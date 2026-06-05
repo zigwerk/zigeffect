@@ -401,13 +401,17 @@ the minimum useful layer and should remain dependency-light.
 A CLI can run examples or tests and emit:
 
 - causal text report
+- causal CI report with event ids, findings, and next query suggestions
 - causal JSON
 - DOT graph
 - derived findings
 - regression hints
 
 CI can attach those artifacts to failed jobs so agents and humans start from
-the same evidence.
+the same evidence. The first formatter for this lane is
+`formatCausalCiReport(allocator, label, store)`, and
+`tools/causal_report.zig` is a small local demo harness that prints a sample
+report through the same public API.
 
 ### Agent Tool Surface
 

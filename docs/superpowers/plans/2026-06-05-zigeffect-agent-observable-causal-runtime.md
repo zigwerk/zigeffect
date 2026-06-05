@@ -1010,7 +1010,7 @@ git commit -m "feat(zigeffect): add causal backend adapter boundary"
 - Modify: `packages/zigeffect/docs/agent-observable-runtime.md`
 - Test: `packages/zigeffect/test/services_test.zig`
 
-- [ ] **Step 1: Write failing CLI-oriented report tests**
+- [x] **Step 1: Write failing CLI-oriented report tests**
 
 Add tests that build a causal store, call the same formatter the CLI will use,
 and assert the output contains:
@@ -1020,13 +1020,13 @@ and assert the output contains:
 - a recommended next query list
 - stable event ids for citation
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `bun run zigeffect:test`
 
 Expected: FAIL because the CI/agent report formatter does not exist.
 
-- [ ] **Step 3: Add CI report formatting**
+- [x] **Step 3: Add CI report formatting**
 
 Add `formatCausalCiReport(allocator, label, store)` to
 `packages/zigeffect/src/services/causal.zig`. The report should include:
@@ -1044,18 +1044,18 @@ next queries:
 
 The report must cite event ids and avoid raw secret values.
 
-- [ ] **Step 4: Add a local report tool**
+- [x] **Step 4: Add a local report tool**
 
 Create `packages/zigeffect/tools/causal_report.zig` as a tiny executable that
 constructs a sample causal store and prints the CI report. This is a dev tool
 and demo harness, not the final production CLI.
 
-- [ ] **Step 5: Wire the tool into the build**
+- [x] **Step 5: Wire the tool into the build**
 
 Modify `packages/zigeffect/build.zig` so `zig build examples` compiles
 `tools/causal_report.zig`.
 
-- [ ] **Step 6: Run verification**
+- [x] **Step 6: Run verification**
 
 Run:
 
@@ -1067,7 +1067,7 @@ zig build examples
 
 Expected: both commands exit 0.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/zigeffect/src/services/causal.zig \

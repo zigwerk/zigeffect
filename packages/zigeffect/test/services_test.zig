@@ -592,3 +592,55 @@ test "causal json and dot exports are deterministic and redacted" {
     try std.testing.expect(std.mem.indexOf(u8, dot, "event_1 [label=\"run_started readiness\"]") != null);
     try std.testing.expect(std.mem.indexOf(u8, dot, "event_1 -> event_2") != null);
 }
+
+test "causal ci report includes findings next queries and citation ids" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    const run_id = store.nextRunId();
+    const scope_id = store.nextScopeId();
+    const started = try store.record(.{
+        .kind = .run_started,
+        .run_id = run_id,
+        .label = "readiness",
+    });
+    const resource = try store.record(.{
+        .kind = .resource_acquired,
+        .run_id = run_id,
+        .scope_id = scope_id,
+        .label = "database",
+        .type_name = "DatabaseConnection",
+        .redacted_detail = "super-secret-password",
+    });
+    _ = try store.record(.{
+        .kind = .service_required,
+        .run_id = run_id,
+        .parent_id = started,
+        .label = "DatabaseLayer",
+        .type_name = @typeName(fx.Config),
+        .status = "missing",
+    });
+    _ = try store.record(.{
+        .kind = .exit_recorded,
+        .run_id = run_id,
+        .parent_id = resource,
+        .status = "failure",
+        .type_name = "MissingConfig",
+    });
+
+    const report = try fx.formatCausalCiReport(std.testing.allocator, "readiness", &store);
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect causal ci report") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "program: readiness") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "events: 4") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "findings: 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "event id=1 kind=run_started") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "finding event=2 kind=resource_acquired_without_finalization") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "next queries:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "- causal.cause 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "- causal.lineage 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "- causal.resources 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "- causal.requirements 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "super-secret-password") == null);
+}

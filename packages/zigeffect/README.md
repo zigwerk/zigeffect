@@ -105,6 +105,13 @@ cd packages/zigeffect
 zig build examples
 ```
 
+Print a sample causal CI report:
+
+```bash
+cd packages/zigeffect
+zig build causal-report
+```
+
 Print an agent-friendly module scaffold:
 
 ```bash

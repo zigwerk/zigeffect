@@ -472,6 +472,96 @@ pub fn formatCausalReport(
     return output.toOwnedSlice(allocator);
 }
 
+fn appendCiEventSummary(output: *std.ArrayList(u8), allocator: Allocator, event: CausalEvent) Allocator.Error!void {
+    try output.print(
+        allocator,
+        "- event id={d} kind={s}",
+        .{ event.id, @tagName(event.kind) },
+    );
+    if (event.run_id) |run_id| try output.print(allocator, " run={d}", .{run_id});
+    if (event.scope_id) |scope_id| try output.print(allocator, " scope={d}", .{scope_id});
+    if (event.fiber_id) |fiber_id| try output.print(allocator, " fiber={d}", .{fiber_id});
+    if (event.label.len > 0) try output.print(allocator, " label={s}", .{event.label});
+    if (event.type_name.len > 0) try output.print(allocator, " type={s}", .{event.type_name});
+    if (event.status.len > 0) try output.print(allocator, " status={s}", .{event.status});
+    try output.appendSlice(allocator, "\n");
+}
+
+fn appendCiFinding(output: *std.ArrayList(u8), allocator: Allocator, finding: CausalFinding) Allocator.Error!void {
+    try output.print(
+        allocator,
+        "- finding event={d} kind={s}",
+        .{ finding.event_id, @tagName(finding.kind) },
+    );
+    if (finding.run_id) |run_id| try output.print(allocator, " run={d}", .{run_id});
+    if (finding.scope_id) |scope_id| try output.print(allocator, " scope={d}", .{scope_id});
+    if (finding.fiber_id) |fiber_id| try output.print(allocator, " fiber={d}", .{fiber_id});
+    if (finding.label.len > 0) try output.print(allocator, " label={s}", .{finding.label});
+    if (finding.type_name.len > 0) try output.print(allocator, " type={s}", .{finding.type_name});
+    try output.appendSlice(allocator, "\n");
+}
+
+fn appendCiNextQueries(output: *std.ArrayList(u8), allocator: Allocator, finding: CausalFinding) Allocator.Error!void {
+    try output.print(allocator, "- causal.cause {d}\n", .{finding.event_id});
+    try output.print(allocator, "- causal.lineage {d}\n", .{finding.event_id});
+    if (finding.scope_id) |scope_id| try output.print(allocator, "- causal.resources {d}\n", .{scope_id});
+    if (finding.fiber_id != null) try output.appendSlice(allocator, "- causal.fibers pending\n");
+    if (finding.run_id) |run_id| {
+        switch (finding.kind) {
+            .retry_budget_exhausted => try output.print(allocator, "- causal.retries {d}\n", .{run_id}),
+            .service_requirement_without_provider => try output.print(allocator, "- causal.requirements {d}\n", .{run_id}),
+            else => {},
+        }
+    }
+}
+
+pub fn formatCausalCiReport(
+    allocator: Allocator,
+    label: []const u8,
+    store: *const CausalStore,
+) Allocator.Error![]const u8 {
+    var findings = try store.findings(allocator);
+    defer findings.deinit();
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.print(
+        allocator,
+        "zigeffect causal ci report\nprogram: {s}\nevents: {d}\nfindings: {d}\n",
+        .{ label, store.events.items.len, findings.items.len },
+    );
+
+    try output.appendSlice(allocator, "event citations:\n");
+    if (store.events.items.len == 0) {
+        try output.appendSlice(allocator, "- none\n");
+    } else {
+        for (store.events.items) |event| {
+            try appendCiEventSummary(&output, allocator, event);
+        }
+    }
+
+    try output.appendSlice(allocator, "findings detail:\n");
+    if (findings.items.len == 0) {
+        try output.appendSlice(allocator, "- none\n");
+    } else {
+        for (findings.items) |finding| {
+            try appendCiFinding(&output, allocator, finding);
+        }
+    }
+
+    try output.appendSlice(allocator, "next queries:\n");
+    if (findings.items.len == 0) {
+        try output.appendSlice(allocator, "- causal.snapshot\n");
+    } else {
+        for (findings.items) |finding| {
+            try appendCiNextQueries(&output, allocator, finding);
+        }
+    }
+
+    return output.toOwnedSlice(allocator);
+}
+
 fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []const u8) Allocator.Error!void {
     try output.append(allocator, '"');
     for (value) |byte| {

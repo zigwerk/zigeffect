@@ -79,6 +79,27 @@ pub fn build(b: *std.Build) void {
     });
     const run_scaffold_tool_tests = b.addRunArtifact(scaffold_tool_tests);
 
+    const causal_report_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_report.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_report_tool_module.addImport("zigeffect", zigeffect);
+
+    const causal_report_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-report",
+        .root_module = causal_report_tool_module,
+    });
+    const run_causal_report_tool = b.addRunArtifact(causal_report_tool);
+    const causal_report_step = b.step("causal-report", "Print a sample causal CI report");
+    causal_report_step.dependOn(&run_causal_report_tool.step);
+
+    const causal_report_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-report-tests",
+        .root_module = causal_report_tool_module,
+    });
+    const run_causal_report_tool_tests = b.addRunArtifact(causal_report_tool_tests);
+
     const examples_step = b.step("examples", "Compile and test zigeffect examples");
     examples_step.dependOn(&readiness_example.step);
     examples_step.dependOn(&run_readiness_example_tests.step);
@@ -86,4 +107,6 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_readiness_example_tests.step);
     examples_step.dependOn(&scaffold_tool.step);
     examples_step.dependOn(&run_scaffold_tool_tests.step);
+    examples_step.dependOn(&causal_report_tool.step);
+    examples_step.dependOn(&run_causal_report_tool_tests.step);
 }

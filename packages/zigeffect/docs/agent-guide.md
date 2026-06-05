@@ -276,6 +276,10 @@ service, runs a readiness effect through a causal store, preserves
 `error.MissingConfig` as a typed app failure, and prints `formatCausalReport`
 plus `formatCausalJson`.
 
+Use `formatCausalCiReport` when an agent or CI job needs a compact artifact:
+it includes event counts, finding counts, citation ids, and recommended next
+queries while avoiding raw `redacted_detail` payloads.
+
 Backend adapters are sinks, not the source of truth. Keep tests and local agent
 queries against the in-memory `CausalStore`; use `store.attachBackend` for
 JSONL, DOT, OpenTelemetry, embedded graph, durable-history, or future async
