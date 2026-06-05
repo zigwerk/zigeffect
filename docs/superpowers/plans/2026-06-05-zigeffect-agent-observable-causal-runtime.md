@@ -624,10 +624,10 @@ git commit -m "feat(zigeffect): emit fiber causal events"
 
 **Files:**
 - Modify: `packages/zigeffect/src/layer/graph.zig`
-- Modify: `packages/zigeffect/src/dependency/report.zig`
+- Modify: `packages/zigeffect/src/layer/layer.zig`
 - Test: `packages/zigeffect/test/layer_test.zig`
 
-- [ ] **Step 1: Write failing layer graph tests**
+- [x] **Step 1: Write failing layer graph tests**
 
 Add tests asserting:
 
@@ -636,19 +636,22 @@ Add tests asserting:
 - `layer_started` and `layer_completed` for graph startup
 - `exit_recorded` for typed layer startup failure
 - already-started layer cleanup is visible when a later layer fails
+- graph-created regular and fiber runtimes inherit the causal store
+- effect-backed startup layers and narrowed graph runtime paths preserve causal
+  context
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `bun run zigeffect:test`
 
 Expected: FAIL because layer graph startup does not emit causal events.
 
-- [ ] **Step 3: Add graph causal store configuration**
+- [x] **Step 3: Add graph causal store configuration**
 
 Add `graph.withCausalStore(&store)` and propagate the store to graph startup
 contexts, `graph.run`, `graph.runtime`, and `graph.fiberRuntime`.
 
-- [ ] **Step 4: Emit graph and service events**
+- [x] **Step 4: Emit graph and service events**
 
 Emit events from validation and startup:
 
@@ -663,17 +666,18 @@ Emit events from validation and startup:
 
 Use layer names as labels and service type names as `type_name`.
 
-- [ ] **Step 5: Run tests and verify they pass**
+- [x] **Step 5: Run tests and verify they pass**
 
 Run: `bun run zigeffect:test`
 
 Expected: PASS for graph/service causal events and existing layer tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/zigeffect/src/layer/graph.zig \
-  packages/zigeffect/src/dependency/report.zig \
+  packages/zigeffect/src/layer/layer.zig \
+  docs/superpowers/plans/2026-06-05-zigeffect-agent-observable-causal-runtime.md \
   packages/zigeffect/test/layer_test.zig
 git commit -m "feat(zigeffect): trace layer graph services"
 ```
