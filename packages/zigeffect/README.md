@@ -84,6 +84,7 @@ Docs:
 - [Module Pattern](docs/module-pattern.md)
 - [Agent-Observable Causal Runtime](docs/agent-observable-runtime.md)
 - [Readiness Example](examples/readiness.zig)
+- [Causal Readiness Example](examples/causal_readiness.zig)
 - [Agent Guide](docs/agent-guide.md)
 - [Devex Review](docs/devex-review.md)
 - [Roadmap](docs/roadmap.md)

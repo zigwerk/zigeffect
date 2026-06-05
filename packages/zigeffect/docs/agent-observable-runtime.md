@@ -624,20 +624,19 @@ not arbitrary memory inspection.
 
 ### Required Queries
 
-- `runtime.snapshot`: return bounded runtime state for active runs, scopes,
+- `store.snapshot`: return bounded runtime state for active runs, scopes,
   fibers, layers, services, spans, and recent exits.
-- `runtime.cause(id)`: return a structured cause tree for a run, fiber, layer,
-  or finalizer.
-- `runtime.lineage(id)`: return parents and children for an event, scope,
-  fiber, span, or resource.
-- `runtime.resources(scope_id)`: return resources owned by a scope and their
+- `store.cause(event_id)`: return the causal parent chain for a run, fiber,
+  layer, exit, or finalizer event.
+- `store.lineage(event_id)`: return an event and its direct child events.
+- `store.resources(scope_id)`: return resources owned by a scope and their
   finalizer state.
-- `runtime.fibers(status?)`: return fibers filtered by status.
-- `runtime.requirements(id)`: return required, provided, missing, duplicate, or
-  replaced services.
-- `runtime.retries(run_id)`: return schedule decisions and typed failures that
+- `store.fibers(status?)`: return fibers filtered by status.
+- `store.requirements(run_id)`: return required, provided, missing, duplicate,
+  or replaced services.
+- `store.retries(run_id)`: return schedule decisions and typed failures that
   led to retries.
-- `runtime.findings`: return derived issues such as leaked resources,
+- `store.findings`: return derived issues such as leaked resources,
   unexpected retries, missing providers, finalizer failures, and failed spans.
 
 ### Diagnostic Loop
@@ -653,6 +652,30 @@ not arbitrary memory inspection.
    action.
 7. The developer or policy layer approves and applies the action.
 8. Tests or the runtime query suite verify the issue is resolved.
+
+The shortest useful local loop is:
+
+```text
+run effect -> inspect causal snapshot -> query lineage -> inspect cause
+-> propose test or code fix
+```
+
+### Executable Example
+
+`examples/causal_readiness.zig` is the canonical first app example. It builds a
+layer graph with config, logger, metrics, tracing, and a database-like service,
+attaches a `CausalStore`, runs a readiness effect, preserves missing config as
+a typed `error.MissingConfig`, and prints both `formatCausalReport` and
+`formatCausalJson`.
+
+Agents should use it as a small rehearsal before diagnosing real app failures:
+
+1. Run `cd packages/zigeffect && zig build examples`.
+2. Inspect the causal snapshot or JSON output from the example.
+3. Query lineage around the failing `exit_recorded` or `assertion_recorded`
+   event.
+4. Query cause and requirements before proposing a config, layer, test, or code
+   fix.
 
 ### Controlled Remediation
 
@@ -745,6 +768,10 @@ findings queries. Provide JSON output for tools and text output for humans.
 Document the app pattern for labeling effects, services, layers, resources,
 and traces. Add examples showing an agent diagnosing a failing app effect and a
 resource leak.
+
+Initial app diagnostic coverage exists in `examples/causal_readiness.zig`.
+Future examples should add resource leaks, retries, and fiber interruption
+paths so agents can compare multiple failure shapes.
 
 ### Phase 6: Engine Improvement Harness
 

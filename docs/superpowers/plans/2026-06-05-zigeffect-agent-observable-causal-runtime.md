@@ -487,7 +487,7 @@ Run: `bun run zigeffect:test`
 
 Expected: PASS for runtime causal events.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/zigeffect/src/core/context.zig \
@@ -875,7 +875,7 @@ git commit -m "feat(zigeffect): export causal graphs"
 - Modify: `packages/zigeffect/docs/agent-observable-runtime.md`
 - Modify: `packages/zigeffect/docs/agent-guide.md`
 
-- [ ] **Step 1: Write the example**
+- [x] **Step 1: Write the example**
 
 Create an example that:
 
@@ -886,12 +886,12 @@ Create an example that:
 - prints `formatCausalReport`
 - prints `formatCausalJson`
 
-- [ ] **Step 2: Wire the example into `zig build examples`**
+- [x] **Step 2: Wire the example into `zig build examples`**
 
 Modify `packages/zigeffect/build.zig` so `zig build examples` compiles
 `examples/causal_readiness.zig`.
 
-- [ ] **Step 3: Run the example build and verify it passes**
+- [x] **Step 3: Run the example build and verify it passes**
 
 Run:
 
@@ -902,7 +902,7 @@ zig build examples
 
 Expected: exit code 0.
 
-- [ ] **Step 4: Update docs**
+- [x] **Step 4: Update docs**
 
 Update `agent-observable-runtime.md` and `agent-guide.md` with the query loop:
 
@@ -910,13 +910,13 @@ Update `agent-observable-runtime.md` and `agent-guide.md` with the query loop:
 run effect -> inspect causal snapshot -> query lineage -> inspect cause -> propose test or code fix
 ```
 
-- [ ] **Step 5: Run package verification**
+- [x] **Step 5: Run package verification**
 
 Run: `bun run zigeffect:test`
 
 Expected: PASS for all `zigeffect` tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/zigeffect/examples/causal_readiness.zig \

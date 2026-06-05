@@ -234,8 +234,10 @@ and agents can connect the report back to the failing workflow.
 ## Causal Runtime Direction
 
 The long-term agent workflow is documented in
-`docs/agent-observable-runtime.md`. The causal runtime is not a shipped API yet,
-but agents should already follow its discipline:
+`docs/agent-observable-runtime.md`. The first causal runtime APIs are now
+available through `fx.CausalStore`, graph/runtime `.withCausalStore`, query
+helpers, and causal report/JSON/DOT formatters. Agents should use them with
+this discipline:
 
 - Prefer structured `Exit`, `Cause`, dependency, observability, and test reports
   over ad hoc log scraping.
@@ -248,13 +250,31 @@ but agents should already follow its discipline:
   observed later.
 - Use tracing spans and trace context where a workflow crosses service or fiber
   boundaries.
+- Attach a `CausalStore` to runtime, fiber runtime, or layer graph paths when a
+  test or example needs agent-readable evidence.
+- Record app-level log, metric, span, config, or assertion facts with
+  `ctx.recordCausal` until those services have automatic adapters.
 
-When causal APIs land, agents should diagnose failures in this order:
+The shortest useful query loop is:
+
+```text
+run effect -> inspect causal snapshot -> query lineage -> inspect cause
+-> propose test or code fix
+```
+
+For broader diagnosis, use:
 
 ```text
 inspect failing run -> query cause -> query lineage -> inspect requirements
 -> inspect resources -> inspect fibers -> inspect retries -> propose fix
 ```
+
+The runnable example is
+[`../examples/causal_readiness.zig`](../examples/causal_readiness.zig). It
+starts a graph with config, logger, metrics, tracing, and a database-like
+service, runs a readiness effect through a causal store, preserves
+`error.MissingConfig` as a typed app failure, and prints `formatCausalReport`
+plus `formatCausalJson`.
 
 Future causal findings should be treated as evidence pointers, not conclusions.
 An agent should cite event ids, explain whether an edge is causal or merely
