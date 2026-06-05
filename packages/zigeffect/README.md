@@ -59,9 +59,10 @@ Included in this package:
 - `Schedule` / `ScheduleProgram`: retry/repeat timing with `once`, `recurs`,
   `spaced`, `duration`, fixed, exponential, fibonacci, linear, backoff,
   deterministic jitter, and owned recursive schedule composition.
-- `CausalStore` / `CausalBackend`: deterministic causal event storage with
-  optional adapter sinks for JSON Lines, DOT, OpenTelemetry, embedded graph,
-  durable history, and future async streams.
+- `CausalStore` / `CausalBackend`: deterministic causal event storage, query
+  helpers, report/JSON/DOT/CI formatters, and optional adapter sinks for JSON
+  Lines, DOT, OpenTelemetry, embedded graph, durable history, and future async
+  streams.
 - `TestEnv`: fake clock, memory filesystem, logger, config, metrics, tracing,
   runtime helpers, assertion helpers, and readable assertion report formatters.
 - `Clock`: fake/system time service used by schedules and tests.
@@ -72,10 +73,11 @@ The core fiber runtime is semantic-first and deterministic. It does not claim
 real green-thread suspension; a future optional zio adapter will provide the
 stackful coroutine and `std.Io` backend.
 
-Longer term, `zigeffect` is also aiming at an agent-observable causal runtime:
-typed runtime events for effects, services, scopes, resources, fibers,
-schedules, exits, causes, logs, metrics, and traces that agents can query
-structurally instead of reconstructing behavior from logs.
+`zigeffect` now includes the first deterministic agent-observable causal
+runtime surface: attach a `CausalStore` to a runtime, fiber runtime, layer
+graph, or context, then inspect snapshots, lineage, causes, resources, fibers,
+requirements, retries, findings, and reports instead of reconstructing runtime
+behavior from logs.
 
 Docs:
 
@@ -88,6 +90,10 @@ Docs:
 - [Agent-Observable Causal Runtime](docs/agent-observable-runtime.md)
 - [Readiness Example](examples/readiness.zig)
 - [Causal Readiness Example](examples/causal_readiness.zig)
+- [Causal Missing Config Scenario](examples/causal_missing_config.zig)
+- [Causal Cleanup Failure Scenario](examples/causal_cleanup_failure.zig)
+- [Causal Scoped Fiber Scenario](examples/causal_scoped_fiber.zig)
+- [Causal Retry Exhaustion Scenario](examples/causal_retry_exhaustion.zig)
 - [Agent Guide](docs/agent-guide.md)
 - [Devex Review](docs/devex-review.md)
 - [Roadmap](docs/roadmap.md)

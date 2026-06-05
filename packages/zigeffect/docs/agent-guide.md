@@ -262,6 +262,20 @@ run effect -> inspect causal snapshot -> query lineage -> inspect cause
 -> propose test or code fix
 ```
 
+Attach and report with the public API:
+
+```zig
+var store = fx.CausalStore.init(allocator);
+defer store.deinit();
+
+var runtime = env.runtime().withCausalStore(&store);
+const exit = runtime.exit(Program);
+_ = exit;
+
+const report = try fx.formatCausalCiReport(allocator, "program name", &store);
+defer allocator.free(report);
+```
+
 For broader diagnosis, use:
 
 ```text

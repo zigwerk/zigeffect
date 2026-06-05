@@ -467,7 +467,8 @@ catalog can grow from this template.
 Goal: make `zigeffect` useful to agents as a structured execution model, not
 just a library that emits text logs.
 
-Status: planned. The canonical design is in
+Status: initial deterministic implementation delivered. The canonical design is
+in
 `docs/agent-observable-runtime.md`; the Superpowers design and implementation
 plan live in
 `docs/superpowers/specs/2026-06-05-zigeffect-agent-observable-causal-runtime-design.md`
@@ -479,32 +480,22 @@ with a first-class causal execution graph spanning typed errors, service
 requirements, layer providers, scopes, resources, fibers, schedules, logs,
 metrics, and traces.
 
-- Add an opt-in `CausalStore` service that records bounded deterministic
-  runtime events.
-- Emit run, effect, scope, resource, fiber, layer, schedule, exit, and cause
-  events when a causal store is attached.
-- Add structured queries for snapshot, lineage, cause, resources, fibers,
-  requirements, retries, and findings.
-- Add text, JSON, and DOT reports for human and agent tooling.
-- Add CI artifacts for failed deterministic tests so agents can summarize
-  event lineage, owning subsystem, and likely fix direction without rerunning
-  the job.
-- Add app-level labeling patterns for domain effects, layers, resources,
-  schedules, and remediation boundaries.
-- Keep backend adapters optional: JSON Lines, DOT, OpenTelemetry, NenDB, and
-  future async backend streams sit behind the event sink contract.
-- Treat the in-memory store as the deterministic reference backend. Treat NenDB
-  as the embedded graph-query adapter candidate after the event taxonomy is
-  stable. Treat Cockroach/RoachGraph as the later durable history adapter for
-  app, CI, or fleet-level audit, not as the core runtime store.
-- Use the causal graph inside `zigeffect` tests so agents can diagnose engine
-  regressions from runtime facts.
-- Document the application pattern so app agents can connect user-visible
-  failures to service providers, layer startup, resource ownership, retry
-  policies, and trace spans.
-- Grow toward a local agent tool surface that can answer causal questions such
-  as `snapshot`, `lineage`, `cause`, `resources`, `fibers`, `requirements`,
-  `retries`, and `findings`.
+- Delivered: opt-in `CausalStore` records deterministic runtime events.
+- Delivered: runtime, scope, resource, fiber, layer, schedule, exit, service,
+  and app-recorded observability facts can enter the causal graph.
+- Delivered: structured queries for snapshot, lineage, cause, resources,
+  fibers, requirements, retries, and findings.
+- Delivered: text, JSON, DOT, and CI reports for human and agent tooling.
+- Delivered: a local causal report tool and scenario examples for missing
+  config, cleanup failure, scoped fiber interruption, and retry exhaustion.
+- Delivered: an optional `CausalBackend` event sink contract with adapter kinds
+  for memory, JSON Lines, DOT, OpenTelemetry, NenDB graph, Cockroach/RoachGraph
+  history, and async streams.
+- Still future: production-grade adapter implementations, durable histories,
+  a workbench UI, deterministic replay/forking, and policy-controlled
+  remediation.
+- Still future: using the causal graph pervasively inside `zigeffect` tests so
+  agents can diagnose engine regressions from runtime facts.
 - Leave room for a future causal workbench that visualizes effect runs, scope
   trees, fiber trees, layer graphs, retry timelines, resource ownership, and
   cause trees.
@@ -552,7 +543,8 @@ Before any engine milestone is considered complete, verify:
   EffectTS
 
 The current implementation satisfies the deterministic core, dependency, layer,
-resource, fiber, config, observability, test, backend-boundary, and
-module-pattern requirements listed above. Future work can add causal runtime
-events, async backend adapters, and a larger application-template catalog
-without changing the current deterministic contracts.
+resource, fiber, config, observability, test, causal-runtime,
+backend-boundary, and module-pattern requirements listed above. Future work can
+add production adapters, async runtime backends, deterministic replay,
+controlled remediation, and a larger application-template catalog without
+changing the current deterministic contracts.

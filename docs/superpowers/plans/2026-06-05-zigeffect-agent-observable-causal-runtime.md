@@ -85,7 +85,7 @@ event evidence; they do not mutate runtime state.
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 - Test: `packages/zigeffect/test/services_test.zig`
 
-- [ ] **Step 1: Write the failing store test**
+- [x] **Step 1: Write the failing store test**
 
 Append this test to `packages/zigeffect/test/services_test.zig`:
 
@@ -113,14 +113,14 @@ test "causal store records events and snapshots deterministically" {
 }
 ```
 
-- [ ] **Step 2: Run the test and verify it fails**
+- [x] **Step 2: Run the test and verify it fails**
 
 Run: `bun run zigeffect:test`
 
 Expected: FAIL because `fx.CausalStore` and `fx.CausalEventKind` are not
 exported.
 
-- [ ] **Step 3: Implement the event store**
+- [x] **Step 3: Implement the event store**
 
 Create `packages/zigeffect/src/services/causal.zig`:
 
@@ -232,7 +232,7 @@ pub const CausalSnapshot = causal.CausalSnapshot;
 pub const CausalStore = causal.CausalStore;
 ```
 
-- [ ] **Step 4: Run the test and verify it passes**
+- [x] **Step 4: Run the test and verify it passes**
 
 Run: `bun run zigeffect:test`
 
@@ -253,7 +253,7 @@ git commit -m "feat(zigeffect): add causal event store"
 - Modify: `packages/zigeffect/src/services/causal.zig`
 - Test: `packages/zigeffect/test/services_test.zig`
 
-- [ ] **Step 1: Write the failing lineage and report test**
+- [x] **Step 1: Write the failing lineage and report test**
 
 Append this test to `packages/zigeffect/test/services_test.zig`:
 
@@ -285,13 +285,13 @@ test "causal store reports lineage and formats agent-readable output" {
 }
 ```
 
-- [ ] **Step 2: Run the test and verify it fails**
+- [x] **Step 2: Run the test and verify it fails**
 
 Run: `bun run zigeffect:test`
 
 Expected: FAIL because `lineage` and `formatCausalReport` do not exist.
 
-- [ ] **Step 3: Implement lineage and report formatting**
+- [x] **Step 3: Implement lineage and report formatting**
 
 Add to `packages/zigeffect/src/services/causal.zig`:
 
@@ -367,13 +367,13 @@ Export `formatCausalReport` from `packages/zigeffect/src/zigeffect.zig`:
 pub const formatCausalReport = causal.formatCausalReport;
 ```
 
-- [ ] **Step 4: Run the test and verify it passes**
+- [x] **Step 4: Run the test and verify it passes**
 
 Run: `bun run zigeffect:test`
 
 Expected: PASS for causal lineage and report formatting.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/services/causal.zig \
@@ -390,7 +390,7 @@ git commit -m "feat(zigeffect): add causal reports"
 - Modify: `packages/zigeffect/src/runtime/runner.zig`
 - Test: `packages/zigeffect/test/runtime_test.zig`
 
-- [ ] **Step 1: Write the failing runtime hook test**
+- [x] **Step 1: Write the failing runtime hook test**
 
 Append this test to `packages/zigeffect/test/runtime_test.zig`:
 
@@ -418,14 +418,14 @@ test "runtime emits causal run and exit events when store is attached" {
 }
 ```
 
-- [ ] **Step 2: Run the test and verify it fails**
+- [x] **Step 2: Run the test and verify it fails**
 
 Run: `bun run zigeffect:test`
 
 Expected: FAIL because `Runtime.withCausalStore` and `expectCausalEvent` do not
 exist.
 
-- [ ] **Step 3: Add optional causal context**
+- [x] **Step 3: Add optional causal context**
 
 Modify `packages/zigeffect/src/core/context.zig`:
 
@@ -467,7 +467,7 @@ Add `withCausalStore` to `Runtime` and pass store metadata into the shared
 runner. Add run start, run completed, and exit recorded events in
 `runtime/runner.zig` around the existing managed-scope execution.
 
-- [ ] **Step 4: Add test helper**
+- [x] **Step 4: Add test helper**
 
 Modify `packages/zigeffect/src/testing/test_env.zig`:
 
@@ -481,7 +481,7 @@ pub fn expectCausalEvent(self: *TestEnv, store: *const fx.CausalStore, kind: fx.
 }
 ```
 
-- [ ] **Step 5: Run the test and verify it passes**
+- [x] **Step 5: Run the test and verify it passes**
 
 Run: `bun run zigeffect:test`
 
@@ -1162,7 +1162,7 @@ git commit -m "docs(zigeffect): add causal runtime scenarios"
 - Modify: `packages/zigeffect/docs/agent-guide.md`
 - Modify: `packages/zigeffect/docs/effectts-parity.md`
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
 Document:
 
@@ -1175,7 +1175,7 @@ Document:
 - how CI artifacts, agent query tools, and scenario examples fit the maturity
   ladder
 
-- [ ] **Step 2: Run full verification**
+- [x] **Step 2: Run full verification**
 
 Run:
 
@@ -1187,7 +1187,7 @@ bun run typecheck
 
 Expected: all commands exit 0.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/zigeffect/README.md \

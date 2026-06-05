@@ -94,8 +94,13 @@ The current package already has the runtime ingredients:
 - Logger, metrics, tracing, and observability report services.
 - Test helpers and agent-readable reports.
 
-The missing piece is a shared causal event model that ties those subsystems
-together at runtime.
+The first shared causal event model now exists. `CausalStore` records
+deterministic events; runtime, scope, fiber, layer graph, resource, schedule,
+exit, service, and app-level observability facts can attach to it; and agents
+can query snapshot, lineage, cause, resources, fibers, requirements, retries,
+and findings. Future work is about production adapters, durable histories,
+replay, workbench UI, and policy-controlled remediation rather than inventing
+the core event shape.
 
 ## Two Agent Audiences
 
