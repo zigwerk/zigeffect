@@ -367,6 +367,57 @@ test "causal report and backend kinds preserve adapter strategy" {
     try std.testing.expectEqual(fx.CausalBackendKind.async_stream, fx.CausalBackendKind.async_stream);
 }
 
+const FakeCausalBackendState = struct {
+    ids: [8]u64 = undefined,
+    kinds: [8]fx.CausalEventKind = undefined,
+    labels: [8][]const u8 = undefined,
+    count: usize = 0,
+};
+
+fn recordFakeCausalBackend(raw: ?*anyopaque, event: fx.CausalEvent) anyerror!void {
+    const state: *FakeCausalBackendState = @ptrCast(@alignCast(raw.?));
+    if (state.count >= state.ids.len) return error.TooManyEvents;
+    state.ids[state.count] = event.id;
+    state.kinds[state.count] = event.kind;
+    state.labels[state.count] = event.label;
+    state.count += 1;
+}
+
+fn fakeCausalBackend(state: *FakeCausalBackendState) fx.CausalBackend {
+    return .{
+        .kind = .memory,
+        .state = state,
+        .record = recordFakeCausalBackend,
+    };
+}
+
+test "causal store forwards stored events to attached backend" {
+    var backend_state = FakeCausalBackendState{};
+    var store = fx.CausalStore.init(std.testing.allocator);
+    store.attachBackend(fakeCausalBackend(&backend_state));
+    defer store.deinit();
+
+    const first = try store.record(.{
+        .kind = .run_started,
+        .label = "backend-run",
+    });
+    const second = try store.record(.{
+        .kind = .exit_recorded,
+        .parent_id = first,
+        .label = "backend-run",
+        .status = "success",
+    });
+
+    try std.testing.expectEqual(@as(usize, 2), backend_state.count);
+    try std.testing.expectEqual(first, backend_state.ids[0]);
+    try std.testing.expectEqual(second, backend_state.ids[1]);
+    try std.testing.expectEqual(fx.CausalEventKind.run_started, backend_state.kinds[0]);
+    try std.testing.expectEqual(fx.CausalEventKind.exit_recorded, backend_state.kinds[1]);
+    try std.testing.expectEqualStrings("backend-run", backend_state.labels[0]);
+    try std.testing.expectEqualStrings("backend-run", backend_state.labels[1]);
+    try std.testing.expectEqual(@as(usize, 2), store.events.items.len);
+}
+
 fn expectFinding(findings: fx.CausalFindings, kind: fx.CausalFindingKind) !void {
     for (findings.items) |finding| {
         if (finding.kind == kind) return;

@@ -1,6 +1,8 @@
 const std = @import("std");
+const causal_backend = @import("causal_backend.zig");
 
 pub const Allocator = std.mem.Allocator;
+pub const CausalBackend = causal_backend.CausalBackend;
 
 pub const CausalEventKind = enum {
     run_started,
@@ -146,6 +148,7 @@ pub const CausalStore = struct {
     next_run_id_value: u64 = 1,
     next_scope_id_value: u64 = 1,
     events: std.ArrayList(CausalEvent) = .empty,
+    backend: ?CausalBackend = null,
 
     pub fn init(allocator: Allocator) CausalStore {
         return .{ .allocator = allocator };
@@ -156,6 +159,10 @@ pub const CausalStore = struct {
             deinitEventStrings(self.allocator, event);
         }
         self.events.deinit(self.allocator);
+    }
+
+    pub fn attachBackend(self: *CausalStore, backend: CausalBackend) void {
+        self.backend = backend;
     }
 
     pub fn nextRunId(self: *CausalStore) u64 {
@@ -176,6 +183,9 @@ pub const CausalStore = struct {
         owned.id = self.next_event_id;
         self.next_event_id += 1;
         try self.events.append(self.allocator, owned);
+        if (self.backend) |backend| {
+            backend.record(backend.state, owned) catch {};
+        }
         return owned.id;
     }
 

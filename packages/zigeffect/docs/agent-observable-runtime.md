@@ -691,21 +691,27 @@ The first implementation should not support arbitrary in-process mutation.
 
 ## Storage Strategy
 
-The first backend should be an in-memory deterministic event store owned by a
-service. This keeps tests simple and keeps the runtime independent from any
-external database.
+The current backend boundary is `CausalBackend`. `CausalStore` remains the
+authoritative in-memory deterministic event store: it assigns event ids, keeps
+the test/query surface stable, and then calls an attached backend adapter after
+the event is stored.
 
-Future backends can adapt the same event sink contract:
+Backend callbacks are an adapter hook, not a durability guarantee. A failing
+adapter must not make the deterministic store lose events. Future adapters can
+adapt the same event sink contract:
 
-- in-memory ring buffer for tests and local development
-- JSON Lines export for CLIs and agent tools
-- DOT export for visual graph debugging
-- OpenTelemetry bridge for spans and metrics
-- NenDB or another embedded graph backend for high-volume local queries
-- durable workflow history for deterministic replay
+- `memory`: reference deterministic store for tests and local development
+- `json_lines`: artifact export for CLIs, CI, and agent tools
+- `dot`: artifact export for visual graph debugging
+- `opentelemetry`: production bridge for span and event ecosystems
+- `nendb_graph`: embedded graph-query adapter candidate for local agents
+- `cockroach_history`: durable app, CI, or fleet audit history
+- `async_stream`: future non-blocking event stream
 
 NenDB is attractive because it is Zig-native and data-oriented, but it should
-remain a backend adapter until the event model proves itself.
+remain a backend adapter until the event model proves itself. CockroachDB or
+RoachGraph belongs on the durable-history side of the adapter boundary, not in
+the deterministic runtime core.
 
 ## Derived Findings
 

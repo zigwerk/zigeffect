@@ -238,7 +238,7 @@ Run: `bun run zigeffect:test`
 
 Expected: PASS for the new causal store test and no regressions.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/services/causal.zig \
@@ -934,7 +934,7 @@ git commit -m "docs(zigeffect): add causal runtime example"
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 - Test: `packages/zigeffect/test/services_test.zig`
 
-- [ ] **Step 1: Write failing backend adapter tests**
+- [x] **Step 1: Write failing backend adapter tests**
 
 Add a test with a fake backend that receives every event recorded by
 `CausalStore`. Add named adapter-kind tests for:
@@ -947,13 +947,13 @@ Add a test with a fake backend that receives every event recorded by
 - `.cockroach_history`
 - `.async_stream`
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `bun run zigeffect:test`
 
 Expected: FAIL because backend adapters and adapter kinds do not exist.
 
-- [ ] **Step 3: Implement the adapter contract**
+- [x] **Step 3: Implement the adapter contract**
 
 Create `causal_backend.zig` with:
 
@@ -986,13 +986,13 @@ Document adapter intent in code comments:
 - NenDB is the embedded graph-query adapter candidate;
 - Cockroach/RoachGraph is durable history for app, CI, or fleet audit.
 
-- [ ] **Step 4: Run tests and verify they pass**
+- [x] **Step 4: Run tests and verify they pass**
 
 Run: `bun run zigeffect:test`
 
 Expected: PASS for backend adapter tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/services/causal_backend.zig \

@@ -59,6 +59,9 @@ Included in this package:
 - `Schedule` / `ScheduleProgram`: retry/repeat timing with `once`, `recurs`,
   `spaced`, `duration`, fixed, exponential, fibonacci, linear, backoff,
   deterministic jitter, and owned recursive schedule composition.
+- `CausalStore` / `CausalBackend`: deterministic causal event storage with
+  optional adapter sinks for JSON Lines, DOT, OpenTelemetry, embedded graph,
+  durable history, and future async streams.
 - `TestEnv`: fake clock, memory filesystem, logger, config, metrics, tracing,
   runtime helpers, assertion helpers, and readable assertion report formatters.
 - `Clock`: fake/system time service used by schedules and tests.

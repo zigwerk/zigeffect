@@ -276,6 +276,12 @@ service, runs a readiness effect through a causal store, preserves
 `error.MissingConfig` as a typed app failure, and prints `formatCausalReport`
 plus `formatCausalJson`.
 
+Backend adapters are sinks, not the source of truth. Keep tests and local agent
+queries against the in-memory `CausalStore`; use `store.attachBackend` for
+JSONL, DOT, OpenTelemetry, embedded graph, durable-history, or future async
+adapters. Do not put CockroachDB, RoachGraph, NenDB, or OpenTelemetry inside
+the deterministic core.
+
 Future causal findings should be treated as evidence pointers, not conclusions.
 An agent should cite event ids, explain whether an edge is causal or merely
 correlated by trace context, and then propose a source, config, test, or runtime
