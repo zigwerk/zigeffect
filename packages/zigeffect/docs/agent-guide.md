@@ -291,12 +291,21 @@ An agent should cite event ids, explain whether an edge is causal or merely
 correlated by trace context, and then propose a source, config, test, or runtime
 policy change.
 
+When a report contains findings, use this workflow:
+
+```text
+start with finding -> cite event id -> query lineage -> query cause
+-> inspect scope/resource/fiber/retry evidence -> propose code or config fix
+```
+
 The most useful first scenario fixtures are:
 
-- missing config during layer startup
-- cleanup failure after a typed program failure
-- parent scope interrupting a child fiber
-- retry exhaustion masking the first typed failure
+- `../examples/causal_missing_config.zig`: missing config during layer startup
+- `../examples/causal_cleanup_failure.zig`: cleanup failure after a typed
+  program failure
+- `../examples/causal_scoped_fiber.zig`: parent scope interrupting a child fiber
+- `../examples/causal_retry_exhaustion.zig`: retry exhaustion masking the first
+  typed failure
 - app incident with trace context linking domain effect, service provider,
   resource scope, and schedule decisions
 

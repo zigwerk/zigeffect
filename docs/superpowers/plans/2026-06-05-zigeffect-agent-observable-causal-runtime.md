@@ -1089,36 +1089,36 @@ git commit -m "feat(zigeffect): add causal ci report tool"
 - Modify: `packages/zigeffect/docs/agent-observable-runtime.md`
 - Modify: `packages/zigeffect/docs/agent-guide.md`
 
-- [ ] **Step 1: Add missing-config scenario**
+- [x] **Step 1: Add missing-config scenario**
 
 Create `causal_missing_config.zig` showing a graph startup failure where
 `DatabaseLayer` requires `Config` and fails with `MissingConfig`. The example
 should print a causal report showing `service_required`, `service_provided`,
 `layer_started`, and `exit_recorded`.
 
-- [ ] **Step 2: Add cleanup-failure scenario**
+- [x] **Step 2: Add cleanup-failure scenario**
 
 Create `causal_cleanup_failure.zig` showing a typed program failure followed by
 a finalizer failure. The example should print the combined cause and resource
 lineage.
 
-- [ ] **Step 3: Add scoped-fiber scenario**
+- [x] **Step 3: Add scoped-fiber scenario**
 
 Create `causal_scoped_fiber.zig` showing a parent scope interrupting a pending
 child fiber. The example should print `fiber_forked`, `fiber_interrupted`, and
 `scope_closed`.
 
-- [ ] **Step 4: Add retry-exhaustion scenario**
+- [x] **Step 4: Add retry-exhaustion scenario**
 
 Create `causal_retry_exhaustion.zig` showing repeated typed failures under a
 backoff schedule. The example should print schedule decisions and the first
 typed failure.
 
-- [ ] **Step 5: Wire scenarios into `zig build examples`**
+- [x] **Step 5: Wire scenarios into `zig build examples`**
 
 Modify `packages/zigeffect/build.zig` so all four scenario files compile.
 
-- [ ] **Step 6: Update agent docs**
+- [x] **Step 6: Update agent docs**
 
 Document the four scenarios in `agent-observable-runtime.md` and add this
 agent workflow to `agent-guide.md`:
@@ -1128,7 +1128,7 @@ start with finding -> cite event id -> query lineage -> query cause
 -> inspect scope/resource/fiber/retry evidence -> propose code or config fix
 ```
 
-- [ ] **Step 7: Run verification**
+- [x] **Step 7: Run verification**
 
 Run:
 
@@ -1140,7 +1140,7 @@ zig build examples
 
 Expected: both commands exit 0.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/zigeffect/examples/causal_missing_config.zig \

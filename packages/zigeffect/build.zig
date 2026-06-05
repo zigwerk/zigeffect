@@ -62,6 +62,78 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_readiness_example_tests = b.addRunArtifact(causal_readiness_example_tests);
 
+    const causal_missing_config_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/causal_missing_config.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_missing_config_example_module.addImport("zigeffect", zigeffect);
+
+    const causal_missing_config_example = b.addExecutable(.{
+        .name = "zigeffect-causal-missing-config",
+        .root_module = causal_missing_config_example_module,
+    });
+
+    const causal_missing_config_example_tests = b.addTest(.{
+        .name = "zigeffect-causal-missing-config-tests",
+        .root_module = causal_missing_config_example_module,
+    });
+    const run_causal_missing_config_example_tests = b.addRunArtifact(causal_missing_config_example_tests);
+
+    const causal_cleanup_failure_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/causal_cleanup_failure.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_cleanup_failure_example_module.addImport("zigeffect", zigeffect);
+
+    const causal_cleanup_failure_example = b.addExecutable(.{
+        .name = "zigeffect-causal-cleanup-failure",
+        .root_module = causal_cleanup_failure_example_module,
+    });
+
+    const causal_cleanup_failure_example_tests = b.addTest(.{
+        .name = "zigeffect-causal-cleanup-failure-tests",
+        .root_module = causal_cleanup_failure_example_module,
+    });
+    const run_causal_cleanup_failure_example_tests = b.addRunArtifact(causal_cleanup_failure_example_tests);
+
+    const causal_scoped_fiber_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/causal_scoped_fiber.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_scoped_fiber_example_module.addImport("zigeffect", zigeffect);
+
+    const causal_scoped_fiber_example = b.addExecutable(.{
+        .name = "zigeffect-causal-scoped-fiber",
+        .root_module = causal_scoped_fiber_example_module,
+    });
+
+    const causal_scoped_fiber_example_tests = b.addTest(.{
+        .name = "zigeffect-causal-scoped-fiber-tests",
+        .root_module = causal_scoped_fiber_example_module,
+    });
+    const run_causal_scoped_fiber_example_tests = b.addRunArtifact(causal_scoped_fiber_example_tests);
+
+    const causal_retry_exhaustion_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/causal_retry_exhaustion.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_retry_exhaustion_example_module.addImport("zigeffect", zigeffect);
+
+    const causal_retry_exhaustion_example = b.addExecutable(.{
+        .name = "zigeffect-causal-retry-exhaustion",
+        .root_module = causal_retry_exhaustion_example_module,
+    });
+
+    const causal_retry_exhaustion_example_tests = b.addTest(.{
+        .name = "zigeffect-causal-retry-exhaustion-tests",
+        .root_module = causal_retry_exhaustion_example_module,
+    });
+    const run_causal_retry_exhaustion_example_tests = b.addRunArtifact(causal_retry_exhaustion_example_tests);
+
     const scaffold_module = b.createModule(.{
         .root_source_file = b.path("tools/scaffold_module.zig"),
         .target = target,
@@ -105,6 +177,14 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_readiness_example_tests.step);
     examples_step.dependOn(&causal_readiness_example.step);
     examples_step.dependOn(&run_causal_readiness_example_tests.step);
+    examples_step.dependOn(&causal_missing_config_example.step);
+    examples_step.dependOn(&run_causal_missing_config_example_tests.step);
+    examples_step.dependOn(&causal_cleanup_failure_example.step);
+    examples_step.dependOn(&run_causal_cleanup_failure_example_tests.step);
+    examples_step.dependOn(&causal_scoped_fiber_example.step);
+    examples_step.dependOn(&run_causal_scoped_fiber_example_tests.step);
+    examples_step.dependOn(&causal_retry_exhaustion_example.step);
+    examples_step.dependOn(&run_causal_retry_exhaustion_example_tests.step);
     examples_step.dependOn(&scaffold_tool.step);
     examples_step.dependOn(&run_scaffold_tool_tests.step);
     examples_step.dependOn(&causal_report_tool.step);

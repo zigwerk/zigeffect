@@ -681,6 +681,17 @@ Agents should use it as a small rehearsal before diagnosing real app failures:
 4. Query cause and requirements before proposing a config, layer, test, or code
    fix.
 
+The scenario fixtures cover the first failure shapes agents should learn:
+
+- `examples/causal_missing_config.zig`: graph startup failure from missing
+  config, with service and layer evidence.
+- `examples/causal_cleanup_failure.zig`: typed program failure followed by a
+  failing finalizer, with resource lineage.
+- `examples/causal_scoped_fiber.zig`: parent scope closure interrupting a
+  scoped child fiber.
+- `examples/causal_retry_exhaustion.zig`: retry exhaustion with schedule
+  decisions and the first typed upstream failure.
+
 ### Controlled Remediation
 
 The graph can support remediation, but it must be explicit:
