@@ -567,7 +567,7 @@ git commit -m "feat(zigeffect): trace scope and resource lifecycle"
 - Modify: `packages/zigeffect/src/runtime/fiber.zig`
 - Test: `packages/zigeffect/test/fiber_test.zig`
 
-- [ ] **Step 1: Write failing fiber tests**
+- [x] **Step 1: Write failing fiber tests**
 
 Add tests for:
 
@@ -576,25 +576,28 @@ Add tests for:
 - `fiber_joined` when `join` returns an exit
 - `fiber_interrupted` when `interrupt` is called
 - scoped child interruption when parent scope closes
+- fiber run id, scope id, trace id, and span id propagation
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `bun run zigeffect:test`
 
 Expected: FAIL because `FiberRuntime` does not accept a causal store.
 
-- [ ] **Step 3: Add `FiberRuntime.withCausalStore`**
+- [x] **Step 3: Add `FiberRuntime.withCausalStore`**
 
 Mirror `Runtime.withCausalStore`. Set causal store and run ids on contexts
 created by `FiberRuntime.context`.
 
-- [ ] **Step 4: Emit fiber events**
+- [x] **Step 4: Emit fiber events**
 
 Record:
 
 ```zig
 .fiber_forked
+.scope_opened
 .fiber_started
+.scope_closed
 .fiber_joined
 .fiber_interrupted
 ```
@@ -602,16 +605,17 @@ Record:
 Include `fiber_id`, `run_id`, `scope_id`, `trace_id`, and `span_id` when
 available.
 
-- [ ] **Step 5: Run tests and verify they pass**
+- [x] **Step 5: Run tests and verify they pass**
 
 Run: `bun run zigeffect:test`
 
 Expected: PASS for fiber causal events and existing fiber semantics.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/zigeffect/src/runtime/fiber.zig \
+  docs/superpowers/plans/2026-06-05-zigeffect-agent-observable-causal-runtime.md \
   packages/zigeffect/test/fiber_test.zig
 git commit -m "feat(zigeffect): emit fiber causal events"
 ```
