@@ -92,6 +92,54 @@ pub const CausalLineage = struct {
     }
 };
 
+pub const CausalFindingKind = enum {
+    resource_acquired_without_finalization,
+    fiber_pending_after_scope_close,
+    finalizer_failure,
+    retry_budget_exhausted,
+    service_requirement_without_provider,
+};
+
+pub const CausalFinding = struct {
+    kind: CausalFindingKind,
+    event_id: u64,
+    run_id: ?u64 = null,
+    scope_id: ?u64 = null,
+    fiber_id: ?u64 = null,
+    label: []const u8 = "",
+    type_name: []const u8 = "",
+    redacted_detail: []const u8 = "",
+};
+
+fn cloneFinding(allocator: Allocator, finding: CausalFinding) Allocator.Error!CausalFinding {
+    var owned = finding;
+    owned.label = try cloneSlice(allocator, finding.label);
+    errdefer if (owned.label.len > 0) allocator.free(owned.label);
+    owned.type_name = try cloneSlice(allocator, finding.type_name);
+    errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
+    owned.redacted_detail = try cloneSlice(allocator, finding.redacted_detail);
+    errdefer if (owned.redacted_detail.len > 0) allocator.free(owned.redacted_detail);
+    return owned;
+}
+
+fn deinitFindingStrings(allocator: Allocator, finding: CausalFinding) void {
+    if (finding.label.len > 0) allocator.free(finding.label);
+    if (finding.type_name.len > 0) allocator.free(finding.type_name);
+    if (finding.redacted_detail.len > 0) allocator.free(finding.redacted_detail);
+}
+
+pub const CausalFindings = struct {
+    allocator: Allocator,
+    items: []CausalFinding,
+
+    pub fn deinit(self: *CausalFindings) void {
+        for (self.items) |finding| {
+            deinitFindingStrings(self.allocator, finding);
+        }
+        self.allocator.free(self.items);
+    }
+};
+
 pub const CausalStore = struct {
     allocator: Allocator,
     next_event_id: u64 = 1,
@@ -171,7 +219,194 @@ pub const CausalStore = struct {
 
         return .{ .allocator = allocator, .events = try output.toOwnedSlice(allocator) };
     }
+
+    pub fn cause(self: *const CausalStore, allocator: Allocator, event_id: u64) Allocator.Error!CausalLineage {
+        var output = std.ArrayList(CausalEvent).empty;
+        errdefer {
+            for (output.items) |event| {
+                deinitEventStrings(allocator, event);
+            }
+            output.deinit(allocator);
+        }
+
+        try self.appendCauseChain(allocator, &output, event_id);
+
+        return .{ .allocator = allocator, .events = try output.toOwnedSlice(allocator) };
+    }
+
+    pub fn resources(self: *const CausalStore, allocator: Allocator, scope_id: u64) Allocator.Error!CausalSnapshot {
+        return self.filterEvents(allocator, struct {
+            fn matches(event: CausalEvent, expected_scope_id: u64) bool {
+                return event.scope_id == expected_scope_id and
+                    (event.kind == .resource_acquired or event.kind == .resource_finalized);
+            }
+        }.matches, scope_id);
+    }
+
+    pub fn fibers(self: *const CausalStore, allocator: Allocator, status: ?[]const u8) Allocator.Error!CausalSnapshot {
+        return self.filterEvents(allocator, struct {
+            fn matches(event: CausalEvent, expected_status: ?[]const u8) bool {
+                const fiber_event = switch (event.kind) {
+                    .fiber_forked, .fiber_started, .fiber_joined, .fiber_interrupted => true,
+                    else => false,
+                };
+                if (!fiber_event) return false;
+                if (expected_status) |value| return std.mem.eql(u8, event.status, value);
+                return true;
+            }
+        }.matches, status);
+    }
+
+    pub fn requirements(self: *const CausalStore, allocator: Allocator, run_id: u64) Allocator.Error!CausalSnapshot {
+        return self.filterEvents(allocator, struct {
+            fn matches(event: CausalEvent, expected_run_id: u64) bool {
+                return event.run_id == expected_run_id and event.kind == .service_required;
+            }
+        }.matches, run_id);
+    }
+
+    pub fn retries(self: *const CausalStore, allocator: Allocator, run_id: u64) Allocator.Error!CausalSnapshot {
+        return self.filterEvents(allocator, struct {
+            fn matches(event: CausalEvent, expected_run_id: u64) bool {
+                return event.run_id == expected_run_id and event.kind == .schedule_decision;
+            }
+        }.matches, run_id);
+    }
+
+    pub fn findings(self: *const CausalStore, allocator: Allocator) Allocator.Error!CausalFindings {
+        var output = std.ArrayList(CausalFinding).empty;
+        errdefer {
+            for (output.items) |finding| {
+                deinitFindingStrings(allocator, finding);
+            }
+            output.deinit(allocator);
+        }
+
+        for (self.events.items) |event| {
+            switch (event.kind) {
+                .resource_acquired => if (!self.hasFinalizedResource(event)) {
+                    try appendFinding(allocator, &output, .resource_acquired_without_finalization, event);
+                },
+                .scope_closed => try self.appendPendingFiberFindings(allocator, &output, event),
+                .resource_finalized => if (std.mem.eql(u8, event.status, "failure")) {
+                    try appendFinding(allocator, &output, .finalizer_failure, event);
+                },
+                .schedule_decision => if (std.mem.eql(u8, event.status, "exhausted")) {
+                    try appendFinding(allocator, &output, .retry_budget_exhausted, event);
+                },
+                .service_required => if (std.mem.eql(u8, event.status, "missing")) {
+                    try appendFinding(allocator, &output, .service_requirement_without_provider, event);
+                },
+                else => {},
+            }
+        }
+
+        return .{ .allocator = allocator, .items = try output.toOwnedSlice(allocator) };
+    }
+
+    fn findEvent(self: *const CausalStore, event_id: u64) ?CausalEvent {
+        for (self.events.items) |event| {
+            if (event.id == event_id) return event;
+        }
+        return null;
+    }
+
+    fn appendCauseChain(self: *const CausalStore, allocator: Allocator, output: *std.ArrayList(CausalEvent), event_id: u64) Allocator.Error!void {
+        const event = self.findEvent(event_id) orelse return;
+        if (event.parent_id) |parent_id| {
+            try self.appendCauseChain(allocator, output, parent_id);
+        }
+        try appendClonedEvent(allocator, output, event);
+    }
+
+    fn filterEvents(
+        self: *const CausalStore,
+        allocator: Allocator,
+        comptime matches: anytype,
+        expected: anytype,
+    ) Allocator.Error!CausalSnapshot {
+        var output = std.ArrayList(CausalEvent).empty;
+        errdefer {
+            for (output.items) |event| {
+                deinitEventStrings(allocator, event);
+            }
+            output.deinit(allocator);
+        }
+
+        for (self.events.items) |event| {
+            if (matches(event, expected)) {
+                try appendClonedEvent(allocator, &output, event);
+            }
+        }
+
+        return .{ .allocator = allocator, .events = try output.toOwnedSlice(allocator) };
+    }
+
+    fn hasFinalizedResource(self: *const CausalStore, acquired: CausalEvent) bool {
+        for (self.events.items) |event| {
+            if (event.kind != .resource_finalized) continue;
+            if (event.scope_id != acquired.scope_id) continue;
+            if (!std.mem.eql(u8, event.type_name, acquired.type_name)) continue;
+            return true;
+        }
+        return false;
+    }
+
+    fn fiberCompletedAfter(self: *const CausalStore, fiber_id: u64, closed_event_id: u64) bool {
+        for (self.events.items) |event| {
+            if (event.id < closed_event_id) continue;
+            if (event.fiber_id != fiber_id) continue;
+            switch (event.kind) {
+                .fiber_joined, .fiber_interrupted => return true,
+                else => {},
+            }
+        }
+        return false;
+    }
+
+    fn appendPendingFiberFindings(
+        self: *const CausalStore,
+        allocator: Allocator,
+        output: *std.ArrayList(CausalFinding),
+        closed: CausalEvent,
+    ) Allocator.Error!void {
+        const scope_id = closed.scope_id orelse return;
+        for (self.events.items) |event| {
+            if (event.scope_id != scope_id) continue;
+            if (event.fiber_id == null) continue;
+            if (event.kind != .fiber_forked and event.kind != .fiber_started) continue;
+            if (!std.mem.eql(u8, event.status, "pending") and !std.mem.eql(u8, event.status, "running")) continue;
+            if (self.fiberCompletedAfter(event.fiber_id.?, closed.id)) continue;
+            try appendFinding(allocator, output, .fiber_pending_after_scope_close, event);
+        }
+    }
 };
+
+fn appendClonedEvent(allocator: Allocator, output: *std.ArrayList(CausalEvent), event: CausalEvent) Allocator.Error!void {
+    const cloned = try cloneEvent(allocator, event);
+    errdefer deinitEventStrings(allocator, cloned);
+    try output.append(allocator, cloned);
+}
+
+fn appendFinding(
+    allocator: Allocator,
+    output: *std.ArrayList(CausalFinding),
+    kind: CausalFindingKind,
+    event: CausalEvent,
+) Allocator.Error!void {
+    const finding = try cloneFinding(allocator, .{
+        .kind = kind,
+        .event_id = event.id,
+        .run_id = event.run_id,
+        .scope_id = event.scope_id,
+        .fiber_id = event.fiber_id,
+        .label = event.label,
+        .type_name = event.type_name,
+        .redacted_detail = event.redacted_detail,
+    });
+    errdefer deinitFindingStrings(allocator, finding);
+    try output.append(allocator, finding);
+}
 
 fn appendOptionalU64(output: *std.ArrayList(u8), allocator: Allocator, value: ?u64) Allocator.Error!void {
     if (value) |number| {

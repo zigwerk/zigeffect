@@ -740,9 +740,10 @@ git commit -m "feat(zigeffect): record schedule decisions"
 
 **Files:**
 - Modify: `packages/zigeffect/src/services/causal.zig`
+- Modify: `packages/zigeffect/src/zigeffect.zig`
 - Test: `packages/zigeffect/test/services_test.zig`
 
-- [ ] **Step 1: Write failing query tests**
+- [x] **Step 1: Write failing query tests**
 
 Add tests for:
 
@@ -755,19 +756,19 @@ Add tests for:
 - `retries(run_id)`
 - `findings`
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `bun run zigeffect:test`
 
 Expected: FAIL because query helpers do not exist beyond snapshot and lineage.
 
-- [ ] **Step 3: Implement query helpers**
+- [x] **Step 3: Implement query helpers**
 
 Use simple scans over the append-only event list. Keep every query
 allocator-owned and deterministic. Return typed snapshot structs rather than
 formatted strings.
 
-- [ ] **Step 4: Implement findings**
+- [x] **Step 4: Implement findings**
 
 Add derived findings for:
 
@@ -777,16 +778,18 @@ Add derived findings for:
 - retry budget exhausted
 - service requirement without provider
 
-- [ ] **Step 5: Run tests and verify they pass**
+- [x] **Step 5: Run tests and verify they pass**
 
 Run: `bun run zigeffect:test`
 
 Expected: PASS for query helpers and findings.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/zigeffect/src/services/causal.zig \
+  packages/zigeffect/src/zigeffect.zig \
+  docs/superpowers/plans/2026-06-05-zigeffect-agent-observable-causal-runtime.md \
   packages/zigeffect/test/services_test.zig
 git commit -m "feat(zigeffect): add causal query helpers"
 ```

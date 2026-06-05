@@ -366,3 +366,140 @@ test "causal report and backend kinds preserve adapter strategy" {
     try std.testing.expectEqual(fx.CausalBackendKind.cockroach_history, fx.CausalBackendKind.cockroach_history);
     try std.testing.expectEqual(fx.CausalBackendKind.async_stream, fx.CausalBackendKind.async_stream);
 }
+
+fn expectFinding(findings: fx.CausalFindings, kind: fx.CausalFindingKind) !void {
+    for (findings.items) |finding| {
+        if (finding.kind == kind) return;
+    }
+    return error.ExpectedFindingMissing;
+}
+
+test "causal query helpers filter resources fibers requirements and retries" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    const run_id = store.nextRunId();
+    const scope_id = store.nextScopeId();
+    const parent = try store.record(.{
+        .kind = .run_started,
+        .run_id = run_id,
+        .label = "query-run",
+    });
+    const child = try store.record(.{
+        .kind = .exit_recorded,
+        .run_id = run_id,
+        .parent_id = parent,
+        .status = "failure",
+        .type_name = "Boom",
+    });
+    _ = try store.record(.{
+        .kind = .resource_acquired,
+        .run_id = run_id,
+        .scope_id = scope_id,
+        .type_name = "DatabaseConnection",
+    });
+    _ = try store.record(.{
+        .kind = .fiber_forked,
+        .run_id = run_id,
+        .fiber_id = 44,
+        .status = "pending",
+    });
+    _ = try store.record(.{
+        .kind = .service_required,
+        .run_id = run_id,
+        .type_name = @typeName(fx.Config),
+        .status = "missing",
+    });
+    _ = try store.record(.{
+        .kind = .schedule_decision,
+        .run_id = run_id,
+        .label = "retry-config",
+        .status = "exhausted",
+        .redacted_detail = "attempt=2 delay_ms=null decision=exhausted",
+    });
+
+    var cause = try store.cause(std.testing.allocator, child);
+    defer cause.deinit();
+    try std.testing.expectEqual(@as(usize, 2), cause.events.len);
+    try std.testing.expectEqual(parent, cause.events[0].id);
+    try std.testing.expectEqual(child, cause.events[1].id);
+
+    var resources = try store.resources(std.testing.allocator, scope_id);
+    defer resources.deinit();
+    try std.testing.expectEqual(@as(usize, 1), resources.events.len);
+    try std.testing.expectEqual(fx.CausalEventKind.resource_acquired, resources.events[0].kind);
+
+    var fibers = try store.fibers(std.testing.allocator, "pending");
+    defer fibers.deinit();
+    try std.testing.expectEqual(@as(usize, 1), fibers.events.len);
+    try std.testing.expectEqual(@as(?u64, 44), fibers.events[0].fiber_id);
+
+    var requirements = try store.requirements(std.testing.allocator, run_id);
+    defer requirements.deinit();
+    try std.testing.expectEqual(@as(usize, 1), requirements.events.len);
+    try std.testing.expectEqualStrings(@typeName(fx.Config), requirements.events[0].type_name);
+
+    var retries = try store.retries(std.testing.allocator, run_id);
+    defer retries.deinit();
+    try std.testing.expectEqual(@as(usize, 1), retries.events.len);
+    try std.testing.expectEqualStrings("retry-config", retries.events[0].label);
+}
+
+test "causal findings surface missing cleanup pending fibers finalizer failures exhausted retries and missing services" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    const run_id = store.nextRunId();
+    const leaked_scope_id = store.nextScopeId();
+    const closed_scope_id = store.nextScopeId();
+
+    _ = try store.record(.{
+        .kind = .resource_acquired,
+        .run_id = run_id,
+        .scope_id = leaked_scope_id,
+        .type_name = "LeakedResource",
+    });
+    _ = try store.record(.{
+        .kind = .fiber_forked,
+        .run_id = run_id,
+        .scope_id = closed_scope_id,
+        .fiber_id = 7,
+        .status = "pending",
+    });
+    _ = try store.record(.{
+        .kind = .scope_closed,
+        .run_id = run_id,
+        .scope_id = closed_scope_id,
+        .status = "success",
+    });
+    _ = try store.record(.{
+        .kind = .resource_finalized,
+        .run_id = run_id,
+        .scope_id = closed_scope_id,
+        .type_name = "FailingResource",
+        .status = "failure",
+        .redacted_detail = "CloseFailed",
+    });
+    _ = try store.record(.{
+        .kind = .schedule_decision,
+        .run_id = run_id,
+        .label = "retry-db",
+        .status = "exhausted",
+        .redacted_detail = "attempt=3 delay_ms=null decision=exhausted",
+    });
+    _ = try store.record(.{
+        .kind = .service_required,
+        .run_id = run_id,
+        .type_name = @typeName(fx.Config),
+        .status = "missing",
+    });
+
+    var findings = try store.findings(std.testing.allocator);
+    defer findings.deinit();
+
+    try expectFinding(findings, .resource_acquired_without_finalization);
+    try expectFinding(findings, .fiber_pending_after_scope_close);
+    try expectFinding(findings, .finalizer_failure);
+    try expectFinding(findings, .retry_budget_exhausted);
+    try expectFinding(findings, .service_requirement_without_provider);
+}
