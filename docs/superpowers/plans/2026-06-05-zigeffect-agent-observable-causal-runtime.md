@@ -687,9 +687,10 @@ git commit -m "feat(zigeffect): trace layer graph services"
 **Files:**
 - Modify: `packages/zigeffect/src/effect/schedule.zig`
 - Modify: `packages/zigeffect/src/effect/effect.zig`
+- Modify: `packages/zigeffect/src/services/causal.zig`
 - Test: `packages/zigeffect/test/schedule_test.zig`
 
-- [ ] **Step 1: Write failing schedule tests**
+- [x] **Step 1: Write failing schedule tests**
 
 Add tests that run retry and repeat programs through a context with a causal
 store and assert `schedule_decision` events with:
@@ -699,13 +700,13 @@ store and assert `schedule_decision` events with:
 - delay in milliseconds
 - schedule label
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `bun run zigeffect:test`
 
 Expected: FAIL because schedule execution does not emit causal events.
 
-- [ ] **Step 3: Add schedule labels and decision events**
+- [x] **Step 3: Add schedule labels and decision events**
 
 Record schedule decisions inside retry/repeat execution where the active
 context is available. Encode attempt and delay in `redacted_detail`, for
@@ -715,17 +716,22 @@ example:
 attempt=2 delay_ms=50 decision=retry
 ```
 
-- [ ] **Step 4: Run tests and verify they pass**
+Also make the causal store own event string payloads so dynamic decision
+details remain stable in snapshots and reports.
+
+- [x] **Step 4: Run tests and verify they pass**
 
 Run: `bun run zigeffect:test`
 
 Expected: PASS for schedule causal events and existing schedule tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/effect/schedule.zig \
   packages/zigeffect/src/effect/effect.zig \
+  packages/zigeffect/src/services/causal.zig \
+  docs/superpowers/plans/2026-06-05-zigeffect-agent-observable-causal-runtime.md \
   packages/zigeffect/test/schedule_test.zig
 git commit -m "feat(zigeffect): record schedule decisions"
 ```
