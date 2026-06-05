@@ -461,3 +461,101 @@ pub fn formatCausalReport(
 
     return output.toOwnedSlice(allocator);
 }
+
+fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []const u8) Allocator.Error!void {
+    try output.append(allocator, '"');
+    for (value) |byte| {
+        switch (byte) {
+            '"' => try output.appendSlice(allocator, "\\\""),
+            '\\' => try output.appendSlice(allocator, "\\\\"),
+            '\n' => try output.appendSlice(allocator, "\\n"),
+            '\r' => try output.appendSlice(allocator, "\\r"),
+            '\t' => try output.appendSlice(allocator, "\\t"),
+            else => try output.append(allocator, byte),
+        }
+    }
+    try output.append(allocator, '"');
+}
+
+fn appendOptionalJsonU64(output: *std.ArrayList(u8), allocator: Allocator, value: ?u64) Allocator.Error!void {
+    if (value) |number| {
+        try output.print(allocator, "{d}", .{number});
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+}
+
+pub fn formatCausalJson(allocator: Allocator, store: *const CausalStore) Allocator.Error![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\n  \"events\": [\n");
+    for (store.events.items, 0..) |event, index| {
+        if (index > 0) try output.appendSlice(allocator, ",\n");
+        try output.appendSlice(allocator, "    {\n");
+        try output.print(allocator, "      \"id\": {d},\n", .{event.id});
+        try output.appendSlice(allocator, "      \"kind\": ");
+        try appendJsonString(&output, allocator, @tagName(event.kind));
+        try output.appendSlice(allocator, ",\n      \"run_id\": ");
+        try appendOptionalJsonU64(&output, allocator, event.run_id);
+        try output.appendSlice(allocator, ",\n      \"parent_id\": ");
+        try appendOptionalJsonU64(&output, allocator, event.parent_id);
+        try output.appendSlice(allocator, ",\n      \"fiber_id\": ");
+        try appendOptionalJsonU64(&output, allocator, event.fiber_id);
+        try output.appendSlice(allocator, ",\n      \"scope_id\": ");
+        try appendOptionalJsonU64(&output, allocator, event.scope_id);
+        try output.appendSlice(allocator, ",\n      \"trace_id\": ");
+        try appendOptionalJsonU64(&output, allocator, event.trace_id);
+        try output.appendSlice(allocator, ",\n      \"span_id\": ");
+        try appendOptionalJsonU64(&output, allocator, event.span_id);
+        try output.appendSlice(allocator, ",\n      \"label\": ");
+        try appendJsonString(&output, allocator, event.label);
+        try output.appendSlice(allocator, ",\n      \"type_name\": ");
+        try appendJsonString(&output, allocator, event.type_name);
+        try output.appendSlice(allocator, ",\n      \"status\": ");
+        try appendJsonString(&output, allocator, event.status);
+        try output.appendSlice(allocator, ",\n      \"redacted_detail\": ");
+        try appendJsonString(&output, allocator, event.redacted_detail);
+        try output.appendSlice(allocator, "\n    }");
+    }
+    try output.appendSlice(allocator, "\n  ]\n}\n");
+
+    return output.toOwnedSlice(allocator);
+}
+
+fn appendDotLabel(output: *std.ArrayList(u8), allocator: Allocator, event: CausalEvent) Allocator.Error!void {
+    try output.append(allocator, '"');
+    try output.appendSlice(allocator, @tagName(event.kind));
+    if (event.label.len > 0) {
+        try output.append(allocator, ' ');
+        for (event.label) |byte| {
+            switch (byte) {
+                '"' => try output.appendSlice(allocator, "\\\""),
+                '\\' => try output.appendSlice(allocator, "\\\\"),
+                '\n', '\r', '\t' => try output.append(allocator, ' '),
+                else => try output.append(allocator, byte),
+            }
+        }
+    }
+    try output.append(allocator, '"');
+}
+
+pub fn formatCausalDot(allocator: Allocator, store: *const CausalStore) Allocator.Error![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "digraph zigeffect_causal {\n");
+    for (store.events.items) |event| {
+        try output.print(allocator, "  event_{d} [label=", .{event.id});
+        try appendDotLabel(&output, allocator, event);
+        try output.appendSlice(allocator, "];\n");
+    }
+    for (store.events.items) |event| {
+        if (event.parent_id) |parent_id| {
+            try output.print(allocator, "  event_{d} -> event_{d};\n", .{ parent_id, event.id });
+        }
+    }
+    try output.appendSlice(allocator, "}\n");
+
+    return output.toOwnedSlice(allocator);
+}

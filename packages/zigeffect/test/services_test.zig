@@ -503,3 +503,41 @@ test "causal findings surface missing cleanup pending fibers finalizer failures 
     try expectFinding(findings, .retry_budget_exhausted);
     try expectFinding(findings, .service_requirement_without_provider);
 }
+
+test "causal json and dot exports are deterministic and redacted" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    const run_id = store.nextRunId();
+    const parent = try store.record(.{
+        .kind = .run_started,
+        .run_id = run_id,
+        .label = "readiness",
+        .type_name = "ReadinessEffect",
+    });
+    _ = try store.record(.{
+        .kind = .exit_recorded,
+        .run_id = run_id,
+        .parent_id = parent,
+        .status = "failure",
+        .type_name = "InvalidConfig",
+        .redacted_detail = "database.password=<redacted>",
+    });
+
+    const json = try fx.formatCausalJson(std.testing.allocator, &store);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"events\": [") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"id\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\": \"run_started\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"parent_id\": null") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"redacted_detail\": \"database.password=<redacted>\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "super-secret") == null);
+
+    const dot = try fx.formatCausalDot(std.testing.allocator, &store);
+    defer std.testing.allocator.free(dot);
+
+    try std.testing.expect(std.mem.indexOf(u8, dot, "digraph zigeffect_causal") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dot, "event_1 [label=\"run_started readiness\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dot, "event_1 -> event_2") != null);
+}

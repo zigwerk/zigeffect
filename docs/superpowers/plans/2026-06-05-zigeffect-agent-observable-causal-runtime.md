@@ -798,9 +798,10 @@ git commit -m "feat(zigeffect): add causal query helpers"
 
 **Files:**
 - Modify: `packages/zigeffect/src/services/causal.zig`
+- Modify: `packages/zigeffect/src/zigeffect.zig`
 - Test: `packages/zigeffect/test/services_test.zig`
 
-- [ ] **Step 1: Write failing export tests**
+- [x] **Step 1: Write failing export tests**
 
 Add tests for:
 
@@ -808,13 +809,13 @@ Add tests for:
 - DOT graph output with event ids as nodes and parent edges
 - secret redaction in `redacted_detail`
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `bun run zigeffect:test`
 
 Expected: FAIL because export helpers do not exist.
 
-- [ ] **Step 3: Implement JSON export**
+- [x] **Step 3: Implement JSON export**
 
 Add `formatCausalJson(allocator, store)` that renders an object:
 
@@ -839,7 +840,7 @@ Add `formatCausalJson(allocator, store)` that renders an object:
 }
 ```
 
-- [ ] **Step 4: Implement DOT export**
+- [x] **Step 4: Implement DOT export**
 
 Add `formatCausalDot(allocator, store)` that renders:
 
@@ -850,16 +851,18 @@ digraph zigeffect_causal {
 }
 ```
 
-- [ ] **Step 5: Run tests and verify they pass**
+- [x] **Step 5: Run tests and verify they pass**
 
 Run: `bun run zigeffect:test`
 
 Expected: PASS for JSON and DOT export.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/zigeffect/src/services/causal.zig \
+  packages/zigeffect/src/zigeffect.zig \
+  docs/superpowers/plans/2026-06-05-zigeffect-agent-observable-causal-runtime.md \
   packages/zigeffect/test/services_test.zig
 git commit -m "feat(zigeffect): export causal graphs"
 ```

@@ -117,6 +117,8 @@ pub const services = struct {
     pub const CausalFindings = causal.CausalFindings;
     pub const CausalStore = causal.CausalStore;
     pub const formatCausalReport = causal.formatCausalReport;
+    pub const formatCausalJson = causal.formatCausalJson;
+    pub const formatCausalDot = causal.formatCausalDot;
     pub const CausalBackendKind = causal_backend.CausalBackendKind;
     pub const CausalBackend = causal_backend.CausalBackend;
 };
@@ -244,6 +246,8 @@ pub const CausalFinding = services.causal.CausalFinding;
 pub const CausalFindings = services.causal.CausalFindings;
 pub const CausalStore = services.causal.CausalStore;
 pub const formatCausalReport = services.causal.formatCausalReport;
+pub const formatCausalJson = services.causal.formatCausalJson;
+pub const formatCausalDot = services.causal.formatCausalDot;
 pub const CausalBackendKind = services.causal_backend.CausalBackendKind;
 pub const CausalBackend = services.causal_backend.CausalBackend;
 pub const TestFixtureRegistry = testing.test_env.TestFixtureRegistry;
