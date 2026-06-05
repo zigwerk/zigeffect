@@ -9,33 +9,47 @@ layers, testing, and eventually async runtime semantics.
 
 ## Current Assessment
 
-`zigeffect` now works as a small synchronous Zig effect engine. It captures the
-Effect architecture shape, but it is not yet a full Effect-grade runtime.
+`zigeffect` now works as a deterministic Zig effect engine. It satisfies the
+current deterministic roadmap and keeps the async runtime story as an explicit
+backend-adapter boundary.
 
 What is real today:
 
+- Public package layout is split behind a facade into core, dependency, effect,
+  runtime, layer, services, and testing domains.
+- Runner APIs emit stable compile-time diagnostics for mismatched effect
+  environments before runtime execution or service validation.
 - Dependency injection gates work.
 - Layer startup and teardown work.
 - Heterogeneous graph startup works and memoizes within the graph runtime.
+- Graph-started environments can be handed to regular and fiber runtimes while
+  keeping dependency validation.
 - Typed Zig errors are preserved.
 - Scoped cleanup is deterministic.
+- Pointer and value resource acquisition helpers share the same scope cleanup
+  contract.
 - Deterministic fiber lifecycle semantics exist for `fork`, `join`,
   `interrupt`, scoped leases, and coordination primitives.
 - Tests cover these paths.
 
-What is not Effect-grade yet:
+Current boundary decisions:
 
-- The fiber runtime is deterministic and semantic-first, not a real async
-  scheduler with green-thread suspension or blocking-IO interruption.
-- `requires` is metadata plus validation, not a fully type-level requirement
-  algebra.
-- Layer builders cannot consume previously built services through a graph
-  context yet.
-- `Cause` is a useful reporting shape, not the full Effect failure algebra.
-- `Schedule` is a practical delay policy set, not a compositional schedule
-  algebra.
-- Logger, config, metrics, and tracing are still test-oriented service stubs,
-  not production observability.
+- The fiber runtime is deterministic and semantic-first. Real suspension,
+  blocking-IO interruption, and async supervision belong to a future backend
+  adapter, not to the deterministic core.
+- `requires` stays Zig-native metadata plus validation. It is not trying to
+  become a full type-level requirement algebra.
+- `Exit` stays a lightweight by-value result. Recursive ownership is handled by
+  `CauseTree` for reports and tooling instead of forcing every `exit()` caller
+  to manage heap state.
+- Logger, config, metrics, tracing, and observability reporting are deterministic
+  stdlib-style services. External exporters can layer on top of those service
+  contracts.
+- The agent-observable causal runtime is a roadmap direction, not a shipped
+  runtime graph API yet. The package already has the ingredients: typed
+  effects, services, scopes, fibers, layers, schedules, exits, causes, logs,
+  metrics, and traces. Future work should connect them through an opt-in,
+  bounded causal event model that agents can query structurally.
 
 ## Engine Integration Invariants
 
@@ -83,6 +97,18 @@ Every deeper engine change should preserve these rules:
 - Package-owned `serviceNotFound` compile-time diagnostics.
 - `Effect.requires` metadata for production dependency gates.
 - `Runtime.provides` and layer provider declarations.
+- `validateRequirements` and `requirementsSatisfiedBy` for provider/consumer
+  contract checks.
+- `staticRequirementsSatisfied` and `assertStaticRequirementsSatisfied` for
+  compile-time known provider/consumer metadata.
+- `ServiceEnv(.{ ... })` and graph `runNarrowed`/`exitNarrowed` for app effects
+  that depend on a service slice rather than the full graph environment.
+- Stable compile diagnostics for malformed provider/requirement service
+  tuples.
+- Stable compile diagnostics for invalid `Effect.fromFn`, invalid
+  `Layer.merge`, and resource failure sets missing scope/allocation errors.
+- Stable compile diagnostics for mismatched effect environments at layer,
+  runtime, graph runtime, and fiber runtime boundaries.
 
 ### Scope And Resources
 
@@ -91,13 +117,21 @@ Every deeper engine change should preserve these rules:
 - Fallible finalizers with recorded cleanup failures.
 - Exit-aware finalizers through `FinalizerExit`.
 - `acquireRelease` for scoped pointer resources.
+- `acquireReleaseValue` for scoped value resources where copy-based cleanup is
+  safe.
 - Runtime-managed scope close on success and failure.
+- Explicit shared runtime scopes through `Runtime.withScope`.
+- Runtime, fiber, and graph exits preserve typed program failure followed by
+  cleanup failure through `Cause.failure_then_finalizer_failure`.
+- Runtime-generated cleanup failures also preserve defects and interruptions
+  through direct combined cause variants.
 
 ### Runtime Result Model
 
 - `Exit` for success, typed failure, defect, interruption, and cause.
 - `Cause` shape for failures, defects, interruption, cleanup failure, and nested
   cause variants.
+- `CauseTree` for allocator-owned recursive cause reports in tests and tooling.
 - `formatExit` and `formatCause` for readable CLI/test/agent reports.
 
 ### Fiber Lifecycle And Coordination
@@ -109,19 +143,29 @@ Every deeper engine change should preserve these rules:
   closes.
 - Child scope cleanup with success, failure, or interruption exits.
 - `Deferred`, `Queue`, and `Semaphore` coordination primitives.
+- Queue shutdown and scoped semaphore permit cleanup.
+- Deterministic queue producer/consumer workflow coverage under fibers.
+- Explicit deterministic backend capability boundary for future async runtimes.
 
 ### Layers And DI
 
 - `Layer.fromEnv`.
 - `Layer.fromBuilder`.
+- `Layer.fromContextBuilder` for dependency-injected graph startup builders.
 - `Layer.provide`.
 - `Layer.merge`.
 - `LayerWithError` for typed startup failures.
 - `ServiceSet`, `DependencyReport`, and `LayerGraph` metadata validation.
 - Duplicate provider and missing requirement diagnostics.
 - Executable `layerGraph` for heterogeneous layer tuples.
+- Direct `LayerGraphRuntime.report("label")` formatted dependency reports.
 - Automatic graph validation before startup.
+- Explicit provider replacement metadata through `.replaces(.{Service})`.
 - Dependency-ordered graph startup from declarations.
+- Graph builder contexts that expose already-started dependency services.
+- Graph startup-scope finalizers for dependency-injected builders.
+- Startup failure cleanup for already-started graph dependencies.
+- Regular and fiber runtime adapters for graph-started environments.
 - Memoized graph startup until graph deinit.
 - Generated composite graph environment with typed service dispatch.
 
@@ -130,25 +174,44 @@ Every deeper engine change should preserve these rules:
 - Retry/repeat policies: `once`, `recurs`, `spaced`, `duration`, `fixed`,
   `repeat`, `exponential`, `fibonacci`, `linear`, `backoff`,
   `jitteredBackoff`.
+- Schedule decision inspection and union/intersection-style delay composition.
+- Schedule timeout policies and reset-attempt inspection.
 - Fake/system `Clock`.
 - `TestEnv` with logger, config, metrics, tracing, memory filesystem, fake
-  clock, runtime helpers, and assertions.
+  clock, runtime helpers, fixture registry, golden output assertions, and
+  deterministic assertions.
+- Typed config descriptors with defaults, parse errors, and secret-safe
+  diagnostic formatting.
+- Config entry/dotenv provider loading and `ConfigEnv` layer support.
+- Schema-wide config loading through `Config.schema` and `Config.readSchema`.
+- Structured logger entries with optional trace metadata, metrics
+  histograms/snapshots, and tracing span/trace ids plus attributes.
+- Test helpers for structured logs, histograms, dependency reports, causes, and
+  schedule delays.
 
 ### Documentation And Verification
 
 - Usage guide.
+- Architecture guide and domain file tree for future roadmap work.
 - Error guide.
 - EffectTS parity notes.
+- Module/application pattern guide.
 - Agent guide.
 - Devex review.
 - Focused Zig tests for core effect behavior, scopes, layers, graph startup,
-  schedules, diagnostics, and test services.
+  schedules, diagnostics, invariants, and test services.
 
 ## Delivery Roadmap
 
 ### 1. Engine Invariants And Public API Hardening
 
 Goal: make the current engine harder to misuse before adding deeper semantics.
+
+Status: delivered for the current synchronous API surface. Malformed service
+tuple diagnostics, environment mismatch diagnostics, composition-shape
+diagnostics for `Effect.fromFn`, `Layer.merge`, and resource failure sets,
+graph-runtime reports, compile-fail coverage, and cross-subsystem invariants
+are in place.
 
 - Add compile-time assertions for common composition mistakes:
   mismatched environments, invalid effect function shapes, invalid layer merge
@@ -166,6 +229,11 @@ Goal: make the current engine harder to misuse before adding deeper semantics.
 
 Goal: make requirements more than loose metadata while staying Zig-native.
 
+Status: delivered for the current graph runtime shape. Generic
+provider/consumer comparison helpers, static requirement helpers,
+graph duplicate-provider diagnostics, explicit graph-local provider replacement
+metadata, and graph service-environment narrowing are in place.
+
 - Preserve current `requires(.{ ... })` ergonomics.
 - Add typed helpers that can compare effect requirements against layer/runtime
   providers at compile time when both sides are known.
@@ -180,6 +248,12 @@ Goal: make requirements more than loose metadata while staying Zig-native.
 
 Goal: make `layerGraph` behave more like real Effect layers, where layer
 constructors can consume services built by earlier layers.
+
+Status: delivered for the current graph startup shape. `Layer.fromContextBuilder`
+receives a graph startup context, `Layer.fromEffect` runs startup effects over
+projected service environments, typed startup errors are preserved, graph
+startup scope finalizers are used, and already-started dependencies close on
+builder failure.
 
 - Add `Layer.fromEffect` or `Layer.fromContextBuilder`.
 - Let a layer builder receive `Context(GraphEnvSoFar)` or a narrower generated
@@ -196,6 +270,14 @@ constructors can consume services built by earlier layers.
 Goal: make `Runtime`, `FiberRuntime`, and `LayerGraphRuntime` feel like one
 engine rather than three runners.
 
+Status: delivered for the current deterministic runtime. Graph-started
+environments expose regular and fiber runtime adapters that validate
+requirements against graph providers. Managed-scope run/exit logic is shared
+through an internal runner helper. `forkScoped` and `forkInScope` define
+parent/child scope leases for per-run, caller-owned, and graph-startup scopes,
+including graph-provided services that start unfinished child fibers during
+startup. Future async supervision remains part of the backend roadmap.
+
 - Share context construction rules across runtime types.
 - Add a common internal runner path for scope creation, effect execution,
   finalizer close, and `Exit` conversion where Zig's types allow it.
@@ -210,6 +292,12 @@ engine rather than three runners.
 
 Goal: make resource handling useful beyond heap-allocated pointer resources.
 
+Status: delivered for the current synchronous resource model. Value-resource
+acquisition, nested reverse cleanup ordering, combined program-failure plus
+cleanup-failure reporting, explicit long-lived runtime scopes, and ownership
+guides for graph startup, per-run, shared runtime, and fiber-owned resources
+are in place.
+
 - Add value-resource acquisition helpers where safe.
 - Add explicit long-lived runtime scopes for applications that need shared
   lifecycle boundaries.
@@ -223,8 +311,16 @@ Goal: make resource handling useful beyond heap-allocated pointer resources.
 
 Goal: make runtime result reporting closer to Effect’s failure model.
 
-- Replace pointer-backed recursive cause links with an owned representation for
-  runtime-generated nested causes.
+Status: delivered for the current by-value `Exit` model. Runtime-generated
+cleanup failures preserve typed failures, defects, and interruptions with
+direct non-pointer cause variants. Cause inspection helpers are available for
+tests. `CauseTree` adds an allocator-owned recursive report shape and can append
+finalizer failures to existing nested causes without dangling pointers. The
+engine intentionally keeps `Exit` lightweight; managed recursive ownership lives
+in `CauseTree`.
+
+- Add an owned recursive representation for runtime-generated nested causes
+  while preserving the current by-value `Exit` API.
 - Represent combined program failure plus cleanup failure safely.
 - Represent interruption cause consistently across runtime and fiber paths.
 - Add richer interruption and defect helpers.
@@ -234,6 +330,12 @@ Goal: make runtime result reporting closer to Effect’s failure model.
 ### 7. Schedule Algebra And Clock Integration
 
 Goal: move schedules from useful policies to composable schedule programs.
+
+Status: delivered for the current deterministic runtime. Schedule decision
+inspection, union/intersection-style delay composition, timeout policies,
+reset-attempt inspection, owned recursive `ScheduleProgram` trees, and
+fake-clock retry/repeat sleeps are in place and tested. Deeper async runtime
+sleep hooks remain part of the backend roadmap.
 
 - Add schedule composition operators.
 - Add jitter, timeout, reset, union/intersection-style policy composition where
@@ -248,6 +350,12 @@ Goal: move schedules from useful policies to composable schedule programs.
 Goal: make `Deferred`, `Queue`, and `Semaphore` useful with the deterministic
 fiber core and future async backend.
 
+Status: delivered for deterministic coordination. Queue shutdown semantics,
+scoped semaphore permits, deterministic queue producer/consumer workflows under
+fibers, and explicit wait-state/backpressure inspection are in place and
+tested. Real blocking or suspend/resume remains part of the future async
+backend.
+
 - Define blocking semantics for deterministic mode: immediate status/errors
   today, suspend/resume through a backend later.
 - Add queue shutdown/interruption behavior.
@@ -257,6 +365,11 @@ fiber core and future async backend.
 ### 9. Config Service
 
 Goal: move from a test map to production-grade typed config.
+
+Status: delivered for the current stdlib service shape. Typed descriptors for
+string, integer, and boolean values, defaults, invalid-value errors,
+secret-safe diagnostics, entry/dotenv provider loading, schema-wide struct
+loading, and `ConfigEnv` layer support are in place.
 
 - Add typed config descriptors.
 - Add env/file providers.
@@ -270,6 +383,13 @@ Goal: move from a test map to production-grade typed config.
 
 Goal: make logger, metrics, and tracing credible stdlib services.
 
+Status: delivered for the current deterministic service shape. Logger levels,
+fields, timestamps, trace metadata, metrics histograms and snapshots, tracing
+span ids, trace ids, parent ids, attributes, and runtime/fiber/graph
+trace-context propagation are in place. Span lifecycle lookup, deterministic
+assertions, and `formatObservabilityReport` for CLI/test/agent reporting are in
+place.
+
 - Logger: preserve level, message, fields, timestamps, and trace/span metadata.
 - Metrics: counters, gauges, histograms, snapshots, and assertions.
 - Tracing: trace ids, span ids, attributes, parent/child relationships, and
@@ -281,6 +401,12 @@ Goal: make logger, metrics, and tracing credible stdlib services.
 ### 11. Test Toolkit
 
 Goal: make Effect-style deterministic testing ergonomic in Zig.
+
+Status: delivered for the current deterministic toolkit. Test assertions cover
+structured logs, histograms, dependency reports, causes, schedule delays, fiber
+status, queue state, fixture registry, golden output, and reusable fake-service
+layer builders. Readable assertion report formatters cover log, schedule,
+fiber-status, and queue-state mismatches for agent-facing harnesses.
 
 - Add `fx.Test` helpers for fixtures, golden output, fake service injection, and
   readable assertion reports.
@@ -296,6 +422,13 @@ Goal: make Effect-style deterministic testing ergonomic in Zig.
 
 Goal: cross the line from deterministic fiber lifecycle semantics to a fuller
 effect runtime with real suspension, scheduling, and structured concurrency.
+
+Status: delivered as an explicit backend boundary. The deterministic backend
+capability contract is exposed through regular and fiber runtimes, and
+coordination wait states define which operations would suspend in a future
+backend. Real suspension, blocking IO interruption, supervision, and parallel
+composition are reserved for an async backend adapter rather than hidden inside
+the deterministic core.
 
 - Define the Zig concurrency model: async functions, event loops, worker pools,
   or a deliberately synchronous engine with explicit async adapters.
@@ -313,11 +446,71 @@ effect runtime with real suspension, scheduling, and structured concurrency.
 
 Goal: make large systems predictable to build with `zigeffect`.
 
+Status: delivered for the current package shape. The module/application guide
+defines service, layer, effects, fixtures, tests, app startup, and agent
+ownership patterns. `examples/readiness.zig` is compile-checked through
+`zig build examples` and demonstrates a database-backed service, startup
+effect, graph bootstrap, narrowed readiness effect, dependency report, and
+fake-service test layers. `tools/scaffold_module.zig` is also compile-checked
+through `zig build examples` and prints a module scaffold for service, layer,
+effects, fixtures, tests, and README files. A larger domain-specific example
+catalog can grow from this template.
+
 - Define a module shape that bundles services, layers, effects, tests, and docs.
 - Add app startup templates around `layerGraph`.
 - Add CLI-friendly startup validation and dependency reports.
 - Add examples for database-backed services, test layers, and production
   bootstrap.
+
+### 14. Agent-Observable Causal Runtime
+
+Goal: make `zigeffect` useful to agents as a structured execution model, not
+just a library that emits text logs.
+
+Status: planned. The canonical design is in
+`docs/agent-observable-runtime.md`; the Superpowers design and implementation
+plan live in
+`docs/superpowers/specs/2026-06-05-zigeffect-agent-observable-causal-runtime-design.md`
+and
+`docs/superpowers/plans/2026-06-05-zigeffect-agent-observable-causal-runtime.md`.
+
+The novelty target is precise: a Zig-native agent-observable Effect runtime
+with a first-class causal execution graph spanning typed errors, service
+requirements, layer providers, scopes, resources, fibers, schedules, logs,
+metrics, and traces.
+
+- Add an opt-in `CausalStore` service that records bounded deterministic
+  runtime events.
+- Emit run, effect, scope, resource, fiber, layer, schedule, exit, and cause
+  events when a causal store is attached.
+- Add structured queries for snapshot, lineage, cause, resources, fibers,
+  requirements, retries, and findings.
+- Add text, JSON, and DOT reports for human and agent tooling.
+- Add CI artifacts for failed deterministic tests so agents can summarize
+  event lineage, owning subsystem, and likely fix direction without rerunning
+  the job.
+- Add app-level labeling patterns for domain effects, layers, resources,
+  schedules, and remediation boundaries.
+- Keep backend adapters optional: JSON Lines, DOT, OpenTelemetry, NenDB, and
+  future async backend streams sit behind the event sink contract.
+- Treat the in-memory store as the deterministic reference backend. Treat NenDB
+  as the embedded graph-query adapter candidate after the event taxonomy is
+  stable. Treat Cockroach/RoachGraph as the later durable history adapter for
+  app, CI, or fleet-level audit, not as the core runtime store.
+- Use the causal graph inside `zigeffect` tests so agents can diagnose engine
+  regressions from runtime facts.
+- Document the application pattern so app agents can connect user-visible
+  failures to service providers, layer startup, resource ownership, retry
+  policies, and trace spans.
+- Grow toward a local agent tool surface that can answer causal questions such
+  as `snapshot`, `lineage`, `cause`, `resources`, `fibers`, `requirements`,
+  `retries`, and `findings`.
+- Leave room for a future causal workbench that visualizes effect runs, scope
+  trees, fiber trees, layer graphs, retry timelines, resource ownership, and
+  cause trees.
+- Keep remediation controlled: agents may propose retries, graph restarts,
+  provider replacement, config-layer replacement, fiber interruption, or
+  deterministic replay, but arbitrary runtime memory mutation is out of scope.
 
 ## Cross-Subsystem Compatibility Checklist
 
@@ -337,6 +530,9 @@ Before any engine milestone is considered complete, verify:
   only through `TestEnv` shortcuts.
 - Documentation shows one preferred path for production startup and one
   preferred path for tests.
+- Causal runtime milestones preserve deterministic event ordering, bounded
+  storage, secret redaction, and equivalent semantics for future async
+  backends.
 
 ## Definition Of Effect-Grade
 
@@ -351,8 +547,12 @@ Before any engine milestone is considered complete, verify:
 - useful typed exits and causes
 - deterministic test services
 - production config and observability services
+- agent-observable causal execution graphs
 - a clear async/concurrency story, even if it is intentionally smaller than
   EffectTS
 
-The current implementation satisfies the first six items for synchronous code.
-The next delivery priority is dependency-injected layer builders.
+The current implementation satisfies the deterministic core, dependency, layer,
+resource, fiber, config, observability, test, backend-boundary, and
+module-pattern requirements listed above. Future work can add causal runtime
+events, async backend adapters, and a larger application-template catalog
+without changing the current deterministic contracts.

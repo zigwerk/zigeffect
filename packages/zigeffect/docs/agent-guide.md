@@ -231,6 +231,49 @@ defer std.testing.allocator.free(report);
 Use stable program labels like `"compile schema"` or `"load config"` so humans
 and agents can connect the report back to the failing workflow.
 
+## Causal Runtime Direction
+
+The long-term agent workflow is documented in
+`docs/agent-observable-runtime.md`. The causal runtime is not a shipped API yet,
+but agents should already follow its discipline:
+
+- Prefer structured `Exit`, `Cause`, dependency, observability, and test reports
+  over ad hoc log scraping.
+- Preserve stable labels for effects, layers, resources, schedules, and test
+  workflows.
+- Keep typed Zig errors visible instead of converting them into strings.
+- Add service requirements and provider declarations so future causal queries
+  can explain where dependencies came from.
+- Use scopes and `acquireRelease` for owned resources so resource lineage can be
+  observed later.
+- Use tracing spans and trace context where a workflow crosses service or fiber
+  boundaries.
+
+When causal APIs land, agents should diagnose failures in this order:
+
+```text
+inspect failing run -> query cause -> query lineage -> inspect requirements
+-> inspect resources -> inspect fibers -> inspect retries -> propose fix
+```
+
+Future causal findings should be treated as evidence pointers, not conclusions.
+An agent should cite event ids, explain whether an edge is causal or merely
+correlated by trace context, and then propose a source, config, test, or runtime
+policy change.
+
+The most useful first scenario fixtures are:
+
+- missing config during layer startup
+- cleanup failure after a typed program failure
+- parent scope interrupting a child fiber
+- retry exhaustion masking the first typed failure
+- app incident with trace context linking domain effect, service provider,
+  resource scope, and schedule decisions
+
+The intended result is that agents can improve `zigeffect` itself and apps built
+with `zigeffect` from typed runtime evidence, not from guesses assembled from
+stdout.
+
 ## Schedule Shape
 
 ```zig
