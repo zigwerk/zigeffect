@@ -502,56 +502,61 @@ git commit -m "feat(zigeffect): emit runtime causal events"
 
 **Files:**
 - Modify: `packages/zigeffect/src/core/scope.zig`
-- Modify: `packages/zigeffect/src/effect/resource.zig`
-- Test: `packages/zigeffect/test/scope_test.zig`
 - Test: `packages/zigeffect/test/runtime_test.zig`
 
-- [ ] **Step 1: Write failing lifecycle tests**
+- [x] **Step 1: Write failing lifecycle tests**
 
 Add tests that run an `acquireRelease` effect through a causal runtime and
 assert these events in order:
 
 ```zig
+.run_started
 .scope_opened
 .resource_acquired
 .resource_finalized
 .scope_closed
+.exit_recorded
+.run_completed
 ```
 
-Also add a fallible finalizer test that asserts an `exit_recorded` event with
-`status = "finalizer_failure"`.
+Also add a fallible finalizer test that asserts `resource_finalized` carries
+`status = "failure"` and the redacted finalizer error name, while the existing
+runtime exit model records the combined cleanup result as an `exit_recorded`
+`cause`.
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `bun run zigeffect:test`
 
 Expected: FAIL because scope/resource causal hooks do not exist.
 
-- [ ] **Step 3: Add scope ids and finalizer events**
+- [x] **Step 3: Add scope ids and finalizer events**
 
 Thread `causal_scope_id` through runtime scope creation. When a scope opens,
 record `scope_opened`. When it closes, record `scope_closed`. When a finalizer
-runs, record `resource_finalized`; when it fails, record `exit_recorded` with
-`status = "finalizer_failure"`.
+runs, record `resource_finalized`; when it fails, record the failure on the
+resource finalization event and let the runtime preserve the combined cleanup
+cause through `exit_recorded`.
 
-- [ ] **Step 4: Add resource acquisition events**
+- [x] **Step 4: Add resource acquisition events**
 
-In `packages/zigeffect/src/effect/resource.zig`, after successful acquisition,
-call `ctx.recordCausal(.{ .kind = .resource_acquired, .type_name = @typeName(Resource) })`
-when the context has a store.
+In `packages/zigeffect/src/core/scope.zig`, after successful typed finalizer
+registration, record `resource_acquired` with `@typeName(Resource)`. This keeps
+`acquireRelease` and manual typed cleanup registration on the same ownership
+path.
 
-- [ ] **Step 5: Run tests and verify they pass**
+- [x] **Step 5: Run tests and verify they pass**
 
 Run: `bun run zigeffect:test`
 
 Expected: PASS for scope/resource lifecycle events and existing resource tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/zigeffect/src/core/scope.zig \
-  packages/zigeffect/src/effect/resource.zig \
-  packages/zigeffect/test/scope_test.zig \
+  packages/zigeffect/src/core/context.zig \
+  packages/zigeffect/src/runtime/runner.zig \
   packages/zigeffect/test/runtime_test.zig
 git commit -m "feat(zigeffect): trace scope and resource lifecycle"
 ```

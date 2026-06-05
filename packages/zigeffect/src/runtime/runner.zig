@@ -107,6 +107,16 @@ fn recordRunCompletedFromExit(
     );
 }
 
+fn attachManagedCausalScope(
+    ctx: anytype,
+    scope: *Scope,
+    parent_id: ?u64,
+) void {
+    const store = ctx.causal_store orelse return;
+    const run_id = ctx.ensureCausalRunId() orelse return;
+    scope.attachCausal(store, run_id, parent_id, ctx.trace_id, ctx.span_id);
+}
+
 pub fn runManagedScope(
     comptime api: []const u8,
     comptime Env: type,
@@ -117,6 +127,7 @@ pub fn runManagedScope(
     assertEffectEnvironment(api, Env, effect);
 
     const started = recordRunStarted(api, ctx, effect);
+    attachManagedCausalScope(ctx, scope, started);
 
     const value = effect.run(ctx) catch |err| {
         scope.closeWithExit(.{ .failure = @errorName(err) });
@@ -160,6 +171,7 @@ pub fn exitManagedScope(
     assertEffectEnvironment(api, Env, effect);
 
     const started = recordRunStarted(api, ctx, effect);
+    attachManagedCausalScope(ctx, scope, started);
     const base_exit = effect.exit(ctx);
     scope.closeWithExit(finalizerExitFromExit(base_exit));
 

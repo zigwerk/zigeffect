@@ -70,6 +70,9 @@ pub fn Context(comptime Env: type) type {
             const store = self.causal_store orelse return null;
             var owned = event;
             owned.run_id = owned.run_id orelse self.ensureCausalRunId();
+            if (owned.scope_id == null) {
+                if (self.scope) |scope| owned.scope_id = scope.causal_scope_id;
+            }
             owned.trace_id = owned.trace_id orelse self.trace_id;
             owned.span_id = owned.span_id orelse self.span_id;
             return store.record(owned) catch null;
