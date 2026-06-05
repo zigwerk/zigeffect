@@ -49,23 +49,26 @@ release without hiding allocators, error sets, or resource lifetimes.
 
 - `Effect` composition wrappers are repetitive internally. Future work should
   consider reducing duplication without making the public API harder to read.
-- `acquireRelease` currently requires pointer resources with stable lifetimes.
-  That is clear, but value resources may need a separate helper later.
-- Composition errors are still mostly Zig's native function-pointer and error-set
-  messages. Future work should add small compile-time assertions where the
-  package can name the likely fix.
-- `Runtime.run` creates a fresh scope per run. Shared long-lived scopes may need
-  an explicit API once real app runtimes need them.
-- Dependency-injected layer builders are still deferred. Layer builders receive
-  `(Allocator, *Scope)`, while declared requirements drive validation and build
-  order.
+- `acquireRelease` covers pointer resources and `acquireReleaseValue` covers
+  copy-safe value resources. The remaining risk is teaching callers when a
+  value's copy-based cleanup model is appropriate.
+- Common composition errors now have package-owned diagnostics for effect
+  functions, layer merges, resource error sets, service tuples, static
+  requirements, and environment mismatches. Future work should keep adding
+  focused assertions only where the package can name the likely fix.
+- `Runtime.run` creates a fresh scope per run by default. Use
+  `Runtime.withScope` when an app lifecycle should own resources across runs.
+- Dependency-injected layer builders now receive graph startup contexts through
+  `fromContextBuilder`; `fromEffect` and richer layer algebra remain future
+  work.
 - Recursive causes use pointer links for nested formatting. Runtime-generated
-  causes currently surface finalizer failures directly rather than returning
-  pointer-backed sequential trees.
+  causes avoid pointer-backed sequential trees and use direct cleanup variants
+  for finalizer-only and failure-then-finalizer failures.
 - Logger levels are currently collapsed into plain messages. A real app logger
   should preserve level metadata.
-- Test services are useful but still bundled. Larger apps may need custom
-  environments with only the services they use.
+- `ServiceEnv(.{ ... })` lets graph-run app effects depend on only the service
+  slice they use. Larger apps should still define custom module environments
+  when those environments own state or behavior beyond service projection.
 - Runtime-generated nested causes are still deliberately conservative. Cleanup
   failures from `Runtime.exit` surface as direct finalizer-failure causes rather
   than stack-unsafe sequential cause trees.
@@ -87,11 +90,10 @@ priorities.
 2. Add level-aware structured logger entries.
 3. Add metrics snapshots with counters, gauges, and histograms.
 4. Add tracing span ids and nested span trees.
-5. Add compile-time assertions for common composition mistakes, especially
-   mismatched environments and resource error sets.
-6. Add dependency-injected layer builders that can consume previously-started
-   graph services.
-7. Add a small module/app pattern that bundles layer, effects, tests, and docs
+5. Add a common internal runner path where Zig's types allow it.
+6. Add cross-runtime trace propagation across effects, layers, fibers, and
+   schedules.
+7. Add richer fake-service layer builders for custom module tests.
    for large predictable software.
 8. Add richer `Exit`/`Cause` assertions and defect helpers.
 

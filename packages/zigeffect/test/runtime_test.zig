@@ -1,0 +1,175 @@
+const std = @import("std");
+const fx = @import("zigeffect");
+const fixtures = @import("support/fixtures.zig");
+
+test "runtime automatically closes scoped resources after success" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    const program = fx.acquireRelease(
+        fixtures.TrackedResource,
+        fixtures.TestError,
+        fx.TestServices,
+        fixtures.acquireTracked,
+        fixtures.releaseTracked,
+    ).map(u32, fixtures.trackedId);
+
+    try std.testing.expectEqual(@as(u32, 9), try env.run(program));
+    try std.testing.expect(fixtures.tracked_resource_released);
+}
+test "runtime shared scope keeps resources until caller closes scope" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    var app_scope = fx.Scope.init(std.testing.allocator);
+    defer app_scope.deinit();
+
+    var runtime = env.runtime().withScope(&app_scope);
+    const program = fx.acquireRelease(
+        fixtures.TrackedResource,
+        fixtures.TestError,
+        fx.TestServices,
+        fixtures.acquireTracked,
+        fixtures.releaseTracked,
+    ).map(u32, fixtures.trackedId);
+
+    try std.testing.expectEqual(@as(u32, 9), try runtime.run(program));
+    try std.testing.expect(!fixtures.tracked_resource_released);
+
+    app_scope.close();
+
+    try std.testing.expect(fixtures.tracked_resource_released);
+}
+test "runtime shared scope releases immediately when scope is already closed" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    var app_scope = fx.Scope.init(std.testing.allocator);
+    defer app_scope.deinit();
+    app_scope.close();
+
+    var runtime = env.runtime().withScope(&app_scope);
+    const program = fx.acquireRelease(
+        fixtures.TrackedResource,
+        fixtures.TestError,
+        fx.TestServices,
+        fixtures.acquireTracked,
+        fixtures.releaseTracked,
+    );
+
+    try std.testing.expectError(error.MissingScope, runtime.run(program));
+    try std.testing.expect(fixtures.tracked_resource_released);
+}
+test "runtime propagates trace context into effect context" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    var runtime = env.runtime().withTraceContext(101, 202);
+    const program = fx.Effect(void, fixtures.TestError, fx.TestServices)
+        .fromFn(fixtures.logTraceContext)
+        .requires(.{fx.Logger});
+
+    try runtime.run(program);
+
+    const entry = env.services.logger.structured_entries.items[0];
+    try std.testing.expectEqual(@as(?u64, 101), entry.trace_id);
+    try std.testing.expectEqual(@as(?u64, 202), entry.span_id);
+}
+test "runtime automatically closes scoped value resources after success" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    var state = fixtures.FinalizerState{
+        .allocator = std.testing.allocator,
+        .order = .empty,
+    };
+    defer state.order.deinit(std.testing.allocator);
+    fixtures.value_resource_state = &state;
+    defer fixtures.value_resource_state = null;
+
+    const program = fx.acquireReleaseValue(
+        fixtures.ValueResource,
+        fixtures.TestError,
+        fx.TestServices,
+        fixtures.acquireValueResourceA,
+        fixtures.releaseValueResourceA,
+    ).map(u32, fixtures.valueResourceId);
+
+    try std.testing.expectEqual(@as(u32, 1), try env.run(program));
+    try std.testing.expect(fixtures.value_resource_released);
+    try std.testing.expectEqualStrings("a", state.order.items);
+}
+test "runtime automatically closes scoped resources after failure" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    const program = fx.acquireRelease(
+        fixtures.TrackedResource,
+        fixtures.TestError,
+        fx.TestServices,
+        fixtures.acquireTracked,
+        fixtures.releaseTracked,
+    ).flatMap(u32, fixtures.failAfterTracked);
+
+    try std.testing.expectError(error.Boom, env.run(program));
+    try std.testing.expect(fixtures.tracked_resource_released);
+    try env.expectLog("failing after acquire");
+}
+test "runtime closes nested value resources in reverse acquisition order" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    var state = fixtures.FinalizerState{
+        .allocator = std.testing.allocator,
+        .order = .empty,
+    };
+    defer state.order.deinit(std.testing.allocator);
+    fixtures.value_resource_state = &state;
+    defer fixtures.value_resource_state = null;
+
+    const program = fx.Effect(u32, fixtures.TestError, fx.TestServices)
+        .fromFn(fixtures.acquireNestedValueResources);
+
+    try std.testing.expectEqual(@as(u32, 3), try env.run(program));
+    try std.testing.expectEqualStrings("ba", state.order.items);
+}
+test "runtime exit reports finalizer failures as causes" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    const program = fx.Effect(*fixtures.TrackedResource, fixtures.TestError, fx.TestServices)
+        .fromFn(fixtures.acquireTrackedWithFailingCleanup)
+        .map(u32, fixtures.trackedId);
+
+    const exit = env.exit(program);
+    switch (exit) {
+        .cause => |cause| switch (cause) {
+            .finalizer_failure => |name| try std.testing.expectEqualStrings("CloseFailed", name),
+            else => return error.Empty,
+        },
+        else => return error.Empty,
+    }
+
+    try std.testing.expect(fixtures.tracked_resource_released);
+}
+test "runtime exit preserves program failure plus cleanup failure" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    const program = fx.Effect(u32, fixtures.TestError, fx.TestServices)
+        .fromFn(fixtures.acquireTrackedThenFailWithFailingCleanup);
+
+    const exit = env.exit(program);
+    switch (exit) {
+        .cause => |cause| switch (cause) {
+            .failure_then_finalizer_failure => |both| {
+                try std.testing.expectEqual(error.Boom, both.failure);
+                try std.testing.expectEqualStrings("CloseFailed", both.finalizer_failure);
+            },
+            else => return error.Empty,
+        },
+        else => return error.Empty,
+    }
+
+    try std.testing.expect(fixtures.tracked_resource_released);
+}
