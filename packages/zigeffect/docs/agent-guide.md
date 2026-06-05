@@ -1,0 +1,307 @@
+# zigeffect Guide For Agents
+
+Use this guide when building with `zigeffect`.
+
+## Rules
+
+- Keep app logic as normal Zig functions: `fn run(ctx) Error!A`.
+- Use `Effect.fromFn` to make direct-style functions composable.
+- Use `Effect.requires(.{ ... })` for production effects that depend on
+  services.
+- Use `Effect.succeed`, `Effect.fail`, and `Effect.sync` for small reusable
+  helpers instead of writing tiny wrapper functions.
+- Use `mapError`, `catchAll`, `orElse`, and `tapError` for recovery boundaries.
+- Use `onExit` when logic needs the structured `Exit`; use `ensuring` when an
+  effect-local finalizer must run on success and failure.
+- Use `Layer.fromBuilder` for dependencies that need allocation, startup, or
+  teardown.
+- Use `LayerWithError` when dependency startup can fail with app-specific
+  errors.
+- Use `Layer.provides(.{ ... })`, `Layer.requires(.{ ... })`, and `LayerGraph`
+  to validate production dependency boundaries before startup.
+- Use `fx.layerGraph` when production startup should build heterogeneous
+  declared layers automatically and reuse the started dependencies across runs.
+- Use `Layer.provide` for tests or tools that should run a program directly from
+  a layer. Use `Layer.merge` when a module needs multiple dependency groups.
+- Use Zig error sets for typed errors. Do not hide failures in strings or status
+  booleans.
+- Include `OutOfMemory` when code allocates or registers scoped resources.
+- Include `MissingScope` when code registers scoped resources or uses
+  `acquireRelease`.
+- Use `acquireRelease` for any resource that must be closed, destroyed, or
+  returned to a pool.
+- Use fallible finalizers when cleanup can fail, then inspect `Runtime.exit` or
+  `Scope.firstFinalizerFailure`.
+- Use exit-aware finalizers when cleanup behavior depends on success versus
+  typed failure.
+- Prefer `Runtime.run` or `TestEnv.run` so cleanup is engine-managed.
+- Only close scopes manually in low-level scope tests or special runtime code.
+- Use `fx.serviceNotFound(Env, Service)` as the final branch of every custom
+  environment `service` method.
+- Use `fx.formatExit` or `fx.formatCause` for CLI/test reports instead of
+  inventing one-off error strings.
+- Use `fx.validateLayerRequirements` and `fx.formatDependencyReport` before
+  running large application graphs.
+- Use `Schedule.repeat` for successful polling/repetition and `Schedule.backoff`
+  or `Schedule.jitteredBackoff` for retry loops.
+- Use `Schedule.once`, `recurs`, `spaced`, `duration`, and `fibonacci` when
+  those names make the retry/repeat policy easier to scan.
+- Use `fx.Clock` as the clock service; do not reach directly for OS time inside
+  effectful code.
+- Add tests before implementation.
+- Update usage docs when adding public API.
+- Prefer small service structs over global state.
+
+## App Shape
+
+```zig
+const AppError = error{ MissingScope, OutOfMemory, MissingConfig, InvalidInput };
+
+fn app(ctx: *fx.Context(AppEnv)) AppError!AppResult {
+    const logger = ctx.service(fx.Logger);
+    try logger.info("running");
+    return .{};
+}
+
+const App = fx.Effect(AppResult, AppError, AppEnv).fromFn(app);
+```
+
+## Recovery Shape
+
+```zig
+fn recover(err: AppError, ctx: *fx.Context(AppEnv)) AppError!AppResult {
+    _ = err;
+    const logger = ctx.service(fx.Logger);
+    try logger.warn("recovering");
+    return .{};
+}
+
+const Program = App
+    .tapError(logFailure)
+    .catchAll(AppError, recover);
+```
+
+For production modules, attach requirements:
+
+```zig
+const Program = App
+    .requires(.{ fx.Logger, fx.Config });
+```
+
+Custom environments should make missing services obvious:
+
+```zig
+const AppEnv = struct {
+    logger: fx.Logger,
+
+    pub fn service(self: *AppEnv, comptime Service: type) *Service {
+        if (Service == fx.Logger) return &self.logger;
+        return fx.serviceNotFound(AppEnv, Service);
+    }
+};
+```
+
+## Layer Shape
+
+```zig
+fn buildEnv(allocator: std.mem.Allocator, scope: *fx.Scope) std.mem.Allocator.Error!*AppEnv {
+    const env = try allocator.create(AppEnv);
+    env.* = .{ .logger = fx.Logger.init(allocator) };
+
+    scope.addFinalizerFor(AppEnv, env, releaseEnv) catch |err| {
+        releaseEnv(env);
+        return err;
+    };
+
+    return env;
+}
+
+fn releaseEnv(env: *AppEnv) void {
+    const allocator = env.logger.allocator;
+    env.logger.deinit();
+    allocator.destroy(env);
+}
+
+const AppLayer = fx.Layer(AppEnv).fromBuilder(buildEnv);
+```
+
+Use `Layer.fromEnv` only when the caller already owns the environment lifetime.
+
+Use `Layer.provide` to run from a layer:
+
+```zig
+const result = try AppLayer
+    .provides(.{fx.Logger})
+    .provide(allocator, App);
+```
+
+Use metadata validation before app startup:
+
+```zig
+var graph = fx.LayerGraph.init(allocator);
+defer graph.deinit();
+
+try graph.addLayer("app", AppLayer.provides(.{fx.Logger}));
+try graph.addLayer("program", AppLayer.requires(.{fx.Logger}));
+
+var report = try graph.validate(allocator);
+defer report.deinit();
+
+if (!report.isValid()) return error.InvalidDependencyGraph;
+```
+
+Use executable graph startup when callers should not hand-write a merged
+environment:
+
+```zig
+var graph = fx.layerGraph(allocator, .{
+    AppLayer.requires(.{ fx.Logger }).provides(.{AppService}),
+    LoggerLayer.provides(.{fx.Logger}),
+});
+defer graph.deinit();
+
+const GraphEnv = @TypeOf(graph).EnvType;
+const Program = fx.Effect(AppResult, AppError, GraphEnv)
+    .fromFn(app)
+    .requires(.{ AppService, fx.Logger });
+
+const result = try graph.run(Program);
+```
+
+## Resource Shape
+
+```zig
+const ResourceError = error{ MissingScope, OutOfMemory };
+
+fn acquire(ctx: *fx.Context(AppEnv)) ResourceError!*Resource {
+    const resource = try ctx.allocator.create(Resource);
+    resource.* = .{ .allocator = ctx.allocator };
+    return resource;
+}
+
+fn release(resource: *Resource) void {
+    resource.allocator.destroy(resource);
+}
+
+const OpenResource = fx.acquireRelease(Resource, ResourceError, AppEnv, acquire, release);
+```
+
+Run `OpenResource` through the runtime. The runtime opens a scope and closes it
+in reverse registration order even when the program fails.
+
+```zig
+_ = try env.run(OpenResource);
+```
+
+If a resource effect returns `error.MissingScope`, the program was run against a
+context without an active `Scope`. Run it through `Runtime.run`, `TestEnv.run`,
+or construct a context with a scope.
+
+For fallible cleanup:
+
+```zig
+try scope.addFinalizerFallibleFor(Resource, resource, releaseMayFail);
+```
+
+For exit-aware cleanup:
+
+```zig
+fn releaseWithExit(resource: *Resource, exit: fx.FinalizerExit) void {
+    switch (exit) {
+        .success => resource.releaseCleanly(),
+        .failure => resource.releaseAfterFailure(),
+        else => resource.releaseCleanly(),
+    }
+}
+
+try ctx.addFinalizerExitFor(Resource, resource, releaseWithExit);
+```
+
+Prefer `Runtime.exit` when a caller needs to inspect cleanup failures as
+structured causes.
+
+## Diagnostic Reports
+
+```zig
+const exit = env.exit(Program);
+const report = try fx.formatExit(std.testing.allocator, "program name", exit);
+defer std.testing.allocator.free(report);
+```
+
+Use stable program labels like `"compile schema"` or `"load config"` so humans
+and agents can connect the report back to the failing workflow.
+
+## Schedule Shape
+
+```zig
+var retry = fx.Schedule.jitteredBackoff(.{
+    .max_retries = 5,
+    .base_delay_ms = 25,
+    .factor = 2,
+    .max_delay_ms = 1_000,
+    .jitter_ms = 50,
+    .seed = 1,
+});
+
+const result = try Program.retry(&ctx, &retry);
+```
+
+For successful repetition:
+
+```zig
+var repeat = fx.Schedule.repeat(.{ .max_repeats = 2, .delay_ms = 10 });
+const final = try Program.repeat(&ctx, &repeat);
+```
+
+For common retry names:
+
+```zig
+var once = fx.Schedule.once();
+var recurs = fx.Schedule.recurs(3);
+var spaced = fx.Schedule.spaced(.{ .max_retries = 3, .delay_ms = 25 });
+var fibonacci = fx.Schedule.fibonacci(.{
+    .max_retries = 5,
+    .base_delay_ms = 25,
+    .max_delay_ms = 1_000,
+});
+```
+
+## Testing Pattern
+
+```zig
+test "program records telemetry" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    _ = try env.run(Program);
+
+    try env.expectLog("running");
+    try env.expectMetric("program.count", 1);
+}
+```
+
+## Design Review Checklist
+
+Before adding a public API, check:
+
+- Does this still read like Zig?
+- Can a user write the body with `try` instead of a combinator chain?
+- Are errors statically typed?
+- Does cleanup happen through `Runtime`/`Scope` instead of manual calls?
+- If cleanup can fail, is it registered as a fallible finalizer?
+- Does dependency startup happen through a `Layer` when ownership is not already
+  clear?
+- Do production effects declare service requirements?
+- Do production layers/runtimes declare provided services?
+- Is the layer graph validated before app startup?
+- Can recovery be expressed with `catchAll`/`orElse` instead of scattered
+  conditionals?
+- Does cleanup that needs the program outcome use `onExit`, `ensuring`, or
+  exit-aware scope finalizers?
+- Does repeated/retried work use `Schedule` instead of a hand-rolled loop?
+- Do missing services use `fx.serviceNotFound`?
+- Do runtime reports use `formatExit`/`formatCause` when shown to users?
+- Can `TestEnv` make the behavior deterministic?
+- Can an LLM infer the correct usage from the README and tests?
+
+If any answer is no, improve the API or docs before moving on.
