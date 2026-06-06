@@ -184,8 +184,14 @@ pub fn build(b: *std.Build) void {
         .root_module = causal_test_tool_module,
     });
     const run_causal_test_tool = b.addRunArtifact(causal_test_tool);
+    if (b.args) |args| run_causal_test_tool.addArgs(args);
     const causal_test_step = b.step("causal-test", "Run dogfood causal test harness and write artifacts");
     causal_test_step.dependOn(&run_causal_test_tool.step);
+
+    const run_causal_check_tool = b.addRunArtifact(causal_test_tool);
+    run_causal_check_tool.addArg("--fail-on-findings");
+    const causal_check_step = b.step("causal-check", "Run dogfood causal check and fail when findings exist");
+    causal_check_step.dependOn(&run_causal_check_tool.step);
 
     const causal_test_tool_tests = b.addTest(.{
         .name = "zigeffect-causal-test-tests",

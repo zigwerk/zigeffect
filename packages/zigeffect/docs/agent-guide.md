@@ -313,6 +313,22 @@ Use the text report for finding summaries and next-query suggestions. Use the
 JSON artifact when citing event ids in a fix proposal. Use the DOT artifact
 when checking graph shape.
 
+Use the non-failing probe when you want evidence:
+
+```sh
+zig build causal-test
+```
+
+Use the failure-gated check when causal findings should fail the development
+loop:
+
+```sh
+zig build causal-check
+```
+
+The check still writes artifacts before failing, so inspect the JSON with
+`causal-query` instead of rerunning blindly.
+
 Follow the report's next-query hints with:
 
 ```sh

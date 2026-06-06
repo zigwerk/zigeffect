@@ -128,6 +128,17 @@ zig build causal-test
 The harness writes a text report, JSON event snapshot, and DOT graph under
 `.zig-cache/causal-artifacts/`.
 
+Run the failure-gated causal dogfood check:
+
+```bash
+cd packages/zigeffect
+zig build causal-check
+```
+
+`causal-check` writes the same artifacts as `causal-test`, then exits nonzero
+when the dogfood fixture contains findings. Use it when a development or CI
+agent should treat causal findings as actionable failures.
+
 Query the default dogfood JSON artifact:
 
 ```bash

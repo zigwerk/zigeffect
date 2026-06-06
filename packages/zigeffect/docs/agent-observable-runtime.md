@@ -805,6 +805,11 @@ proposing changes. The companion `zig build causal-query -- <query> [argument]`
 command makes the saved JSON artifact executable for the same next-query names
 shown in the text report.
 
+The companion `zig build causal-check` command runs the same dogfood scenario in
+fail-on-findings mode. It writes artifacts first, then exits nonzero when
+findings exist. This is the first development-agent gate; real failing-test
+capture should reuse the same policy with scenario-specific artifact names.
+
 This phase proves the agent workflow before production or app adapters exist.
 
 ### Phase 1: Causal Event Core

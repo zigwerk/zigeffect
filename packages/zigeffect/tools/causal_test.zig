@@ -13,6 +13,7 @@ pub const ArtifactSet = struct {
     report: []const u8,
     json: []const u8,
     dot: []const u8,
+    finding_count: usize,
 
     pub fn deinit(self: ArtifactSet, allocator: std.mem.Allocator) void {
         allocator.free(self.report);
@@ -100,6 +101,10 @@ pub fn buildDogfoodArtifacts(allocator: std.mem.Allocator) std.mem.Allocator.Err
 
     try recordDogfoodScenario(&store);
 
+    var findings = try store.findings(allocator);
+    defer findings.deinit();
+    const finding_count = findings.items.len;
+
     const report = try fx.formatCausalCiReport(allocator, "zigeffect dogfood", &store);
     errdefer allocator.free(report);
     const json = try fx.formatCausalJson(allocator, &store);
@@ -114,7 +119,13 @@ pub fn buildDogfoodArtifacts(allocator: std.mem.Allocator) std.mem.Allocator.Err
         .report = report,
         .json = json,
         .dot = dot,
+        .finding_count = finding_count,
     };
+}
+
+pub fn exitCodeForFindings(finding_count: usize, fail_on_findings: bool) u8 {
+    if (fail_on_findings and finding_count > 0) return 1;
+    return 0;
 }
 
 fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
@@ -130,27 +141,51 @@ fn writeArtifacts(io: std.Io, artifacts: ArtifactSet) !void {
     try writeArtifact(io, artifacts.dot_path, artifacts.dot);
 }
 
-pub fn main() !void {
-    const allocator = std.heap.page_allocator;
-    var threaded: std.Io.Threaded = .init(allocator, .{});
-    defer threaded.deinit();
-    const io = threaded.io();
+fn usage() []const u8 {
+    return "usage: zig build causal-test -- [--fail-on-findings]\n       zig build causal-check\n";
+}
+
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+
+    var fail_on_findings = false;
+    for (args[1..]) |arg| {
+        if (std.mem.eql(u8, arg, "--fail-on-findings")) {
+            fail_on_findings = true;
+        } else {
+            std.debug.print("causal-test error: unknown argument '{s}'\n{s}", .{ arg, usage() });
+            std.process.exit(2);
+        }
+    }
 
     const artifacts = try buildDogfoodArtifacts(allocator);
     defer artifacts.deinit(allocator);
 
-    try writeArtifacts(io, artifacts);
+    try writeArtifacts(init.io, artifacts);
 
     std.debug.print(
-        "zigeffect causal dogfood artifacts written:\n- {s}\n- {s}\n- {s}\n",
-        .{ artifacts.report_path, artifacts.json_path, artifacts.dot_path },
+        "zigeffect causal dogfood artifacts written:\n- {s}\n- {s}\n- {s}\nfindings: {d}\n",
+        .{
+            artifacts.report_path,
+            artifacts.json_path,
+            artifacts.dot_path,
+            artifacts.finding_count,
+        },
     );
+
+    const exit_code = exitCodeForFindings(artifacts.finding_count, fail_on_findings);
+    if (exit_code != 0) {
+        std.debug.print("causal dogfood check failed: {d} findings detected\n", .{artifacts.finding_count});
+        std.process.exit(exit_code);
+    }
 }
 
 test "dogfood artifacts include report json dot and stable paths" {
     const artifacts = try buildDogfoodArtifacts(std.testing.allocator);
     defer artifacts.deinit(std.testing.allocator);
 
+    try std.testing.expectEqual(@as(usize, 4), artifacts.finding_count);
     try std.testing.expectEqualStrings(
         ".zig-cache/causal-artifacts/zigeffect-causal-dogfood.txt",
         artifacts.report_path,
@@ -174,4 +209,11 @@ test "dogfood artifacts include report json dot and stable paths" {
     try std.testing.expect(std.mem.indexOf(u8, artifacts.json, "\"kind\": \"resource_acquired\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, artifacts.dot, "digraph zigeffect_causal") != null);
     try std.testing.expect(std.mem.indexOf(u8, artifacts.dot, "event_1 -> event_2") != null);
+}
+
+test "fail-on-findings mode exits nonzero only when findings exist" {
+    try std.testing.expectEqual(@as(u8, 0), exitCodeForFindings(0, false));
+    try std.testing.expectEqual(@as(u8, 0), exitCodeForFindings(4, false));
+    try std.testing.expectEqual(@as(u8, 0), exitCodeForFindings(0, true));
+    try std.testing.expectEqual(@as(u8, 1), exitCodeForFindings(4, true));
 }
