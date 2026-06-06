@@ -172,6 +172,27 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_report_tool_tests = b.addRunArtifact(causal_report_tool_tests);
 
+    const causal_test_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_test_tool_module.addImport("zigeffect", zigeffect);
+
+    const causal_test_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-test",
+        .root_module = causal_test_tool_module,
+    });
+    const run_causal_test_tool = b.addRunArtifact(causal_test_tool);
+    const causal_test_step = b.step("causal-test", "Run dogfood causal test harness and write artifacts");
+    causal_test_step.dependOn(&run_causal_test_tool.step);
+
+    const causal_test_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-test-tests",
+        .root_module = causal_test_tool_module,
+    });
+    const run_causal_test_tool_tests = b.addRunArtifact(causal_test_tool_tests);
+
     const examples_step = b.step("examples", "Compile and test zigeffect examples");
     examples_step.dependOn(&readiness_example.step);
     examples_step.dependOn(&run_readiness_example_tests.step);
@@ -189,4 +210,6 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_scaffold_tool_tests.step);
     examples_step.dependOn(&causal_report_tool.step);
     examples_step.dependOn(&run_causal_report_tool_tests.step);
+    examples_step.dependOn(&causal_test_tool.step);
+    examples_step.dependOn(&run_causal_test_tool_tests.step);
 }

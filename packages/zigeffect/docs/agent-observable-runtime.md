@@ -418,6 +418,24 @@ the same evidence. The first formatter for this lane is
 `tools/causal_report.zig` is a small local demo harness that prints a sample
 report through the same public API.
 
+The first dogfood command is:
+
+```sh
+cd packages/zigeffect
+zig build causal-test
+```
+
+It writes:
+
+- `.zig-cache/causal-artifacts/zigeffect-causal-dogfood.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dogfood.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dogfood.dot`
+
+This command records a compact deterministic engine fixture with missing
+service, resource, fiber, and retry findings. It exits successfully unless
+artifact generation fails, because the findings are intentional evidence for
+the development-agent workflow.
+
 ### Agent Tool Surface
 
 A local tool or MCP-style server can expose:
@@ -766,6 +784,11 @@ state. It should help agents build the runtime by:
 - proposing tests, docs, or implementation changes with evidence ids;
 - comparing before/after causal traces;
 - feeding new findings back into the invariant and scenario catalog.
+
+The first concrete command for this phase is `zig build causal-test` from
+`packages/zigeffect`. It writes text, JSON, and DOT artifacts to
+`.zig-cache/causal-artifacts/` so a development agent can cite event ids before
+proposing changes.
 
 This phase proves the agent workflow before production or app adapters exist.
 

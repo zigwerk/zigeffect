@@ -118,6 +118,16 @@ cd packages/zigeffect
 zig build causal-report
 ```
 
+Run the local causal dogfood harness and write agent-readable artifacts:
+
+```bash
+cd packages/zigeffect
+zig build causal-test
+```
+
+The harness writes a text report, JSON event snapshot, and DOT graph under
+`.zig-cache/causal-artifacts/`.
+
 Print an agent-friendly module scaffold:
 
 ```bash

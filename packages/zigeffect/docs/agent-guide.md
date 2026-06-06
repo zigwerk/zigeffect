@@ -294,6 +294,29 @@ Use `formatCausalCiReport` when an agent or CI job needs a compact artifact:
 it includes event counts, finding counts, citation ids, and recommended next
 queries while avoiding raw `redacted_detail` payloads.
 
+## Causal Dogfood Harness
+
+Run the local dogfood harness before changing causal runtime behavior:
+
+```sh
+cd packages/zigeffect
+zig build causal-test
+```
+
+The harness writes:
+
+- `.zig-cache/causal-artifacts/zigeffect-causal-dogfood.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dogfood.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dogfood.dot`
+
+Use the text report for finding summaries and next-query suggestions. Use the
+JSON artifact when citing event ids in a fix proposal. Use the DOT artifact
+when checking graph shape.
+
+This is the Phase 0 self-improving feedback lane: agents use `zigeffect`'s own
+causal runtime as evidence while improving `zigeffect`, then rerun the harness
+and package tests to compare behavior.
+
 Backend adapters are sinks, not the source of truth. Keep tests and local agent
 queries against the in-memory `CausalStore`; use `store.attachBackend` for
 JSONL, DOT, OpenTelemetry, embedded graph, durable-history, or future async
