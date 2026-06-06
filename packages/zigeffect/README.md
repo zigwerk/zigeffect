@@ -31,28 +31,40 @@ Included in this package:
   helpers.
 - `Runtime`: runs effects with engine-managed scopes and automatic cleanup on
   success or failure, with optional service requirement gates.
-- `FiberRuntime` / `Fiber`: deterministic fork, join, interrupt, and scoped
-  leases for Effect-style fiber lifecycle semantics.
+- `FiberRuntime` / `Fiber`: deterministic fork, join, interrupt, scoped
+  leases, and direct scope-attached forks for Effect-style fiber lifecycle
+  semantics.
 - `Deferred`, `Queue`, and `Semaphore`: deterministic coordination primitives
-  for tests, tooling, and future async backends.
+  with explicit wait-state/backpressure inspection for tests, tooling, and
+  future async backends.
 - `Context`: typed service access and scoped finalizer registration.
-- `acquireRelease`: typed resource acquisition with automatic scope cleanup.
+- `acquireRelease` / `acquireReleaseValue`: typed resource acquisition with
+  automatic scope cleanup.
 - `Layer`: dependency environment wrapper, scoped dependency builder, provider,
-  and merge helper.
+  context-aware dependency builder, provider, and merge helper.
 - `LayerWithError`: layer builders with typed startup errors.
 - `ServiceSet`, `DependencyReport`, and `LayerGraph`: production DI metadata,
   graph validation, and readable dependency diagnostics.
+- `validateRequirements` / `requirementsSatisfiedBy`: compare declared
+  requirements against declared providers.
 - `layerGraph`: executable heterogeneous layer graph startup with generated
-  composite environments, dependency ordering, and memoized layer builds.
+  composite environments, dependency ordering, dependency reports, and memoized
+  layer builds, plus regular and fiber runtime adapters for graph-started
+  environments.
 - `Scope`: reverse-order finalizers, including exit-aware cleanup.
-- `Exit` / `Cause`: structured result shapes.
-- `formatExit` / `formatCause`: readable runtime reports for CLIs, tests, and
-  agent workflows.
-- `Schedule`: retry/repeat timing with `once`, `recurs`, `spaced`, `duration`,
-  fixed, exponential, fibonacci, linear, backoff, and deterministic jitter
-  policies.
+- `Exit` / `Cause`: structured result shapes, plus `CauseTree` for
+  allocator-owned recursive cause reports.
+- `formatExit` / `formatCause` / `formatObservabilityReport`: readable runtime
+  and observability reports for CLIs, tests, and agent workflows.
+- `Schedule` / `ScheduleProgram`: retry/repeat timing with `once`, `recurs`,
+  `spaced`, `duration`, fixed, exponential, fibonacci, linear, backoff,
+  deterministic jitter, and owned recursive schedule composition.
+- `CausalStore` / `CausalBackend`: deterministic causal event storage, query
+  helpers, report/JSON/DOT/CI formatters, and optional adapter sinks for JSON
+  Lines, DOT, OpenTelemetry, embedded graph, durable history, and future async
+  streams.
 - `TestEnv`: fake clock, memory filesystem, logger, config, metrics, tracing,
-  runtime helpers, and assertion helpers.
+  runtime helpers, assertion helpers, and readable assertion report formatters.
 - `Clock`: fake/system time service used by schedules and tests.
 - `serviceNotFound`: rich compile-time diagnostics for missing environment
   services.
@@ -61,11 +73,27 @@ The core fiber runtime is semantic-first and deterministic. It does not claim
 real green-thread suspension; a future optional zio adapter will provide the
 stackful coroutine and `std.Io` backend.
 
+`zigeffect` now includes the first deterministic agent-observable causal
+runtime surface: attach a `CausalStore` to a runtime, fiber runtime, layer
+graph, or context, then inspect snapshots, lineage, causes, resources, fibers,
+requirements, retries, findings, and reports instead of reconstructing runtime
+behavior from logs.
+
 Docs:
 
 - [Usage](docs/usage.md)
+- [Architecture](docs/architecture.md)
 - [Errors](docs/errors.md)
+- [Resource Ownership](docs/resource-ownership.md)
 - [EffectTS Parity](docs/effectts-parity.md)
+- [Module Pattern](docs/module-pattern.md)
+- [Agent-Observable Causal Runtime](docs/agent-observable-runtime.md)
+- [Readiness Example](examples/readiness.zig)
+- [Causal Readiness Example](examples/causal_readiness.zig)
+- [Causal Missing Config Scenario](examples/causal_missing_config.zig)
+- [Causal Cleanup Failure Scenario](examples/causal_cleanup_failure.zig)
+- [Causal Scoped Fiber Scenario](examples/causal_scoped_fiber.zig)
+- [Causal Retry Exhaustion Scenario](examples/causal_retry_exhaustion.zig)
 - [Agent Guide](docs/agent-guide.md)
 - [Devex Review](docs/devex-review.md)
 - [Roadmap](docs/roadmap.md)
@@ -74,4 +102,26 @@ Run tests:
 
 ```bash
 bun run zigeffect:test
+```
+
+Compile and test the package examples:
+
+```bash
+cd packages/zigeffect
+zig build examples
+```
+
+Print a sample causal CI report:
+
+```bash
+cd packages/zigeffect
+zig build causal-report
+```
+
+Print an agent-friendly module scaffold:
+
+```bash
+cd packages/zigeffect
+zig build-exe tools/scaffold_module.zig
+./scaffold_module billing Ledger
 ```

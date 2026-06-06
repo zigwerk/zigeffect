@@ -11,7 +11,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const tests = b.createModule(.{
-        .root_source_file = b.path("test/core_test.zig"),
+        .root_source_file = b.path("test/all_test.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -25,4 +25,168 @@ pub fn build(b: *std.Build) void {
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run zigeffect tests");
     test_step.dependOn(&run_unit_tests.step);
+
+    const readiness_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/readiness.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    readiness_example_module.addImport("zigeffect", zigeffect);
+
+    const readiness_example = b.addExecutable(.{
+        .name = "zigeffect-readiness-example",
+        .root_module = readiness_example_module,
+    });
+
+    const readiness_example_tests = b.addTest(.{
+        .name = "zigeffect-readiness-example-tests",
+        .root_module = readiness_example_module,
+    });
+    const run_readiness_example_tests = b.addRunArtifact(readiness_example_tests);
+
+    const causal_readiness_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/causal_readiness.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_readiness_example_module.addImport("zigeffect", zigeffect);
+
+    const causal_readiness_example = b.addExecutable(.{
+        .name = "zigeffect-causal-readiness-example",
+        .root_module = causal_readiness_example_module,
+    });
+
+    const causal_readiness_example_tests = b.addTest(.{
+        .name = "zigeffect-causal-readiness-example-tests",
+        .root_module = causal_readiness_example_module,
+    });
+    const run_causal_readiness_example_tests = b.addRunArtifact(causal_readiness_example_tests);
+
+    const causal_missing_config_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/causal_missing_config.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_missing_config_example_module.addImport("zigeffect", zigeffect);
+
+    const causal_missing_config_example = b.addExecutable(.{
+        .name = "zigeffect-causal-missing-config",
+        .root_module = causal_missing_config_example_module,
+    });
+
+    const causal_missing_config_example_tests = b.addTest(.{
+        .name = "zigeffect-causal-missing-config-tests",
+        .root_module = causal_missing_config_example_module,
+    });
+    const run_causal_missing_config_example_tests = b.addRunArtifact(causal_missing_config_example_tests);
+
+    const causal_cleanup_failure_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/causal_cleanup_failure.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_cleanup_failure_example_module.addImport("zigeffect", zigeffect);
+
+    const causal_cleanup_failure_example = b.addExecutable(.{
+        .name = "zigeffect-causal-cleanup-failure",
+        .root_module = causal_cleanup_failure_example_module,
+    });
+
+    const causal_cleanup_failure_example_tests = b.addTest(.{
+        .name = "zigeffect-causal-cleanup-failure-tests",
+        .root_module = causal_cleanup_failure_example_module,
+    });
+    const run_causal_cleanup_failure_example_tests = b.addRunArtifact(causal_cleanup_failure_example_tests);
+
+    const causal_scoped_fiber_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/causal_scoped_fiber.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_scoped_fiber_example_module.addImport("zigeffect", zigeffect);
+
+    const causal_scoped_fiber_example = b.addExecutable(.{
+        .name = "zigeffect-causal-scoped-fiber",
+        .root_module = causal_scoped_fiber_example_module,
+    });
+
+    const causal_scoped_fiber_example_tests = b.addTest(.{
+        .name = "zigeffect-causal-scoped-fiber-tests",
+        .root_module = causal_scoped_fiber_example_module,
+    });
+    const run_causal_scoped_fiber_example_tests = b.addRunArtifact(causal_scoped_fiber_example_tests);
+
+    const causal_retry_exhaustion_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/causal_retry_exhaustion.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_retry_exhaustion_example_module.addImport("zigeffect", zigeffect);
+
+    const causal_retry_exhaustion_example = b.addExecutable(.{
+        .name = "zigeffect-causal-retry-exhaustion",
+        .root_module = causal_retry_exhaustion_example_module,
+    });
+
+    const causal_retry_exhaustion_example_tests = b.addTest(.{
+        .name = "zigeffect-causal-retry-exhaustion-tests",
+        .root_module = causal_retry_exhaustion_example_module,
+    });
+    const run_causal_retry_exhaustion_example_tests = b.addRunArtifact(causal_retry_exhaustion_example_tests);
+
+    const scaffold_module = b.createModule(.{
+        .root_source_file = b.path("tools/scaffold_module.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const scaffold_tool = b.addExecutable(.{
+        .name = "zigeffect-scaffold-module",
+        .root_module = scaffold_module,
+    });
+
+    const scaffold_tool_tests = b.addTest(.{
+        .name = "zigeffect-scaffold-module-tests",
+        .root_module = scaffold_module,
+    });
+    const run_scaffold_tool_tests = b.addRunArtifact(scaffold_tool_tests);
+
+    const causal_report_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_report.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_report_tool_module.addImport("zigeffect", zigeffect);
+
+    const causal_report_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-report",
+        .root_module = causal_report_tool_module,
+    });
+    const run_causal_report_tool = b.addRunArtifact(causal_report_tool);
+    const causal_report_step = b.step("causal-report", "Print a sample causal CI report");
+    causal_report_step.dependOn(&run_causal_report_tool.step);
+
+    const causal_report_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-report-tests",
+        .root_module = causal_report_tool_module,
+    });
+    const run_causal_report_tool_tests = b.addRunArtifact(causal_report_tool_tests);
+
+    const examples_step = b.step("examples", "Compile and test zigeffect examples");
+    examples_step.dependOn(&readiness_example.step);
+    examples_step.dependOn(&run_readiness_example_tests.step);
+    examples_step.dependOn(&causal_readiness_example.step);
+    examples_step.dependOn(&run_causal_readiness_example_tests.step);
+    examples_step.dependOn(&causal_missing_config_example.step);
+    examples_step.dependOn(&run_causal_missing_config_example_tests.step);
+    examples_step.dependOn(&causal_cleanup_failure_example.step);
+    examples_step.dependOn(&run_causal_cleanup_failure_example_tests.step);
+    examples_step.dependOn(&causal_scoped_fiber_example.step);
+    examples_step.dependOn(&run_causal_scoped_fiber_example_tests.step);
+    examples_step.dependOn(&causal_retry_exhaustion_example.step);
+    examples_step.dependOn(&run_causal_retry_exhaustion_example_tests.step);
+    examples_step.dependOn(&scaffold_tool.step);
+    examples_step.dependOn(&run_scaffold_tool_tests.step);
+    examples_step.dependOn(&causal_report_tool.step);
+    examples_step.dependOn(&run_causal_report_tool_tests.step);
 }

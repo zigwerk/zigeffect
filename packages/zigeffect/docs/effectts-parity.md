@@ -65,9 +65,9 @@ typed `service` method. Missing services route through
 environment, and fix pattern.
 
 Production paths can now add metadata through `Effect.requires`, layer/runtime
-`provides`, `ServiceSet`, `DependencyReport`, and `LayerGraph`. This gives
-preflight dependency validation without replacing Zig's compile-time service
-lookup.
+`provides`, `ServiceSet`, `DependencyReport`, `validateRequirements`,
+`requirementsSatisfiedBy`, and `LayerGraph`. This gives preflight dependency
+validation without replacing Zig's compile-time service lookup.
 
 ### Layer
 
@@ -76,6 +76,8 @@ supports:
 
 - `Layer.fromEnv`
 - `Layer.fromBuilder`
+- `Layer.fromContextBuilder`
+- `Layer.fromEffect`
 - `Layer.buildContext`
 - `Layer.provide`
 - `Layer.merge`
@@ -86,7 +88,11 @@ supports:
 This supports checked production startup in small and medium graphs. Explicit
 `Layer.merge` remains available, while `layerGraph` accepts heterogeneous layer
 tuples, validates declared providers and requirements, derives startup order,
-and memoizes the built environments until graph deinit.
+passes already-started services into context builders, and memoizes the built
+environments until graph deinit. Graph-started environments can also be handed
+to regular and fiber runtimes through `graph.runtime()` and
+`graph.fiberRuntime()`. Effects that only need a subset of graph services can
+use `ServiceEnv(.{ ... })` with `graph.runNarrowed` or `graph.exitNarrowed`.
 
 ### Scope
 
@@ -99,6 +105,9 @@ has:
 - exit-aware finalizers through `FinalizerExit`
 - runtime-managed scope close on success and failure
 - `ensuring` for effect-local finalizers
+- value-resource acquisition through `acquireReleaseValue` when copy-based
+  cleanup is safe
+- direct combined failure/defect/interruption plus cleanup-failure causes
 
 Manual scope closing remains a low-level test/custom-runtime tool.
 
@@ -111,8 +120,14 @@ sequential/parallel causes, and annotations.
 
 The main difference is runtime-generated nested causes: recursive causes use
 pointer links, so runtime code avoids returning pointer-backed sequential trees
-from stack-local values. Today, a cleanup failure surfaced by `Runtime.exit`
-returns `Cause.finalizer_failure` directly.
+from stack-local values. Today, cleanup-only failure surfaced by `Runtime.exit`
+returns `Cause.finalizer_failure` directly; typed program failure followed by
+cleanup failure returns `Cause.failure_then_finalizer_failure`, defects followed
+by cleanup failure return `Cause.defect_then_finalizer_failure`, and
+interruptions followed by cleanup failure return
+`Cause.interrupted_then_finalizer_failure`. Cause-inspection helpers are
+available for tests that care about preserved facts rather than one exact
+variant.
 
 ### Fibers
 
@@ -128,13 +143,15 @@ surface:
 - `forkScoped` leases that interrupt unfinished children when a parent scope
   closes
 - child scope cleanup with success, failure, or interruption exits
+- graph-started environments through `graph.fiberRuntime()`
 - `Deferred`, `Queue`, and `Semaphore` as deterministic coordination
-  primitives
+  primitives, including queue shutdown and scoped semaphore permits
 
 The current core runtime is deterministic and run-to-completion on `join`; it is
 not a real green-thread scheduler. True suspension, task groups, cancellation
 against blocking IO, and `std.Io` integration are deferred to the optional zio
-backend adapter.
+backend adapter. The deterministic backend is exposed through
+`BackendCapabilities` so future backends have a compatibility boundary.
 
 ### Schedule
 
@@ -152,9 +169,11 @@ for retry/repeat stdlib work:
 - `linear`
 - `backoff`
 - `jitteredBackoff`
+- decision inspection
+- union/intersection-style delay composition
 
-Composition operators are intentionally deferred until real stdlib code needs
-them.
+Full recursive schedule programs are still deferred until real stdlib code
+needs them.
 
 ### TestEnv
 
@@ -170,7 +189,9 @@ bundles:
 - assertion helpers
 
 This is enough to build `fx.Test` later. The next useful step is fixtures,
-golden output, and clearer assertion reports.
+golden output, fixture registry helpers, and richer assertion reports. Current
+helpers cover structured logs, histograms, dependency reports, causes, and
+schedule delays.
 
 ### Logger, Config, Metrics, Tracing
 
@@ -178,22 +199,43 @@ EffectTS observability/config is substantially more mature than the current
 stubs. The first `zigeffect` parity line is service shape, deterministic tests,
 and useful names:
 
-- Logger should evolve from plain messages to level-aware entries and fields.
-- Config should evolve into typed descriptors with env/file providers and
-  missing-key diagnostics.
-- Metrics should add histograms and snapshots.
-- Tracing should add trace ids, span ids, attributes, and nested span trees.
+- Logger has level-aware structured entries with fields; timestamps and richer
+  formatting remain future work.
+- Config has typed descriptors, entry/dotenv provider loading, secret-safe
+  diagnostics, and schema-wide struct loading.
+- Metrics have counters, gauges, histograms, and deterministic snapshots.
+- Tracing has span ids, trace ids, parent relationships, attributes,
+  runtime-carried trace context, and deterministic span lifecycle checks.
 
 These should be built as stdlib services on top of the core rather than by
 expanding the core runtime too early.
 
+### Agent-Observable Diagnostics
+
+EffectTS has mature runtime diagnostics through fibers, causes, scopes,
+tracing, and structured services. `zigeffect` now has a Zig-native deterministic
+diagnostic surface for the same family of questions:
+
+- opt-in `CausalStore` attachment for runtimes, fiber runtimes, layer graphs,
+  and contexts
+- causal events for runs, exits, scopes, resources, fibers, layers, services,
+  schedules, and app-recorded observability facts
+- queries for snapshot, lineage, cause, resources, fibers, requirements,
+  retries, and findings
+- text, JSON, DOT, and CI report formatters
+- backend adapter kinds for memory, JSON Lines, DOT, OpenTelemetry, embedded
+  graph queries, durable history, and future async streams
+
+This is not EffectTS's full runtime inspector or a durable workflow engine. It
+is the deterministic Zig core that future async backends, production adapters,
+and agent tools can build on.
+
 ## Next Parity Priorities
 
-1. Typed config descriptors and providers.
-2. Level-aware structured logger entries.
-3. Metrics snapshots with counters, gauges, and histograms.
-4. Tracing spans with ids and parent/child relationships.
-5. `fx.Test` helpers for fixtures, golden output, and fake service injection.
-6. Dependency-injected layer builders for graph services.
-7. Zio backend adapter for real fibers, cancellation, and `std.Io`.
-8. Compile-time assertions for common effect composition mistakes.
+1. Zio backend adapter for real fibers, cancellation, and `std.Io`.
+2. Production causal adapters for JSON Lines, OpenTelemetry, embedded graph
+   queries, and durable history.
+3. Deterministic replay/forking for selected effect inputs.
+4. Policy-controlled remediation for retries, graph restarts, provider
+   replacement, and fiber interruption.
+5. Compile-time assertions for common effect composition mistakes.

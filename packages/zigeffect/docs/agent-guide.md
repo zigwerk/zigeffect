@@ -231,6 +231,102 @@ defer std.testing.allocator.free(report);
 Use stable program labels like `"compile schema"` or `"load config"` so humans
 and agents can connect the report back to the failing workflow.
 
+## Causal Runtime Direction
+
+The long-term agent workflow is documented in
+`docs/agent-observable-runtime.md`. The first causal runtime APIs are now
+available through `fx.CausalStore`, graph/runtime `.withCausalStore`, query
+helpers, and causal report/JSON/DOT formatters. Agents should use them with
+this discipline:
+
+- Prefer structured `Exit`, `Cause`, dependency, observability, and test reports
+  over ad hoc log scraping.
+- Preserve stable labels for effects, layers, resources, schedules, and test
+  workflows.
+- Keep typed Zig errors visible instead of converting them into strings.
+- Add service requirements and provider declarations so future causal queries
+  can explain where dependencies came from.
+- Use scopes and `acquireRelease` for owned resources so resource lineage can be
+  observed later.
+- Use tracing spans and trace context where a workflow crosses service or fiber
+  boundaries.
+- Attach a `CausalStore` to runtime, fiber runtime, or layer graph paths when a
+  test or example needs agent-readable evidence.
+- Record app-level log, metric, span, config, or assertion facts with
+  `ctx.recordCausal` until those services have automatic adapters.
+
+The shortest useful query loop is:
+
+```text
+run effect -> inspect causal snapshot -> query lineage -> inspect cause
+-> propose test or code fix
+```
+
+Attach and report with the public API:
+
+```zig
+var store = fx.CausalStore.init(allocator);
+defer store.deinit();
+
+var runtime = env.runtime().withCausalStore(&store);
+const exit = runtime.exit(Program);
+_ = exit;
+
+const report = try fx.formatCausalCiReport(allocator, "program name", &store);
+defer allocator.free(report);
+```
+
+For broader diagnosis, use:
+
+```text
+inspect failing run -> query cause -> query lineage -> inspect requirements
+-> inspect resources -> inspect fibers -> inspect retries -> propose fix
+```
+
+The runnable example is
+[`../examples/causal_readiness.zig`](../examples/causal_readiness.zig). It
+starts a graph with config, logger, metrics, tracing, and a database-like
+service, runs a readiness effect through a causal store, preserves
+`error.MissingConfig` as a typed app failure, and prints `formatCausalReport`
+plus `formatCausalJson`.
+
+Use `formatCausalCiReport` when an agent or CI job needs a compact artifact:
+it includes event counts, finding counts, citation ids, and recommended next
+queries while avoiding raw `redacted_detail` payloads.
+
+Backend adapters are sinks, not the source of truth. Keep tests and local agent
+queries against the in-memory `CausalStore`; use `store.attachBackend` for
+JSONL, DOT, OpenTelemetry, embedded graph, durable-history, or future async
+adapters. Do not put CockroachDB, RoachGraph, NenDB, or OpenTelemetry inside
+the deterministic core.
+
+Future causal findings should be treated as evidence pointers, not conclusions.
+An agent should cite event ids, explain whether an edge is causal or merely
+correlated by trace context, and then propose a source, config, test, or runtime
+policy change.
+
+When a report contains findings, use this workflow:
+
+```text
+start with finding -> cite event id -> query lineage -> query cause
+-> inspect scope/resource/fiber/retry evidence -> propose code or config fix
+```
+
+The most useful first scenario fixtures are:
+
+- `../examples/causal_missing_config.zig`: missing config during layer startup
+- `../examples/causal_cleanup_failure.zig`: cleanup failure after a typed
+  program failure
+- `../examples/causal_scoped_fiber.zig`: parent scope interrupting a child fiber
+- `../examples/causal_retry_exhaustion.zig`: retry exhaustion masking the first
+  typed failure
+- app incident with trace context linking domain effect, service provider,
+  resource scope, and schedule decisions
+
+The intended result is that agents can improve `zigeffect` itself and apps built
+with `zigeffect` from typed runtime evidence, not from guesses assembled from
+stdout.
+
 ## Schedule Shape
 
 ```zig

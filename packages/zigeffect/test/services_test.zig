@@ -1,0 +1,646 @@
+const std = @import("std");
+const fx = @import("zigeffect");
+const fixtures = @import("support/fixtures.zig");
+
+test "context resolves services and test environment captures state" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    var ctx = env.context();
+    const fs = ctx.service(fx.MemoryFileSystem);
+    const config = ctx.service(fx.Config);
+    const metrics = ctx.service(fx.Metrics);
+    const tracing = ctx.service(fx.Tracing);
+    const clock = ctx.service(fx.FakeClock);
+    const clock_service = ctx.service(fx.Clock);
+
+    try config.set("mode", "test");
+    try fs.writeFile("schema.rg", "database yachdee {}");
+    try metrics.increment("compile.count", 1);
+    try tracing.event("compile.start");
+    clock.sleep(25);
+    clock_service.sleep(5);
+
+    try std.testing.expectEqualStrings("test", config.get("mode").?);
+    try std.testing.expectEqualStrings("database yachdee {}", fs.readFile("schema.rg").?);
+    try std.testing.expectEqual(@as(i64, 1), metrics.get("compile.count"));
+    try std.testing.expectEqualStrings("compile.start", env.services.tracing.events.items[0]);
+    try std.testing.expectEqual(@as(u64, 30), clock.nowMs());
+    try std.testing.expectEqual(@as(u64, 30), clock_service.nowMs());
+    try env.expectFile("schema.rg", "database yachdee {}");
+    try env.expectTrace("compile.start");
+    try env.expectMetric("compile.count", 1);
+}
+test "logger config metrics tracing and memory fs support bootstrap helpers" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    var ctx = env.context();
+    const logger = ctx.service(fx.Logger);
+    const config = ctx.service(fx.Config);
+    const metrics = ctx.service(fx.Metrics);
+    const tracing = ctx.service(fx.Tracing);
+    const fs = ctx.service(fx.MemoryFileSystem);
+
+    try logger.warn("warned");
+    try logger.err("errored");
+    try config.set("stage", "dev");
+    try config.set("stage", "test");
+    try metrics.gauge("queue.depth", 12);
+    try tracing.spanStart("compile");
+    try tracing.spanEnd("compile");
+    try fs.writeFile("schema.rg", "old");
+    try fs.writeFile("schema.rg", "new");
+
+    try env.expectLog("warned");
+    try env.expectLog("errored");
+    try std.testing.expectEqualStrings("test", config.require("stage") catch unreachable);
+    try env.expectMetric("queue.depth", 12);
+    try env.expectTrace("span:start:compile");
+    try env.expectTrace("span:end:compile");
+    try env.expectFile("schema.rg", "new");
+    try std.testing.expect(fs.exists("schema.rg"));
+    fs.deleteFile("schema.rg");
+    try std.testing.expect(!fs.exists("schema.rg"));
+}
+test "test env stores fixture and golden output" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    try env.putFixture("report", "first");
+    try env.expectGolden("report", "first");
+
+    try env.putFixture("report", "updated");
+    try env.expectGolden("report", "updated");
+    try std.testing.expectEqualStrings("updated", env.fixtures.get("report").?);
+    try std.testing.expectError(error.ExpectedFixtureNotFound, env.expectGolden("missing", "value"));
+}
+test "config descriptors read typed values and defaults" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    const config = &env.services.config;
+    try config.set("app.name", "yachdee");
+    try config.set("http.port", "8080");
+    try config.set("feature.enabled", "true");
+
+    try std.testing.expectEqualStrings("yachdee", try config.read(fx.Config.string("app.name")));
+    try std.testing.expectEqual(@as(i64, 8080), try config.read(fx.Config.int("http.port")));
+    try std.testing.expectEqual(true, try config.read(fx.Config.boolean("feature.enabled")));
+
+    try std.testing.expectEqualStrings("local", try config.read(fx.Config.string("region").withDefault("local")));
+    try std.testing.expectEqual(@as(i64, 30), try config.read(fx.Config.int("timeout.seconds").withDefault(30)));
+    try std.testing.expectEqual(false, try config.read(fx.Config.boolean("debug").withDefault(false)));
+}
+test "config schema loads typed structs from descriptors" {
+    var config = fx.Config.init(std.testing.allocator);
+    defer config.deinit();
+
+    const entries = [_]fx.ConfigEntry{
+        .{ .key = "app.name", .value = "yachdee" },
+        .{ .key = "http.port", .value = "8080" },
+        .{ .key = "feature.enabled", .value = "true" },
+    };
+    try config.loadEntries(&entries);
+
+    const AppConfig = struct {
+        name: []const u8,
+        port: i64,
+        enabled: bool,
+        region: []const u8,
+    };
+    const schema = fx.Config.schema(AppConfig, .{
+        .name = fx.Config.string("app.name"),
+        .port = fx.Config.int("http.port"),
+        .enabled = fx.Config.boolean("feature.enabled"),
+        .region = fx.Config.string("region").withDefault("local"),
+    });
+
+    const app = try config.readSchema(schema);
+
+    try std.testing.expectEqualStrings("yachdee", app.name);
+    try std.testing.expectEqual(@as(i64, 8080), app.port);
+    try std.testing.expectEqual(true, app.enabled);
+    try std.testing.expectEqualStrings("local", app.region);
+}
+test "config providers load entries and dotenv text" {
+    var config = fx.Config.init(std.testing.allocator);
+    defer config.deinit();
+
+    const entries = [_]fx.ConfigEntry{
+        .{ .key = "app.name", .value = "entries" },
+        .{ .key = "http.port", .value = "8080" },
+        .{ .key = "app.name", .value = "override" },
+    };
+    try config.loadEntries(&entries);
+
+    try std.testing.expectEqualStrings("override", try config.read(fx.Config.string("app.name")));
+    try std.testing.expectEqual(@as(i64, 8080), try config.read(fx.Config.int("http.port")));
+
+    try config.loadDotEnv(
+        \\# file-style provider
+        \\feature.enabled = true
+        \\http.port = 9090
+        \\
+    );
+
+    try std.testing.expectEqual(true, try config.read(fx.Config.boolean("feature.enabled")));
+    try std.testing.expectEqual(@as(i64, 9090), try config.read(fx.Config.int("http.port")));
+    try std.testing.expectError(error.InvalidConfigValue, config.loadDotEnv("not-a-pair"));
+}
+test "config diagnostics are typed and secret safe" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    const config = &env.services.config;
+    try config.set("database.password", "not-an-int-secret");
+
+    const descriptor = fx.Config.int("database.password").secret();
+    try std.testing.expectError(error.InvalidConfigValue, config.read(descriptor));
+
+    const formatted = try fx.services.config.formatConfigError(
+        std.testing.allocator,
+        descriptor,
+        error.InvalidConfigValue,
+    );
+    defer std.testing.allocator.free(formatted);
+
+    try std.testing.expect(std.mem.indexOf(u8, formatted, "database.password") != null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted, "redacted") != null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted, "not-an-int-secret") == null);
+}
+test "observability services expose structured logs metrics and spans" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    const logger = &env.services.logger;
+    try logger.logFields(.info, "request handled", &.{
+        .{ .key = "route", .value = "/health" },
+        .{ .key = "status", .value = "200" },
+    });
+
+    try std.testing.expectEqual(fx.services.logger.LogLevel.info, logger.structured_entries.items[0].level);
+    try std.testing.expectEqualStrings("request handled", logger.structured_entries.items[0].message);
+    try std.testing.expectEqualStrings("route", logger.structured_entries.items[0].fields[0].key);
+    try std.testing.expectEqualStrings("/health", logger.structured_entries.items[0].fields[0].value);
+    try env.expectLog("request handled");
+    try env.expectStructuredLog(.info, "request handled");
+
+    const metrics = &env.services.metrics;
+    try metrics.increment("requests.total", 1);
+    try metrics.observe("request.ms", 10);
+    try metrics.observe("request.ms", 25);
+
+    const histogram = metrics.histogram("request.ms").?;
+    try std.testing.expectEqual(@as(usize, 2), histogram.count);
+    try std.testing.expectEqual(@as(i64, 35), histogram.sum);
+    try std.testing.expectEqual(@as(i64, 10), histogram.min);
+    try std.testing.expectEqual(@as(i64, 25), histogram.max);
+    try env.expectHistogram("request.ms", 2, 35, 10, 25);
+
+    var snapshot = try metrics.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 1), snapshot.counters.len);
+    try std.testing.expectEqual(@as(usize, 1), snapshot.histograms.len);
+
+    const tracing = &env.services.tracing;
+    const root = try tracing.startSpan("compile", null);
+    const child = try tracing.startSpan("parse", root);
+    try tracing.endSpan(child);
+
+    try std.testing.expectEqual(@as(fx.services.tracing.SpanId, 1), root);
+    try std.testing.expectEqual(root, tracing.spans.items[1].parent_id.?);
+    try std.testing.expect(tracing.spans.items[1].ended);
+    try env.expectTrace("span:start:compile");
+}
+test "observability report formats logs metrics and traces" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    const tracing = &env.services.tracing;
+    const root = try tracing.startSpanWithAttributes("request", null, &.{
+        .{ .key = "route", .value = "/health" },
+    });
+    const child = try tracing.startSpan("database", root);
+    try tracing.endSpan(child);
+
+    const logger = &env.services.logger;
+    try logger.logWithContext(
+        .info,
+        "request handled",
+        &.{.{ .key = "status", .value = "200" }},
+        .{ .timestamp_ms = 1234, .trace_id = tracing.spanTrace(root).?, .span_id = child },
+    );
+
+    const metrics = &env.services.metrics;
+    try metrics.increment("requests.total", 1);
+    try metrics.observe("request.ms", 25);
+
+    const report = try fx.formatObservabilityReport(
+        std.testing.allocator,
+        "health check",
+        logger,
+        metrics,
+        tracing,
+    );
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect observability report") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "program: health check") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "logs: 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "log: info request handled") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "counter: requests.total=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "histogram: request.ms count=1 sum=25 min=25 max=25") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "span: id=1 trace=1 parent=null ended=false name=request") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "span: id=2 trace=1 parent=1 ended=true name=database") != null);
+}
+test "observability metadata preserves trace context" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    const tracing = &env.services.tracing;
+    const root = try tracing.startSpanWithAttributes("request", null, &.{
+        .{ .key = "route", .value = "/health" },
+    });
+    const child = try tracing.startSpan("database", root);
+
+    try std.testing.expectEqual(@as(fx.services.tracing.TraceId, 1), tracing.spans.items[0].trace_id);
+    try std.testing.expectEqual(tracing.spans.items[0].trace_id, tracing.spans.items[1].trace_id);
+    try std.testing.expectEqualStrings("route", tracing.spans.items[0].attributes[0].key);
+    try std.testing.expectEqualStrings("/health", tracing.spans.items[0].attributes[0].value);
+
+    const logger = &env.services.logger;
+    try logger.logWithContext(
+        .info,
+        "request handled",
+        &.{.{ .key = "status", .value = "200" }},
+        .{
+            .timestamp_ms = 1234,
+            .trace_id = tracing.spans.items[0].trace_id,
+            .span_id = child,
+        },
+    );
+
+    const entry = logger.structured_entries.items[0];
+    try std.testing.expectEqual(@as(?u64, 1234), entry.timestamp_ms);
+    try std.testing.expectEqual(@as(?fx.services.tracing.TraceId, tracing.spans.items[0].trace_id), entry.trace_id);
+    try std.testing.expectEqual(@as(?fx.services.tracing.SpanId, child), entry.span_id);
+    try std.testing.expectEqualStrings("status", entry.fields[0].key);
+    try std.testing.expectEqualStrings("200", entry.fields[0].value);
+}
+test "tracing span lifecycle assertions inspect ended parent and trace state" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    const tracing = &env.services.tracing;
+    const root = try tracing.startSpan("request", null);
+    const child = try tracing.startSpan("database", root);
+    try tracing.endSpan(child);
+
+    try env.expectSpanEnded(child);
+    try env.expectSpanParent(child, root);
+    try env.expectSpanTrace(child, tracing.spanTrace(root).?);
+}
+
+test "causal store records events snapshots and lineage deterministically" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    const run_id = store.nextRunId();
+    const parent = try store.record(.{
+        .kind = .run_started,
+        .run_id = run_id,
+        .label = "readiness",
+        .type_name = "ReadinessEffect",
+    });
+    const child = try store.record(.{
+        .kind = .exit_recorded,
+        .run_id = run_id,
+        .parent_id = parent,
+        .status = "success",
+    });
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), snapshot.events.len);
+    try std.testing.expectEqual(parent, snapshot.events[0].id);
+    try std.testing.expectEqual(child, snapshot.events[1].id);
+    try std.testing.expectEqual(run_id, snapshot.events[0].run_id.?);
+    try std.testing.expectEqual(fx.CausalEventKind.run_started, snapshot.events[0].kind);
+    try std.testing.expectEqualStrings("readiness", snapshot.events[0].label);
+
+    var lineage = try store.lineage(std.testing.allocator, parent);
+    defer lineage.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), lineage.events.len);
+    try std.testing.expectEqual(parent, lineage.events[0].id);
+    try std.testing.expectEqual(child, lineage.events[1].id);
+}
+
+test "causal report and backend kinds preserve adapter strategy" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    const run_id = store.nextRunId();
+    _ = try store.record(.{
+        .kind = .run_started,
+        .run_id = run_id,
+        .label = "adapter-check",
+        .type_name = "AdapterEffect",
+    });
+
+    const report = try fx.formatCausalReport(std.testing.allocator, "adapter check", &store);
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect causal report") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "program: adapter check") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "kind=run_started") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "type=AdapterEffect") != null);
+
+    try std.testing.expectEqual(fx.CausalBackendKind.memory, fx.CausalBackendKind.memory);
+    try std.testing.expectEqual(fx.CausalBackendKind.json_lines, fx.CausalBackendKind.json_lines);
+    try std.testing.expectEqual(fx.CausalBackendKind.dot, fx.CausalBackendKind.dot);
+    try std.testing.expectEqual(fx.CausalBackendKind.opentelemetry, fx.CausalBackendKind.opentelemetry);
+    try std.testing.expectEqual(fx.CausalBackendKind.nendb_graph, fx.CausalBackendKind.nendb_graph);
+    try std.testing.expectEqual(fx.CausalBackendKind.cockroach_history, fx.CausalBackendKind.cockroach_history);
+    try std.testing.expectEqual(fx.CausalBackendKind.async_stream, fx.CausalBackendKind.async_stream);
+}
+
+const FakeCausalBackendState = struct {
+    ids: [8]u64 = undefined,
+    kinds: [8]fx.CausalEventKind = undefined,
+    labels: [8][]const u8 = undefined,
+    count: usize = 0,
+};
+
+fn recordFakeCausalBackend(raw: ?*anyopaque, event: fx.CausalEvent) anyerror!void {
+    const state: *FakeCausalBackendState = @ptrCast(@alignCast(raw.?));
+    if (state.count >= state.ids.len) return error.TooManyEvents;
+    state.ids[state.count] = event.id;
+    state.kinds[state.count] = event.kind;
+    state.labels[state.count] = event.label;
+    state.count += 1;
+}
+
+fn fakeCausalBackend(state: *FakeCausalBackendState) fx.CausalBackend {
+    return .{
+        .kind = .memory,
+        .state = state,
+        .record = recordFakeCausalBackend,
+    };
+}
+
+test "causal store forwards stored events to attached backend" {
+    var backend_state = FakeCausalBackendState{};
+    var store = fx.CausalStore.init(std.testing.allocator);
+    store.attachBackend(fakeCausalBackend(&backend_state));
+    defer store.deinit();
+
+    const first = try store.record(.{
+        .kind = .run_started,
+        .label = "backend-run",
+    });
+    const second = try store.record(.{
+        .kind = .exit_recorded,
+        .parent_id = first,
+        .label = "backend-run",
+        .status = "success",
+    });
+
+    try std.testing.expectEqual(@as(usize, 2), backend_state.count);
+    try std.testing.expectEqual(first, backend_state.ids[0]);
+    try std.testing.expectEqual(second, backend_state.ids[1]);
+    try std.testing.expectEqual(fx.CausalEventKind.run_started, backend_state.kinds[0]);
+    try std.testing.expectEqual(fx.CausalEventKind.exit_recorded, backend_state.kinds[1]);
+    try std.testing.expectEqualStrings("backend-run", backend_state.labels[0]);
+    try std.testing.expectEqualStrings("backend-run", backend_state.labels[1]);
+    try std.testing.expectEqual(@as(usize, 2), store.events.items.len);
+}
+
+fn expectFinding(findings: fx.CausalFindings, kind: fx.CausalFindingKind) !void {
+    for (findings.items) |finding| {
+        if (finding.kind == kind) return;
+    }
+    return error.ExpectedFindingMissing;
+}
+
+test "causal query helpers filter resources fibers requirements and retries" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    const run_id = store.nextRunId();
+    const scope_id = store.nextScopeId();
+    const parent = try store.record(.{
+        .kind = .run_started,
+        .run_id = run_id,
+        .label = "query-run",
+    });
+    const child = try store.record(.{
+        .kind = .exit_recorded,
+        .run_id = run_id,
+        .parent_id = parent,
+        .status = "failure",
+        .type_name = "Boom",
+    });
+    _ = try store.record(.{
+        .kind = .resource_acquired,
+        .run_id = run_id,
+        .scope_id = scope_id,
+        .type_name = "DatabaseConnection",
+    });
+    _ = try store.record(.{
+        .kind = .fiber_forked,
+        .run_id = run_id,
+        .fiber_id = 44,
+        .status = "pending",
+    });
+    _ = try store.record(.{
+        .kind = .service_required,
+        .run_id = run_id,
+        .type_name = @typeName(fx.Config),
+        .status = "missing",
+    });
+    _ = try store.record(.{
+        .kind = .schedule_decision,
+        .run_id = run_id,
+        .label = "retry-config",
+        .status = "exhausted",
+        .redacted_detail = "attempt=2 delay_ms=null decision=exhausted",
+    });
+
+    var cause = try store.cause(std.testing.allocator, child);
+    defer cause.deinit();
+    try std.testing.expectEqual(@as(usize, 2), cause.events.len);
+    try std.testing.expectEqual(parent, cause.events[0].id);
+    try std.testing.expectEqual(child, cause.events[1].id);
+
+    var resources = try store.resources(std.testing.allocator, scope_id);
+    defer resources.deinit();
+    try std.testing.expectEqual(@as(usize, 1), resources.events.len);
+    try std.testing.expectEqual(fx.CausalEventKind.resource_acquired, resources.events[0].kind);
+
+    var fibers = try store.fibers(std.testing.allocator, "pending");
+    defer fibers.deinit();
+    try std.testing.expectEqual(@as(usize, 1), fibers.events.len);
+    try std.testing.expectEqual(@as(?u64, 44), fibers.events[0].fiber_id);
+
+    var requirements = try store.requirements(std.testing.allocator, run_id);
+    defer requirements.deinit();
+    try std.testing.expectEqual(@as(usize, 1), requirements.events.len);
+    try std.testing.expectEqualStrings(@typeName(fx.Config), requirements.events[0].type_name);
+
+    var retries = try store.retries(std.testing.allocator, run_id);
+    defer retries.deinit();
+    try std.testing.expectEqual(@as(usize, 1), retries.events.len);
+    try std.testing.expectEqualStrings("retry-config", retries.events[0].label);
+}
+
+test "causal findings surface missing cleanup pending fibers finalizer failures exhausted retries and missing services" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    const run_id = store.nextRunId();
+    const leaked_scope_id = store.nextScopeId();
+    const closed_scope_id = store.nextScopeId();
+
+    _ = try store.record(.{
+        .kind = .resource_acquired,
+        .run_id = run_id,
+        .scope_id = leaked_scope_id,
+        .type_name = "LeakedResource",
+    });
+    _ = try store.record(.{
+        .kind = .fiber_forked,
+        .run_id = run_id,
+        .scope_id = closed_scope_id,
+        .fiber_id = 7,
+        .status = "pending",
+    });
+    _ = try store.record(.{
+        .kind = .scope_closed,
+        .run_id = run_id,
+        .scope_id = closed_scope_id,
+        .status = "success",
+    });
+    _ = try store.record(.{
+        .kind = .resource_finalized,
+        .run_id = run_id,
+        .scope_id = closed_scope_id,
+        .type_name = "FailingResource",
+        .status = "failure",
+        .redacted_detail = "CloseFailed",
+    });
+    _ = try store.record(.{
+        .kind = .schedule_decision,
+        .run_id = run_id,
+        .label = "retry-db",
+        .status = "exhausted",
+        .redacted_detail = "attempt=3 delay_ms=null decision=exhausted",
+    });
+    _ = try store.record(.{
+        .kind = .service_required,
+        .run_id = run_id,
+        .type_name = @typeName(fx.Config),
+        .status = "missing",
+    });
+
+    var findings = try store.findings(std.testing.allocator);
+    defer findings.deinit();
+
+    try expectFinding(findings, .resource_acquired_without_finalization);
+    try expectFinding(findings, .fiber_pending_after_scope_close);
+    try expectFinding(findings, .finalizer_failure);
+    try expectFinding(findings, .retry_budget_exhausted);
+    try expectFinding(findings, .service_requirement_without_provider);
+}
+
+test "causal json and dot exports are deterministic and redacted" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    const run_id = store.nextRunId();
+    const parent = try store.record(.{
+        .kind = .run_started,
+        .run_id = run_id,
+        .label = "readiness",
+        .type_name = "ReadinessEffect",
+    });
+    _ = try store.record(.{
+        .kind = .exit_recorded,
+        .run_id = run_id,
+        .parent_id = parent,
+        .status = "failure",
+        .type_name = "InvalidConfig",
+        .redacted_detail = "database.password=<redacted>",
+    });
+
+    const json = try fx.formatCausalJson(std.testing.allocator, &store);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"events\": [") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"id\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\": \"run_started\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"parent_id\": null") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"redacted_detail\": \"database.password=<redacted>\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "super-secret") == null);
+
+    const dot = try fx.formatCausalDot(std.testing.allocator, &store);
+    defer std.testing.allocator.free(dot);
+
+    try std.testing.expect(std.mem.indexOf(u8, dot, "digraph zigeffect_causal") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dot, "event_1 [label=\"run_started readiness\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dot, "event_1 -> event_2") != null);
+}
+
+test "causal ci report includes findings next queries and citation ids" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    const run_id = store.nextRunId();
+    const scope_id = store.nextScopeId();
+    const started = try store.record(.{
+        .kind = .run_started,
+        .run_id = run_id,
+        .label = "readiness",
+    });
+    const resource = try store.record(.{
+        .kind = .resource_acquired,
+        .run_id = run_id,
+        .scope_id = scope_id,
+        .label = "database",
+        .type_name = "DatabaseConnection",
+        .redacted_detail = "super-secret-password",
+    });
+    _ = try store.record(.{
+        .kind = .service_required,
+        .run_id = run_id,
+        .parent_id = started,
+        .label = "DatabaseLayer",
+        .type_name = @typeName(fx.Config),
+        .status = "missing",
+    });
+    _ = try store.record(.{
+        .kind = .exit_recorded,
+        .run_id = run_id,
+        .parent_id = resource,
+        .status = "failure",
+        .type_name = "MissingConfig",
+    });
+
+    const report = try fx.formatCausalCiReport(std.testing.allocator, "readiness", &store);
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect causal ci report") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "program: readiness") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "events: 4") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "findings: 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "event id=1 kind=run_started") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "finding event=2 kind=resource_acquired_without_finalization") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "next queries:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "- causal.cause 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "- causal.lineage 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "- causal.resources 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "- causal.requirements 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "super-secret-password") == null);
+}

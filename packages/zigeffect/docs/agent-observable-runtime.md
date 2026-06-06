@@ -1,0 +1,861 @@
+# Agent-Observable Causal Runtime
+
+Date: 2026-06-05
+
+This document defines the long-term `zigeffect` direction for an
+agent-observable Effect runtime: a Zig-native runtime that exposes effect
+execution as a structured causal graph rather than as unstructured logs.
+
+The goal is not to make an LLM execute arbitrary runtime magic. The goal is to
+make effectful Zig programs understandable to agents and humans through the
+same typed runtime facts the engine already owns: effects, services, scopes,
+fibers, resources, schedules, exits, causes, logs, metrics, and traces.
+
+## Thesis
+
+Most agentic coding and operations loops still observe software from the
+outside. They run commands, parse stdout, inspect stack traces, and infer what
+probably happened. That is expensive in tokens, fragile under formatting
+changes, and often misses the true runtime cause.
+
+`zigeffect` can make the runtime itself agent-readable. When an effect runs,
+the engine can emit compact structural events into a causal graph. An agent can
+then ask precise questions:
+
+- Which service requirement was missing or replaced?
+- Which effect opened this resource?
+- Which fiber was interrupted by which parent scope?
+- Which retry policy hid the first typed failure?
+- Which finalizer failed after the program failure?
+- Which config value, layer provider, or app dependency changed the outcome?
+
+The runtime becomes a debuggable, queryable execution model instead of a black
+box that agents reconstruct from logs.
+
+## Novelty Position
+
+The individual pieces are not new:
+
+- Distributed tracing already models span graphs.
+- Effect systems already model typed failure, scopes, fibers, and supervision.
+- Workflow engines already persist execution histories for replay.
+- Dynamic tracing systems already inspect live processes.
+- Agent frameworks already display chain, tool, and graph execution traces.
+
+The novel wedge for `zigeffect` is the combination:
+
+> A Zig-native Effect runtime where typed errors, service requirements, layer
+> providers, scopes, resources, fibers, schedules, logs, metrics, and traces
+> emit into one allocator-aware causal execution graph that agents can query
+> structurally.
+
+The claim should stay precise. Do not claim that `zigeffect` invents tracing,
+time travel, supervision, or self-healing software. Claim that it can become
+the first Zig-native agent-observable Effect runtime with a first-class causal
+execution graph.
+
+## Landscape Anchors
+
+This direction should learn from adjacent systems without copying their shape.
+
+- OpenTelemetry treats traces as span DAGs and defines span events, links,
+  context propagation, sampling, and limits. `zigeffect` should interoperate
+  with that world, but it should keep effect-specific facts such as scopes,
+  typed errors, finalizers, service providers, schedules, and fibers as richer
+  runtime data rather than flattening them into generic attributes too early.
+- LangGraph-style checkpoint replay and forking show why agents need to revisit
+  past execution points. `zigeffect` should approach replay through typed effect
+  inputs, deterministic stores, and sandboxed reruns instead of implying
+  arbitrary stack-frame resurrection.
+- Temporal-style durable execution shows the value of event histories for
+  long-running workflows. `zigeffect` should not try to become a workflow
+  platform first, but it can make selected effect histories durable when an app
+  needs replay or audit.
+- Agent SDK tracing shows that agent workflows need traces for LLM calls, tool
+  calls, handoffs, guardrails, and custom events. `zigeffect` can complement
+  that by making the application runtime the agent is using equally queryable.
+
+The opportunity is between these systems: effect-native causality for agents
+working inside Zig application runtimes.
+
+## Current Foundation
+
+The current package already has the runtime ingredients:
+
+- Direct-style effects with typed success and failure channels.
+- Service requirements and provider declarations.
+- Layer graph validation, startup ordering, and memoized graph environments.
+- Runtime-managed scopes and reverse-order finalizers.
+- Exit-aware cleanup and structured `Exit` / `Cause` reports.
+- Deterministic fiber lifecycle semantics for fork, join, interrupt, and
+  scoped leases.
+- Deterministic coordination primitives with wait-state inspection.
+- Schedules, retry/repeat policies, and fake-clock integration.
+- Logger, metrics, tracing, and observability report services.
+- Test helpers and agent-readable reports.
+
+The first shared causal event model now exists. `CausalStore` records
+deterministic events; runtime, scope, fiber, layer graph, resource, schedule,
+exit, service, and app-level observability facts can attach to it; and agents
+can query snapshot, lineage, cause, resources, fibers, requirements, retries,
+and findings. Future work is about production adapters, durable histories,
+replay, workbench UI, and policy-controlled remediation rather than inventing
+the core event shape.
+
+## Two Agent Audiences
+
+The causal runtime should serve two related but different users.
+
+### Agents Maintaining `zigeffect`
+
+Agents working on the engine need to understand how runtime internals interact.
+The causal graph should make engine bugs easier to locate:
+
+- A scope finalizer did not run: inspect the scope lifecycle and owning effect.
+- A fiber status is wrong: inspect fork, run, interrupt, join, and child-scope
+  events.
+- A graph startup failure leaks resources: inspect layer startup order and
+  graph startup finalizers.
+- A schedule behaves incorrectly: inspect retry decisions, delays, clock
+  reads, and reset state.
+- A test assertion fails: query the exact runtime path rather than scanning a
+  long text report.
+
+This turns engine tests into executable traces that explain themselves.
+
+### Agents Understanding Apps Built With `zigeffect`
+
+Agents working on Yachdee or third-party apps need app-level understanding:
+
+- Which app service failed and what declared requirement supplied it?
+- Which layer built the database, cache, queue, AI client, or config service?
+- Which domain effect produced a typed app error?
+- Which resource was still open at request or job completion?
+- Which retry loop is masking upstream instability?
+- Which trace/span connects a user-visible failure to a dependency, schedule,
+  or finalizer?
+
+This lets app agents surface issues, propose fixes, and produce better incident
+summaries without guessing from logs.
+
+## Use-Case Atlas
+
+The runtime graph should be designed around concrete jobs, not around generic
+telemetry collection.
+
+### 1. Engine Development And Regression Diagnosis
+
+When a `zigeffect` test fails, an agent should be able to inspect the exact
+runtime path:
+
+- the effect that ran
+- the runtime or graph environment that provided services
+- the scope that owned resources
+- the child fibers that were forked
+- the schedule decisions that retried work
+- the finalizer that failed or did not run
+- the `Exit` / `Cause` tree that explains the final result
+
+This turns engine work from "read several files and infer state" into "query
+the execution graph and edit the owning subsystem."
+
+Example questions:
+
+- Why did `forkScoped` leave a pending fiber?
+- Which finalizer changed a success into a cleanup failure?
+- Did graph validation happen before startup builders ran?
+- Did a retry test use fake time or wall-clock time?
+- Which service requirement was narrowed incorrectly?
+
+### 2. App Debugging And Support
+
+For apps built with `zigeffect`, the graph should explain the path from a
+user-visible failure back to typed runtime facts.
+
+Example questions:
+
+- Which domain effect returned `error.InvalidVesselDocument`?
+- Which layer supplied the document-analysis service?
+- Was the AI extractor retried, and did it fail before or after storage?
+- Which request trace owns the failing fiber?
+- Which resource was still open when the request scope closed?
+- Did an invalid config read happen during graph startup or per request?
+
+This is especially useful for Yachdee-style systems where a user action may
+cross auth, vessel registry, document vault, AI extraction, storage, and
+matching services.
+
+### 3. CI Failure Triage
+
+CI should be able to emit a causal artifact when a deterministic `zigeffect`
+test fails. An agent can then load the artifact and answer:
+
+- Was the failure a typed program error, defect, interruption, or finalizer
+  failure?
+- Which events occurred immediately before the assertion failed?
+- Did a service provider change between the passing and failing run?
+- Did the failure come from an app effect, a layer builder, or cleanup?
+
+The artifact should be small enough to attach to CI and structured enough to
+drive automatic issue summaries.
+
+### 4. Production Incident Understanding
+
+In production, the graph should be bounded and sampled, but still useful at
+breaker points: typed failures, timeouts, finalizer failures, retry exhaustion,
+or explicit diagnostic probes.
+
+Example questions:
+
+- Which service dependency caused the request to fail?
+- Did retries hide a degraded upstream dependency?
+- Which resource scope owned the connection or object that failed cleanup?
+- Did a graph-started singleton leak into a per-request scope?
+- Which trace span connects the user-visible failure to the effect cause?
+
+The first production posture is "explain and propose," not "mutate live state."
+
+### 5. Agent-Orchestrated Workflows
+
+The runtime can eventually become a substrate for agentic workflow execution.
+Instead of treating sub-agents as black-box command runners, each task can run
+as a typed effect with:
+
+- declared services
+- scoped resources
+- retry policies
+- fork/join relationships
+- structured exits
+- causal event output
+
+An agent manager can inspect bottlenecks, failed sub-tasks, leaked resources,
+and retry exhaustion without scraping logs from each worker.
+
+### 6. Performance And Cost Analysis
+
+The graph can expose cost-shaped runtime facts:
+
+- repeated retries against the same dependency
+- long-lived fibers on the critical path
+- resource scopes that stay open longer than expected
+- high-cardinality spans or logs
+- expensive effects that run when their result is not used
+- schedule policies that create too much waiting or too much churn
+
+This is not full profiling. It is effect-aware operational analysis: "which
+semantic runtime decisions made this workflow slow or expensive?"
+
+### 7. Security, Audit, And Data Hygiene
+
+Because `zigeffect` already models config and services, the graph can help
+agents answer safety questions:
+
+- Did a secret-looking value enter an exported event?
+- Which config descriptor supplied a value used by this effect?
+- Which service boundary handled external input?
+- Which effect emitted a log outside trace context?
+- Which remediation operation was proposed, approved, and applied?
+
+This matters if agents are allowed to suggest retries, provider replacement, or
+configuration changes.
+
+### 8. Teaching And Onboarding
+
+The graph can teach the runtime. A new contributor can run an example and ask:
+
+- What is the difference between graph startup scope and per-run scope?
+- Why did this resource close after the effect finished?
+- Why did this fiber get interrupted?
+- Which layer provided `Logger`?
+- Why is this failure a typed error rather than a defect?
+
+The same machinery that helps agents can help humans form the right mental
+model.
+
+## Canonical Scenarios
+
+These scenarios should drive examples, tests, and demos.
+
+### Missing Config During Layer Startup
+
+A database layer requires a DSN from `Config`. Startup fails with a typed
+`MissingConfig` error. The graph shows:
+
+- `ConfigLayer` provided `Config`
+- `DatabaseLayer` required `Config`
+- `DatabaseLayer` read `database.dsn`
+- startup failed before the app graph became runnable
+- already-started providers were finalized
+
+Agent action: propose a config descriptor default, deployment config fix, or
+test fixture update.
+
+### Cleanup Failure After Program Failure
+
+An effect fails with `error.InvalidInput`, then a finalizer also fails while
+closing a resource. The graph shows:
+
+- original typed program failure
+- resource owner scope
+- finalizer event
+- combined `Cause.failure_then_finalizer_failure`
+
+Agent action: preserve the original failure while fixing cleanup handling and
+adding a regression test.
+
+### Parent Scope Interrupts Child Fiber
+
+A graph-backed service forks a child fiber under a startup or request scope.
+The parent closes while the child is still pending. The graph shows:
+
+- parent scope
+- child fiber id
+- fork event
+- interrupt event caused by scope close
+- child scope cleanup
+
+Agent action: decide whether the child should be awaited, detached under a
+longer-lived scope, or explicitly interrupted sooner.
+
+### Retry Exhaustion Masks The First Failure
+
+An HTTP-like service fails several times under a backoff schedule. The final
+result is retry exhaustion, but the first typed failure explains the real
+problem. The graph shows:
+
+- first typed failure
+- each schedule decision
+- delay and attempt count
+- final exhausted exit
+
+Agent action: report the upstream issue, tune the schedule, or make the typed
+failure more specific.
+
+### App Incident With Trace Context
+
+A request fails in an app effect. The graph connects:
+
+- request span
+- domain effect
+- service provider
+- resource scope
+- retry policy
+- typed failure
+- emitted logs and metrics
+
+Agent action: produce an incident summary with event ids, user impact, likely
+cause, and a code or config patch.
+
+## Maturity Ladder
+
+The project should grow in deliberate levels.
+
+### Level 0: Readable Reports
+
+Use existing `formatExit`, `formatCause`, dependency reports, and observability
+reports. Agents still read text, but the text is structured and stable.
+
+### Level 1: Causal Event Store
+
+Record bounded, deterministic events in memory. Export snapshots and text
+reports. No runtime hooks are required beyond manual events.
+
+### Level 2: Runtime Hooks
+
+Runtime, scopes, fibers, resources, layers, schedules, and exits emit events
+when a store is attached. Tests can assert event sequences.
+
+### Level 3: Agent Queries
+
+Expose lineage, cause, resource, fiber, requirement, retry, and finding
+queries. Agents diagnose failures from structured facts.
+
+### Level 4: CI And Local Tooling
+
+Failed tests produce causal artifacts. A local CLI or MCP-style tool lets
+agents ask runtime questions while working on code.
+
+### Level 5: App Diagnostics
+
+Apps label effects, layers, resources, and domains. Agents can explain
+user-visible incidents and suggest targeted fixes.
+
+### Level 6: Replay And Forking
+
+Deterministic test inputs and selected effect snapshots can be replayed or
+forked in a sandbox. This is inspired by workflow replay systems, but scoped to
+`zigeffect`'s typed effect boundaries.
+
+### Level 7: Policy-Controlled Remediation
+
+Agents can propose and, under policy, apply controlled actions: retry, graph
+restart, provider replacement, config-layer replacement, fiber interruption, or
+deterministic replay. Arbitrary memory patching remains out of scope.
+
+## Product And Tooling Directions
+
+The causal runtime can become several things at once.
+
+### Runtime Library
+
+The core package exposes causal events, stores, queries, and reports. This is
+the minimum useful layer and should remain dependency-light.
+
+### CLI And CI Artifact
+
+A CLI can run examples or tests and emit:
+
+- causal text report
+- causal CI report with event ids, findings, and next query suggestions
+- causal JSON
+- DOT graph
+- derived findings
+- regression hints
+
+CI can attach those artifacts to failed jobs so agents and humans start from
+the same evidence. The first formatter for this lane is
+`formatCausalCiReport(allocator, label, store)`, and
+`tools/causal_report.zig` is a small local demo harness that prints a sample
+report through the same public API.
+
+### Agent Tool Surface
+
+A local tool or MCP-style server can expose:
+
+- `causal.snapshot`
+- `causal.lineage`
+- `causal.cause`
+- `causal.resources`
+- `causal.fibers`
+- `causal.requirements`
+- `causal.retries`
+- `causal.findings`
+
+This is where the idea becomes agent-native: the runtime becomes something an
+agent can ask about directly.
+
+### Causal Workbench
+
+A future UI could visualize:
+
+- effect runs
+- scope trees
+- fiber trees
+- layer graphs
+- resource ownership
+- retry timelines
+- cause trees
+- trace/span overlays
+
+This is not needed for the first implementation, but it is a strong demo and
+developer-product direction.
+
+### OpenTelemetry Bridge
+
+OpenTelemetry spans already model trace DAGs, events, attributes, links, and
+sampling. `zigeffect` should bridge to that ecosystem while keeping effect
+semantics richer than generic spans.
+
+The bridge should map:
+
+- run/effect/fiber/layer events to spans or span events
+- service and resource facts to attributes
+- fork/join or batch relationships to span links where parent/child is not
+  precise
+- redaction and retention settings to exporter configuration
+
+### Embedded Graph Backend
+
+After the in-memory store proves the taxonomy, the correct database direction
+is an explicit adapter boundary:
+
+- the deterministic core keeps an in-memory event store and query API;
+- JSON Lines and DOT exporters provide portable artifacts;
+- OpenTelemetry export bridges production tracing ecosystems;
+- an embedded graph adapter handles high-volume local and agent-session graph
+  queries;
+- durable app or CI history adapters can be added separately when a workflow
+  needs cross-run audit or replay.
+
+NenDB is the current embedded graph adapter candidate because it is Zig-native
+and data-oriented. It should not become a core dependency until the event
+taxonomy, query protocol, and memory limits are proven. The first adapter
+contract should be small enough that another backend can replace it without
+changing runtime hooks.
+
+RoachGraph and CockroachDB remain the right direction for canonical application
+data in this repository. They are not the first causal-runtime database because
+the runtime needs local, low-overhead, allocator-aware observation before it
+needs distributed durability. A later durable artifact adapter can map causal
+events into Cockroach-backed storage for CI history, app audit, or fleet-level
+analysis.
+
+### Agentic Application Runtime
+
+Longer term, apps can expose a safe agent-facing runtime contract:
+
+- what services exist
+- what effects are available
+- what resources they own
+- what typed errors they return
+- what remediation actions are allowed
+
+That lets agents understand app behavior through declared runtime structure,
+not by wandering through source files first.
+
+## Design Principles
+
+- **Direct-style Zig stays the user boundary.** Users should still write
+  `fn run(ctx) Error!A`. Instrumentation should not turn application code into
+  a callback maze.
+- **Typed facts beat text inference.** Runtime events should preserve Zig
+  error-set names, service type names, fiber ids, scope ids, layer names, span
+  ids, and schedule labels.
+- **The graph is opt-in and bounded.** The deterministic core must remain
+  usable without telemetry. Event retention, sampling, and memory limits must
+  be explicit.
+- **Runtime hooks converge through services.** Add event sinks as services or
+  runtime configuration. Do not create parallel lookup or cleanup systems.
+- **Scopes still own cleanup.** Causal observation must describe scope cleanup,
+  not replace it.
+- **No hidden live mutation.** Agents may propose controlled retries,
+  replacements, or config changes. They should not patch arbitrary runtime
+  memory.
+- **Secrets stay secret.** Config values, request payloads, headers, and AI
+  prompts need redaction policies before they enter the graph.
+- **Determinism remains the compatibility suite.** The deterministic backend is
+  the reference implementation for causal events. Async backends must emit the
+  same event semantics.
+- **Causality must be earned.** Parent/child edges, links, and findings should
+  only claim causal relationships the runtime actually knows. Correlation is
+  useful, but the graph must label it honestly.
+- **Agent actions need evidence ids.** Every diagnosis, finding, and proposed
+  remediation should cite event ids or query results so humans can audit why
+  the agent believes it.
+
+## Causal Model
+
+The runtime graph is a typed event graph. It can be stored as append-only events
+plus derived indices, or as direct node/edge structures.
+
+### Node Types
+
+- `run`: one runtime invocation of an effect.
+- `effect`: a named effect blueprint or direct-style function boundary.
+- `layer`: a dependency layer declaration or startup node.
+- `service`: a provided or required service type.
+- `scope`: a runtime, graph startup, shared, or fiber-owned scope.
+- `resource`: a scoped resource acquisition.
+- `fiber`: a deterministic or async fiber.
+- `schedule`: a retry/repeat schedule and its current decision state.
+- `exit`: success, typed failure, defect, interruption, or cause.
+- `cause`: structured failure, finalizer failure, defect, interruption, or
+  nested cause.
+- `log`: structured log entry.
+- `metric`: counter, gauge, histogram, or snapshot observation.
+- `span`: tracing span with trace id and parent id.
+- `config`: config descriptor or redacted config read.
+- `assertion`: test or agent assertion result.
+
+### Edge Types
+
+- `runs`: runtime invocation runs an effect.
+- `requires`: effect or layer requires a service.
+- `provides`: layer or runtime provides a service.
+- `replaces`: layer replaces a previous provider.
+- `opens_scope`: run, graph, or fiber opens a scope.
+- `owns_scope`: parent scope owns a child scope.
+- `acquires`: effect or scope acquires a resource.
+- `finalizes`: scope runs a finalizer for a resource.
+- `forks`: fiber or runtime forks a child fiber.
+- `joins`: runtime or fiber joins another fiber.
+- `interrupts`: scope, runtime, or fiber interrupts a fiber.
+- `retries`: effect execution retries through a schedule.
+- `emits`: effect, fiber, or runtime emits log, metric, or span events.
+- `fails_with`: run, fiber, layer, finalizer, or effect exits with a cause.
+- `derived_from`: diagnostic, assertion, or agent finding derives from graph
+  facts.
+
+### Event Shape
+
+The first implementation should use an append-only event shape that is easy to
+store in memory, serialize, and test.
+
+```zig
+pub const CausalEventKind = enum {
+    run_started,
+    run_completed,
+    effect_started,
+    effect_completed,
+    layer_started,
+    layer_completed,
+    service_required,
+    service_provided,
+    scope_opened,
+    scope_closed,
+    resource_acquired,
+    resource_finalized,
+    fiber_forked,
+    fiber_started,
+    fiber_joined,
+    fiber_interrupted,
+    schedule_decision,
+    exit_recorded,
+    log_recorded,
+    metric_recorded,
+    span_recorded,
+    assertion_recorded,
+};
+
+pub const CausalEvent = struct {
+    id: u64,
+    kind: CausalEventKind,
+    run_id: ?u64 = null,
+    parent_id: ?u64 = null,
+    fiber_id: ?u64 = null,
+    scope_id: ?u64 = null,
+    trace_id: ?u64 = null,
+    span_id: ?u64 = null,
+    label: []const u8 = "",
+    type_name: []const u8 = "",
+    status: []const u8 = "",
+    redacted_detail: []const u8 = "",
+};
+```
+
+This shape is intentionally conservative. Richer payloads can be added through
+tagged unions once the event taxonomy is stable.
+
+## Agent Query Protocol
+
+Agents should interact with the causal runtime through explicit query tools,
+not arbitrary memory inspection.
+
+### Required Queries
+
+- `store.snapshot`: return bounded runtime state for active runs, scopes,
+  fibers, layers, services, spans, and recent exits.
+- `store.cause(event_id)`: return the causal parent chain for a run, fiber,
+  layer, exit, or finalizer event.
+- `store.lineage(event_id)`: return an event and its direct child events.
+- `store.resources(scope_id)`: return resources owned by a scope and their
+  finalizer state.
+- `store.fibers(status?)`: return fibers filtered by status.
+- `store.requirements(run_id)`: return required, provided, missing, duplicate,
+  or replaced services.
+- `store.retries(run_id)`: return schedule decisions and typed failures that
+  led to retries.
+- `store.findings`: return derived issues such as leaked resources,
+  unexpected retries, missing providers, finalizer failures, and failed spans.
+
+### Diagnostic Loop
+
+1. Runtime records causal events while code runs.
+2. A breaker condition occurs: typed failure, defect, finalizer failure,
+   timeout, failed assertion, explicit breakpoint, or agent query.
+3. The agent receives a compact pointer: run id, fiber id, scope id, span id,
+   or exit id.
+4. The agent queries lineage, cause, requirements, resources, and retries.
+5. The agent produces a diagnosis with evidence linked to event ids.
+6. The agent proposes a source code change, config change, test, or operational
+   action.
+7. The developer or policy layer approves and applies the action.
+8. Tests or the runtime query suite verify the issue is resolved.
+
+The shortest useful local loop is:
+
+```text
+run effect -> inspect causal snapshot -> query lineage -> inspect cause
+-> propose test or code fix
+```
+
+### Executable Example
+
+`examples/causal_readiness.zig` is the canonical first app example. It builds a
+layer graph with config, logger, metrics, tracing, and a database-like service,
+attaches a `CausalStore`, runs a readiness effect, preserves missing config as
+a typed `error.MissingConfig`, and prints both `formatCausalReport` and
+`formatCausalJson`.
+
+Agents should use it as a small rehearsal before diagnosing real app failures:
+
+1. Run `cd packages/zigeffect && zig build examples`.
+2. Inspect the causal snapshot or JSON output from the example.
+3. Query lineage around the failing `exit_recorded` or `assertion_recorded`
+   event.
+4. Query cause and requirements before proposing a config, layer, test, or code
+   fix.
+
+The scenario fixtures cover the first failure shapes agents should learn:
+
+- `examples/causal_missing_config.zig`: graph startup failure from missing
+  config, with service and layer evidence.
+- `examples/causal_cleanup_failure.zig`: typed program failure followed by a
+  failing finalizer, with resource lineage.
+- `examples/causal_scoped_fiber.zig`: parent scope closure interrupting a
+  scoped child fiber.
+- `examples/causal_retry_exhaustion.zig`: retry exhaustion with schedule
+  decisions and the first typed upstream failure.
+
+### Controlled Remediation
+
+The graph can support remediation, but it must be explicit:
+
+- retry an effect through a declared schedule
+- restart a layer graph with a new provider
+- replace a config layer with approved values
+- interrupt or drain a fiber tree
+- snapshot and replay deterministic test inputs
+
+The first implementation should not support arbitrary in-process mutation.
+
+## Storage Strategy
+
+The current backend boundary is `CausalBackend`. `CausalStore` remains the
+authoritative in-memory deterministic event store: it assigns event ids, keeps
+the test/query surface stable, and then calls an attached backend adapter after
+the event is stored.
+
+Backend callbacks are an adapter hook, not a durability guarantee. A failing
+adapter must not make the deterministic store lose events. Future adapters can
+adapt the same event sink contract:
+
+- `memory`: reference deterministic store for tests and local development
+- `json_lines`: artifact export for CLIs, CI, and agent tools
+- `dot`: artifact export for visual graph debugging
+- `opentelemetry`: production bridge for span and event ecosystems
+- `nendb_graph`: embedded graph-query adapter candidate for local agents
+- `cockroach_history`: durable app, CI, or fleet audit history
+- `async_stream`: future non-blocking event stream
+
+NenDB is attractive because it is Zig-native and data-oriented, but it should
+remain a backend adapter until the event model proves itself. CockroachDB or
+RoachGraph belongs on the durable-history side of the adapter boundary, not in
+the deterministic runtime core.
+
+## Derived Findings
+
+The runtime should eventually compute findings from the graph:
+
+- missing service requirement
+- duplicate provider without explicit replacement
+- layer startup failed after partial startup
+- resource acquired without finalization
+- finalizer failed after typed program failure
+- fiber interrupted by parent scope close
+- fiber remained pending at graph deinit
+- retry budget exhausted
+- schedule reset caused unexpected repeated work
+- span started but did not end
+- log or metric emitted outside expected trace context
+- config read missing or invalid
+- secret-looking value entered an unredacted field
+
+Findings should be stable structured objects so agents can cite evidence.
+
+## Implementation Phases
+
+### Phase 0: Dogfood Development Feedback
+
+Use existing deterministic reports and the first causal artifacts inside
+`zigeffect` development itself. This is the internal feedback lane, not the end
+state. It should help agents build the runtime by:
+
+- capturing failing test artifacts;
+- summarizing owning subsystem, event lineage, and likely invariant;
+- proposing tests, docs, or implementation changes with evidence ids;
+- comparing before/after causal traces;
+- feeding new findings back into the invariant and scenario catalog.
+
+This phase proves the agent workflow before production or app adapters exist.
+
+### Phase 1: Causal Event Core
+
+Add a deterministic `CausalStore` service, event types, snapshots, and a
+formatter. Prove it with manual events and no runtime hooks.
+
+### Phase 2: Runtime, Scope, And Fiber Hooks
+
+Instrument `Runtime`, shared runner paths, `Scope`, and `FiberRuntime` to emit
+run, scope, fiber, exit, and cleanup events when a causal store is present.
+
+### Phase 3: Layer, Service, Resource, And Schedule Hooks
+
+Connect layer graph startup, requirement validation, provider replacement,
+resource acquisition, finalizers, and schedule decisions into the graph.
+
+### Phase 4: Agent Query Surface
+
+Add snapshot, lineage, cause, resources, fibers, requirements, retries, and
+findings queries. Provide JSON output for tools and text output for humans.
+
+### Phase 5: App-Level Diagnostics
+
+Document the app pattern for labeling effects, services, layers, resources,
+and traces. Add examples showing an agent diagnosing a failing app effect and a
+resource leak.
+
+Initial app diagnostic coverage exists in `examples/causal_readiness.zig`.
+Future examples should add resource leaks, retries, and fiber interruption
+paths so agents can compare multiple failure shapes.
+
+### Phase 6: Engine Improvement Harness
+
+Use the graph inside `zigeffect` tests so agents can analyze engine regressions
+with structured runtime evidence.
+
+### Phase 7: Backend And Database Adapters
+
+Add optional exporters and graph backends after the event model is stable.
+Candidate adapters:
+
+- JSON Lines artifact adapter for tools and CI;
+- DOT adapter for visualization;
+- OpenTelemetry adapter for production span ecosystems;
+- NenDB embedded graph adapter for local/agent graph queries;
+- Cockroach/RoachGraph durable history adapter for app, CI, or fleet-level
+  audit once local semantics are stable;
+- future async backend event streams.
+
+### Phase 8: Controlled Remediation
+
+Add approved operations for retry, graph restart with provider replacement,
+fiber interruption, deterministic replay, and config-layer replacement.
+
+## Success Criteria
+
+The causal runtime is useful when:
+
+- a failing effect can be diagnosed from structured graph queries without
+  reading stdout;
+- a failed test can show the exact fiber, scope, resource, and cause lineage;
+- an app agent can connect a user-visible failure to a service provider, layer,
+  resource, retry policy, and trace span;
+- event storage remains bounded and deterministic under tests;
+- secrets do not appear in exported reports;
+- the same event semantics work for deterministic and future async backends;
+- the docs teach agents what to query before proposing fixes.
+
+## Non-Goals
+
+- No arbitrary hot-patching of runtime memory.
+- No production self-healing without explicit approval or policy.
+- No dependency on a graph database in the deterministic core.
+- No replacement for Zig compile errors or typed error sets.
+- No requirement that every local computation emits telemetry.
+- No claim that `zigeffect` invented tracing, workflow replay, or supervision.
+
+## Naming
+
+`NeuroEffect` is a strong product or research-program name. Inside the package,
+prefer neutral API names:
+
+- `CausalStore`
+- `CausalEvent`
+- `CausalSnapshot`
+- `CausalQuery`
+- `formatCausalReport`
+- `Runtime.withCausalStore`
+
+That keeps the public API clear while leaving room for a stronger external
+story.
