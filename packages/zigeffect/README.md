@@ -128,6 +128,21 @@ zig build causal-test
 The harness writes a text report, JSON event snapshot, and DOT graph under
 `.zig-cache/causal-artifacts/`.
 
+Query the default dogfood JSON artifact:
+
+```bash
+cd packages/zigeffect
+zig build causal-query -- cause 3
+zig build causal-query -- lineage 2
+zig build causal-query -- resources 1
+zig build causal-query -- fibers pending
+zig build causal-query -- requirements 1
+zig build causal-query -- retries 1
+```
+
+Use `zig build causal-query -- --file <path> <query> [argument]` to inspect a
+non-default artifact.
+
 Print an agent-friendly module scaffold:
 
 ```bash

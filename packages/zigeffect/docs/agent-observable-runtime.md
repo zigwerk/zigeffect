@@ -436,6 +436,19 @@ service, resource, fiber, and retry findings. It exits successfully unless
 artifact generation fails, because the findings are intentional evidence for
 the development-agent workflow.
 
+The first artifact query command is:
+
+```sh
+cd packages/zigeffect
+zig build causal-query -- cause 3
+```
+
+It reads `.zig-cache/causal-artifacts/zigeffect-causal-dogfood.json` by
+default and supports the query names emitted by `formatCausalCiReport`:
+`snapshot`, `cause`, `lineage`, `resources`, `fibers`, `requirements`, and
+`retries`. Use `--file <path>` after `--` to inspect an artifact from another
+run.
+
 ### Agent Tool Surface
 
 A local tool or MCP-style server can expose:
@@ -788,7 +801,9 @@ state. It should help agents build the runtime by:
 The first concrete command for this phase is `zig build causal-test` from
 `packages/zigeffect`. It writes text, JSON, and DOT artifacts to
 `.zig-cache/causal-artifacts/` so a development agent can cite event ids before
-proposing changes.
+proposing changes. The companion `zig build causal-query -- <query> [argument]`
+command makes the saved JSON artifact executable for the same next-query names
+shown in the text report.
 
 This phase proves the agent workflow before production or app adapters exist.
 

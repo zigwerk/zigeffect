@@ -313,6 +313,20 @@ Use the text report for finding summaries and next-query suggestions. Use the
 JSON artifact when citing event ids in a fix proposal. Use the DOT artifact
 when checking graph shape.
 
+Follow the report's next-query hints with:
+
+```sh
+zig build causal-query -- cause 3
+zig build causal-query -- lineage 2
+zig build causal-query -- resources 1
+zig build causal-query -- fibers pending
+zig build causal-query -- requirements 1
+zig build causal-query -- retries 1
+```
+
+Use `zig build causal-query -- --file <path> <query> [argument]` when querying
+an artifact from CI or a non-default harness run.
+
 This is the Phase 0 self-improving feedback lane: agents use `zigeffect`'s own
 causal runtime as evidence while improving `zigeffect`, then rerun the harness
 and package tests to compare behavior.
