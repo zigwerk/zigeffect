@@ -186,9 +186,10 @@ The baseline phase writes
 `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json` and runs the
 package-test gate. The after phase writes
 `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json`, writes
-`.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-compare.txt`, reruns the
-package-test gate, and prints next-query commands. Scenario targets use
-slug-specific before, after, and compare paths under
+`.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-compare.txt`, writes
+`.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-queries.txt`, reruns the
+package-test gate, and prints the report paths. Scenario targets use
+slug-specific before, after, compare, and query-report paths under
 `.zig-cache/causal-artifacts/`.
 
 Run a named scenario from the catalog:

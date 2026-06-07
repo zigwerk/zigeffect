@@ -145,6 +145,7 @@ runs the `package-tests` scenario as the package gate. It writes:
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-compare.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-queries.txt`
 
 Scenario loops compare command-level artifacts for the selected scenario and
 write slug-specific loop artifacts:
@@ -152,6 +153,10 @@ write slug-specific loop artifacts:
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-before.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-after.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-compare.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-queries.txt`
+
+The `*-queries.txt` artifact contains executed `causal-query` output selected
+from the after artifact's evidence events.
 
 Expected-failure scenarios are valid loop targets. For example,
 `missing-service-compile-fail` reports `expected_failure_observed` when the

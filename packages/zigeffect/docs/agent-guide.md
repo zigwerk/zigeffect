@@ -372,10 +372,11 @@ zig build causal-dev-loop -- after causal-scoped-fiber
 ```
 
 The baseline phase stores the before artifact and runs package tests. The after
-phase stores the after artifact, writes the compare report, reruns package
-tests, and prints next-query commands against the after artifact. Expected
+phase stores the after artifact, writes the compare report, writes an executed
+query report, reruns package tests, and prints the report paths. Expected
 failure scenarios, such as `missing-service-compile-fail`, are treated as
-successful evidence when the expected failure is observed.
+successful evidence when the expected failure is observed. Read the
+`*-queries.txt` artifact before proposing the next fix.
 
 Run a specific scenario from the catalog when your change touches its owner:
 

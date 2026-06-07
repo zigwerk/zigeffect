@@ -239,19 +239,20 @@ Exit criteria:
 - failed checks always point at artifacts, event ids, and suggested queries;
 - the loop does not require network or external services.
 
-Delivered first slice:
+Delivered slices:
 
 - `zig build causal-dev-loop -- baseline`;
 - `zig build causal-dev-loop -- after`;
 - stable before, after, and compare artifact paths;
 - package-test gate execution in both phases;
-- after-phase summary with compare output and next-query commands.
+- after-phase summary with compare output and report paths;
 - scenario-specific before/after command artifacts for registered scenarios;
 - expected-failure scenario handling with `expected_failure_observed` status.
+- automatic `causal-query` report artifacts selected from after-artifact
+  evidence.
 
 Remaining:
 
-- automatic execution of selected query helpers based on changed findings;
 - app-facing development loops once applications emit causal runtime artifacts.
 
 ### Milestone 8: Hardening And CI Readiness
