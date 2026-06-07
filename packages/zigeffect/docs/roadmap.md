@@ -526,6 +526,10 @@ metrics, and traces.
 - Delivered: `zig build causal-remediation-decision -- local approve|reject
   [scenario]` writes approved or rejected decision records for pending audits
   while keeping `applied=false`.
+- Planned next: `zig build causal-dev-session -- start|assess|status
+  [scenario]`, a local coordinator for the self-improving development harness
+  described in
+  `docs/superpowers/specs/2026-06-07-zigeffect-self-improving-dev-harness-roadmap.md`.
 - Delivered: `zig build causal-artifacts` prints a deterministic retention
   manifest with upload globs and dogfood, scenario, and dev-loop artifact paths
   for agents and CI.
