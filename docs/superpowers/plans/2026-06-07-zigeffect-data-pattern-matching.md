@@ -151,7 +151,7 @@ Expected: still FAIL until data skeletons are introduced in later tasks.
 - Modify: `packages/zigeffect/src/traits/root.zig`
 - Create: `packages/zigeffect/test/traits_test.zig`
 
-- [ ] **Step 1: Write failing trait tests**
+- [x] **Step 1: Write failing trait tests**
 
 Create `packages/zigeffect/test/traits_test.zig` with tests for:
 
@@ -181,7 +181,7 @@ test "Hash and Order produce stable basic behavior" {
 }
 ```
 
-- [ ] **Step 2: Run failing trait tests**
+- [x] **Step 2: Run failing trait tests**
 
 Run:
 
@@ -191,11 +191,11 @@ cd packages/zigeffect && zig build test-raw
 
 Expected: FAIL because `fx.traits.equals`, `hash`, and `compare` do not exist.
 
-- [ ] **Step 3: Implement traits**
+- [x] **Step 3: Implement traits**
 
 Implement `equals`, `hash`, `compare`, `format`, and redaction marker exports.
 
-- [ ] **Step 4: Run trait tests**
+- [x] **Step 4: Run trait tests**
 
 Run:
 
