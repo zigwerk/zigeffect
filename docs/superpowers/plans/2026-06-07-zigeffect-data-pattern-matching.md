@@ -358,17 +358,17 @@ Expected: PASS for tagged matcher tests.
 - Create: `packages/zigeffect/test/compile_fail/match_wrong_payload.zig`
 - Modify: `packages/zigeffect/test/layer_test.zig`
 
-- [ ] **Step 1: Add compile-fail fixtures**
+- [x] **Step 1: Add compile-fail fixtures**
 
 Each fixture imports `zigeffect`, defines a small `union(enum)`, and calls
 `fx.match.exhaustive` with one invalid handler condition.
 
-- [ ] **Step 2: Add diagnostic assertions**
+- [x] **Step 2: Add diagnostic assertions**
 
 Extend `layer_test.zig` compile-fail coverage to assert diagnostic text such as
 `zigeffect match exhaustive missing handler` and `zigeffect match handler payload mismatch`.
 
-- [ ] **Step 3: Run compile-fail tests**
+- [x] **Step 3: Run compile-fail tests**
 
 Run:
 

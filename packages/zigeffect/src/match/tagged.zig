@@ -100,19 +100,28 @@ fn hasUnionField(comptime T: type, comptime name: []const u8) bool {
 fn callHandler(comptime Return: type, handler: anytype, payload: anytype) Return {
     const Handler = @TypeOf(handler);
     return switch (@typeInfo(Handler)) {
-        .@"fn" => |function| callFunction(Return, handler, function.params.len, payload),
+        .@"fn" => |function_info| callFunction(Return, handler, function_info, payload),
         .pointer => |pointer| switch (@typeInfo(pointer.child)) {
-            .@"fn" => |function| callFunction(Return, handler, function.params.len, payload),
+            .@"fn" => |function_info| callFunction(Return, handler, function_info, payload),
             else => callValueHandler(Return, handler, payload),
         },
         else => callValueHandler(Return, handler, payload),
     };
 }
 
-fn callFunction(comptime Return: type, function: anytype, comptime param_count: usize, payload: anytype) Return {
-    return switch (param_count) {
-        0 => coerceReturn(Return, function()),
-        1 => coerceReturn(Return, function(payload)),
+fn callFunction(comptime Return: type, function: anytype, comptime function_info: anytype, payload: anytype) Return {
+    validateFunctionReturn(Return, function_info.return_type);
+    return switch (function_info.params.len) {
+        0 => {
+            if (comptime @TypeOf(payload) != void) {
+                @compileError("zigeffect match handler payload mismatch: tag carries " ++ @typeName(@TypeOf(payload)) ++ " but handler accepts no arguments");
+            }
+            return coerceReturn(Return, function());
+        },
+        1 => {
+            validateFunctionPayload(@TypeOf(payload), function_info.params[0].type);
+            return coerceReturn(Return, function(payload));
+        },
         else => @compileError("zigeffect match handlers must accept zero or one argument"),
     };
 }
@@ -126,4 +135,20 @@ fn callValueHandler(comptime Return: type, handler: anytype, payload: anytype) R
 
 fn coerceReturn(comptime Return: type, value: anytype) Return {
     return value;
+}
+
+fn validateFunctionReturn(comptime Return: type, comptime actual_return: ?type) void {
+    const Actual = actual_return orelse {
+        @compileError("zigeffect match handler return mismatch: handler has no concrete return type");
+    };
+    if (comptime Actual != Return) {
+        @compileError("zigeffect match handler return mismatch: expected " ++ @typeName(Return) ++ ", got " ++ @typeName(Actual));
+    }
+}
+
+fn validateFunctionPayload(comptime Payload: type, comptime expected_payload: ?type) void {
+    const Expected = expected_payload orelse return;
+    if (comptime Expected != Payload) {
+        @compileError("zigeffect match handler payload mismatch: expected " ++ @typeName(Payload) ++ ", handler accepts " ++ @typeName(Expected));
+    }
 }

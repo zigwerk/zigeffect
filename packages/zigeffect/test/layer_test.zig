@@ -1108,3 +1108,31 @@ test "compile fail fixture captures fiber environment mismatch diagnostics" {
         "api: FiberRuntime.fork",
     );
 }
+test "compile fail fixture captures match missing handler diagnostics" {
+    try expectCompileFailDiagnostic(
+        "match_missing_handler.zig",
+        ".zig-cache/match_missing_handler_compile_fail.txt",
+        "zigeffect match exhaustive missing handler for tag 'failed'",
+    );
+}
+test "compile fail fixture captures match unknown handler diagnostics" {
+    try expectCompileFailDiagnostic(
+        "match_unknown_handler.zig",
+        ".zig-cache/match_unknown_handler_compile_fail.txt",
+        "zigeffect match handler 'done' is not a tag",
+    );
+}
+test "compile fail fixture captures match return diagnostics" {
+    try expectCompileFailDiagnostic(
+        "match_wrong_return.zig",
+        ".zig-cache/match_wrong_return_compile_fail.txt",
+        "zigeffect match handler return mismatch",
+    );
+}
+test "compile fail fixture captures match payload diagnostics" {
+    try expectCompileFailDiagnostic(
+        "match_wrong_payload.zig",
+        ".zig-cache/match_wrong_payload_compile_fail.txt",
+        "zigeffect match handler payload mismatch",
+    );
+}
