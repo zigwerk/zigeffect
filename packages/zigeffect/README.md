@@ -285,10 +285,11 @@ package-test gate. The after phase writes
 `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json`, writes
 `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-compare.txt`, writes
 `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-queries.txt`, writes
-`.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-advice.txt`, reruns the
+`.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-advice.txt`, writes
+`.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-verdict.json`, reruns the
 package-test gate, and prints the report paths. Scenario targets use
-slug-specific before, after, compare, query-report, and advice-report paths under
-`.zig-cache/causal-artifacts/`.
+slug-specific before, after, compare, query-report, advice-report, and verdict
+paths under `.zig-cache/causal-artifacts/`.
 
 Run a named scenario from the catalog:
 
@@ -330,6 +331,26 @@ exact `causal-query` commands, but they do not generate patches or apply
 remediation. Single-artifact advice marks actions as `status=observed`;
 before-aware advice marks unchanged evidence as `status=persisting` and
 after-only evidence as `status=new`.
+
+Read the local verdict and generate agent-facing follow-up artifacts:
+
+```bash
+zig build causal-dev-agent -- local
+zig build causal-diagnosis -- local
+zig build causal-remediation-plan -- local
+```
+
+For scenario targets, pass the same scenario slug:
+
+```bash
+zig build causal-dev-agent -- local causal-scoped-fiber
+zig build causal-diagnosis -- local causal-scoped-fiber
+zig build causal-remediation-plan -- local causal-scoped-fiber
+```
+
+`causal-dev-agent` prints the inspection order, `causal-diagnosis` writes
+`*-diagnosis.txt`, and `causal-remediation-plan` writes
+`*-remediation-plan.md`. All three are deterministic and non-mutating.
 
 Compare two saved causal JSON artifacts:
 

@@ -518,6 +518,8 @@ metrics, and traces.
   dev-loop verdicts into deterministic agent inspection plans.
 - Delivered: `zig build causal-diagnosis -- local [scenario]` writes
   patch-ready, non-mutating diagnosis reports from local dev-loop artifacts.
+- Delivered: `zig build causal-remediation-plan -- local [scenario]` writes
+  evidence-bound, non-mutating remediation plans from local dev-loop artifacts.
 - Delivered: `zig build causal-artifacts` prints a deterministic retention
   manifest with upload globs and dogfood, scenario, and dev-loop artifact paths
   for agents and CI.
