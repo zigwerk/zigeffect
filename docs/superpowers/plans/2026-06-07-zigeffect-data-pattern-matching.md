@@ -552,7 +552,7 @@ Expected: PASS.
 **Files:**
 - Review all files touched by Tasks 1-9.
 
-- [ ] **Step 1: Run package gate**
+- [x] **Step 1: Run package gate**
 
 Run:
 
@@ -562,7 +562,7 @@ bun run zigeffect:test
 
 Expected: PASS.
 
-- [ ] **Step 2: Run workspace Zig gate**
+- [x] **Step 2: Run workspace Zig gate**
 
 Run:
 
@@ -572,7 +572,7 @@ bun run zig:test
 
 Expected: PASS.
 
-- [ ] **Step 3: Run TypeScript gate**
+- [x] **Step 3: Run TypeScript gate**
 
 Run:
 
@@ -582,7 +582,7 @@ bun run typecheck
 
 Expected: PASS.
 
-- [ ] **Step 4: Review git diff**
+- [x] **Step 4: Review git diff**
 
 Run:
 
