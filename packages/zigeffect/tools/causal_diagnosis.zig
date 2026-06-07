@@ -128,7 +128,13 @@ fn parseAdviceActions(allocator: std.mem.Allocator, advice_report: []const u8) !
 }
 
 fn parseAdviceActionLine(allocator: std.mem.Allocator, line: []const u8) !AdviceAction {
-    var tokens = std.mem.splitScalar(u8, line, ' ');
+    const label_marker = " label=";
+    const action_prefix, const label = if (std.mem.indexOf(u8, line, label_marker)) |label_index|
+        .{ line[0..label_index], line[label_index + label_marker.len ..] }
+    else
+        .{ line, null };
+
+    var tokens = std.mem.splitScalar(u8, action_prefix, ' ');
     _ = tokens.next() orelse return error.InvalidAdviceActionLine;
     const action_keyword = tokens.next() orelse return error.InvalidAdviceActionLine;
     if (!std.mem.eql(u8, action_keyword, "action")) return error.InvalidAdviceActionLine;
@@ -137,7 +143,6 @@ fn parseAdviceActionLine(allocator: std.mem.Allocator, line: []const u8) !Advice
     var status: ?[]const u8 = null;
     var event_id: ?u64 = null;
     var kind: ?[]const u8 = null;
-    var label: ?[]const u8 = null;
     while (tokens.next()) |token| {
         if (std.mem.startsWith(u8, token, "status=")) {
             status = token["status=".len..];
@@ -145,8 +150,6 @@ fn parseAdviceActionLine(allocator: std.mem.Allocator, line: []const u8) !Advice
             event_id = try std.fmt.parseInt(u64, token["event=".len..], 10);
         } else if (std.mem.startsWith(u8, token, "kind=")) {
             kind = token["kind=".len..];
-        } else if (std.mem.startsWith(u8, token, "label=")) {
-            label = token["label=".len..];
         }
     }
 
@@ -520,6 +523,21 @@ test "advice action parser captures action status event kind and label" {
     try std.testing.expectEqual(@as(u64, 3), actions[0].event_id);
     try std.testing.expectEqualStrings("service_required", actions[0].kind);
     try std.testing.expectEqualStrings("Config", actions[0].label.?);
+}
+
+test "advice action parser preserves labels containing spaces" {
+    const report =
+        \\zigeffect causal advice report
+        \\artifact: .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json
+        \\actions: 1
+        \\- action close-resource status=persisting event=4 kind=resource_acquired label=dogfood database
+        \\
+    ;
+    const actions = try parseAdviceActions(std.testing.allocator, report);
+    defer deinitAdviceActions(std.testing.allocator, actions);
+
+    try std.testing.expectEqual(@as(usize, 1), actions.len);
+    try std.testing.expectEqualStrings("dogfood database", actions[0].label.?);
 }
 
 test "action mapping names subsystem and fix category" {
