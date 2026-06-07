@@ -258,7 +258,7 @@ const sample_refine_existing_registry_patch_json =
     \\  "target": "causal-scoped-fiber",
     \\  "scenario_slug": "causal-scoped-fiber",
     \\  "scenario_conflict": false,
-    \\  "known_invariant_ids": ["scope-finalizers-release-on-success"],
+    \\  "known_invariant_ids": ["scoped-fiber-must-finish-before-scope-close"],
     \\  "new_invariant_ids": [],
     \\  "review_checklist": ["Run the scenario after applying the registry patch."],
     \\  "guardrails": ["This registry patch is generated from evidence but requires explicit review."]
@@ -388,15 +388,16 @@ const ReadinessInput = struct {
     policy: []const u8,
     reason: []const u8,
     verified_commands: []const []const u8,
+    scenario_docs: []const u8 = "",
 };
 ```
 
 - [ ] Implement `validateRegistryPatch`, `evaluateReadiness`, `requiredVerificationCommands`,
   `scenarioHasPlaceholderArgv`, `appendCheck`, `checkPassed`, `checkFailed`,
   and `statusText`.
-- [ ] Implement docs check by reading
-  `packages/zigeffect/docs/causal-scenarios.md` when the file exists. In tests,
-  treat a missing docs file as a failed `scenario-docs-updated` check.
+- [ ] Implement docs check from `ReadinessInput.scenario_docs`. Task 4 reads
+  `packages/zigeffect/docs/causal-scenarios.md` and passes its contents into
+  the evaluator.
 - [ ] Run `cd packages/zigeffect && zig build examples`.
 - [ ] Commit:
 
