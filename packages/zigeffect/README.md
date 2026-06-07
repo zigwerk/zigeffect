@@ -254,9 +254,10 @@ The baseline phase writes
 package-test gate. The after phase writes
 `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json`, writes
 `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-compare.txt`, writes
-`.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-queries.txt`, reruns the
+`.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-queries.txt`, writes
+`.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-advice.txt`, reruns the
 package-test gate, and prints the report paths. Scenario targets use
-slug-specific before, after, compare, and query-report paths under
+slug-specific before, after, compare, query-report, and advice-report paths under
 `.zig-cache/causal-artifacts/`.
 
 Run a named scenario from the catalog:
@@ -286,6 +287,16 @@ For example:
 ```bash
 zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-missing-service-compile-fail.json cause 3
 ```
+
+Generate deterministic next-action advice from a saved causal JSON artifact:
+
+```bash
+zig build causal-advice -- --file .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json
+```
+
+Advice reports are rule-based and non-mutating. They point at event ids and
+exact `causal-query` commands, but they do not generate patches or apply
+remediation.
 
 Compare two saved causal JSON artifacts:
 

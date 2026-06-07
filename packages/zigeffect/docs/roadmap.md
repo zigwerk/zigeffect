@@ -501,6 +501,9 @@ metrics, and traces.
 - Delivered: a controlled `zig build causal-package-failure-fixture` scenario
   proves package-shaped test failures write queryable causal artifacts without
   forcing the real package suite to fail.
+- Delivered: `zig build causal-advice -- --file <artifact>` and
+  after-phase loop advice reports turn causal evidence into deterministic,
+  non-mutating next actions for development agents.
 - Delivered: defensive causal event redaction for common secret-shaped
   key/value details, bearer values, and URL credentials.
 - Delivered: an optional `CausalBackend` event sink contract with adapter kinds

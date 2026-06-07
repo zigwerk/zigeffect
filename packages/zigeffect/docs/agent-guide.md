@@ -441,10 +441,21 @@ zig build causal-dev-loop -- after causal-scoped-fiber
 
 The baseline phase stores the before artifact and runs package tests. The after
 phase stores the after artifact, writes the compare report, writes an executed
-query report, reruns package tests, and prints the report paths. Expected
-failure scenarios, such as `missing-service-compile-fail`, are treated as
-successful evidence when the expected failure is observed. Read the
-`*-queries.txt` artifact before proposing the next fix.
+query report, writes deterministic advice, reruns package tests, and prints the
+report paths. Expected failure scenarios, such as
+`missing-service-compile-fail`, are treated as successful evidence when the
+expected failure is observed. Read the `*-advice.txt` artifact first, then use
+the `*-queries.txt` artifact for detailed event evidence before proposing the
+next fix.
+
+Generate advice directly from any saved causal JSON artifact:
+
+```sh
+zig build causal-advice -- --file .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json
+```
+
+Advice is deterministic and non-mutating. It names event ids, why the event is
+actionable, and exact `causal-query` commands.
 
 Run a specific scenario from the catalog when your change touches its owner:
 

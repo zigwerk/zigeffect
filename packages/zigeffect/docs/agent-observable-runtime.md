@@ -894,8 +894,13 @@ those pieces. The no-scenario form captures before/after dogfood evidence and
 runs package tests. The scenario form, such as
 `zig build causal-dev-loop -- baseline causal-scoped-fiber`, captures
 before/after command-level evidence for a registered scenario, writes a compare
-report, writes an executed `causal-query` report, reruns package tests, and
-prints the report paths.
+report, writes an executed `causal-query` report, writes a deterministic
+`causal-advice` report, reruns package tests, and prints the report paths.
+
+`zig build causal-advice -- --file <artifact>` turns a saved causal JSON
+artifact into bounded next actions. It is rule-based and non-mutating: it names
+event ids, explains why an event is actionable, and prints exact
+`causal-query` commands instead of generating patches.
 
 This phase proves the agent workflow before production or app adapters exist.
 

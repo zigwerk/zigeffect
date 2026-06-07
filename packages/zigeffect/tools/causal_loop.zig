@@ -2,6 +2,7 @@ const std = @import("std");
 const causal_test = @import("causal_test");
 const causal_compare = @import("causal_compare");
 const causal_query = @import("causal_query");
+const causal_advice = @import("causal_advice");
 const causal_run = @import("causal_run");
 const causal_artifact = @import("causal_artifact");
 
@@ -26,6 +27,7 @@ const LoopPaths = struct {
     after_json_path: []const u8,
     compare_report_path: []const u8,
     query_report_path: []const u8,
+    advice_report_path: []const u8,
     owned: bool = false,
 
     fn deinit(self: LoopPaths, allocator: std.mem.Allocator) void {
@@ -34,6 +36,7 @@ const LoopPaths = struct {
         allocator.free(self.after_json_path);
         allocator.free(self.compare_report_path);
         allocator.free(self.query_report_path);
+        allocator.free(self.advice_report_path);
     }
 };
 
@@ -133,6 +136,7 @@ fn loopPaths() LoopPaths {
         .after_json_path = causal_test.artifact_dir ++ "/zigeffect-causal-dev-loop-after.json",
         .compare_report_path = causal_test.artifact_dir ++ "/zigeffect-causal-dev-loop-compare.txt",
         .query_report_path = causal_test.artifact_dir ++ "/zigeffect-causal-dev-loop-queries.txt",
+        .advice_report_path = causal_test.artifact_dir ++ "/zigeffect-causal-dev-loop-advice.txt",
     };
 }
 
@@ -145,12 +149,15 @@ fn loopPathsForScenario(allocator: std.mem.Allocator, scenario_slug: []const u8)
     errdefer allocator.free(compare_report_path);
     const query_report_path = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-queries.txt", .{ causal_run.artifact_dir, scenario_slug });
     errdefer allocator.free(query_report_path);
+    const advice_report_path = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-advice.txt", .{ causal_run.artifact_dir, scenario_slug });
+    errdefer allocator.free(advice_report_path);
 
     return .{
         .before_json_path = before_json_path,
         .after_json_path = after_json_path,
         .compare_report_path = compare_report_path,
         .query_report_path = query_report_path,
+        .advice_report_path = advice_report_path,
         .owned = true,
     };
 }
@@ -183,13 +190,14 @@ fn formatSummary(allocator: std.mem.Allocator, input: SummaryInput) std.mem.Allo
             try output.print(allocator, "after json: {s}\n", .{input.paths.after_json_path});
             try output.print(allocator, "compare report: {s}\n", .{input.paths.compare_report_path});
             try output.print(allocator, "query report: {s}\n", .{input.paths.query_report_path});
+            try output.print(allocator, "advice report: {s}\n", .{input.paths.advice_report_path});
             try output.print(allocator, "package-tests: {s}\n", .{@tagName(input.package_status)});
             if (input.compare_report) |report| {
                 try output.appendSlice(allocator, "compare summary:\n");
                 try output.appendSlice(allocator, report);
                 if (report.len == 0 or report[report.len - 1] != '\n') try output.append(allocator, '\n');
             }
-            try output.appendSlice(allocator, "next: inspect query report\n");
+            try output.appendSlice(allocator, "next: inspect advice report\n");
         },
     }
 
@@ -521,6 +529,9 @@ fn runAfter(init: std.process.Init, scenario: ?causal_run.Scenario) !u8 {
     const query_report = try buildQueryReport(allocator, after, paths.after_json_path);
     defer allocator.free(query_report);
     try writeArtifact(init.io, paths.query_report_path, query_report);
+    const advice_report = try causal_advice.buildAdviceReport(allocator, after, paths.after_json_path);
+    defer allocator.free(advice_report);
+    try writeArtifact(init.io, paths.advice_report_path, advice_report);
 
     const package_status = if (scenario) |selected|
         if (std.mem.eql(u8, selected.slug, "package-tests"))
@@ -594,6 +605,10 @@ test "dev loop paths are stable" {
         ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-queries.txt",
         paths.query_report_path,
     );
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-advice.txt",
+        paths.advice_report_path,
+    );
 }
 
 test "scenario dev loop paths include scenario slug" {
@@ -615,6 +630,10 @@ test "scenario dev loop paths include scenario slug" {
     try std.testing.expectEqualStrings(
         ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-queries.txt",
         paths.query_report_path,
+    );
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-advice.txt",
+        paths.advice_report_path,
     );
 }
 
@@ -649,7 +668,8 @@ test "after summary includes compare and query report paths" {
     try std.testing.expect(std.mem.indexOf(u8, summary, "phase: after") != null);
     try std.testing.expect(std.mem.indexOf(u8, summary, "compare report: .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-compare.txt") != null);
     try std.testing.expect(std.mem.indexOf(u8, summary, "query report: .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-queries.txt") != null);
-    try std.testing.expect(std.mem.indexOf(u8, summary, "next: inspect query report") != null);
+    try std.testing.expect(std.mem.indexOf(u8, summary, "advice report: .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-advice.txt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, summary, "next: inspect advice report") != null);
 }
 
 test "package failure status exits nonzero" {

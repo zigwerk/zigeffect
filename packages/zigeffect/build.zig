@@ -227,6 +227,28 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_query_tool_tests = b.addRunArtifact(causal_query_tool_tests);
 
+    const causal_advice_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_advice.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_advice_tool_module.addImport("causal_artifact", causal_artifact_tool_module);
+
+    const causal_advice_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-advice",
+        .root_module = causal_advice_tool_module,
+    });
+    const run_causal_advice_tool = b.addRunArtifact(causal_advice_tool);
+    if (b.args) |args| run_causal_advice_tool.addArgs(args);
+    const causal_advice_step = b.step("causal-advice", "Suggest deterministic next actions from a saved causal JSON artifact");
+    causal_advice_step.dependOn(&run_causal_advice_tool.step);
+
+    const causal_advice_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-advice-tests",
+        .root_module = causal_advice_tool_module,
+    });
+    const run_causal_advice_tool_tests = b.addRunArtifact(causal_advice_tool_tests);
+
     const causal_compare_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_compare.zig"),
         .target = target,
@@ -301,6 +323,7 @@ pub fn build(b: *std.Build) void {
     causal_loop_tool_module.addImport("causal_test", causal_test_tool_module);
     causal_loop_tool_module.addImport("causal_compare", causal_compare_tool_module);
     causal_loop_tool_module.addImport("causal_query", causal_query_tool_module);
+    causal_loop_tool_module.addImport("causal_advice", causal_advice_tool_module);
     causal_loop_tool_module.addImport("causal_run", causal_run_tool_module);
     causal_loop_tool_module.addImport("causal_artifact", causal_artifact_tool_module);
 
@@ -340,6 +363,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_test_tool_tests.step);
     examples_step.dependOn(&causal_query_tool.step);
     examples_step.dependOn(&run_causal_query_tool_tests.step);
+    examples_step.dependOn(&causal_advice_tool.step);
+    examples_step.dependOn(&run_causal_advice_tool_tests.step);
     examples_step.dependOn(&causal_compare_tool.step);
     examples_step.dependOn(&run_causal_compare_tool_tests.step);
     examples_step.dependOn(&causal_run_tool.step);

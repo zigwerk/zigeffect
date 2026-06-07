@@ -31,6 +31,8 @@ development branch contains:
   rules.
 - `zig build causal-compare -- <before.json> <after.json>`, which compares
   saved causal artifacts.
+- `zig build causal-advice -- --file <artifact>`, which turns saved causal
+  evidence into deterministic, non-mutating next actions.
 
 The baseline proves that agents can cite causal evidence from `zigeffect`
 itself. The next step is to automate before/after capture around the scenario
@@ -250,6 +252,8 @@ Delivered slices:
 - expected-failure scenario handling with `expected_failure_observed` status.
 - automatic `causal-query` report artifacts selected from after-artifact
   evidence.
+- deterministic `causal-advice` reports that name event ids, explain bounded
+  next actions, and print exact follow-up query commands.
 
 Remaining:
 
