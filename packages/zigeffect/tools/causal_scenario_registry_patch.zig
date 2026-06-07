@@ -139,6 +139,11 @@ fn usage() []const u8 {
     return "usage: zig build causal-scenario-registry-patch -- --from-proposal <scenario-proposal.json>\n";
 }
 
+fn failUsage(err: anyerror) noreturn {
+    std.debug.print("causal-scenario-registry-patch error: {s}\n{s}", .{ @errorName(err), usage() });
+    std.process.exit(2);
+}
+
 fn validateScenarioProposal(proposal: ScenarioProposal) !ValidationResult {
     if (!std.mem.eql(u8, proposal.schema, proposal_schema)) return error.UnsupportedProposalSchema;
     if (proposal.schema_version != 1) return error.UnsupportedProposalSchema;
@@ -449,6 +454,59 @@ fn appendInvariantIdsJson(
 fn invariantExists(id: []const u8) bool {
     _ = causal_run.invariantById(id) catch return false;
     return true;
+}
+
+fn readRequiredArtifact(io: std.Io, allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => error.MissingRegistryPatchInput,
+        else => return err,
+    };
+}
+
+fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
+    const slash = std.mem.lastIndexOfScalar(u8, path, '/') orelse return error.InvalidArtifactPath;
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(io, path[0..slash]);
+    try cwd.writeFile(io, .{ .sub_path = path, .data = contents });
+}
+
+fn runFromProposal(init: std.process.Init, options: Options) !void {
+    const allocator = init.gpa;
+    const proposal_json = try readRequiredArtifact(init.io, allocator, options.proposal_path);
+    defer allocator.free(proposal_json);
+
+    const reports = try formatRegistryPatchReports(allocator, .{
+        .source_proposal_path = options.proposal_path,
+        .proposal_json = proposal_json,
+    });
+    defer reports.deinit(allocator);
+
+    const paths = try registryPatchPathsFromProposal(allocator, options.proposal_path);
+    defer paths.deinit(allocator);
+
+    try writeArtifact(init.io, paths.json, reports.json);
+    try writeArtifact(init.io, paths.text, reports.text);
+    try writeArtifact(init.io, paths.zig, reports.zig);
+    std.debug.print("{s}", .{reports.text});
+}
+
+pub fn main(init: std.process.Init) !void {
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    const options = parseOptions(args) catch |err| failUsage(err);
+    runFromProposal(init, options) catch |err| switch (err) {
+        error.MissingRegistryPatchInput,
+        error.InvalidProposalPath,
+        error.InvalidArtifactPath,
+        error.UnsupportedProposalSchema,
+        error.UnknownRecommendation,
+        error.MissingProposedScenario,
+        error.UnknownOwner,
+        error.UnknownExpectation,
+        error.UnknownFindingPolicy,
+        error.EmptyInvariantId,
+        => failUsage(err),
+        else => return err,
+    };
 }
 
 const sample_add_scenario_proposal_json =
