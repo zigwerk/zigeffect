@@ -88,6 +88,7 @@ Docs:
 - [EffectTS Parity](docs/effectts-parity.md)
 - [Module Pattern](docs/module-pattern.md)
 - [Agent-Observable Causal Runtime](docs/agent-observable-runtime.md)
+- [Causal Scenario Registry](docs/causal-scenarios.md)
 - [Readiness Example](examples/readiness.zig)
 - [Causal Readiness Example](examples/causal_readiness.zig)
 - [Causal Missing Config Scenario](examples/causal_missing_config.zig)
@@ -139,6 +140,13 @@ zig build causal-check
 when the dogfood fixture contains findings. Use it when a development or CI
 agent should treat causal findings as actionable failures.
 
+Print the registered causal scenarios and invariants:
+
+```bash
+cd packages/zigeffect
+zig build causal-catalog
+```
+
 Capture artifacts for a real expected compile-fail scenario:
 
 ```bash
@@ -156,6 +164,13 @@ zig build causal-dev-test
 `causal-dev-test` exits zero while package tests pass. If package tests fail
 during development, it writes scenario-specific artifacts under
 `.zig-cache/causal-artifacts/` before exiting nonzero.
+
+Run a named scenario from the catalog:
+
+```bash
+cd packages/zigeffect
+zig build causal-run -- causal-scoped-fiber
+```
 
 Query the default dogfood JSON artifact:
 

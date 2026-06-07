@@ -816,6 +816,11 @@ The former proves scenario-specific artifacts against an existing compile-fail
 fixture. The latter runs package tests through a causal harness and writes
 `package-tests` artifacts if those tests fail during development.
 
+`zig build causal-catalog` prints the current scenario registry and invariant
+catalog. Agents should use it to choose the smallest relevant scenario before
+changing runtime behavior, and should add a new scenario when a bug teaches a
+new invariant.
+
 This phase proves the agent workflow before production or app adapters exist.
 
 ### Phase 1: Causal Event Core

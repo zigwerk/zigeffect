@@ -236,6 +236,11 @@ pub fn build(b: *std.Build) void {
     const causal_run_step = b.step("causal-run", "Run a zigeffect command with causal failure capture");
     causal_run_step.dependOn(&run_causal_run_tool.step);
 
+    const run_causal_catalog_tool = b.addRunArtifact(causal_run_tool);
+    run_causal_catalog_tool.addArg("catalog");
+    const causal_catalog_step = b.step("causal-catalog", "Print the zigeffect causal scenario registry and invariant catalog");
+    causal_catalog_step.dependOn(&run_causal_catalog_tool.step);
+
     const run_causal_capture_missing_service_tool = b.addRunArtifact(causal_run_tool);
     run_causal_capture_missing_service_tool.addArg("missing-service-compile-fail");
     const causal_capture_missing_service_step = b.step("causal-capture-missing-service", "Capture causal artifacts for the missing-service compile-fail scenario");

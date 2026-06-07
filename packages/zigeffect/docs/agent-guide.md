@@ -329,6 +329,13 @@ zig build causal-check
 The check still writes artifacts before failing, so inspect the JSON with
 `causal-query` instead of rerunning blindly.
 
+Inspect the registered scenario and invariant catalog before changing runtime
+behavior:
+
+```sh
+zig build causal-catalog
+```
+
 Use the real command capture fixture to prove that non-fixture command failures
 leave scenario-specific artifacts:
 
@@ -344,6 +351,12 @@ zig build causal-dev-test
 
 When package tests are green, the command exits zero. When they fail, it writes
 `package-tests` causal artifacts before exiting nonzero.
+
+Run a specific scenario from the catalog when your change touches its owner:
+
+```sh
+zig build causal-run -- causal-scoped-fiber
+```
 
 Follow the report's next-query hints with:
 
@@ -368,6 +381,10 @@ zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-mi
 This is the Phase 0 self-improving feedback lane: agents use `zigeffect`'s own
 causal runtime as evidence while improving `zigeffect`, then rerun the harness
 and package tests to compare behavior.
+
+When a bug teaches a new runtime rule, add or update a catalog entry in
+`tools/causal_run.zig` and document it in `docs/causal-scenarios.md` before
+claiming the invariant is covered.
 
 Backend adapters are sinks, not the source of truth. Keep tests and local agent
 queries against the in-memory `CausalStore`; use `store.attachBackend` for

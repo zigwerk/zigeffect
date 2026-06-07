@@ -153,7 +153,7 @@ Delivered first slice:
 
 ### Milestone 5: Scenario Registry And Invariant Catalog
 
-Status: planned.
+Status: first registry/catalog slice delivered.
 
 Deliverables:
 
@@ -168,6 +168,13 @@ Exit criteria:
   path;
 - new runtime bugs can become regression scenarios without duplicating harness
   logic.
+
+Delivered first slice:
+
+- `zig build causal-catalog` prints registered scenarios and invariant rules;
+- `causal_run.zig` stores scenario owner, purpose, finding policy, artifact
+  paths, and invariant ids;
+- existing causal examples are registered as quiet-on-success scenarios.
 
 ### Milestone 6: Before/After Trace Comparison
 
