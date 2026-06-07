@@ -328,6 +328,89 @@ fn formatDecisionText(allocator: std.mem.Allocator, input: DecisionInput) ![]con
     return output.toOwnedSlice(allocator);
 }
 
+fn usage() []const u8 {
+    return "usage: zig build causal-remediation-decision -- local approve|reject [scenario] [--by <actor>] [--policy <policy>] [--reason <reason>]\n";
+}
+
+fn failUsage(err: anyerror) noreturn {
+    std.debug.print("causal-remediation-decision error: {s}\n{s}", .{ @errorName(err), usage() });
+    std.process.exit(2);
+}
+
+fn readArtifact(io: std.Io, allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => error.MissingRemediationDecisionInput,
+        else => return err,
+    };
+}
+
+fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
+    const slash = std.mem.lastIndexOfScalar(u8, path, '/') orelse return error.InvalidArtifactPath;
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(io, path[0..slash]);
+    try cwd.writeFile(io, .{ .sub_path = path, .data = contents });
+}
+
+fn runLocal(init: std.process.Init, options: DecisionOptions) !void {
+    const allocator = init.gpa;
+    const audit_path = if (options.scenario_slug) |slug| try localAuditJsonPathForScenario(allocator, slug) else localAuditJsonPath();
+    defer if (options.scenario_slug != null) allocator.free(audit_path);
+    const decision_json_path = if (options.scenario_slug) |slug| try localDecisionJsonPathForScenario(allocator, slug) else localDecisionJsonPath();
+    defer if (options.scenario_slug != null) allocator.free(decision_json_path);
+    const decision_text_path = if (options.scenario_slug) |slug| try localDecisionTextPathForScenario(allocator, slug) else localDecisionTextPath();
+    defer if (options.scenario_slug != null) allocator.free(decision_text_path);
+
+    const audit_json = try readArtifact(init.io, allocator, audit_path);
+    defer allocator.free(audit_json);
+    var parsed_audit = try std.json.parseFromSlice(AuditRecord, allocator, audit_json, .{ .ignore_unknown_fields = true });
+    defer parsed_audit.deinit();
+    try validateAuditRecord(parsed_audit.value);
+
+    const input = DecisionInput{
+        .audit_path = audit_path,
+        .audit = parsed_audit.value,
+        .options = options,
+    };
+
+    const json_report = try formatDecisionJson(allocator, input);
+    defer allocator.free(json_report);
+    const text_report = try formatDecisionText(allocator, input);
+    defer allocator.free(text_report);
+
+    try writeArtifact(init.io, decision_json_path, json_report);
+    try writeArtifact(init.io, decision_text_path, text_report);
+    std.debug.print("{s}", .{text_report});
+}
+
+pub fn main(init: std.process.Init) !void {
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    const options = parseDecisionOptions(args) catch |err| switch (err) {
+        error.MissingMode,
+        error.UnknownMode,
+        error.MissingDecision,
+        error.UnknownDecision,
+        error.DuplicateScenarioArgument,
+        error.UnknownFlag,
+        error.MissingFlagValue,
+        error.MissingRejectionReason,
+        => failUsage(err),
+    };
+
+    if (options.scenario_slug) |slug| {
+        _ = causal_run.scenarioByName(slug) catch |err| failUsage(err);
+    }
+
+    runLocal(init, options) catch |err| switch (err) {
+        error.MissingRemediationDecisionInput,
+        error.UnsupportedAuditSchema,
+        error.AuditAlreadyDecided,
+        error.AuditAlreadyApplied,
+        error.InvalidArtifactPath,
+        => failUsage(err),
+        else => return err,
+    };
+}
+
 const approved_audit_json =
     \\{
     \\  "schema": "zigeffect.causal.remediation-audit.v1",
@@ -481,4 +564,26 @@ test "decision text records rejection reason and guardrails" {
     try std.testing.expect(std.mem.indexOf(u8, text, "decision: rejected") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "reason: intentional fixture") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "Rejected proposals must not be used as permission for source edits.") != null);
+}
+
+test "usage names local decision shape" {
+    try std.testing.expectEqualStrings(
+        "usage: zig build causal-remediation-decision -- local approve|reject [scenario] [--by <actor>] [--policy <policy>] [--reason <reason>]\n",
+        usage(),
+    );
+}
+
+test "audit paths are stable for default and scenario targets" {
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-audit.json",
+        localAuditJsonPath(),
+    );
+
+    const scenario = try localAuditJsonPathForScenario(std.testing.allocator, "causal-scoped-fiber");
+    defer std.testing.allocator.free(scenario);
+
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-remediation-audit.json",
+        scenario,
+    );
 }
