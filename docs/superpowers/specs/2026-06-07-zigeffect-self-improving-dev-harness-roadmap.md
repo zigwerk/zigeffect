@@ -255,6 +255,18 @@ Delivered:
 Compare session, audit, decision, proposal, and after artifacts across a
 development cycle.
 
+First branch scope:
+
+```sh
+zig build causal-audit-chain -- local [scenario]
+```
+
+The command reads the current local session, remediation audit, optional
+decision, patch proposal, before/after causal artifacts, and compare report. It
+writes one JSON/text workbench report that classifies proposal evidence ids as
+disappeared, persisting, appeared, or missing, then assigns an overall posture
+of `improved`, `unchanged`, `regressed`, or `inconclusive`.
+
 Exit criteria:
 
 - agents can say which event ids disappeared, persisted, or appeared;
@@ -370,13 +382,19 @@ Output:
 
 ## First Branch Recommendation
 
-Build Milestone 1 only:
+Build Milestone 4's first audit-chain comparison slice:
 
-- create `tools/causal_dev_session.zig`;
-- add `zig build causal-dev-session`;
-- add session JSON/text paths to `causal-artifacts`;
+- create `tools/causal_audit_chain.zig`;
+- add `zig build causal-audit-chain -- local [scenario]`;
+- read the current session, audit, optional decision, proposal, before/after
+  causal JSON, and compare report;
+- classify proposal event ids into disappeared, persisting, appeared, and
+  missing sets;
+- parse compare `finding delta` when available and fall back to event-id
+  classification;
+- add audit-chain JSON/text paths to `causal-artifacts`;
 - update README, agent guide, causal scenarios, and roadmap docs;
 - verify default and `causal-scoped-fiber` flows.
 
-Do not implement patch proposals, policy decisions, app-facing adapters, or
-source mutation in the first branch.
+Do not implement source mutation, policy-backed automatic approval, durable
+history, arbitrary snapshot comparison, or app-facing adapters in this branch.

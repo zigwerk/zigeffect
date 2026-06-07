@@ -324,6 +324,20 @@ Delivered patch-proposal slice:
 - implementation plan:
   `docs/superpowers/plans/2026-06-07-zigeffect-causal-patch-proposal.md`.
 
+Next audit-chain slice:
+
+- `zig build causal-audit-chain -- local [scenario]` compares the current
+  session, audit, optional decision, patch proposal, before/after causal
+  artifacts, and compare report;
+- the report classifies proposal evidence ids as disappeared, persisting,
+  appeared, or missing;
+- the report classifies the remediation as `improved`, `unchanged`,
+  `regressed`, or `inconclusive`;
+- detailed design:
+  `docs/superpowers/specs/2026-06-07-zigeffect-causal-audit-chain-comparison-design.md`;
+- implementation plan:
+  `docs/superpowers/plans/2026-06-07-zigeffect-causal-audit-chain-comparison.md`.
+
 #### Remediation-Control Roadmap
 
 This sub-roadmap is the concrete path from "agent can inspect evidence" to
@@ -336,9 +350,10 @@ This sub-roadmap is the concrete path from "agent can inspect evidence" to
 3. **Patch proposal artifact.** Add `causal-patch-proposal` so agents can write
    draft or approved patch-intent artifacts linked to audit evidence, decision
    evidence, event ids, guardrails, and required verification commands.
-4. **Remediation workbench loop.** Let agents compare audit/proposal outcomes
-   before and after a patch, including which event ids disappeared, persisted,
-   or appeared.
+4. **Remediation workbench loop.** Add `causal-audit-chain` so agents can
+   compare session, audit, decision, proposal, before/after artifacts, and
+   compare-report posture after a patch attempt, including which event ids
+   disappeared, persisted, appeared, or went missing.
 5. **App-facing reuse.** Reuse the same verdict, diagnosis, plan, audit,
    approval, and proposal vocabulary for apps built with `zigeffect`.
 
@@ -519,5 +534,6 @@ point: agents can cite event ids, source artifacts, verification commands,
 claim guardrails, and review state before any source-editing workflow is added.
 
 The next branch should not jump straight to patch application. It should build
-the `causal-dev-session` coordinator so agents can run the whole evidence chain
-reliably during ordinary core runtime development.
+the `causal-audit-chain` comparison so agents can prove whether an approved
+proposal actually improved, preserved, regressed, or failed to match the latest
+causal evidence.
