@@ -43,7 +43,7 @@
 - Create: `packages/zigeffect/tools/causal_remediation_decision.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Write failing parser and formatter tests**
+- [x] **Step 1: Write failing parser and formatter tests**
 
 Create `packages/zigeffect/tools/causal_remediation_decision.zig` with these
 initial types, fixtures, and tests. These tests intentionally reference helpers
@@ -256,7 +256,7 @@ test "decision text records rejection reason and guardrails" {
 }
 ```
 
-- [ ] **Step 2: Wire only the test module and verify red**
+- [x] **Step 2: Wire only the test module and verify red**
 
 Modify `packages/zigeffect/build.zig` after `causal_remediation_audit_tool_module`:
 
@@ -291,7 +291,7 @@ zig build examples
 Expected: FAIL because path helpers, option parsing, audit validation, and
 formatters are missing.
 
-- [ ] **Step 3: Implement parser, validation, and deterministic formatters**
+- [x] **Step 3: Implement parser, validation, and deterministic formatters**
 
 Implement these helpers in `causal_remediation_decision.zig`:
 
@@ -351,7 +351,7 @@ Decision guardrails:
 - approved: `Approval does not apply source changes.`, `Run required verification after any future patch before claiming a fix.`
 - rejected: `Rejected proposals must not be used as permission for source edits.`, `Create a new audit if evidence changes.`
 
-- [ ] **Step 4: Run green verification for Task 1**
+- [x] **Step 4: Run green verification for Task 1**
 
 Run:
 
@@ -363,7 +363,7 @@ zig build examples
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 Run:
 
@@ -379,7 +379,7 @@ git commit -m "feat(zigeffect): add causal remediation decision formatter"
 - Modify: `packages/zigeffect/tools/causal_remediation_decision.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Add failing CLI/path tests**
+- [x] **Step 1: Add failing CLI/path tests**
 
 Add tests for usage text, local input paths, and scenario path validation:
 
@@ -416,7 +416,7 @@ zig build examples
 
 Expected: FAIL because CLI helpers or executable wiring are still incomplete.
 
-- [ ] **Step 2: Implement artifact IO and `runLocal`**
+- [x] **Step 2: Implement artifact IO and `runLocal`**
 
 Add IO helpers:
 
@@ -446,7 +446,7 @@ fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
 6. Write both decision artifacts.
 7. Print the text report.
 
-- [ ] **Step 3: Implement CLI `main` and usage errors**
+- [x] **Step 3: Implement CLI `main` and usage errors**
 
 Add:
 
@@ -486,7 +486,7 @@ error.AuditAlreadyApplied,
 error.InvalidArtifactPath,
 ```
 
-- [ ] **Step 4: Wire executable build step**
+- [x] **Step 4: Wire executable build step**
 
 Modify `packages/zigeffect/build.zig` after the audit executable:
 
@@ -507,7 +507,7 @@ Add the executable dependency to `examples_step`:
     examples_step.dependOn(&causal_remediation_decision_tool.step);
 ```
 
-- [ ] **Step 5: Run green verification for Task 2**
+- [x] **Step 5: Run green verification for Task 2**
 
 Run:
 
@@ -519,7 +519,7 @@ zig build examples
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 6: Commit Task 2**
 
 Run:
 
@@ -539,7 +539,7 @@ git commit -m "feat(zigeffect): wire causal remediation decision command"
 - Modify: `docs/superpowers/specs/2026-06-07-zigeffect-causal-self-improvement-roadmap.md`
 - Modify: `packages/zigeffect/docs/roadmap.md`
 
-- [ ] **Step 1: Write failing manifest expectations**
+- [x] **Step 1: Write failing manifest expectations**
 
 In `packages/zigeffect/tools/causal_artifacts.zig`, extend the default manifest
 test with:
@@ -565,7 +565,7 @@ zig build examples
 
 Expected: FAIL because the manifest does not print decision paths yet.
 
-- [ ] **Step 2: Add decision paths to manifest output**
+- [x] **Step 2: Add decision paths to manifest output**
 
 In `appendDefaultLoopArtifacts`, print:
 
@@ -581,7 +581,7 @@ In `appendScenarioLoopArtifacts`, print:
     try output.print(allocator, "  loop remediation decision text: {s}/zigeffect-causal-dev-loop-{s}-remediation-decision.txt\n", .{ causal_run.artifact_dir, slug });
 ```
 
-- [ ] **Step 3: Update docs**
+- [x] **Step 3: Update docs**
 
 Update `packages/zigeffect/README.md`, `packages/zigeffect/docs/agent-guide.md`,
 and `packages/zigeffect/docs/causal-scenarios.md` so the local workflow reads:
@@ -611,7 +611,7 @@ Update both roadmap files:
 - keep patch proposal artifacts, policy engine, application command, and
   app-facing loops as remaining work.
 
-- [ ] **Step 4: Run green verification for Task 3**
+- [x] **Step 4: Run green verification for Task 3**
 
 Run:
 
@@ -623,7 +623,7 @@ zig build examples
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
 Run:
 
@@ -638,7 +638,7 @@ git commit -m "docs(zigeffect): document causal remediation decision"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-06-07-zigeffect-causal-remediation-decision.md`
 
-- [ ] **Step 1: Verify default approval flow**
+- [x] **Step 1: Verify default approval flow**
 
 Run:
 
@@ -666,7 +666,7 @@ Expected: all commands exit zero. If the dogfood event ids change because the
 fixture changes, inspect the generated audit and update only the exact event-id
 assertion to match the new deterministic fixture.
 
-- [ ] **Step 2: Verify scenario rejection flow**
+- [x] **Step 2: Verify scenario rejection flow**
 
 Run:
 
@@ -690,7 +690,7 @@ rg 'Rejected proposals must not be used as permission for source edits' .zig-cac
 
 Expected: all commands exit zero.
 
-- [ ] **Step 3: Verify rejection requires reason and missing audit fails**
+- [x] **Step 3: Verify rejection requires reason and missing audit fails**
 
 Run:
 
@@ -714,7 +714,7 @@ printf "%s\n" "$output" | rg "causal-remediation-decision error: MissingRemediat
 Expected: both command groups exit zero because the commands fail as intended
 and the assertions match the stable error output.
 
-- [ ] **Step 4: Verify already-decided audit is rejected**
+- [x] **Step 4: Verify already-decided audit is rejected**
 
 Run:
 
@@ -736,7 +736,7 @@ printf "%s\n" "$output" | rg "causal-remediation-decision error: AuditAlreadyDec
 
 Expected: command exits nonzero and reports `AuditAlreadyDecided`.
 
-- [ ] **Step 5: Verify manifest paths**
+- [x] **Step 5: Verify manifest paths**
 
 Run:
 
@@ -751,7 +751,7 @@ rg "zigeffect-causal-dev-loop-causal-scoped-fiber-remediation-decision.txt" /tmp
 
 Expected: all commands exit zero.
 
-- [ ] **Step 6: Run full verification**
+- [x] **Step 6: Run full verification**
 
 Run:
 
@@ -766,11 +766,11 @@ bun run zig:test
 
 Expected: all commands exit zero.
 
-- [ ] **Step 7: Mark this implementation plan complete**
+- [x] **Step 7: Mark this implementation plan complete**
 
 Update every completed checkbox in this file from `- [ ]` to `- [x]`.
 
-- [ ] **Step 8: Commit final checklist update**
+- [x] **Step 8: Commit final checklist update**
 
 Run:
 
@@ -782,27 +782,27 @@ git commit -m "docs(zigeffect): complete causal remediation decision checklist"
 
 ## Completion Checklist
 
-- [ ] `causal-remediation-decision` writes default approval JSON and text
+- [x] `causal-remediation-decision` writes default approval JSON and text
   decision artifacts.
-- [ ] `causal-remediation-decision` writes scenario rejection JSON and text
+- [x] `causal-remediation-decision` writes scenario rejection JSON and text
   decision artifacts.
-- [ ] Decision JSON uses schema `zigeffect.causal.remediation-decision.v1`.
-- [ ] Decision JSON and text show `applied=false`.
-- [ ] Approved decisions show `approval_status=approved`.
-- [ ] Rejected decisions show `approval_status=rejected` and a required reason.
-- [ ] Decision artifacts cite source audit, verdict, diagnosis, remediation plan,
+- [x] Decision JSON uses schema `zigeffect.causal.remediation-decision.v1`.
+- [x] Decision JSON and text show `applied=false`.
+- [x] Approved decisions show `approval_status=approved`.
+- [x] Rejected decisions show `approval_status=rejected` and a required reason.
+- [x] Decision artifacts cite source audit, verdict, diagnosis, remediation plan,
   advice, query, and compare paths.
-- [ ] Decision artifacts copy event ids, verification commands, and claim
+- [x] Decision artifacts copy event ids, verification commands, and claim
   guardrails from the audit.
-- [ ] Decision artifacts include decision guardrails.
-- [ ] Reject without `--reason` fails with stable usage text.
-- [ ] Missing audit input fails with stable usage text.
-- [ ] Non-pending audit input fails with `AuditAlreadyDecided`.
-- [ ] Manifest, README, agent guide, causal scenarios, and roadmap docs mention
+- [x] Decision artifacts include decision guardrails.
+- [x] Reject without `--reason` fails with stable usage text.
+- [x] Missing audit input fails with stable usage text.
+- [x] Non-pending audit input fails with `AuditAlreadyDecided`.
+- [x] Manifest, README, agent guide, causal scenarios, and roadmap docs mention
   the decision command and artifacts.
-- [ ] `zig build examples` passes in `packages/zigeffect`.
-- [ ] `zig build test --summary none` passes in `packages/zigeffect`.
-- [ ] `bun run zig:test` passes at the repo root.
+- [x] `zig build examples` passes in `packages/zigeffect`.
+- [x] `zig build test --summary none` passes in `packages/zigeffect`.
+- [x] `bun run zig:test` passes at the repo root.
 
 ## Self-Review
 
