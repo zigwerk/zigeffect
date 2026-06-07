@@ -252,6 +252,8 @@ Delivered:
 
 ### Milestone 4: Audit Chain Comparison
 
+Status: first audit-chain comparison slice delivered.
+
 Compare session, audit, decision, proposal, and after artifacts across a
 development cycle.
 
@@ -273,6 +275,20 @@ Exit criteria:
 - a remediation can be classified as improved, unchanged, regressed, or
   inconclusive;
 - reports retain the claim guardrails from the source audit.
+
+Delivered:
+
+- `zig build causal-audit-chain -- local [scenario]` reads the current local
+  session, remediation audit, optional decision, patch proposal, before/after
+  causal artifacts, and compare report;
+- default and scenario reports are written as `*-audit-chain.json` and
+  `*-audit-chain.txt`;
+- reports preserve proposal approval status, `applied=false`, verification
+  commands, claim guardrails, proposal guardrails, and chain guardrails;
+- proposal event ids are classified as disappeared, persisting, appeared, or
+  missing;
+- assessment is reported as `improved`, `unchanged`, `regressed`, or
+  `inconclusive`.
 
 ### Milestone 5: Scenario Learning Loop
 
@@ -380,21 +396,31 @@ Output:
 - Clear scenarios do not produce speculative patch advice.
 - Approval and application remain separate from evidence generation.
 
-## First Branch Recommendation
+## Completed Branch Summary
 
-Build Milestone 4's first audit-chain comparison slice:
+Milestone 4's first audit-chain comparison slice is implemented:
 
-- create `tools/causal_audit_chain.zig`;
-- add `zig build causal-audit-chain -- local [scenario]`;
-- read the current session, audit, optional decision, proposal, before/after
+- `tools/causal_audit_chain.zig` owns the read-only chain report;
+- `zig build causal-audit-chain -- local [scenario]` reads the current session,
+  audit, optional decision, proposal, before/after causal JSON, and compare
+  report;
+- reports classify proposal event ids into disappeared, persisting, appeared,
+  and missing sets;
+- compare `finding delta` is parsed when available and event-id classification
+  provides the fallback;
+- `causal-artifacts` lists audit-chain JSON/text paths;
+- default and `causal-scoped-fiber` flows have integration coverage.
+
+## Next Branch Recommendation
+
+Build Milestone 5's scenario learning loop:
+
+- let remediation plans recommend a new scenario or invariant when evidence is
+  too broad for a direct patch;
+- add a small scenario-authoring checklist that names owner, invariant,
   causal JSON, and compare report;
-- classify proposal event ids into disappeared, persisting, appeared, and
-  missing sets;
-- parse compare `finding delta` when available and fall back to event-id
-  classification;
-- add audit-chain JSON/text paths to `causal-artifacts`;
-- update README, agent guide, causal scenarios, and roadmap docs;
-- verify default and `causal-scoped-fiber` flows.
+- keep the workflow non-mutating and require review before scenario changes are
+  treated as regression coverage.
 
 Do not implement source mutation, policy-backed automatic approval, durable
 history, arbitrary snapshot comparison, or app-facing adapters in this branch.
