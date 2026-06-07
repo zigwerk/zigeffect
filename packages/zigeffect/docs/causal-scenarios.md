@@ -194,6 +194,7 @@ runs the `package-tests` scenario as the package gate. It writes:
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-compare.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-queries.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-advice.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-verdict.json`
 
 Scenario loops compare command-level artifacts for the selected scenario and
 write slug-specific loop artifacts:
@@ -203,6 +204,7 @@ write slug-specific loop artifacts:
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-compare.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-queries.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-advice.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-verdict.json`
 
 The `*-queries.txt` artifact contains executed `causal-query` output selected
 from the after artifact's evidence events. The `*-advice.txt` artifact contains
@@ -210,6 +212,9 @@ deterministic next actions derived from those same events. Advice is
 non-mutating: it prints exact follow-up commands instead of applying fixes. Loop
 after-phase advice is before-aware, so unchanged evidence is marked
 `status=persisting` and after-only evidence is marked `status=new`.
+The `*-verdict.json` artifact is the first file agents should read after an
+after-phase run. It summarizes aggregate action counts, baseline pairing, and
+the recommended next inspection step.
 
 Expected-failure scenarios are valid loop targets. For example,
 `missing-service-compile-fail` reports `expected_failure_observed` when the

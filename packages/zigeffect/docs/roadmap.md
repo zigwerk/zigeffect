@@ -51,9 +51,9 @@ Current boundary decisions:
   metrics, and traces. Future work should connect them through an opt-in,
   bounded causal event model that agents can query structurally.
 - The current causal dogfood lane now has local before/after comparison,
-  generated CI handoff advice, structured verdict JSON, and pull request CI
-  baseline capture, so failing head artifacts can be compared with base-commit
-  causal evidence.
+  generated local and CI advice, local and CI structured verdict JSON, and pull
+  request CI baseline capture, so failing head artifacts can be compared with
+  base-commit causal evidence.
 
 ## Engine Integration Invariants
 
@@ -511,6 +511,9 @@ metrics, and traces.
 - Delivered: before-aware causal advice labels actions as `observed`,
   `persisting`, or `new`, allowing the development loop to distinguish stable
   fixture evidence from after-only regressions.
+- Delivered: local causal dev-loop verdict JSON gives agents a first-read
+  aggregate status, action counts, and next inspection step after after-phase
+  runs.
 - Delivered: `zig build causal-artifacts` prints a deterministic retention
   manifest with upload globs and dogfood, scenario, and dev-loop artifact paths
   for agents and CI.
