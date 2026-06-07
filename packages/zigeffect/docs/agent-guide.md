@@ -319,6 +319,7 @@ Causal JSON artifacts are self-identifying:
 {
   "schema": "zigeffect.causal.v1",
   "schema_version": 1,
+  "event_taxonomy_version": 1,
   "retention": {
     "max_events": null,
     "dropped_events": 0,
@@ -351,6 +352,11 @@ For noisy probes, a causal store may also use opt-in deterministic sampling for
 logs, metrics, and spans. If `sampled_events` is nonzero, cite that
 observability evidence may be incomplete. Structural runtime evidence remains
 unsampled unless it is later truncated by retention.
+
+`event_taxonomy_version` identifies the event-kind role semantics. Version `1`
+keeps sampleable observability disjoint from finding evidence: logs, metrics,
+and spans may be sampled; service, scope, resource, fiber, schedule, and
+assertion evidence must not be sampled.
 
 Causal events also redact common secret-shaped text before storage:
 password-like key/value pairs, API keys, token keys, authorization bearer

@@ -501,6 +501,32 @@ test "causal sampling keeps every nth observability event and preserves structur
     try std.testing.expectEqualStrings("sampled-exit", backend_state.labels[3]);
 }
 
+test "causal event taxonomy classifies structural finding and sampleable roles" {
+    try std.testing.expect(fx.isCausalStructuralEvent(.run_started));
+    try std.testing.expect(fx.isCausalStructuralEvent(.resource_acquired));
+    try std.testing.expect(fx.isCausalFindingEvidenceEvent(.resource_acquired));
+    try std.testing.expect(fx.isCausalFindingEvidenceEvent(.fiber_forked));
+    try std.testing.expect(fx.isCausalFindingEvidenceEvent(.assertion_recorded));
+    try std.testing.expect(fx.isCausalSampleableEvent(.log_recorded));
+    try std.testing.expect(fx.isCausalSampleableEvent(.metric_recorded));
+    try std.testing.expect(fx.isCausalSampleableEvent(.span_recorded));
+    try std.testing.expect(!fx.isCausalStructuralEvent(.log_recorded));
+    try std.testing.expect(!fx.isCausalFindingEvidenceEvent(.log_recorded));
+    try std.testing.expect(!fx.isCausalSampleableEvent(.assertion_recorded));
+}
+
+test "causal event taxonomy keeps sampleable events disjoint from finding evidence" {
+    inline for (std.meta.fields(fx.CausalEventKind)) |field| {
+        const kind: fx.CausalEventKind = @field(fx.CausalEventKind, field.name);
+        if (fx.isCausalSampleableEvent(kind)) {
+            try std.testing.expect(!fx.isCausalFindingEvidenceEvent(kind));
+        }
+        if (fx.isCausalFindingEvidenceEvent(kind)) {
+            try std.testing.expect(!fx.isCausalSampleableEvent(kind));
+        }
+    }
+}
+
 fn expectFinding(findings: fx.CausalFindings, kind: fx.CausalFindingKind) !void {
     for (findings.items) |finding| {
         if (finding.kind == kind) return;
@@ -683,6 +709,7 @@ test "causal json and dot exports are deterministic and redacted" {
 
     try std.testing.expect(std.mem.indexOf(u8, json, "\"schema\": \"zigeffect.causal.v1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"schema_version\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"event_taxonomy_version\": 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"events\": [") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"id\": 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\": \"run_started\"") != null);

@@ -135,6 +135,7 @@ Causal JSON artifacts use this root header:
 {
   "schema": "zigeffect.causal.v1",
   "schema_version": 1,
+  "event_taxonomy_version": 1,
   "retention": {
     "max_events": null,
     "dropped_events": 0,
@@ -166,6 +167,11 @@ unsampled. Sampled-out events consume IDs but do not enter the retained store or
 attached backends. Reports and JSON artifacts disclose `sampled_events` so
 agents know observability evidence may be incomplete without treating the causal
 runtime trace as retention-truncated.
+
+Causal artifacts also include `event_taxonomy_version`. Version `1` classifies
+logs, metrics, and spans as sampleable observability; runtime lifecycle events
+as structural evidence; and service, scope, resource, fiber, schedule, and
+assertion events as finding evidence. Finding evidence is never sampleable.
 
 Causal event strings are defensively redacted before storage and backend
 emission for common secret-shaped key/value details, bearer values, and URL

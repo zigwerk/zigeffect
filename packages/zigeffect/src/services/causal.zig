@@ -5,6 +5,7 @@ pub const Allocator = std.mem.Allocator;
 pub const CausalBackend = causal_backend.CausalBackend;
 pub const causal_json_schema = "zigeffect.causal.v1";
 pub const causal_json_schema_version: u32 = 1;
+pub const causal_event_taxonomy_version: u32 = 1;
 pub const causal_redaction_marker = "<redacted>";
 
 pub const CausalSamplingPolicy = struct {
@@ -43,6 +44,64 @@ pub const CausalEventKind = enum {
     span_recorded,
     assertion_recorded,
 };
+
+pub const CausalEventTaxonomy = struct {
+    structural: bool,
+    finding_evidence: bool,
+    sampleable: bool,
+};
+
+pub fn causalEventTaxonomy(kind: CausalEventKind) CausalEventTaxonomy {
+    return switch (kind) {
+        .log_recorded, .metric_recorded, .span_recorded => .{
+            .structural = false,
+            .finding_evidence = false,
+            .sampleable = true,
+        },
+        .service_required,
+        .scope_closed,
+        .resource_acquired,
+        .resource_finalized,
+        .fiber_forked,
+        .fiber_started,
+        .fiber_joined,
+        .fiber_interrupted,
+        .schedule_decision,
+        .assertion_recorded,
+        => .{
+            .structural = true,
+            .finding_evidence = true,
+            .sampleable = false,
+        },
+        .run_started,
+        .run_completed,
+        .effect_started,
+        .effect_completed,
+        .layer_started,
+        .layer_completed,
+        .service_provided,
+        .service_replaced,
+        .scope_opened,
+        .exit_recorded,
+        => .{
+            .structural = true,
+            .finding_evidence = false,
+            .sampleable = false,
+        },
+    };
+}
+
+pub fn isCausalStructuralEvent(kind: CausalEventKind) bool {
+    return causalEventTaxonomy(kind).structural;
+}
+
+pub fn isCausalFindingEvidenceEvent(kind: CausalEventKind) bool {
+    return causalEventTaxonomy(kind).finding_evidence;
+}
+
+pub fn isCausalSampleableEvent(kind: CausalEventKind) bool {
+    return causalEventTaxonomy(kind).sampleable;
+}
 
 pub const CausalEvent = struct {
     id: u64 = 0,
@@ -565,6 +624,7 @@ pub const CausalStore = struct {
     }
 
     fn shouldRecordBySampling(self: *CausalStore, kind: CausalEventKind) bool {
+        if (!isCausalSampleableEvent(kind)) return true;
         return switch (kind) {
             .log_recorded => shouldRecordEveryN(&self.log_seen_count, self.sampling.log_every_n),
             .metric_recorded => shouldRecordEveryN(&self.metric_seen_count, self.sampling.metric_every_n),
@@ -910,7 +970,11 @@ pub fn formatCausalJson(allocator: Allocator, store: *const CausalStore) Allocat
 
     try output.appendSlice(allocator, "{\n  \"schema\": ");
     try appendJsonString(&output, allocator, causal_json_schema);
-    try output.print(allocator, ",\n  \"schema_version\": {d},\n", .{causal_json_schema_version});
+    try output.print(
+        allocator,
+        ",\n  \"schema_version\": {d},\n  \"event_taxonomy_version\": {d},\n",
+        .{ causal_json_schema_version, causal_event_taxonomy_version },
+    );
     try output.appendSlice(allocator, "  \"retention\": {\n    \"max_events\": ");
     try appendOptionalJsonUsize(&output, allocator, store.max_events);
     try output.print(allocator, ",\n    \"dropped_events\": {d},\n    \"oldest_retained_event_id\": ", .{store.dropped_event_count});

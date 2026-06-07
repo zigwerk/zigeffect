@@ -437,6 +437,7 @@ The causal JSON artifact is versioned at the root:
 {
   "schema": "zigeffect.causal.v1",
   "schema_version": 1,
+  "event_taxonomy_version": 1,
   "retention": {
     "max_events": null,
     "dropped_events": 0,
@@ -452,8 +453,12 @@ The causal JSON artifact is versioned at the root:
 }
 ```
 
-Version `1` is the current event-array artifact shape. Local tools keep parsing
-legacy event-only artifacts so saved evidence remains useful.
+Schema version `1` is the current event-array artifact shape.
+`event_taxonomy_version` version `1` classifies event-kind roles: logs, metrics,
+and spans are sampleable observability; runtime lifecycle events are structural
+evidence; and service, scope, resource, fiber, schedule, and assertion events
+are finding evidence. Finding evidence is never sampleable. Local tools keep
+parsing legacy event-only artifacts so saved evidence remains useful.
 
 Bounded stores are opt-in through `CausalStore.initBounded(allocator,
 max_events)`. Retention applies to the in-memory store, not attached backends.
@@ -666,6 +671,7 @@ pub const CausalEventKind = enum {
     layer_completed,
     service_required,
     service_provided,
+    service_replaced,
     scope_opened,
     scope_closed,
     resource_acquired,
