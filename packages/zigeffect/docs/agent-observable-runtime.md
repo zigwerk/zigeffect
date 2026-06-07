@@ -898,9 +898,11 @@ report, writes an executed `causal-query` report, writes a deterministic
 `causal-advice` report, reruns package tests, and prints the report paths.
 
 `zig build causal-advice -- --file <artifact>` turns a saved causal JSON
-artifact into bounded next actions. It is rule-based and non-mutating: it names
-event ids, explains why an event is actionable, and prints exact
-`causal-query` commands instead of generating patches.
+artifact into bounded next actions. `zig build causal-advice -- --before
+<before.json> --file <after.json>` makes that advice before-aware. It is
+rule-based and non-mutating: it names event ids, explains why an event is
+actionable, labels actions as `observed`, `persisting`, or `new`, and prints
+exact `causal-query` commands instead of generating patches.
 
 This phase proves the agent workflow before production or app adapters exist.
 

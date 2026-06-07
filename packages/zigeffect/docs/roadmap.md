@@ -504,6 +504,9 @@ metrics, and traces.
 - Delivered: `zig build causal-advice -- --file <artifact>` and
   after-phase loop advice reports turn causal evidence into deterministic,
   non-mutating next actions for development agents.
+- Delivered: before-aware causal advice labels actions as `observed`,
+  `persisting`, or `new`, allowing the development loop to distinguish stable
+  fixture evidence from after-only regressions.
 - Delivered: defensive causal event redaction for common secret-shaped
   key/value details, bearer values, and URL credentials.
 - Delivered: an optional `CausalBackend` event sink contract with adapter kinds

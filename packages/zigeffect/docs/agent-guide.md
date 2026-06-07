@@ -452,10 +452,13 @@ Generate advice directly from any saved causal JSON artifact:
 
 ```sh
 zig build causal-advice -- --file .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json
+zig build causal-advice -- --before .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json --file .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json
 ```
 
 Advice is deterministic and non-mutating. It names event ids, why the event is
-actionable, and exact `causal-query` commands.
+actionable, and exact `causal-query` commands. Single-artifact advice uses
+`status=observed`. Before-aware advice uses `status=persisting` for evidence
+that existed in the baseline and `status=new` for after-only evidence.
 
 Run a specific scenario from the catalog when your change touches its owner:
 

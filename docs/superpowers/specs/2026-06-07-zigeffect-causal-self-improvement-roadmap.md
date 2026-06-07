@@ -254,6 +254,8 @@ Delivered slices:
   evidence.
 - deterministic `causal-advice` reports that name event ids, explain bounded
   next actions, and print exact follow-up query commands.
+- before-aware advice statuses for `observed`, `persisting`, and `new`
+  evidence in after-phase development loop reports.
 
 Remaining:
 

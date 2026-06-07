@@ -292,11 +292,14 @@ Generate deterministic next-action advice from a saved causal JSON artifact:
 
 ```bash
 zig build causal-advice -- --file .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json
+zig build causal-advice -- --before .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json --file .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json
 ```
 
 Advice reports are rule-based and non-mutating. They point at event ids and
 exact `causal-query` commands, but they do not generate patches or apply
-remediation.
+remediation. Single-artifact advice marks actions as `status=observed`;
+before-aware advice marks unchanged evidence as `status=persisting` and
+after-only evidence as `status=new`.
 
 Compare two saved causal JSON artifacts:
 

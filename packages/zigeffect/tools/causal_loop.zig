@@ -529,7 +529,13 @@ fn runAfter(init: std.process.Init, scenario: ?causal_run.Scenario) !u8 {
     const query_report = try buildQueryReport(allocator, after, paths.after_json_path);
     defer allocator.free(query_report);
     try writeArtifact(init.io, paths.query_report_path, query_report);
-    const advice_report = try causal_advice.buildAdviceReport(allocator, after, paths.after_json_path);
+    const advice_report = try causal_advice.buildAdviceReportWithBaseline(
+        allocator,
+        before,
+        paths.before_json_path,
+        after,
+        paths.after_json_path,
+    );
     defer allocator.free(advice_report);
     try writeArtifact(init.io, paths.advice_report_path, advice_report);
 

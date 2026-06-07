@@ -53,6 +53,7 @@ Generate deterministic advice from a saved causal JSON artifact:
 
 ```sh
 zig build causal-advice -- --file <artifact.json>
+zig build causal-advice -- --before <before.json> --file <after.json>
 ```
 
 ## Registered Scenarios
@@ -176,7 +177,9 @@ write slug-specific loop artifacts:
 The `*-queries.txt` artifact contains executed `causal-query` output selected
 from the after artifact's evidence events. The `*-advice.txt` artifact contains
 deterministic next actions derived from those same events. Advice is
-non-mutating: it prints exact follow-up commands instead of applying fixes.
+non-mutating: it prints exact follow-up commands instead of applying fixes. Loop
+after-phase advice is before-aware, so unchanged evidence is marked
+`status=persisting` and after-only evidence is marked `status=new`.
 
 Expected-failure scenarios are valid loop targets. For example,
 `missing-service-compile-fail` reports `expected_failure_observed` when the
