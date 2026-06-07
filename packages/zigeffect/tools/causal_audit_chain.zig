@@ -24,6 +24,36 @@ const RawAuditChainInputs = struct {
     compare_text: ?[]const u8,
 };
 
+const Options = struct {
+    mode: []const u8,
+    scenario_slug: ?[]const u8,
+};
+
+const AuditChainPaths = struct {
+    session_json: []const u8,
+    audit_json: []const u8,
+    decision_json: []const u8,
+    proposal_json: []const u8,
+    before_json: []const u8,
+    after_json: []const u8,
+    compare_text: []const u8,
+    output_json: []const u8,
+    output_text: []const u8,
+
+    fn deinit(self: AuditChainPaths, allocator: std.mem.Allocator, options: Options) void {
+        if (options.scenario_slug == null) return;
+        allocator.free(self.session_json);
+        allocator.free(self.audit_json);
+        allocator.free(self.decision_json);
+        allocator.free(self.proposal_json);
+        allocator.free(self.before_json);
+        allocator.free(self.after_json);
+        allocator.free(self.compare_text);
+        allocator.free(self.output_json);
+        allocator.free(self.output_text);
+    }
+};
+
 const AuditChainReports = struct {
     json: []const u8,
     text: []const u8,
@@ -162,6 +192,39 @@ fn scenarioAuditChainTextPath(allocator: std.mem.Allocator, scenario_slug: []con
         "{s}/zigeffect-causal-dev-loop-{s}-audit-chain.txt",
         .{ causal_run.artifact_dir, scenario_slug },
     );
+}
+
+fn defaultAuditChainPaths() AuditChainPaths {
+    return .{
+        .session_json = causal_run.artifact_dir ++ "/zigeffect-causal-dev-session.json",
+        .audit_json = causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-remediation-audit.json",
+        .decision_json = causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-remediation-decision.json",
+        .proposal_json = causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-patch-proposal.json",
+        .before_json = causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-before.json",
+        .after_json = causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-after.json",
+        .compare_text = causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-compare.txt",
+        .output_json = defaultAuditChainJsonPath(),
+        .output_text = defaultAuditChainTextPath(),
+    };
+}
+
+fn scenarioAuditChainPaths(allocator: std.mem.Allocator, scenario_slug: []const u8) !AuditChainPaths {
+    return .{
+        .session_json = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-session-{s}.json", .{ causal_run.artifact_dir, scenario_slug }),
+        .audit_json = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-remediation-audit.json", .{ causal_run.artifact_dir, scenario_slug }),
+        .decision_json = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-remediation-decision.json", .{ causal_run.artifact_dir, scenario_slug }),
+        .proposal_json = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-patch-proposal.json", .{ causal_run.artifact_dir, scenario_slug }),
+        .before_json = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-before.json", .{ causal_run.artifact_dir, scenario_slug }),
+        .after_json = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-after.json", .{ causal_run.artifact_dir, scenario_slug }),
+        .compare_text = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-compare.txt", .{ causal_run.artifact_dir, scenario_slug }),
+        .output_json = try scenarioAuditChainJsonPath(allocator, scenario_slug),
+        .output_text = try scenarioAuditChainTextPath(allocator, scenario_slug),
+    };
+}
+
+fn auditChainPathsForOptions(allocator: std.mem.Allocator, options: Options) !AuditChainPaths {
+    if (options.scenario_slug) |slug| return scenarioAuditChainPaths(allocator, slug);
+    return defaultAuditChainPaths();
 }
 
 fn classifyEventIds(
@@ -590,6 +653,97 @@ fn appendIdLine(allocator: std.mem.Allocator, output: *std.ArrayList(u8), label:
     try output.append(allocator, '\n');
 }
 
+fn parseOptions(args: []const []const u8) !Options {
+    if (args.len < 2) return error.MissingMode;
+    if (!std.mem.eql(u8, args[1], "local")) return error.UnknownMode;
+    if (args.len > 3) return error.DuplicateScenarioArgument;
+    const scenario_slug = if (args.len == 3) blk: {
+        _ = try causal_run.scenarioByName(args[2]);
+        break :blk args[2];
+    } else null;
+    return .{ .mode = "local", .scenario_slug = scenario_slug };
+}
+
+fn usage() []const u8 {
+    return "usage: zig build causal-audit-chain -- local [scenario]\n";
+}
+
+fn failUsage(err: anyerror) noreturn {
+    std.debug.print("causal-audit-chain error: {s}\n{s}", .{ @errorName(err), usage() });
+    std.process.exit(2);
+}
+
+fn readRequiredArtifact(io: std.Io, allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => error.MissingAuditChainInput,
+        else => return err,
+    };
+}
+
+fn readOptionalArtifact(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !?[]const u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => null,
+        else => return err,
+    };
+}
+
+fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
+    const slash = std.mem.lastIndexOfScalar(u8, path, '/') orelse return error.InvalidArtifactPath;
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(io, path[0..slash]);
+    try cwd.writeFile(io, .{ .sub_path = path, .data = contents });
+}
+
+fn runLocal(init: std.process.Init, options: Options) !void {
+    const allocator = init.gpa;
+    const paths = try auditChainPathsForOptions(allocator, options);
+    defer paths.deinit(allocator, options);
+
+    const session_json = try readRequiredArtifact(init.io, allocator, paths.session_json);
+    defer allocator.free(session_json);
+    const audit_json = try readRequiredArtifact(init.io, allocator, paths.audit_json);
+    defer allocator.free(audit_json);
+    const proposal_json = try readRequiredArtifact(init.io, allocator, paths.proposal_json);
+    defer allocator.free(proposal_json);
+    const before_json = try readRequiredArtifact(init.io, allocator, paths.before_json);
+    defer allocator.free(before_json);
+    const after_json = try readRequiredArtifact(init.io, allocator, paths.after_json);
+    defer allocator.free(after_json);
+
+    const decision_json = try readOptionalArtifact(init.io, allocator, paths.decision_json);
+    defer if (decision_json) |json| allocator.free(json);
+    const compare_text = try readOptionalArtifact(init.io, allocator, paths.compare_text);
+    defer if (compare_text) |text| allocator.free(text);
+
+    const reports = try formatAuditChainReports(allocator, .{
+        .session_path = paths.session_json,
+        .audit_path = paths.audit_json,
+        .decision_path = if (decision_json != null) paths.decision_json else null,
+        .proposal_path = paths.proposal_json,
+        .before_path = paths.before_json,
+        .after_path = paths.after_json,
+        .compare_path = if (compare_text != null) paths.compare_text else null,
+        .session_json = session_json,
+        .audit_json = audit_json,
+        .decision_json = decision_json,
+        .proposal_json = proposal_json,
+        .before_json = before_json,
+        .after_json = after_json,
+        .compare_text = compare_text,
+    });
+    defer reports.deinit(allocator);
+
+    try writeArtifact(init.io, paths.output_json, reports.json);
+    try writeArtifact(init.io, paths.output_text, reports.text);
+    std.debug.print("{s}", .{reports.text});
+}
+
+pub fn main(init: std.process.Init) !void {
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    const options = parseOptions(args) catch |err| failUsage(err);
+    try runLocal(init, options);
+}
+
 test "audit-chain default and scenario paths are deterministic" {
     try std.testing.expectEqualStrings(
         causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-audit-chain.json",
@@ -884,4 +1038,35 @@ test "audit-chain validates targets and applied proposal boundary" {
     var applied = base;
     applied.proposal_json = applied_proposal;
     try std.testing.expectError(error.ProposalAlreadyApplied, formatAuditChainReports(std.testing.allocator, applied));
+}
+
+test "audit-chain CLI options and paths support local default and scenario" {
+    const default_options = try parseOptions(&.{ "zigeffect-causal-audit-chain", "local" });
+    try std.testing.expectEqual(@as(?[]const u8, null), default_options.scenario_slug);
+
+    const scenario_options = try parseOptions(&.{ "zigeffect-causal-audit-chain", "local", "causal-scoped-fiber" });
+    try std.testing.expectEqualStrings("causal-scoped-fiber", scenario_options.scenario_slug.?);
+
+    var paths = try auditChainPathsForOptions(std.testing.allocator, scenario_options);
+    defer paths.deinit(std.testing.allocator, scenario_options);
+
+    try std.testing.expectEqualStrings(
+        causal_run.artifact_dir ++ "/zigeffect-causal-dev-session-causal-scoped-fiber.json",
+        paths.session_json,
+    );
+    try std.testing.expectEqualStrings(
+        causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-causal-scoped-fiber-remediation-decision.json",
+        paths.decision_json,
+    );
+    try std.testing.expectEqualStrings(
+        causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-causal-scoped-fiber-compare.txt",
+        paths.compare_text,
+    );
+    try std.testing.expectEqualStrings(
+        causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-causal-scoped-fiber-audit-chain.json",
+        paths.output_json,
+    );
+
+    try std.testing.expectError(error.MissingMode, parseOptions(&.{"zigeffect-causal-audit-chain"}));
+    try std.testing.expectError(error.UnknownMode, parseOptions(&.{ "zigeffect-causal-audit-chain", "remote" }));
 }

@@ -515,6 +515,15 @@ pub fn build(b: *std.Build) void {
     const causal_patch_proposal_step = b.step("causal-patch-proposal", "Write a non-mutating causal patch proposal from audit or decision evidence");
     causal_patch_proposal_step.dependOn(&run_causal_patch_proposal_tool.step);
 
+    const causal_audit_chain_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-audit-chain",
+        .root_module = causal_audit_chain_tool_module,
+    });
+    const run_causal_audit_chain_tool = b.addRunArtifact(causal_audit_chain_tool);
+    if (b.args) |args| run_causal_audit_chain_tool.addArgs(args);
+    const causal_audit_chain_step = b.step("causal-audit-chain", "Compare local causal remediation chain evidence before and after a patch");
+    causal_audit_chain_step.dependOn(&run_causal_audit_chain_tool.step);
+
     const causal_handoff_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_handoff.zig"),
         .target = target,
@@ -611,6 +620,7 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_remediation_decision_tool_tests.step);
     examples_step.dependOn(&causal_patch_proposal_tool.step);
     examples_step.dependOn(&run_causal_patch_proposal_tool_tests.step);
+    examples_step.dependOn(&causal_audit_chain_tool.step);
     examples_step.dependOn(&run_causal_audit_chain_tool_tests.step);
     examples_step.dependOn(&causal_handoff_tool.step);
     examples_step.dependOn(&run_causal_handoff_tool_tests.step);
