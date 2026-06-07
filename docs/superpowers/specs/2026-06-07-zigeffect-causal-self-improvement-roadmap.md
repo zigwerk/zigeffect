@@ -301,13 +301,13 @@ Delivered slices:
 - `zig build causal-remediation-decision -- local approve|reject [scenario]`,
   which writes append-only approved or rejected decision records while keeping
   source edits and patch application out of scope.
+- `zig build causal-dev-session -- start|assess|status [scenario]`, which
+  coordinates baseline capture, after assessment, local agent handoff,
+  diagnosis, remediation planning, and remediation audit into one repeatable
+  local development harness without approval or source mutation.
 
 Remaining:
 
-- add the `causal-dev-session` coordinator documented in
-  `docs/superpowers/specs/2026-06-07-zigeffect-self-improving-dev-harness-roadmap.md`
-  and planned in
-  `docs/superpowers/plans/2026-06-07-zigeffect-causal-dev-session-coordinator.md`;
 - add an optional patch-proposal artifact that can describe a source edit diff
   while still requiring human or policy approval;
 - add a policy engine that can produce policy-backed decision records;
