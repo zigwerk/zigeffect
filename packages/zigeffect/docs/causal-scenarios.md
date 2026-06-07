@@ -30,6 +30,12 @@ Capture the expected missing-service compile-fail scenario:
 zig build causal-capture-missing-service
 ```
 
+Compare two saved causal JSON artifacts:
+
+```sh
+zig build causal-compare -- <before.json> <after.json>
+```
+
 ## Registered Scenarios
 
 - `missing-service-compile-fail`
@@ -88,6 +94,23 @@ When a zigeffect bug reveals a new runtime rule:
 5. Run `zig build causal-run -- <scenario>` before and after the fix.
 6. Query any failure artifact with `zig build causal-query -- --file <path>
    <query>`.
+7. Compare before and after artifacts with `zig build causal-compare --
+   <before.json> <after.json>`.
 
 The scenario should describe the runtime invariant, not merely the symptom that
 happened to fail first.
+
+## Comparing Before And After
+
+Use comparison after a fix when the claim is about runtime behavior, not just
+source code shape. Capture a before artifact from the smallest relevant
+scenario, apply the fix, capture the after artifact, then run:
+
+```sh
+zig build causal-compare -- <before.json> <after.json>
+```
+
+The report is intentionally text-first for agents. It shows event count deltas,
+finding count deltas, added events, removed events, and changed events. A good
+patch summary should cite the comparison and the event ids that explain the
+behavior change.

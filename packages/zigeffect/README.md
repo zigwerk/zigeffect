@@ -193,6 +193,17 @@ For example:
 zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-missing-service-compile-fail.json cause 3
 ```
 
+Compare two saved causal JSON artifacts:
+
+```bash
+cd packages/zigeffect
+zig build causal-compare -- .zig-cache/causal-artifacts/before.json .zig-cache/causal-artifacts/after.json
+```
+
+The compare report summarizes event count deltas, finding count deltas, added
+events, removed events, and changed events. Use it when a fix needs evidence
+that the causal trace improved instead of just changed.
+
 Print an agent-friendly module scaffold:
 
 ```bash

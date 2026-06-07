@@ -21,10 +21,20 @@ development branch contains:
 - `zig build causal-test`, which emits deterministic dogfood artifacts.
 - `zig build causal-query -- <query> [argument]`, which lets agents inspect a
   saved causal JSON artifact without rerunning the scenario.
+- `zig build causal-check`, which turns dogfood findings into an intentional
+  nonzero local gate while preserving artifacts.
+- `zig build causal-capture-missing-service`, which proves real command failure
+  capture against the missing-service compile-fail fixture.
+- `zig build causal-dev-test`, which runs package tests through the causal
+  development wrapper and emits artifacts on failure.
+- `zig build causal-catalog`, which exposes scenario ownership and invariant
+  rules.
+- `zig build causal-compare -- <before.json> <after.json>`, which compares
+  saved causal artifacts.
 
 The baseline proves that agents can cite causal evidence from `zigeffect`
-itself. The next step is to make that evidence participate in development
-checks.
+itself. The next step is to automate before/after capture around the scenario
+registry and package-test development loop.
 
 ## North Star
 
@@ -101,7 +111,7 @@ Exit criteria:
 
 ### Milestone 3: Failure-Gated Dogfood Check
 
-Status: first next implementation slice.
+Status: done.
 
 Deliverables:
 
@@ -125,6 +135,13 @@ Why this comes before full test wrapping:
 - It gives agents a real nonzero causal check immediately.
 - It avoids conflating fixture findings with real test failures before the
   scenario registry and artifact naming rules exist.
+
+Delivered:
+
+- `zig build causal-check` writes the dogfood artifacts and exits nonzero when
+  findings are present;
+- `causal-test` remains the non-failing evidence command;
+- the intentionally failing check is excluded from aggregate examples.
 
 ### Milestone 4: Real Test Failure Capture
 
@@ -178,7 +195,7 @@ Delivered first slice:
 
 ### Milestone 6: Before/After Trace Comparison
 
-Status: planned.
+Status: first compare slice delivered.
 
 Deliverables:
 
@@ -192,6 +209,18 @@ Exit criteria:
 - a development agent can cite before and after event ids;
 - changes that only rewrite formatting do not masquerade as runtime fixes;
 - comparison output is stable enough for CI artifacts.
+
+Delivered first slice:
+
+- `zig build causal-compare -- <before.json> <after.json>`;
+- finding deltas recomputed from saved JSON artifacts;
+- added, removed, and changed event summaries.
+
+Remaining:
+
+- automated capture of before and after artifacts around selected scenarios;
+- optional persisted compare reports under `.zig-cache/causal-artifacts/`;
+- scenario-aware labels so reports can say which invariant improved.
 
 ### Milestone 7: Development Agent Loop
 

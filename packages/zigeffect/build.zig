@@ -220,6 +220,27 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_query_tool_tests = b.addRunArtifact(causal_query_tool_tests);
 
+    const causal_compare_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_compare.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_compare_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-compare",
+        .root_module = causal_compare_tool_module,
+    });
+    const run_causal_compare_tool = b.addRunArtifact(causal_compare_tool);
+    if (b.args) |args| run_causal_compare_tool.addArgs(args);
+    const causal_compare_step = b.step("causal-compare", "Compare two saved causal JSON artifacts");
+    causal_compare_step.dependOn(&run_causal_compare_tool.step);
+
+    const causal_compare_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-compare-tests",
+        .root_module = causal_compare_tool_module,
+    });
+    const run_causal_compare_tool_tests = b.addRunArtifact(causal_compare_tool_tests);
+
     const causal_run_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_run.zig"),
         .target = target,
@@ -278,6 +299,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_test_tool_tests.step);
     examples_step.dependOn(&causal_query_tool.step);
     examples_step.dependOn(&run_causal_query_tool_tests.step);
+    examples_step.dependOn(&causal_compare_tool.step);
+    examples_step.dependOn(&run_causal_compare_tool_tests.step);
     examples_step.dependOn(&causal_run_tool.step);
     examples_step.dependOn(&run_causal_run_tool_tests.step);
 }

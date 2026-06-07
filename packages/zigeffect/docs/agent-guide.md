@@ -378,6 +378,15 @@ For the real missing-service compile-fail artifact:
 zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-missing-service-compile-fail.json cause 3
 ```
 
+Compare before and after artifacts after a runtime fix:
+
+```sh
+zig build causal-compare -- .zig-cache/causal-artifacts/before.json .zig-cache/causal-artifacts/after.json
+```
+
+Use the compare report to cite event deltas, finding deltas, added events,
+removed events, and changed events in the patch summary.
+
 This is the Phase 0 self-improving feedback lane: agents use `zigeffect`'s own
 causal runtime as evidence while improving `zigeffect`, then rerun the harness
 and package tests to compare behavior.

@@ -821,6 +821,11 @@ catalog. Agents should use it to choose the smallest relevant scenario before
 changing runtime behavior, and should add a new scenario when a bug teaches a
 new invariant.
 
+`zig build causal-compare -- <before.json> <after.json>` compares two saved
+causal JSON artifacts. It reports event deltas, finding deltas, added events,
+removed events, and changed events so an agent can explain whether a patch
+improved the runtime trace.
+
 This phase proves the agent workflow before production or app adapters exist.
 
 ### Phase 1: Causal Event Core
