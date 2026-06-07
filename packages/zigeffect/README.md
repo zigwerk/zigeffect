@@ -54,6 +54,11 @@ Included in this package:
 - `Scope`: reverse-order finalizers, including exit-aware cleanup.
 - `Exit` / `Cause`: structured result shapes, plus `CauseTree` for
   allocator-owned recursive cause reports.
+- `Option`, `Either`, `Duration`, `DateTime`, `BigDecimal`, `Chunk`,
+  `HashSet`, `Redacted`, and `Data`: Effect-style data helpers with explicit
+  Zig ownership.
+- `match` / `pattern`: exhaustive tagged-union matching, partial matching,
+  structural patterns, typed captures, and payload-filtered union arms.
 - `formatExit` / `formatCause` / `formatObservabilityReport`: readable runtime
   and observability reports for CLIs, tests, and agent workflows.
 - `Schedule` / `ScheduleProgram`: retry/repeat timing with `once`, `recurs`,
@@ -85,6 +90,8 @@ Docs:
 - [Architecture](docs/architecture.md)
 - [Errors](docs/errors.md)
 - [Resource Ownership](docs/resource-ownership.md)
+- [Data](docs/data.md)
+- [Pattern Matching](docs/pattern-matching.md)
 - [EffectTS Parity](docs/effectts-parity.md)
 - [Module Pattern](docs/module-pattern.md)
 - [Agent-Observable Causal Runtime](docs/agent-observable-runtime.md)
@@ -95,6 +102,7 @@ Docs:
 - [Causal Cleanup Failure Scenario](examples/causal_cleanup_failure.zig)
 - [Causal Scoped Fiber Scenario](examples/causal_scoped_fiber.zig)
 - [Causal Retry Exhaustion Scenario](examples/causal_retry_exhaustion.zig)
+- [Data And Matching Example](examples/data_and_matching.zig)
 - [Agent Guide](docs/agent-guide.md)
 - [Devex Review](docs/devex-review.md)
 - [Roadmap](docs/roadmap.md)

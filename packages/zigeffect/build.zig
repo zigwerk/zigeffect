@@ -44,6 +44,24 @@ pub fn build(b: *std.Build) void {
     });
     const run_readiness_example_tests = b.addRunArtifact(readiness_example_tests);
 
+    const data_and_matching_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/data_and_matching.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    data_and_matching_example_module.addImport("zigeffect", zigeffect);
+
+    const data_and_matching_example = b.addExecutable(.{
+        .name = "zigeffect-data-and-matching-example",
+        .root_module = data_and_matching_example_module,
+    });
+
+    const data_and_matching_example_tests = b.addTest(.{
+        .name = "zigeffect-data-and-matching-example-tests",
+        .root_module = data_and_matching_example_module,
+    });
+    const run_data_and_matching_example_tests = b.addRunArtifact(data_and_matching_example_tests);
+
     const causal_readiness_example_module = b.createModule(.{
         .root_source_file = b.path("examples/causal_readiness.zig"),
         .target = target,
@@ -601,6 +619,8 @@ pub fn build(b: *std.Build) void {
     const examples_step = b.step("examples", "Compile and test zigeffect examples");
     examples_step.dependOn(&readiness_example.step);
     examples_step.dependOn(&run_readiness_example_tests.step);
+    examples_step.dependOn(&data_and_matching_example.step);
+    examples_step.dependOn(&run_data_and_matching_example_tests.step);
     examples_step.dependOn(&causal_readiness_example.step);
     examples_step.dependOn(&run_causal_readiness_example_tests.step);
     examples_step.dependOn(&causal_missing_config_example.step);
