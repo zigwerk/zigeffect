@@ -497,19 +497,19 @@ Expected: PASS for structural matcher tests.
 - Create: `packages/zigeffect/test/compile_fail/pattern_unknown_union_tag.zig`
 - Modify: `packages/zigeffect/test/layer_test.zig`
 
-- [ ] **Step 1: Add failing structural arms tests**
+- [x] **Step 1: Add failing structural arms tests**
 
 Add tests for `fx.pattern.exhaustive` and `fx.pattern.partial` over a tagged union.
 
-- [ ] **Step 2: Add compile-fail fixtures**
+- [x] **Step 2: Add compile-fail fixtures**
 
 Add duplicate capture and invalid union tag fixtures.
 
-- [ ] **Step 3: Implement structural arms and diagnostics**
+- [x] **Step 3: Implement structural arms and diagnostics**
 
 Validate union coverage for exhaustive structural arms and reject provable duplicate/unknown cases.
 
-- [ ] **Step 4: Run structural diagnostics tests**
+- [x] **Step 4: Run structural diagnostics tests**
 
 Run:
 

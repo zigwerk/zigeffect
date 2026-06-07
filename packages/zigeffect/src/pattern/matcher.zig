@@ -229,6 +229,7 @@ fn toI128(value: anytype) ?i128 {
 }
 
 fn CaptureResult(comptime Value: type, comptime pattern: anytype) type {
+    validateNoDuplicateCaptures(pattern);
     const count = countCaptures(Value, pattern);
     comptime var field_names: [count][]const u8 = undefined;
     comptime var field_types: [count]type = undefined;
@@ -236,6 +237,76 @@ fn CaptureResult(comptime Value: type, comptime pattern: anytype) type {
     comptime var index: usize = 0;
     fillCaptureFields(&field_names, &field_types, &field_attrs, &index, Value, pattern);
     return @Struct(.auto, null, &field_names, &field_types, &field_attrs);
+}
+
+fn validateNoDuplicateCaptures(comptime pattern: anytype) void {
+    const count = countPatternBinds(pattern);
+    comptime var names: [count][]const u8 = undefined;
+    comptime var index: usize = 0;
+    fillPatternBindNames(&names, &index, pattern);
+
+    inline for (names, 0..) |left, left_index| {
+        inline for (names, 0..) |right, right_index| {
+            if (comptime right_index > left_index and std.mem.eql(u8, left, right)) {
+                @compileError("zigeffect pattern duplicate capture '" ++ left ++ "'");
+            }
+        }
+    }
+}
+
+fn countPatternBinds(comptime pattern: anytype) usize {
+    const PatternType = @TypeOf(pattern);
+    if (PatternType == Pattern) {
+        return switch (pattern) {
+            .bind => 1,
+            else => 0,
+        };
+    }
+    if (comptime isSomePattern(PatternType)) {
+        return countPatternBinds(pattern.pattern);
+    }
+    if (comptime isPredicate(PatternType) or isNonePattern(PatternType)) {
+        return 0;
+    }
+
+    return switch (@typeInfo(PatternType)) {
+        .@"struct" => |structure| {
+            comptime var count: usize = 0;
+            inline for (structure.fields) |field| {
+                count += countPatternBinds(@field(pattern, field.name));
+            }
+            return count;
+        },
+        else => 0,
+    };
+}
+
+fn fillPatternBindNames(comptime names: anytype, comptime index: *usize, comptime pattern: anytype) void {
+    const PatternType = @TypeOf(pattern);
+    if (PatternType == Pattern) {
+        switch (pattern) {
+            .bind => |name| {
+                names[index.*] = name;
+                index.* += 1;
+            },
+            else => {},
+        }
+        return;
+    }
+    if (comptime isSomePattern(PatternType)) {
+        fillPatternBindNames(names, index, pattern.pattern);
+        return;
+    }
+    if (comptime isPredicate(PatternType) or isNonePattern(PatternType)) {
+        return;
+    }
+
+    switch (@typeInfo(PatternType)) {
+        .@"struct" => |structure| inline for (structure.fields) |field| {
+            fillPatternBindNames(names, index, @field(pattern, field.name));
+        },
+        else => {},
+    }
 }
 
 fn countCaptures(comptime Value: type, comptime pattern: anytype) usize {

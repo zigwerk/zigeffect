@@ -1136,3 +1136,24 @@ test "compile fail fixture captures match payload diagnostics" {
         "zigeffect match handler payload mismatch",
     );
 }
+test "compile fail fixture captures duplicate pattern capture diagnostics" {
+    try expectCompileFailDiagnostic(
+        "pattern_duplicate_capture.zig",
+        ".zig-cache/pattern_duplicate_capture_compile_fail.txt",
+        "zigeffect pattern duplicate capture 'same'",
+    );
+}
+test "compile fail fixture captures missing pattern arm diagnostics" {
+    try expectCompileFailDiagnostic(
+        "pattern_missing_union_tag.zig",
+        ".zig-cache/pattern_missing_union_tag_compile_fail.txt",
+        "zigeffect pattern exhaustive missing arm for tag 'score'",
+    );
+}
+test "compile fail fixture captures unknown pattern arm diagnostics" {
+    try expectCompileFailDiagnostic(
+        "pattern_unknown_union_tag.zig",
+        ".zig-cache/pattern_unknown_union_tag_compile_fail.txt",
+        "zigeffect pattern arm 'score' is not a tag",
+    );
+}
