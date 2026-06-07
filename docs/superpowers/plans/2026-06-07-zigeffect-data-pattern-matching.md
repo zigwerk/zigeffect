@@ -529,15 +529,15 @@ Expected: PASS.
 - Create: `packages/zigeffect/examples/data_and_matching.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Add docs and example**
+- [x] **Step 1: Add docs and example**
 
 Document ownership, APIs, match modes, structural patterns, redaction behavior, and examples.
 
-- [ ] **Step 2: Wire example into build**
+- [x] **Step 2: Wire example into build**
 
 Add the example executable/test to `build.zig` following existing example patterns.
 
-- [ ] **Step 3: Run docs/example verification**
+- [x] **Step 3: Run docs/example verification**
 
 Run:
 
