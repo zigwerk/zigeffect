@@ -530,9 +530,9 @@ metrics, and traces.
   [scenario]` coordinates baseline capture, after assessment, local agent
   handoff, diagnosis, remediation planning, and remediation audit into one
   repeatable local development harness without approval or source mutation.
-- Active next slice: `zig build causal-patch-proposal -- local draft|approved
-  [scenario] --summary <summary> --file <path> --change <description>` will
-  write non-mutating patch-intent artifacts that link proposed file changes to
+- Delivered: `zig build causal-patch-proposal -- local draft|approved
+  [scenario] --summary <summary> --file <path> --change <description>` writes
+  non-mutating patch-intent artifacts that link proposed file changes to
   audit or approved decision evidence while preserving `applied=false`.
 - Delivered: `zig build causal-artifacts` prints a deterministic retention
   manifest with upload globs and dogfood, scenario, and dev-loop artifact paths

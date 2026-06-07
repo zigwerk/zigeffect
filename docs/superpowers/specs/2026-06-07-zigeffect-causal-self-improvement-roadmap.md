@@ -308,14 +308,12 @@ Delivered slices:
 
 Remaining:
 
-- add an optional patch-proposal artifact that can describe a source edit diff
-  while still requiring human or policy approval;
 - add a policy engine that can produce policy-backed decision records;
 - compare before/after audit chains so a development agent can show whether a
   proposed remediation reduced, preserved, or introduced causal findings;
 - app-facing development loops once applications emit causal runtime artifacts.
 
-Active next slice:
+Delivered patch-proposal slice:
 
 - `zig build causal-patch-proposal -- local draft|approved [scenario] ...`
   creates the first patch-intent artifact without applying source changes;

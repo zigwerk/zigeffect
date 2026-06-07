@@ -210,6 +210,8 @@ Exit criteria:
 
 ### Milestone 3: Non-Mutating Patch Proposal Artifact
 
+Status: first slice delivered.
+
 Add a patch proposal artifact that links a proposed diff or file-level action
 to audit evidence, event ids, and verification commands.
 
@@ -238,6 +240,15 @@ Detailed design and execution plan:
 
 - `docs/superpowers/specs/2026-06-07-zigeffect-causal-patch-proposal-design.md`
 - `docs/superpowers/plans/2026-06-07-zigeffect-causal-patch-proposal.md`
+
+Delivered:
+
+- `zig build causal-patch-proposal -- local draft [scenario] ...` reads pending
+  audits and writes unapproved proposal artifacts;
+- `zig build causal-patch-proposal -- local approved [scenario] ...` reads
+  approved decisions and writes approved proposal artifacts;
+- proposal artifacts copy source paths, event ids, verification commands, and
+  guardrails forward while preserving `applied=false`.
 
 ### Milestone 4: Audit Chain Comparison
 
