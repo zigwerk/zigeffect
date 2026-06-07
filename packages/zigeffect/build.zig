@@ -23,8 +23,8 @@ pub fn build(b: *std.Build) void {
     });
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
-    const test_step = b.step("test", "Run zigeffect tests");
-    test_step.dependOn(&run_unit_tests.step);
+    const raw_test_step = b.step("test-raw", "Run zigeffect tests without causal wrapping");
+    raw_test_step.dependOn(&run_unit_tests.step);
 
     const readiness_example_module = b.createModule(.{
         .root_source_file = b.path("examples/readiness.zig"),
@@ -275,10 +275,12 @@ pub fn build(b: *std.Build) void {
     const causal_capture_missing_service_step = b.step("causal-capture-missing-service", "Capture causal artifacts for the missing-service compile-fail scenario");
     causal_capture_missing_service_step.dependOn(&run_causal_capture_missing_service_tool.step);
 
-    const run_causal_dev_test_tool = b.addRunArtifact(causal_run_tool);
-    run_causal_dev_test_tool.addArg("package-tests");
+    const run_causal_package_test_tool = b.addRunArtifact(causal_run_tool);
+    run_causal_package_test_tool.addArg("package-tests");
+    const test_step = b.step("test", "Run zigeffect tests with causal failure capture");
+    test_step.dependOn(&run_causal_package_test_tool.step);
     const causal_dev_test_step = b.step("causal-dev-test", "Run zigeffect tests with causal failure capture");
-    causal_dev_test_step.dependOn(&run_causal_dev_test_tool.step);
+    causal_dev_test_step.dependOn(&run_causal_package_test_tool.step);
 
     const causal_run_tool_tests = b.addTest(.{
         .name = "zigeffect-causal-run-tests",

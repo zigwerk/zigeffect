@@ -21,7 +21,7 @@ zig build causal-run -- <scenario>
 Run the current package-test development gate:
 
 ```sh
-zig build causal-dev-test
+zig build test
 ```
 
 Capture the expected missing-service compile-fail scenario:
@@ -163,4 +163,6 @@ Expected-failure scenarios are valid loop targets. For example,
 compile failure occurs as intended.
 
 If package tests fail, the loop writes the same `package-tests` failure
-artifacts as `zig build causal-dev-test` and exits nonzero.
+artifacts as the default `zig build test` causal wrapper and exits nonzero.
+Use `zig build test-raw` only when debugging the unwrapped package-test binary;
+`zig build causal-dev-test` remains an explicit alias for the causal wrapper.

@@ -210,12 +210,15 @@ Run package tests through the causal development harness:
 
 ```bash
 cd packages/zigeffect
-zig build causal-dev-test
+zig build test
 ```
 
-`causal-dev-test` exits zero while package tests pass. If package tests fail
-during development, it writes scenario-specific artifacts under
-`.zig-cache/causal-artifacts/` before exiting nonzero.
+`test` exits zero while package tests pass. If package tests fail during
+development, it writes scenario-specific `package-tests` artifacts under
+`.zig-cache/causal-artifacts/` before exiting nonzero. Use
+`zig build test-raw` only when debugging the underlying Zig test binary without
+the causal wrapper. `zig build causal-dev-test` remains an explicit alias for
+the same causal package-test harness.
 
 Run the two-phase causal development loop around a runtime patch:
 

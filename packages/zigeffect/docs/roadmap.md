@@ -496,6 +496,8 @@ metrics, and traces.
   metadata for structural, finding-evidence, and sampleable roles.
 - Delivered: taxonomy-version warnings in causal query, compare, and
   development-loop query reports for newer saved artifacts.
+- Delivered: default `zig build test` now runs through the causal package-test
+  harness, with `test-raw` kept as the unwrapped unit-test step.
 - Delivered: defensive causal event redaction for common secret-shaped
   key/value details, bearer values, and URL credentials.
 - Delivered: an optional `CausalBackend` event sink contract with adapter kinds

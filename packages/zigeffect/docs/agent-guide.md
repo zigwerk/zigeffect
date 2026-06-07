@@ -398,14 +398,16 @@ leave scenario-specific artifacts:
 zig build causal-capture-missing-service
 ```
 
-Use the package-test development harness while changing `zigeffect` internals:
+Use the normal package-test gate while changing `zigeffect` internals:
 
 ```sh
-zig build causal-dev-test
+zig build test
 ```
 
 When package tests are green, the command exits zero. When they fail, it writes
-`package-tests` causal artifacts before exiting nonzero.
+`package-tests` causal artifacts before exiting nonzero. Use `zig build
+test-raw` only when you need the unwrapped Zig test binary. `zig build
+causal-dev-test` is an explicit alias for the same causal package-test harness.
 
 Use the causal development loop when making runtime changes:
 

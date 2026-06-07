@@ -100,7 +100,7 @@ const package_tests_argv: []const []const u8 = &.{
     ".zig-cache/causal-dev-test-cache",
     "--global-cache-dir",
     ".zig-cache/causal-dev-test-global-cache",
-    "test",
+    "test-raw",
 };
 
 const causal_scoped_fiber_argv: []const []const u8 = &.{
@@ -487,6 +487,13 @@ fn commandFailed(term: std.process.Child.Term) bool {
     };
 }
 
+fn argvContains(args: []const []const u8, expected: []const u8) bool {
+    for (args) |arg| {
+        if (std.mem.eql(u8, arg, expected)) return true;
+    }
+    return false;
+}
+
 fn shouldWriteArtifacts(scenario: Scenario, term: std.process.Child.Term) bool {
     return commandFailed(term) or scenario.expectation == .expected_failure;
 }
@@ -611,6 +618,36 @@ test "failed command artifacts cite scenario command and assertion finding" {
     try std.testing.expect(std.mem.indexOf(u8, artifacts.dot, "event_2 -> event_3") != null);
 }
 
+test "package test failure artifacts use package paths and causal ci report" {
+    const scenario = try scenarioByName("package-tests");
+    const artifacts = try buildFailureArtifacts(std.testing.allocator, scenario, .{
+        .term = .{ .exited = 1 },
+        .stdout = "",
+        .stderr = "package test failure",
+    });
+    defer artifacts.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 1), artifacts.finding_count);
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-package-tests.txt",
+        artifacts.report_path,
+    );
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-package-tests.json",
+        artifacts.json_path,
+    );
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-package-tests.dot",
+        artifacts.dot_path,
+    );
+    try std.testing.expect(std.mem.indexOf(u8, artifacts.report, "zigeffect causal ci report") != null);
+    try std.testing.expect(std.mem.indexOf(u8, artifacts.report, "program: zigeffect command: package-tests") != null);
+    try std.testing.expect(std.mem.indexOf(u8, artifacts.report, "finding event=3 kind=assertion_failure") != null);
+    try std.testing.expect(std.mem.indexOf(u8, artifacts.report, "- causal.cause 3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, artifacts.json, "\"event_taxonomy_version\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, artifacts.json, "package test failure") != null);
+}
+
 test "successful command artifacts record success with no findings" {
     const scenario = try scenarioByName("causal-scoped-fiber");
     const artifacts = try buildCommandArtifacts(std.testing.allocator, scenario, .{
@@ -645,6 +682,12 @@ test "scenario registry records owners purposes policies invariants and paths" {
         ".zig-cache/causal-artifacts/zigeffect-causal-causal-scoped-fiber.json",
         paths.json_path,
     );
+}
+
+test "package test scenario targets raw package test step" {
+    const scenario = try scenarioByName("package-tests");
+    try std.testing.expect(argvContains(scenario.argv, "test-raw"));
+    try std.testing.expect(!argvContains(scenario.argv, "test"));
 }
 
 test "invariant catalog maps findings to runtime rules" {
