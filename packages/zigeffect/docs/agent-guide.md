@@ -474,6 +474,17 @@ aggregate action counts and `next_action`, then inspect `*-advice.txt`,
 `*-queries.txt`, and `*-compare.txt` for detailed event evidence before
 proposing the next fix.
 
+To turn the verdict into a deterministic local agent handoff, run:
+
+```sh
+zig build causal-dev-agent -- local
+zig build causal-dev-agent -- local causal-scoped-fiber
+```
+
+The command reads the existing verdict artifact, prints the recommended
+inspection order, and gives exact advice, query, and compare commands. It does
+not rerun the loop or apply fixes.
+
 Generate advice directly from any saved causal JSON artifact:
 
 ```sh

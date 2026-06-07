@@ -348,6 +348,28 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_verdict_tool_tests = b.addRunArtifact(causal_verdict_tool_tests);
 
+    const causal_dev_agent_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_dev_agent.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_dev_agent_tool_module.addImport("causal_run", causal_run_tool_module);
+
+    const causal_dev_agent_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-dev-agent-tests",
+        .root_module = causal_dev_agent_tool_module,
+    });
+    const run_causal_dev_agent_tool_tests = b.addRunArtifact(causal_dev_agent_tool_tests);
+
+    const causal_dev_agent_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-dev-agent",
+        .root_module = causal_dev_agent_tool_module,
+    });
+    const run_causal_dev_agent_tool = b.addRunArtifact(causal_dev_agent_tool);
+    if (b.args) |args| run_causal_dev_agent_tool.addArgs(args);
+    const causal_dev_agent_step = b.step("causal-dev-agent", "Read a causal dev-loop verdict and print the next agent inspection plan");
+    causal_dev_agent_step.dependOn(&run_causal_dev_agent_tool.step);
+
     const causal_handoff_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_handoff.zig"),
         .target = target,
@@ -430,6 +452,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&causal_artifacts_tool.step);
     examples_step.dependOn(&run_causal_artifacts_tool_tests.step);
     examples_step.dependOn(&run_causal_verdict_tool_tests.step);
+    examples_step.dependOn(&causal_dev_agent_tool.step);
+    examples_step.dependOn(&run_causal_dev_agent_tool_tests.step);
     examples_step.dependOn(&causal_handoff_tool.step);
     examples_step.dependOn(&run_causal_handoff_tool_tests.step);
     examples_step.dependOn(&causal_loop_tool.step);
