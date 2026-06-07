@@ -513,6 +513,8 @@ metrics, and traces.
 - Delivered: `.github/workflows/zigeffect-causal.yml` runs the causal manifest,
   dogfood harness, examples, and causal package-test gate, then uploads causal
   artifacts on failure.
+- Delivered: `zig build causal-ci-handoff` writes a failure handoff report with
+  exact advice and query commands, and CI runs it before artifact upload.
 - Delivered: defensive causal event redaction for common secret-shaped
   key/value details, bearer values, and URL credentials.
 - Delivered: an optional `CausalBackend` event sink contract with adapter kinds

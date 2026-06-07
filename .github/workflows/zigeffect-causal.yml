@@ -49,6 +49,11 @@ jobs:
         working-directory: packages/zigeffect
         run: zig build test --summary none
 
+      - name: Write causal CI handoff
+        if: ${{ failure() }}
+        working-directory: packages/zigeffect
+        run: zig build causal-ci-handoff
+
       - name: Upload causal artifacts on failure
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4

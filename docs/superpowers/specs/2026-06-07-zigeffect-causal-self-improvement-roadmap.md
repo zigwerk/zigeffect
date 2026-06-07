@@ -37,10 +37,12 @@ development branch contains:
   artifact retention guidance for agents and CI.
 - `.github/workflows/zigeffect-causal.yml`, which runs the causal zigeffect
   harness in CI and uploads causal artifacts when the job fails.
+- `zig build causal-ci-handoff`, which writes a first-read CI failure report
+  with exact advice and query commands for uploaded JSON artifacts.
 
 The baseline proves that agents can cite causal evidence from `zigeffect`
-itself. The next step is to automate before/after capture around the scenario
-registry and package-test development loop.
+itself. The next step is to make CI and local development compare failing
+artifact bundles against the nearest healthy baseline.
 
 ## North Star
 
@@ -309,6 +311,9 @@ Delivered first slice:
 - `.github/workflows/zigeffect-causal.yml` runs the manifest, dogfood harness,
   examples, and causal package-test gate in CI, then uploads causal `.txt`,
   `.json`, and `.dot` artifacts on failure.
+- `zig build causal-ci-handoff` writes
+  `.zig-cache/causal-artifacts/zigeffect-causal-ci-handoff.txt`, and CI runs it
+  on failure before upload so agents have a first-read report.
 
 Remaining:
 

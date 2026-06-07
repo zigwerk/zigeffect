@@ -146,6 +146,18 @@ Repository CI uses `.github/workflows/zigeffect-causal.yml` to print this
 manifest, generate dogfood artifacts, run examples, run the causal package-test
 gate, and upload only causal artifacts when the job fails.
 
+Write the compact CI failure handoff report locally:
+
+```bash
+cd packages/zigeffect
+zig build causal-ci-handoff
+```
+
+The report is written to
+`.zig-cache/causal-artifacts/zigeffect-causal-ci-handoff.txt`. CI runs this on
+failure before artifact upload, so agents should read that file first and then
+run the exact `causal-advice` or `causal-query` commands it lists.
+
 Causal JSON artifacts use this root header:
 
 ```json

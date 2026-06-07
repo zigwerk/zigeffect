@@ -336,6 +336,27 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_artifacts_tool_tests = b.addRunArtifact(causal_artifacts_tool_tests);
 
+    const causal_handoff_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_handoff.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_handoff_tool_module.addImport("causal_run", causal_run_tool_module);
+
+    const causal_handoff_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-handoff",
+        .root_module = causal_handoff_tool_module,
+    });
+    const run_causal_handoff_tool = b.addRunArtifact(causal_handoff_tool);
+    const causal_handoff_step = b.step("causal-ci-handoff", "Write causal CI handoff report for agents");
+    causal_handoff_step.dependOn(&run_causal_handoff_tool.step);
+
+    const causal_handoff_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-handoff-tests",
+        .root_module = causal_handoff_tool_module,
+    });
+    const run_causal_handoff_tool_tests = b.addRunArtifact(causal_handoff_tool_tests);
+
     const causal_loop_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_loop.zig"),
         .target = target,
@@ -392,6 +413,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_run_tool_tests.step);
     examples_step.dependOn(&causal_artifacts_tool.step);
     examples_step.dependOn(&run_causal_artifacts_tool_tests.step);
+    examples_step.dependOn(&causal_handoff_tool.step);
+    examples_step.dependOn(&run_causal_handoff_tool_tests.step);
     examples_step.dependOn(&causal_loop_tool.step);
     examples_step.dependOn(&run_causal_loop_tool_tests.step);
 }

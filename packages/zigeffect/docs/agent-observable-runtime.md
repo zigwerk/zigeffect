@@ -447,8 +447,9 @@ loops, review them before public upload, and avoid uploading the rest of
 
 The repository workflow `.github/workflows/zigeffect-causal.yml` is the first
 CI version of this lane. It prints the manifest, generates dogfood artifacts,
-compiles and tests examples, runs the causal package-test gate, and uploads only
-the causal artifact globs when the job fails.
+compiles and tests examples, runs the causal package-test gate, writes a compact
+`zigeffect-causal-ci-handoff.txt` report on failure, and uploads only the causal
+artifact globs when the job fails.
 
 The causal JSON artifact is versioned at the root:
 
@@ -929,7 +930,9 @@ to failed jobs or handed between development agents.
 
 `.github/workflows/zigeffect-causal.yml` now applies that boundary in CI: it
 runs the local causal harness and preserves `.txt`, `.json`, and `.dot` causal
-artifacts only on failure.
+artifacts only on failure. The failure path also runs
+`zig build causal-ci-handoff` so the uploaded bundle contains a first-read
+report with exact follow-up commands.
 
 This phase proves the agent workflow before production or app adapters exist.
 
