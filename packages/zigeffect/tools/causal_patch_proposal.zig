@@ -110,6 +110,30 @@ fn localProposalTextPathForScenario(allocator: std.mem.Allocator, scenario_slug:
     );
 }
 
+fn localAuditJsonPath() []const u8 {
+    return causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-remediation-audit.json";
+}
+
+fn localAuditJsonPathForScenario(allocator: std.mem.Allocator, scenario_slug: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{s}/zigeffect-causal-dev-loop-{s}-remediation-audit.json",
+        .{ causal_run.artifact_dir, scenario_slug },
+    );
+}
+
+fn localDecisionJsonPath() []const u8 {
+    return causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-remediation-decision.json";
+}
+
+fn localDecisionJsonPathForScenario(allocator: std.mem.Allocator, scenario_slug: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{s}/zigeffect-causal-dev-loop-{s}-remediation-decision.json",
+        .{ causal_run.artifact_dir, scenario_slug },
+    );
+}
+
 fn parseProposalStatus(value: []const u8) ?ProposalStatus {
     if (std.mem.eql(u8, value, "draft")) return .draft;
     if (std.mem.eql(u8, value, "approved")) return .approved;
@@ -375,6 +399,167 @@ fn formatProposalJson(allocator: std.mem.Allocator, input: ProposalInput) ![]con
     try output.appendSlice(allocator, "}\n");
 
     return output.toOwnedSlice(allocator);
+}
+
+fn formatProposalText(allocator: std.mem.Allocator, input: ProposalInput) ![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "zigeffect causal patch proposal\n");
+    try output.print(allocator, "schema: {s}\n", .{proposal_schema});
+    try output.print(allocator, "mode: {s}\n", .{input.options.mode});
+    try output.print(allocator, "target: {s}\n", .{input.target});
+    try output.print(allocator, "proposal_status: {s}\n", .{proposalStatusText(input.options.status)});
+    try output.print(allocator, "approval_status: {s}\n", .{approvalStatusText(input.options.status)});
+    try output.print(allocator, "approved: {}\n", .{approvedBool(input.options.status)});
+    try output.appendSlice(allocator, "applied: false\n");
+    try output.print(allocator, "summary: {s}\n\n", .{input.options.summary});
+
+    try output.appendSlice(allocator, "source:\n");
+    try output.print(allocator, "- audit: {s}\n", .{input.source.audit});
+    if (input.source.decision) |decision| {
+        try output.print(allocator, "- decision: {s}\n", .{decision});
+    } else {
+        try output.appendSlice(allocator, "- decision: none\n");
+    }
+    try output.print(allocator, "- verdict: {s}\n", .{input.source.artifacts.verdict});
+    try output.print(allocator, "- diagnosis: {s}\n", .{input.source.artifacts.diagnosis});
+    try output.print(allocator, "- remediation plan: {s}\n", .{input.source.artifacts.remediation_plan});
+    try output.print(allocator, "- advice: {s}\n", .{input.source.artifacts.advice});
+    try output.print(allocator, "- query: {s}\n", .{input.source.artifacts.query});
+    if (input.source.artifacts.compare) |compare| {
+        try output.print(allocator, "- compare: {s}\n\n", .{compare});
+    } else {
+        try output.appendSlice(allocator, "- compare: none\n\n");
+    }
+
+    try output.appendSlice(allocator, "proposed changes:\n");
+    try output.print(allocator, "- {s}: {s}\n\n", .{ input.options.file, input.options.change });
+
+    try output.appendSlice(allocator, "evidence:\n");
+    if (input.event_ids.len == 0) {
+        try output.appendSlice(allocator, "- none\n\n");
+    } else {
+        for (input.event_ids) |event_id| try output.print(allocator, "- event {d}\n", .{event_id});
+        try output.append(allocator, '\n');
+    }
+
+    try output.appendSlice(allocator, "verification:\n");
+    for (input.verification_commands) |command| try output.print(allocator, "- `{s}`\n", .{command});
+    try output.append(allocator, '\n');
+
+    try output.appendSlice(allocator, "claim guardrails:\n");
+    for (input.claim_guardrails) |guardrail| try output.print(allocator, "- {s}\n", .{guardrail});
+    try output.append(allocator, '\n');
+
+    try output.appendSlice(allocator, "proposal guardrails:\n");
+    try output.print(allocator, "- {s}\n", .{firstProposalGuardrail()});
+    try output.print(allocator, "- {s}\n", .{secondProposalGuardrail(input.options.status)});
+    try output.print(allocator, "- {s}\n", .{thirdProposalGuardrail()});
+
+    return output.toOwnedSlice(allocator);
+}
+
+fn readArtifact(io: std.Io, allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => error.MissingPatchProposalInput,
+        else => return err,
+    };
+}
+
+fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
+    const slash = std.mem.lastIndexOfScalar(u8, path, '/') orelse return error.InvalidArtifactPath;
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(io, path[0..slash]);
+    try cwd.writeFile(io, .{ .sub_path = path, .data = contents });
+}
+
+fn writeProposal(init: std.process.Init, proposal_json_path: []const u8, proposal_text_path: []const u8, input: ProposalInput) !void {
+    const allocator = init.gpa;
+    const json_report = try formatProposalJson(allocator, input);
+    defer allocator.free(json_report);
+    const text_report = try formatProposalText(allocator, input);
+    defer allocator.free(text_report);
+
+    try writeArtifact(init.io, proposal_json_path, json_report);
+    try writeArtifact(init.io, proposal_text_path, text_report);
+    std.debug.print("{s}", .{text_report});
+}
+
+fn runLocal(init: std.process.Init, options: ProposalOptions) !void {
+    const allocator = init.gpa;
+
+    if (options.scenario_slug) |slug| {
+        _ = try causal_run.scenarioByName(slug);
+    }
+
+    const proposal_json_path = if (options.scenario_slug) |slug| try localProposalJsonPathForScenario(allocator, slug) else localProposalJsonPath();
+    defer if (options.scenario_slug != null) allocator.free(proposal_json_path);
+    const proposal_text_path = if (options.scenario_slug) |slug| try localProposalTextPathForScenario(allocator, slug) else localProposalTextPath();
+    defer if (options.scenario_slug != null) allocator.free(proposal_text_path);
+
+    switch (options.status) {
+        .draft => {
+            const audit_path = if (options.scenario_slug) |slug| try localAuditJsonPathForScenario(allocator, slug) else localAuditJsonPath();
+            defer if (options.scenario_slug != null) allocator.free(audit_path);
+
+            const audit_json = try readArtifact(init.io, allocator, audit_path);
+            defer allocator.free(audit_json);
+            var parsed_audit = try std.json.parseFromSlice(AuditRecord, allocator, audit_json, .{ .ignore_unknown_fields = true });
+            defer parsed_audit.deinit();
+            try validateAuditRecord(parsed_audit.value);
+
+            try writeProposal(init, proposal_json_path, proposal_text_path, proposalInputFromAudit(options, audit_path, parsed_audit.value));
+        },
+        .approved => {
+            const decision_path = if (options.scenario_slug) |slug| try localDecisionJsonPathForScenario(allocator, slug) else localDecisionJsonPath();
+            defer if (options.scenario_slug != null) allocator.free(decision_path);
+
+            const decision_json = try readArtifact(init.io, allocator, decision_path);
+            defer allocator.free(decision_json);
+            var parsed_decision = try std.json.parseFromSlice(DecisionRecord, allocator, decision_json, .{ .ignore_unknown_fields = true });
+            defer parsed_decision.deinit();
+            try validateDecisionRecord(parsed_decision.value);
+
+            try writeProposal(init, proposal_json_path, proposal_text_path, proposalInputFromDecision(options, decision_path, parsed_decision.value));
+        },
+    }
+}
+
+fn failUsage(err: anyerror) noreturn {
+    std.debug.print("causal-patch-proposal error: {s}\n{s}", .{ @errorName(err), usage() });
+    std.process.exit(2);
+}
+
+pub fn main(init: std.process.Init) !void {
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    const options = parseProposalOptions(args) catch |err| switch (err) {
+        error.MissingMode,
+        error.UnknownMode,
+        error.MissingProposalStatus,
+        error.UnknownProposalStatus,
+        error.DuplicateScenarioArgument,
+        error.UnknownFlag,
+        error.MissingFlagValue,
+        error.MissingSummary,
+        error.MissingFile,
+        error.MissingChange,
+        => failUsage(err),
+    };
+
+    runLocal(init, options) catch |err| switch (err) {
+        error.UnknownScenario,
+        error.MissingPatchProposalInput,
+        error.UnsupportedAuditSchema,
+        error.UnsupportedDecisionSchema,
+        error.AuditNotPending,
+        error.AuditAlreadyApplied,
+        error.DecisionNotApproved,
+        error.DecisionAlreadyApplied,
+        error.InvalidArtifactPath,
+        => failUsage(err),
+        else => return err,
+    };
 }
 
 const pending_audit_json =
