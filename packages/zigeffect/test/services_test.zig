@@ -677,6 +677,69 @@ test "causal artifacts disclose bounded retention state" {
     try std.testing.expectEqual(retained, store.oldestRetainedEventId().?);
 }
 
+test "causal store redacts secret-shaped event strings before storage and export" {
+    var backend_state = FakeCausalBackendState{};
+    var store = fx.CausalStore.init(std.testing.allocator);
+    store.attachBackend(fakeCausalBackend(&backend_state));
+    defer store.deinit();
+
+    _ = try store.record(.{
+        .kind = .log_recorded,
+        .label = "Authorization: Bearer raw-bearer-token",
+        .type_name = "postgresql://root:db-password@localhost/yachdee",
+        .status = "api_key=sk-proj-raw-key",
+        .redacted_detail = "database.password=hunter2 token: raw-token safe=kept",
+    });
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+
+    const event = snapshot.events[0];
+    try std.testing.expect(std.mem.indexOf(u8, event.label, "raw-bearer-token") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.type_name, "db-password") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.status, "sk-proj-raw-key") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "hunter2") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "raw-token") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "safe=kept") != null);
+    try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "database.password=<redacted>") != null);
+
+    try std.testing.expect(std.mem.indexOf(u8, backend_state.labels[0], "raw-bearer-token") == null);
+
+    const report = try fx.formatCausalReport(std.testing.allocator, "redaction", &store);
+    defer std.testing.allocator.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "hunter2") == null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "raw-token") == null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "db-password") == null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "<redacted>") != null);
+
+    const json = try fx.formatCausalJson(std.testing.allocator, &store);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "hunter2") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "raw-token") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "db-password") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "<redacted>") != null);
+}
+
+test "causal redaction preserves safe retry diagnostics" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    _ = try store.record(.{
+        .kind = .schedule_decision,
+        .label = "retry",
+        .status = "exhausted",
+        .redacted_detail = "attempt=2 delay_ms=null decision=exhausted",
+    });
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+
+    try std.testing.expectEqualStrings(
+        "attempt=2 delay_ms=null decision=exhausted",
+        snapshot.events[0].redacted_detail,
+    );
+}
+
 test "causal ci report includes findings next queries and citation ids" {
     var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();

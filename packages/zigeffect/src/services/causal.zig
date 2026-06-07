@@ -5,6 +5,7 @@ pub const Allocator = std.mem.Allocator;
 pub const CausalBackend = causal_backend.CausalBackend;
 pub const causal_json_schema = "zigeffect.causal.v1";
 pub const causal_json_schema_version: u32 = 1;
+pub const causal_redaction_marker = "<redacted>";
 
 pub const CausalStoreOptions = struct {
     max_events: ?usize = null,
@@ -51,6 +52,198 @@ pub const CausalEvent = struct {
     redacted_detail: []const u8 = "",
 };
 
+const sensitive_detail_keys = [_][]const u8{
+    "password",
+    "passwd",
+    "pwd",
+    "secret",
+    "token",
+    "api_key",
+    "api-key",
+    "apikey",
+    "access_token",
+    "access-token",
+    "refresh_token",
+    "refresh-token",
+    "authorization",
+};
+
+fn asciiLower(byte: u8) u8 {
+    if (byte >= 'A' and byte <= 'Z') return byte + 32;
+    return byte;
+}
+
+fn eqlAsciiIgnoreCase(left: []const u8, right: []const u8) bool {
+    if (left.len != right.len) return false;
+    for (left, right) |a, b| {
+        if (asciiLower(a) != asciiLower(b)) return false;
+    }
+    return true;
+}
+
+fn startsWithAsciiIgnoreCase(value: []const u8, index: usize, expected: []const u8) bool {
+    if (index + expected.len > value.len) return false;
+    return eqlAsciiIgnoreCase(value[index .. index + expected.len], expected);
+}
+
+fn isAsciiAlphaNumeric(byte: u8) bool {
+    return (byte >= 'a' and byte <= 'z') or
+        (byte >= 'A' and byte <= 'Z') or
+        (byte >= '0' and byte <= '9');
+}
+
+fn isSensitiveKeyChar(byte: u8) bool {
+    return isAsciiAlphaNumeric(byte) or byte == '_' or byte == '-' or byte == '.';
+}
+
+fn isValueDelimiter(byte: u8) bool {
+    return byte == ' ' or
+        byte == '\t' or
+        byte == '\n' or
+        byte == '\r' or
+        byte == '&' or
+        byte == ';' or
+        byte == ',';
+}
+
+fn skipValue(value: []const u8, start: usize) usize {
+    var index = start;
+    while (index < value.len and !isValueDelimiter(value[index])) {
+        index += 1;
+    }
+    return index;
+}
+
+fn isHardValueDelimiter(byte: u8) bool {
+    return byte == '\n' or byte == '\r' or byte == '&' or byte == ';' or byte == ',';
+}
+
+fn skipAuthorizationValue(value: []const u8, start: usize) usize {
+    var index = start;
+    while (index < value.len and !isHardValueDelimiter(value[index])) {
+        index += 1;
+    }
+    return index;
+}
+
+fn isAuthorizationKey(key: []const u8) bool {
+    return eqlAsciiIgnoreCase(key, "authorization");
+}
+
+fn isSensitiveKey(key: []const u8) bool {
+    for (sensitive_detail_keys) |candidate| {
+        if (eqlAsciiIgnoreCase(key, candidate)) return true;
+    }
+
+    if (std.mem.lastIndexOfAny(u8, key, ".-")) |separator_index| {
+        const suffix = key[separator_index + 1 ..];
+        for (sensitive_detail_keys) |candidate| {
+            if (eqlAsciiIgnoreCase(suffix, candidate)) return true;
+        }
+    }
+
+    return false;
+}
+
+fn appendUrlCredentialRedaction(
+    output: *std.ArrayList(u8),
+    allocator: Allocator,
+    value: []const u8,
+    index: *usize,
+) Allocator.Error!bool {
+    if (!std.mem.startsWith(u8, value[index.*..], "://")) return false;
+
+    const authority_start = index.* + 3;
+    const authority_end = skipValue(value, authority_start);
+    const authority = value[authority_start..authority_end];
+    const at_index = std.mem.indexOfScalar(u8, authority, '@') orelse return false;
+    const credentials = authority[0..at_index];
+    if (std.mem.indexOfScalar(u8, credentials, ':') == null) return false;
+
+    try output.appendSlice(allocator, "://");
+    try output.appendSlice(allocator, causal_redaction_marker);
+    try output.append(allocator, '@');
+    index.* = authority_start + at_index + 1;
+    return true;
+}
+
+fn appendBearerRedaction(
+    output: *std.ArrayList(u8),
+    allocator: Allocator,
+    value: []const u8,
+    index: *usize,
+) Allocator.Error!bool {
+    if (!startsWithAsciiIgnoreCase(value, index.*, "bearer")) return false;
+    const after_bearer = index.* + "bearer".len;
+    if (after_bearer >= value.len or !std.ascii.isWhitespace(value[after_bearer])) return false;
+
+    try output.appendSlice(allocator, value[index.*..after_bearer]);
+    var value_start = after_bearer;
+    while (value_start < value.len and std.ascii.isWhitespace(value[value_start])) {
+        try output.append(allocator, value[value_start]);
+        value_start += 1;
+    }
+    try output.appendSlice(allocator, causal_redaction_marker);
+    index.* = skipValue(value, value_start);
+    return true;
+}
+
+fn appendSensitiveKeyRedaction(
+    output: *std.ArrayList(u8),
+    allocator: Allocator,
+    value: []const u8,
+    index: *usize,
+) Allocator.Error!bool {
+    if (!isSensitiveKeyChar(value[index.*])) return false;
+
+    var key_end = index.*;
+    while (key_end < value.len and isSensitiveKeyChar(value[key_end])) {
+        key_end += 1;
+    }
+
+    var separator_index = key_end;
+    while (separator_index < value.len and value[separator_index] == ' ') {
+        separator_index += 1;
+    }
+    if (separator_index >= value.len) return false;
+    if (value[separator_index] != '=' and value[separator_index] != ':') return false;
+
+    const key = value[index.*..key_end];
+    if (!isSensitiveKey(key)) return false;
+
+    try output.appendSlice(allocator, value[index.* .. separator_index + 1]);
+    var value_start = separator_index + 1;
+    while (value_start < value.len and value[value_start] == ' ') {
+        try output.append(allocator, value[value_start]);
+        value_start += 1;
+    }
+    try output.appendSlice(allocator, causal_redaction_marker);
+    index.* = if (isAuthorizationKey(key))
+        skipAuthorizationValue(value, value_start)
+    else
+        skipValue(value, value_start);
+    return true;
+}
+
+fn redactCausalText(allocator: Allocator, value: []const u8) Allocator.Error![]const u8 {
+    if (value.len == 0) return "";
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    var index: usize = 0;
+    while (index < value.len) {
+        if (try appendUrlCredentialRedaction(&output, allocator, value, &index)) continue;
+        if (try appendSensitiveKeyRedaction(&output, allocator, value, &index)) continue;
+        if (try appendBearerRedaction(&output, allocator, value, &index)) continue;
+
+        try output.append(allocator, value[index]);
+        index += 1;
+    }
+
+    return output.toOwnedSlice(allocator);
+}
+
 fn cloneSlice(allocator: Allocator, value: []const u8) Allocator.Error![]const u8 {
     if (value.len == 0) return "";
     return allocator.dupe(u8, value);
@@ -58,13 +251,13 @@ fn cloneSlice(allocator: Allocator, value: []const u8) Allocator.Error![]const u
 
 fn cloneEvent(allocator: Allocator, event: CausalEvent) Allocator.Error!CausalEvent {
     var owned = event;
-    owned.label = try cloneSlice(allocator, event.label);
+    owned.label = try redactCausalText(allocator, event.label);
     errdefer if (owned.label.len > 0) allocator.free(owned.label);
-    owned.type_name = try cloneSlice(allocator, event.type_name);
+    owned.type_name = try redactCausalText(allocator, event.type_name);
     errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
-    owned.status = try cloneSlice(allocator, event.status);
+    owned.status = try redactCausalText(allocator, event.status);
     errdefer if (owned.status.len > 0) allocator.free(owned.status);
-    owned.redacted_detail = try cloneSlice(allocator, event.redacted_detail);
+    owned.redacted_detail = try redactCausalText(allocator, event.redacted_detail);
     errdefer if (owned.redacted_detail.len > 0) allocator.free(owned.redacted_detail);
     return owned;
 }

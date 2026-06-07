@@ -341,6 +341,12 @@ defer store.deinit();
 Queries only see retained events. If `dropped_events` is nonzero, cite the
 retention metadata in the fix summary and avoid claiming the trace is complete.
 
+Causal events also redact common secret-shaped text before storage:
+password-like key/value pairs, API keys, token keys, authorization bearer
+values, and URL credentials become `<redacted>`. Treat this as a backstop. Do
+not intentionally put secrets, prompts, request bodies, or credentials into
+labels, statuses, type names, or details.
+
 Use the non-failing probe when you want evidence:
 
 ```sh

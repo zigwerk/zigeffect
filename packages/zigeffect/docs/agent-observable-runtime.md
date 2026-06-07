@@ -454,6 +454,11 @@ max_events)`. Retention applies to the in-memory store, not attached backends.
 Queries operate on retained events only, so `dropped_events` is the signal that
 an agent may be looking at a truncated parent chain.
 
+Causal event string fields are defensively redacted before the store retains
+them or forwards them to attached backends. The first policy redacts common
+secret-shaped key/value pairs, bearer token values, and URL credentials. This
+is a deterministic backstop, not a complete PII classifier.
+
 This command records a compact deterministic engine fixture with missing
 service, resource, fiber, and retry findings. It exits successfully unless
 artifact generation fails, because the findings are intentional evidence for
@@ -577,7 +582,9 @@ not by wandering through source files first.
   replacements, or config changes. They should not patch arbitrary runtime
   memory.
 - **Secrets stay secret.** Config values, request payloads, headers, and AI
-  prompts need redaction policies before they enter the graph.
+  prompts need redaction policies before they enter the graph. The causal store
+  defensively redacts common secret-shaped strings, but callers should still
+  avoid recording secrets.
 - **Determinism remains the compatibility suite.** The deterministic backend is
   the reference implementation for causal events. Async backends must emit the
   same event semantics.

@@ -152,6 +152,12 @@ CI harness needs capped retained memory. Queries operate on retained events;
 reports and JSON artifacts disclose `max_events`, `dropped_events`, and
 `oldest_retained_event_id` so agents know when evidence is truncated.
 
+Causal event strings are defensively redacted before storage and backend
+emission for common secret-shaped key/value details, bearer values, and URL
+credentials. Callers should still avoid putting secrets in labels, statuses,
+type names, or details; the redactor is a safety backstop, not a full PII
+classifier.
+
 Run the failure-gated causal dogfood check:
 
 ```bash

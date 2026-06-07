@@ -257,13 +257,14 @@ Remaining:
 
 ### Milestone 8: Hardening And CI Readiness
 
-Status: first schema-versioning and bounded-store slices delivered.
+Status: first schema-versioning, bounded-store, and redaction slices delivered.
 
 Deliverables:
 
 - bounded store or ring-buffer policy; first opt-in bounded retention slice
   delivered through `CausalStore.initBounded`;
-- stronger secret redaction tests;
+- stronger secret redaction tests; first defensive store-time redaction slice
+  delivered;
 - event sampling rules;
 - stable schema versioning for JSON artifacts; delivered for
   `zigeffect.causal.v1` root metadata;
@@ -286,12 +287,15 @@ Delivered first slice:
   preserving monotonic event ids;
 - reports and JSON artifacts disclose `max_events`, `dropped_events`, and
   `oldest_retained_event_id`.
+- causal store redacts common secret-shaped key/value details, bearer token
+  values, and URL credentials before storage and backend emission.
 
 Remaining:
 
 - physical ring-buffer optimization if ordered drop-oldest retention becomes a
   bottleneck;
-- stronger secret redaction tests;
+- broader PII/payload redaction policy beyond deterministic secret-shaped
+  strings;
 - event sampling rules;
 - compatibility tests for event taxonomy changes;
 - artifact retention and upload guidance.
