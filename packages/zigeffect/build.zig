@@ -427,6 +427,15 @@ pub fn build(b: *std.Build) void {
     const causal_remediation_plan_step = b.step("causal-remediation-plan", "Write a causal remediation plan from local dev-loop reports");
     causal_remediation_plan_step.dependOn(&run_causal_remediation_plan_tool.step);
 
+    const causal_remediation_audit_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-remediation-audit",
+        .root_module = causal_remediation_audit_tool_module,
+    });
+    const run_causal_remediation_audit_tool = b.addRunArtifact(causal_remediation_audit_tool);
+    if (b.args) |args| run_causal_remediation_audit_tool.addArgs(args);
+    const causal_remediation_audit_step = b.step("causal-remediation-audit", "Write a pending causal remediation audit from local dev-loop reports");
+    causal_remediation_audit_step.dependOn(&run_causal_remediation_audit_tool.step);
+
     const causal_handoff_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_handoff.zig"),
         .target = target,
@@ -515,6 +524,7 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_diagnosis_tool_tests.step);
     examples_step.dependOn(&causal_remediation_plan_tool.step);
     examples_step.dependOn(&run_causal_remediation_plan_tool_tests.step);
+    examples_step.dependOn(&causal_remediation_audit_tool.step);
     examples_step.dependOn(&run_causal_remediation_audit_tool_tests.step);
     examples_step.dependOn(&causal_handoff_tool.step);
     examples_step.dependOn(&run_causal_handoff_tool_tests.step);
