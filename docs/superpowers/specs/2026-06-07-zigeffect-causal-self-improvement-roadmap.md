@@ -315,6 +315,17 @@ Remaining:
   proposed remediation reduced, preserved, or introduced causal findings;
 - app-facing development loops once applications emit causal runtime artifacts.
 
+Active next slice:
+
+- `zig build causal-patch-proposal -- local draft|approved [scenario] ...`
+  creates the first patch-intent artifact without applying source changes;
+- draft proposals are explicitly unapproved and read pending audits;
+- approved proposals read approved decisions and still record `applied=false`;
+- detailed design:
+  `docs/superpowers/specs/2026-06-07-zigeffect-causal-patch-proposal-design.md`;
+- implementation plan:
+  `docs/superpowers/plans/2026-06-07-zigeffect-causal-patch-proposal.md`.
+
 #### Remediation-Control Roadmap
 
 This sub-roadmap is the concrete path from "agent can inspect evidence" to
@@ -324,8 +335,9 @@ This sub-roadmap is the concrete path from "agent can inspect evidence" to
    pending proposal artifacts. No source edits, no approvals, no timestamps.
 2. **Approval boundary.** Use `causal-remediation-decision` to append an audit
    decision with reviewer, policy id, and rationale. Still no patch application.
-3. **Patch proposal artifact.** Add a non-mutating patch proposal format that
-   links one proposed diff to audit evidence and required verification commands.
+3. **Patch proposal artifact.** Add `causal-patch-proposal` so agents can write
+   draft or approved patch-intent artifacts linked to audit evidence, decision
+   evidence, event ids, guardrails, and required verification commands.
 4. **Remediation workbench loop.** Let agents compare audit/proposal outcomes
    before and after a patch, including which event ids disappeared, persisted,
    or appeared.
