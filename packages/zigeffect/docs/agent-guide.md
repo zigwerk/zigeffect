@@ -574,6 +574,24 @@ proposals require an approved remediation decision and write
 `applied=false`. The command writes `*-patch-proposal.json` and
 `*-patch-proposal.txt`; it never edits source or runs verification.
 
+After a patch attempt and after-phase evidence exist, compare the full local
+audit chain:
+
+```sh
+zig build causal-audit-chain -- local
+zig build causal-audit-chain -- local causal-scoped-fiber
+```
+
+The command writes `*-audit-chain.json` and `*-audit-chain.txt` with schema
+`zigeffect.causal.audit-chain.v1`. It reads the session, audit, optional
+decision, patch proposal, before/after causal artifacts, and compare report. It
+classifies proposal evidence ids as `disappeared`, `persisting`, `appeared`, or
+`missing`, then assigns `assessment=improved|unchanged|regressed|inconclusive`.
+Use this report before claiming a remediation worked. Persisting or missing
+event ids mean the cited evidence is not resolved; appeared ids mean the patch
+may have introduced new evidence. The command does not approve, apply, edit
+source, or run verification.
+
 Generate advice directly from any saved causal JSON artifact:
 
 ```sh

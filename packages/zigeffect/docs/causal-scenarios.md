@@ -94,6 +94,13 @@ zig build causal-patch-proposal -- local draft [scenario] --summary <summary> --
 zig build causal-patch-proposal -- local approved [scenario] --summary <summary> --file <path> --change <description>
 ```
 
+Compare the current session, audit, decision, proposal, before/after artifacts,
+and compare report:
+
+```sh
+zig build causal-audit-chain -- local [scenario]
+```
+
 Generate deterministic advice from a saved causal JSON artifact:
 
 ```sh
@@ -238,6 +245,7 @@ saved bundle; `causal-remediation-plan` writes the remediation-plan artifact;
 `causal-remediation-audit` writes pending proposal audit artifacts;
 `causal-remediation-decision` writes approved or rejected decision artifacts.
 `causal-patch-proposal` writes non-mutating proposal artifacts.
+`causal-audit-chain` writes chain comparison artifacts.
 `causal-dev-session` writes the session wrapper artifacts:
 
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json`
@@ -254,6 +262,8 @@ saved bundle; `causal-remediation-plan` writes the remediation-plan artifact;
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-decision.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-patch-proposal.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-patch-proposal.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-audit-chain.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-audit-chain.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session.txt`
 
@@ -263,6 +273,7 @@ write slug-specific loop artifacts. `causal-diagnosis` and
 `causal-remediation-audit` adds matching pending audit artifacts;
 `causal-remediation-decision` adds matching decision artifacts.
 `causal-patch-proposal` adds matching proposal artifacts.
+`causal-audit-chain` adds matching chain comparison artifacts.
 `causal-dev-session` adds matching session wrapper artifacts:
 
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-before.json`
@@ -279,6 +290,8 @@ write slug-specific loop artifacts. `causal-diagnosis` and
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-remediation-decision.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-patch-proposal.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-patch-proposal.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-audit-chain.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-audit-chain.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session-<scenario>.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session-<scenario>.txt`
 
@@ -315,6 +328,12 @@ Then run `zig build causal-patch-proposal -- local draft|approved [scenario]
 intended source change without applying it. Draft proposals are unapproved and
 read pending audits. Approved proposals require an approved decision. Both modes
 keep `applied=false` and never edit source.
+Then run `zig build causal-audit-chain -- local [scenario]` after the
+before/after evidence and proposal exist. The command writes an audit-chain
+JSON/text report that classifies proposal evidence ids as disappeared,
+persisting, appeared, or missing and assigns an overall assessment of
+`improved`, `unchanged`, `regressed`, or `inconclusive`. Treat it as evidence
+for patch claims, not permission to edit source.
 
 Expected-failure scenarios are valid loop targets. For example,
 `missing-service-compile-fail` reports `expected_failure_observed` when the
