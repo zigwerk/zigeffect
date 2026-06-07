@@ -5,6 +5,7 @@ const causal_query = @import("causal_query");
 const causal_advice = @import("causal_advice");
 const causal_run = @import("causal_run");
 const causal_artifact = @import("causal_artifact");
+const causal_verdict = @import("causal_verdict");
 
 const Phase = enum {
     baseline,
@@ -28,6 +29,7 @@ const LoopPaths = struct {
     compare_report_path: []const u8,
     query_report_path: []const u8,
     advice_report_path: []const u8,
+    verdict_report_path: []const u8,
     owned: bool = false,
 
     fn deinit(self: LoopPaths, allocator: std.mem.Allocator) void {
@@ -37,6 +39,7 @@ const LoopPaths = struct {
         allocator.free(self.compare_report_path);
         allocator.free(self.query_report_path);
         allocator.free(self.advice_report_path);
+        allocator.free(self.verdict_report_path);
     }
 };
 
@@ -137,6 +140,7 @@ fn loopPaths() LoopPaths {
         .compare_report_path = causal_test.artifact_dir ++ "/zigeffect-causal-dev-loop-compare.txt",
         .query_report_path = causal_test.artifact_dir ++ "/zigeffect-causal-dev-loop-queries.txt",
         .advice_report_path = causal_test.artifact_dir ++ "/zigeffect-causal-dev-loop-advice.txt",
+        .verdict_report_path = causal_test.artifact_dir ++ "/zigeffect-causal-dev-loop-verdict.json",
     };
 }
 
@@ -151,6 +155,8 @@ fn loopPathsForScenario(allocator: std.mem.Allocator, scenario_slug: []const u8)
     errdefer allocator.free(query_report_path);
     const advice_report_path = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-advice.txt", .{ causal_run.artifact_dir, scenario_slug });
     errdefer allocator.free(advice_report_path);
+    const verdict_report_path = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-verdict.json", .{ causal_run.artifact_dir, scenario_slug });
+    errdefer allocator.free(verdict_report_path);
 
     return .{
         .before_json_path = before_json_path,
@@ -158,6 +164,7 @@ fn loopPathsForScenario(allocator: std.mem.Allocator, scenario_slug: []const u8)
         .compare_report_path = compare_report_path,
         .query_report_path = query_report_path,
         .advice_report_path = advice_report_path,
+        .verdict_report_path = verdict_report_path,
         .owned = true,
     };
 }
@@ -191,13 +198,14 @@ fn formatSummary(allocator: std.mem.Allocator, input: SummaryInput) std.mem.Allo
             try output.print(allocator, "compare report: {s}\n", .{input.paths.compare_report_path});
             try output.print(allocator, "query report: {s}\n", .{input.paths.query_report_path});
             try output.print(allocator, "advice report: {s}\n", .{input.paths.advice_report_path});
+            try output.print(allocator, "verdict: {s}\n", .{input.paths.verdict_report_path});
             try output.print(allocator, "package-tests: {s}\n", .{@tagName(input.package_status)});
             if (input.compare_report) |report| {
                 try output.appendSlice(allocator, "compare summary:\n");
                 try output.appendSlice(allocator, report);
                 if (report.len == 0 or report[report.len - 1] != '\n') try output.append(allocator, '\n');
             }
-            try output.appendSlice(allocator, "next: inspect advice report\n");
+            try output.appendSlice(allocator, "next: inspect verdict\n");
         },
     }
 
@@ -538,6 +546,23 @@ fn runAfter(init: std.process.Init, scenario: ?causal_run.Scenario) !u8 {
     );
     defer allocator.free(advice_report);
     try writeArtifact(init.io, paths.advice_report_path, advice_report);
+    const verdict_inputs: []const causal_verdict.ArtifactVerdictInput = &.{
+        .{
+            .json_path = paths.after_json_path,
+            .baseline_path = paths.before_json_path,
+            .advice_report_path = paths.advice_report_path,
+            .compare_report_path = paths.compare_report_path,
+        },
+    };
+    const verdict_advice_reports: []const []const u8 = &.{advice_report};
+    const verdict = try causal_verdict.formatVerdictJson(
+        allocator,
+        "zigeffect.causal.dev-loop-verdict.v1",
+        verdict_inputs,
+        verdict_advice_reports,
+    );
+    defer allocator.free(verdict);
+    try writeArtifact(init.io, paths.verdict_report_path, verdict);
 
     const package_status = if (scenario) |selected|
         if (std.mem.eql(u8, selected.slug, "package-tests"))
@@ -615,6 +640,10 @@ test "dev loop paths are stable" {
         ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-advice.txt",
         paths.advice_report_path,
     );
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-verdict.json",
+        paths.verdict_report_path,
+    );
 }
 
 test "scenario dev loop paths include scenario slug" {
@@ -640,6 +669,10 @@ test "scenario dev loop paths include scenario slug" {
     try std.testing.expectEqualStrings(
         ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-advice.txt",
         paths.advice_report_path,
+    );
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-verdict.json",
+        paths.verdict_report_path,
     );
 }
 
@@ -675,7 +708,8 @@ test "after summary includes compare and query report paths" {
     try std.testing.expect(std.mem.indexOf(u8, summary, "compare report: .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-compare.txt") != null);
     try std.testing.expect(std.mem.indexOf(u8, summary, "query report: .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-queries.txt") != null);
     try std.testing.expect(std.mem.indexOf(u8, summary, "advice report: .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-advice.txt") != null);
-    try std.testing.expect(std.mem.indexOf(u8, summary, "next: inspect advice report") != null);
+    try std.testing.expect(std.mem.indexOf(u8, summary, "verdict: .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-verdict.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, summary, "next: inspect verdict") != null);
 }
 
 test "package failure status exits nonzero" {

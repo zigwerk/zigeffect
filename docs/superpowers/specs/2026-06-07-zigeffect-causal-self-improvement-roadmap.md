@@ -44,11 +44,13 @@ development branch contains:
 - CI baseline comparison, where pull request jobs capture exact base-commit
   dogfood and package-test JSON artifacts and use them to mark head advice as
   new or persisting evidence.
+- local dev-loop verdict JSON artifacts, so after-phase runs have the same
+  first-read structured status and action-count surface as CI failures.
 
 The baseline proves that agents can cite causal evidence from `zigeffect`
-itself. The next step is to make CI compare failing pull request artifact
-bundles against exact base-commit causal baselines, while preserving the local
-before/after development loop.
+itself in both local and CI workflows. The next step is to use those verdicts
+as the entry point for more automated development-agent feedback while keeping
+the same before/after artifact discipline.
 
 ## North Star
 
@@ -268,9 +270,14 @@ Delivered slices:
   next actions, and print exact follow-up query commands.
 - before-aware advice statuses for `observed`, `persisting`, and `new`
   evidence in after-phase development loop reports.
+- local `zigeffect-causal-dev-loop-verdict.json` and scenario-specific
+  `zigeffect-causal-dev-loop-<scenario>-verdict.json` reports that summarize
+  action counts, baseline pairing, and the next inspection step.
 
 Remaining:
 
+- development-agent automation that reads local verdicts before selecting
+  advice, query, compare, or scenario-registry follow-up.
 - app-facing development loops once applications emit causal runtime artifacts.
 
 ### Milestone 8: Hardening And CI Readiness
