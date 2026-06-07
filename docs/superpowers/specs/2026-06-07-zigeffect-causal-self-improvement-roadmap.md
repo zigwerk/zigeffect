@@ -295,13 +295,15 @@ Delivered slices:
   pending-approval JSON and text audit records citing the local verdict,
   diagnosis, remediation plan, advice, query, compare artifacts, evidence event
   ids, verification commands, and claim guardrails.
+- `zig build causal-remediation-decision -- local approve|reject [scenario]`,
+  which writes append-only approved or rejected decision records while keeping
+  source edits and patch application out of scope.
 
 Remaining:
 
-- add an approval/rejection command that can mark audit records without applying
-  patches;
 - add an optional patch-proposal artifact that can describe a source edit diff
   while still requiring human or policy approval;
+- add a policy engine that can produce policy-backed decision records;
 - compare before/after audit chains so a development agent can show whether a
   proposed remediation reduced, preserved, or introduced causal findings;
 - app-facing development loops once applications emit causal runtime artifacts.
@@ -313,9 +315,8 @@ This sub-roadmap is the concrete path from "agent can inspect evidence" to
 
 1. **Audit record.** Use `causal-remediation-audit` to create deterministic
    pending proposal artifacts. No source edits, no approvals, no timestamps.
-2. **Approval boundary.** Add approve/reject commands that update or append an
-   audit decision with `approved_by`, policy id, and rationale. Still no patch
-   application.
+2. **Approval boundary.** Use `causal-remediation-decision` to append an audit
+   decision with reviewer, policy id, and rationale. Still no patch application.
 3. **Patch proposal artifact.** Add a non-mutating patch proposal format that
    links one proposed diff to audit evidence and required verification commands.
 4. **Remediation workbench loop.** Let agents compare audit/proposal outcomes
