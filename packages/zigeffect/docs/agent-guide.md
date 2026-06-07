@@ -330,10 +330,13 @@ base-commit dogfood and package-test baseline JSON files, then prints the
 manifest, runs `causal-test`, runs examples, runs `zig build test --summary
 none`, and uploads only causal artifacts if the job fails. On failure it also
 runs `zig build causal-ci-handoff`, which writes
-`.zig-cache/causal-artifacts/zigeffect-causal-ci-handoff.txt` and generated
-`*-advice.txt` reports for existing JSON artifacts. When a head artifact has a
-matching baseline, handoff also writes a `*-ci-compare.txt` report and the
-advice report marks actions as `status=persisting` or `status=new`.
+`.zig-cache/causal-artifacts/zigeffect-causal-ci-verdict.json`,
+`.zig-cache/causal-artifacts/zigeffect-causal-ci-handoff.txt`, and generated
+`*-advice.txt` reports for existing JSON artifacts. Read the verdict JSON first
+for aggregate action counts and the next recommended inspection step. When a
+head artifact has a matching baseline, handoff also writes a `*-ci-compare.txt`
+report and the advice report marks actions as `status=persisting` or
+`status=new`.
 
 Causal JSON artifacts are self-identifying:
 
@@ -526,12 +529,13 @@ make the artifact retention contract explicit before uploading or attaching
 causal evidence.
 
 When debugging a CI failure, start with the uploaded
-`zigeffect-causal-ci-handoff.txt` report. It names the JSON artifacts that were
-present, points at generated `*-advice.txt` reports, and prints exact
-`causal-query` commands for each one. On pull requests it also names any
-base-commit baseline JSON artifact and generated `*-ci-compare.txt` report, so
-new evidence can be separated from findings that already existed on the base
-commit.
+`zigeffect-causal-ci-verdict.json` report. It gives the aggregate status, action
+counts, and `next_action`. Then read `zigeffect-causal-ci-handoff.txt`; it names
+the JSON artifacts that were present, points at generated `*-advice.txt`
+reports, and prints exact `causal-query` commands for each one. On pull
+requests it also names any base-commit baseline JSON artifact and generated
+`*-ci-compare.txt` report, so new evidence can be separated from findings that
+already existed on the base commit.
 
 When a bug teaches a new runtime rule, add or update a catalog entry in
 `tools/causal_run.zig` and document it in `docs/causal-scenarios.md` before

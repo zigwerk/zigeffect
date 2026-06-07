@@ -325,6 +325,9 @@ Delivered first slice:
 - pull request CI captures base-commit dogfood and package-test baseline JSON
   artifacts, and handoff uses matching baselines to write compare reports plus
   `status=persisting` or `status=new` advice.
+- CI handoff writes `zigeffect-causal-ci-verdict.json`, a structured first-read
+  verdict with aggregate action counts and the recommended next inspection
+  step.
 
 Remaining:
 
