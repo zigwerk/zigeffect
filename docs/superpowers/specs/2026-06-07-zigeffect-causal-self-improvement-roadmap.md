@@ -41,10 +41,14 @@ development branch contains:
   with exact advice and query commands for uploaded JSON artifacts.
 - generated CI `*-advice.txt` reports, produced from existing causal JSON
   artifacts by the same `causal_advice` engine used locally.
+- planned CI baseline comparison, where pull request jobs capture exact
+  base-commit dogfood and package-test JSON artifacts and use them to mark head
+  advice as new or persisting evidence.
 
 The baseline proves that agents can cite causal evidence from `zigeffect`
-itself. The next step is to make CI and local development compare failing
-artifact bundles against the nearest healthy baseline.
+itself. The next step is to make CI compare failing pull request artifact
+bundles against exact base-commit causal baselines, while preserving the local
+before/after development loop.
 
 ## North Star
 
