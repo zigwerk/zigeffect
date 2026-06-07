@@ -358,6 +358,10 @@ keeps sampleable observability disjoint from finding evidence: logs, metrics,
 and spans may be sampled; service, scope, resource, fiber, schedule, and
 assertion evidence must not be sampled.
 
+If a query, compare, or development-loop query report warns that the artifact
+taxonomy is newer than supported, keep using the event citations but avoid
+strong claims about role semantics until the tool is updated.
+
 Causal events also redact common secret-shaped text before storage:
 password-like key/value pairs, API keys, token keys, authorization bearer
 values, and URL credentials become `<redacted>`. Treat this as a backstop. Do

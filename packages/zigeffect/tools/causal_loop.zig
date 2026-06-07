@@ -3,6 +3,7 @@ const causal_test = @import("causal_test");
 const causal_compare = @import("causal_compare");
 const causal_query = @import("causal_query");
 const causal_run = @import("causal_run");
+const causal_artifact = @import("causal_artifact");
 
 const Phase = enum {
     baseline,
@@ -54,6 +55,7 @@ const ScenarioCapture = struct {
 const Artifact = struct {
     schema: ?[]const u8 = null,
     schema_version: ?u32 = null,
+    event_taxonomy_version: ?u32 = null,
     events: []Event,
 };
 
@@ -89,6 +91,22 @@ const versioned_dogfood_query_json =
     \\{
     \\  "schema": "zigeffect.causal.v1",
     \\  "schema_version": 1,
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"zigeffect dogfood","type_name":"DogfoodHarness","status":"","redacted_detail":""},
+    \\    {"id":2,"kind":"scope_opened","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":1,"trace_id":null,"span_id":null,"label":"dogfood scope","type_name":"","status":"opened","redacted_detail":""},
+    \\    {"id":3,"kind":"service_required","run_id":1,"parent_id":2,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"Config","type_name":"Config","status":"missing","redacted_detail":"missing provider"},
+    \\    {"id":4,"kind":"resource_acquired","run_id":1,"parent_id":2,"fiber_id":null,"scope_id":1,"trace_id":null,"span_id":null,"label":"dogfood database","type_name":"DogfoodDatabaseConnection","status":"success","redacted_detail":"left open"},
+    \\    {"id":5,"kind":"fiber_forked","run_id":1,"parent_id":2,"fiber_id":42,"scope_id":1,"trace_id":null,"span_id":null,"label":"dogfood child fiber","type_name":"","status":"pending","redacted_detail":""},
+    \\    {"id":6,"kind":"schedule_decision","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"dogfood retry policy","type_name":"Schedule.exponential","status":"exhausted","redacted_detail":"retry budget exhausted"}
+    \\  ]
+    \\}
+;
+
+const future_taxonomy_dogfood_query_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v1",
+    \\  "schema_version": 1,
+    \\  "event_taxonomy_version": 2,
     \\  "events": [
     \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"zigeffect dogfood","type_name":"DogfoodHarness","status":"","redacted_detail":""},
     \\    {"id":2,"kind":"scope_opened","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":1,"trace_id":null,"span_id":null,"label":"dogfood scope","type_name":"","status":"opened","redacted_detail":""},
@@ -240,6 +258,7 @@ fn buildQueryReport(allocator: std.mem.Allocator, json: []const u8, artifact_pat
     var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
     try output.appendSlice(allocator, "zigeffect causal query report\n");
+    try causal_artifact.appendTaxonomyVersionWarning(&output, allocator, artifact_path, parsed.value.event_taxonomy_version);
     try output.print(allocator, "queries: {d}\n", .{query_count});
     if (query_count == 0) {
         try output.appendSlice(allocator, "- no follow-up queries selected\n");
@@ -303,7 +322,9 @@ fn appendQuery(
     try seen.append(allocator, command_text);
     query_count.* += 1;
     try output.print(allocator, "query: {s}\n", .{command_text});
-    const result = try causal_query.runQuery(allocator, json, args);
+    const result = try causal_query.runQueryWithOptions(allocator, json, args, .{
+        .include_artifact_warnings = false,
+    });
     defer allocator.free(result);
     try output.appendSlice(allocator, result);
     if (result.len == 0 or result[result.len - 1] != '\n') try output.append(allocator, '\n');
@@ -663,6 +684,15 @@ test "query report accepts versioned causal artifacts" {
     defer std.testing.allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect causal query report") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "queries: 12") != null);
+}
+
+test "query report warns once when artifact taxonomy is newer than supported" {
+    const report = try buildQueryReport(std.testing.allocator, future_taxonomy_dogfood_query_json, ".zig-cache/causal-artifacts/after.json");
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "warning: .zig-cache/causal-artifacts/after.json event_taxonomy_version=2 newer than supported=1") != null);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, report, "warning:"));
     try std.testing.expect(std.mem.indexOf(u8, report, "queries: 12") != null);
 }
 

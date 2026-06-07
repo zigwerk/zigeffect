@@ -199,11 +199,18 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_test_tool_tests = b.addRunArtifact(causal_test_tool_tests);
 
+    const causal_artifact_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_artifact.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const causal_query_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_query.zig"),
         .target = target,
         .optimize = optimize,
     });
+    causal_query_tool_module.addImport("causal_artifact", causal_artifact_tool_module);
 
     const causal_query_tool = b.addExecutable(.{
         .name = "zigeffect-causal-query",
@@ -225,6 +232,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    causal_compare_tool_module.addImport("causal_artifact", causal_artifact_tool_module);
 
     const causal_compare_tool = b.addExecutable(.{
         .name = "zigeffect-causal-compare",
@@ -287,6 +295,7 @@ pub fn build(b: *std.Build) void {
     causal_loop_tool_module.addImport("causal_compare", causal_compare_tool_module);
     causal_loop_tool_module.addImport("causal_query", causal_query_tool_module);
     causal_loop_tool_module.addImport("causal_run", causal_run_tool_module);
+    causal_loop_tool_module.addImport("causal_artifact", causal_artifact_tool_module);
 
     const causal_loop_tool = b.addExecutable(.{
         .name = "zigeffect-causal-loop",

@@ -458,7 +458,9 @@ Schema version `1` is the current event-array artifact shape.
 and spans are sampleable observability; runtime lifecycle events are structural
 evidence; and service, scope, resource, fiber, schedule, and assertion events
 are finding evidence. Finding evidence is never sampleable. Local tools keep
-parsing legacy event-only artifacts so saved evidence remains useful.
+parsing legacy event-only artifacts so saved evidence remains useful. Query,
+compare, and development-loop query reports warn when an artifact's taxonomy
+version is newer than the tool understands.
 
 Bounded stores are opt-in through `CausalStore.initBounded(allocator,
 max_events)`. Retention applies to the in-memory store, not attached backends.

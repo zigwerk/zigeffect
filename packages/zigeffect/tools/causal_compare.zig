@@ -1,8 +1,10 @@
 const std = @import("std");
+const causal_artifact = @import("causal_artifact");
 
 const Artifact = struct {
     schema: ?[]const u8 = null,
     schema_version: ?u32 = null,
+    event_taxonomy_version: ?u32 = null,
     events: []Event,
 };
 
@@ -63,6 +65,31 @@ const versioned_after_json =
     \\}
 ;
 
+const future_taxonomy_before_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v1",
+    \\  "schema_version": 1,
+    \\  "event_taxonomy_version": 2,
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"scenario","type_name":"Command","status":"started","redacted_detail":""},
+    \\    {"id":2,"kind":"service_required","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"Config","type_name":"Config","status":"missing","redacted_detail":"missing provider"}
+    \\  ]
+    \\}
+;
+
+const future_taxonomy_after_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v1",
+    \\  "schema_version": 1,
+    \\  "event_taxonomy_version": 3,
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"scenario","type_name":"Command","status":"started","redacted_detail":""},
+    \\    {"id":2,"kind":"service_required","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"Config","type_name":"Config","status":"provided","redacted_detail":"provider added"},
+    \\    {"id":3,"kind":"exit_recorded","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"scenario","type_name":"Command","status":"success","redacted_detail":""}
+    \\  ]
+    \\}
+;
+
 const removed_json =
     \\{
     \\  "events": [
@@ -86,6 +113,8 @@ pub fn runCompare(allocator: std.mem.Allocator, before_json_input: []const u8, a
     errdefer output.deinit(allocator);
 
     try output.appendSlice(allocator, "zigeffect causal compare report\n");
+    try causal_artifact.appendTaxonomyVersionWarning(&output, allocator, "before", before_parsed.value.event_taxonomy_version);
+    try causal_artifact.appendTaxonomyVersionWarning(&output, allocator, "after", after_parsed.value.event_taxonomy_version);
     try output.print(allocator, "before events: {d}\n", .{before_events.len});
     try output.print(allocator, "after events: {d}\n", .{after_events.len});
     try appendSignedDelta(&output, allocator, "event delta", @as(isize, @intCast(after_events.len)) - @as(isize, @intCast(before_events.len)));
@@ -266,6 +295,15 @@ test "compare accepts versioned causal artifacts" {
 
     try std.testing.expect(std.mem.indexOf(u8, report, "before events: 2") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "after events: 3") != null);
+}
+
+test "compare warns when artifact taxonomy is newer than supported" {
+    const report = try runCompare(std.testing.allocator, future_taxonomy_before_json, future_taxonomy_after_json);
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "warning: before event_taxonomy_version=2 newer than supported=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "warning: after event_taxonomy_version=3 newer than supported=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "before events: 2") != null);
 }
 
 test "compare report lists added removed and changed events" {

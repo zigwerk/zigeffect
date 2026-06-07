@@ -494,6 +494,8 @@ metrics, and traces.
   metrics, and spans, with sampled-event metadata in reports and JSON artifacts.
 - Delivered: explicit causal event taxonomy helpers and taxonomy-versioned JSON
   metadata for structural, finding-evidence, and sampleable roles.
+- Delivered: taxonomy-version warnings in causal query, compare, and
+  development-loop query reports for newer saved artifacts.
 - Delivered: defensive causal event redaction for common secret-shaped
   key/value details, bearer values, and URL credentials.
 - Delivered: an optional `CausalBackend` event sink contract with adapter kinds

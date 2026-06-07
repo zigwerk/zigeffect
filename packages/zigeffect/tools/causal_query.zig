@@ -1,10 +1,12 @@
 const std = @import("std");
+const causal_artifact = @import("causal_artifact");
 
 pub const default_artifact_path = ".zig-cache/causal-artifacts/zigeffect-causal-dogfood.json";
 
 const Artifact = struct {
     schema: ?[]const u8 = null,
     schema_version: ?u32 = null,
+    event_taxonomy_version: ?u32 = null,
     events: []Event,
 };
 
@@ -124,7 +126,32 @@ const versioned_sample_json =
     \\}
 ;
 
+const future_taxonomy_sample_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v1",
+    \\  "schema_version": 1,
+    \\  "event_taxonomy_version": 2,
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"future taxonomy","type_name":"Fixture","status":"started","redacted_detail":""}
+    \\  ]
+    \\}
+;
+
+pub const QueryOptions = struct {
+    include_artifact_warnings: bool = true,
+    artifact_label: []const u8 = "artifact",
+};
+
 pub fn runQuery(allocator: std.mem.Allocator, json: []const u8, args: []const []const u8) ![]const u8 {
+    return runQueryWithOptions(allocator, json, args, .{});
+}
+
+pub fn runQueryWithOptions(
+    allocator: std.mem.Allocator,
+    json: []const u8,
+    args: []const []const u8,
+    options: QueryOptions,
+) ![]const u8 {
     if (args.len == 0) return error.MissingQueryName;
 
     var parsed = try std.json.parseFromSlice(Artifact, allocator, json, .{ .ignore_unknown_fields = true });
@@ -180,7 +207,7 @@ pub fn runQuery(allocator: std.mem.Allocator, json: []const u8, args: []const []
         return error.UnknownQuery;
     }
 
-    return formatQueryResult(allocator, args, selected.items);
+    return formatQueryResult(allocator, args, selected.items, parsed.value.event_taxonomy_version, options);
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -272,7 +299,13 @@ fn isFiberEvent(kind: []const u8) bool {
         std.mem.eql(u8, kind, "fiber_interrupted");
 }
 
-fn formatQueryResult(allocator: std.mem.Allocator, args: []const []const u8, events: []const Event) std.mem.Allocator.Error![]const u8 {
+fn formatQueryResult(
+    allocator: std.mem.Allocator,
+    args: []const []const u8,
+    events: []const Event,
+    event_taxonomy_version: ?u32,
+    options: QueryOptions,
+) std.mem.Allocator.Error![]const u8 {
     var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
 
@@ -280,7 +313,11 @@ fn formatQueryResult(allocator: std.mem.Allocator, args: []const []const u8, eve
     for (args) |arg| {
         try output.print(allocator, " {s}", .{arg});
     }
-    try output.print(allocator, "\nevents: {d}\n", .{events.len});
+    try output.append(allocator, '\n');
+    if (options.include_artifact_warnings) {
+        try causal_artifact.appendTaxonomyVersionWarning(&output, allocator, options.artifact_label, event_taxonomy_version);
+    }
+    try output.print(allocator, "events: {d}\n", .{events.len});
     for (events) |event| {
         try appendEventLine(&output, allocator, event);
     }
@@ -316,6 +353,14 @@ test "query accepts versioned causal artifacts" {
     try std.testing.expect(std.mem.indexOf(u8, output, "causal.query: snapshot") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "events: 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "event id=1 kind=run_started") != null);
+}
+
+test "query warns when artifact taxonomy is newer than supported" {
+    const output = try runQuery(std.testing.allocator, future_taxonomy_sample_json, &.{"snapshot"});
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "warning: artifact event_taxonomy_version=2 newer than supported=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "events: 1") != null);
 }
 
 test "cause query prints parent chain" {
