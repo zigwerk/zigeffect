@@ -43,7 +43,7 @@
 - Create: `packages/zigeffect/tools/causal_remediation_audit.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Write failing parser and formatter tests**
+- [x] **Step 1: Write failing parser and formatter tests**
 
 Create `packages/zigeffect/tools/causal_remediation_audit.zig` with the initial
 types, fixtures, and tests below. The tests intentionally reference helpers
@@ -268,7 +268,7 @@ test "audit text mirrors approval state and evidence ids" {
 }
 ```
 
-- [ ] **Step 2: Wire only the test module and verify red**
+- [x] **Step 2: Wire only the test module and verify red**
 
 Modify `packages/zigeffect/build.zig` near the remediation-plan tool module:
 
@@ -303,7 +303,7 @@ zig build examples
 Expected: FAIL because path helpers, parsing, deinit, and formatter functions
 are missing.
 
-- [ ] **Step 3: Implement parser and deterministic formatters**
+- [x] **Step 3: Implement parser and deterministic formatters**
 
 Implement these helpers in `causal_remediation_audit.zig`:
 
@@ -406,7 +406,7 @@ applied: false
 posture: patch-candidate
 ```
 
-- [ ] **Step 4: Run green verification for Task 1**
+- [x] **Step 4: Run green verification for Task 1**
 
 Run:
 
@@ -418,7 +418,7 @@ zig build examples
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 Run:
 
@@ -434,7 +434,7 @@ git commit -m "feat(zigeffect): add causal remediation audit formatter"
 - Modify: `packages/zigeffect/tools/causal_remediation_audit.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Add failing CLI/path tests**
+- [x] **Step 1: Add failing CLI/path tests**
 
 Add tests for usage, verdict validation, query-report path derivation, and
 local input paths:
@@ -519,7 +519,7 @@ zig build examples
 
 Expected: FAIL because CLI helpers are missing.
 
-- [ ] **Step 2: Implement path helpers and verdict validation**
+- [x] **Step 2: Implement path helpers and verdict validation**
 
 Add helpers that mirror `causal_remediation_plan.zig` naming:
 
@@ -546,7 +546,7 @@ fn validateLocalVerdict(verdict: Verdict) !void {
 Also add scenario path variants for verdict, diagnosis, and remediation plan
 using the `zigeffect-causal-dev-loop-<scenario>-...` convention.
 
-- [ ] **Step 3: Implement artifact IO and `runLocal`**
+- [x] **Step 3: Implement artifact IO and `runLocal`**
 
 Add IO helpers:
 
@@ -579,7 +579,7 @@ fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
 Use `proposer = "local-agent"`, `approval_status = "pending"`, and
 `applied = false` in every record.
 
-- [ ] **Step 4: Implement CLI `main` and usage errors**
+- [x] **Step 4: Implement CLI `main` and usage errors**
 
 Add:
 
@@ -603,7 +603,7 @@ zig build causal-remediation-audit -- local <registered-scenario-slug>
 
 Use `causal_run.scenarioByName` to validate a scenario slug.
 
-- [ ] **Step 5: Wire executable build step**
+- [x] **Step 5: Wire executable build step**
 
 Modify `packages/zigeffect/build.zig` after the remediation-plan executable:
 
@@ -624,7 +624,7 @@ Add the executable dependency to `examples_step`:
     examples_step.dependOn(&causal_remediation_audit_tool.step);
 ```
 
-- [ ] **Step 6: Run green verification for Task 2**
+- [x] **Step 6: Run green verification for Task 2**
 
 Run:
 
@@ -636,7 +636,7 @@ zig build examples
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 2**
+- [x] **Step 7: Commit Task 2**
 
 Run:
 
@@ -656,7 +656,7 @@ git commit -m "feat(zigeffect): wire causal remediation audit command"
 - Modify: `docs/superpowers/specs/2026-06-07-zigeffect-causal-self-improvement-roadmap.md`
 - Modify: `packages/zigeffect/docs/roadmap.md`
 
-- [ ] **Step 1: Write failing manifest expectations**
+- [x] **Step 1: Write failing manifest expectations**
 
 In `packages/zigeffect/tools/causal_artifacts.zig`, extend the default manifest
 test with:
@@ -682,7 +682,7 @@ zig build examples
 
 Expected: FAIL because the manifest does not print audit paths yet.
 
-- [ ] **Step 2: Add audit paths to manifest output**
+- [x] **Step 2: Add audit paths to manifest output**
 
 In `appendDefaultLoopArtifacts`, print:
 
@@ -698,7 +698,7 @@ In `appendScenarioLoopArtifacts`, print:
     try output.print(allocator, "  loop remediation audit text: {s}/zigeffect-causal-dev-loop-{s}-remediation-audit.txt\n", .{ causal_run.artifact_dir, slug });
 ```
 
-- [ ] **Step 3: Update docs**
+- [x] **Step 3: Update docs**
 
 Update `packages/zigeffect/README.md`, `packages/zigeffect/docs/agent-guide.md`,
 and `packages/zigeffect/docs/causal-scenarios.md` so the local workflow reads:
@@ -727,7 +727,7 @@ Update both roadmap files:
 - keep approval/rejection, patch proposals, and policy-controlled application as
   remaining work.
 
-- [ ] **Step 4: Run green verification for Task 3**
+- [x] **Step 4: Run green verification for Task 3**
 
 Run:
 
@@ -739,7 +739,7 @@ zig build examples
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
 Run:
 
@@ -754,7 +754,7 @@ git commit -m "docs(zigeffect): document causal remediation audit"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-06-07-zigeffect-causal-remediation-audit.md`
 
-- [ ] **Step 1: Verify default local audit flow**
+- [x] **Step 1: Verify default local audit flow**
 
 Run:
 
@@ -779,7 +779,7 @@ Expected: all commands exit zero. If the dogfood event ids change because the
 fixture changes, inspect the remediation plan and update only the exact event-id
 assertion to match the new deterministic fixture.
 
-- [ ] **Step 2: Verify scenario local audit flow**
+- [x] **Step 2: Verify scenario local audit flow**
 
 Run:
 
@@ -800,7 +800,7 @@ rg '"event_ids": \\[\\]' .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-c
 
 Expected: all commands exit zero.
 
-- [ ] **Step 3: Verify missing input failure**
+- [x] **Step 3: Verify missing input failure**
 
 Run:
 
@@ -817,7 +817,7 @@ printf "%s\n" "$output" | rg "usage: zig build causal-remediation-audit -- local
 
 Expected: exit code is nonzero and output includes the stable error plus usage.
 
-- [ ] **Step 4: Verify manifest paths**
+- [x] **Step 4: Verify manifest paths**
 
 Run:
 
@@ -833,7 +833,7 @@ rg "zigeffect-causal-dev-loop-causal-scoped-fiber-remediation-audit.txt" /tmp/zi
 Expected: all commands exit zero. Capture stderr because the manifest uses
 `std.debug.print`.
 
-- [ ] **Step 5: Run full verification**
+- [x] **Step 5: Run full verification**
 
 Run:
 
@@ -848,11 +848,11 @@ bun run zig:test
 
 Expected: all commands exit zero.
 
-- [ ] **Step 6: Mark this implementation plan complete**
+- [x] **Step 6: Mark this implementation plan complete**
 
 Update every completed checkbox in this file from `- [ ]` to `- [x]`.
 
-- [ ] **Step 7: Commit final checklist update**
+- [x] **Step 7: Commit final checklist update**
 
 Run:
 
@@ -864,21 +864,21 @@ git commit -m "docs(zigeffect): complete causal remediation audit checklist"
 
 ## Completion Checklist
 
-- [ ] `causal-remediation-audit` writes default JSON and text audit artifacts.
-- [ ] `causal-remediation-audit` writes scenario JSON and text audit artifacts.
-- [ ] Audit JSON uses schema `zigeffect.causal.remediation-audit.v1`.
-- [ ] Audit JSON and text show `approval_status=pending` and `applied=false`.
-- [ ] Audit artifacts cite source verdict, diagnosis, remediation plan, advice,
+- [x] `causal-remediation-audit` writes default JSON and text audit artifacts.
+- [x] `causal-remediation-audit` writes scenario JSON and text audit artifacts.
+- [x] Audit JSON uses schema `zigeffect.causal.remediation-audit.v1`.
+- [x] Audit JSON and text show `approval_status=pending` and `applied=false`.
+- [x] Audit artifacts cite source verdict, diagnosis, remediation plan, advice,
   query, and compare paths.
-- [ ] Audit artifacts cite evidence event ids when the remediation plan has
+- [x] Audit artifacts cite evidence event ids when the remediation plan has
   event ids.
-- [ ] Do-not-patch plans can produce an empty `event_ids` array.
-- [ ] Missing inputs fail with stable usage text.
-- [ ] Manifest, README, agent guide, causal scenarios, and roadmap docs mention
+- [x] Do-not-patch plans can produce an empty `event_ids` array.
+- [x] Missing inputs fail with stable usage text.
+- [x] Manifest, README, agent guide, causal scenarios, and roadmap docs mention
   the audit command and artifacts.
-- [ ] `zig build examples` passes in `packages/zigeffect`.
-- [ ] `zig build test --summary none` passes in `packages/zigeffect`.
-- [ ] `bun run zig:test` passes at the repo root.
+- [x] `zig build examples` passes in `packages/zigeffect`.
+- [x] `zig build test --summary none` passes in `packages/zigeffect`.
+- [x] `bun run zig:test` passes at the repo root.
 
 ## Self-Review
 
