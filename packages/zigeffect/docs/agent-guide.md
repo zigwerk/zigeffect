@@ -592,6 +592,21 @@ event ids mean the cited evidence is not resolved; appeared ids mean the patch
 may have introduced new evidence. The command does not approve, apply, edit
 source, or run verification.
 
+After the audit chain exists, ask whether the evidence should become scenario
+coverage:
+
+```sh
+zig build causal-scenario-proposal -- local
+zig build causal-scenario-proposal -- local causal-scoped-fiber
+```
+
+The command writes `*-scenario-proposal.json` and
+`*-scenario-proposal.txt` with schema
+`zigeffect.causal.scenario-proposal.v1`. It reads the verdict, diagnosis,
+remediation plan, and audit chain, then recommends `add-scenario`,
+`refine-scenario`, or `none`. Treat it as a review prompt for scenario or
+invariant coverage. It is read-only and does not edit `tools/causal_run.zig`.
+
 Generate advice directly from any saved causal JSON artifact:
 
 ```sh
@@ -656,9 +671,11 @@ requests it also names any base-commit baseline JSON artifact and generated
 `*-ci-compare.txt` report, so new evidence can be separated from findings that
 already existed on the base commit.
 
-When a bug teaches a new runtime rule, add or update a catalog entry in
-`tools/causal_run.zig` and document it in `docs/causal-scenarios.md` before
-claiming the invariant is covered.
+When a bug teaches a new runtime rule, run
+`zig build causal-scenario-proposal -- local [scenario]` after the audit chain.
+Use the proposal to review whether a catalog entry in `tools/causal_run.zig`
+and documentation in `docs/causal-scenarios.md` should be added before claiming
+the invariant is covered.
 
 Backend adapters are sinks, not the source of truth. Keep tests and local agent
 queries against the in-memory `CausalStore`; use `store.attachBackend` for

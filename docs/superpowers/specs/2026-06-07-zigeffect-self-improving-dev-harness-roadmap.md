@@ -28,6 +28,9 @@ The merged causal runtime work already provides:
 - `zig build causal-remediation-plan -- local [scenario]`
 - `zig build causal-remediation-audit -- local [scenario]`
 - `zig build causal-remediation-decision -- local approve|reject [scenario]`
+- `zig build causal-patch-proposal -- local draft|approved [scenario] ...`
+- `zig build causal-audit-chain -- local [scenario]`
+- `zig build causal-scenario-proposal -- local [scenario]`
 - `zig build causal-query -- --file <artifact> <query> [argument]`
 - `zig build causal-advice -- --before <before.json> --file <after.json>`
 - `zig build causal-compare -- <before.json> <after.json>`
@@ -301,6 +304,19 @@ Exit criteria:
   expected findings policy;
 - a new regression scenario can be added without duplicating harness logic.
 
+Delivered first slice:
+
+- `zig build causal-scenario-proposal -- local [scenario]` reads the current
+  verdict, diagnosis, remediation plan, and audit-chain artifacts;
+- default and scenario reports are written as `*-scenario-proposal.json` and
+  `*-scenario-proposal.txt`;
+- reports recommend `add-scenario`, `refine-scenario`, or `none` and carry
+  event ids, dominant subsystem, proposed scenario shape, invariant
+  suggestion, review checklist, and read-only guardrails;
+- clear evidence produces `recommendation=none`;
+- the command does not edit `tools/causal_run.zig` or mutate the scenario
+  registry.
+
 ### Milestone 6: Policy And Approval Engine
 
 Add local policy-backed decision records after the artifact vocabulary is
@@ -411,16 +427,26 @@ Milestone 4's first audit-chain comparison slice is implemented:
 - `causal-artifacts` lists audit-chain JSON/text paths;
 - default and `causal-scoped-fiber` flows have integration coverage.
 
+Milestone 5's first scenario-learning slice is implemented:
+
+- `tools/causal_scenario_proposal.zig` owns read-only proposal reports;
+- `zig build causal-scenario-proposal -- local [scenario]` converts verdict,
+  diagnosis, remediation-plan, and audit-chain evidence into a scenario
+  learning recommendation;
+- reports preserve evidence ids, source paths, proposed scenario/invariant
+  guidance, review checklist, and guardrails;
+- the command is deterministic and non-mutating.
+
 ## Next Branch Recommendation
 
-Build Milestone 5's scenario learning loop:
+Extend Milestone 5 from read-only proposal to reviewable authoring support:
 
-- let remediation plans recommend a new scenario or invariant when evidence is
-  too broad for a direct patch;
-- add a small scenario-authoring checklist that names owner, invariant,
-  causal JSON, and compare report;
-- keep the workflow non-mutating and require review before scenario changes are
-  treated as regression coverage.
+- add a scenario-authoring checklist that names owner, invariant, causal JSON,
+  compare report, and smallest reproducing command;
+- optionally generate a registry patch draft from
+  `*-scenario-proposal.json`;
+- require explicit review before any scenario registry change is treated as
+  regression coverage.
 
 Do not implement source mutation, policy-backed automatic approval, durable
 history, arbitrary snapshot comparison, or app-facing adapters in this branch.

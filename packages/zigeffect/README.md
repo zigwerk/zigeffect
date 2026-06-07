@@ -369,6 +369,7 @@ zig build causal-patch-proposal -- local draft --summary "scope cleanup ordering
 zig build causal-remediation-decision -- local approve --by local-reviewer --policy manual-review
 zig build causal-patch-proposal -- local approved --summary "scope cleanup ordering" --file packages/zigeffect/src/core/scope.zig --change "tighten finalizer ordering evidence"
 zig build causal-audit-chain -- local
+zig build causal-scenario-proposal -- local
 ```
 
 For scenario targets, pass the same scenario slug:
@@ -381,6 +382,7 @@ zig build causal-remediation-audit -- local causal-scoped-fiber
 zig build causal-remediation-decision -- local reject causal-scoped-fiber --reason "clear verdict"
 zig build causal-patch-proposal -- local draft causal-scoped-fiber --summary "scoped fiber evidence" --file packages/zigeffect/src/runtime/fiber.zig --change "record scoped fiber interruption evidence"
 zig build causal-audit-chain -- local causal-scoped-fiber
+zig build causal-scenario-proposal -- local causal-scoped-fiber
 ```
 
 `causal-dev-agent` prints the inspection order, `causal-diagnosis` writes
@@ -402,6 +404,11 @@ disappeared, persisting, appeared, or missing, then reports `assessment` as
 `improved`, `unchanged`, `regressed`, or `inconclusive`. The command is
 deterministic and non-mutating; use it to constrain patch claims, not as proof
 that source edits were authorized.
+`causal-scenario-proposal` writes `*-scenario-proposal.json` and
+`*-scenario-proposal.txt` after the audit chain exists. It recommends
+`add-scenario`, `refine-scenario`, or `none`, cites verdict and audit-chain
+evidence, proposes reviewable scenario/invariant coverage, and never edits the
+scenario registry.
 
 Compare two saved causal JSON artifacts:
 
