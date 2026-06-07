@@ -434,7 +434,7 @@ Expected: PASS for rich data tests.
 - Modify: `packages/zigeffect/src/pattern/root.zig`
 - Create: `packages/zigeffect/test/pattern_test.zig`
 
-- [ ] **Step 1: Write failing structural matcher tests**
+- [x] **Step 1: Write failing structural matcher tests**
 
 Create tests that assert:
 
@@ -462,7 +462,7 @@ test "structural matcher supports wildcard ranges nested structs and captures" {
 }
 ```
 
-- [ ] **Step 2: Run failing structural matcher tests**
+- [x] **Step 2: Run failing structural matcher tests**
 
 Run:
 
@@ -472,11 +472,11 @@ cd packages/zigeffect && zig build test-raw
 
 Expected: FAIL because `fx.pattern` APIs do not exist.
 
-- [ ] **Step 3: Implement structural matcher core**
+- [x] **Step 3: Implement structural matcher core**
 
 Implement recursive matching and capture derivation for scalars, structs, tagged unions, optionals, arrays, slices, single-item pointers, wildcards, binds, predicates, and ranges.
 
-- [ ] **Step 4: Run structural matcher tests**
+- [x] **Step 4: Run structural matcher tests**
 
 Run:
 
