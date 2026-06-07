@@ -560,6 +560,20 @@ ids, verification commands, claim guardrails, and decision guardrails. Approval
 is permission for a future patch workflow only; it does not edit source or mark
 anything applied.
 
+To record the intended file-level patch without applying it, run:
+
+```sh
+zig build causal-patch-proposal -- local draft --summary "scope cleanup ordering" --file packages/zigeffect/src/core/scope.zig --change "tighten finalizer ordering evidence"
+zig build causal-patch-proposal -- local approved causal-scoped-fiber --summary "scoped fiber evidence" --file packages/zigeffect/src/runtime/fiber.zig --change "record scoped fiber interruption evidence"
+```
+
+Draft proposals read pending audits and write `proposal_status=draft`,
+`approval_status=pending`, `approved=false`, and `applied=false`. Approved
+proposals require an approved remediation decision and write
+`proposal_status=approved`, `approval_status=approved`, `approved=true`, and
+`applied=false`. The command writes `*-patch-proposal.json` and
+`*-patch-proposal.txt`; it never edits source or runs verification.
+
 Generate advice directly from any saved causal JSON artifact:
 
 ```sh

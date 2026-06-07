@@ -365,7 +365,9 @@ zig build causal-dev-agent -- local
 zig build causal-diagnosis -- local
 zig build causal-remediation-plan -- local
 zig build causal-remediation-audit -- local
+zig build causal-patch-proposal -- local draft --summary "scope cleanup ordering" --file packages/zigeffect/src/core/scope.zig --change "tighten finalizer ordering evidence"
 zig build causal-remediation-decision -- local approve --by local-reviewer --policy manual-review
+zig build causal-patch-proposal -- local approved --summary "scope cleanup ordering" --file packages/zigeffect/src/core/scope.zig --change "tighten finalizer ordering evidence"
 ```
 
 For scenario targets, pass the same scenario slug:
@@ -376,6 +378,7 @@ zig build causal-diagnosis -- local causal-scoped-fiber
 zig build causal-remediation-plan -- local causal-scoped-fiber
 zig build causal-remediation-audit -- local causal-scoped-fiber
 zig build causal-remediation-decision -- local reject causal-scoped-fiber --reason "clear verdict"
+zig build causal-patch-proposal -- local draft causal-scoped-fiber --summary "scoped fiber evidence" --file packages/zigeffect/src/runtime/fiber.zig --change "record scoped fiber interruption evidence"
 ```
 
 `causal-dev-agent` prints the inspection order, `causal-diagnosis` writes
@@ -385,7 +388,11 @@ zig build causal-remediation-decision -- local reject causal-scoped-fiber --reas
 status, source artifact paths, evidence event ids, verification commands, and
 claim guardrails. `causal-remediation-decision` writes
 `*-remediation-decision.json` and `*-remediation-decision.txt` with an approved
-or rejected review result while keeping `applied=false`. All five commands are
+or rejected review result while keeping `applied=false`.
+`causal-patch-proposal` writes `*-patch-proposal.json` and
+`*-patch-proposal.txt`. Draft proposals read pending audits and remain
+unapproved; approved proposals require an approved remediation decision. Both
+proposal modes keep `applied=false` and never edit source. All six commands are
 deterministic and non-mutating.
 
 Compare two saved causal JSON artifacts:
