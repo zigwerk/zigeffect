@@ -156,7 +156,8 @@ zig build causal-ci-handoff
 The report is written to
 `.zig-cache/causal-artifacts/zigeffect-causal-ci-handoff.txt`. CI runs this on
 failure before artifact upload, so agents should read that file first and then
-run the exact `causal-advice` or `causal-query` commands it lists.
+inspect the generated `*-advice.txt` reports or run the exact `causal-query`
+commands it lists.
 
 Causal JSON artifacts use this root header:
 

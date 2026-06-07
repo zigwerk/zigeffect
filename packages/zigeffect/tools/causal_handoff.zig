@@ -1,5 +1,6 @@
 const std = @import("std");
 const causal_run = @import("causal_run");
+const causal_advice = @import("causal_advice");
 
 pub const handoff_report_path = causal_run.artifact_dir ++ "/zigeffect-causal-ci-handoff.txt";
 
@@ -17,7 +18,11 @@ pub fn formatCiHandoffReport(allocator: std.mem.Allocator, json_artifact_paths: 
         try output.appendSlice(allocator, "- no causal JSON artifacts found\n");
     } else {
         for (json_artifact_paths) |path| {
+            const advice_report_path = try adviceReportPathForJsonArtifact(allocator, path);
+            defer allocator.free(advice_report_path);
+
             try output.print(allocator, "- artifact {s}\n", .{path});
+            try output.print(allocator, "  advice report: {s}\n", .{advice_report_path});
             try output.print(allocator, "  advice: zig build causal-advice -- --file {s}\n", .{path});
             try output.print(allocator, "  snapshot: zig build causal-query -- --file {s} snapshot\n", .{path});
         }
@@ -43,6 +48,8 @@ pub fn main(init: std.process.Init) !void {
             try existing.append(allocator, path);
         }
     }
+
+    try writeAdviceReportsForArtifacts(init.io, allocator, existing.items);
 
     const report = try formatCiHandoffReport(allocator, existing.items);
     defer init.gpa.free(report);
@@ -98,6 +105,25 @@ fn artifactExists(io: std.Io, path: []const u8) !bool {
     return true;
 }
 
+fn adviceReportPathForJsonArtifact(allocator: std.mem.Allocator, json_path: []const u8) ![]const u8 {
+    if (!std.mem.endsWith(u8, json_path, ".json")) return error.InvalidJsonArtifactPath;
+    return std.fmt.allocPrint(allocator, "{s}-advice.txt", .{json_path[0 .. json_path.len - ".json".len]});
+}
+
+fn writeAdviceReportsForArtifacts(io: std.Io, allocator: std.mem.Allocator, json_artifact_paths: []const []const u8) !void {
+    for (json_artifact_paths) |path| {
+        const json = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024));
+        defer allocator.free(json);
+
+        const advice_report_path = try adviceReportPathForJsonArtifact(allocator, path);
+        defer allocator.free(advice_report_path);
+
+        const report = try causal_advice.buildAdviceReport(allocator, json, path);
+        defer allocator.free(report);
+        try writeArtifact(io, advice_report_path, report);
+    }
+}
+
 fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
     const slash = std.mem.lastIndexOfScalar(u8, path, '/') orelse return error.InvalidArtifactPath;
     const cwd = std.Io.Dir.cwd();
@@ -117,8 +143,16 @@ test "handoff report lists artifacts and exact follow-up commands" {
     try std.testing.expect(std.mem.indexOf(u8, report, "handoff: .zig-cache/causal-artifacts/zigeffect-causal-ci-handoff.txt") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "json artifacts: 2") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "artifact .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "advice report: .zig-cache/causal-artifacts/zigeffect-causal-dogfood-advice.txt") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-advice -- --file .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json snapshot") != null);
+}
+
+test "advice report path is derived from JSON artifact path" {
+    const path = try adviceReportPathForJsonArtifact(std.testing.allocator, ".zig-cache/causal-artifacts/zigeffect-causal-dogfood.json");
+    defer std.testing.allocator.free(path);
+
+    try std.testing.expectEqualStrings(".zig-cache/causal-artifacts/zigeffect-causal-dogfood-advice.txt", path);
 }
 
 test "handoff report is explicit when no JSON artifacts exist" {
