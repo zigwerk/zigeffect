@@ -132,12 +132,30 @@ zig build causal-dev-loop -- baseline
 zig build causal-dev-loop -- after
 ```
 
-The loop currently compares the deterministic dogfood causal artifact and runs
-the `package-tests` scenario as the package gate. It writes:
+For targeted runtime work, pass a registered scenario slug:
+
+```sh
+zig build causal-dev-loop -- baseline causal-scoped-fiber
+zig build causal-dev-loop -- after causal-scoped-fiber
+```
+
+The no-scenario loop compares the deterministic dogfood causal artifact and
+runs the `package-tests` scenario as the package gate. It writes:
 
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-compare.txt`
+
+Scenario loops compare command-level artifacts for the selected scenario and
+write slug-specific loop artifacts:
+
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-before.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-after.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-compare.txt`
+
+Expected-failure scenarios are valid loop targets. For example,
+`missing-service-compile-fail` reports `expected_failure_observed` when the
+compile failure occurs as intended.
 
 If package tests fail, the loop writes the same `package-tests` failure
 artifacts as `zig build causal-dev-test` and exits nonzero.

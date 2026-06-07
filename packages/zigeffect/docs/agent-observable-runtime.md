@@ -828,9 +828,11 @@ improved the runtime trace.
 
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around
-those pieces. The baseline phase captures before dogfood evidence and runs
-package tests. The after phase captures after evidence, writes a compare report,
-reruns package tests, and prints next-query commands.
+those pieces. The no-scenario form captures before/after dogfood evidence and
+runs package tests. The scenario form, such as
+`zig build causal-dev-loop -- baseline causal-scoped-fiber`, captures
+before/after command-level evidence for a registered scenario, writes a compare
+report, reruns package tests, and prints next-query commands.
 
 This phase proves the agent workflow before production or app adapters exist.
 

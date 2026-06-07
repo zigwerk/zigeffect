@@ -364,9 +364,18 @@ Make the patch, then run:
 zig build causal-dev-loop -- after
 ```
 
+When the change touches a known subsystem, target its scenario:
+
+```sh
+zig build causal-dev-loop -- baseline causal-scoped-fiber
+zig build causal-dev-loop -- after causal-scoped-fiber
+```
+
 The baseline phase stores the before artifact and runs package tests. The after
 phase stores the after artifact, writes the compare report, reruns package
-tests, and prints next-query commands against the after artifact.
+tests, and prints next-query commands against the after artifact. Expected
+failure scenarios, such as `missing-service-compile-fail`, are treated as
+successful evidence when the expected failure is observed.
 
 Run a specific scenario from the catalog when your change touches its owner:
 

@@ -373,7 +373,7 @@ pub fn formatCatalog(allocator: std.mem.Allocator) std.mem.Allocator.Error![]con
     return output.toOwnedSlice(allocator);
 }
 
-pub fn buildFailureArtifacts(
+pub fn buildCommandArtifacts(
     allocator: std.mem.Allocator,
     scenario: Scenario,
     result: CommandResult,
@@ -402,27 +402,39 @@ pub fn buildFailureArtifacts(
         .redacted_detail = scenario.slug,
     });
 
-    const detail = try commandDetail(allocator, result);
-    defer allocator.free(detail);
+    if (commandFailed(result.term)) {
+        const detail = try commandDetail(allocator, result);
+        defer allocator.free(detail);
 
-    const assertion = try store.record(.{
-        .kind = .assertion_recorded,
-        .run_id = run_id,
-        .parent_id = command_started,
-        .label = scenario.slug,
-        .type_name = "CommandExit",
-        .status = "failure",
-        .redacted_detail = detail,
-    });
-    _ = try store.record(.{
-        .kind = .exit_recorded,
-        .run_id = run_id,
-        .parent_id = assertion,
-        .label = scenario.slug,
-        .type_name = "CausalCommandRun",
-        .status = "failure",
-        .redacted_detail = "command failure captured for agent analysis",
-    });
+        const assertion = try store.record(.{
+            .kind = .assertion_recorded,
+            .run_id = run_id,
+            .parent_id = command_started,
+            .label = scenario.slug,
+            .type_name = "CommandExit",
+            .status = "failure",
+            .redacted_detail = detail,
+        });
+        _ = try store.record(.{
+            .kind = .exit_recorded,
+            .run_id = run_id,
+            .parent_id = assertion,
+            .label = scenario.slug,
+            .type_name = "CausalCommandRun",
+            .status = "failure",
+            .redacted_detail = "command failure captured for agent analysis",
+        });
+    } else {
+        _ = try store.record(.{
+            .kind = .exit_recorded,
+            .run_id = run_id,
+            .parent_id = command_started,
+            .label = scenario.slug,
+            .type_name = "CausalCommandRun",
+            .status = "success",
+            .redacted_detail = "command completed successfully for agent analysis",
+        });
+    }
 
     var findings = try store.findings(allocator);
     defer findings.deinit();
@@ -447,6 +459,14 @@ pub fn buildFailureArtifacts(
         .dot = dot,
         .finding_count = finding_count,
     };
+}
+
+pub fn buildFailureArtifacts(
+    allocator: std.mem.Allocator,
+    scenario: Scenario,
+    result: CommandResult,
+) std.mem.Allocator.Error!CommandArtifacts {
+    return buildCommandArtifacts(allocator, scenario, result);
 }
 
 fn commandDetail(allocator: std.mem.Allocator, result: CommandResult) std.mem.Allocator.Error![]const u8 {
@@ -589,6 +609,20 @@ test "failed command artifacts cite scenario command and assertion finding" {
     try std.testing.expect(std.mem.indexOf(u8, artifacts.report, "finding event=3 kind=assertion_failure") != null);
     try std.testing.expect(std.mem.indexOf(u8, artifacts.json, "\"kind\": \"assertion_recorded\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, artifacts.dot, "event_2 -> event_3") != null);
+}
+
+test "successful command artifacts record success with no findings" {
+    const scenario = try scenarioByName("causal-scoped-fiber");
+    const artifacts = try buildCommandArtifacts(std.testing.allocator, scenario, .{
+        .term = .{ .exited = 0 },
+        .stdout = "ok",
+        .stderr = "",
+    });
+    defer artifacts.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 0), artifacts.finding_count);
+    try std.testing.expect(std.mem.indexOf(u8, artifacts.report, "program: zigeffect command: causal-scoped-fiber") != null);
+    try std.testing.expect(std.mem.indexOf(u8, artifacts.json, "\"status\": \"success\"") != null);
 }
 
 test "scenario registry records owners purposes policies invariants and paths" {

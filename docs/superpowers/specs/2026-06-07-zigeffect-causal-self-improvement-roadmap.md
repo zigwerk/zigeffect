@@ -160,7 +160,7 @@ Exit criteria:
 - agents can answer "which scenario failed and why" from the report alone;
 - query helper can inspect both fixture artifacts and real failure artifacts.
 
-Delivered first slice:
+Delivered slices:
 
 - `zig build causal-capture-missing-service` captures artifacts for the existing
   `missing_service.zig` compile-fail fixture;
@@ -246,11 +246,11 @@ Delivered first slice:
 - stable before, after, and compare artifact paths;
 - package-test gate execution in both phases;
 - after-phase summary with compare output and next-query commands.
+- scenario-specific before/after command artifacts for registered scenarios;
+- expected-failure scenario handling with `expected_failure_observed` status.
 
 Remaining:
 
-- scenario-specific before/after traces beyond the deterministic dogfood
-  artifact;
 - automatic execution of selected query helpers based on changed findings;
 - app-facing development loops once applications emit causal runtime artifacts.
 
