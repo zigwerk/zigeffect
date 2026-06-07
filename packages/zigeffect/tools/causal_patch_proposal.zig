@@ -43,6 +43,34 @@ const AuditRecord = struct {
     claim_guardrails: []const []const u8,
 };
 
+const DecisionSource = struct {
+    audit: []const u8,
+    verdict: []const u8,
+    diagnosis: []const u8,
+    remediation_plan: []const u8,
+    advice: []const u8,
+    query: []const u8,
+    compare: ?[]const u8,
+};
+
+const DecisionRecord = struct {
+    schema: []const u8,
+    schema_version: u32,
+    mode: []const u8,
+    target: []const u8,
+    decision: []const u8,
+    approval_status: []const u8,
+    decided_by: []const u8,
+    policy: []const u8,
+    reason: []const u8,
+    applied: bool,
+    source: DecisionSource,
+    event_ids: []const u64,
+    verification_commands: []const []const u8,
+    claim_guardrails: []const []const u8,
+    decision_guardrails: []const []const u8,
+};
+
 const ProposalSource = struct {
     audit: []const u8,
     decision: ?[]const u8,
@@ -163,6 +191,37 @@ fn proposalInputFromAudit(options: ProposalOptions, audit_path: []const u8, audi
         .event_ids = audit.event_ids,
         .verification_commands = audit.verification_commands,
         .claim_guardrails = audit.claim_guardrails,
+    };
+}
+
+fn validateDecisionRecord(decision: DecisionRecord) !void {
+    if (!std.mem.eql(u8, decision.schema, decision_schema)) return error.UnsupportedDecisionSchema;
+    if (decision.schema_version != 1) return error.UnsupportedDecisionSchema;
+    if (!std.mem.eql(u8, decision.mode, "local")) return error.UnsupportedDecisionSchema;
+    if (!std.mem.eql(u8, decision.decision, "approved")) return error.DecisionNotApproved;
+    if (!std.mem.eql(u8, decision.approval_status, "approved")) return error.DecisionNotApproved;
+    if (decision.applied) return error.DecisionAlreadyApplied;
+}
+
+fn proposalInputFromDecision(options: ProposalOptions, decision_path: []const u8, decision: DecisionRecord) ProposalInput {
+    return .{
+        .options = options,
+        .target = decision.target,
+        .source = .{
+            .audit = decision.source.audit,
+            .decision = decision_path,
+            .artifacts = .{
+                .verdict = decision.source.verdict,
+                .diagnosis = decision.source.diagnosis,
+                .remediation_plan = decision.source.remediation_plan,
+                .advice = decision.source.advice,
+                .query = decision.source.query,
+                .compare = decision.source.compare,
+            },
+        },
+        .event_ids = decision.event_ids,
+        .verification_commands = decision.verification_commands,
+        .claim_guardrails = decision.claim_guardrails,
     };
 }
 
@@ -342,6 +401,34 @@ const pending_audit_json =
     \\}
 ;
 
+const approved_decision_json =
+    \\{
+    \\  "schema": "zigeffect.causal.remediation-decision.v1",
+    \\  "schema_version": 1,
+    \\  "mode": "local",
+    \\  "target": "dogfood",
+    \\  "decision": "approved",
+    \\  "approval_status": "approved",
+    \\  "decided_by": "local-reviewer",
+    \\  "policy": "manual-review",
+    \\  "reason": "reviewed local remediation audit",
+    \\  "applied": false,
+    \\  "source": {
+    \\    "audit": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-audit.json",
+    \\    "verdict": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-verdict.json",
+    \\    "diagnosis": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-diagnosis.txt",
+    \\    "remediation_plan": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-plan.md",
+    \\    "advice": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-advice.txt",
+    \\    "query": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-queries.txt",
+    \\    "compare": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-compare.txt"
+    \\  },
+    \\  "event_ids": [3, 4, 5, 6],
+    \\  "verification_commands": ["zig build causal-dev-loop -- baseline", "zig build causal-dev-loop -- after", "zig build causal-diagnosis -- local", "zig build test --summary none"],
+    \\  "claim_guardrails": ["Do not claim this patch fixed persisting evidence unless the after verdict is clear or the compare report shows fewer findings."],
+    \\  "decision_guardrails": ["Approval does not apply source changes.", "Run required verification after any future patch before claiming a fix."]
+    \\}
+;
+
 test "patch proposal output paths are stable for default and scenario targets" {
     try std.testing.expectEqualStrings(
         ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-patch-proposal.json",
@@ -492,4 +579,47 @@ test "draft proposal JSON records pending approval without applying source chang
     try std.testing.expect(std.mem.indexOf(u8, json, "\"file\": \"packages/zigeffect/src/core/scope.zig\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"event_ids\": [3, 4, 5, 6]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"Draft proposals are not approval for source edits.\"") != null);
+}
+
+test "decision validation accepts approved unapplied decision only" {
+    var parsed = try std.json.parseFromSlice(DecisionRecord, std.testing.allocator, approved_decision_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    try validateDecisionRecord(parsed.value);
+
+    var rejected = parsed.value;
+    rejected.decision = "rejected";
+    rejected.approval_status = "rejected";
+    try std.testing.expectError(error.DecisionNotApproved, validateDecisionRecord(rejected));
+
+    var applied = parsed.value;
+    applied.applied = true;
+    try std.testing.expectError(error.DecisionAlreadyApplied, validateDecisionRecord(applied));
+}
+
+test "approved proposal JSON carries decision evidence without applying source changes" {
+    var parsed = try std.json.parseFromSlice(DecisionRecord, std.testing.allocator, approved_decision_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const input = proposalInputFromDecision(
+        .{
+            .mode = "local",
+            .status = .approved,
+            .summary = "tighten scope close ordering",
+            .file = "packages/zigeffect/src/core/scope.zig",
+            .change = "ensure child finalizers run before parent close is reported",
+        },
+        ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-decision.json",
+        parsed.value,
+    );
+
+    const json = try formatProposalJson(std.testing.allocator, input);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"proposal_status\": \"approved\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"approval_status\": \"approved\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"approved\": true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"decision\": \".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-decision.json\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"audit\": \".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-audit.json\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"Approval permits reviewable patch work but does not prove the fix.\"") != null);
 }
