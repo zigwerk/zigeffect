@@ -374,6 +374,15 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_dev_session_tool_tests = b.addRunArtifact(causal_dev_session_tool_tests);
 
+    const causal_dev_session_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-dev-session",
+        .root_module = causal_dev_session_tool_module,
+    });
+    const run_causal_dev_session_tool = b.addRunArtifact(causal_dev_session_tool);
+    if (b.args) |args| run_causal_dev_session_tool.addArgs(args);
+    const causal_dev_session_step = b.step("causal-dev-session", "Run the local causal development session coordinator");
+    causal_dev_session_step.dependOn(&run_causal_dev_session_tool.step);
+
     const causal_dev_agent_tool = b.addExecutable(.{
         .name = "zigeffect-causal-dev-agent",
         .root_module = causal_dev_agent_tool_module,
@@ -555,6 +564,7 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_verdict_tool_tests.step);
     examples_step.dependOn(&causal_dev_agent_tool.step);
     examples_step.dependOn(&run_causal_dev_agent_tool_tests.step);
+    examples_step.dependOn(&causal_dev_session_tool.step);
     examples_step.dependOn(&run_causal_dev_session_tool_tests.step);
     examples_step.dependOn(&causal_diagnosis_tool.step);
     examples_step.dependOn(&run_causal_diagnosis_tool_tests.step);
