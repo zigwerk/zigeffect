@@ -555,6 +555,26 @@ test "causal findings surface missing cleanup pending fibers finalizer failures 
     try expectFinding(findings, .service_requirement_without_provider);
 }
 
+test "causal findings surface failed assertions as agent-readable evidence" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    const run_id = store.nextRunId();
+    _ = try store.record(.{
+        .kind = .assertion_recorded,
+        .run_id = run_id,
+        .label = "missing-service-compile-fail",
+        .type_name = "CommandExit",
+        .status = "failure",
+        .redacted_detail = "command exited with code 1",
+    });
+
+    var findings = try store.findings(std.testing.allocator);
+    defer findings.deinit();
+
+    try expectFinding(findings, .assertion_failure);
+}
+
 test "causal json and dot exports are deterministic and redacted" {
     var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();

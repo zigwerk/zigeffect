@@ -139,6 +139,24 @@ zig build causal-check
 when the dogfood fixture contains findings. Use it when a development or CI
 agent should treat causal findings as actionable failures.
 
+Capture artifacts for a real expected compile-fail scenario:
+
+```bash
+cd packages/zigeffect
+zig build causal-capture-missing-service
+```
+
+Run package tests through the causal development harness:
+
+```bash
+cd packages/zigeffect
+zig build causal-dev-test
+```
+
+`causal-dev-test` exits zero while package tests pass. If package tests fail
+during development, it writes scenario-specific artifacts under
+`.zig-cache/causal-artifacts/` before exiting nonzero.
+
 Query the default dogfood JSON artifact:
 
 ```bash
@@ -153,6 +171,12 @@ zig build causal-query -- retries 1
 
 Use `zig build causal-query -- --file <path> <query> [argument]` to inspect a
 non-default artifact.
+
+For example:
+
+```bash
+zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-missing-service-compile-fail.json cause 3
+```
 
 Print an agent-friendly module scaffold:
 

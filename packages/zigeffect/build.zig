@@ -220,6 +220,38 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_query_tool_tests = b.addRunArtifact(causal_query_tool_tests);
 
+    const causal_run_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_run.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_run_tool_module.addImport("zigeffect", zigeffect);
+
+    const causal_run_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-run",
+        .root_module = causal_run_tool_module,
+    });
+    const run_causal_run_tool = b.addRunArtifact(causal_run_tool);
+    if (b.args) |args| run_causal_run_tool.addArgs(args);
+    const causal_run_step = b.step("causal-run", "Run a zigeffect command with causal failure capture");
+    causal_run_step.dependOn(&run_causal_run_tool.step);
+
+    const run_causal_capture_missing_service_tool = b.addRunArtifact(causal_run_tool);
+    run_causal_capture_missing_service_tool.addArg("missing-service-compile-fail");
+    const causal_capture_missing_service_step = b.step("causal-capture-missing-service", "Capture causal artifacts for the missing-service compile-fail scenario");
+    causal_capture_missing_service_step.dependOn(&run_causal_capture_missing_service_tool.step);
+
+    const run_causal_dev_test_tool = b.addRunArtifact(causal_run_tool);
+    run_causal_dev_test_tool.addArg("package-tests");
+    const causal_dev_test_step = b.step("causal-dev-test", "Run zigeffect tests with causal failure capture");
+    causal_dev_test_step.dependOn(&run_causal_dev_test_tool.step);
+
+    const causal_run_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-run-tests",
+        .root_module = causal_run_tool_module,
+    });
+    const run_causal_run_tool_tests = b.addRunArtifact(causal_run_tool_tests);
+
     const examples_step = b.step("examples", "Compile and test zigeffect examples");
     examples_step.dependOn(&readiness_example.step);
     examples_step.dependOn(&run_readiness_example_tests.step);
@@ -241,4 +273,6 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_test_tool_tests.step);
     examples_step.dependOn(&causal_query_tool.step);
     examples_step.dependOn(&run_causal_query_tool_tests.step);
+    examples_step.dependOn(&causal_run_tool.step);
+    examples_step.dependOn(&run_causal_run_tool_tests.step);
 }

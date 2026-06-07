@@ -810,6 +810,12 @@ fail-on-findings mode. It writes artifacts first, then exits nonzero when
 findings exist. This is the first development-agent gate; real failing-test
 capture should reuse the same policy with scenario-specific artifact names.
 
+The first real command capture commands are
+`zig build causal-capture-missing-service` and `zig build causal-dev-test`.
+The former proves scenario-specific artifacts against an existing compile-fail
+fixture. The latter runs package tests through a causal harness and writes
+`package-tests` artifacts if those tests fail during development.
+
 This phase proves the agent workflow before production or app adapters exist.
 
 ### Phase 1: Causal Event Core

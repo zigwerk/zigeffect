@@ -100,6 +100,7 @@ pub const CausalFindingKind = enum {
     finalizer_failure,
     retry_budget_exhausted,
     service_requirement_without_provider,
+    assertion_failure,
 };
 
 pub const CausalFinding = struct {
@@ -306,6 +307,9 @@ pub const CausalStore = struct {
                 },
                 .service_required => if (std.mem.eql(u8, event.status, "missing")) {
                     try appendFinding(allocator, &output, .service_requirement_without_provider, event);
+                },
+                .assertion_recorded => if (std.mem.eql(u8, event.status, "failure")) {
+                    try appendFinding(allocator, &output, .assertion_failure, event);
                 },
                 else => {},
             }

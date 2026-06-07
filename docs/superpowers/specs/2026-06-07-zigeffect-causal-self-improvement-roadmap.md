@@ -128,7 +128,7 @@ Why this comes before full test wrapping:
 
 ### Milestone 4: Real Test Failure Capture
 
-Status: planned after Milestone 3.
+Status: first real command-capture slice delivered.
 
 Deliverables:
 
@@ -142,6 +142,14 @@ Exit criteria:
 - a selected failing core scenario leaves causal artifacts automatically;
 - agents can answer "which scenario failed and why" from the report alone;
 - query helper can inspect both fixture artifacts and real failure artifacts.
+
+Delivered first slice:
+
+- `zig build causal-capture-missing-service` captures artifacts for the existing
+  `missing_service.zig` compile-fail fixture;
+- `zig build causal-dev-test` runs package tests through a causal wrapper and
+  emits `package-tests` artifacts if the command fails;
+- failed `assertion_recorded` events now surface as causal findings.
 
 ### Milestone 5: Scenario Registry And Invariant Catalog
 

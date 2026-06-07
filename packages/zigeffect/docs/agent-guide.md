@@ -329,6 +329,22 @@ zig build causal-check
 The check still writes artifacts before failing, so inspect the JSON with
 `causal-query` instead of rerunning blindly.
 
+Use the real command capture fixture to prove that non-fixture command failures
+leave scenario-specific artifacts:
+
+```sh
+zig build causal-capture-missing-service
+```
+
+Use the package-test development harness while changing `zigeffect` internals:
+
+```sh
+zig build causal-dev-test
+```
+
+When package tests are green, the command exits zero. When they fail, it writes
+`package-tests` causal artifacts before exiting nonzero.
+
 Follow the report's next-query hints with:
 
 ```sh
@@ -342,6 +358,12 @@ zig build causal-query -- retries 1
 
 Use `zig build causal-query -- --file <path> <query> [argument]` when querying
 an artifact from CI or a non-default harness run.
+
+For the real missing-service compile-fail artifact:
+
+```sh
+zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-missing-service-compile-fail.json cause 3
+```
 
 This is the Phase 0 self-improving feedback lane: agents use `zigeffect`'s own
 causal runtime as evidence while improving `zigeffect`, then rerun the harness
