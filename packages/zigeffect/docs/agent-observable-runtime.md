@@ -431,6 +431,20 @@ It writes:
 - `.zig-cache/causal-artifacts/zigeffect-causal-dogfood.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dogfood.dot`
 
+The companion retention command is:
+
+```sh
+cd packages/zigeffect
+zig build causal-artifacts
+```
+
+It prints the causal artifact manifest for agents and CI, including upload
+globs for `.zig-cache/causal-artifacts/*.txt`, `.json`, and `.dot`, known
+scenario paths, and dev-loop before/after, compare, query, and advice paths.
+CI should retain those causal artifacts on failures and after-phase development
+loops, review them before public upload, and avoid uploading the rest of
+`.zig-cache`.
+
 The causal JSON artifact is versioned at the root:
 
 ```json
@@ -903,6 +917,10 @@ artifact into bounded next actions. `zig build causal-advice -- --before
 rule-based and non-mutating: it names event ids, explains why an event is
 actionable, labels actions as `observed`, `persisting`, or `new`, and prints
 exact `causal-query` commands instead of generating patches.
+
+`zig build causal-artifacts` is the retention map for this phase. It makes the
+artifact upload boundary explicit for agents and CI before traces are attached
+to failed jobs or handed between development agents.
 
 This phase proves the agent workflow before production or app adapters exist.
 

@@ -315,6 +315,27 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_run_tool_tests = b.addRunArtifact(causal_run_tool_tests);
 
+    const causal_artifacts_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_artifacts.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_artifacts_tool_module.addImport("causal_run", causal_run_tool_module);
+
+    const causal_artifacts_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-artifacts",
+        .root_module = causal_artifacts_tool_module,
+    });
+    const run_causal_artifacts_tool = b.addRunArtifact(causal_artifacts_tool);
+    const causal_artifacts_step = b.step("causal-artifacts", "Print causal artifact retention manifest for agents and CI");
+    causal_artifacts_step.dependOn(&run_causal_artifacts_tool.step);
+
+    const causal_artifacts_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-artifacts-tests",
+        .root_module = causal_artifacts_tool_module,
+    });
+    const run_causal_artifacts_tool_tests = b.addRunArtifact(causal_artifacts_tool_tests);
+
     const causal_loop_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_loop.zig"),
         .target = target,
@@ -369,6 +390,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_compare_tool_tests.step);
     examples_step.dependOn(&causal_run_tool.step);
     examples_step.dependOn(&run_causal_run_tool_tests.step);
+    examples_step.dependOn(&causal_artifacts_tool.step);
+    examples_step.dependOn(&run_causal_artifacts_tool_tests.step);
     examples_step.dependOn(&causal_loop_tool.step);
     examples_step.dependOn(&run_causal_loop_tool_tests.step);
 }

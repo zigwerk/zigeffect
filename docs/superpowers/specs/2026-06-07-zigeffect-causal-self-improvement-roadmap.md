@@ -33,6 +33,8 @@ development branch contains:
   saved causal artifacts.
 - `zig build causal-advice -- --file <artifact>`, which turns saved causal
   evidence into deterministic, non-mutating next actions.
+- `zig build causal-artifacts`, which prints deterministic upload globs and
+  artifact retention guidance for agents and CI.
 
 The baseline proves that agents can cite causal evidence from `zigeffect`
 itself. The next step is to automate before/after capture around the scenario
@@ -263,7 +265,8 @@ Remaining:
 
 ### Milestone 8: Hardening And CI Readiness
 
-Status: first schema-versioning, bounded-store, and redaction slices delivered.
+Status: schema-versioning, bounded-store, redaction, sampling, taxonomy, and
+artifact-retention slices delivered.
 
 Deliverables:
 
@@ -295,6 +298,12 @@ Delivered first slice:
   `oldest_retained_event_id`.
 - causal store redacts common secret-shaped key/value details, bearer token
   values, and URL credentials before storage and backend emission.
+- event sampling rules are explicit for logs, metrics, and spans, while
+  structural and finding-evidence events remain unsampled.
+- event taxonomy metadata and warnings make compatibility changes explicit.
+- `zig build causal-artifacts` prints upload globs and dogfood, scenario, and
+  dev-loop artifact paths so CI can retain causal evidence without uploading
+  the rest of `.zig-cache`.
 
 Remaining:
 
@@ -302,9 +311,7 @@ Remaining:
   bottleneck;
 - broader PII/payload redaction policy beyond deterministic secret-shaped
   strings;
-- event sampling rules;
-- compatibility tests for event taxonomy changes;
-- artifact retention and upload guidance.
+- deeper compatibility fixtures for future taxonomy changes.
 
 ### Milestone 9: App-Facing Agent Runtime
 

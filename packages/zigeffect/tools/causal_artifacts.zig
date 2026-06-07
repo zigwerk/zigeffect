@@ -1,0 +1,93 @@
+const std = @import("std");
+const causal_run = @import("causal_run");
+
+pub fn formatArtifactManifest(allocator: std.mem.Allocator) ![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "zigeffect causal artifact manifest\n");
+    try output.print(allocator, "artifact dir: {s}\n", .{causal_run.artifact_dir});
+    try output.appendSlice(allocator, "retention: upload causal artifacts on failed causal checks and after-phase dev loops\n");
+
+    try output.appendSlice(allocator, "\nci upload globs:\n");
+    try output.print(allocator, "- {s}/*.txt\n", .{causal_run.artifact_dir});
+    try output.print(allocator, "- {s}/*.json\n", .{causal_run.artifact_dir});
+    try output.print(allocator, "- {s}/*.dot\n", .{causal_run.artifact_dir});
+
+    try output.appendSlice(allocator, "\ndefault artifacts:\n");
+    try appendDogfoodArtifacts(&output, allocator);
+    try appendDefaultLoopArtifacts(&output, allocator);
+
+    try output.appendSlice(allocator, "\nscenario artifacts:\n");
+    for (causal_run.scenarioRegistry()) |scenario| {
+        const paths = try causal_run.artifactPaths(allocator, scenario.slug);
+        defer paths.deinit(allocator);
+
+        try output.print(allocator, "- scenario {s}\n", .{scenario.slug});
+        try output.print(allocator, "  label: {s}\n", .{scenario.label});
+        try output.print(allocator, "  expectation: {s}\n", .{@tagName(scenario.expectation)});
+        try output.print(allocator, "  report: {s}\n", .{paths.report_path});
+        try output.print(allocator, "  json: {s}\n", .{paths.json_path});
+        try output.print(allocator, "  dot: {s}\n", .{paths.dot_path});
+        try appendScenarioLoopArtifacts(&output, allocator, scenario.slug);
+    }
+
+    try output.appendSlice(allocator, "\nsafety notes:\n");
+    try output.appendSlice(allocator, "- artifacts are redacted and bounded, but review before public upload\n");
+    try output.appendSlice(allocator, "- upload only causal artifact globs; do not upload the rest of .zig-cache\n");
+    try output.appendSlice(allocator, "- prefer txt for human triage, json for agent queries, and dot for graph visualization\n");
+
+    return output.toOwnedSlice(allocator);
+}
+
+pub fn main(init: std.process.Init) !void {
+    const manifest = try formatArtifactManifest(init.gpa);
+    defer init.gpa.free(manifest);
+    std.debug.print("{s}", .{manifest});
+}
+
+fn appendDogfoodArtifacts(output: *std.ArrayList(u8), allocator: std.mem.Allocator) std.mem.Allocator.Error!void {
+    try output.print(allocator, "- dogfood report {s}/zigeffect-causal-dogfood.txt\n", .{causal_run.artifact_dir});
+    try output.print(allocator, "- dogfood json {s}/zigeffect-causal-dogfood.json\n", .{causal_run.artifact_dir});
+    try output.print(allocator, "- dogfood dot {s}/zigeffect-causal-dogfood.dot\n", .{causal_run.artifact_dir});
+}
+
+fn appendDefaultLoopArtifacts(output: *std.ArrayList(u8), allocator: std.mem.Allocator) std.mem.Allocator.Error!void {
+    try output.print(allocator, "- dev-loop before {s}/zigeffect-causal-dev-loop-before.json\n", .{causal_run.artifact_dir});
+    try output.print(allocator, "- dev-loop after {s}/zigeffect-causal-dev-loop-after.json\n", .{causal_run.artifact_dir});
+    try output.print(allocator, "- dev-loop compare {s}/zigeffect-causal-dev-loop-compare.txt\n", .{causal_run.artifact_dir});
+    try output.print(allocator, "- dev-loop queries {s}/zigeffect-causal-dev-loop-queries.txt\n", .{causal_run.artifact_dir});
+    try output.print(allocator, "- dev-loop advice {s}/zigeffect-causal-dev-loop-advice.txt\n", .{causal_run.artifact_dir});
+}
+
+fn appendScenarioLoopArtifacts(output: *std.ArrayList(u8), allocator: std.mem.Allocator, slug: []const u8) std.mem.Allocator.Error!void {
+    try output.print(allocator, "  loop before: {s}/zigeffect-causal-dev-loop-{s}-before.json\n", .{ causal_run.artifact_dir, slug });
+    try output.print(allocator, "  loop after: {s}/zigeffect-causal-dev-loop-{s}-after.json\n", .{ causal_run.artifact_dir, slug });
+    try output.print(allocator, "  loop compare: {s}/zigeffect-causal-dev-loop-{s}-compare.txt\n", .{ causal_run.artifact_dir, slug });
+    try output.print(allocator, "  loop queries: {s}/zigeffect-causal-dev-loop-{s}-queries.txt\n", .{ causal_run.artifact_dir, slug });
+    try output.print(allocator, "  loop advice: {s}/zigeffect-causal-dev-loop-{s}-advice.txt\n", .{ causal_run.artifact_dir, slug });
+}
+
+test "artifact manifest lists CI upload globs and default artifacts" {
+    const manifest = try formatArtifactManifest(std.testing.allocator);
+    defer std.testing.allocator.free(manifest);
+
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "zigeffect causal artifact manifest") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "artifact dir: .zig-cache/causal-artifacts") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/*.txt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/*.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/*.dot") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dogfood.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-advice.txt") != null);
+}
+
+test "artifact manifest lists scenario and scenario loop artifacts" {
+    const manifest = try formatArtifactManifest(std.testing.allocator);
+    defer std.testing.allocator.free(manifest);
+
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "scenario package-tests") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-package-tests.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-advice.txt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "review before public upload") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "do not upload the rest of .zig-cache") != null);
+}

@@ -129,6 +129,19 @@ zig build causal-test
 The harness writes a text report, JSON event snapshot, and DOT graph under
 `.zig-cache/causal-artifacts/`.
 
+Print the causal artifact retention manifest for agents and CI:
+
+```bash
+cd packages/zigeffect
+zig build causal-artifacts
+```
+
+The manifest lists stable upload globs for
+`.zig-cache/causal-artifacts/*.txt`, `.json`, and `.dot`, plus dogfood,
+scenario, and dev-loop artifact paths. Use text artifacts for quick human
+triage, JSON artifacts for `causal-query`, compare, and advice tooling, and DOT
+artifacts for graph visualization. Do not upload the rest of `.zig-cache`.
+
 Causal JSON artifacts use this root header:
 
 ```json

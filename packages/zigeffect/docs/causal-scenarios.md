@@ -56,6 +56,12 @@ zig build causal-advice -- --file <artifact.json>
 zig build causal-advice -- --before <before.json> --file <after.json>
 ```
 
+Print the causal artifact retention manifest:
+
+```sh
+zig build causal-artifacts
+```
+
 ## Registered Scenarios
 
 - `missing-service-compile-fail`
@@ -84,6 +90,12 @@ zig build causal-advice -- --before <before.json> --file <after.json>
 Each scenario has stable artifact paths under `.zig-cache/causal-artifacts/`.
 Passing scenarios may write no runner failure artifact; failing scenarios write
 text, JSON, and DOT artifacts before the command exits.
+
+Use `zig build causal-artifacts` when configuring CI or handing work to another
+agent. It lists the upload globs, dogfood artifacts, scenario artifacts, and
+scenario dev-loop paths. Retain `.txt` for human triage, `.json` for
+`causal-query`, compare, and advice tooling, and `.dot` for graph visualization.
+Do not upload the rest of `.zig-cache`.
 
 ## Invariants
 

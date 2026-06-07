@@ -313,6 +313,17 @@ Use the text report for finding summaries and next-query suggestions. Use the
 JSON artifact when citing event ids in a fix proposal. Use the DOT artifact
 when checking graph shape.
 
+Before configuring local or CI retention, print the manifest:
+
+```sh
+zig build causal-artifacts
+```
+
+It lists the upload globs and known dogfood, scenario, and dev-loop artifacts.
+Retain `.zig-cache/causal-artifacts/*.txt`, `.json`, and `.dot`; do not upload
+the rest of `.zig-cache`. Treat JSON artifacts as the agent-readable source for
+`causal-query`, compare, and advice tooling.
+
 Causal JSON artifacts are self-identifying:
 
 ```json
@@ -498,6 +509,10 @@ removed events, and changed events in the patch summary.
 This is the Phase 0 self-improving feedback lane: agents use `zigeffect`'s own
 causal runtime as evidence while improving `zigeffect`, then rerun the harness
 and package tests to compare behavior.
+
+Use `zig build causal-artifacts` at the start of CI wiring or branch handoff to
+make the artifact retention contract explicit before uploading or attaching
+causal evidence.
 
 When a bug teaches a new runtime rule, add or update a catalog entry in
 `tools/causal_run.zig` and document it in `docs/causal-scenarios.md` before
