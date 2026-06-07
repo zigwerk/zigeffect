@@ -439,8 +439,30 @@ fn formatSessionText(allocator: std.mem.Allocator, record: SessionRecord) ![]con
 
 fn copySnippet(allocator: std.mem.Allocator, value: []const u8) ![]const u8 {
     const max_len: usize = 512;
-    const len = @min(value.len, max_len);
-    return allocator.dupe(u8, value[0..len]);
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    var last_was_space = false;
+    for (value) |byte| {
+        if (output.items.len >= max_len) break;
+        const normalized: ?u8 = switch (byte) {
+            '\n', '\r', '\t' => ' ',
+            else => byte,
+        };
+        if (normalized == ' ') {
+            if (output.items.len == 0 or last_was_space) continue;
+            try output.append(allocator, ' ');
+            last_was_space = true;
+            continue;
+        }
+        try output.append(allocator, normalized.?);
+        last_was_space = false;
+    }
+
+    if (output.items.len > 0 and output.items[output.items.len - 1] == ' ') {
+        output.items.len -= 1;
+    }
+    return output.toOwnedSlice(allocator);
 }
 
 fn copyArgv(allocator: std.mem.Allocator, argv: []const []const u8) ![]const []const u8 {
@@ -876,4 +898,20 @@ test "failed command records are included in session report" {
 
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-dev-loop baseline status=failed exit=1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "next: inspect failed command output and rerun the session command") != null);
+}
+
+test "command output snippets are compact single-line text" {
+    var fake = FakeRunner.init(&.{
+        .{ .status = .failed, .exit_code = 1, .stdout = "line one\nline two", .stderr = "first\tsecond\r\nthird" },
+    });
+    defer fake.deinit(std.testing.allocator);
+
+    const record = try runStart(std.testing.allocator, fake.runner(), null);
+    defer deinitSessionRecord(std.testing.allocator, record);
+
+    const report = try formatSessionText(std.testing.allocator, record);
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "stdout: line one line two") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "stderr: first second third") != null);
 }
