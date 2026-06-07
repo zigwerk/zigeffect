@@ -496,6 +496,17 @@ zig build causal-diagnosis -- local causal-scoped-fiber
 The command writes `*-diagnosis.txt`, cites event ids from advice, summarizes
 compare posture, and suggests patch categories without editing source.
 
+To convert the diagnosis into a bounded, reviewable engineering plan, run:
+
+```sh
+zig build causal-remediation-plan -- local
+zig build causal-remediation-plan -- local causal-scoped-fiber
+```
+
+The command writes `*-remediation-plan.md` with evidence ids, remediation
+posture, proposed patch strategy, verification commands, and claim guardrails.
+It does not edit source or execute remediation.
+
 Generate advice directly from any saved causal JSON artifact:
 
 ```sh

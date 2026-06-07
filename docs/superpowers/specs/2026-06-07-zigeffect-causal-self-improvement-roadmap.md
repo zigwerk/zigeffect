@@ -278,6 +278,9 @@ Delivered slices:
 - `zig build causal-diagnosis -- local [scenario]`, which summarizes verdict,
   advice, query, and compare artifacts into a patch-ready non-mutating
   diagnosis report.
+- `zig build causal-remediation-plan -- local [scenario]`, which turns local
+  diagnosis artifacts into non-mutating remediation plans with evidence ids,
+  verification commands, and claim guardrails.
 
 Remaining:
 
