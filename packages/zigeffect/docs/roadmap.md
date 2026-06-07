@@ -490,6 +490,8 @@ metrics, and traces.
   config, cleanup failure, scoped fiber interruption, and retry exhaustion.
 - Delivered: opt-in bounded `CausalStore` retention through `initBounded`, with
   retention metadata in reports and JSON artifacts.
+- Delivered: opt-in deterministic causal sampling for high-volume logs,
+  metrics, and spans, with sampled-event metadata in reports and JSON artifacts.
 - Delivered: defensive causal event redaction for common secret-shaped
   key/value details, bearer values, and URL credentials.
 - Delivered: an optional `CausalBackend` event sink contract with adapter kinds

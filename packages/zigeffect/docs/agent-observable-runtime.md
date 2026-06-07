@@ -442,6 +442,12 @@ The causal JSON artifact is versioned at the root:
     "dropped_events": 0,
     "oldest_retained_event_id": null
   },
+  "sampling": {
+    "log_every_n": null,
+    "metric_every_n": null,
+    "span_every_n": null,
+    "sampled_events": 0
+  },
   "events": []
 }
 ```
@@ -453,6 +459,13 @@ Bounded stores are opt-in through `CausalStore.initBounded(allocator,
 max_events)`. Retention applies to the in-memory store, not attached backends.
 Queries operate on retained events only, so `dropped_events` is the signal that
 an agent may be looking at a truncated parent chain.
+
+Causal sampling is opt-in through `CausalStore.initWithOptions`. The first
+policy is deterministic `every_n` sampling for `log_recorded`,
+`metric_recorded`, and `span_recorded` only. Runtime structure, service, scope,
+resource, fiber, schedule, exit, and assertion events are retained before
+bounded retention trimming. Sampled-out events consume event IDs, skip storage
+and backend emission, and increment `sampled_events` in reports and JSON.
 
 Causal event string fields are defensively redacted before the store retains
 them or forwards them to attached backends. The first policy redacts common

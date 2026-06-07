@@ -324,6 +324,12 @@ Causal JSON artifacts are self-identifying:
     "dropped_events": 0,
     "oldest_retained_event_id": null
   },
+  "sampling": {
+    "log_every_n": null,
+    "metric_every_n": null,
+    "span_every_n": null,
+    "sampled_events": 0
+  },
   "events": []
 }
 ```
@@ -340,6 +346,11 @@ defer store.deinit();
 
 Queries only see retained events. If `dropped_events` is nonzero, cite the
 retention metadata in the fix summary and avoid claiming the trace is complete.
+
+For noisy probes, a causal store may also use opt-in deterministic sampling for
+logs, metrics, and spans. If `sampled_events` is nonzero, cite that
+observability evidence may be incomplete. Structural runtime evidence remains
+unsampled unless it is later truncated by retention.
 
 Causal events also redact common secret-shaped text before storage:
 password-like key/value pairs, API keys, token keys, authorization bearer

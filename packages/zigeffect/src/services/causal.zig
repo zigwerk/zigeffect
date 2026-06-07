@@ -7,8 +7,15 @@ pub const causal_json_schema = "zigeffect.causal.v1";
 pub const causal_json_schema_version: u32 = 1;
 pub const causal_redaction_marker = "<redacted>";
 
+pub const CausalSamplingPolicy = struct {
+    log_every_n: ?usize = null,
+    metric_every_n: ?usize = null,
+    span_every_n: ?usize = null,
+};
+
 pub const CausalStoreOptions = struct {
     max_events: ?usize = null,
+    sampling: CausalSamplingPolicy = .{},
 };
 
 pub const CausalEventKind = enum {
@@ -351,6 +358,11 @@ pub const CausalStore = struct {
     backend: ?CausalBackend = null,
     max_events: ?usize = null,
     dropped_event_count: u64 = 0,
+    sampling: CausalSamplingPolicy = .{},
+    sampled_event_count: u64 = 0,
+    log_seen_count: u64 = 0,
+    metric_seen_count: u64 = 0,
+    span_seen_count: u64 = 0,
 
     pub fn init(allocator: Allocator) CausalStore {
         return initWithOptions(allocator, .{});
@@ -360,6 +372,7 @@ pub const CausalStore = struct {
         return .{
             .allocator = allocator,
             .max_events = options.max_events,
+            .sampling = options.sampling,
         };
     }
 
@@ -382,6 +395,10 @@ pub const CausalStore = struct {
         return self.dropped_event_count;
     }
 
+    pub fn sampledEventCount(self: *const CausalStore) u64 {
+        return self.sampled_event_count;
+    }
+
     pub fn oldestRetainedEventId(self: *const CausalStore) ?u64 {
         if (self.events.items.len == 0) return null;
         return self.events.items[0].id;
@@ -400,9 +417,16 @@ pub const CausalStore = struct {
     }
 
     pub fn record(self: *CausalStore, event: CausalEvent) Allocator.Error!u64 {
+        const event_id = self.next_event_id;
+        if (!self.shouldRecordBySampling(event.kind)) {
+            self.next_event_id += 1;
+            self.sampled_event_count += 1;
+            return event_id;
+        }
+
         var owned = try cloneEvent(self.allocator, event);
         errdefer deinitEventStrings(self.allocator, owned);
-        owned.id = self.next_event_id;
+        owned.id = event_id;
         self.next_event_id += 1;
         try self.events.append(self.allocator, owned);
         if (self.backend) |backend| {
@@ -540,6 +564,15 @@ pub const CausalStore = struct {
         return .{ .allocator = allocator, .items = try output.toOwnedSlice(allocator) };
     }
 
+    fn shouldRecordBySampling(self: *CausalStore, kind: CausalEventKind) bool {
+        return switch (kind) {
+            .log_recorded => shouldRecordEveryN(&self.log_seen_count, self.sampling.log_every_n),
+            .metric_recorded => shouldRecordEveryN(&self.metric_seen_count, self.sampling.metric_every_n),
+            .span_recorded => shouldRecordEveryN(&self.span_seen_count, self.sampling.span_every_n),
+            else => true,
+        };
+    }
+
     fn findEvent(self: *const CausalStore, event_id: u64) ?CausalEvent {
         for (self.events.items) |event| {
             if (event.id == event_id) return event;
@@ -627,6 +660,13 @@ pub const CausalStore = struct {
     }
 };
 
+fn shouldRecordEveryN(seen_count: *u64, every_n: ?usize) bool {
+    seen_count.* += 1;
+    const n = every_n orelse return true;
+    if (n == 0) return true;
+    return seen_count.* % @as(u64, @intCast(n)) == 0;
+}
+
 fn appendClonedEvent(allocator: Allocator, output: *std.ArrayList(CausalEvent), event: CausalEvent) Allocator.Error!void {
     const cloned = try cloneEvent(allocator, event);
     errdefer deinitEventStrings(allocator, cloned);
@@ -673,6 +713,26 @@ fn appendRetentionSummary(output: *std.ArrayList(u8), allocator: Allocator, stor
     try output.append(allocator, '\n');
 }
 
+fn appendSamplingEveryN(output: *std.ArrayList(u8), allocator: Allocator, value: ?usize) Allocator.Error!void {
+    if (value) |number| {
+        if (number > 0) {
+            try output.print(allocator, "{d}", .{number});
+            return;
+        }
+    }
+    try output.appendSlice(allocator, "off");
+}
+
+fn appendSamplingSummary(output: *std.ArrayList(u8), allocator: Allocator, store: *const CausalStore) Allocator.Error!void {
+    try output.appendSlice(allocator, "sampling: log_every_n=");
+    try appendSamplingEveryN(output, allocator, store.sampling.log_every_n);
+    try output.appendSlice(allocator, " metric_every_n=");
+    try appendSamplingEveryN(output, allocator, store.sampling.metric_every_n);
+    try output.appendSlice(allocator, " span_every_n=");
+    try appendSamplingEveryN(output, allocator, store.sampling.span_every_n);
+    try output.print(allocator, " sampled_events={d}\n", .{store.sampled_event_count});
+}
+
 pub fn formatCausalReport(
     allocator: Allocator,
     label: []const u8,
@@ -684,6 +744,7 @@ pub fn formatCausalReport(
     try output.print(allocator, "zigeffect causal report\nprogram: {s}\n", .{label});
     try output.print(allocator, "events: {d}\n", .{store.events.items.len});
     try appendRetentionSummary(&output, allocator, store);
+    try appendSamplingSummary(&output, allocator, store);
 
     for (store.events.items) |event| {
         try output.print(
@@ -780,6 +841,7 @@ pub fn formatCausalCiReport(
         .{ label, store.events.items.len, findings.items.len },
     );
     try appendRetentionSummary(&output, allocator, store);
+    try appendSamplingSummary(&output, allocator, store);
 
     try output.appendSlice(allocator, "event citations:\n");
     if (store.events.items.len == 0) {
@@ -853,7 +915,14 @@ pub fn formatCausalJson(allocator: Allocator, store: *const CausalStore) Allocat
     try appendOptionalJsonUsize(&output, allocator, store.max_events);
     try output.print(allocator, ",\n    \"dropped_events\": {d},\n    \"oldest_retained_event_id\": ", .{store.dropped_event_count});
     try appendOptionalJsonU64(&output, allocator, store.oldestRetainedEventId());
-    try output.appendSlice(allocator, "\n  },\n  \"events\": [\n");
+    try output.appendSlice(allocator, "\n  },\n  \"sampling\": {\n    \"log_every_n\": ");
+    try appendOptionalJsonUsize(&output, allocator, store.sampling.log_every_n);
+    try output.appendSlice(allocator, ",\n    \"metric_every_n\": ");
+    try appendOptionalJsonUsize(&output, allocator, store.sampling.metric_every_n);
+    try output.appendSlice(allocator, ",\n    \"span_every_n\": ");
+    try appendOptionalJsonUsize(&output, allocator, store.sampling.span_every_n);
+    try output.print(allocator, ",\n    \"sampled_events\": {d}\n", .{store.sampled_event_count});
+    try output.appendSlice(allocator, "  },\n  \"events\": [\n");
     for (store.events.items, 0..) |event, index| {
         if (index > 0) try output.appendSlice(allocator, ",\n");
         try output.appendSlice(allocator, "    {\n");

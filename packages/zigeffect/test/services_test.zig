@@ -456,6 +456,51 @@ test "bounded causal store can retain zero events while forwarding backend event
     try std.testing.expectEqual(second, backend_state.ids[1]);
 }
 
+test "causal sampling keeps every nth observability event and preserves structural events" {
+    var backend_state = FakeCausalBackendState{};
+    var store = fx.CausalStore.initWithOptions(std.testing.allocator, .{
+        .sampling = .{ .log_every_n = 2, .metric_every_n = 3 },
+    });
+    store.attachBackend(fakeCausalBackend(&backend_state));
+    defer store.deinit();
+
+    const run_id = store.nextRunId();
+    const run = try store.record(.{ .kind = .run_started, .run_id = run_id, .label = "sampled-run" });
+    const log1 = try store.record(.{ .kind = .log_recorded, .run_id = run_id, .label = "log-1" });
+    const log2 = try store.record(.{ .kind = .log_recorded, .run_id = run_id, .label = "log-2" });
+    const metric1 = try store.record(.{ .kind = .metric_recorded, .run_id = run_id, .label = "metric-1" });
+    const metric2 = try store.record(.{ .kind = .metric_recorded, .run_id = run_id, .label = "metric-2" });
+    const metric3 = try store.record(.{ .kind = .metric_recorded, .run_id = run_id, .label = "metric-3" });
+    const exit = try store.record(.{ .kind = .exit_recorded, .run_id = run_id, .parent_id = run, .label = "sampled-exit" });
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+
+    try std.testing.expectEqual(@as(u64, 1), run);
+    try std.testing.expectEqual(@as(u64, 2), log1);
+    try std.testing.expectEqual(@as(u64, 3), log2);
+    try std.testing.expectEqual(@as(u64, 4), metric1);
+    try std.testing.expectEqual(@as(u64, 5), metric2);
+    try std.testing.expectEqual(@as(u64, 6), metric3);
+    try std.testing.expectEqual(@as(u64, 7), exit);
+    try std.testing.expectEqual(@as(usize, 4), snapshot.events.len);
+    try std.testing.expectEqual(run, snapshot.events[0].id);
+    try std.testing.expectEqual(log2, snapshot.events[1].id);
+    try std.testing.expectEqual(metric3, snapshot.events[2].id);
+    try std.testing.expectEqual(exit, snapshot.events[3].id);
+    try std.testing.expectEqual(@as(u64, 3), store.sampledEventCount());
+
+    try std.testing.expectEqual(@as(usize, 4), backend_state.count);
+    try std.testing.expectEqual(run, backend_state.ids[0]);
+    try std.testing.expectEqual(log2, backend_state.ids[1]);
+    try std.testing.expectEqual(metric3, backend_state.ids[2]);
+    try std.testing.expectEqual(exit, backend_state.ids[3]);
+    try std.testing.expectEqualStrings("sampled-run", backend_state.labels[0]);
+    try std.testing.expectEqualStrings("log-2", backend_state.labels[1]);
+    try std.testing.expectEqualStrings("metric-3", backend_state.labels[2]);
+    try std.testing.expectEqualStrings("sampled-exit", backend_state.labels[3]);
+}
+
 fn expectFinding(findings: fx.CausalFindings, kind: fx.CausalFindingKind) !void {
     for (findings.items) |finding| {
         if (finding.kind == kind) return;
@@ -675,6 +720,36 @@ test "causal artifacts disclose bounded retention state" {
 
     try std.testing.expect(std.mem.indexOf(u8, report, "retention: max_events=1 dropped_events=1 oldest_retained_event=2") != null);
     try std.testing.expectEqual(retained, store.oldestRetainedEventId().?);
+}
+
+test "causal artifacts disclose sampling policy and sampled event count" {
+    var store = fx.CausalStore.initWithOptions(std.testing.allocator, .{
+        .sampling = .{ .span_every_n = 2 },
+    });
+    defer store.deinit();
+
+    const first = try store.record(.{ .kind = .span_recorded, .label = "span-1" });
+    const second = try store.record(.{ .kind = .span_recorded, .label = "span-2" });
+
+    try std.testing.expectEqual(@as(u64, 1), first);
+    try std.testing.expectEqual(@as(u64, 2), second);
+    try std.testing.expectEqual(@as(u64, 1), store.sampledEventCount());
+
+    const json = try fx.formatCausalJson(std.testing.allocator, &store);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"sampling\": {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"log_every_n\": null") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"metric_every_n\": null") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"span_every_n\": 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"sampled_events\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "span-1") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "span-2") != null);
+
+    const report = try fx.formatCausalCiReport(std.testing.allocator, "sampled", &store);
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "sampling: log_every_n=off metric_every_n=off span_every_n=2 sampled_events=1") != null);
 }
 
 test "causal store redacts secret-shaped event strings before storage and export" {

@@ -140,6 +140,12 @@ Causal JSON artifacts use this root header:
     "dropped_events": 0,
     "oldest_retained_event_id": null
   },
+  "sampling": {
+    "log_every_n": null,
+    "metric_every_n": null,
+    "span_every_n": null,
+    "sampled_events": 0
+  },
   "events": []
 }
 ```
@@ -151,6 +157,15 @@ Use `fx.CausalStore.initBounded(allocator, max_events)` when a development or
 CI harness needs capped retained memory. Queries operate on retained events;
 reports and JSON artifacts disclose `max_events`, `dropped_events`, and
 `oldest_retained_event_id` so agents know when evidence is truncated.
+
+Use `fx.CausalStore.initWithOptions(allocator, .{ .sampling = ... })` when a
+development or CI harness needs to reduce high-volume observability events.
+Sampling is opt-in and currently applies only to `log_recorded`,
+`metric_recorded`, and `span_recorded`; structural runtime events remain
+unsampled. Sampled-out events consume IDs but do not enter the retained store or
+attached backends. Reports and JSON artifacts disclose `sampled_events` so
+agents know observability evidence may be incomplete without treating the causal
+runtime trace as retention-truncated.
 
 Causal event strings are defensively redacted before storage and backend
 emission for common secret-shaped key/value details, bearer values, and URL
