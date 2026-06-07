@@ -65,6 +65,8 @@ fn appendDefaultLoopArtifacts(output: *std.ArrayList(u8), allocator: std.mem.All
     try output.print(allocator, "- dev-loop remediation plan {s}/zigeffect-causal-dev-loop-remediation-plan.md\n", .{causal_run.artifact_dir});
     try output.print(allocator, "- dev-loop remediation audit json {s}/zigeffect-causal-dev-loop-remediation-audit.json\n", .{causal_run.artifact_dir});
     try output.print(allocator, "- dev-loop remediation audit text {s}/zigeffect-causal-dev-loop-remediation-audit.txt\n", .{causal_run.artifact_dir});
+    try output.print(allocator, "- dev-loop remediation decision json {s}/zigeffect-causal-dev-loop-remediation-decision.json\n", .{causal_run.artifact_dir});
+    try output.print(allocator, "- dev-loop remediation decision text {s}/zigeffect-causal-dev-loop-remediation-decision.txt\n", .{causal_run.artifact_dir});
     try output.print(allocator, "- ci handoff {s}/zigeffect-causal-ci-handoff.txt\n", .{causal_run.artifact_dir});
     try output.print(allocator, "- ci verdict {s}/zigeffect-causal-ci-verdict.json\n", .{causal_run.artifact_dir});
 }
@@ -80,6 +82,8 @@ fn appendScenarioLoopArtifacts(output: *std.ArrayList(u8), allocator: std.mem.Al
     try output.print(allocator, "  loop remediation plan: {s}/zigeffect-causal-dev-loop-{s}-remediation-plan.md\n", .{ causal_run.artifact_dir, slug });
     try output.print(allocator, "  loop remediation audit json: {s}/zigeffect-causal-dev-loop-{s}-remediation-audit.json\n", .{ causal_run.artifact_dir, slug });
     try output.print(allocator, "  loop remediation audit text: {s}/zigeffect-causal-dev-loop-{s}-remediation-audit.txt\n", .{ causal_run.artifact_dir, slug });
+    try output.print(allocator, "  loop remediation decision json: {s}/zigeffect-causal-dev-loop-{s}-remediation-decision.json\n", .{ causal_run.artifact_dir, slug });
+    try output.print(allocator, "  loop remediation decision text: {s}/zigeffect-causal-dev-loop-{s}-remediation-decision.txt\n", .{ causal_run.artifact_dir, slug });
 }
 
 test "artifact manifest lists CI upload globs and default artifacts" {
@@ -100,6 +104,8 @@ test "artifact manifest lists CI upload globs and default artifacts" {
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-plan.md") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-audit.json") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-audit.txt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-decision.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-decision.txt") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-ci-handoff.txt") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-ci-verdict.json") != null);
 }
@@ -116,6 +122,8 @@ test "artifact manifest lists scenario and scenario loop artifacts" {
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-remediation-plan.md") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-remediation-audit.json") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-remediation-audit.txt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-remediation-decision.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-remediation-decision.txt") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, "review before public upload") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, "do not upload the rest of .zig-cache") != null);
 }

@@ -339,6 +339,7 @@ zig build causal-dev-agent -- local
 zig build causal-diagnosis -- local
 zig build causal-remediation-plan -- local
 zig build causal-remediation-audit -- local
+zig build causal-remediation-decision -- local approve --by local-reviewer --policy manual-review
 ```
 
 For scenario targets, pass the same scenario slug:
@@ -348,6 +349,7 @@ zig build causal-dev-agent -- local causal-scoped-fiber
 zig build causal-diagnosis -- local causal-scoped-fiber
 zig build causal-remediation-plan -- local causal-scoped-fiber
 zig build causal-remediation-audit -- local causal-scoped-fiber
+zig build causal-remediation-decision -- local reject causal-scoped-fiber --reason "clear verdict"
 ```
 
 `causal-dev-agent` prints the inspection order, `causal-diagnosis` writes
@@ -355,7 +357,10 @@ zig build causal-remediation-audit -- local causal-scoped-fiber
 `*-remediation-plan.md`. `causal-remediation-audit` writes
 `*-remediation-audit.json` and `*-remediation-audit.txt` with pending approval
 status, source artifact paths, evidence event ids, verification commands, and
-claim guardrails. All four commands are deterministic and non-mutating.
+claim guardrails. `causal-remediation-decision` writes
+`*-remediation-decision.json` and `*-remediation-decision.txt` with an approved
+or rejected review result while keeping `applied=false`. All five commands are
+deterministic and non-mutating.
 
 Compare two saved causal JSON artifacts:
 

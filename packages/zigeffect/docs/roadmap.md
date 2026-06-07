@@ -523,6 +523,9 @@ metrics, and traces.
 - Delivered: `zig build causal-remediation-audit -- local [scenario]` writes
   pending, schema-versioned proposal/audit records before any approval, patch
   proposal, or source mutation command exists.
+- Delivered: `zig build causal-remediation-decision -- local approve|reject
+  [scenario]` writes approved or rejected decision records for pending audits
+  while keeping `applied=false`.
 - Delivered: `zig build causal-artifacts` prints a deterministic retention
   manifest with upload globs and dogfood, scenario, and dev-loop artifact paths
   for agents and CI.
@@ -539,8 +542,8 @@ metrics, and traces.
   for memory, JSON Lines, DOT, OpenTelemetry, NenDB graph, Cockroach/RoachGraph
   history, and async streams.
 - Still future: production-grade adapter implementations, durable histories,
-  a workbench UI, deterministic replay/forking, patch proposal artifacts, and
-  policy-controlled remediation approval.
+  a workbench UI, deterministic replay/forking, patch proposal artifacts,
+  policy engine decisions, and remediation application.
 - Still future: using the causal graph pervasively inside `zigeffect` tests so
   agents can diagnose engine regressions from runtime facts.
 - Leave room for a future causal workbench that visualizes effect runs, scope

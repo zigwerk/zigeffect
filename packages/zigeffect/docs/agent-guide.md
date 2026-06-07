@@ -521,6 +521,20 @@ event ids, verification commands, and claim guardrails. Treat this audit record
 as the review boundary before source edits or future policy-controlled
 remediation.
 
+To record a review decision for that audit without applying source changes, run:
+
+```sh
+zig build causal-remediation-decision -- local approve --by local-reviewer --policy manual-review
+zig build causal-remediation-decision -- local reject causal-scoped-fiber --reason "clear verdict"
+```
+
+The command writes `*-remediation-decision.json` and
+`*-remediation-decision.txt` with `approval_status=approved` or
+`approval_status=rejected`, `applied=false`, the source audit path, copied event
+ids, verification commands, claim guardrails, and decision guardrails. Approval
+is permission for a future patch workflow only; it does not edit source or mark
+anything applied.
+
 Generate advice directly from any saved causal JSON artifact:
 
 ```sh
