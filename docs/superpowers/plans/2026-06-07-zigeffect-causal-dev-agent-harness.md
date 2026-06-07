@@ -674,7 +674,8 @@ git commit -m "docs(zigeffect): document causal dev-agent harness"
 
 - [ ] `zig build causal-dev-agent -- local` works after a default after-phase run.
 - [ ] `zig build causal-dev-agent -- local causal-scoped-fiber` works after a scenario after-phase run.
-- [ ] Missing verdicts fail with clean usage text and exit code `2`.
+- [ ] Missing verdicts fail with clean usage text; the executable uses
+  usage-style exit code `2`, while `zig build` reports the failed step.
 - [ ] `zig build examples` includes the new tool tests and executable build.
 - [ ] `zig build test --summary none` passes in `packages/zigeffect`.
 - [ ] `bun run zig:test` passes at the repo root.

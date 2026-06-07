@@ -49,6 +49,12 @@ zig build causal-dev-loop -- baseline
 zig build causal-dev-loop -- after
 ```
 
+Print the next local agent inspection plan from a saved dev-loop verdict:
+
+```sh
+zig build causal-dev-agent -- local [scenario]
+```
+
 Generate deterministic advice from a saved causal JSON artifact:
 
 ```sh
@@ -215,6 +221,9 @@ after-phase advice is before-aware, so unchanged evidence is marked
 The `*-verdict.json` artifact is the first file agents should read after an
 after-phase run. It summarizes aggregate action counts, baseline pairing, and
 the recommended next inspection step.
+After an after-phase run, `zig build causal-dev-agent -- local [scenario]`
+reads the matching verdict and prints the deterministic local inspection plan.
+Use it before manually opening advice, query, or compare artifacts.
 
 Expected-failure scenarios are valid loop targets. For example,
 `missing-service-compile-fail` reports `expected_failure_observed` when the

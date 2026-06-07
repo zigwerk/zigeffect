@@ -98,7 +98,9 @@ causal-dev-agent error: <error-name>
 usage: zig build causal-dev-agent -- local [scenario]
 ```
 
-Missing verdict should print a clean error and exit with code `2`:
+Missing verdict should print a clean error. The executable uses usage-style
+exit code `2`; when invoked through `zig build`, the outer build command reports
+the failed step:
 
 ```text
 causal-dev-agent error: MissingVerdictArtifact
@@ -243,7 +245,9 @@ No existing causal runtime module needs to change.
 
 ## Error Handling
 
-The executable should convert these conditions to usage-style exit code `2`:
+The executable should convert these conditions to usage-style exit code `2`.
+When invoked through `zig build`, the outer build process reports the failed
+step while preserving the tool's error text:
 
 - missing mode;
 - unknown mode;

@@ -514,6 +514,8 @@ metrics, and traces.
 - Delivered: local causal dev-loop verdict JSON gives agents a first-read
   aggregate status, action counts, and next inspection step after after-phase
   runs.
+- Delivered: `zig build causal-dev-agent -- local [scenario]` turns local
+  dev-loop verdicts into deterministic agent inspection plans.
 - Delivered: `zig build causal-artifacts` prints a deterministic retention
   manifest with upload globs and dogfood, scenario, and dev-loop artifact paths
   for agents and CI.
