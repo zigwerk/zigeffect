@@ -2,6 +2,11 @@ const std = @import("std");
 
 pub const Allocator = std.mem.Allocator;
 
+pub const traits = @import("traits/root.zig");
+pub const data = @import("data/root.zig");
+pub const match = @import("match/root.zig");
+pub const pattern = @import("pattern/root.zig");
+
 pub const core = struct {
     pub const result = @import("core/result.zig");
     pub const scope = @import("core/scope.zig");
@@ -277,3 +282,12 @@ pub const CausalBackend = services.causal_backend.CausalBackend;
 pub const TestFixtureRegistry = testing.test_env.TestFixtureRegistry;
 pub const TestServices = testing.test_env.TestServices;
 pub const TestEnv = testing.test_env.TestEnv;
+
+pub const Option = data.Option;
+pub const Either = data.Either;
+pub const Duration = data.Duration;
+pub const BigDecimal = data.BigDecimal;
+pub const DateTime = data.DateTime;
+pub const Redacted = data.Redacted;
+pub const Chunk = data.Chunk;
+pub const HashSet = data.HashSet;
