@@ -1,30 +1,45 @@
 const std = @import("std");
 const causal_run = @import("causal_run");
 const causal_advice = @import("causal_advice");
+const causal_compare = @import("causal_compare");
 
 pub const handoff_report_path = causal_run.artifact_dir ++ "/zigeffect-causal-ci-handoff.txt";
 
-pub fn formatCiHandoffReport(allocator: std.mem.Allocator, json_artifact_paths: []const []const u8) ![]const u8 {
+const HandoffArtifact = struct {
+    json_path: []const u8,
+    advice_report_path: []const u8,
+    baseline_path: ?[]const u8 = null,
+    compare_report_path: ?[]const u8 = null,
+};
+
+pub fn formatCiHandoffReport(allocator: std.mem.Allocator, artifacts: []const HandoffArtifact) ![]const u8 {
     var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
 
     try output.appendSlice(allocator, "zigeffect causal CI handoff\n");
     try output.print(allocator, "artifact dir: {s}\n", .{causal_run.artifact_dir});
     try output.print(allocator, "handoff: {s}\n", .{handoff_report_path});
-    try output.print(allocator, "json artifacts: {d}\n", .{json_artifact_paths.len});
+    try output.print(allocator, "json artifacts: {d}\n", .{artifacts.len});
+    try output.print(allocator, "baseline pairs: {d}\n", .{baselinePairCount(artifacts)});
     try output.append(allocator, '\n');
 
-    if (json_artifact_paths.len == 0) {
+    if (artifacts.len == 0) {
         try output.appendSlice(allocator, "- no causal JSON artifacts found\n");
     } else {
-        for (json_artifact_paths) |path| {
-            const advice_report_path = try adviceReportPathForJsonArtifact(allocator, path);
-            defer allocator.free(advice_report_path);
-
-            try output.print(allocator, "- artifact {s}\n", .{path});
-            try output.print(allocator, "  advice report: {s}\n", .{advice_report_path});
-            try output.print(allocator, "  advice: zig build causal-advice -- --file {s}\n", .{path});
-            try output.print(allocator, "  snapshot: zig build causal-query -- --file {s} snapshot\n", .{path});
+        for (artifacts) |artifact| {
+            try output.print(allocator, "- artifact {s}\n", .{artifact.json_path});
+            if (artifact.baseline_path) |baseline_path| {
+                const compare_report_path = artifact.compare_report_path orelse return error.MissingCompareReportPath;
+                try output.print(allocator, "  baseline: {s}\n", .{baseline_path});
+                try output.print(allocator, "  compare report: {s}\n", .{compare_report_path});
+                try output.print(allocator, "  advice report: {s}\n", .{artifact.advice_report_path});
+                try output.print(allocator, "  compare: zig build causal-compare -- {s} {s}\n", .{ baseline_path, artifact.json_path });
+                try output.print(allocator, "  advice: zig build causal-advice -- --before {s} --file {s}\n", .{ baseline_path, artifact.json_path });
+            } else {
+                try output.print(allocator, "  advice report: {s}\n", .{artifact.advice_report_path});
+                try output.print(allocator, "  advice: zig build causal-advice -- --file {s}\n", .{artifact.json_path});
+            }
+            try output.print(allocator, "  snapshot: zig build causal-query -- --file {s} snapshot\n", .{artifact.json_path});
         }
     }
 
@@ -41,20 +56,31 @@ pub fn main(init: std.process.Init) !void {
     var candidates = try candidateJsonArtifactPaths(allocator);
     defer deinitOwnedPaths(allocator, &candidates);
 
-    var existing = std.ArrayList([]const u8).empty;
-    defer existing.deinit(allocator);
+    var existing_paths = std.ArrayList([]const u8).empty;
+    defer existing_paths.deinit(allocator);
     for (candidates.items) |path| {
         if (try artifactExists(init.io, path)) {
-            try existing.append(allocator, path);
+            try existing_paths.append(allocator, path);
         }
     }
 
-    try writeAdviceReportsForArtifacts(init.io, allocator, existing.items);
+    var artifacts = try describeArtifacts(init.io, allocator, existing_paths.items);
+    defer deinitArtifacts(allocator, &artifacts);
 
-    const report = try formatCiHandoffReport(allocator, existing.items);
+    try writeGeneratedReportsForArtifacts(init.io, allocator, artifacts.items);
+
+    const report = try formatCiHandoffReport(allocator, artifacts.items);
     defer init.gpa.free(report);
     try writeArtifact(init.io, handoff_report_path, report);
     std.debug.print("{s}", .{report});
+}
+
+fn baselinePairCount(artifacts: []const HandoffArtifact) usize {
+    var count: usize = 0;
+    for (artifacts) |artifact| {
+        if (artifact.baseline_path != null) count += 1;
+    }
+    return count;
 }
 
 fn candidateJsonArtifactPaths(allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
@@ -106,21 +132,120 @@ fn artifactExists(io: std.Io, path: []const u8) !bool {
 }
 
 fn adviceReportPathForJsonArtifact(allocator: std.mem.Allocator, json_path: []const u8) ![]const u8 {
+    if (std.mem.endsWith(u8, json_path, "-after.json")) {
+        return std.fmt.allocPrint(
+            allocator,
+            "{s}-advice.txt",
+            .{json_path[0 .. json_path.len - "-after.json".len]},
+        );
+    }
     if (!std.mem.endsWith(u8, json_path, ".json")) return error.InvalidJsonArtifactPath;
     return std.fmt.allocPrint(allocator, "{s}-advice.txt", .{json_path[0 .. json_path.len - ".json".len]});
 }
 
-fn writeAdviceReportsForArtifacts(io: std.Io, allocator: std.mem.Allocator, json_artifact_paths: []const []const u8) !void {
+fn compareReportPathForJsonArtifact(allocator: std.mem.Allocator, json_path: []const u8) ![]const u8 {
+    if (std.mem.endsWith(u8, json_path, "-after.json")) {
+        return std.fmt.allocPrint(
+            allocator,
+            "{s}-compare.txt",
+            .{json_path[0 .. json_path.len - "-after.json".len]},
+        );
+    }
+    if (!std.mem.endsWith(u8, json_path, ".json")) return error.InvalidJsonArtifactPath;
+    return std.fmt.allocPrint(allocator, "{s}-ci-compare.txt", .{json_path[0 .. json_path.len - ".json".len]});
+}
+
+fn baselinePathForJsonArtifact(allocator: std.mem.Allocator, json_path: []const u8) !?[]const u8 {
+    const dir = causal_run.artifact_dir ++ "/";
+    if (std.mem.eql(u8, json_path, dir ++ "zigeffect-causal-dogfood.json")) {
+        return try std.fmt.allocPrint(allocator, "{s}zigeffect-causal-ci-baseline-dogfood.json", .{dir});
+    }
+    if (std.mem.eql(u8, json_path, dir ++ "zigeffect-causal-package-tests.json")) {
+        return try std.fmt.allocPrint(allocator, "{s}zigeffect-causal-ci-baseline-package-tests.json", .{dir});
+    }
+    if (std.mem.endsWith(u8, json_path, "-after.json")) {
+        return try std.fmt.allocPrint(
+            allocator,
+            "{s}-before.json",
+            .{json_path[0 .. json_path.len - "-after.json".len]},
+        );
+    }
+    return null;
+}
+
+fn describeArtifacts(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    json_artifact_paths: []const []const u8,
+) !std.ArrayList(HandoffArtifact) {
+    var artifacts = std.ArrayList(HandoffArtifact).empty;
+    errdefer deinitArtifacts(allocator, &artifacts);
+
     for (json_artifact_paths) |path| {
-        const json = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024));
-        defer allocator.free(json);
+        const json_path = try allocator.dupe(u8, path);
+        errdefer allocator.free(json_path);
 
         const advice_report_path = try adviceReportPathForJsonArtifact(allocator, path);
-        defer allocator.free(advice_report_path);
+        errdefer allocator.free(advice_report_path);
 
-        const report = try causal_advice.buildAdviceReport(allocator, json, path);
-        defer allocator.free(report);
-        try writeArtifact(io, advice_report_path, report);
+        var baseline_path: ?[]const u8 = null;
+        errdefer if (baseline_path) |owned| allocator.free(owned);
+        var compare_report_path: ?[]const u8 = null;
+        errdefer if (compare_report_path) |owned| allocator.free(owned);
+
+        const candidate_baseline_path = try baselinePathForJsonArtifact(allocator, path);
+        if (candidate_baseline_path) |owned_baseline_path| {
+            if (try artifactExists(io, owned_baseline_path)) {
+                baseline_path = owned_baseline_path;
+                compare_report_path = try compareReportPathForJsonArtifact(allocator, path);
+            } else {
+                allocator.free(owned_baseline_path);
+            }
+        }
+
+        try artifacts.append(allocator, .{
+            .json_path = json_path,
+            .advice_report_path = advice_report_path,
+            .baseline_path = baseline_path,
+            .compare_report_path = compare_report_path,
+        });
+    }
+
+    return artifacts;
+}
+
+fn deinitArtifacts(allocator: std.mem.Allocator, artifacts: *std.ArrayList(HandoffArtifact)) void {
+    for (artifacts.items) |artifact| {
+        allocator.free(artifact.json_path);
+        allocator.free(artifact.advice_report_path);
+        if (artifact.baseline_path) |path| allocator.free(path);
+        if (artifact.compare_report_path) |path| allocator.free(path);
+    }
+    artifacts.deinit(allocator);
+}
+
+fn writeGeneratedReportsForArtifacts(io: std.Io, allocator: std.mem.Allocator, artifacts: []const HandoffArtifact) !void {
+    for (artifacts) |artifact| {
+        const json = try std.Io.Dir.cwd().readFileAlloc(io, artifact.json_path, allocator, .limited(1024 * 1024));
+        defer allocator.free(json);
+
+        if (artifact.baseline_path) |baseline_path| {
+            const compare_report_path = artifact.compare_report_path orelse return error.MissingCompareReportPath;
+            const baseline_json = try std.Io.Dir.cwd().readFileAlloc(io, baseline_path, allocator, .limited(1024 * 1024));
+            defer allocator.free(baseline_json);
+
+            const compare_report = try causal_compare.runCompare(allocator, baseline_json, json);
+            defer allocator.free(compare_report);
+            try writeArtifact(io, compare_report_path, compare_report);
+
+            const advice_report = try causal_advice.buildAdviceReportWithBaseline(allocator, baseline_json, baseline_path, json, artifact.json_path);
+            defer allocator.free(advice_report);
+            try writeArtifact(io, artifact.advice_report_path, advice_report);
+        } else {
+            const advice_report = try causal_advice.buildAdviceReport(allocator, json, artifact.json_path);
+            defer allocator.free(advice_report);
+            try writeArtifact(io, artifact.advice_report_path, advice_report);
+        }
     }
 }
 
@@ -132,20 +257,33 @@ fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
 }
 
 test "handoff report lists artifacts and exact follow-up commands" {
-    const paths: []const []const u8 = &.{
-        ".zig-cache/causal-artifacts/zigeffect-causal-dogfood.json",
-        ".zig-cache/causal-artifacts/zigeffect-causal-package-tests.json",
+    const artifacts: []const HandoffArtifact = &.{
+        .{
+            .json_path = ".zig-cache/causal-artifacts/zigeffect-causal-package-tests.json",
+            .advice_report_path = ".zig-cache/causal-artifacts/zigeffect-causal-package-tests-advice.txt",
+            .baseline_path = ".zig-cache/causal-artifacts/zigeffect-causal-ci-baseline-package-tests.json",
+            .compare_report_path = ".zig-cache/causal-artifacts/zigeffect-causal-package-tests-ci-compare.txt",
+        },
+        .{
+            .json_path = ".zig-cache/causal-artifacts/zigeffect-causal-missing-service-compile-fail.json",
+            .advice_report_path = ".zig-cache/causal-artifacts/zigeffect-causal-missing-service-compile-fail-advice.txt",
+        },
     };
-    const report = try formatCiHandoffReport(std.testing.allocator, paths);
+    const report = try formatCiHandoffReport(std.testing.allocator, artifacts);
     defer std.testing.allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect causal CI handoff") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "handoff: .zig-cache/causal-artifacts/zigeffect-causal-ci-handoff.txt") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "json artifacts: 2") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "artifact .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "advice report: .zig-cache/causal-artifacts/zigeffect-causal-dogfood-advice.txt") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-advice -- --file .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json snapshot") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "baseline pairs: 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "artifact .zig-cache/causal-artifacts/zigeffect-causal-package-tests.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "baseline: .zig-cache/causal-artifacts/zigeffect-causal-ci-baseline-package-tests.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "compare report: .zig-cache/causal-artifacts/zigeffect-causal-package-tests-ci-compare.txt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "advice report: .zig-cache/causal-artifacts/zigeffect-causal-package-tests-advice.txt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-compare -- .zig-cache/causal-artifacts/zigeffect-causal-ci-baseline-package-tests.json .zig-cache/causal-artifacts/zigeffect-causal-package-tests.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-advice -- --before .zig-cache/causal-artifacts/zigeffect-causal-ci-baseline-package-tests.json --file .zig-cache/causal-artifacts/zigeffect-causal-package-tests.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-advice -- --file .zig-cache/causal-artifacts/zigeffect-causal-missing-service-compile-fail.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-package-tests.json snapshot") != null);
 }
 
 test "advice report path is derived from JSON artifact path" {
@@ -153,6 +291,55 @@ test "advice report path is derived from JSON artifact path" {
     defer std.testing.allocator.free(path);
 
     try std.testing.expectEqualStrings(".zig-cache/causal-artifacts/zigeffect-causal-dogfood-advice.txt", path);
+}
+
+test "advice report path reuses local dev-loop advice naming for after artifacts" {
+    const path = try adviceReportPathForJsonArtifact(std.testing.allocator, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-after.json");
+    defer std.testing.allocator.free(path);
+
+    try std.testing.expectEqualStrings(".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-advice.txt", path);
+}
+
+test "ci baseline path resolves for dogfood and package test artifacts" {
+    const dogfood = try baselinePathForJsonArtifact(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-dogfood.json",
+    );
+    defer if (dogfood) |path| std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-ci-baseline-dogfood.json",
+        dogfood.?,
+    );
+
+    const package_tests = try baselinePathForJsonArtifact(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-package-tests.json",
+    );
+    defer if (package_tests) |path| std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-ci-baseline-package-tests.json",
+        package_tests.?,
+    );
+}
+
+test "local after artifact resolves to matching before artifact" {
+    const before = try baselinePathForJsonArtifact(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-after.json",
+    );
+    defer if (before) |path| std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-before.json",
+        before.?,
+    );
+}
+
+test "unpaired artifact has no baseline path" {
+    const baseline = try baselinePathForJsonArtifact(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-missing-service-compile-fail.json",
+    );
+    try std.testing.expectEqual(@as(?[]const u8, null), baseline);
 }
 
 test "handoff report is explicit when no JSON artifacts exist" {

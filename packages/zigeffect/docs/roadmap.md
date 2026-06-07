@@ -50,6 +50,9 @@ Current boundary decisions:
   effects, services, scopes, fibers, layers, schedules, exits, causes, logs,
   metrics, and traces. Future work should connect them through an opt-in,
   bounded causal event model that agents can query structurally.
+- The current causal dogfood lane now has local before/after comparison,
+  generated CI handoff advice, and pull request CI baseline capture, so failing
+  head artifacts can be compared with base-commit causal evidence.
 
 ## Engine Integration Invariants
 

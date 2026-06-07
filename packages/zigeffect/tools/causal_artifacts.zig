@@ -53,6 +53,8 @@ fn appendDogfoodArtifacts(output: *std.ArrayList(u8), allocator: std.mem.Allocat
 }
 
 fn appendDefaultLoopArtifacts(output: *std.ArrayList(u8), allocator: std.mem.Allocator) std.mem.Allocator.Error!void {
+    try output.print(allocator, "- ci baseline dogfood {s}/zigeffect-causal-ci-baseline-dogfood.json\n", .{causal_run.artifact_dir});
+    try output.print(allocator, "- ci baseline package-tests {s}/zigeffect-causal-ci-baseline-package-tests.json\n", .{causal_run.artifact_dir});
     try output.print(allocator, "- dev-loop before {s}/zigeffect-causal-dev-loop-before.json\n", .{causal_run.artifact_dir});
     try output.print(allocator, "- dev-loop after {s}/zigeffect-causal-dev-loop-after.json\n", .{causal_run.artifact_dir});
     try output.print(allocator, "- dev-loop compare {s}/zigeffect-causal-dev-loop-compare.txt\n", .{causal_run.artifact_dir});
@@ -79,6 +81,8 @@ test "artifact manifest lists CI upload globs and default artifacts" {
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/*.json") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/*.dot") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dogfood.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-ci-baseline-dogfood.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-ci-baseline-package-tests.json") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-advice.txt") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-ci-handoff.txt") != null);
 }

@@ -343,6 +343,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_handoff_tool_module.addImport("causal_run", causal_run_tool_module);
     causal_handoff_tool_module.addImport("causal_advice", causal_advice_tool_module);
+    causal_handoff_tool_module.addImport("causal_compare", causal_compare_tool_module);
 
     const causal_handoff_tool = b.addExecutable(.{
         .name = "zigeffect-causal-handoff",

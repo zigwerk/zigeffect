@@ -64,8 +64,10 @@ zig build causal-artifacts
 
 The repository CI workflow `.github/workflows/zigeffect-causal.yml` runs the
 manifest, dogfood harness, examples, and causal package-test gate, then uploads
-causal artifacts on failure. It also runs `zig build causal-ci-handoff` on
-failure so the uploaded bundle contains
+causal artifacts on failure. On pull requests it first captures exact
+base-commit dogfood and package-test baseline JSON artifacts so the failure
+handoff can compare head evidence against the PR base. It also runs `zig build
+causal-ci-handoff` on failure so the uploaded bundle contains
 `.zig-cache/causal-artifacts/zigeffect-causal-ci-handoff.txt`.
 
 ## Registered Scenarios
@@ -106,7 +108,9 @@ Do not upload the rest of `.zig-cache`.
 CI uses the same boundary: only `.txt`, `.json`, and `.dot` files under
 `packages/zigeffect/.zig-cache/causal-artifacts/` are uploaded.
 Read `zigeffect-causal-ci-handoff.txt` first; it points at the JSON artifacts
-and exact local commands for advice and query follow-up.
+and exact local commands for advice and query follow-up. On pull requests,
+paired artifacts also include a base JSON path, generated compare report, and
+baseline-aware advice that marks actions as `status=persisting` or `status=new`.
 
 ## Invariants
 
