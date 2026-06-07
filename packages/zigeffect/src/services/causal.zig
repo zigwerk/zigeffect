@@ -3,6 +3,8 @@ const causal_backend = @import("causal_backend.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const CausalBackend = causal_backend.CausalBackend;
+pub const causal_json_schema = "zigeffect.causal.v1";
+pub const causal_json_schema_version: u32 = 1;
 
 pub const CausalEventKind = enum {
     run_started,
@@ -593,7 +595,9 @@ pub fn formatCausalJson(allocator: Allocator, store: *const CausalStore) Allocat
     var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
 
-    try output.appendSlice(allocator, "{\n  \"events\": [\n");
+    try output.appendSlice(allocator, "{\n  \"schema\": ");
+    try appendJsonString(&output, allocator, causal_json_schema);
+    try output.print(allocator, ",\n  \"schema_version\": {d},\n  \"events\": [\n", .{causal_json_schema_version});
     for (store.events.items, 0..) |event, index| {
         if (index > 0) try output.appendSlice(allocator, ",\n");
         try output.appendSlice(allocator, "    {\n");

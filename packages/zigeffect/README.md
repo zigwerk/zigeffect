@@ -129,6 +129,19 @@ zig build causal-test
 The harness writes a text report, JSON event snapshot, and DOT graph under
 `.zig-cache/causal-artifacts/`.
 
+Causal JSON artifacts use this root header:
+
+```json
+{
+  "schema": "zigeffect.causal.v1",
+  "schema_version": 1,
+  "events": []
+}
+```
+
+Older event-only artifacts remain readable by the local query, compare, and
+development-loop tools.
+
 Run the failure-gated causal dogfood check:
 
 ```bash

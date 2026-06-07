@@ -313,6 +313,19 @@ Use the text report for finding summaries and next-query suggestions. Use the
 JSON artifact when citing event ids in a fix proposal. Use the DOT artifact
 when checking graph shape.
 
+Causal JSON artifacts are self-identifying:
+
+```json
+{
+  "schema": "zigeffect.causal.v1",
+  "schema_version": 1,
+  "events": []
+}
+```
+
+The query, compare, and development-loop tools still accept older artifacts
+that only contain `events`.
+
 Use the non-failing probe when you want evidence:
 
 ```sh

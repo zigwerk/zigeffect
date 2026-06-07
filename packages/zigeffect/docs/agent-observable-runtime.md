@@ -431,6 +431,19 @@ It writes:
 - `.zig-cache/causal-artifacts/zigeffect-causal-dogfood.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dogfood.dot`
 
+The causal JSON artifact is versioned at the root:
+
+```json
+{
+  "schema": "zigeffect.causal.v1",
+  "schema_version": 1,
+  "events": []
+}
+```
+
+Version `1` is the current event-array artifact shape. Local tools keep parsing
+legacy event-only artifacts so saved evidence remains useful.
+
 This command records a compact deterministic engine fixture with missing
 service, resource, fiber, and retry findings. It exits successfully unless
 artifact generation fails, because the findings are intentional evidence for
@@ -801,9 +814,11 @@ state. It should help agents build the runtime by:
 The first concrete command for this phase is `zig build causal-test` from
 `packages/zigeffect`. It writes text, JSON, and DOT artifacts to
 `.zig-cache/causal-artifacts/` so a development agent can cite event ids before
-proposing changes. The companion `zig build causal-query -- <query> [argument]`
-command makes the saved JSON artifact executable for the same next-query names
-shown in the text report.
+proposing changes. The JSON artifact root includes
+`schema: "zigeffect.causal.v1"` and `schema_version: 1`, and legacy event-only
+artifacts remain readable. The companion
+`zig build causal-query -- <query> [argument]` command makes the saved JSON
+artifact executable for the same next-query names shown in the text report.
 
 The companion `zig build causal-check` command runs the same dogfood scenario in
 fail-on-findings mode. It writes artifacts first, then exits nonzero when

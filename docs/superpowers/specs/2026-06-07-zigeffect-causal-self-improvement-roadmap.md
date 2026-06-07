@@ -257,14 +257,15 @@ Remaining:
 
 ### Milestone 8: Hardening And CI Readiness
 
-Status: planned.
+Status: first schema-versioning slice delivered.
 
 Deliverables:
 
 - bounded store or ring-buffer policy;
 - stronger secret redaction tests;
 - event sampling rules;
-- stable schema versioning for JSON artifacts;
+- stable schema versioning for JSON artifacts; delivered for
+  `zigeffect.causal.v1` root metadata;
 - compatibility tests for event taxonomy changes;
 - artifact retention and upload guidance.
 
@@ -273,6 +274,21 @@ Exit criteria:
 - artifacts are safe to emit by default in CI;
 - schema changes are explicit and tested;
 - memory growth is bounded under long-running traces.
+
+Delivered first slice:
+
+- generated causal JSON artifacts include
+  `"schema": "zigeffect.causal.v1"` and `"schema_version": 1`;
+- query, compare, and development-loop tools continue to parse legacy
+  event-only artifacts.
+
+Remaining:
+
+- bounded store or ring-buffer policy;
+- stronger secret redaction tests;
+- event sampling rules;
+- compatibility tests for event taxonomy changes;
+- artifact retention and upload guidance.
 
 ### Milestone 9: App-Facing Agent Runtime
 

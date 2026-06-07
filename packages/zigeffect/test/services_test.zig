@@ -598,6 +598,8 @@ test "causal json and dot exports are deterministic and redacted" {
     const json = try fx.formatCausalJson(std.testing.allocator, &store);
     defer std.testing.allocator.free(json);
 
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"schema\": \"zigeffect.causal.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"schema_version\": 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"events\": [") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"id\": 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\": \"run_started\"") != null);

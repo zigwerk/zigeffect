@@ -3,6 +3,8 @@ const std = @import("std");
 pub const default_artifact_path = ".zig-cache/causal-artifacts/zigeffect-causal-dogfood.json";
 
 const Artifact = struct {
+    schema: ?[]const u8 = null,
+    schema_version: ?u32 = null,
     events: []Event,
 };
 
@@ -108,6 +110,16 @@ const sample_json =
     \\      "status": "exhausted",
     \\      "redacted_detail": "retry budget exhausted after deterministic fixture"
     \\    }
+    \\  ]
+    \\}
+;
+
+const versioned_sample_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v1",
+    \\  "schema_version": 1,
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"versioned artifact","type_name":"Fixture","status":"started","redacted_detail":""}
     \\  ]
     \\}
 ;
@@ -295,6 +307,15 @@ test "snapshot query prints all events" {
     try std.testing.expect(std.mem.indexOf(u8, output, "events: 6") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "event id=1 kind=run_started") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "event id=6 kind=schedule_decision") != null);
+}
+
+test "query accepts versioned causal artifacts" {
+    const output = try runQuery(std.testing.allocator, versioned_sample_json, &.{"snapshot"});
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "causal.query: snapshot") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "events: 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "event id=1 kind=run_started") != null);
 }
 
 test "cause query prints parent chain" {

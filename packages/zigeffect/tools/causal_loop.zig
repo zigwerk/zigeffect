@@ -52,6 +52,8 @@ const ScenarioCapture = struct {
 };
 
 const Artifact = struct {
+    schema: ?[]const u8 = null,
+    schema_version: ?u32 = null,
     events: []Event,
 };
 
@@ -72,6 +74,21 @@ const Event = struct {
 
 const dogfood_query_json =
     \\{
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"zigeffect dogfood","type_name":"DogfoodHarness","status":"","redacted_detail":""},
+    \\    {"id":2,"kind":"scope_opened","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":1,"trace_id":null,"span_id":null,"label":"dogfood scope","type_name":"","status":"opened","redacted_detail":""},
+    \\    {"id":3,"kind":"service_required","run_id":1,"parent_id":2,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"Config","type_name":"Config","status":"missing","redacted_detail":"missing provider"},
+    \\    {"id":4,"kind":"resource_acquired","run_id":1,"parent_id":2,"fiber_id":null,"scope_id":1,"trace_id":null,"span_id":null,"label":"dogfood database","type_name":"DogfoodDatabaseConnection","status":"success","redacted_detail":"left open"},
+    \\    {"id":5,"kind":"fiber_forked","run_id":1,"parent_id":2,"fiber_id":42,"scope_id":1,"trace_id":null,"span_id":null,"label":"dogfood child fiber","type_name":"","status":"pending","redacted_detail":""},
+    \\    {"id":6,"kind":"schedule_decision","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"dogfood retry policy","type_name":"Schedule.exponential","status":"exhausted","redacted_detail":"retry budget exhausted"}
+    \\  ]
+    \\}
+;
+
+const versioned_dogfood_query_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v1",
+    \\  "schema_version": 1,
     \\  "events": [
     \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"zigeffect dogfood","type_name":"DogfoodHarness","status":"","redacted_detail":""},
     \\    {"id":2,"kind":"scope_opened","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":1,"trace_id":null,"span_id":null,"label":"dogfood scope","type_name":"","status":"opened","redacted_detail":""},
@@ -639,6 +656,14 @@ test "query report runs selected dogfood follow-up queries" {
     try std.testing.expect(std.mem.indexOf(u8, report, "causal.query: resources 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "causal.query: fibers pending") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "causal.query: retries 1") != null);
+}
+
+test "query report accepts versioned causal artifacts" {
+    const report = try buildQueryReport(std.testing.allocator, versioned_dogfood_query_json, ".zig-cache/causal-artifacts/after.json");
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect causal query report") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "queries: 12") != null);
 }
 
 test "query report is explicit when no follow-up queries are selected" {
