@@ -105,6 +105,44 @@ fn localPlanPathForScenario(allocator: std.mem.Allocator, scenario_slug: []const
     );
 }
 
+fn localVerdictPath() []const u8 {
+    return causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-verdict.json";
+}
+
+fn localVerdictPathForScenario(allocator: std.mem.Allocator, scenario_slug: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{s}/zigeffect-causal-dev-loop-{s}-verdict.json",
+        .{ causal_run.artifact_dir, scenario_slug },
+    );
+}
+
+fn localDiagnosisPath() []const u8 {
+    return causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-diagnosis.txt";
+}
+
+fn localDiagnosisPathForScenario(allocator: std.mem.Allocator, scenario_slug: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{s}/zigeffect-causal-dev-loop-{s}-diagnosis.txt",
+        .{ causal_run.artifact_dir, scenario_slug },
+    );
+}
+
+fn queryReportPathForJson(allocator: std.mem.Allocator, json_path: []const u8) ![]const u8 {
+    if (std.mem.endsWith(u8, json_path, "-after.json")) {
+        return std.fmt.allocPrint(allocator, "{s}-queries.txt", .{json_path[0 .. json_path.len - "-after.json".len]});
+    }
+    if (!std.mem.endsWith(u8, json_path, ".json")) return error.InvalidVerdictArtifactPath;
+    return std.fmt.allocPrint(allocator, "{s}-queries.txt", .{json_path[0 .. json_path.len - ".json".len]});
+}
+
+fn validateLocalVerdict(verdict: Verdict) !void {
+    if (!std.mem.eql(u8, verdict.schema, supported_local_schema)) return error.UnsupportedVerdictSchema;
+    if (verdict.schema_version != 1) return error.UnsupportedVerdictSchema;
+    if (verdict.artifacts.len == 0) return error.EmptyVerdictArtifacts;
+}
+
 fn remediationPosture(verdict: Verdict) RemediationPosture {
     if (std.mem.eql(u8, verdict.status, "clear") or verdict.actions == 0) return .do_not_patch;
     if (verdict.new_actions > 0) return .regression_candidate;
@@ -139,7 +177,10 @@ fn parseDiagnosisEvidence(allocator: std.mem.Allocator, diagnosis_report: []cons
     var lines = std.mem.splitScalar(u8, diagnosis_report, '\n');
     while (lines.next()) |line| {
         if (std.mem.startsWith(u8, line, "- action ")) {
-            if (current) |item| try evidence.append(allocator, item);
+            if (current) |item| {
+                try evidence.append(allocator, item);
+                current = null;
+            }
             current = try parseActionLine(allocator, line);
         } else if (std.mem.startsWith(u8, line, "  subsystem: ")) {
             if (current) |*item| try replaceOwnedField(allocator, &item.subsystem, line["  subsystem: ".len..]);
@@ -151,7 +192,10 @@ fn parseDiagnosisEvidence(allocator: std.mem.Allocator, diagnosis_report: []cons
             if (current) |*item| try replaceOwnedField(allocator, &item.patch_prompt, line["  patch prompt: ".len..]);
         }
     }
-    if (current) |item| try evidence.append(allocator, item);
+    if (current) |item| {
+        try evidence.append(allocator, item);
+        current = null;
+    }
 
     return evidence.toOwnedSlice(allocator);
 }
@@ -333,6 +377,107 @@ fn appendClaimGuardrails(allocator: std.mem.Allocator, output: *std.ArrayList(u8
     try output.appendSlice(allocator, "- Treat this plan as guidance, not permission to edit unrelated subsystems.\n");
 }
 
+fn parseCompareGuardrail(diagnosis_report: []const u8) []const u8 {
+    var lines = std.mem.splitScalar(u8, diagnosis_report, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.startsWith(u8, line, "- compare posture: ")) {
+            return line["- compare posture: ".len..];
+        }
+    }
+    return "compare report unavailable or unreadable";
+}
+
+fn usage() []const u8 {
+    return "usage: zig build causal-remediation-plan -- local [scenario]\n";
+}
+
+fn failUsage(err: anyerror) noreturn {
+    std.debug.print("causal-remediation-plan error: {s}\n{s}", .{ @errorName(err), usage() });
+    std.process.exit(2);
+}
+
+fn readArtifact(io: std.Io, allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => error.MissingRemediationInput,
+        else => return err,
+    };
+}
+
+fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
+    const slash = std.mem.lastIndexOfScalar(u8, path, '/') orelse return error.InvalidArtifactPath;
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(io, path[0..slash]);
+    try cwd.writeFile(io, .{ .sub_path = path, .data = contents });
+}
+
+fn runLocal(init: std.process.Init, scenario_slug: ?[]const u8) !void {
+    const allocator = init.gpa;
+    const verdict_path = if (scenario_slug) |slug| try localVerdictPathForScenario(allocator, slug) else localVerdictPath();
+    defer if (scenario_slug != null) allocator.free(verdict_path);
+    const diagnosis_path = if (scenario_slug) |slug| try localDiagnosisPathForScenario(allocator, slug) else localDiagnosisPath();
+    defer if (scenario_slug != null) allocator.free(diagnosis_path);
+    const plan_path = if (scenario_slug) |slug| try localPlanPathForScenario(allocator, slug) else localPlanPath();
+    defer if (scenario_slug != null) allocator.free(plan_path);
+    const target = scenario_slug orelse "dogfood";
+
+    const verdict_json = try readArtifact(init.io, allocator, verdict_path);
+    defer allocator.free(verdict_json);
+    var parsed = try std.json.parseFromSlice(Verdict, allocator, verdict_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    try validateLocalVerdict(parsed.value);
+
+    const diagnosis_report = try readArtifact(init.io, allocator, diagnosis_path);
+    defer allocator.free(diagnosis_report);
+    const artifact = parsed.value.artifacts[0];
+    const advice_report = try readArtifact(init.io, allocator, artifact.advice_report_path);
+    defer allocator.free(advice_report);
+    const query_report_path = try queryReportPathForJson(allocator, artifact.json_path);
+    defer allocator.free(query_report_path);
+    const query_report = try readArtifact(init.io, allocator, query_report_path);
+    defer allocator.free(query_report);
+    const compare_report = if (artifact.compare_report_path) |path| try readArtifact(init.io, allocator, path) else "";
+    defer if (artifact.compare_report_path != null) allocator.free(compare_report);
+
+    const evidence = try parseDiagnosisEvidence(allocator, diagnosis_report);
+    defer deinitEvidence(allocator, evidence);
+
+    const report = try formatRemediationPlan(allocator, .{
+        .target = target,
+        .plan_path = plan_path,
+        .verdict_path = verdict_path,
+        .diagnosis_path = diagnosis_path,
+        .verdict = parsed.value,
+        .evidence = evidence,
+        .compare_guardrail = parseCompareGuardrail(diagnosis_report),
+    });
+    defer allocator.free(report);
+
+    try writeArtifact(init.io, plan_path, report);
+    std.debug.print("{s}", .{report});
+}
+
+pub fn main(init: std.process.Init) !void {
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    if (args.len < 2) failUsage(error.MissingMode);
+    if (args.len > 3) failUsage(error.TooManyArguments);
+    if (!std.mem.eql(u8, args[1], "local")) failUsage(error.UnknownMode);
+
+    const scenario_slug: ?[]const u8 = if (args.len == 3) blk: {
+        _ = causal_run.scenarioByName(args[2]) catch |err| failUsage(err);
+        break :blk args[2];
+    } else null;
+
+    runLocal(init, scenario_slug) catch |err| switch (err) {
+        error.MissingRemediationInput,
+        error.UnsupportedVerdictSchema,
+        error.EmptyVerdictArtifacts,
+        error.InvalidVerdictArtifactPath,
+        error.InvalidArtifactPath,
+        => failUsage(err),
+        else => return err,
+    };
+}
+
 test "remediation plan path is stable for default target" {
     try std.testing.expectEqualStrings(
         ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-plan.md",
@@ -462,4 +607,47 @@ test "remediation formatter writes markdown strategy and guardrails" {
     try std.testing.expect(std.mem.indexOf(u8, report, "Patch candidate: scope_lifecycle / resource-finalizer") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-dev-loop -- baseline") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "Do not claim this patch fixed persisting evidence") != null);
+}
+
+test "usage names local mode" {
+    try std.testing.expectEqualStrings(
+        "usage: zig build causal-remediation-plan -- local [scenario]\n",
+        usage(),
+    );
+}
+
+test "unsupported verdict schema is rejected" {
+    const verdict = Verdict{
+        .schema = "zigeffect.causal.other.v1",
+        .schema_version = 1,
+        .status = "clear",
+        .next_action = "none",
+        .json_artifacts = 0,
+        .baseline_pairs = 0,
+        .actions = 0,
+        .new_actions = 0,
+        .persisting_actions = 0,
+        .observed_actions = 0,
+        .artifacts = &.{},
+    };
+
+    try std.testing.expectError(error.UnsupportedVerdictSchema, validateLocalVerdict(verdict));
+}
+
+test "empty verdict artifacts are rejected" {
+    const verdict = Verdict{
+        .schema = supported_local_schema,
+        .schema_version = 1,
+        .status = "clear",
+        .next_action = "none",
+        .json_artifacts = 0,
+        .baseline_pairs = 0,
+        .actions = 0,
+        .new_actions = 0,
+        .persisting_actions = 0,
+        .observed_actions = 0,
+        .artifacts = &.{},
+    };
+
+    try std.testing.expectError(error.EmptyVerdictArtifacts, validateLocalVerdict(verdict));
 }
