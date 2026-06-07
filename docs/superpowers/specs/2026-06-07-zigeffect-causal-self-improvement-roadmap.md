@@ -224,7 +224,7 @@ Remaining:
 
 ### Milestone 7: Development Agent Loop
 
-Status: planned.
+Status: first dev-loop slice delivered.
 
 Deliverables:
 
@@ -238,6 +238,21 @@ Exit criteria:
 - an agent can run one development loop and produce a grounded patch summary;
 - failed checks always point at artifacts, event ids, and suggested queries;
 - the loop does not require network or external services.
+
+Delivered first slice:
+
+- `zig build causal-dev-loop -- baseline`;
+- `zig build causal-dev-loop -- after`;
+- stable before, after, and compare artifact paths;
+- package-test gate execution in both phases;
+- after-phase summary with compare output and next-query commands.
+
+Remaining:
+
+- scenario-specific before/after traces beyond the deterministic dogfood
+  artifact;
+- automatic execution of selected query helpers based on changed findings;
+- app-facing development loops once applications emit causal runtime artifacts.
 
 ### Milestone 8: Hardening And CI Readiness
 

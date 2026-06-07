@@ -165,6 +165,22 @@ zig build causal-dev-test
 during development, it writes scenario-specific artifacts under
 `.zig-cache/causal-artifacts/` before exiting nonzero.
 
+Run the two-phase causal development loop around a runtime patch:
+
+```bash
+cd packages/zigeffect
+zig build causal-dev-loop -- baseline
+# make the patch
+zig build causal-dev-loop -- after
+```
+
+The baseline phase writes
+`.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json` and runs the
+package-test gate. The after phase writes
+`.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json`, writes
+`.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-compare.txt`, reruns the
+package-test gate, and prints next-query commands.
+
 Run a named scenario from the catalog:
 
 ```bash

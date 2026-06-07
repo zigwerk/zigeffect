@@ -826,6 +826,12 @@ causal JSON artifacts. It reports event deltas, finding deltas, added events,
 removed events, and changed events so an agent can explain whether a patch
 improved the runtime trace.
 
+`zig build causal-dev-loop -- baseline` and
+`zig build causal-dev-loop -- after` are the first orchestration layer around
+those pieces. The baseline phase captures before dogfood evidence and runs
+package tests. The after phase captures after evidence, writes a compare report,
+reruns package tests, and prints next-query commands.
+
 This phase proves the agent workflow before production or app adapters exist.
 
 ### Phase 1: Causal Event Core

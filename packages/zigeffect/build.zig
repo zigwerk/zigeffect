@@ -278,6 +278,30 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_run_tool_tests = b.addRunArtifact(causal_run_tool_tests);
 
+    const causal_loop_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_loop.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_loop_tool_module.addImport("causal_test", causal_test_tool_module);
+    causal_loop_tool_module.addImport("causal_compare", causal_compare_tool_module);
+    causal_loop_tool_module.addImport("causal_run", causal_run_tool_module);
+
+    const causal_loop_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-loop",
+        .root_module = causal_loop_tool_module,
+    });
+    const run_causal_loop_tool = b.addRunArtifact(causal_loop_tool);
+    if (b.args) |args| run_causal_loop_tool.addArgs(args);
+    const causal_loop_step = b.step("causal-dev-loop", "Run the zigeffect causal development loop");
+    causal_loop_step.dependOn(&run_causal_loop_tool.step);
+
+    const causal_loop_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-loop-tests",
+        .root_module = causal_loop_tool_module,
+    });
+    const run_causal_loop_tool_tests = b.addRunArtifact(causal_loop_tool_tests);
+
     const examples_step = b.step("examples", "Compile and test zigeffect examples");
     examples_step.dependOn(&readiness_example.step);
     examples_step.dependOn(&run_readiness_example_tests.step);
@@ -303,4 +327,6 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_compare_tool_tests.step);
     examples_step.dependOn(&causal_run_tool.step);
     examples_step.dependOn(&run_causal_run_tool_tests.step);
+    examples_step.dependOn(&causal_loop_tool.step);
+    examples_step.dependOn(&run_causal_loop_tool_tests.step);
 }

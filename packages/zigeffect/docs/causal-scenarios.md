@@ -36,6 +36,13 @@ Compare two saved causal JSON artifacts:
 zig build causal-compare -- <before.json> <after.json>
 ```
 
+Run the two-phase causal development loop:
+
+```sh
+zig build causal-dev-loop -- baseline
+zig build causal-dev-loop -- after
+```
+
 ## Registered Scenarios
 
 - `missing-service-compile-fail`
@@ -114,3 +121,23 @@ The report is intentionally text-first for agents. It shows event count deltas,
 finding count deltas, added events, removed events, and changed events. A good
 patch summary should cite the comparison and the event ids that explain the
 behavior change.
+
+## Development Loop
+
+Use the development loop for ordinary runtime patches. Run the baseline phase
+before editing, then run the after phase once the patch is in place:
+
+```sh
+zig build causal-dev-loop -- baseline
+zig build causal-dev-loop -- after
+```
+
+The loop currently compares the deterministic dogfood causal artifact and runs
+the `package-tests` scenario as the package gate. It writes:
+
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-compare.txt`
+
+If package tests fail, the loop writes the same `package-tests` failure
+artifacts as `zig build causal-dev-test` and exits nonzero.

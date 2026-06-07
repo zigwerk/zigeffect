@@ -352,6 +352,22 @@ zig build causal-dev-test
 When package tests are green, the command exits zero. When they fail, it writes
 `package-tests` causal artifacts before exiting nonzero.
 
+Use the causal development loop when making runtime changes:
+
+```sh
+zig build causal-dev-loop -- baseline
+```
+
+Make the patch, then run:
+
+```sh
+zig build causal-dev-loop -- after
+```
+
+The baseline phase stores the before artifact and runs package tests. The after
+phase stores the after artifact, writes the compare report, reruns package
+tests, and prints next-query commands against the after artifact.
+
 Run a specific scenario from the catalog when your change touches its owner:
 
 ```sh
