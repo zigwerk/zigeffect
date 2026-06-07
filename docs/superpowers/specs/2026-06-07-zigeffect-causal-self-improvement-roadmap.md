@@ -54,6 +54,13 @@ merged into `master`. The repository now contains:
 - `zig build causal-remediation-decision -- local approve|reject [scenario]`,
   which records approved or rejected review decisions while keeping
   `applied=false`.
+- `zig build causal-patch-proposal -- local draft|approved [scenario] ...`,
+  which records non-mutating patch intent from audit or decision evidence.
+- `zig build causal-audit-chain -- local [scenario]`, which compares the
+  remediation chain against before/after causal evidence.
+- `zig build causal-scenario-proposal -- local [scenario]`, which proposes
+  reviewed scenario or invariant coverage from verdict, diagnosis,
+  remediation-plan, and audit-chain evidence.
 
 The baseline proves that agents can cite causal evidence from `zigeffect`
 itself in both local and CI workflows. The next step is to make that chain
@@ -336,6 +343,20 @@ Delivered audit-chain slice:
 - implementation plan:
   `docs/superpowers/plans/2026-06-07-zigeffect-causal-audit-chain-comparison.md`.
 
+Delivered scenario-learning proposal slice:
+
+- `zig build causal-scenario-proposal -- local [scenario]` writes read-only
+  `*-scenario-proposal.json` and `*-scenario-proposal.txt` artifacts;
+- reports recommend `add-scenario`, `refine-scenario`, or `none` from verdict
+  action counts and audit-chain posture;
+- reports carry source paths, event ids, dominant subsystem, proposed scenario
+  shape, proposed invariant, review checklist, and guardrails;
+- clear evidence produces no scenario recommendation;
+- detailed design:
+  `docs/superpowers/specs/2026-06-07-zigeffect-causal-scenario-learning-design.md`;
+- implementation plan:
+  `docs/superpowers/plans/2026-06-07-zigeffect-causal-scenario-learning.md`.
+
 #### Remediation-Control Roadmap
 
 This sub-roadmap is the concrete path from "agent can inspect evidence" to
@@ -352,7 +373,10 @@ This sub-roadmap is the concrete path from "agent can inspect evidence" to
    compare session, audit, decision, proposal, before/after artifacts, and
    compare-report posture after a patch attempt, including which event ids
    disappeared, persisted, appeared, or went missing.
-5. **App-facing reuse.** Reuse the same verdict, diagnosis, plan, audit,
+5. **Scenario learning proposal.** Use `causal-scenario-proposal` so agents can
+   turn persisting, new, or regressed causal evidence into a reviewed
+   scenario/invariant recommendation without editing the registry.
+6. **App-facing reuse.** Reuse the same verdict, diagnosis, plan, audit,
    approval, and proposal vocabulary for apps built with `zigeffect`.
 
 Safety invariant: each step must produce a reviewable artifact before the next
@@ -517,21 +541,27 @@ Review:
 
 ## Delivered Slice Decisions
 
-The Milestone 7 remediation-control chain has two delivered non-mutating
+The Milestone 7 remediation-control chain now has five delivered non-mutating
 review slices:
 
 ```sh
 zig build causal-remediation-audit -- local [scenario]
 zig build causal-remediation-decision -- local approve|reject [scenario]
+zig build causal-patch-proposal -- local draft|approved [scenario] ...
+zig build causal-audit-chain -- local [scenario]
+zig build causal-scenario-proposal -- local [scenario]
 ```
 
 The audit command creates a durable, schema-versioned, pending proposal record.
 The decision command records the human or local-review outcome while preserving
-`applied=false`. Together they give zigeffect a safe self-improvement control
-point: agents can cite event ids, source artifacts, verification commands,
-claim guardrails, and review state before any source-editing workflow is added.
+`applied=false`. Patch proposals, audit-chain reports, and scenario proposals
+extend that review boundary without applying source or registry changes.
+Together they give zigeffect a safe self-improvement control point: agents can
+cite event ids, source artifacts, verification commands, claim guardrails,
+review state, before/after posture, and coverage recommendations before any
+source-editing workflow is added.
 
 The next branch should not jump straight to patch application. It should build
-the scenario learning loop so agents can turn repeated or overly broad causal
-evidence into reviewed regression scenarios and invariants before any source
+the next scenario learning slice so agents can turn read-only proposals into
+reviewable registry patch drafts before any source
 mutation or policy-backed application boundary exists.

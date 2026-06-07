@@ -544,6 +544,10 @@ metrics, and traces.
   optional decision, proposal, before/after artifacts, and compare posture,
   then classify proposal event ids as disappeared, persisting, appeared, or
   missing.
+- Delivered: `zig build causal-scenario-proposal -- local [scenario]` writes
+  read-only scenario learning JSON/text reports that recommend `add-scenario`,
+  `refine-scenario`, or `none` from verdict, diagnosis, remediation-plan, and
+  audit-chain evidence.
 - Delivered: `zig build causal-artifacts` prints a deterministic retention
   manifest with upload globs and dogfood, scenario, and dev-loop artifact paths
   for agents and CI.
