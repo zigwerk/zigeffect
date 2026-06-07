@@ -216,7 +216,7 @@ Expected: PASS for trait tests or actionable compile errors to fix.
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 - Create: `packages/zigeffect/test/data_test.zig`
 
-- [ ] **Step 1: Write failing foundational data tests**
+- [x] **Step 1: Write failing foundational data tests**
 
 Create tests that assert:
 
@@ -247,7 +247,7 @@ test "Duration and Redacted expose safe value behavior" {
 }
 ```
 
-- [ ] **Step 2: Run failing data tests**
+- [x] **Step 2: Run failing data tests**
 
 Run:
 
@@ -257,11 +257,11 @@ cd packages/zigeffect && zig build test-raw
 
 Expected: FAIL because data types do not exist.
 
-- [ ] **Step 3: Implement foundational data types**
+- [x] **Step 3: Implement foundational data types**
 
 Implement `Option`, `Either`, `Duration`, and `Redacted` with tests as the API contract.
 
-- [ ] **Step 4: Run data tests**
+- [x] **Step 4: Run data tests**
 
 Run:
 
