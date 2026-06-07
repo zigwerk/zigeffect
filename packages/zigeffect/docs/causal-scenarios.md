@@ -67,6 +67,12 @@ Write a reviewable remediation plan from saved dev-loop artifacts:
 zig build causal-remediation-plan -- local [scenario]
 ```
 
+Record a pending remediation proposal audit from saved dev-loop artifacts:
+
+```sh
+zig build causal-remediation-audit -- local [scenario]
+```
+
 Generate deterministic advice from a saved causal JSON artifact:
 
 ```sh
@@ -207,7 +213,8 @@ zig build causal-dev-loop -- after causal-scoped-fiber
 The no-scenario loop compares the deterministic dogfood causal artifact and
 runs the `package-tests` scenario as the package gate. The loop writes the
 first six artifacts; `causal-diagnosis` writes the diagnosis artifact from that
-saved bundle; `causal-remediation-plan` writes the remediation-plan artifact:
+saved bundle; `causal-remediation-plan` writes the remediation-plan artifact;
+`causal-remediation-audit` writes pending proposal audit artifacts:
 
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json`
@@ -217,10 +224,13 @@ saved bundle; `causal-remediation-plan` writes the remediation-plan artifact:
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-verdict.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-diagnosis.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-plan.md`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-audit.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-audit.txt`
 
 Scenario loops compare command-level artifacts for the selected scenario and
 write slug-specific loop artifacts. `causal-diagnosis` and
-`causal-remediation-plan` add the matching follow-up artifacts:
+`causal-remediation-plan` add matching follow-up artifacts;
+`causal-remediation-audit` adds matching pending audit artifacts:
 
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-before.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-after.json`
@@ -230,6 +240,8 @@ write slug-specific loop artifacts. `causal-diagnosis` and
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-verdict.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-diagnosis.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-remediation-plan.md`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-remediation-audit.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-remediation-audit.txt`
 
 The `*-queries.txt` artifact contains executed `causal-query` output selected
 from the after artifact's evidence events. The `*-advice.txt` artifact contains
@@ -249,6 +261,9 @@ and compare posture.
 Then run `zig build causal-remediation-plan -- local [scenario]` when the agent
 needs an implementation plan with evidence ids, verification commands, and claim
 guardrails. The plan is non-mutating and should be reviewed before source edits.
+Then run `zig build causal-remediation-audit -- local [scenario]` to record the
+proposal bundle with pending approval status and `applied=false` before source
+edits or future policy-controlled remediation.
 
 Expected-failure scenarios are valid loop targets. For example,
 `missing-service-compile-fail` reports `expected_failure_observed` when the

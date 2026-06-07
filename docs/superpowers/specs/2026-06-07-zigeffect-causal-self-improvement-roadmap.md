@@ -49,9 +49,9 @@ merged into `master`. The repository now contains:
 - local development-agent, diagnosis, and remediation-plan commands, so agents
   can move from verdict to inspection order to patch-ready evidence without
   mutating source.
-- a reviewed design for `zig build causal-remediation-audit -- local [scenario]`,
-  which will add the first durable proposal/audit artifact before any approval
-  or application command exists.
+- `zig build causal-remediation-audit -- local [scenario]`, which adds the
+  first durable proposal/audit artifact before any approval or application
+  command exists.
 
 The baseline proves that agents can cite causal evidence from `zigeffect`
 itself in both local and CI workflows. The next step is to finish the local
@@ -247,8 +247,8 @@ Remaining:
 
 ### Milestone 7: Development Agent Loop And Remediation Control
 
-Status: dev-loop, local agent handoff, diagnosis, and remediation planning
-delivered; remediation audit is the next implementation slice.
+Status: dev-loop, local agent handoff, diagnosis, remediation planning, and
+remediation audit delivered.
 
 Deliverables:
 
@@ -291,15 +291,13 @@ Delivered slices:
 - `zig build causal-remediation-plan -- local [scenario]`, which turns local
   diagnosis artifacts into non-mutating remediation plans with evidence ids,
   verification commands, and claim guardrails.
-- design complete for `zig build causal-remediation-audit -- local [scenario]`,
-  a pending-approval audit record that cites the local verdict, diagnosis,
-  remediation plan, advice, query, compare artifacts, evidence event ids,
-  verification commands, and claim guardrails.
+- `zig build causal-remediation-audit -- local [scenario]`, which writes
+  pending-approval JSON and text audit records citing the local verdict,
+  diagnosis, remediation plan, advice, query, compare artifacts, evidence event
+  ids, verification commands, and claim guardrails.
 
 Remaining:
 
-- implement `causal-remediation-audit` as the first remediation-control build
-  slice;
 - add an approval/rejection command that can mark audit records without applying
   patches;
 - add an optional patch-proposal artifact that can describe a source edit diff
@@ -313,7 +311,7 @@ Remaining:
 This sub-roadmap is the concrete path from "agent can inspect evidence" to
 "agent can safely participate in improving zigeffect":
 
-1. **Audit record.** Implement `causal-remediation-audit` to create deterministic
+1. **Audit record.** Use `causal-remediation-audit` to create deterministic
    pending proposal artifacts. No source edits, no approvals, no timestamps.
 2. **Approval boundary.** Add approve/reject commands that update or append an
    audit decision with `approved_by`, policy id, and rationale. Still no patch
@@ -473,9 +471,10 @@ Review:
 - how to cite source diffs without letting causal tools mutate source;
 - how the same audit vocabulary will work for app-facing incident remediation.
 
-## First Slice Decision
+## Delivered Slice Decision
 
-The next implementation slice is the Milestone 7 remediation audit command:
+The Milestone 7 remediation audit command is the first delivered
+remediation-control slice:
 
 ```sh
 zig build causal-remediation-audit -- local [scenario]

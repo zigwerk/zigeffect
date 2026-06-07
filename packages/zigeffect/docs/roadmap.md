@@ -520,9 +520,9 @@ metrics, and traces.
   patch-ready, non-mutating diagnosis reports from local dev-loop artifacts.
 - Delivered: `zig build causal-remediation-plan -- local [scenario]` writes
   evidence-bound, non-mutating remediation plans from local dev-loop artifacts.
-- Next causal remediation-control slice: `zig build causal-remediation-audit --
-  local [scenario]` should write a pending, schema-versioned proposal/audit
-  record before any approval, patch proposal, or source mutation command exists.
+- Delivered: `zig build causal-remediation-audit -- local [scenario]` writes
+  pending, schema-versioned proposal/audit records before any approval, patch
+  proposal, or source mutation command exists.
 - Delivered: `zig build causal-artifacts` prints a deterministic retention
   manifest with upload globs and dogfood, scenario, and dev-loop artifact paths
   for agents and CI.
