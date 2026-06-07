@@ -33,6 +33,25 @@ jobs:
         with:
           version: 0.16.0
 
+      - name: Capture PR base causal baselines
+        if: ${{ github.event_name == 'pull_request' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          git worktree add ../zigeffect-causal-base "${{ github.event.pull_request.base.sha }}"
+
+          pushd ../zigeffect-causal-base/packages/zigeffect
+          zig build causal-test
+          zig build causal-dev-loop -- baseline package-tests
+          popd
+
+          mkdir -p packages/zigeffect/.zig-cache/causal-artifacts
+          cp ../zigeffect-causal-base/packages/zigeffect/.zig-cache/causal-artifacts/zigeffect-causal-dogfood.json \
+            packages/zigeffect/.zig-cache/causal-artifacts/zigeffect-causal-ci-baseline-dogfood.json
+          cp ../zigeffect-causal-base/packages/zigeffect/.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-before.json \
+            packages/zigeffect/.zig-cache/causal-artifacts/zigeffect-causal-ci-baseline-package-tests.json
+
       - name: Print causal artifact manifest
         working-directory: packages/zigeffect
         run: zig build causal-artifacts

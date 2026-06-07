@@ -41,9 +41,9 @@ development branch contains:
   with exact advice and query commands for uploaded JSON artifacts.
 - generated CI `*-advice.txt` reports, produced from existing causal JSON
   artifacts by the same `causal_advice` engine used locally.
-- planned CI baseline comparison, where pull request jobs capture exact
-  base-commit dogfood and package-test JSON artifacts and use them to mark head
-  advice as new or persisting evidence.
+- CI baseline comparison, where pull request jobs capture exact base-commit
+  dogfood and package-test JSON artifacts and use them to mark head advice as
+  new or persisting evidence.
 
 The baseline proves that agents can cite causal evidence from `zigeffect`
 itself. The next step is to make CI compare failing pull request artifact
@@ -322,6 +322,9 @@ Delivered first slice:
   on failure before upload so agents have a first-read report.
 - CI handoff generates `*-advice.txt` reports for existing JSON artifacts, so
   the uploaded bundle contains deterministic advice before local reruns.
+- pull request CI captures base-commit dogfood and package-test baseline JSON
+  artifacts, and handoff uses matching baselines to write compare reports plus
+  `status=persisting` or `status=new` advice.
 
 Remaining:
 
