@@ -39,6 +39,8 @@ development branch contains:
   harness in CI and uploads causal artifacts when the job fails.
 - `zig build causal-ci-handoff`, which writes a first-read CI failure report
   with exact advice and query commands for uploaded JSON artifacts.
+- generated CI `*-advice.txt` reports, produced from existing causal JSON
+  artifacts by the same `causal_advice` engine used locally.
 
 The baseline proves that agents can cite causal evidence from `zigeffect`
 itself. The next step is to make CI and local development compare failing
@@ -314,6 +316,8 @@ Delivered first slice:
 - `zig build causal-ci-handoff` writes
   `.zig-cache/causal-artifacts/zigeffect-causal-ci-handoff.txt`, and CI runs it
   on failure before upload so agents have a first-read report.
+- CI handoff generates `*-advice.txt` reports for existing JSON artifacts, so
+  the uploaded bundle contains deterministic advice before local reruns.
 
 Remaining:
 

@@ -329,7 +329,8 @@ The first CI harness for this lane is
 `causal-test`, runs examples, runs `zig build test --summary none`, and uploads
 only causal artifacts if the job fails. On failure it also runs
 `zig build causal-ci-handoff`, which writes
-`.zig-cache/causal-artifacts/zigeffect-causal-ci-handoff.txt`.
+`.zig-cache/causal-artifacts/zigeffect-causal-ci-handoff.txt` and generated
+`*-advice.txt` reports for existing JSON artifacts.
 
 Causal JSON artifacts are self-identifying:
 
@@ -523,8 +524,8 @@ causal evidence.
 
 When debugging a CI failure, start with the uploaded
 `zigeffect-causal-ci-handoff.txt` report. It names the JSON artifacts that were
-present and prints exact `causal-advice` and `causal-query` commands for each
-one.
+present, points at generated `*-advice.txt` reports, and prints exact
+`causal-query` commands for each one.
 
 When a bug teaches a new runtime rule, add or update a catalog entry in
 `tools/causal_run.zig` and document it in `docs/causal-scenarios.md` before

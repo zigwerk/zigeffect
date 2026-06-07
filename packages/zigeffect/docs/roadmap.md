@@ -515,6 +515,8 @@ metrics, and traces.
   artifacts on failure.
 - Delivered: `zig build causal-ci-handoff` writes a failure handoff report with
   exact advice and query commands, and CI runs it before artifact upload.
+- Delivered: CI handoff now generates `*-advice.txt` reports from existing JSON
+  artifacts using the same `causal_advice` engine as local development.
 - Delivered: defensive causal event redaction for common secret-shaped
   key/value details, bearer values, and URL credentials.
 - Delivered: an optional `CausalBackend` event sink contract with adapter kinds
