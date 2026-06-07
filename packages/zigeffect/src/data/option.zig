@@ -1,3 +1,5 @@
+const match_mod = @import("../match/root.zig");
+
 pub fn Option(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -60,6 +62,10 @@ pub fn Option(comptime T: type) type {
                 .some => |value| value,
                 .none => null,
             };
+        }
+
+        pub fn match(self: Self, comptime Return: type, handlers: anytype) Return {
+            return match_mod.exhaustive(Return, self.state, handlers);
         }
     };
 }

@@ -283,7 +283,7 @@ Expected: PASS for foundational data tests.
 - Modify: `packages/zigeffect/src/core/result.zig`
 - Create: `packages/zigeffect/test/match_test.zig`
 
-- [ ] **Step 1: Write failing tagged matcher tests**
+- [x] **Step 1: Write failing tagged matcher tests**
 
 Create tests for:
 
@@ -321,7 +321,7 @@ test "tagged partial and orElse handle missing tags deliberately" {
 }
 ```
 
-- [ ] **Step 2: Run failing tagged matcher tests**
+- [x] **Step 2: Run failing tagged matcher tests**
 
 Run:
 
@@ -331,15 +331,15 @@ cd packages/zigeffect && zig build test-raw
 
 Expected: FAIL because `fx.match` APIs do not exist.
 
-- [ ] **Step 3: Implement tagged matcher**
+- [x] **Step 3: Implement tagged matcher**
 
 Implement exhaustive and partial matching with compile-time handler checks.
 
-- [ ] **Step 4: Add `Option.match`, `Either.match`, `Cause.match`, and `Exit.match` tests**
+- [x] **Step 4: Add `Option.match`, `Either.match`, `Cause.match`, and `Exit.match` tests**
 
 Add tests that use type-native match methods and call into the generic matcher.
 
-- [ ] **Step 5: Run tagged matcher tests**
+- [x] **Step 5: Run tagged matcher tests**
 
 Run:
 

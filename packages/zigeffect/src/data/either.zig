@@ -1,3 +1,5 @@
+const match_mod = @import("../match/root.zig");
+
 pub fn Either(comptime Right: type, comptime Left: type) type {
     return struct {
         const Self = @This();
@@ -69,6 +71,10 @@ pub fn Either(comptime Right: type, comptime Left: type) type {
                 .right => null,
                 .left => |value| value,
             };
+        }
+
+        pub fn match(self: Self, comptime Return: type, handlers: anytype) Return {
+            return match_mod.exhaustive(Return, self.state, handlers);
         }
     };
 }
