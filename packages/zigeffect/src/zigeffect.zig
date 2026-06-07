@@ -288,6 +288,7 @@ pub const Either = data.Either;
 pub const Duration = data.Duration;
 pub const BigDecimal = data.BigDecimal;
 pub const DateTime = data.DateTime;
+pub const Data = data.Data;
 pub const Redacted = data.Redacted;
 pub const Chunk = data.Chunk;
 pub const HashSet = data.HashSet;

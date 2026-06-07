@@ -389,7 +389,7 @@ Expected: PASS with the invalid fixtures failing in the expected way.
 - Modify: `packages/zigeffect/src/data/root.zig`
 - Modify: `packages/zigeffect/test/data_test.zig`
 
-- [ ] **Step 1: Write failing rich data tests**
+- [x] **Step 1: Write failing rich data tests**
 
 Add tests that prove:
 
@@ -399,7 +399,7 @@ Add tests that prove:
 - `DateTime` parses/formats UTC ISO strings and computes duration distance.
 - `BigDecimal` parses and formats values larger than `i128` precision.
 
-- [ ] **Step 2: Run failing rich data tests**
+- [x] **Step 2: Run failing rich data tests**
 
 Run:
 
@@ -409,11 +409,11 @@ cd packages/zigeffect && zig build test-raw
 
 Expected: FAIL because rich data types do not exist.
 
-- [ ] **Step 3: Implement rich data types**
+- [x] **Step 3: Implement rich data types**
 
 Implement the minimum complete APIs described by the tests, keeping allocators explicit for owned types.
 
-- [ ] **Step 4: Run rich data tests**
+- [x] **Step 4: Run rich data tests**
 
 Run:
 

@@ -16,3 +16,4 @@ pub const Chunk = chunk.Chunk;
 pub const HashSet = hash_set.HashSet;
 pub const DateTime = datetime.DateTime;
 pub const BigDecimal = big_decimal.BigDecimal;
+pub const Data = tagged_data;

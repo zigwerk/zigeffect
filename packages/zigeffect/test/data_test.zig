@@ -14,6 +14,27 @@ fn appendBang(value: []const u8) []const u8 {
     return "!";
 }
 
+const Tagged = union(enum) {
+    one,
+    two: u8,
+};
+
+const Plain = struct {
+    value: u8,
+};
+
+fn toU16(value: u8) u16 {
+    return value * 10;
+}
+
+fn isEven(value: u8) bool {
+    return value % 2 == 0;
+}
+
+fn sumU8(accumulator: u32, value: u8) u32 {
+    return accumulator + value;
+}
+
 test "data namespace exposes core data type constructors" {
     try std.testing.expect(@hasDecl(fx.data, "Option"));
     try std.testing.expect(@hasDecl(fx.data, "Either"));
@@ -68,4 +89,91 @@ test "Duration and Redacted expose safe value behavior" {
     const secret = fx.Redacted([]const u8).make("token");
     try std.testing.expectEqualStrings("token", secret.unsafeValue());
     try std.testing.expectEqualStrings("[REDACTED]", secret.redactedText());
+}
+
+test "Data identifies tagged unions" {
+    try std.testing.expect(fx.Data.isTaggedUnion(Tagged));
+    try std.testing.expect(!fx.Data.isTaggedUnion(Plain));
+}
+
+test "Chunk copies appends concatenates maps filters and folds" {
+    var chunk = try fx.Chunk(u8).fromSlice(std.testing.allocator, &.{ 1, 2, 3 });
+    defer chunk.deinit();
+    try chunk.append(4);
+
+    var other = try fx.Chunk(u8).fromSlice(std.testing.allocator, &.{ 5, 6 });
+    defer other.deinit();
+
+    var combined = try chunk.concat(other);
+    defer combined.deinit();
+    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4, 5, 6 }, combined.items);
+
+    var mapped = try combined.map(u16, toU16);
+    defer mapped.deinit();
+    try std.testing.expectEqualSlices(u16, &.{ 10, 20, 30, 40, 50, 60 }, mapped.items);
+
+    var filtered = try combined.filter(isEven);
+    defer filtered.deinit();
+    try std.testing.expectEqualSlices(u8, &.{ 2, 4, 6 }, filtered.items);
+
+    try std.testing.expectEqual(@as(u32, 21), combined.fold(u32, 0, sumU8));
+}
+
+test "HashSet adds unique values removes and combines sets" {
+    var set = fx.HashSet(u8).init(std.testing.allocator);
+    defer set.deinit();
+    try set.add(1);
+    try set.add(1);
+    try set.add(2);
+    try std.testing.expectEqual(@as(usize, 2), set.count());
+    try std.testing.expect(set.contains(1));
+    try std.testing.expect(set.remove(1));
+    try std.testing.expect(!set.contains(1));
+
+    var other = fx.HashSet(u8).init(std.testing.allocator);
+    defer other.deinit();
+    try other.add(2);
+    try other.add(3);
+
+    var unioned = try set.unionWith(&other);
+    defer unioned.deinit();
+    try std.testing.expect(unioned.contains(2));
+    try std.testing.expect(unioned.contains(3));
+
+    var intersection = try set.intersection(&other);
+    defer intersection.deinit();
+    try std.testing.expect(intersection.contains(2));
+    try std.testing.expect(!intersection.contains(3));
+
+    var difference = try other.difference(&set);
+    defer difference.deinit();
+    try std.testing.expect(difference.contains(3));
+    try std.testing.expect(!difference.contains(2));
+}
+
+test "DateTime parses formats UTC ISO strings and computes duration distance" {
+    const timestamp = try fx.DateTime.parseIsoUtc("2026-06-07T12:34:56.123456789Z");
+    const rendered = try timestamp.formatIsoUtc(std.testing.allocator);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings("2026-06-07T12:34:56.123456789Z", rendered);
+
+    const later = try fx.DateTime.parseIsoUtc("2026-06-07T12:35:01.123456789Z");
+    try std.testing.expectEqual(@as(?i128, 5_000_000_000), later.distance(timestamp).toNanos());
+}
+
+test "BigDecimal parses and formats values larger than i128 precision" {
+    const text = "-1234567890123456789012345678901234567890.000000000000000001";
+    var decimal = try fx.BigDecimal.parse(std.testing.allocator, text);
+    defer decimal.deinit();
+
+    try std.testing.expect(decimal.isNegative());
+    try std.testing.expectEqual(@as(i32, 18), decimal.scaleValue());
+    try std.testing.expectEqualStrings(
+        "1234567890123456789012345678901234567890000000000000000001",
+        decimal.coefficientDigits(),
+    );
+
+    const rendered = try decimal.format(std.testing.allocator);
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings(text, rendered);
 }
