@@ -226,6 +226,18 @@ Delivered first slice:
   paths, and invariant ids;
 - existing causal examples are registered as quiet-on-success scenarios.
 
+Delivered scenario-learning slices:
+
+- `zig build causal-scenario-proposal -- local [scenario]` turns verdict,
+  diagnosis, remediation-plan, and audit-chain evidence into read-only
+  `add-scenario`, `refine-scenario`, or `none` recommendations;
+- `zig build causal-scenario-registry-patch -- --from-proposal
+  <scenario-proposal.json>` turns those recommendations into review-only
+  JSON/text/Zig registry patch drafts using schema
+  `zigeffect.causal.registry-patch.v1`;
+- generated registry patch snippets remain unapplied until a reviewer replaces
+  placeholder argv, updates `tools/causal_run.zig`, and verifies the scenario.
+
 ### Milestone 6: Before/After Trace Comparison
 
 Status: first compare slice delivered.
@@ -541,7 +553,7 @@ Review:
 
 ## Delivered Slice Decisions
 
-The Milestone 7 remediation-control chain now has five delivered non-mutating
+The Milestone 7 remediation-control chain now has six delivered non-mutating
 review slices:
 
 ```sh
@@ -550,18 +562,21 @@ zig build causal-remediation-decision -- local approve|reject [scenario]
 zig build causal-patch-proposal -- local draft|approved [scenario] ...
 zig build causal-audit-chain -- local [scenario]
 zig build causal-scenario-proposal -- local [scenario]
+zig build causal-scenario-registry-patch -- --from-proposal <scenario-proposal.json>
 ```
 
 The audit command creates a durable, schema-versioned, pending proposal record.
 The decision command records the human or local-review outcome while preserving
-`applied=false`. Patch proposals, audit-chain reports, and scenario proposals
-extend that review boundary without applying source or registry changes.
+`applied=false`. Patch proposals, audit-chain reports, scenario proposals, and
+registry patch drafts extend that review boundary without applying source or
+registry changes.
 Together they give zigeffect a safe self-improvement control point: agents can
 cite event ids, source artifacts, verification commands, claim guardrails,
-review state, before/after posture, and coverage recommendations before any
-source-editing workflow is added.
+review state, before/after posture, coverage recommendations, and reviewed
+registry patch drafts before any source-editing workflow is added.
 
-The next branch should not jump straight to patch application. It should build
-the next scenario learning slice so agents can turn read-only proposals into
-reviewable registry patch drafts before any source
-mutation or policy-backed application boundary exists.
+The next branch should still avoid automatic source mutation. It should build a
+policy-controlled registry application boundary that consumes
+`zigeffect.causal.registry-patch.v1`, verifies explicit reviewer approval,
+checks placeholder argv replacement and scenario conflicts, and only then
+produces an auditable manual-application or guarded-application result.

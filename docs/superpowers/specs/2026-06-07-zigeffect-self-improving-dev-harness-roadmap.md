@@ -317,6 +317,20 @@ Delivered first slice:
 - the command does not edit `tools/causal_run.zig` or mutate the scenario
   registry.
 
+Delivered authoring-support slice:
+
+- `zig build causal-scenario-registry-patch -- --from-proposal
+  <scenario-proposal.json>` consumes the scenario proposal artifact and writes
+  `*-registry-patch.json`, `*-registry-patch.txt`, and
+  `*-registry-patch.zig`;
+- registry patch reports use schema `zigeffect.causal.registry-patch.v1`;
+- `add-scenario` recommendations produce review-only scenario and invariant
+  snippets, `refine-scenario` recommendations produce targeted review
+  guidance, and `none` recommendations produce no-op reports;
+- generated Zig snippets are never applied automatically and retain a
+  placeholder argv that must be replaced with the smallest reproducing command
+  before registry coverage can be claimed.
+
 ### Milestone 6: Policy And Approval Engine
 
 Add local policy-backed decision records after the artifact vocabulary is
@@ -427,7 +441,7 @@ Milestone 4's first audit-chain comparison slice is implemented:
 - `causal-artifacts` lists audit-chain JSON/text paths;
 - default and `causal-scoped-fiber` flows have integration coverage.
 
-Milestone 5's first scenario-learning slice is implemented:
+Milestone 5's scenario-learning and authoring-support slices are implemented:
 
 - `tools/causal_scenario_proposal.zig` owns read-only proposal reports;
 - `zig build causal-scenario-proposal -- local [scenario]` converts verdict,
@@ -435,18 +449,26 @@ Milestone 5's first scenario-learning slice is implemented:
   learning recommendation;
 - reports preserve evidence ids, source paths, proposed scenario/invariant
   guidance, review checklist, and guardrails;
-- the command is deterministic and non-mutating.
+- `tools/causal_scenario_registry_patch.zig` owns review-only registry patch
+  drafts;
+- `zig build causal-scenario-registry-patch -- --from-proposal
+  <scenario-proposal.json>` emits JSON/text/Zig patch drafts without mutating
+  `tools/causal_run.zig`;
+- both commands are deterministic and non-mutating.
 
 ## Next Branch Recommendation
 
-Extend Milestone 5 from read-only proposal to reviewable authoring support:
+Extend Milestone 5 from reviewable authoring support to policy-controlled
+application readiness:
 
-- add a scenario-authoring checklist that names owner, invariant, causal JSON,
-  compare report, and smallest reproducing command;
-- optionally generate a registry patch draft from
-  `*-scenario-proposal.json`;
-- require explicit review before any scenario registry change is treated as
-  regression coverage.
+- consume `zigeffect.causal.registry-patch.v1` artifacts as the source of
+  intent;
+- require an explicit reviewer decision artifact before any registry patch can
+  be marked applicable;
+- verify placeholder argv replacement, scenario conflict resolution, invariant
+  catalog consistency, and required docs/test commands;
+- emit an auditable application-readiness report, still without automatic
+  source mutation unless a later branch adds a guarded mutation backend.
 
-Do not implement source mutation, policy-backed automatic approval, durable
-history, arbitrary snapshot comparison, or app-facing adapters in this branch.
+Do not implement broad source mutation, durable history, arbitrary snapshot
+comparison, or app-facing adapters in this branch.

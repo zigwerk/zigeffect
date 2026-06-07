@@ -73,6 +73,9 @@ fn appendDefaultLoopArtifacts(output: *std.ArrayList(u8), allocator: std.mem.All
     try output.print(allocator, "- dev-loop audit chain text {s}/zigeffect-causal-dev-loop-audit-chain.txt\n", .{causal_run.artifact_dir});
     try output.print(allocator, "- dev-loop scenario proposal json {s}/zigeffect-causal-dev-loop-scenario-proposal.json\n", .{causal_run.artifact_dir});
     try output.print(allocator, "- dev-loop scenario proposal text {s}/zigeffect-causal-dev-loop-scenario-proposal.txt\n", .{causal_run.artifact_dir});
+    try output.print(allocator, "- dev-loop registry patch json {s}/zigeffect-causal-dev-loop-registry-patch.json\n", .{causal_run.artifact_dir});
+    try output.print(allocator, "- dev-loop registry patch text {s}/zigeffect-causal-dev-loop-registry-patch.txt\n", .{causal_run.artifact_dir});
+    try output.print(allocator, "- dev-loop registry patch zig {s}/zigeffect-causal-dev-loop-registry-patch.zig\n", .{causal_run.artifact_dir});
     try output.print(allocator, "- dev session json {s}/zigeffect-causal-dev-session.json\n", .{causal_run.artifact_dir});
     try output.print(allocator, "- dev session text {s}/zigeffect-causal-dev-session.txt\n", .{causal_run.artifact_dir});
     try output.print(allocator, "- ci handoff {s}/zigeffect-causal-ci-handoff.txt\n", .{causal_run.artifact_dir});
@@ -98,6 +101,9 @@ fn appendScenarioLoopArtifacts(output: *std.ArrayList(u8), allocator: std.mem.Al
     try output.print(allocator, "  loop audit chain text: {s}/zigeffect-causal-dev-loop-{s}-audit-chain.txt\n", .{ causal_run.artifact_dir, slug });
     try output.print(allocator, "  loop scenario proposal json: {s}/zigeffect-causal-dev-loop-{s}-scenario-proposal.json\n", .{ causal_run.artifact_dir, slug });
     try output.print(allocator, "  loop scenario proposal text: {s}/zigeffect-causal-dev-loop-{s}-scenario-proposal.txt\n", .{ causal_run.artifact_dir, slug });
+    try output.print(allocator, "  loop registry patch json: {s}/zigeffect-causal-dev-loop-{s}-registry-patch.json\n", .{ causal_run.artifact_dir, slug });
+    try output.print(allocator, "  loop registry patch text: {s}/zigeffect-causal-dev-loop-{s}-registry-patch.txt\n", .{ causal_run.artifact_dir, slug });
+    try output.print(allocator, "  loop registry patch zig: {s}/zigeffect-causal-dev-loop-{s}-registry-patch.zig\n", .{ causal_run.artifact_dir, slug });
     try output.print(allocator, "  dev session json: {s}/zigeffect-causal-dev-session-{s}.json\n", .{ causal_run.artifact_dir, slug });
     try output.print(allocator, "  dev session text: {s}/zigeffect-causal-dev-session-{s}.txt\n", .{ causal_run.artifact_dir, slug });
 }
@@ -128,6 +134,9 @@ test "artifact manifest lists CI upload globs and default artifacts" {
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-audit-chain.txt") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-scenario-proposal.json") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-scenario-proposal.txt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-patch.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-patch.txt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-patch.zig") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-session.json") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-session.txt") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-ci-handoff.txt") != null);
@@ -154,6 +163,9 @@ test "artifact manifest lists scenario and scenario loop artifacts" {
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-audit-chain.txt") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-scenario-proposal.json") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-scenario-proposal.txt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-registry-patch.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-registry-patch.txt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-registry-patch.zig") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-session-causal-scoped-fiber.json") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, ".zig-cache/causal-artifacts/zigeffect-causal-dev-session-causal-scoped-fiber.txt") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, "review before public upload") != null);
