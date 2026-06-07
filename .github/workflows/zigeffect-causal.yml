@@ -1,0 +1,62 @@
+name: zigeffect causal
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/zigeffect-causal.yml"
+      - "packages/zigeffect/**"
+      - "package.json"
+      - "bun.lock"
+  push:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/zigeffect-causal.yml"
+      - "packages/zigeffect/**"
+      - "package.json"
+      - "bun.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  zigeffect-causal:
+    name: zigeffect causal
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Print causal artifact manifest
+        working-directory: packages/zigeffect
+        run: zig build causal-artifacts
+
+      - name: Generate causal dogfood artifacts
+        working-directory: packages/zigeffect
+        run: zig build causal-test
+
+      - name: Compile and test examples
+        working-directory: packages/zigeffect
+        run: zig build examples
+
+      - name: Run causal package test gate
+        working-directory: packages/zigeffect
+        run: zig build test --summary none
+
+      - name: Upload causal artifacts on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: zigeffect-causal-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            packages/zigeffect/.zig-cache/causal-artifacts/*.txt
+            packages/zigeffect/.zig-cache/causal-artifacts/*.json
+            packages/zigeffect/.zig-cache/causal-artifacts/*.dot

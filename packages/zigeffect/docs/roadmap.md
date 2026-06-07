@@ -510,6 +510,9 @@ metrics, and traces.
 - Delivered: `zig build causal-artifacts` prints a deterministic retention
   manifest with upload globs and dogfood, scenario, and dev-loop artifact paths
   for agents and CI.
+- Delivered: `.github/workflows/zigeffect-causal.yml` runs the causal manifest,
+  dogfood harness, examples, and causal package-test gate, then uploads causal
+  artifacts on failure.
 - Delivered: defensive causal event redaction for common secret-shaped
   key/value details, bearer values, and URL credentials.
 - Delivered: an optional `CausalBackend` event sink contract with adapter kinds

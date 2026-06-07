@@ -324,6 +324,11 @@ Retain `.zig-cache/causal-artifacts/*.txt`, `.json`, and `.dot`; do not upload
 the rest of `.zig-cache`. Treat JSON artifacts as the agent-readable source for
 `causal-query`, compare, and advice tooling.
 
+The first CI harness for this lane is
+`.github/workflows/zigeffect-causal.yml`. It prints the manifest, runs
+`causal-test`, runs examples, runs `zig build test --summary none`, and uploads
+only causal artifacts if the job fails.
+
 Causal JSON artifacts are self-identifying:
 
 ```json
@@ -513,6 +518,10 @@ and package tests to compare behavior.
 Use `zig build causal-artifacts` at the start of CI wiring or branch handoff to
 make the artifact retention contract explicit before uploading or attaching
 causal evidence.
+
+When debugging a CI failure, start with the uploaded `.txt` report for the
+summary, then query the uploaded `.json` artifact locally with
+`zig build causal-query -- --file <artifact.json> <query>`.
 
 When a bug teaches a new runtime rule, add or update a catalog entry in
 `tools/causal_run.zig` and document it in `docs/causal-scenarios.md` before

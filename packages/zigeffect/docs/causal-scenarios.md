@@ -62,6 +62,10 @@ Print the causal artifact retention manifest:
 zig build causal-artifacts
 ```
 
+The repository CI workflow `.github/workflows/zigeffect-causal.yml` runs the
+manifest, dogfood harness, examples, and causal package-test gate, then uploads
+causal artifacts on failure.
+
 ## Registered Scenarios
 
 - `missing-service-compile-fail`
@@ -96,6 +100,9 @@ agent. It lists the upload globs, dogfood artifacts, scenario artifacts, and
 scenario dev-loop paths. Retain `.txt` for human triage, `.json` for
 `causal-query`, compare, and advice tooling, and `.dot` for graph visualization.
 Do not upload the rest of `.zig-cache`.
+
+CI uses the same boundary: only `.txt`, `.json`, and `.dot` files under
+`packages/zigeffect/.zig-cache/causal-artifacts/` are uploaded.
 
 ## Invariants
 

@@ -35,6 +35,8 @@ development branch contains:
   evidence into deterministic, non-mutating next actions.
 - `zig build causal-artifacts`, which prints deterministic upload globs and
   artifact retention guidance for agents and CI.
+- `.github/workflows/zigeffect-causal.yml`, which runs the causal zigeffect
+  harness in CI and uploads causal artifacts when the job fails.
 
 The baseline proves that agents can cite causal evidence from `zigeffect`
 itself. The next step is to automate before/after capture around the scenario
@@ -304,6 +306,9 @@ Delivered first slice:
 - `zig build causal-artifacts` prints upload globs and dogfood, scenario, and
   dev-loop artifact paths so CI can retain causal evidence without uploading
   the rest of `.zig-cache`.
+- `.github/workflows/zigeffect-causal.yml` runs the manifest, dogfood harness,
+  examples, and causal package-test gate in CI, then uploads causal `.txt`,
+  `.json`, and `.dot` artifacts on failure.
 
 Remaining:
 
