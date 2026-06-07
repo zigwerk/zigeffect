@@ -78,9 +78,14 @@ fn appendRecommendedOrder(allocator: std.mem.Allocator, output: *std.ArrayList(u
     }
 }
 
+fn validateLocalVerdict(verdict: Verdict) !void {
+    if (!std.mem.eql(u8, verdict.schema, supported_local_schema)) return error.UnsupportedVerdictSchema;
+    if (verdict.schema_version != 1) return error.UnsupportedVerdictSchema;
+    if (verdict.artifacts.len == 0) return error.EmptyVerdictArtifacts;
+}
+
 fn formatLocalAgentReport(allocator: std.mem.Allocator, input: LocalReportInput) ![]const u8 {
-    if (!std.mem.eql(u8, input.verdict.schema, supported_local_schema)) return error.UnsupportedVerdictSchema;
-    if (input.verdict.artifacts.len == 0) return error.EmptyVerdictArtifacts;
+    try validateLocalVerdict(input.verdict);
 
     var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
@@ -133,6 +138,64 @@ fn formatLocalAgentReport(allocator: std.mem.Allocator, input: LocalReportInput)
     }
 
     return output.toOwnedSlice(allocator);
+}
+
+fn usage() []const u8 {
+    return "usage: zig build causal-dev-agent -- local [scenario]\n";
+}
+
+fn failUsage(err: anyerror) noreturn {
+    std.debug.print("causal-dev-agent error: {s}\n{s}", .{ @errorName(err), usage() });
+    std.process.exit(2);
+}
+
+fn readVerdict(io: std.Io, allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => error.MissingVerdictArtifact,
+        else => return err,
+    };
+}
+
+fn runLocal(init: std.process.Init, scenario_slug: ?[]const u8) !void {
+    const allocator = init.gpa;
+    const verdict_path = if (scenario_slug) |slug| try localVerdictPathForScenario(allocator, slug) else localVerdictPath();
+    defer if (scenario_slug != null) allocator.free(verdict_path);
+
+    const target = scenario_slug orelse "dogfood";
+    const verdict_json = try readVerdict(init.io, allocator, verdict_path);
+    defer allocator.free(verdict_json);
+
+    var parsed = try std.json.parseFromSlice(Verdict, allocator, verdict_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const report = try formatLocalAgentReport(allocator, .{
+        .target = target,
+        .verdict_path = verdict_path,
+        .verdict = parsed.value,
+    });
+    defer allocator.free(report);
+    std.debug.print("{s}", .{report});
+}
+
+pub fn main(init: std.process.Init) !void {
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    if (args.len < 2) failUsage(error.MissingMode);
+    if (args.len > 3) failUsage(error.TooManyArguments);
+    if (!std.mem.eql(u8, args[1], "local")) failUsage(error.UnknownMode);
+
+    const scenario_slug: ?[]const u8 = if (args.len == 3) blk: {
+        _ = causal_run.scenarioByName(args[2]) catch |err| failUsage(err);
+        break :blk args[2];
+    } else null;
+
+    runLocal(init, scenario_slug) catch |err| switch (err) {
+        error.MissingVerdictArtifact,
+        error.UnsupportedVerdictSchema,
+        error.EmptyVerdictArtifacts,
+        error.InvalidVerdictArtifactPath,
+        => failUsage(err),
+        else => return err,
+    };
 }
 
 test "local verdict path is stable for default target" {
@@ -247,4 +310,47 @@ test "local report explains clear verdict" {
     try std.testing.expect(std.mem.indexOf(u8, report, "status: clear") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "no advice actions; inspect compare report if the patch claims runtime behavior changed") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "rerun package tests before finalizing") != null);
+}
+
+test "unsupported verdict schema is rejected" {
+    const verdict = Verdict{
+        .schema = "zigeffect.causal.other.v1",
+        .schema_version = 1,
+        .status = "clear",
+        .next_action = "none",
+        .json_artifacts = 0,
+        .baseline_pairs = 0,
+        .actions = 0,
+        .new_actions = 0,
+        .persisting_actions = 0,
+        .observed_actions = 0,
+        .artifacts = &.{},
+    };
+
+    try std.testing.expectError(error.UnsupportedVerdictSchema, validateLocalVerdict(verdict));
+}
+
+test "empty verdict artifacts are rejected" {
+    const verdict = Verdict{
+        .schema = supported_local_schema,
+        .schema_version = 1,
+        .status = "clear",
+        .next_action = "none",
+        .json_artifacts = 0,
+        .baseline_pairs = 0,
+        .actions = 0,
+        .new_actions = 0,
+        .persisting_actions = 0,
+        .observed_actions = 0,
+        .artifacts = &.{},
+    };
+
+    try std.testing.expectError(error.EmptyVerdictArtifacts, validateLocalVerdict(verdict));
+}
+
+test "usage text names local mode" {
+    try std.testing.expectEqualStrings(
+        "usage: zig build causal-dev-agent -- local [scenario]\n",
+        usage(),
+    );
 }
