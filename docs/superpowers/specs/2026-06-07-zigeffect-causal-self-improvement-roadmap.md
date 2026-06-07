@@ -50,14 +50,17 @@ merged into `master`. The repository now contains:
   can move from verdict to inspection order to patch-ready evidence without
   mutating source.
 - `zig build causal-remediation-audit -- local [scenario]`, which adds the
-  first durable proposal/audit artifact before any approval or application
-  command exists.
+  first durable proposal/audit artifact before any application command exists.
+- `zig build causal-remediation-decision -- local approve|reject [scenario]`,
+  which records approved or rejected review decisions while keeping
+  `applied=false`.
 
 The baseline proves that agents can cite causal evidence from `zigeffect`
-itself in both local and CI workflows. The next step is to finish the local
-remediation-control chain: proposal audit first, then explicit approval/policy
-gates, then patch proposals, with source edits remaining outside the causal
-tools until the evidence boundary is stable.
+itself in both local and CI workflows. The next step is to make that chain
+ergonomic enough to use while building core `zigeffect`: a local
+`causal-dev-session` coordinator should run the baseline/assessment sequence,
+assemble the existing reports, and stop before review decisions or source
+mutation.
 
 ## North Star
 
@@ -301,6 +304,10 @@ Delivered slices:
 
 Remaining:
 
+- add the `causal-dev-session` coordinator documented in
+  `docs/superpowers/specs/2026-06-07-zigeffect-self-improving-dev-harness-roadmap.md`
+  and planned in
+  `docs/superpowers/plans/2026-06-07-zigeffect-causal-dev-session-coordinator.md`;
 - add an optional patch-proposal artifact that can describe a source edit diff
   while still requiring human or policy approval;
 - add a policy engine that can produce policy-backed decision records;
@@ -462,7 +469,7 @@ Review:
 
 ### Session 5: Remediation-Control Review
 
-Run before implementing approval or patch proposal commands.
+Run before implementing patch proposal commands.
 
 Review:
 
@@ -472,17 +479,35 @@ Review:
 - how to cite source diffs without letting causal tools mutate source;
 - how the same audit vocabulary will work for app-facing incident remediation.
 
-## Delivered Slice Decision
+### Session 6: Dev Session Coordinator Review
 
-The Milestone 7 remediation audit command is the first delivered
-remediation-control slice:
+Run before implementing `causal-dev-session`.
+
+Review:
+
+- command names and whether `start`, `assess`, and `status` are enough;
+- which commands the coordinator may run automatically;
+- missing-baseline and command-failure semantics;
+- session schema fields and artifact names;
+- confirming that `assess` should create a remediation audit automatically
+  after the remediation plan.
+
+## Delivered Slice Decisions
+
+The Milestone 7 remediation-control chain has two delivered non-mutating
+review slices:
 
 ```sh
 zig build causal-remediation-audit -- local [scenario]
+zig build causal-remediation-decision -- local approve|reject [scenario]
 ```
 
-This is deliberately the first remediation-control slice because it creates a
-durable, schema-versioned, pending proposal record without approving, applying,
-or generating a patch. The command gives zigeffect a safe self-improvement
-control point: agents can cite event ids, source artifacts, verification
-commands, and claim guardrails before any source-editing workflow is added.
+The audit command creates a durable, schema-versioned, pending proposal record.
+The decision command records the human or local-review outcome while preserving
+`applied=false`. Together they give zigeffect a safe self-improvement control
+point: agents can cite event ids, source artifacts, verification commands,
+claim guardrails, and review state before any source-editing workflow is added.
+
+The next branch should not jump straight to patch application. It should build
+the `causal-dev-session` coordinator so agents can run the whole evidence chain
+reliably during ordinary core runtime development.
