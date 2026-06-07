@@ -332,7 +332,33 @@ remediation. Single-artifact advice marks actions as `status=observed`;
 before-aware advice marks unchanged evidence as `status=persisting` and
 after-only evidence as `status=new`.
 
-Read the local verdict and generate agent-facing follow-up artifacts:
+Run the coordinated local self-improvement session while changing `zigeffect`:
+
+```bash
+zig build causal-dev-session -- start
+# edit source
+zig build causal-dev-session -- assess
+zig build causal-dev-session -- status
+```
+
+For scenario targets, pass the same scenario slug:
+
+```bash
+zig build causal-dev-session -- start causal-scoped-fiber
+# edit source
+zig build causal-dev-session -- assess causal-scoped-fiber
+zig build causal-dev-session -- status causal-scoped-fiber
+```
+
+`causal-dev-session` writes `zigeffect-causal-dev-session.{json,txt}` or
+scenario-specific `zigeffect-causal-dev-session-<scenario>.{json,txt}`
+artifacts. `start` captures the baseline half of the dev loop. `assess` runs
+the after phase, local agent handoff, diagnosis, remediation plan, and
+remediation audit. It does not approve, apply, or edit source; review remains
+explicit through `causal-remediation-decision`.
+
+To run the same chain manually, read the local verdict and generate
+agent-facing follow-up artifacts:
 
 ```bash
 zig build causal-dev-agent -- local

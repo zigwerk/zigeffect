@@ -474,6 +474,31 @@ aggregate action counts and `next_action`, then inspect `*-advice.txt`,
 `*-queries.txt`, and `*-compare.txt` for detailed event evidence before
 proposing the next fix.
 
+For normal core-runtime development, prefer the coordinated session command:
+
+```sh
+zig build causal-dev-session -- start
+# edit source
+zig build causal-dev-session -- assess
+zig build causal-dev-session -- status
+```
+
+When the change touches a known subsystem, pass the scenario slug through the
+whole session:
+
+```sh
+zig build causal-dev-session -- start causal-scoped-fiber
+# edit source
+zig build causal-dev-session -- assess causal-scoped-fiber
+zig build causal-dev-session -- status causal-scoped-fiber
+```
+
+The session coordinator writes `*-dev-session.json` and `*-dev-session.txt`.
+`start` captures the baseline. `assess` runs the after phase, local agent
+handoff, diagnosis, remediation plan, and remediation audit, then stops before
+review. It does not approve, apply, or edit source. Use
+`causal-remediation-decision` only after review.
+
 To turn the verdict into a deterministic local agent handoff, run:
 
 ```sh

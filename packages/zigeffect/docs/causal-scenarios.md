@@ -49,6 +49,14 @@ zig build causal-dev-loop -- baseline
 zig build causal-dev-loop -- after
 ```
 
+Run the coordinated local development session:
+
+```sh
+zig build causal-dev-session -- start [scenario]
+zig build causal-dev-session -- assess [scenario]
+zig build causal-dev-session -- status [scenario]
+```
+
 Print the next local agent inspection plan from a saved dev-loop verdict:
 
 ```sh
@@ -221,7 +229,8 @@ runs the `package-tests` scenario as the package gate. The loop writes the
 first six artifacts; `causal-diagnosis` writes the diagnosis artifact from that
 saved bundle; `causal-remediation-plan` writes the remediation-plan artifact;
 `causal-remediation-audit` writes pending proposal audit artifacts;
-`causal-remediation-decision` writes approved or rejected decision artifacts:
+`causal-remediation-decision` writes approved or rejected decision artifacts.
+`causal-dev-session` writes the session wrapper artifacts:
 
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json`
@@ -235,12 +244,15 @@ saved bundle; `causal-remediation-plan` writes the remediation-plan artifact;
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-audit.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-decision.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-decision.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-session.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-session.txt`
 
 Scenario loops compare command-level artifacts for the selected scenario and
 write slug-specific loop artifacts. `causal-diagnosis` and
 `causal-remediation-plan` add matching follow-up artifacts;
 `causal-remediation-audit` adds matching pending audit artifacts;
-`causal-remediation-decision` adds matching decision artifacts:
+`causal-remediation-decision` adds matching decision artifacts.
+`causal-dev-session` adds matching session wrapper artifacts:
 
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-before.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-after.json`
@@ -254,6 +266,8 @@ write slug-specific loop artifacts. `causal-diagnosis` and
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-remediation-audit.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-remediation-decision.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-remediation-decision.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-session-<scenario>.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-session-<scenario>.txt`
 
 The `*-queries.txt` artifact contains executed `causal-query` output selected
 from the after artifact's evidence events. The `*-advice.txt` artifact contains
@@ -267,6 +281,11 @@ the recommended next inspection step.
 After an after-phase run, `zig build causal-dev-agent -- local [scenario]`
 reads the matching verdict and prints the deterministic local inspection plan.
 Use it before manually opening advice, query, or compare artifacts.
+For ordinary development, `zig build causal-dev-session -- start [scenario]`
+captures the baseline and `zig build causal-dev-session -- assess [scenario]`
+runs the after phase plus local agent handoff, diagnosis, remediation plan, and
+remediation audit. `status` reprints the latest session text. The session
+coordinator never approves, applies, or edits source.
 Then run `zig build causal-diagnosis -- local [scenario]` when the agent needs a
 patch-ready, non-mutating diagnosis that cites advice event ids, query output,
 and compare posture.

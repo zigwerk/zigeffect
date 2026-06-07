@@ -40,7 +40,7 @@
 **Files:**
 - Create: `packages/zigeffect/tools/causal_dev_session.zig`
 
-- [ ] **Step 1: Write the failing formatter/path tests**
+- [x] **Step 1: Write the failing formatter/path tests**
 
 Create `packages/zigeffect/tools/causal_dev_session.zig` with these tests and declarations:
 
@@ -196,7 +196,7 @@ test "assessed session text points at remediation audit and decision command" {
 }
 ```
 
-- [ ] **Step 2: Wire only the test module and verify red**
+- [x] **Step 2: Wire only the test module and verify red**
 
 Modify `packages/zigeffect/build.zig` near the other causal tool modules:
 
@@ -231,7 +231,7 @@ zig build examples
 Expected: FAIL because `defaultSessionArtifacts`, `scenarioSessionArtifacts`,
 `deinitOwnedSessionArtifacts`, and `formatSessionText` are not implemented.
 
-- [ ] **Step 3: Implement pure helpers**
+- [x] **Step 3: Implement pure helpers**
 
 Implement:
 
@@ -268,7 +268,7 @@ fn scenarioSessionArtifacts(allocator: std.mem.Allocator, slug: []const u8) !Ses
 Also implement `deinitOwnedSessionArtifacts`, `formatPhase`, `formatCommandStatus`,
 and `formatSessionText`.
 
-- [ ] **Step 4: Run green verification for Task 1**
+- [x] **Step 4: Run green verification for Task 1**
 
 Run:
 
@@ -279,7 +279,7 @@ zig build examples
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 Run:
 
@@ -295,7 +295,7 @@ git commit -m "feat(zigeffect): add causal dev session formatter"
 - Modify: `packages/zigeffect/tools/causal_dev_session.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Add failing CLI and runner tests**
+- [x] **Step 1: Add failing CLI and runner tests**
 
 Add tests for:
 
@@ -316,7 +316,7 @@ zig build examples
 
 Expected: FAIL until the parser and runner are implemented.
 
-- [ ] **Step 2: Implement parser and command planning**
+- [x] **Step 2: Implement parser and command planning**
 
 Implement these command plans:
 
@@ -360,7 +360,7 @@ const Runner = struct {
 Production runner must use `std.process.Child.run` with argv arrays, not a
 shell string.
 
-- [ ] **Step 3: Implement JSON/text writes and `status` mode**
+- [x] **Step 3: Implement JSON/text writes and `status` mode**
 
 Add:
 
@@ -375,7 +375,7 @@ Add:
 If missing, write a failed session report and return
 `error.MissingBaselineArtifact`.
 
-- [ ] **Step 4: Wire executable build step**
+- [x] **Step 4: Wire executable build step**
 
 In `packages/zigeffect/build.zig`, add:
 
@@ -396,7 +396,7 @@ Add to `examples_step`:
 examples_step.dependOn(&causal_dev_session_tool.step);
 ```
 
-- [ ] **Step 5: Run green verification for Task 2**
+- [x] **Step 5: Run green verification for Task 2**
 
 Run:
 
@@ -407,7 +407,7 @@ zig build examples
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 6: Commit Task 2**
 
 Run:
 
@@ -427,7 +427,7 @@ git commit -m "feat(zigeffect): wire causal dev session coordinator"
 - Modify: `docs/superpowers/specs/2026-06-07-zigeffect-causal-self-improvement-roadmap.md`
 - Modify: `packages/zigeffect/docs/roadmap.md`
 
-- [ ] **Step 1: Add failing manifest expectations**
+- [x] **Step 1: Add failing manifest expectations**
 
 Extend `causal_artifacts.zig` tests to expect:
 
@@ -447,7 +447,7 @@ zig build examples
 
 Expected: FAIL until manifest output is updated.
 
-- [ ] **Step 2: Add session paths to manifest output**
+- [x] **Step 2: Add session paths to manifest output**
 
 In `appendDefaultLoopArtifacts`, add:
 
@@ -463,7 +463,7 @@ try output.print(allocator, "  dev session json: {s}/zigeffect-causal-dev-sessio
 try output.print(allocator, "  dev session text: {s}/zigeffect-causal-dev-session-{s}.txt\n", .{ causal_run.artifact_dir, slug });
 ```
 
-- [ ] **Step 3: Update docs**
+- [x] **Step 3: Update docs**
 
 Document this local sequence:
 
@@ -482,7 +482,7 @@ Docs must state:
 - source edits and patch application remain outside causal tools.
 - `causal-remediation-decision` remains the explicit review boundary.
 
-- [ ] **Step 4: Run green verification for Task 3**
+- [x] **Step 4: Run green verification for Task 3**
 
 Run:
 
@@ -493,7 +493,7 @@ zig build examples
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
 Run:
 
@@ -508,7 +508,7 @@ git commit -m "docs(zigeffect): document causal dev session workflow"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-06-07-zigeffect-causal-dev-session-coordinator.md`
 
-- [ ] **Step 1: Verify default start and assess flow**
+- [x] **Step 1: Verify default start and assess flow**
 
 Run:
 
@@ -528,7 +528,7 @@ rg 'next: zig build causal-remediation-decision -- local approve|reject' .zig-ca
 
 Expected: all commands exit zero.
 
-- [ ] **Step 2: Verify scenario start and assess flow**
+- [x] **Step 2: Verify scenario start and assess flow**
 
 Run:
 
@@ -545,7 +545,7 @@ rg 'causal-remediation-decision -- local approve|reject causal-scoped-fiber' .zi
 
 Expected: all commands exit zero.
 
-- [ ] **Step 3: Verify missing baseline fails after writing session report**
+- [x] **Step 3: Verify missing baseline fails after writing session report**
 
 Run:
 
@@ -564,7 +564,7 @@ rg '"phase": "failed"' .zig-cache/causal-artifacts/zigeffect-causal-dev-session.
 Expected: the command fails intentionally, writes a failed session artifact,
 and prints stable usage/error text.
 
-- [ ] **Step 4: Verify status mode**
+- [x] **Step 4: Verify status mode**
 
 Run:
 
@@ -576,7 +576,7 @@ zig build causal-dev-session -- status causal-scoped-fiber
 
 Expected: both commands print the latest session status when artifacts exist.
 
-- [ ] **Step 5: Run full verification**
+- [x] **Step 5: Run full verification**
 
 Run:
 
@@ -591,7 +591,7 @@ bun run zig:test
 
 Expected: all commands exit zero.
 
-- [ ] **Step 6: Mark this plan complete and commit**
+- [x] **Step 6: Mark this plan complete and commit**
 
 Run:
 
@@ -603,20 +603,20 @@ git commit -m "docs(zigeffect): complete causal dev session checklist"
 
 ## Completion Checklist
 
-- [ ] `causal-dev-session start` runs the baseline dev-loop command.
-- [ ] `causal-dev-session assess` runs after, dev-agent, diagnosis,
+- [x] `causal-dev-session start` runs the baseline dev-loop command.
+- [x] `causal-dev-session assess` runs after, dev-agent, diagnosis,
   remediation-plan, and remediation-audit commands.
-- [ ] `causal-dev-session status` reads the latest session artifact.
-- [ ] Default session JSON/text paths are deterministic.
-- [ ] Scenario session JSON/text paths are deterministic.
-- [ ] Missing baseline fails with `MissingBaselineArtifact`.
-- [ ] Failed assessments write a session artifact before exiting nonzero.
-- [ ] Session artifacts include schema `zigeffect.causal.dev-session.v1`.
-- [ ] Session text states that source edits remain outside causal tools.
-- [ ] Session text points reviewers at `causal-remediation-decision`.
-- [ ] Manifest lists default and scenario session artifacts.
-- [ ] README, agent guide, causal scenarios, and roadmap docs mention the
+- [x] `causal-dev-session status` reads the latest session artifact.
+- [x] Default session JSON/text paths are deterministic.
+- [x] Scenario session JSON/text paths are deterministic.
+- [x] Missing baseline fails with `MissingBaselineArtifact`.
+- [x] Failed assessments write a session artifact before exiting nonzero.
+- [x] Session artifacts include schema `zigeffect.causal.dev-session.v1`.
+- [x] Session text states that source edits remain outside causal tools.
+- [x] Session text points reviewers at `causal-remediation-decision`.
+- [x] Manifest lists default and scenario session artifacts.
+- [x] README, agent guide, causal scenarios, and roadmap docs mention the
   coordinator.
-- [ ] `zig build examples` passes in `packages/zigeffect`.
-- [ ] `zig build test --summary none` passes in `packages/zigeffect`.
-- [ ] `bun run zig:test` passes at the repo root.
+- [x] `zig build examples` passes in `packages/zigeffect`.
+- [x] `zig build test --summary none` passes in `packages/zigeffect`.
+- [x] `bun run zig:test` passes at the repo root.
