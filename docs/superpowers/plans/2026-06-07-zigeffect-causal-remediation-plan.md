@@ -43,7 +43,7 @@
 - Create: `packages/zigeffect/tools/causal_remediation_plan.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Write failing formatter tests**
+- [x] **Step 1: Write failing formatter tests**
 
 Create `packages/zigeffect/tools/causal_remediation_plan.zig` with these initial types, fixtures, and tests:
 
@@ -279,7 +279,7 @@ test "remediation formatter writes markdown strategy and guardrails" {
 }
 ```
 
-- [ ] **Step 2: Wire only the test module and verify red**
+- [x] **Step 2: Wire only the test module and verify red**
 
 Modify `packages/zigeffect/build.zig` after `causal_diagnosis_tool_module`:
 
@@ -315,7 +315,7 @@ Expected: FAIL because helpers such as `localPlanPathForScenario`,
 `remediationPosture`, `parseDiagnosisEvidence`, `deinitEvidence`, and
 `formatRemediationPlan` are not implemented.
 
-- [ ] **Step 3: Implement parser, posture, and formatter**
+- [x] **Step 3: Implement parser, posture, and formatter**
 
 In `causal_remediation_plan.zig`, add the helpers below. Keep all allocations
 owned by the caller and freed through `deinitEvidence`.
@@ -568,7 +568,7 @@ fn appendClaimGuardrails(allocator: std.mem.Allocator, output: *std.ArrayList(u8
 }
 ```
 
-- [ ] **Step 4: Run green check and commit**
+- [x] **Step 4: Run green check and commit**
 
 Run:
 
@@ -593,7 +593,7 @@ git commit -m "feat(zigeffect): add causal remediation formatter"
 - Modify: `packages/zigeffect/tools/causal_remediation_plan.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Add failing validation and usage tests**
+- [x] **Step 1: Add failing validation and usage tests**
 
 Add tests to `causal_remediation_plan.zig`:
 
@@ -651,7 +651,7 @@ zig build examples
 
 Expected: FAIL because `usage` and `validateLocalVerdict` are missing.
 
-- [ ] **Step 2: Implement validation, local paths, and compare guardrail parsing**
+- [x] **Step 2: Implement validation, local paths, and compare guardrail parsing**
 
 Add path helpers:
 
@@ -709,7 +709,7 @@ fn parseCompareGuardrail(diagnosis_report: []const u8) []const u8 {
 }
 ```
 
-- [ ] **Step 3: Implement file IO and `main`**
+- [x] **Step 3: Implement file IO and `main`**
 
 Add usage and IO helpers:
 
@@ -817,7 +817,7 @@ The `advice_report`, `query_report`, and `compare_report` reads are intentional
 even when the first planner only parses diagnosis text: they verify the full
 local bundle is present before emitting a remediation plan.
 
-- [ ] **Step 4: Wire executable and build step**
+- [x] **Step 4: Wire executable and build step**
 
 Modify `packages/zigeffect/build.zig` after the `causal_remediation_plan_tool_tests`
 wiring from Task 1:
@@ -839,7 +839,7 @@ Add executable dependency to `examples_step` next to diagnosis:
     examples_step.dependOn(&causal_remediation_plan_tool.step);
 ```
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run:
 
@@ -868,7 +868,7 @@ git commit -m "feat(zigeffect): wire causal remediation plan command"
 - Modify: `docs/superpowers/specs/2026-06-07-zigeffect-causal-self-improvement-roadmap.md`
 - Modify: `packages/zigeffect/docs/roadmap.md`
 
-- [ ] **Step 1: Update artifact manifest tests first**
+- [x] **Step 1: Update artifact manifest tests first**
 
 In `packages/zigeffect/tools/causal_artifacts.zig`, extend the first test:
 
@@ -894,7 +894,7 @@ zig build examples
 Expected: FAIL because the manifest does not list diagnosis or remediation-plan
 paths yet.
 
-- [ ] **Step 2: Update manifest output**
+- [x] **Step 2: Update manifest output**
 
 In `appendDefaultLoopArtifacts`, add:
 
@@ -920,7 +920,7 @@ zig build examples
 
 Expected: PASS.
 
-- [ ] **Step 3: Update README workflow**
+- [x] **Step 3: Update README workflow**
 
 In `packages/zigeffect/README.md`, update the dev-loop paragraph so the after
 phase names verdict and diagnosis/remediation follow-up. Replace the paragraph
@@ -964,7 +964,7 @@ zig build causal-remediation-plan -- local causal-scoped-fiber
 `*-remediation-plan.md`. All three are deterministic and non-mutating.
 ````
 
-- [ ] **Step 4: Update agent guide**
+- [x] **Step 4: Update agent guide**
 
 In `packages/zigeffect/docs/agent-guide.md`, after the `causal-diagnosis`
 paragraph, add:
@@ -982,7 +982,7 @@ posture, proposed patch strategy, verification commands, and claim guardrails.
 It does not edit source or execute remediation.
 ````
 
-- [ ] **Step 5: Update scenario docs**
+- [x] **Step 5: Update scenario docs**
 
 In `packages/zigeffect/docs/causal-scenarios.md`, add the command near
 `causal-diagnosis`:
@@ -1010,7 +1010,7 @@ needs an implementation plan with evidence ids, verification commands, and claim
 guardrails. The plan is non-mutating and should be reviewed before source edits.
 ```
 
-- [ ] **Step 6: Update roadmaps**
+- [x] **Step 6: Update roadmaps**
 
 In `docs/superpowers/specs/2026-06-07-zigeffect-causal-self-improvement-roadmap.md`,
 add to Milestone 7 delivered slices:
@@ -1029,7 +1029,7 @@ diagnosis bullets:
   evidence-bound, non-mutating remediation plans from local dev-loop artifacts.
 ```
 
-- [ ] **Step 7: Verify and commit docs**
+- [x] **Step 7: Verify and commit docs**
 
 Run:
 
@@ -1059,7 +1059,7 @@ git commit -m "docs(zigeffect): document causal remediation planning"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-06-07-zigeffect-causal-remediation-plan.md`
 
-- [ ] **Step 1: Verify default remediation plan**
+- [x] **Step 1: Verify default remediation plan**
 
 Run:
 
@@ -1080,7 +1080,7 @@ rg 'event 4 `resource_acquired` status=persisting' .zig-cache/causal-artifacts/z
 Expected: PASS. The plan should preserve multi-word labels in its evidence
 section and include dogfood verification commands without a scenario slug.
 
-- [ ] **Step 2: Verify scenario remediation plan**
+- [x] **Step 2: Verify scenario remediation plan**
 
 Run:
 
@@ -1099,7 +1099,7 @@ rg "zig build causal-dev-loop -- baseline causal-scoped-fiber" .zig-cache/causal
 
 Expected: PASS.
 
-- [ ] **Step 3: Verify missing input failure**
+- [x] **Step 3: Verify missing input failure**
 
 Run:
 
@@ -1116,13 +1116,13 @@ printf "%s\n" "$output" | rg "usage: zig build causal-remediation-plan -- local 
 
 Expected: PASS.
 
-- [ ] **Step 4: Verify manifest paths**
+- [x] **Step 4: Verify manifest paths**
 
 Run:
 
 ```sh
 cd packages/zigeffect
-zig build causal-artifacts > /tmp/zigeffect-causal-artifacts.txt
+zig build causal-artifacts > /tmp/zigeffect-causal-artifacts.txt 2>&1
 rg "zigeffect-causal-dev-loop-diagnosis.txt" /tmp/zigeffect-causal-artifacts.txt
 rg "zigeffect-causal-dev-loop-remediation-plan.md" /tmp/zigeffect-causal-artifacts.txt
 rg "zigeffect-causal-dev-loop-causal-scoped-fiber-diagnosis.txt" /tmp/zigeffect-causal-artifacts.txt
@@ -1131,7 +1131,7 @@ rg "zigeffect-causal-dev-loop-causal-scoped-fiber-remediation-plan.md" /tmp/zige
 
 Expected: PASS.
 
-- [ ] **Step 5: Run final verification**
+- [x] **Step 5: Run final verification**
 
 Run:
 
@@ -1146,7 +1146,7 @@ bun run zig:test
 
 Expected: all commands exit zero.
 
-- [ ] **Step 6: Commit plan checklist update**
+- [x] **Step 6: Commit plan checklist update**
 
 After all verification steps pass, mark Task 4 checklist items complete in this
 plan file and commit:
@@ -1158,19 +1158,19 @@ git commit -m "docs(zigeffect): complete causal remediation plan checklist"
 
 ## Completion Checklist
 
-- [ ] `zig build causal-remediation-plan -- local` works after a default
+- [x] `zig build causal-remediation-plan -- local` works after a default
   after-phase and diagnosis run.
-- [ ] `zig build causal-remediation-plan -- local causal-scoped-fiber` works
+- [x] `zig build causal-remediation-plan -- local causal-scoped-fiber` works
   after a scenario after-phase and diagnosis run.
-- [ ] Remediation plan artifacts are written to stable default and scenario
+- [x] Remediation plan artifacts are written to stable default and scenario
   paths.
-- [ ] Missing inputs fail with clean usage text.
-- [ ] Reports cite event ids and artifact paths.
-- [ ] Reports preserve `new`, `observed`, and `persisting` semantics in posture
+- [x] Missing inputs fail with clean usage text.
+- [x] Reports cite event ids and artifact paths.
+- [x] Reports preserve `new`, `observed`, and `persisting` semantics in posture
   and claim guardrails.
-- [ ] Reports include required verification commands.
-- [ ] `zig build causal-artifacts` lists diagnosis and remediation-plan paths.
-- [ ] README and agent docs document the command as non-mutating.
-- [ ] `zig build examples` includes the new tests and executable.
-- [ ] `zig build test --summary none` passes in `packages/zigeffect`.
-- [ ] `bun run zig:test` passes at the repo root.
+- [x] Reports include required verification commands.
+- [x] `zig build causal-artifacts` lists diagnosis and remediation-plan paths.
+- [x] README and agent docs document the command as non-mutating.
+- [x] `zig build examples` includes the new tests and executable.
+- [x] `zig build test --summary none` passes in `packages/zigeffect`.
+- [x] `bun run zig:test` passes at the repo root.
