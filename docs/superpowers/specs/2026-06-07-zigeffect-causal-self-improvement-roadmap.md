@@ -13,8 +13,8 @@ agents and humans can inspect before the next milestone begins.
 
 ## Current Baseline
 
-The causal runtime branch has been merged into `master`, and the current
-development branch contains:
+The causal runtime branch and its local self-improvement slices have been
+merged into `master`. The repository now contains:
 
 - `CausalStore`, event ids, run ids, scope ids, and finding extraction.
 - Text, JSON, and DOT formatters.
@@ -46,11 +46,18 @@ development branch contains:
   new or persisting evidence.
 - local dev-loop verdict JSON artifacts, so after-phase runs have the same
   first-read structured status and action-count surface as CI failures.
+- local development-agent, diagnosis, and remediation-plan commands, so agents
+  can move from verdict to inspection order to patch-ready evidence without
+  mutating source.
+- `zig build causal-remediation-audit -- local [scenario]`, which adds the
+  first durable proposal/audit artifact before any approval or application
+  command exists.
 
 The baseline proves that agents can cite causal evidence from `zigeffect`
-itself in both local and CI workflows. The next step is to use those verdicts
-as the entry point for more automated development-agent feedback while keeping
-the same before/after artifact discipline.
+itself in both local and CI workflows. The next step is to finish the local
+remediation-control chain: proposal audit first, then explicit approval/policy
+gates, then patch proposals, with source edits remaining outside the causal
+tools until the evidence boundary is stable.
 
 ## North Star
 
@@ -238,9 +245,10 @@ Remaining:
 - optional persisted compare reports under `.zig-cache/causal-artifacts/`;
 - scenario-aware labels so reports can say which invariant improved.
 
-### Milestone 7: Development Agent Loop
+### Milestone 7: Development Agent Loop And Remediation Control
 
-Status: first dev-loop slice delivered.
+Status: dev-loop, local agent handoff, diagnosis, remediation planning, and
+remediation audit delivered.
 
 Deliverables:
 
@@ -248,6 +256,8 @@ Deliverables:
 - an agent-readable summary with next actions;
 - optional before/after trace capture around a patch;
 - docs for how an agent should use causal evidence before proposing a fix.
+- non-mutating remediation-control artifacts that show proposal, approval
+  status, evidence ids, verification commands, and claim guardrails.
 
 Exit criteria:
 
@@ -281,10 +291,42 @@ Delivered slices:
 - `zig build causal-remediation-plan -- local [scenario]`, which turns local
   diagnosis artifacts into non-mutating remediation plans with evidence ids,
   verification commands, and claim guardrails.
+- `zig build causal-remediation-audit -- local [scenario]`, which writes
+  pending-approval JSON and text audit records citing the local verdict,
+  diagnosis, remediation plan, advice, query, compare artifacts, evidence event
+  ids, verification commands, and claim guardrails.
 
 Remaining:
 
+- add an approval/rejection command that can mark audit records without applying
+  patches;
+- add an optional patch-proposal artifact that can describe a source edit diff
+  while still requiring human or policy approval;
+- compare before/after audit chains so a development agent can show whether a
+  proposed remediation reduced, preserved, or introduced causal findings;
 - app-facing development loops once applications emit causal runtime artifacts.
+
+#### Remediation-Control Roadmap
+
+This sub-roadmap is the concrete path from "agent can inspect evidence" to
+"agent can safely participate in improving zigeffect":
+
+1. **Audit record.** Use `causal-remediation-audit` to create deterministic
+   pending proposal artifacts. No source edits, no approvals, no timestamps.
+2. **Approval boundary.** Add approve/reject commands that update or append an
+   audit decision with `approved_by`, policy id, and rationale. Still no patch
+   application.
+3. **Patch proposal artifact.** Add a non-mutating patch proposal format that
+   links one proposed diff to audit evidence and required verification commands.
+4. **Remediation workbench loop.** Let agents compare audit/proposal outcomes
+   before and after a patch, including which event ids disappeared, persisted,
+   or appeared.
+5. **App-facing reuse.** Reuse the same verdict, diagnosis, plan, audit,
+   approval, and proposal vocabulary for apps built with `zigeffect`.
+
+Safety invariant: each step must produce a reviewable artifact before the next
+step is allowed to mutate anything. The causal runtime can propose and explain;
+authorization and edits remain separate until the policy layer exists.
 
 ### Milestone 8: Hardening And CI Readiness
 
@@ -417,11 +459,29 @@ Review:
 - CI artifact retention;
 - sampling rules.
 
-## First Slice Decision
+### Session 5: Remediation-Control Review
 
-The first implementation slice is Milestone 3: failure-gated dogfood check.
+Run before implementing approval or patch proposal commands.
 
-It intentionally does not wrap real tests yet. The goal is to prove the local
-failure semantics, artifact writing guarantees, and agent workflow using the
-existing deterministic dogfood scenario. Once that is stable, real failing-test
-capture can reuse the same exit policy and documentation shape.
+Review:
+
+- audit schema ergonomics and whether fields are enough for policy review;
+- whether proposal records should be append-only or regenerated locally;
+- how to represent human approval, local policy approval, and rejection;
+- how to cite source diffs without letting causal tools mutate source;
+- how the same audit vocabulary will work for app-facing incident remediation.
+
+## Delivered Slice Decision
+
+The Milestone 7 remediation audit command is the first delivered
+remediation-control slice:
+
+```sh
+zig build causal-remediation-audit -- local [scenario]
+```
+
+This is deliberately the first remediation-control slice because it creates a
+durable, schema-versioned, pending proposal record without approving, applying,
+or generating a patch. The command gives zigeffect a safe self-improvement
+control point: agents can cite event ids, source artifacts, verification
+commands, and claim guardrails before any source-editing workflow is added.

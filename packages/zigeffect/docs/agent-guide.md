@@ -507,6 +507,20 @@ The command writes `*-remediation-plan.md` with evidence ids, remediation
 posture, proposed patch strategy, verification commands, and claim guardrails.
 It does not edit source or execute remediation.
 
+To record the remediation proposal before any approval or patch application,
+run:
+
+```sh
+zig build causal-remediation-audit -- local
+zig build causal-remediation-audit -- local causal-scoped-fiber
+```
+
+The command writes `*-remediation-audit.json` and `*-remediation-audit.txt`
+with `approval_status=pending`, `applied=false`, source artifact paths, evidence
+event ids, verification commands, and claim guardrails. Treat this audit record
+as the review boundary before source edits or future policy-controlled
+remediation.
+
 Generate advice directly from any saved causal JSON artifact:
 
 ```sh

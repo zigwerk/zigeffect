@@ -338,6 +338,7 @@ Read the local verdict and generate agent-facing follow-up artifacts:
 zig build causal-dev-agent -- local
 zig build causal-diagnosis -- local
 zig build causal-remediation-plan -- local
+zig build causal-remediation-audit -- local
 ```
 
 For scenario targets, pass the same scenario slug:
@@ -346,11 +347,15 @@ For scenario targets, pass the same scenario slug:
 zig build causal-dev-agent -- local causal-scoped-fiber
 zig build causal-diagnosis -- local causal-scoped-fiber
 zig build causal-remediation-plan -- local causal-scoped-fiber
+zig build causal-remediation-audit -- local causal-scoped-fiber
 ```
 
 `causal-dev-agent` prints the inspection order, `causal-diagnosis` writes
 `*-diagnosis.txt`, and `causal-remediation-plan` writes
-`*-remediation-plan.md`. All three are deterministic and non-mutating.
+`*-remediation-plan.md`. `causal-remediation-audit` writes
+`*-remediation-audit.json` and `*-remediation-audit.txt` with pending approval
+status, source artifact paths, evidence event ids, verification commands, and
+claim guardrails. All four commands are deterministic and non-mutating.
 
 Compare two saved causal JSON artifacts:
 
