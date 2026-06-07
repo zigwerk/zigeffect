@@ -135,12 +135,22 @@ Causal JSON artifacts use this root header:
 {
   "schema": "zigeffect.causal.v1",
   "schema_version": 1,
+  "retention": {
+    "max_events": null,
+    "dropped_events": 0,
+    "oldest_retained_event_id": null
+  },
   "events": []
 }
 ```
 
 Older event-only artifacts remain readable by the local query, compare, and
 development-loop tools.
+
+Use `fx.CausalStore.initBounded(allocator, max_events)` when a development or
+CI harness needs capped retained memory. Queries operate on retained events;
+reports and JSON artifacts disclose `max_events`, `dropped_events`, and
+`oldest_retained_event_id` so agents know when evidence is truncated.
 
 Run the failure-gated causal dogfood check:
 

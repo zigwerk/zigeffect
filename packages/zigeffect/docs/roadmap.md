@@ -488,6 +488,8 @@ metrics, and traces.
 - Delivered: text, JSON, DOT, and CI reports for human and agent tooling.
 - Delivered: a local causal report tool and scenario examples for missing
   config, cleanup failure, scoped fiber interruption, and retry exhaustion.
+- Delivered: opt-in bounded `CausalStore` retention through `initBounded`, with
+  retention metadata in reports and JSON artifacts.
 - Delivered: an optional `CausalBackend` event sink contract with adapter kinds
   for memory, JSON Lines, DOT, OpenTelemetry, NenDB graph, Cockroach/RoachGraph
   history, and async streams.

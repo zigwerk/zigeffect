@@ -437,12 +437,22 @@ The causal JSON artifact is versioned at the root:
 {
   "schema": "zigeffect.causal.v1",
   "schema_version": 1,
+  "retention": {
+    "max_events": null,
+    "dropped_events": 0,
+    "oldest_retained_event_id": null
+  },
   "events": []
 }
 ```
 
 Version `1` is the current event-array artifact shape. Local tools keep parsing
 legacy event-only artifacts so saved evidence remains useful.
+
+Bounded stores are opt-in through `CausalStore.initBounded(allocator,
+max_events)`. Retention applies to the in-memory store, not attached backends.
+Queries operate on retained events only, so `dropped_events` is the signal that
+an agent may be looking at a truncated parent chain.
 
 This command records a compact deterministic engine fixture with missing
 service, resource, fiber, and retry findings. It exits successfully unless
@@ -557,7 +567,8 @@ not by wandering through source files first.
   ids, and schedule labels.
 - **The graph is opt-in and bounded.** The deterministic core must remain
   usable without telemetry. Event retention, sampling, and memory limits must
-  be explicit.
+  be explicit. Use `CausalStore.initBounded` when a harness needs capped
+  retained memory.
 - **Runtime hooks converge through services.** Add event sinks as services or
   runtime configuration. Do not create parallel lookup or cleanup systems.
 - **Scopes still own cleanup.** Causal observation must describe scope cleanup,
@@ -815,8 +826,8 @@ The first concrete command for this phase is `zig build causal-test` from
 `packages/zigeffect`. It writes text, JSON, and DOT artifacts to
 `.zig-cache/causal-artifacts/` so a development agent can cite event ids before
 proposing changes. The JSON artifact root includes
-`schema: "zigeffect.causal.v1"` and `schema_version: 1`, and legacy event-only
-artifacts remain readable. The companion
+`schema: "zigeffect.causal.v1"`, `schema_version: 1`, and retention metadata,
+and legacy event-only artifacts remain readable. The companion
 `zig build causal-query -- <query> [argument]` command makes the saved JSON
 artifact executable for the same next-query names shown in the text report.
 

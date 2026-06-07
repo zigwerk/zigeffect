@@ -56,9 +56,9 @@ additive root object:
   "schema": "zigeffect.causal.v1",
   "schema_version": 1,
   "retention": {
-    "max_events": 256,
+    "max_events": 0,
     "dropped_events": 4,
-    "oldest_retained_event_id": 5
+    "oldest_retained_event_id": null
   },
   "events": []
 }

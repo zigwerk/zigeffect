@@ -257,11 +257,12 @@ Remaining:
 
 ### Milestone 8: Hardening And CI Readiness
 
-Status: first schema-versioning slice delivered.
+Status: first schema-versioning and bounded-store slices delivered.
 
 Deliverables:
 
-- bounded store or ring-buffer policy;
+- bounded store or ring-buffer policy; first opt-in bounded retention slice
+  delivered through `CausalStore.initBounded`;
 - stronger secret redaction tests;
 - event sampling rules;
 - stable schema versioning for JSON artifacts; delivered for
@@ -281,10 +282,15 @@ Delivered first slice:
   `"schema": "zigeffect.causal.v1"` and `"schema_version": 1`;
 - query, compare, and development-loop tools continue to parse legacy
   event-only artifacts.
+- `CausalStore.initBounded` retains at most the configured event count while
+  preserving monotonic event ids;
+- reports and JSON artifacts disclose `max_events`, `dropped_events`, and
+  `oldest_retained_event_id`.
 
 Remaining:
 
-- bounded store or ring-buffer policy;
+- physical ring-buffer optimization if ordered drop-oldest retention becomes a
+  bottleneck;
 - stronger secret redaction tests;
 - event sampling rules;
 - compatibility tests for event taxonomy changes;

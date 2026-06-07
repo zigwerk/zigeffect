@@ -338,6 +338,24 @@ test "causal store records events snapshots and lineage deterministically" {
     try std.testing.expectEqual(child, lineage.events[1].id);
 }
 
+test "bounded causal store keeps newest events and reports dropped count" {
+    var store = fx.CausalStore.initBounded(std.testing.allocator, 2);
+    defer store.deinit();
+
+    const first = try store.record(.{ .kind = .run_started, .label = "first" });
+    const second = try store.record(.{ .kind = .effect_started, .parent_id = first, .label = "second" });
+    const third = try store.record(.{ .kind = .exit_recorded, .parent_id = second, .label = "third" });
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), snapshot.events.len);
+    try std.testing.expectEqual(second, snapshot.events[0].id);
+    try std.testing.expectEqual(third, snapshot.events[1].id);
+    try std.testing.expectEqual(@as(u64, 1), store.droppedEventCount());
+    try std.testing.expectEqual(@as(?u64, second), store.oldestRetainedEventId());
+}
+
 test "causal report and backend kinds preserve adapter strategy" {
     var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
@@ -416,6 +434,26 @@ test "causal store forwards stored events to attached backend" {
     try std.testing.expectEqualStrings("backend-run", backend_state.labels[0]);
     try std.testing.expectEqualStrings("backend-run", backend_state.labels[1]);
     try std.testing.expectEqual(@as(usize, 2), store.events.items.len);
+}
+
+test "bounded causal store can retain zero events while forwarding backend events" {
+    var backend_state = FakeCausalBackendState{};
+    var store = fx.CausalStore.initBounded(std.testing.allocator, 0);
+    store.attachBackend(fakeCausalBackend(&backend_state));
+    defer store.deinit();
+
+    const first = try store.record(.{ .kind = .run_started, .label = "backend-only" });
+    const second = try store.record(.{ .kind = .exit_recorded, .parent_id = first, .label = "backend-only" });
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), snapshot.events.len);
+    try std.testing.expectEqual(@as(u64, 2), store.droppedEventCount());
+    try std.testing.expectEqual(@as(?u64, null), store.oldestRetainedEventId());
+    try std.testing.expectEqual(@as(usize, 2), backend_state.count);
+    try std.testing.expectEqual(first, backend_state.ids[0]);
+    try std.testing.expectEqual(second, backend_state.ids[1]);
 }
 
 fn expectFinding(findings: fx.CausalFindings, kind: fx.CausalFindingKind) !void {
@@ -613,6 +651,30 @@ test "causal json and dot exports are deterministic and redacted" {
     try std.testing.expect(std.mem.indexOf(u8, dot, "digraph zigeffect_causal") != null);
     try std.testing.expect(std.mem.indexOf(u8, dot, "event_1 [label=\"run_started readiness\"]") != null);
     try std.testing.expect(std.mem.indexOf(u8, dot, "event_1 -> event_2") != null);
+}
+
+test "causal artifacts disclose bounded retention state" {
+    var store = fx.CausalStore.initBounded(std.testing.allocator, 1);
+    defer store.deinit();
+
+    _ = try store.record(.{ .kind = .run_started, .label = "dropped" });
+    const retained = try store.record(.{ .kind = .exit_recorded, .label = "retained" });
+
+    const json = try fx.formatCausalJson(std.testing.allocator, &store);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"retention\": {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"max_events\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"dropped_events\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"oldest_retained_event_id\": 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"id\": 1") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"id\": 2") != null);
+
+    const report = try fx.formatCausalCiReport(std.testing.allocator, "bounded", &store);
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "retention: max_events=1 dropped_events=1 oldest_retained_event=2") != null);
+    try std.testing.expectEqual(retained, store.oldestRetainedEventId().?);
 }
 
 test "causal ci report includes findings next queries and citation ids" {

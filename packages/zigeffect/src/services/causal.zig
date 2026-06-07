@@ -6,6 +6,10 @@ pub const CausalBackend = causal_backend.CausalBackend;
 pub const causal_json_schema = "zigeffect.causal.v1";
 pub const causal_json_schema_version: u32 = 1;
 
+pub const CausalStoreOptions = struct {
+    max_events: ?usize = null,
+};
+
 pub const CausalEventKind = enum {
     run_started,
     run_completed,
@@ -152,9 +156,22 @@ pub const CausalStore = struct {
     next_scope_id_value: u64 = 1,
     events: std.ArrayList(CausalEvent) = .empty,
     backend: ?CausalBackend = null,
+    max_events: ?usize = null,
+    dropped_event_count: u64 = 0,
 
     pub fn init(allocator: Allocator) CausalStore {
-        return .{ .allocator = allocator };
+        return initWithOptions(allocator, .{});
+    }
+
+    pub fn initWithOptions(allocator: Allocator, options: CausalStoreOptions) CausalStore {
+        return .{
+            .allocator = allocator,
+            .max_events = options.max_events,
+        };
+    }
+
+    pub fn initBounded(allocator: Allocator, max_events: usize) CausalStore {
+        return initWithOptions(allocator, .{ .max_events = max_events });
     }
 
     pub fn deinit(self: *CausalStore) void {
@@ -166,6 +183,15 @@ pub const CausalStore = struct {
 
     pub fn attachBackend(self: *CausalStore, backend: CausalBackend) void {
         self.backend = backend;
+    }
+
+    pub fn droppedEventCount(self: *const CausalStore) u64 {
+        return self.dropped_event_count;
+    }
+
+    pub fn oldestRetainedEventId(self: *const CausalStore) ?u64 {
+        if (self.events.items.len == 0) return null;
+        return self.events.items[0].id;
     }
 
     pub fn nextRunId(self: *CausalStore) u64 {
@@ -189,6 +215,7 @@ pub const CausalStore = struct {
         if (self.backend) |backend| {
             backend.record(backend.state, owned) catch {};
         }
+        self.trimRetainedEvents();
         return owned.id;
     }
 
@@ -327,6 +354,15 @@ pub const CausalStore = struct {
         return null;
     }
 
+    fn trimRetainedEvents(self: *CausalStore) void {
+        const max_events = self.max_events orelse return;
+        while (self.events.items.len > max_events) {
+            const dropped = self.events.orderedRemove(0);
+            deinitEventStrings(self.allocator, dropped);
+            self.dropped_event_count += 1;
+        }
+    }
+
     fn appendCauseChain(self: *const CausalStore, allocator: Allocator, output: *std.ArrayList(CausalEvent), event_id: u64) Allocator.Error!void {
         const event = self.findEvent(event_id) orelse return;
         if (event.parent_id) |parent_id| {
@@ -432,6 +468,18 @@ fn appendOptionalU64(output: *std.ArrayList(u8), allocator: Allocator, value: ?u
     }
 }
 
+fn appendRetentionSummary(output: *std.ArrayList(u8), allocator: Allocator, store: *const CausalStore) Allocator.Error!void {
+    try output.appendSlice(allocator, "retention: max_events=");
+    if (store.max_events) |max_events| {
+        try output.print(allocator, "{d}", .{max_events});
+    } else {
+        try output.appendSlice(allocator, "unbounded");
+    }
+    try output.print(allocator, " dropped_events={d} oldest_retained_event=", .{store.dropped_event_count});
+    try appendOptionalU64(output, allocator, store.oldestRetainedEventId());
+    try output.append(allocator, '\n');
+}
+
 pub fn formatCausalReport(
     allocator: Allocator,
     label: []const u8,
@@ -442,6 +490,7 @@ pub fn formatCausalReport(
 
     try output.print(allocator, "zigeffect causal report\nprogram: {s}\n", .{label});
     try output.print(allocator, "events: {d}\n", .{store.events.items.len});
+    try appendRetentionSummary(&output, allocator, store);
 
     for (store.events.items) |event| {
         try output.print(
@@ -537,6 +586,7 @@ pub fn formatCausalCiReport(
         "zigeffect causal ci report\nprogram: {s}\nevents: {d}\nfindings: {d}\n",
         .{ label, store.events.items.len, findings.items.len },
     );
+    try appendRetentionSummary(&output, allocator, store);
 
     try output.appendSlice(allocator, "event citations:\n");
     if (store.events.items.len == 0) {
@@ -591,13 +641,26 @@ fn appendOptionalJsonU64(output: *std.ArrayList(u8), allocator: Allocator, value
     }
 }
 
+fn appendOptionalJsonUsize(output: *std.ArrayList(u8), allocator: Allocator, value: ?usize) Allocator.Error!void {
+    if (value) |number| {
+        try output.print(allocator, "{d}", .{number});
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+}
+
 pub fn formatCausalJson(allocator: Allocator, store: *const CausalStore) Allocator.Error![]const u8 {
     var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
 
     try output.appendSlice(allocator, "{\n  \"schema\": ");
     try appendJsonString(&output, allocator, causal_json_schema);
-    try output.print(allocator, ",\n  \"schema_version\": {d},\n  \"events\": [\n", .{causal_json_schema_version});
+    try output.print(allocator, ",\n  \"schema_version\": {d},\n", .{causal_json_schema_version});
+    try output.appendSlice(allocator, "  \"retention\": {\n    \"max_events\": ");
+    try appendOptionalJsonUsize(&output, allocator, store.max_events);
+    try output.print(allocator, ",\n    \"dropped_events\": {d},\n    \"oldest_retained_event_id\": ", .{store.dropped_event_count});
+    try appendOptionalJsonU64(&output, allocator, store.oldestRetainedEventId());
+    try output.appendSlice(allocator, "\n  },\n  \"events\": [\n");
     for (store.events.items, 0..) |event, index| {
         if (index > 0) try output.appendSlice(allocator, ",\n");
         try output.appendSlice(allocator, "    {\n");

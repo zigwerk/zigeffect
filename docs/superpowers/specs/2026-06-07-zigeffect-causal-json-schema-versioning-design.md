@@ -33,13 +33,18 @@ Use an additive root contract:
 {
   "schema": "zigeffect.causal.v1",
   "schema_version": 1,
+  "retention": {
+    "max_events": null,
+    "dropped_events": 0,
+    "oldest_retained_event_id": null
+  },
   "events": []
 }
 ```
 
 `schema` is a stable human-readable artifact family. `schema_version` is a
 machine-readable integer for future compatibility checks. Version `1` covers
-the current root object and event field names.
+the current root object, retention metadata, and event field names.
 
 ## Alternatives Considered
 
@@ -64,6 +69,7 @@ taxonomy and bounded-store policy are still evolving.
 ## Compatibility
 
 - New generated artifacts include `schema` and `schema_version`.
+- New generated artifacts include root retention metadata.
 - Existing artifacts without those fields remain parseable by query, compare,
   and loop tools.
 - Existing root-level unknown fields remain ignored by local tools.

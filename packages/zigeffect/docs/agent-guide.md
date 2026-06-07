@@ -319,12 +319,27 @@ Causal JSON artifacts are self-identifying:
 {
   "schema": "zigeffect.causal.v1",
   "schema_version": 1,
+  "retention": {
+    "max_events": null,
+    "dropped_events": 0,
+    "oldest_retained_event_id": null
+  },
   "events": []
 }
 ```
 
 The query, compare, and development-loop tools still accept older artifacts
 that only contain `events`.
+
+For longer-running local or CI probes, use a bounded store:
+
+```zig
+var store = fx.CausalStore.initBounded(allocator, 256);
+defer store.deinit();
+```
+
+Queries only see retained events. If `dropped_events` is nonzero, cite the
+retention metadata in the fix summary and avoid claiming the trace is complete.
 
 Use the non-failing probe when you want evidence:
 
