@@ -40,7 +40,7 @@
 - Create: `packages/zigeffect/tools/causal_diagnosis.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Create `packages/zigeffect/tools/causal_diagnosis.zig` with these test fixtures and tests:
 
@@ -293,7 +293,7 @@ test "clear diagnosis report has no evidence actions" {
 }
 ```
 
-- [ ] **Step 2: Wire test module and verify red**
+- [x] **Step 2: Wire test module and verify red**
 
 Modify `packages/zigeffect/build.zig` near `causal_dev_agent_tool_module`:
 
@@ -328,7 +328,7 @@ zig build examples
 Expected: FAIL because helpers such as `localDiagnosisPath`,
 `parseAdviceActions`, `mapAction`, and `formatDiagnosisReport` are not defined.
 
-- [ ] **Step 3: Implement parser and formatter**
+- [x] **Step 3: Implement parser and formatter**
 
 Implement these types and helpers in `causal_diagnosis.zig`:
 
@@ -393,7 +393,7 @@ Use this behavior:
 
 Keep the first implementation deterministic and text-only.
 
-- [ ] **Step 4: Run green check and commit**
+- [x] **Step 4: Run green check and commit**
 
 Run:
 
@@ -418,7 +418,7 @@ git commit -m "feat(zigeffect): add causal diagnosis formatter"
 - Modify: `packages/zigeffect/tools/causal_diagnosis.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Add failing validation and usage tests**
+- [x] **Step 1: Add failing validation and usage tests**
 
 Add tests:
 
@@ -476,7 +476,7 @@ zig build examples
 
 Expected: FAIL because `usage` or `validateLocalVerdict` is not implemented.
 
-- [ ] **Step 2: Implement validation and local path derivation**
+- [x] **Step 2: Implement validation and local path derivation**
 
 Add:
 
@@ -504,7 +504,7 @@ fn queryReportPathForJson(allocator: std.mem.Allocator, json_path: []const u8) !
 }
 ```
 
-- [ ] **Step 3: Implement file IO and `main`**
+- [x] **Step 3: Implement file IO and `main`**
 
 Add:
 
@@ -610,7 +610,7 @@ pub fn main(init: std.process.Init) !void {
 }
 ```
 
-- [ ] **Step 4: Wire executable and build step**
+- [x] **Step 4: Wire executable and build step**
 
 In `packages/zigeffect/build.zig`, add:
 
@@ -631,7 +631,7 @@ Add executable build to `examples_step`:
 examples_step.dependOn(&causal_diagnosis_tool.step);
 ```
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run:
 
@@ -658,7 +658,7 @@ git commit -m "feat(zigeffect): wire causal diagnosis command"
 - Modify: `docs/superpowers/specs/2026-06-07-zigeffect-causal-self-improvement-roadmap.md`
 - Modify: `packages/zigeffect/docs/roadmap.md`
 
-- [ ] **Step 1: Verify default diagnosis**
+- [x] **Step 1: Verify default diagnosis**
 
 Run:
 
@@ -674,7 +674,7 @@ rg "target: dogfood" .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-diagn
 rg "dominant evidence: persisting" .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-diagnosis.txt
 ```
 
-- [ ] **Step 2: Verify scenario diagnosis**
+- [x] **Step 2: Verify scenario diagnosis**
 
 Run:
 
@@ -689,7 +689,7 @@ rg "target: causal-scoped-fiber" .zig-cache/causal-artifacts/zigeffect-causal-de
 rg "diagnosis status: clear" .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-diagnosis.txt
 ```
 
-- [ ] **Step 3: Verify missing input failure**
+- [x] **Step 3: Verify missing input failure**
 
 Run:
 
@@ -706,7 +706,7 @@ printf "%s\n" "$output" | rg "causal-diagnosis error: MissingDiagnosisInput"
 printf "%s\n" "$output" | rg "usage: zig build causal-diagnosis -- local \\[scenario\\]"
 ```
 
-- [ ] **Step 4: Update agent guide**
+- [x] **Step 4: Update agent guide**
 
 In `packages/zigeffect/docs/agent-guide.md`, after the `causal-dev-agent`
 paragraph, add:
@@ -724,7 +724,7 @@ The command writes `*-diagnosis.txt`, cites event ids from advice, summarizes
 compare posture, and suggests patch categories without editing source.
 ````
 
-- [ ] **Step 5: Update scenario docs**
+- [x] **Step 5: Update scenario docs**
 
 In `packages/zigeffect/docs/causal-scenarios.md`, add the command near
 `causal-dev-agent`:
@@ -744,7 +744,7 @@ Add diagnosis artifact paths to the development-loop artifact lists:
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-diagnosis.txt`
 ```
 
-- [ ] **Step 6: Update roadmap docs**
+- [x] **Step 6: Update roadmap docs**
 
 In `docs/superpowers/specs/2026-06-07-zigeffect-causal-self-improvement-roadmap.md`,
 add to Milestone 7 delivered slices:
@@ -768,7 +768,7 @@ In `packages/zigeffect/docs/roadmap.md`, add:
   patch-ready, non-mutating diagnosis reports from local dev-loop artifacts.
 ```
 
-- [ ] **Step 7: Run final verification**
+- [x] **Step 7: Run final verification**
 
 Run:
 
@@ -783,7 +783,7 @@ bun run zig:test
 
 Expected: all commands exit 0.
 
-- [ ] **Step 8: Commit docs**
+- [x] **Step 8: Commit docs**
 
 ```sh
 git add packages/zigeffect/docs/agent-guide.md \
@@ -795,12 +795,12 @@ git commit -m "docs(zigeffect): document causal diagnosis workflow"
 
 ## Completion Checklist
 
-- [ ] `zig build causal-diagnosis -- local` works after a default after-phase run.
-- [ ] `zig build causal-diagnosis -- local causal-scoped-fiber` works after a scenario after-phase run.
-- [ ] Diagnosis artifacts are written to stable default and scenario paths.
-- [ ] Missing inputs fail with clean usage text.
-- [ ] Diagnosis reports cite event ids and report paths.
-- [ ] Diagnosis reports preserve `new`, `observed`, and `persisting` semantics.
-- [ ] `zig build examples` includes the new tests and executable.
-- [ ] `zig build test --summary none` passes in `packages/zigeffect`.
-- [ ] `bun run zig:test` passes at the repo root.
+- [x] `zig build causal-diagnosis -- local` works after a default after-phase run.
+- [x] `zig build causal-diagnosis -- local causal-scoped-fiber` works after a scenario after-phase run.
+- [x] Diagnosis artifacts are written to stable default and scenario paths.
+- [x] Missing inputs fail with clean usage text.
+- [x] Diagnosis reports cite event ids and report paths.
+- [x] Diagnosis reports preserve `new`, `observed`, and `persisting` semantics.
+- [x] `zig build examples` includes the new tests and executable.
+- [x] `zig build test --summary none` passes in `packages/zigeffect`.
+- [x] `bun run zig:test` passes at the repo root.

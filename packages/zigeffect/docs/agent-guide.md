@@ -485,6 +485,17 @@ The command reads the existing verdict artifact, prints the recommended
 inspection order, and gives exact advice, query, and compare commands. It does
 not rerun the loop or apply fixes.
 
+To synthesize the verdict, advice, query, and compare reports into a patch-ready
+local diagnosis, run:
+
+```sh
+zig build causal-diagnosis -- local
+zig build causal-diagnosis -- local causal-scoped-fiber
+```
+
+The command writes `*-diagnosis.txt`, cites event ids from advice, summarizes
+compare posture, and suggests patch categories without editing source.
+
 Generate advice directly from any saved causal JSON artifact:
 
 ```sh

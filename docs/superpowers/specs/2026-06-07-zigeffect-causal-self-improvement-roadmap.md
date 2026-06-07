@@ -275,11 +275,12 @@ Delivered slices:
   action counts, baseline pairing, and the next inspection step.
 - `zig build causal-dev-agent -- local [scenario]`, which reads local verdicts
   and prints the deterministic next inspection plan for development agents.
+- `zig build causal-diagnosis -- local [scenario]`, which summarizes verdict,
+  advice, query, and compare artifacts into a patch-ready non-mutating
+  diagnosis report.
 
 Remaining:
 
-- richer automation that can summarize selected advice/query evidence into a
-  patch-ready diagnosis.
 - app-facing development loops once applications emit causal runtime artifacts.
 
 ### Milestone 8: Hardening And CI Readiness

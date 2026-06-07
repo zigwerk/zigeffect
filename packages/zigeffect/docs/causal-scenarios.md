@@ -55,6 +55,12 @@ Print the next local agent inspection plan from a saved dev-loop verdict:
 zig build causal-dev-agent -- local [scenario]
 ```
 
+Write a patch-ready local diagnosis from saved dev-loop artifacts:
+
+```sh
+zig build causal-diagnosis -- local [scenario]
+```
+
 Generate deterministic advice from a saved causal JSON artifact:
 
 ```sh
@@ -193,7 +199,9 @@ zig build causal-dev-loop -- after causal-scoped-fiber
 ```
 
 The no-scenario loop compares the deterministic dogfood causal artifact and
-runs the `package-tests` scenario as the package gate. It writes:
+runs the `package-tests` scenario as the package gate. The loop writes the
+first six artifacts; `causal-diagnosis` writes the diagnosis artifact from that
+saved bundle:
 
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json`
@@ -201,9 +209,11 @@ runs the `package-tests` scenario as the package gate. It writes:
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-queries.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-advice.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-verdict.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-diagnosis.txt`
 
 Scenario loops compare command-level artifacts for the selected scenario and
-write slug-specific loop artifacts:
+write slug-specific loop artifacts. `causal-diagnosis` adds the matching
+diagnosis artifact:
 
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-before.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-after.json`
@@ -211,6 +221,7 @@ write slug-specific loop artifacts:
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-queries.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-advice.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-verdict.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-diagnosis.txt`
 
 The `*-queries.txt` artifact contains executed `causal-query` output selected
 from the after artifact's evidence events. The `*-advice.txt` artifact contains
@@ -224,6 +235,9 @@ the recommended next inspection step.
 After an after-phase run, `zig build causal-dev-agent -- local [scenario]`
 reads the matching verdict and prints the deterministic local inspection plan.
 Use it before manually opening advice, query, or compare artifacts.
+Then run `zig build causal-diagnosis -- local [scenario]` when the agent needs a
+patch-ready, non-mutating diagnosis that cites advice event ids, query output,
+and compare posture.
 
 Expected-failure scenarios are valid loop targets. For example,
 `missing-service-compile-fail` reports `expected_failure_observed` when the
