@@ -63,7 +63,7 @@
 - Create: `packages/zigeffect/src/match/root.zig`
 - Create: `packages/zigeffect/src/pattern/root.zig`
 
-- [ ] **Step 1: Write failing facade tests**
+- [x] **Step 1: Write failing facade tests**
 
 Add to `packages/zigeffect/test/all_test.zig`:
 
@@ -90,7 +90,7 @@ test "root facade exposes data match pattern and trait namespaces" {
 }
 ```
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run:
 
@@ -100,7 +100,7 @@ cd packages/zigeffect && zig build test-raw
 
 Expected: FAIL because the new test files and facade namespaces do not exist.
 
-- [ ] **Step 3: Add empty public domains**
+- [x] **Step 3: Add empty public domains**
 
 Create the four root files with valid empty exports:
 
@@ -130,7 +130,7 @@ pub const Chunk = data.Chunk;
 pub const HashSet = data.HashSet;
 ```
 
-- [ ] **Step 4: Run test**
+- [x] **Step 4: Run test**
 
 Run:
 
