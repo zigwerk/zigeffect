@@ -368,6 +368,7 @@ zig build causal-remediation-audit -- local
 zig build causal-patch-proposal -- local draft --summary "scope cleanup ordering" --file packages/zigeffect/src/core/scope.zig --change "tighten finalizer ordering evidence"
 zig build causal-remediation-decision -- local approve --by local-reviewer --policy manual-review
 zig build causal-patch-proposal -- local approved --summary "scope cleanup ordering" --file packages/zigeffect/src/core/scope.zig --change "tighten finalizer ordering evidence"
+zig build causal-audit-chain -- local
 ```
 
 For scenario targets, pass the same scenario slug:
@@ -379,6 +380,7 @@ zig build causal-remediation-plan -- local causal-scoped-fiber
 zig build causal-remediation-audit -- local causal-scoped-fiber
 zig build causal-remediation-decision -- local reject causal-scoped-fiber --reason "clear verdict"
 zig build causal-patch-proposal -- local draft causal-scoped-fiber --summary "scoped fiber evidence" --file packages/zigeffect/src/runtime/fiber.zig --change "record scoped fiber interruption evidence"
+zig build causal-audit-chain -- local causal-scoped-fiber
 ```
 
 `causal-dev-agent` prints the inspection order, `causal-diagnosis` writes
@@ -392,8 +394,14 @@ or rejected review result while keeping `applied=false`.
 `causal-patch-proposal` writes `*-patch-proposal.json` and
 `*-patch-proposal.txt`. Draft proposals read pending audits and remain
 unapproved; approved proposals require an approved remediation decision. Both
-proposal modes keep `applied=false` and never edit source. All six commands are
-deterministic and non-mutating.
+proposal modes keep `applied=false` and never edit source.
+`causal-audit-chain` writes `*-audit-chain.json` and `*-audit-chain.txt` by
+comparing the current session, audit, optional decision, proposal, before/after
+causal artifacts, and compare report. It classifies proposal event ids as
+disappeared, persisting, appeared, or missing, then reports `assessment` as
+`improved`, `unchanged`, `regressed`, or `inconclusive`. The command is
+deterministic and non-mutating; use it to constrain patch claims, not as proof
+that source edits were authorized.
 
 Compare two saved causal JSON artifacts:
 

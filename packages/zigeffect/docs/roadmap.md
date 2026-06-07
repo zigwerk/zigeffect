@@ -54,6 +54,11 @@ Current boundary decisions:
   generated local and CI advice, local and CI structured verdict JSON, and pull
   request CI baseline capture, so failing head artifacts can be compared with
   base-commit causal evidence.
+- Forward direction for the next major work is captured in
+  [`../../../docs/superpowers/specs/2026-06-07-zigeffect-forward-roadmap-ergonomics-to-async-design.md`](../../../docs/superpowers/specs/2026-06-07-zigeffect-forward-roadmap-ergonomics-to-async-design.md):
+  make Effect composition more ergonomic without cloning EffectTS, harden the
+  deterministic core as the compatibility suite, then design and prototype the
+  async backend boundary.
 
 ## Engine Integration Invariants
 
@@ -534,6 +539,11 @@ metrics, and traces.
   [scenario] --summary <summary> --file <path> --change <description>` writes
   non-mutating patch-intent artifacts that link proposed file changes to
   audit or approved decision evidence while preserving `applied=false`.
+- Delivered: `zig build causal-audit-chain -- local [scenario]` writes
+  read-only chain comparison JSON/text reports that compare session, audit,
+  optional decision, proposal, before/after artifacts, and compare posture,
+  then classify proposal event ids as disappeared, persisting, appeared, or
+  missing.
 - Delivered: `zig build causal-artifacts` prints a deterministic retention
   manifest with upload globs and dogfood, scenario, and dev-loop artifact paths
   for agents and CI.
@@ -551,7 +561,7 @@ metrics, and traces.
   history, and async streams.
 - Still future: production-grade adapter implementations, durable histories,
   a workbench UI, deterministic replay/forking, policy engine decisions, patch
-  application, and audit-chain comparison after proposals are applied.
+  application, and comparing arbitrary named audit-chain snapshots.
 - Still future: using the causal graph pervasively inside `zigeffect` tests so
   agents can diagnose engine regressions from runtime facts.
 - Leave room for a future causal workbench that visualizes effect runs, scope
