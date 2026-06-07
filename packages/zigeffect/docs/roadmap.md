@@ -548,6 +548,10 @@ metrics, and traces.
   read-only scenario learning JSON/text reports that recommend `add-scenario`,
   `refine-scenario`, or `none` from verdict, diagnosis, remediation-plan, and
   audit-chain evidence.
+- Delivered: `zig build causal-scenario-registry-patch -- --from-proposal
+  <scenario-proposal.json>` writes review-only JSON/text/Zig registry patch
+  drafts from scenario proposal artifacts while never editing
+  `tools/causal_run.zig`.
 - Delivered: `zig build causal-artifacts` prints a deterministic retention
   manifest with upload globs and dogfood, scenario, and dev-loop artifact paths
   for agents and CI.

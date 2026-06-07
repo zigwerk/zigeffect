@@ -501,6 +501,19 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_scenario_proposal_tool_tests = b.addRunArtifact(causal_scenario_proposal_tool_tests);
 
+    const causal_scenario_registry_patch_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_scenario_registry_patch.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_scenario_registry_patch_tool_module.addImport("causal_run", causal_run_tool_module);
+
+    const causal_scenario_registry_patch_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-scenario-registry-patch-tests",
+        .root_module = causal_scenario_registry_patch_tool_module,
+    });
+    const run_causal_scenario_registry_patch_tool_tests = b.addRunArtifact(causal_scenario_registry_patch_tool_tests);
+
     const causal_diagnosis_tool = b.addExecutable(.{
         .name = "zigeffect-causal-diagnosis",
         .root_module = causal_diagnosis_tool_module,
@@ -563,6 +576,15 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_causal_scenario_proposal_tool.addArgs(args);
     const causal_scenario_proposal_step = b.step("causal-scenario-proposal", "Write a read-only causal scenario learning proposal");
     causal_scenario_proposal_step.dependOn(&run_causal_scenario_proposal_tool.step);
+
+    const causal_scenario_registry_patch_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-scenario-registry-patch",
+        .root_module = causal_scenario_registry_patch_tool_module,
+    });
+    const run_causal_scenario_registry_patch_tool = b.addRunArtifact(causal_scenario_registry_patch_tool);
+    if (b.args) |args| run_causal_scenario_registry_patch_tool.addArgs(args);
+    const causal_scenario_registry_patch_step = b.step("causal-scenario-registry-patch", "Write a reviewable causal scenario registry patch draft");
+    causal_scenario_registry_patch_step.dependOn(&run_causal_scenario_registry_patch_tool.step);
 
     const causal_handoff_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_handoff.zig"),
@@ -666,6 +688,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_audit_chain_tool_tests.step);
     examples_step.dependOn(&causal_scenario_proposal_tool.step);
     examples_step.dependOn(&run_causal_scenario_proposal_tool_tests.step);
+    examples_step.dependOn(&causal_scenario_registry_patch_tool.step);
+    examples_step.dependOn(&run_causal_scenario_registry_patch_tool_tests.step);
     examples_step.dependOn(&causal_handoff_tool.step);
     examples_step.dependOn(&run_causal_handoff_tool_tests.step);
     examples_step.dependOn(&causal_loop_tool.step);

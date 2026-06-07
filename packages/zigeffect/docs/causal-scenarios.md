@@ -108,6 +108,17 @@ invariant coverage:
 zig build causal-scenario-proposal -- local [scenario]
 ```
 
+Generate review-only registry patch artifacts from a scenario proposal:
+
+```sh
+zig build causal-scenario-registry-patch -- --from-proposal <scenario-proposal.json>
+```
+
+This writes schema `zigeffect.causal.registry-patch.v1` as JSON plus text and
+Zig review drafts. The generated Zig snippet never changes
+`tools/causal_run.zig`; replace its placeholder argv with the smallest
+reproducing command before applying a registry entry manually.
+
 Generate deterministic advice from a saved causal JSON artifact:
 
 ```sh
@@ -255,6 +266,7 @@ saved bundle; `causal-remediation-plan` writes the remediation-plan artifact;
 `causal-audit-chain` writes chain comparison artifacts.
 `causal-scenario-proposal` writes read-only scenario learning proposal
 artifacts.
+`causal-scenario-registry-patch` writes review-only registry patch artifacts.
 `causal-dev-session` writes the session wrapper artifacts:
 
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json`
@@ -275,6 +287,9 @@ artifacts.
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-audit-chain.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-scenario-proposal.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-scenario-proposal.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-patch.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-patch.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-patch.zig`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session.txt`
 
@@ -286,6 +301,7 @@ write slug-specific loop artifacts. `causal-diagnosis` and
 `causal-patch-proposal` adds matching proposal artifacts.
 `causal-audit-chain` adds matching chain comparison artifacts.
 `causal-scenario-proposal` adds matching scenario learning proposal artifacts.
+`causal-scenario-registry-patch` adds matching registry patch artifacts.
 `causal-dev-session` adds matching session wrapper artifacts:
 
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-before.json`
@@ -306,6 +322,9 @@ write slug-specific loop artifacts. `causal-diagnosis` and
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-audit-chain.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-scenario-proposal.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-scenario-proposal.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-registry-patch.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-registry-patch.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-registry-patch.zig`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session-<scenario>.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session-<scenario>.txt`
 
@@ -352,6 +371,10 @@ Then run `zig build causal-scenario-proposal -- local [scenario]` when the
 audit chain shows persisting, new, or regressed evidence. The command writes a
 JSON/text proposal that recommends `add-scenario`, `refine-scenario`, or
 `none`, carries event ids and guardrails forward, and remains read-only.
+Then run `zig build causal-scenario-registry-patch -- --from-proposal <path>`
+to produce JSON/text/Zig registry patch drafts. The generated `.zig` snippet is
+for review only and must not be treated as applied coverage until a reviewer
+updates `tools/causal_run.zig` and runs verification.
 
 Expected-failure scenarios are valid loop targets. For example,
 `missing-service-compile-fail` reports `expected_failure_observed` when the

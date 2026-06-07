@@ -607,6 +607,19 @@ remediation plan, and audit chain, then recommends `add-scenario`,
 `refine-scenario`, or `none`. Treat it as a review prompt for scenario or
 invariant coverage. It is read-only and does not edit `tools/causal_run.zig`.
 
+To turn that proposal into a reviewable registry patch draft, run:
+
+```sh
+zig build causal-scenario-registry-patch -- --from-proposal .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-scenario-proposal.json
+zig build causal-scenario-registry-patch -- --from-proposal .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-scenario-proposal.json
+```
+
+The command writes `*-registry-patch.json`, `*-registry-patch.txt`, and
+`*-registry-patch.zig` with schema `zigeffect.causal.registry-patch.v1`. Review
+the `.zig` snippet before manually applying anything to `tools/causal_run.zig`.
+The generated argv is a placeholder until the reviewer replaces it with the
+smallest reproducing command.
+
 Generate advice directly from any saved causal JSON artifact:
 
 ```sh
@@ -673,9 +686,11 @@ already existed on the base commit.
 
 When a bug teaches a new runtime rule, run
 `zig build causal-scenario-proposal -- local [scenario]` after the audit chain.
-Use the proposal to review whether a catalog entry in `tools/causal_run.zig`
-and documentation in `docs/causal-scenarios.md` should be added before claiming
-the invariant is covered.
+Then run `zig build causal-scenario-registry-patch -- --from-proposal <path>`
+to generate review-only JSON/text/Zig patch drafts. Use those drafts to review
+whether a catalog entry in `tools/causal_run.zig` and documentation in
+`docs/causal-scenarios.md` should be added before claiming the invariant is
+covered.
 
 Backend adapters are sinks, not the source of truth. Keep tests and local agent
 queries against the in-memory `CausalStore`; use `store.attachBackend` for
