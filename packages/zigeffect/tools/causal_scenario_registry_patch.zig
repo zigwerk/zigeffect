@@ -4,6 +4,7 @@ const causal_run = @import("causal_run");
 const proposal_suffix = "-scenario-proposal.json";
 const registry_patch_suffix = "-registry-patch";
 const proposal_schema = "zigeffect.causal.scenario-proposal.v1";
+const registry_patch_schema = "zigeffect.causal.registry-patch.v1";
 
 const Options = struct {
     proposal_path: []const u8,
@@ -49,6 +50,23 @@ const ValidationResult = struct {
     recommendation: Recommendation,
     scenario_conflict: bool,
     has_patch_snippet: bool,
+};
+
+const RegistryPatchInput = struct {
+    source_proposal_path: []const u8,
+    proposal_json: []const u8,
+};
+
+const RegistryPatchReports = struct {
+    json: []const u8,
+    text: []const u8,
+    zig: []const u8,
+
+    fn deinit(self: RegistryPatchReports, allocator: std.mem.Allocator) void {
+        allocator.free(self.json);
+        allocator.free(self.text);
+        allocator.free(self.zig);
+    }
 };
 
 const RegistryPatchPaths = struct {
@@ -185,6 +203,251 @@ fn validateProposedInvariants(invariants: []const ProposedInvariant) !void {
 
 fn scenarioExists(slug: []const u8) bool {
     _ = causal_run.scenarioByName(slug) catch return false;
+    return true;
+}
+
+fn formatRegistryPatchReports(allocator: std.mem.Allocator, input: RegistryPatchInput) !RegistryPatchReports {
+    var parsed = try std.json.parseFromSlice(ScenarioProposal, allocator, input.proposal_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const validation = try validateScenarioProposal(parsed.value);
+    const json = try formatRegistryPatchJson(allocator, input.source_proposal_path, parsed.value, validation);
+    errdefer allocator.free(json);
+    const text = try formatRegistryPatchText(allocator, input.source_proposal_path, parsed.value, validation);
+    errdefer allocator.free(text);
+    const zig = try formatRegistryPatchZig(allocator, input.source_proposal_path, parsed.value, validation);
+    errdefer allocator.free(zig);
+
+    return .{ .json = json, .text = text, .zig = zig };
+}
+
+fn formatRegistryPatchJson(
+    allocator: std.mem.Allocator,
+    source_proposal_path: []const u8,
+    proposal: ScenarioProposal,
+    validation: ValidationResult,
+) ![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\n");
+    try output.appendSlice(allocator, "  \"schema\": ");
+    try appendJsonString(allocator, &output, registry_patch_schema);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"schema_version\": 1,\n");
+    try output.appendSlice(allocator, "  \"source_proposal\": ");
+    try appendJsonString(allocator, &output, source_proposal_path);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"recommendation\": ");
+    try appendJsonString(allocator, &output, proposal.recommendation);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"patch_status\": ");
+    try appendJsonString(allocator, &output, patchStatusText(validation));
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"target\": ");
+    try appendJsonString(allocator, &output, proposal.target);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"scenario_slug\": ");
+    if (proposal.proposed_scenario) |scenario| {
+        try appendJsonString(allocator, &output, scenario.slug);
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+    try output.appendSlice(allocator, ",\n");
+    try output.print(allocator, "  \"scenario_conflict\": {},\n", .{validation.scenario_conflict});
+    try output.appendSlice(allocator, "  \"known_invariant_ids\": ");
+    try appendInvariantIdsJson(allocator, &output, proposal.proposed_invariants, true);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"new_invariant_ids\": ");
+    try appendInvariantIdsJson(allocator, &output, proposal.proposed_invariants, false);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"review_checklist\": ");
+    try appendStringArray(allocator, &output, reviewChecklist(validation));
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"guardrails\": ");
+    try appendStringArray(allocator, &output, guardrails(validation));
+    try output.append(allocator, '\n');
+    try output.appendSlice(allocator, "}\n");
+
+    return output.toOwnedSlice(allocator);
+}
+
+fn formatRegistryPatchText(
+    allocator: std.mem.Allocator,
+    source_proposal_path: []const u8,
+    proposal: ScenarioProposal,
+    validation: ValidationResult,
+) ![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "zigeffect causal scenario registry patch\n");
+    try output.print(allocator, "schema: {s}\n", .{registry_patch_schema});
+    try output.print(allocator, "source proposal: {s}\n", .{source_proposal_path});
+    try output.print(allocator, "recommendation: {s}\n", .{proposal.recommendation});
+    try output.print(allocator, "patch_status: {s}\n", .{patchStatusText(validation)});
+    try output.print(allocator, "target: {s}\n", .{proposal.target});
+
+    if (validation.recommendation == .none) {
+        try output.appendSlice(allocator, "\nno registry patch recommended\n");
+    } else if (proposal.proposed_scenario) |scenario| {
+        if (validation.recommendation == .refine_scenario) {
+            try output.print(allocator, "\nreview existing scenario: {s}\n", .{scenario.slug});
+        } else {
+            try output.print(allocator, "\nproposed scenario: {s}\n", .{scenario.slug});
+        }
+        try output.print(allocator, "- owner: {s}\n", .{scenario.owner});
+        try output.print(allocator, "- expectation: {s}\n", .{scenario.expectation});
+        try output.print(allocator, "- finding_policy: {s}\n", .{scenario.finding_policy});
+        try output.print(allocator, "- conflict: {}\n", .{validation.scenario_conflict});
+    }
+
+    try output.appendSlice(allocator, "\nreview checklist:\n");
+    for (reviewChecklist(validation)) |item| try output.print(allocator, "- {s}\n", .{item});
+    try output.appendSlice(allocator, "\nguardrails:\n");
+    for (guardrails(validation)) |item| try output.print(allocator, "- {s}\n", .{item});
+
+    return output.toOwnedSlice(allocator);
+}
+
+fn formatRegistryPatchZig(
+    allocator: std.mem.Allocator,
+    source_proposal_path: []const u8,
+    proposal: ScenarioProposal,
+    validation: ValidationResult,
+) ![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.print(allocator, "// Generated from: {s}\n", .{source_proposal_path});
+    try output.print(allocator, "// Recommendation: {s}\n", .{proposal.recommendation});
+
+    if (validation.recommendation == .none) {
+        try output.appendSlice(allocator, "// No registry patch recommended for this proposal.\n");
+        return output.toOwnedSlice(allocator);
+    }
+
+    const scenario = proposal.proposed_scenario orelse return error.MissingProposedScenario;
+    const identifier = try identifierFromSlug(allocator, scenario.slug);
+    defer allocator.free(identifier);
+
+    if (validation.recommendation == .refine_scenario) {
+        try output.print(allocator, "// Review existing scenario entry: {s}\n", .{scenario.slug});
+        try output.appendSlice(allocator, "// Suggested invariant ids:\n");
+        for (proposal.proposed_invariants) |invariant| {
+            try output.print(allocator, "// - {s}\n", .{invariant.id});
+        }
+        try output.appendSlice(allocator, "// REVIEW: update only the smallest registry fields needed.\n");
+        return output.toOwnedSlice(allocator);
+    }
+
+    try output.print(allocator, "\nconst {s}_invariants: []const []const u8 = &.{{\n", .{identifier});
+    for (proposal.proposed_invariants) |invariant| {
+        try output.print(allocator, "    \"{s}\",\n", .{invariant.id});
+    }
+    try output.appendSlice(allocator, "};\n\n");
+
+    try output.print(allocator, "const {s}_argv: []const []const u8 = &.{{\n", .{identifier});
+    try output.appendSlice(allocator, "    // REVIEW: replace this placeholder with the smallest reproducing command.\n");
+    try output.appendSlice(allocator, "    \"zig\",\n");
+    try output.appendSlice(allocator, "    \"build\",\n");
+    try output.appendSlice(allocator, "    \"examples\",\n");
+    try output.appendSlice(allocator, "};\n\n");
+
+    try output.appendSlice(allocator, "// Add to scenario_registry after review:\n");
+    try output.appendSlice(allocator, ".{\n");
+    try output.print(allocator, "    .slug = \"{s}\",\n", .{scenario.slug});
+    try output.print(allocator, "    .label = \"{s}\",\n", .{scenario.label});
+    try output.print(allocator, "    .expectation = .{s},\n", .{scenario.expectation});
+    try output.print(allocator, "    .owner = .{s},\n", .{scenario.owner});
+    try output.print(allocator, "    .purpose = \"{s}\",\n", .{scenario.purpose});
+    try output.print(allocator, "    .finding_policy = .{s},\n", .{scenario.finding_policy});
+    try output.print(allocator, "    .invariant_ids = {s}_invariants,\n", .{identifier});
+    try output.print(allocator, "    .argv = {s}_argv,\n", .{identifier});
+    try output.appendSlice(allocator, "},\n");
+
+    return output.toOwnedSlice(allocator);
+}
+
+fn patchStatusText(validation: ValidationResult) []const u8 {
+    return if (validation.recommendation == .none) "no-op" else "review-required";
+}
+
+fn reviewChecklist(validation: ValidationResult) []const []const u8 {
+    if (validation.recommendation == .none) {
+        return &.{"Confirm no scenario or invariant change is needed for clear evidence."};
+    }
+    return &.{
+        "Verify the proposed scenario slug does not conflict with existing scenarios.",
+        "Replace placeholder argv with the smallest reproducing command.",
+        "Confirm invariant ids match the catalog or add reviewed invariant entries.",
+        "Run the scenario after applying the registry patch.",
+    };
+}
+
+fn guardrails(validation: ValidationResult) []const []const u8 {
+    if (validation.recommendation == .none) {
+        return &.{"Do not apply registry changes for no-op proposals."};
+    }
+    return &.{
+        "This registry patch is generated from evidence but requires explicit review.",
+        "Do not apply registry patches without verifying the minimal reproducing command.",
+        "Generated argv is a placeholder until a reviewer replaces it.",
+    };
+}
+
+fn appendJsonString(allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: []const u8) !void {
+    try output.append(allocator, '"');
+    for (value) |byte| switch (byte) {
+        '"' => try output.appendSlice(allocator, "\\\""),
+        '\\' => try output.appendSlice(allocator, "\\\\"),
+        '\n' => try output.appendSlice(allocator, "\\n"),
+        '\r' => try output.appendSlice(allocator, "\\r"),
+        '\t' => try output.appendSlice(allocator, "\\t"),
+        0...7,
+        11,
+        12,
+        14...31,
+        => {
+            const hex = "0123456789abcdef";
+            try output.appendSlice(allocator, "\\u00");
+            try output.append(allocator, hex[@intCast(byte >> 4)]);
+            try output.append(allocator, hex[@intCast(byte & 0x0f)]);
+        },
+        else => try output.append(allocator, byte),
+    };
+    try output.append(allocator, '"');
+}
+
+fn appendStringArray(allocator: std.mem.Allocator, output: *std.ArrayList(u8), values: []const []const u8) !void {
+    try output.append(allocator, '[');
+    for (values, 0..) |value, index| {
+        if (index > 0) try output.appendSlice(allocator, ", ");
+        try appendJsonString(allocator, output, value);
+    }
+    try output.append(allocator, ']');
+}
+
+fn appendInvariantIdsJson(
+    allocator: std.mem.Allocator,
+    output: *std.ArrayList(u8),
+    invariants: []const ProposedInvariant,
+    known: bool,
+) !void {
+    try output.append(allocator, '[');
+    var emitted: usize = 0;
+    for (invariants) |invariant| {
+        const is_known = invariantExists(invariant.id);
+        if (is_known != known) continue;
+        if (emitted > 0) try output.appendSlice(allocator, ", ");
+        try appendJsonString(allocator, output, invariant.id);
+        emitted += 1;
+    }
+    try output.append(allocator, ']');
+}
+
+fn invariantExists(id: []const u8) bool {
+    _ = causal_run.invariantById(id) catch return false;
     return true;
 }
 
@@ -402,4 +665,45 @@ test "registry patch rejects unsupported schema and unknown enum values" {
     var bad_owner = try std.json.parseFromSlice(ScenarioProposal, std.testing.allocator, bad_owner_json, .{ .ignore_unknown_fields = true });
     defer bad_owner.deinit();
     try std.testing.expectError(error.UnknownOwner, validateScenarioProposal(bad_owner.value));
+}
+
+test "registry patch formats add-scenario JSON text and Zig snippet" {
+    const reports = try formatRegistryPatchReports(std.testing.allocator, .{
+        .source_proposal_path = ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-scenario-proposal.json",
+        .proposal_json = sample_add_scenario_proposal_json,
+    });
+    defer reports.deinit(std.testing.allocator);
+
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"schema\": \"zigeffect.causal.registry-patch.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"patch_status\": \"review-required\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"scenario_conflict\": false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.text, "patch_status: review-required") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.zig, "const learned_dogfood_service_resolution_invariants") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.zig, ".slug = \"learned-dogfood-service-resolution\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.zig, ".owner = .service_resolution") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.zig, "REVIEW: replace this placeholder") != null);
+}
+
+test "registry patch formats none proposal as no-op" {
+    const reports = try formatRegistryPatchReports(std.testing.allocator, .{
+        .source_proposal_path = ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-scenario-proposal.json",
+        .proposal_json = sample_none_proposal_json,
+    });
+    defer reports.deinit(std.testing.allocator);
+
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"patch_status\": \"no-op\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.text, "no registry patch recommended") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.zig, "No registry patch recommended") != null);
+}
+
+test "registry patch formats refine proposal as review guidance" {
+    const reports = try formatRegistryPatchReports(std.testing.allocator, .{
+        .source_proposal_path = ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-scenario-proposal.json",
+        .proposal_json = sample_refine_scenario_proposal_json,
+    });
+    defer reports.deinit(std.testing.allocator);
+
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"recommendation\": \"refine-scenario\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.text, "review existing scenario: causal-scoped-fiber") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.zig, "Review existing scenario entry") != null);
 }
