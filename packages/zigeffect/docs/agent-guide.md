@@ -398,6 +398,17 @@ leave scenario-specific artifacts:
 zig build causal-capture-missing-service
 ```
 
+Use the controlled package-test failure fixture to prove the package failure
+artifact lane while keeping the real package gate green:
+
+```sh
+zig build causal-package-failure-fixture
+```
+
+This command runs an intentionally failing Zig test through the causal command
+harness. It exits zero because the failure is expected and writes
+`package-tests-failure-fixture` artifacts for query-based inspection.
+
 Use the normal package-test gate while changing `zigeffect` internals:
 
 ```sh

@@ -498,6 +498,9 @@ metrics, and traces.
   development-loop query reports for newer saved artifacts.
 - Delivered: default `zig build test` now runs through the causal package-test
   harness, with `test-raw` kept as the unwrapped unit-test step.
+- Delivered: a controlled `zig build causal-package-failure-fixture` scenario
+  proves package-shaped test failures write queryable causal artifacts without
+  forcing the real package suite to fail.
 - Delivered: defensive causal event redaction for common secret-shaped
   key/value details, bearer values, and URL credentials.
 - Delivered: an optional `CausalBackend` event sink contract with adapter kinds

@@ -275,6 +275,11 @@ pub fn build(b: *std.Build) void {
     const causal_capture_missing_service_step = b.step("causal-capture-missing-service", "Capture causal artifacts for the missing-service compile-fail scenario");
     causal_capture_missing_service_step.dependOn(&run_causal_capture_missing_service_tool.step);
 
+    const run_causal_package_failure_fixture_tool = b.addRunArtifact(causal_run_tool);
+    run_causal_package_failure_fixture_tool.addArg("package-tests-failure-fixture");
+    const causal_package_failure_fixture_step = b.step("causal-package-failure-fixture", "Capture causal artifacts for an intentional package-test failure fixture");
+    causal_package_failure_fixture_step.dependOn(&run_causal_package_failure_fixture_tool.step);
+
     const run_causal_package_test_tool = b.addRunArtifact(causal_run_tool);
     run_causal_package_test_tool.addArg("package-tests");
     const test_step = b.step("test", "Run zigeffect tests with causal failure capture");

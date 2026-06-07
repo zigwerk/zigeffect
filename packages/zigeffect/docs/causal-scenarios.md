@@ -30,6 +30,12 @@ Capture the expected missing-service compile-fail scenario:
 zig build causal-capture-missing-service
 ```
 
+Capture the expected package-test failure fixture:
+
+```sh
+zig build causal-package-failure-fixture
+```
+
 Compare two saved causal JSON artifacts:
 
 ```sh
@@ -51,6 +57,10 @@ zig build causal-dev-loop -- after
 - `package-tests`
   Owner: `package`
   Purpose: run the broad zigeffect test suite with causal failure capture.
+- `package-tests-failure-fixture`
+  Owner: `package`
+  Purpose: prove package-shaped test failures write causal command artifacts
+  without breaking the real package gate.
 - `causal-scoped-fiber`
   Owner: `fiber_runtime`
   Purpose: verify scoped fiber interruption causal examples stay healthy.
@@ -166,3 +176,10 @@ If package tests fail, the loop writes the same `package-tests` failure
 artifacts as the default `zig build test` causal wrapper and exits nonzero.
 Use `zig build test-raw` only when debugging the unwrapped package-test binary;
 `zig build causal-dev-test` remains an explicit alias for the causal wrapper.
+
+Use `zig build causal-package-failure-fixture` when an agent needs to prove the
+package failure capture lane itself. It writes:
+
+- `.zig-cache/causal-artifacts/zigeffect-causal-package-tests-failure-fixture.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-package-tests-failure-fixture.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-package-tests-failure-fixture.dot`

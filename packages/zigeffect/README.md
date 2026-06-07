@@ -206,6 +206,18 @@ cd packages/zigeffect
 zig build causal-capture-missing-service
 ```
 
+Prove the package-test failure lane without breaking real package tests:
+
+```bash
+cd packages/zigeffect
+zig build causal-package-failure-fixture
+```
+
+This runs one intentionally failing Zig test through the causal command
+harness. The outer build step exits zero because the failure is expected, and it
+writes `package-tests-failure-fixture` artifacts that agents can query before
+trusting the real package-test failure lane.
+
 Run package tests through the causal development harness:
 
 ```bash

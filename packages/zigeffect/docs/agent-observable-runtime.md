@@ -873,6 +873,11 @@ writes `package-tests` artifacts if those tests fail during development.
 `zig build causal-dev-test` is an explicit alias for the causal package-test
 harness.
 
+`zig build causal-package-failure-fixture` is the package failure-lane
+self-test. It runs an intentionally failing Zig test through the same causal
+command harness and writes `package-tests-failure-fixture` artifacts while the
+outer build step exits zero because that failure is expected.
+
 `zig build causal-catalog` prints the current scenario registry and invariant
 catalog. Agents should use it to choose the smallest relevant scenario before
 changing runtime behavior, and should add a new scenario when a bug teaches a

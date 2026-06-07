@@ -103,6 +103,16 @@ const package_tests_argv: []const []const u8 = &.{
     "test-raw",
 };
 
+const package_tests_failure_fixture_argv: []const []const u8 = &.{
+    "zig",
+    "test",
+    "test/fixtures/causal_package_failure.zig",
+    "--cache-dir",
+    ".zig-cache/causal-run-package-failure-fixture-cache",
+    "--global-cache-dir",
+    ".zig-cache/causal-run-global-cache",
+};
+
 const causal_scoped_fiber_argv: []const []const u8 = &.{
     "zig",
     "test",
@@ -202,6 +212,16 @@ const scenario_registry: []const Scenario = &.{
         .finding_policy = .failure_artifact_on_command_failure,
         .invariant_ids = package_test_invariants,
         .argv = package_tests_argv,
+    },
+    .{
+        .slug = "package-tests-failure-fixture",
+        .label = "Package Tests Failure Fixture",
+        .expectation = .expected_failure,
+        .owner = .package,
+        .purpose = "prove package-shaped test failures write causal command artifacts without breaking the real package gate",
+        .finding_policy = .expected_failure_command_emits_assertion,
+        .invariant_ids = package_test_invariants,
+        .argv = package_tests_failure_fixture_argv,
     },
     .{
         .slug = "causal-scoped-fiber",
@@ -648,6 +668,22 @@ test "package test failure artifacts use package paths and causal ci report" {
     try std.testing.expect(std.mem.indexOf(u8, artifacts.json, "package test failure") != null);
 }
 
+test "package failure fixture artifacts preserve fixture marker and next query" {
+    const scenario = try scenarioByName("package-tests-failure-fixture");
+    const artifacts = try buildFailureArtifacts(std.testing.allocator, scenario, .{
+        .term = .{ .exited = 1 },
+        .stdout = "",
+        .stderr = "causal package failure fixture marker",
+    });
+    defer artifacts.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 1), artifacts.finding_count);
+    try std.testing.expect(std.mem.indexOf(u8, artifacts.report, "program: zigeffect command: package-tests-failure-fixture") != null);
+    try std.testing.expect(std.mem.indexOf(u8, artifacts.report, "finding event=3 kind=assertion_failure") != null);
+    try std.testing.expect(std.mem.indexOf(u8, artifacts.report, "- causal.cause 3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, artifacts.json, "causal package failure fixture marker") != null);
+}
+
 test "successful command artifacts record success with no findings" {
     const scenario = try scenarioByName("causal-scoped-fiber");
     const artifacts = try buildCommandArtifacts(std.testing.allocator, scenario, .{
@@ -680,6 +716,21 @@ test "scenario registry records owners purposes policies invariants and paths" {
     defer paths.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings(
         ".zig-cache/causal-artifacts/zigeffect-causal-causal-scoped-fiber.json",
+        paths.json_path,
+    );
+}
+
+test "package failure fixture scenario is registered as expected package failure" {
+    const scenario = try scenarioByName("package-tests-failure-fixture");
+    try std.testing.expectEqual(RuntimeSubsystem.package, scenario.owner);
+    try std.testing.expectEqual(Expectation.expected_failure, scenario.expectation);
+    try std.testing.expectEqual(ExpectedFindingsPolicy.expected_failure_command_emits_assertion, scenario.finding_policy);
+    try std.testing.expect(argvContains(scenario.argv, "test/fixtures/causal_package_failure.zig"));
+
+    const paths = try artifactPaths(std.testing.allocator, scenario.slug);
+    defer paths.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-package-tests-failure-fixture.json",
         paths.json_path,
     );
 }
