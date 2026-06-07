@@ -49,6 +49,25 @@ const ScenarioProposalReports = struct {
     }
 };
 
+const ScenarioProposalPaths = struct {
+    verdict_json: []const u8,
+    diagnosis_text: []const u8,
+    remediation_plan_md: []const u8,
+    audit_chain_json: []const u8,
+    output_json: []const u8,
+    output_text: []const u8,
+
+    fn deinit(self: ScenarioProposalPaths, allocator: std.mem.Allocator, options: Options) void {
+        if (options.scenario_slug == null) return;
+        allocator.free(self.verdict_json);
+        allocator.free(self.diagnosis_text);
+        allocator.free(self.remediation_plan_md);
+        allocator.free(self.audit_chain_json);
+        allocator.free(self.output_json);
+        allocator.free(self.output_text);
+    }
+};
+
 const Verdict = struct {
     schema: []const u8,
     schema_version: u32,
@@ -122,6 +141,45 @@ fn scenarioScenarioProposalTextPath(allocator: std.mem.Allocator, scenario_slug:
         "{s}/zigeffect-causal-dev-loop-{s}-scenario-proposal.txt",
         .{ causal_run.artifact_dir, scenario_slug },
     );
+}
+
+fn defaultScenarioProposalPaths() ScenarioProposalPaths {
+    return .{
+        .verdict_json = causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-verdict.json",
+        .diagnosis_text = causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-diagnosis.txt",
+        .remediation_plan_md = causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-remediation-plan.md",
+        .audit_chain_json = causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-audit-chain.json",
+        .output_json = defaultScenarioProposalJsonPath(),
+        .output_text = defaultScenarioProposalTextPath(),
+    };
+}
+
+fn scenarioScenarioProposalPaths(allocator: std.mem.Allocator, scenario_slug: []const u8) !ScenarioProposalPaths {
+    const verdict_json = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-verdict.json", .{ causal_run.artifact_dir, scenario_slug });
+    errdefer allocator.free(verdict_json);
+    const diagnosis_text = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-diagnosis.txt", .{ causal_run.artifact_dir, scenario_slug });
+    errdefer allocator.free(diagnosis_text);
+    const remediation_plan_md = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-remediation-plan.md", .{ causal_run.artifact_dir, scenario_slug });
+    errdefer allocator.free(remediation_plan_md);
+    const audit_chain_json = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-audit-chain.json", .{ causal_run.artifact_dir, scenario_slug });
+    errdefer allocator.free(audit_chain_json);
+    const output_json = try scenarioScenarioProposalJsonPath(allocator, scenario_slug);
+    errdefer allocator.free(output_json);
+    const output_text = try scenarioScenarioProposalTextPath(allocator, scenario_slug);
+
+    return .{
+        .verdict_json = verdict_json,
+        .diagnosis_text = diagnosis_text,
+        .remediation_plan_md = remediation_plan_md,
+        .audit_chain_json = audit_chain_json,
+        .output_json = output_json,
+        .output_text = output_text,
+    };
+}
+
+fn scenarioProposalPathsForOptions(allocator: std.mem.Allocator, options: Options) !ScenarioProposalPaths {
+    if (options.scenario_slug) |slug| return scenarioScenarioProposalPaths(allocator, slug);
+    return defaultScenarioProposalPaths();
 }
 
 fn parseOptions(args: []const []const u8) !Options {
@@ -723,6 +781,76 @@ fn appendIdLine(allocator: std.mem.Allocator, output: *std.ArrayList(u8), label:
     try output.append(allocator, '\n');
 }
 
+fn usage() []const u8 {
+    return "usage: zig build causal-scenario-proposal -- local [scenario]\n";
+}
+
+fn failUsage(err: anyerror) noreturn {
+    std.debug.print("causal-scenario-proposal error: {s}\n{s}", .{ @errorName(err), usage() });
+    std.process.exit(2);
+}
+
+fn readRequiredArtifact(io: std.Io, allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => error.MissingScenarioProposalInput,
+        else => return err,
+    };
+}
+
+fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
+    const slash = std.mem.lastIndexOfScalar(u8, path, '/') orelse return error.InvalidArtifactPath;
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(io, path[0..slash]);
+    try cwd.writeFile(io, .{ .sub_path = path, .data = contents });
+}
+
+fn runLocal(init: std.process.Init, options: Options) !void {
+    const allocator = init.gpa;
+    const paths = try scenarioProposalPathsForOptions(allocator, options);
+    defer paths.deinit(allocator, options);
+
+    const verdict_json = try readRequiredArtifact(init.io, allocator, paths.verdict_json);
+    defer allocator.free(verdict_json);
+    const diagnosis_text = try readRequiredArtifact(init.io, allocator, paths.diagnosis_text);
+    defer allocator.free(diagnosis_text);
+    const remediation_plan_text = try readRequiredArtifact(init.io, allocator, paths.remediation_plan_md);
+    defer allocator.free(remediation_plan_text);
+    const audit_chain_json = try readRequiredArtifact(init.io, allocator, paths.audit_chain_json);
+    defer allocator.free(audit_chain_json);
+
+    const reports = try formatScenarioProposalReports(allocator, .{
+        .options = options,
+        .verdict_path = paths.verdict_json,
+        .diagnosis_path = paths.diagnosis_text,
+        .remediation_plan_path = paths.remediation_plan_md,
+        .audit_chain_path = paths.audit_chain_json,
+        .verdict_json = verdict_json,
+        .diagnosis_text = diagnosis_text,
+        .remediation_plan_text = remediation_plan_text,
+        .audit_chain_json = audit_chain_json,
+    });
+    defer reports.deinit(allocator);
+
+    try writeArtifact(init.io, paths.output_json, reports.json);
+    try writeArtifact(init.io, paths.output_text, reports.text);
+    std.debug.print("{s}", .{reports.text});
+}
+
+pub fn main(init: std.process.Init) !void {
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    const options = parseOptions(args) catch |err| failUsage(err);
+    runLocal(init, options) catch |err| switch (err) {
+        error.MissingScenarioProposalInput,
+        error.UnsupportedVerdictSchema,
+        error.UnsupportedAuditChainSchema,
+        error.ModeMismatch,
+        error.UnknownMode,
+        error.InvalidArtifactPath,
+        => failUsage(err),
+        else => return err,
+    };
+}
+
 test "scenario proposal default and scenario paths are deterministic" {
     try std.testing.expectEqualStrings(
         causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-scenario-proposal.json",
@@ -983,4 +1111,47 @@ test "scenario proposal reports no learning recommendation for clear scenario ev
     try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"proposed_invariants\": []") != null);
     try std.testing.expect(std.mem.indexOf(u8, reports.text, "recommendation: none") != null);
     try std.testing.expect(std.mem.indexOf(u8, reports.text, "proposed scenario: none") != null);
+}
+
+test "scenario proposal CLI paths include inputs and outputs for default and scenario" {
+    const default_options = try parseOptions(&.{ "zigeffect-causal-scenario-proposal", "local" });
+    const default_paths = try scenarioProposalPathsForOptions(std.testing.allocator, default_options);
+    defer default_paths.deinit(std.testing.allocator, default_options);
+
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-verdict.json",
+        default_paths.verdict_json,
+    );
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-audit-chain.json",
+        default_paths.audit_chain_json,
+    );
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-scenario-proposal.json",
+        default_paths.output_json,
+    );
+
+    const scenario_options = try parseOptions(&.{ "zigeffect-causal-scenario-proposal", "local", "causal-scoped-fiber" });
+    const scenario_paths = try scenarioProposalPathsForOptions(std.testing.allocator, scenario_options);
+    defer scenario_paths.deinit(std.testing.allocator, scenario_options);
+
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-verdict.json",
+        scenario_paths.verdict_json,
+    );
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-remediation-plan.md",
+        scenario_paths.remediation_plan_md,
+    );
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-scenario-proposal.txt",
+        scenario_paths.output_text,
+    );
+}
+
+test "scenario proposal usage names local shape" {
+    try std.testing.expectEqualStrings(
+        "usage: zig build causal-scenario-proposal -- local [scenario]\n",
+        usage(),
+    );
 }
