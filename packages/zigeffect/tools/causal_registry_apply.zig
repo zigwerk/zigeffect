@@ -5,6 +5,7 @@ const readiness_suffix = "-registry-application-readiness.json";
 const application_suffix = "-registry-application";
 const readiness_schema = "zigeffect.causal.registry-application-readiness.v1";
 const application_schema = "zigeffect.causal.registry-application.v1";
+const scenario_docs_path = "docs/causal-scenarios.md";
 
 const Mode = enum {
     plan,
@@ -648,6 +649,72 @@ fn appendJsonString(allocator: std.mem.Allocator, output: *std.ArrayList(u8), va
         else => try output.append(allocator, byte),
     };
     try output.append(allocator, '"');
+}
+
+fn readRequiredArtifact(io: std.Io, allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => error.MissingReadinessInput,
+        else => return err,
+    };
+}
+
+fn readOptionalArtifact(io: std.Io, allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => return allocator.dupe(u8, ""),
+        else => return err,
+    };
+}
+
+fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
+    const slash = std.mem.lastIndexOfScalar(u8, path, '/') orelse return error.InvalidArtifactPath;
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(io, path[0..slash]);
+    try cwd.writeFile(io, .{ .sub_path = path, .data = contents });
+}
+
+fn runFromReadiness(init: std.process.Init, options: Options) !void {
+    const allocator = init.gpa;
+    const readiness_json = try readRequiredArtifact(init.io, allocator, options.readiness_path);
+    defer allocator.free(readiness_json);
+    const scenario_docs = try readOptionalArtifact(init.io, allocator, scenario_docs_path);
+    defer allocator.free(scenario_docs);
+
+    const reports = try formatApplicationReports(allocator, .{
+        .source_readiness_path = options.readiness_path,
+        .readiness_json = readiness_json,
+        .mode = options.mode,
+        .applied_by = options.applied_by,
+        .policy = options.policy,
+        .reason = options.reason,
+        .verified_commands = options.verified_commands,
+        .scenario_docs = scenario_docs,
+    });
+    defer reports.deinit(allocator);
+
+    const paths = try applicationPathsFromReadiness(allocator, options.readiness_path);
+    defer paths.deinit(allocator);
+
+    try writeArtifact(init.io, paths.json, reports.json);
+    try writeArtifact(init.io, paths.text, reports.text);
+    std.debug.print("{s}", .{reports.text});
+}
+
+pub fn main(init: std.process.Init) !void {
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    const options = parseOptions(init.gpa, args) catch |err| failUsage(err);
+    defer options.deinit(init.gpa);
+    runFromReadiness(init, options) catch |err| switch (err) {
+        error.MissingReadinessInput,
+        error.InvalidReadinessPath,
+        error.InvalidArtifactPath,
+        error.InvalidRegistryPatchPath,
+        error.UnsupportedReadinessSchema,
+        error.UnknownReadinessStatus,
+        error.ReadinessAlreadyApplied,
+        error.MissingReason,
+        => failUsage(err),
+        else => return err,
+    };
 }
 
 const sample_applicable_readiness_json =
