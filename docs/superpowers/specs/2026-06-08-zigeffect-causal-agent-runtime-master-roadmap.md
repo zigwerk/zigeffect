@@ -307,10 +307,11 @@ Exit criteria:
 Recommended branches:
 
 ```text
+codex/zigeffect-causal-backend-conformance
 codex/zigeffect-causal-jsonl-backend
+codex/zigeffect-causal-dot-backend-polish
 codex/zigeffect-causal-otel-backend
 codex/zigeffect-causal-graph-history-backend
-codex/zigeffect-causal-backend-conformance
 ```
 
 ### M5: Replay, Forking, And Named Snapshot Comparison
@@ -585,7 +586,7 @@ Status values:
 | M1 Policy engine | delivered | `causal-policy-decision` writes advisory policy artifacts on branch `codex/zigeffect-causal-policy-engine` | merge after final verification |
 | M2 Pervasive causal tests | delivered | `causal-test-matrix`, coverage domains, `causal-readiness`, and shared causal assertions exist on branch `codex/zigeffect-causal-test-matrix` | move to M3 hardening |
 | M3 Production hardening | delivered | bounded store, broader redaction, sampling, taxonomy, schema/taxonomy compatibility fixtures, and artifact string-size limits delivered | move to M4 backend conformance |
-| M4 Durable backends | in progress | backend boundary and reusable conformance suite exist | implement JSONL backend first |
+| M4 Durable backends | in progress | backend boundary, reusable conformance suite, and JSONL event sink exist | polish DOT backend next |
 | M5 Replay/snapshots | planned | compare and audit-chain tools exist | design snapshot manifest |
 | M6 Workbench UI | planned | JSON/text/DOT artifacts exist | build read-only artifact viewer |
 | M7 App-facing runtime | planned | core causal vocabulary exists | design request/job adapters |
@@ -594,8 +595,8 @@ Status values:
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-causal-jsonl-backend`
-   - Implement the first production-grade sink behind the conformance contract.
+1. `codex/zigeffect-causal-dot-backend-polish`
+   - Turn DOT export into the next backend-polish slice behind the conformance contract.
 
 ## Risks And Controls
 

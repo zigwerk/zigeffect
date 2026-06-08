@@ -836,6 +836,13 @@ that a backend sees assigned, redacted, bounded stored events; does not receive
 sampled-out events; can observe events before retention drops them; and cannot
 make the deterministic store fail when a backend write fails.
 
+The concrete `json_lines` adapter is `CausalJsonLinesBackendState`. It formats
+`zigeffect.causal.event.v1` rows into a caller-owned byte buffer, with an
+optional max-byte ceiling that fails closed before writing partial rows. Local
+tools own filesystem persistence and rotation; the runtime service owns event
+formatting and backend conformance. Its focused gate is
+`zig build causal-jsonl-backend`.
+
 NenDB is attractive because it is Zig-native and data-oriented, but it should
 remain a backend adapter until the event model proves itself. CockroachDB or
 RoachGraph belongs on the durable-history side of the adapter boundary, not in

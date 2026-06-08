@@ -236,6 +236,30 @@ durability or export evidence may be incomplete. Future backend adapter branches
 must run `zig build causal-backend-conformance` before claiming adapter
 compatibility.
 
+Use `fx.CausalJsonLinesBackendState` when a local or CI harness needs one
+schema-tagged causal event per line while the run is being recorded:
+
+```zig
+var lines = std.ArrayList(u8).empty;
+defer lines.deinit(allocator);
+
+var jsonl_backend = fx.CausalJsonLinesBackendState.init(allocator, &lines, .{
+    .max_bytes = 64 * 1024,
+});
+
+var store = fx.CausalStore.init(allocator);
+store.attachBackend(jsonl_backend.backend());
+defer store.deinit();
+```
+
+The JSONL backend receives the same stored events as every backend: assigned,
+redacted, bounded, and not sampled out. A full row is formatted before it is
+appended; when `max_bytes` would be exceeded, no partial row is written and
+`backendFailureCount()` reports the failed sink write. Pair JSONL files with the
+full causal JSON artifact when agents need retention, sampling, truncation, or
+backend metadata. Run `zig build causal-jsonl-backend` for the focused adapter
+gate.
+
 Causal artifacts also include `event_taxonomy_version`. Version `1` classifies
 logs, metrics, and spans as sampleable observability; runtime lifecycle events
 as structural evidence; and service, scope, resource, fiber, schedule, and

@@ -408,6 +408,13 @@ durability or export evidence may be incomplete. Future backend adapter branches
 must run `zig build causal-backend-conformance` before claiming adapter
 compatibility.
 
+For incremental analysis, prefer JSONL rows from
+`CausalJsonLinesBackendState` when you need to tail or split events. Treat each
+row as an event fact, not as a complete store report. If sink failures are
+nonzero, use the in-memory or full JSON artifact as the authoritative trace and
+describe the JSONL stream as incomplete. Run `zig build causal-jsonl-backend`
+for the focused adapter gate.
+
 `event_taxonomy_version` identifies the event-kind role semantics. Version `1`
 keeps sampleable observability disjoint from finding evidence: logs, metrics,
 and spans may be sampled; service, scope, resource, fiber, schedule, and
