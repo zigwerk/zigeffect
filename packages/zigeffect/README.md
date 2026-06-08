@@ -379,6 +379,7 @@ zig build causal-patch-proposal -- local approved --summary "scope cleanup order
 zig build causal-audit-chain -- local
 zig build causal-scenario-proposal -- local
 zig build causal-scenario-registry-patch -- --from-proposal .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-scenario-proposal.json
+zig build causal-registry-application-readiness -- --from-registry-patch .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-patch.json approve --reason "reviewed registry patch draft" --verified-command "zig build causal-run learned-dogfood-service-resolution" --verified-command "zig build examples"
 ```
 
 For scenario targets, pass the same scenario slug:
@@ -393,6 +394,7 @@ zig build causal-patch-proposal -- local draft causal-scoped-fiber --summary "sc
 zig build causal-audit-chain -- local causal-scoped-fiber
 zig build causal-scenario-proposal -- local causal-scoped-fiber
 zig build causal-scenario-registry-patch -- --from-proposal .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-scenario-proposal.json
+zig build causal-registry-application-readiness -- --from-registry-patch .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-registry-patch.json approve --reason "no registry patch applies"
 ```
 
 `causal-dev-agent` prints the inspection order, `causal-diagnosis` writes
@@ -425,6 +427,15 @@ The JSON schema is `zigeffect.causal.registry-patch.v1`. The Zig file is a
 review draft only; the command never edits `tools/causal_run.zig`, and its
 placeholder argv must be replaced with the smallest reproducing command before
 any manual registry change is treated as coverage.
+`causal-registry-application-readiness` reads that registry patch draft, records
+an explicit `approve` or `reject` review decision, and writes
+`*-registry-application-readiness.json` plus
+`*-registry-application-readiness.txt` with schema
+`zigeffect.causal.registry-application-readiness.v1`. Its status is
+`applicable`, `blocked`, or `not-applicable`; it verifies reviewer intent,
+registry state, placeholder argv replacement, invariant catalog consistency,
+scenario docs, and required verification commands. The gate remains
+non-mutating and always reports `applied=false`.
 
 Compare two saved causal JSON artifacts:
 

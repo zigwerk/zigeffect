@@ -61,13 +61,20 @@ merged into `master`. The repository now contains:
 - `zig build causal-scenario-proposal -- local [scenario]`, which proposes
   reviewed scenario or invariant coverage from verdict, diagnosis,
   remediation-plan, and audit-chain evidence.
+- `zig build causal-scenario-registry-patch -- --from-proposal
+  <scenario-proposal.json>`, which writes review-only JSON/text/Zig registry
+  patch drafts from scenario proposal artifacts.
+- `zig build causal-registry-application-readiness`, which consumes
+  `--from-registry-patch <registry-patch.json>` plus an `approve|reject`
+  decision and writes non-mutating readiness reports before any registry draft
+  is treated as manually applicable.
 
 The baseline proves that agents can cite causal evidence from `zigeffect`
-itself in both local and CI workflows. The next step is to make that chain
-ergonomic enough to use while building core `zigeffect`: a local
-`causal-dev-session` coordinator should run the baseline/assessment sequence,
-assemble the existing reports, and stop before review decisions or source
-mutation.
+itself in both local and CI workflows. The current chain is now ergonomic
+enough to use while building core `zigeffect`: it captures before/after
+evidence, diagnoses it, records review decisions, proposes patch and scenario
+coverage, drafts registry changes, and checks readiness while stopping before
+source or registry mutation.
 
 ## North Star
 
@@ -553,7 +560,7 @@ Review:
 
 ## Delivered Slice Decisions
 
-The Milestone 7 remediation-control chain now has six delivered non-mutating
+The Milestone 7 remediation-control chain now has seven delivered non-mutating
 review slices:
 
 ```sh
@@ -563,20 +570,23 @@ zig build causal-patch-proposal -- local draft|approved [scenario] ...
 zig build causal-audit-chain -- local [scenario]
 zig build causal-scenario-proposal -- local [scenario]
 zig build causal-scenario-registry-patch -- --from-proposal <scenario-proposal.json>
+zig build causal-registry-application-readiness -- --from-registry-patch <registry-patch.json> approve|reject --reason <reason>
 ```
 
 The audit command creates a durable, schema-versioned, pending proposal record.
 The decision command records the human or local-review outcome while preserving
 `applied=false`. Patch proposals, audit-chain reports, scenario proposals, and
-registry patch drafts extend that review boundary without applying source or
+registry patch drafts extend that review boundary. The registry readiness gate
+adds explicit reviewer intent, source-registry checks, docs checks, required
+verification evidence, and `readiness_status` while still applying no source or
 registry changes.
 Together they give zigeffect a safe self-improvement control point: agents can
 cite event ids, source artifacts, verification commands, claim guardrails,
 review state, before/after posture, coverage recommendations, and reviewed
-registry patch drafts before any source-editing workflow is added.
+registry readiness before any source-editing workflow is added.
 
-The next branch should still avoid automatic source mutation. It should build a
-policy-controlled registry application boundary that consumes
-`zigeffect.causal.registry-patch.v1`, verifies explicit reviewer approval,
-checks placeholder argv replacement and scenario conflicts, and only then
-produces an auditable manual-application or guarded-application result.
+The next branch should still keep mutation guarded. It should consume the
+readiness report, require `readiness_status=applicable`, and produce either a
+manual application artifact or a narrowly scoped guarded registry patch backend
+with before/after verification evidence and `applied=true` only after the
+source change actually happens.

@@ -119,6 +119,17 @@ Zig review drafts. The generated Zig snippet never changes
 `tools/causal_run.zig`; replace its placeholder argv with the smallest
 reproducing command before applying a registry entry manually.
 
+Check whether a reviewed registry patch is ready to apply manually:
+
+```sh
+zig build causal-registry-application-readiness -- --from-registry-patch <registry-patch.json> approve --reason "reviewed registry patch draft" --verified-command "zig build examples"
+```
+
+This writes schema `zigeffect.causal.registry-application-readiness.v1` as JSON
+plus text. The report records the reviewer decision, readiness status,
+per-check pass/fail/skipped details, verified commands, and guardrails. It
+never edits `tools/causal_run.zig` and always records `applied=false`.
+
 Generate deterministic advice from a saved causal JSON artifact:
 
 ```sh
@@ -267,6 +278,8 @@ saved bundle; `causal-remediation-plan` writes the remediation-plan artifact;
 `causal-scenario-proposal` writes read-only scenario learning proposal
 artifacts.
 `causal-scenario-registry-patch` writes review-only registry patch artifacts.
+`causal-registry-application-readiness` writes review readiness artifacts for
+registry patch drafts.
 `causal-dev-session` writes the session wrapper artifacts:
 
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json`
@@ -290,6 +303,8 @@ artifacts.
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-patch.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-patch.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-patch.zig`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-application-readiness.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-application-readiness.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session.txt`
 
@@ -302,6 +317,8 @@ write slug-specific loop artifacts. `causal-diagnosis` and
 `causal-audit-chain` adds matching chain comparison artifacts.
 `causal-scenario-proposal` adds matching scenario learning proposal artifacts.
 `causal-scenario-registry-patch` adds matching registry patch artifacts.
+`causal-registry-application-readiness` adds matching review readiness
+artifacts.
 `causal-dev-session` adds matching session wrapper artifacts:
 
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-before.json`
@@ -325,6 +342,8 @@ write slug-specific loop artifacts. `causal-diagnosis` and
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-registry-patch.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-registry-patch.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-registry-patch.zig`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-registry-application-readiness.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-registry-application-readiness.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session-<scenario>.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session-<scenario>.txt`
 
@@ -373,8 +392,14 @@ JSON/text proposal that recommends `add-scenario`, `refine-scenario`, or
 `none`, carries event ids and guardrails forward, and remains read-only.
 Then run `zig build causal-scenario-registry-patch -- --from-proposal <path>`
 to produce JSON/text/Zig registry patch drafts. The generated `.zig` snippet is
-for review only and must not be treated as applied coverage until a reviewer
-updates `tools/causal_run.zig` and runs verification.
+for review only. Run the readiness gate before treating the draft as ready:
+
+```sh
+zig build causal-registry-application-readiness -- --from-registry-patch <registry-patch.json> approve|reject --reason <reason>
+```
+
+The draft remains unapplied until a reviewer updates `tools/causal_run.zig` and
+runs verification.
 
 Expected-failure scenarios are valid loop targets. For example,
 `missing-service-compile-fail` reports `expected_failure_observed` when the

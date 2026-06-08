@@ -552,6 +552,9 @@ metrics, and traces.
   <scenario-proposal.json>` writes review-only JSON/text/Zig registry patch
   drafts from scenario proposal artifacts while never editing
   `tools/causal_run.zig`.
+- Delivered: `zig build causal-registry-application-readiness` writes
+  policy-controlled JSON/text readiness reports for registry patch drafts while
+  never editing `tools/causal_run.zig`.
 - Delivered: `zig build causal-artifacts` prints a deterministic retention
   manifest with upload globs and dogfood, scenario, and dev-loop artifact paths
   for agents and CI.

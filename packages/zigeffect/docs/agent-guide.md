@@ -620,6 +620,23 @@ the `.zig` snippet before manually applying anything to `tools/causal_run.zig`.
 The generated argv is a placeholder until the reviewer replaces it with the
 smallest reproducing command.
 
+Before treating a registry patch as applicable, run the readiness gate:
+
+```sh
+zig build causal-registry-application-readiness -- --from-registry-patch .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-patch.json approve --reason "reviewed registry patch draft" --verified-command "zig build causal-run learned-dogfood-service-resolution" --verified-command "zig build examples"
+zig build causal-registry-application-readiness -- --from-registry-patch .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-registry-patch.json approve --reason "no registry patch applies"
+```
+
+The command writes `*-registry-application-readiness.json` and
+`*-registry-application-readiness.txt` with schema
+`zigeffect.causal.registry-application-readiness.v1`. It records the reviewer,
+policy, decision, reason, verified commands, readiness checks, and
+`readiness_status=applicable|blocked|not-applicable`. It verifies reviewer
+approval, current registry state, placeholder argv replacement, invariant
+catalog consistency, scenario docs, and required verification commands. It
+never edits source or the scenario registry, and every report keeps
+`applied=false`.
+
 Generate advice directly from any saved causal JSON artifact:
 
 ```sh
@@ -687,10 +704,16 @@ already existed on the base commit.
 When a bug teaches a new runtime rule, run
 `zig build causal-scenario-proposal -- local [scenario]` after the audit chain.
 Then run `zig build causal-scenario-registry-patch -- --from-proposal <path>`
-to generate review-only JSON/text/Zig patch drafts. Use those drafts to review
-whether a catalog entry in `tools/causal_run.zig` and documentation in
-`docs/causal-scenarios.md` should be added before claiming the invariant is
-covered.
+to generate review-only JSON/text/Zig patch drafts. Then run the readiness gate
+and inspect the report before claiming the draft is applicable:
+
+```sh
+zig build causal-registry-application-readiness -- --from-registry-patch <registry-patch.json> approve|reject --reason <reason>
+```
+
+Use these artifacts to review whether a catalog entry in `tools/causal_run.zig`
+and documentation in `docs/causal-scenarios.md` should be added before claiming
+the invariant is covered.
 
 Backend adapters are sinks, not the source of truth. Keep tests and local agent
 queries against the in-memory `CausalStore`; use `store.attachBackend` for

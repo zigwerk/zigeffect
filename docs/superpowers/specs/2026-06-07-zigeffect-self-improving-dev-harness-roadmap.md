@@ -317,7 +317,7 @@ Delivered first slice:
 - the command does not edit `tools/causal_run.zig` or mutate the scenario
   registry.
 
-Delivered authoring-support slice:
+Delivered authoring-support and readiness slices:
 
 - `zig build causal-scenario-registry-patch -- --from-proposal
   <scenario-proposal.json>` consumes the scenario proposal artifact and writes
@@ -330,6 +330,16 @@ Delivered authoring-support slice:
 - generated Zig snippets are never applied automatically and retain a
   placeholder argv that must be replaced with the smallest reproducing command
   before registry coverage can be claimed.
+- `zig build causal-registry-application-readiness` consumes registry patch
+  artifacts plus an explicit `approve|reject` decision and writes
+  `*-registry-application-readiness.json` and
+  `*-registry-application-readiness.txt`;
+- readiness reports use schema
+  `zigeffect.causal.registry-application-readiness.v1`;
+- reports record reviewer intent, policy, reason, verified commands,
+  source-registry checks, docs checks, invariant checks, and
+  `readiness_status=applicable|blocked|not-applicable`;
+- the command never edits source or marks the patch applied.
 
 ### Milestone 6: Policy And Approval Engine
 
@@ -458,17 +468,18 @@ Milestone 5's scenario-learning and authoring-support slices are implemented:
 
 ## Next Branch Recommendation
 
-Extend Milestone 5 from reviewable authoring support to policy-controlled
-application readiness:
+Extend Milestone 5 from readiness reporting to a guarded application boundary:
 
-- consume `zigeffect.causal.registry-patch.v1` artifacts as the source of
-  intent;
-- require an explicit reviewer decision artifact before any registry patch can
-  be marked applicable;
-- verify placeholder argv replacement, scenario conflict resolution, invariant
-  catalog consistency, and required docs/test commands;
-- emit an auditable application-readiness report, still without automatic
-  source mutation unless a later branch adds a guarded mutation backend.
+- consume `zigeffect.causal.registry-application-readiness.v1` artifacts as
+  the source of application intent;
+- require `readiness_status=applicable` before any registry patch can be
+  applied or marked applied;
+- preserve the readiness report, registry patch, reviewer decision, and
+  verification commands in the application artifact;
+- either emit a manual-application artifact for human patching or add a narrow
+  guarded backend for registry-only edits;
+- set `applied=true` only after the source change is actually written and
+  before/after verification has been recorded.
 
 Do not implement broad source mutation, durable history, arbitrary snapshot
-comparison, or app-facing adapters in this branch.
+comparison, or app-facing adapters in that branch.
