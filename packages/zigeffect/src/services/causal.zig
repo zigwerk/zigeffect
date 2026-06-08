@@ -1246,39 +1246,112 @@ pub fn formatCausalJson(allocator: Allocator, store: *const CausalStore) Allocat
     return output.toOwnedSlice(allocator);
 }
 
-fn appendDotLabel(output: *std.ArrayList(u8), allocator: Allocator, event: CausalEvent) Allocator.Error!void {
-    try output.append(allocator, '"');
-    try output.appendSlice(allocator, @tagName(event.kind));
-    if (event.label.len > 0) {
-        try output.append(allocator, ' ');
-        for (event.label) |byte| {
-            switch (byte) {
-                '"' => try output.appendSlice(allocator, "\\\""),
-                '\\' => try output.appendSlice(allocator, "\\\\"),
-                '\n', '\r', '\t' => try output.append(allocator, ' '),
-                else => try output.append(allocator, byte),
-            }
+fn appendDotEscaped(output: *std.ArrayList(u8), allocator: Allocator, value: []const u8) Allocator.Error!void {
+    for (value) |byte| {
+        switch (byte) {
+            '"' => try output.appendSlice(allocator, "\\\""),
+            '\\' => try output.appendSlice(allocator, "\\\\"),
+            '\n', '\r', '\t' => try output.append(allocator, ' '),
+            else => try output.append(allocator, byte),
         }
     }
+}
+
+fn appendDotOptionalU64Tooltip(
+    output: *std.ArrayList(u8),
+    allocator: Allocator,
+    label: []const u8,
+    value: ?u64,
+    wrote: *bool,
+) Allocator.Error!void {
+    if (value) |number| {
+        if (wrote.*) try output.append(allocator, ' ');
+        try output.print(allocator, "{s}={d}", .{ label, number });
+        wrote.* = true;
+    }
+}
+
+pub fn appendCausalDotGraphHeader(output: *std.ArrayList(u8), allocator: Allocator) Allocator.Error!void {
+    try output.appendSlice(allocator, "digraph zigeffect_causal {\n");
+    try output.appendSlice(allocator, "  graph [rankdir=\"LR\", labelloc=\"t\", label=\"zigeffect causal graph\"];\n");
+    try output.appendSlice(allocator, "  node [shape=\"box\", style=\"rounded,filled\", fontname=\"Menlo\", fontsize=\"10\"];\n");
+    try output.appendSlice(allocator, "  edge [fontname=\"Menlo\", fontsize=\"9\", color=\"#64748b\"];\n");
+}
+
+pub fn appendCausalDotGraphFooter(output: *std.ArrayList(u8), allocator: Allocator) Allocator.Error!void {
+    try output.appendSlice(allocator, "}\n");
+}
+
+fn dotEventFillColor(kind: CausalEventKind) []const u8 {
+    const taxonomy = causalEventTaxonomy(kind);
+    if (taxonomy.finding_evidence) return "#fff7ed";
+    if (taxonomy.sampleable) return "#eef2ff";
+    return "#f8fafc";
+}
+
+fn dotEventBorderColor(kind: CausalEventKind) []const u8 {
+    const taxonomy = causalEventTaxonomy(kind);
+    if (taxonomy.finding_evidence) return "#c2410c";
+    if (taxonomy.sampleable) return "#4338ca";
+    return "#334155";
+}
+
+fn appendDotEventLabel(output: *std.ArrayList(u8), allocator: Allocator, event: CausalEvent) Allocator.Error!void {
     try output.append(allocator, '"');
+    try output.print(allocator, "event {d}\\n{s}", .{ event.id, @tagName(event.kind) });
+    if (event.label.len > 0) {
+        try output.appendSlice(allocator, "\\n");
+        try appendDotEscaped(output, allocator, event.label);
+    }
+    if (event.status.len > 0) {
+        try output.appendSlice(allocator, "\\nstatus=");
+        try appendDotEscaped(output, allocator, event.status);
+    }
+    try output.append(allocator, '"');
+}
+
+fn appendDotEventTooltip(output: *std.ArrayList(u8), allocator: Allocator, event: CausalEvent) Allocator.Error!void {
+    try output.append(allocator, '"');
+    var wrote = false;
+    try appendDotOptionalU64Tooltip(output, allocator, "run", event.run_id, &wrote);
+    try appendDotOptionalU64Tooltip(output, allocator, "scope", event.scope_id, &wrote);
+    try appendDotOptionalU64Tooltip(output, allocator, "fiber", event.fiber_id, &wrote);
+    try appendDotOptionalU64Tooltip(output, allocator, "trace", event.trace_id, &wrote);
+    try appendDotOptionalU64Tooltip(output, allocator, "span", event.span_id, &wrote);
+    if (event.type_name.len > 0) {
+        if (wrote) try output.append(allocator, ' ');
+        try output.appendSlice(allocator, "type=");
+        try appendDotEscaped(output, allocator, event.type_name);
+        wrote = true;
+    }
+    if (!wrote) try output.appendSlice(allocator, "event");
+    try output.append(allocator, '"');
+}
+
+pub fn appendCausalDotEvent(output: *std.ArrayList(u8), allocator: Allocator, event: CausalEvent) Allocator.Error!void {
+    try output.print(allocator, "  event_{d} [label=", .{event.id});
+    try appendDotEventLabel(output, allocator, event);
+    try output.appendSlice(allocator, ", tooltip=");
+    try appendDotEventTooltip(output, allocator, event);
+    try output.print(
+        allocator,
+        ", fillcolor=\"{s}\", color=\"{s}\"];\n",
+        .{ dotEventFillColor(event.kind), dotEventBorderColor(event.kind) },
+    );
+    if (event.parent_id) |parent_id| {
+        try output.print(allocator, "  event_{d} -> event_{d} [label=\"parent\"];\n", .{ parent_id, event.id });
+    }
 }
 
 pub fn formatCausalDot(allocator: Allocator, store: *const CausalStore) Allocator.Error![]const u8 {
     var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
 
-    try output.appendSlice(allocator, "digraph zigeffect_causal {\n");
+    try appendCausalDotGraphHeader(&output, allocator);
     for (store.events.items) |event| {
-        try output.print(allocator, "  event_{d} [label=", .{event.id});
-        try appendDotLabel(&output, allocator, event);
-        try output.appendSlice(allocator, "];\n");
+        try appendCausalDotEvent(&output, allocator, event);
     }
-    for (store.events.items) |event| {
-        if (event.parent_id) |parent_id| {
-            try output.print(allocator, "  event_{d} -> event_{d};\n", .{ parent_id, event.id });
-        }
-    }
-    try output.appendSlice(allocator, "}\n");
+    try appendCausalDotGraphFooter(&output, allocator);
 
     return output.toOwnedSlice(allocator);
 }

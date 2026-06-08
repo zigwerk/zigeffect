@@ -721,8 +721,9 @@ test "causal json and dot exports are deterministic and redacted" {
     defer std.testing.allocator.free(dot);
 
     try std.testing.expect(std.mem.indexOf(u8, dot, "digraph zigeffect_causal") != null);
-    try std.testing.expect(std.mem.indexOf(u8, dot, "event_1 [label=\"run_started readiness\"]") != null);
-    try std.testing.expect(std.mem.indexOf(u8, dot, "event_1 -> event_2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dot, "graph [rankdir=\"LR\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dot, "event_1 [label=\"event 1\\nrun_started\\nreadiness\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dot, "event_1 -> event_2 [label=\"parent\"]") != null);
 }
 
 test "causal artifacts disclose bounded retention state" {

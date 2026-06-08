@@ -7,6 +7,7 @@ comptime {
     _ = @import("fiber_test.zig");
     _ = @import("causal_backend_conformance_test.zig");
     _ = @import("causal_jsonl_backend_test.zig");
+    _ = @import("causal_dot_backend_test.zig");
     _ = @import("invariants_test.zig");
     _ = @import("layer_test.zig");
     _ = @import("schedule_test.zig");
