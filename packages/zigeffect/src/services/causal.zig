@@ -207,6 +207,10 @@ fn isQuote(byte: u8) bool {
     return byte == '"' or byte == '\'';
 }
 
+fn isSensitiveKeyWrapperClose(byte: u8) bool {
+    return byte == ']';
+}
+
 fn isValueDelimiter(byte: u8) bool {
     return byte == ' ' or
         byte == '\t' or
@@ -334,6 +338,9 @@ fn appendSensitiveKeyRedaction(
     var after_key = key_end;
     if (key_quote) |quote| {
         if (after_key >= value.len or value[after_key] != quote) return false;
+        after_key += 1;
+    }
+    if (after_key < value.len and isSensitiveKeyWrapperClose(value[after_key])) {
         after_key += 1;
     }
 

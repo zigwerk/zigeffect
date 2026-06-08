@@ -895,6 +895,43 @@ test "causal redaction handles quoted json-ish keys and key-bound personal data"
     try std.testing.expect(std.mem.indexOf(u8, report, "safe") != null);
 }
 
+test "causal redaction covers sql-ish config payloads without free-text pii scanning" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    _ = try store.record(.{
+        .kind = .log_recorded,
+        .label = "owner email 'owner@example.com' contact plain@example.com",
+        .type_name = "headers['authorization']='Bearer raw-bracket' contact plain@example.com",
+        .status = "config[database_url]=\"postgresql://root:raw-db@db/app\" retry_count:2",
+        .redacted_detail = "select user_ip '198.51.100.42' attempt=2 delay_ms=null decision=exhausted",
+    });
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+
+    const event = snapshot.events[0];
+    try std.testing.expect(std.mem.indexOf(u8, event.label, "owner@example.com") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.label, "email '<redacted>'") != null);
+    try std.testing.expect(std.mem.indexOf(u8, event.label, "plain@example.com") != null);
+    try std.testing.expect(std.mem.indexOf(u8, event.type_name, "raw-bracket") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.type_name, "headers['authorization']='<redacted>'") != null);
+    try std.testing.expect(std.mem.indexOf(u8, event.type_name, "plain@example.com") != null);
+    try std.testing.expect(std.mem.indexOf(u8, event.status, "raw-db") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.status, "config[database_url]=\"<redacted>\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, event.status, "retry_count:2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "198.51.100.42") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "attempt=2 delay_ms=null decision=exhausted") != null);
+
+    const json = try fx.formatCausalJson(std.testing.allocator, &store);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "owner@example.com") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "raw-bracket") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "raw-db") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "198.51.100.42") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "plain@example.com") != null);
+}
+
 test "causal redaction preserves safe retry diagnostics" {
     var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
