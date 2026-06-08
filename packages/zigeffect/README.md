@@ -413,6 +413,7 @@ Name an existing causal JSON artifact with a snapshot manifest:
 ```bash
 zig build causal-snapshot -- capture baseline
 zig build causal-snapshot -- manifest baseline .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json --format text
+zig build causal-snapshot -- compare baseline baseline
 ```
 
 `causal-snapshot` writes or prints `zigeffect.causal.snapshot-manifest.v1`
@@ -421,6 +422,10 @@ snapshot name, artifact path, event count, event id range, finding count, replay
 feasibility, warnings, and next query commands. It does not embed events, rerun
 tests, or make replay feasible yet; query and compare the underlying causal JSON
 artifact for event-level evidence.
+
+`causal-snapshot compare` accepts snapshot names or manifest JSON paths. It
+reads each manifest's referenced causal JSON artifact, prints snapshot-level
+event and finding deltas, and embeds the existing `causal-compare` event diff.
 
 Run a named scenario from the catalog:
 

@@ -574,6 +574,13 @@ artifact, records event counts and finding posture, and prints stable next
 query commands. Snapshot manifests do not embed events and do not make replay
 feasible yet; keep citing the underlying causal JSON event ids.
 
+Compare named snapshots with
+`zig build causal-snapshot -- compare <left> <right>`. Use names such as
+`baseline` and `after` when manifests were written to the default artifact
+directory, or pass explicit manifest JSON paths when reviewing uploaded CI
+artifacts. Treat the report as a state-level summary; query the underlying
+causal JSON paths for event-level evidence.
+
 For normal core-runtime development, prefer the coordinated session command:
 
 ```sh

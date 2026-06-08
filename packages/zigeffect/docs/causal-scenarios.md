@@ -53,7 +53,12 @@ Name an existing causal JSON artifact with a snapshot manifest:
 ```sh
 zig build causal-snapshot -- capture <name> [scenario]
 zig build causal-snapshot -- manifest <name> <artifact.json> --format text
+zig build causal-snapshot -- compare <left> <right>
 ```
+
+Snapshot compare reads existing snapshot manifests and their referenced causal
+JSON artifacts. It does not rerun scenarios or make replay feasible; use it to
+summarize named-state deltas before querying event-level evidence.
 
 Run the two-phase causal development loop:
 

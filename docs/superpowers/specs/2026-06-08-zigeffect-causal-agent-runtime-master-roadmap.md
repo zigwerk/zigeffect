@@ -598,7 +598,7 @@ Status values:
 | M2 Pervasive causal tests | delivered | `causal-test-matrix`, coverage domains, `causal-readiness`, and shared causal assertions exist on branch `codex/zigeffect-causal-test-matrix` | move to M3 hardening |
 | M3 Production hardening | delivered | bounded store, broader redaction, sampling, taxonomy, schema/taxonomy compatibility fixtures, and artifact string-size limits delivered | move to M4 backend conformance |
 | M4 Backend adapters | delivered | backend boundary, conformance suite, JSONL sink, polished DOT backend, OTel bridge, graph-history adapter, NenDB storage writer contract, and async stream adapter exist | move to M5 snapshot manifests |
-| M5 Replay/snapshots | in progress | snapshot manifest schema/tool exists; compare and audit-chain tools already exist | build snapshot compare over named manifests |
+| M5 Replay/snapshots | in progress | snapshot manifest schema/tool exists; snapshot compare over named manifests exists; compare and audit-chain tools already exist | build replay feasibility reports for named snapshots |
 | M6 Workbench UI | planned | JSON/text/DOT artifacts exist | build read-only artifact viewer |
 | M7 App-facing runtime | planned | core causal vocabulary exists | design request/job adapters |
 | M8 App remediation gates | deferred | app-facing runtime not started | wait for M7 |
@@ -606,8 +606,8 @@ Status values:
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-causal-snapshot-compare`
-   - Compare named snapshot manifests and their underlying causal JSON artifacts.
+1. `codex/zigeffect-causal-replay-feasibility`
+   - Explain which snapshot events are replayable and which are observational only.
 
 ## Risks And Controls
 

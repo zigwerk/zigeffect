@@ -957,6 +957,11 @@ does not rerun tests or embed the event list. Use
 `zig build causal-snapshot -- manifest <name> <artifact.json> --format text`
 when you only want a stdout report for a specific artifact path.
 
+`zig build causal-snapshot -- compare <left> <right>` compares two snapshot
+manifests by name or path. It reports manifest identity, event/finding deltas,
+manifest warnings, and then embeds `causal-compare` output for the referenced
+causal JSON artifacts.
+
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around
 those pieces. The no-scenario form captures before/after dogfood evidence and
