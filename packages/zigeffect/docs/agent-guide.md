@@ -436,6 +436,14 @@ queries. Treat it as adapter sink history, not durable truth. If
 history as incomplete and fall back to retained store or JSON artifact
 evidence.
 
+Use `CausalNendbStorageBackendState` when the work is specifically about the
+NenDB storage adapter contract. It translates stored events into deterministic
+NenDB-shaped event nodes and parent edges through `CausalNendbGraphWriter`.
+Treat the writer output as sink evidence: if `failedEventCount()` or
+`backendFailureCount()` is nonzero, cite the storage graph as incomplete and
+fall back to retained store, graph-history, JSONL, or full JSON evidence. Run
+`zig build causal-nendb-storage-backend` for the focused adapter gate.
+
 `event_taxonomy_version` identifies the event-kind role semantics. Version `1`
 keeps sampleable observability disjoint from finding evidence: logs, metrics,
 and spans may be sampled; service, scope, resource, fiber, schedule, and
@@ -831,8 +839,8 @@ the invariant is covered.
 
 Backend adapters are sinks, not the source of truth. Keep tests and local agent
 queries against the in-memory `CausalStore`; use `store.attachBackend` for
-JSONL, DOT, OpenTelemetry, embedded graph, or future async adapters. Do not put
-NenDB or OpenTelemetry inside the deterministic core.
+JSONL, DOT, OpenTelemetry, embedded graph, NenDB storage, or future async
+adapters. Do not put NenDB or OpenTelemetry inside the deterministic core.
 
 Future causal findings should be treated as evidence pointers, not conclusions.
 An agent should cite event ids, explain whether an edge is causal or merely

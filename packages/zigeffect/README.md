@@ -283,6 +283,16 @@ before package-backed storage is wired in. Query the backend with `snapshot`,
 `eventsByFiber`. Run `zig build causal-graph-history-backend` for the focused
 adapter gate.
 
+Use `fx.CausalNendbStorageBackendState` when a harness needs to verify the
+event-to-NenDB graph storage contract. It maps stored causal events into
+NenDB-shaped node writes and parent-edge writes through a caller-provided
+`CausalNendbGraphWriter`, then keeps scan-based local history for immediate
+agent queries. This branch intentionally avoids a direct upstream NenDB package
+dependency because the current Zig package shape is not stable enough for this
+build; a future wrapper can target `nendb.EmbeddedDB.addNode`, `addEdge`, and
+`flush`. Run `zig build causal-nendb-storage-backend` for the focused adapter
+gate.
+
 Causal artifacts also include `event_taxonomy_version`. Version `1` classifies
 logs, metrics, and spans as sampleable observability; runtime lifecycle events
 as structural evidence; and service, scope, resource, fiber, schedule, and

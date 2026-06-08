@@ -822,9 +822,8 @@ adapt the same event sink contract:
 - `dot`: artifact export for visual graph debugging
 - `opentelemetry`: dependency-free span-event/log-record bridge for production
   span and event ecosystems
-- `nendb_graph`: embedded graph-history query adapter for local agents; this
-  branch is dependency-free while the next NenDB slice wires package-backed
-  storage behind the same query contract
+- `nendb_graph`: embedded graph-history query adapter plus a NenDB-shaped
+  storage writer contract for local agents
 - `cockroach_history`: reserved durable-history kind, not part of the current
   NenDB-only roadmap sequence
 - `async_stream`: future non-blocking event stream
@@ -859,9 +858,17 @@ The concrete `nendb_graph` adapter is `CausalGraphHistoryBackendState`. It
 clones stored causal events into an adapter-owned history and answers
 `snapshot`, `cause`, `lineage`, `eventsByKind`, `eventsByRun`, `eventsByScope`,
 and `eventsByFiber` queries even after the deterministic store has trimmed its
-retained event window. This branch is scan-based and dependency-free; the next
-NenDB adapter slice can replace the storage engine without changing the backend
-hook. Its focused gate is `zig build causal-graph-history-backend`.
+retained event window. This scan-only adapter remains dependency-free. Its
+focused gate is `zig build causal-graph-history-backend`.
+
+The concrete NenDB storage contract is `CausalNendbStorageBackendState`. It
+maps stored causal events into deterministic `CausalNendbWrite` values: one
+event node plus an optional `causal_parent` edge. The backend calls an injected
+`CausalNendbGraphWriter` before appending local history, so writer failures are
+observable and fail closed. This branch does not add a direct upstream NenDB
+dependency; a future wrapper can adapt `nendb.EmbeddedDB.addNode`, `addEdge`,
+and `flush` once the upstream package can be pinned cleanly. Its focused gate is
+`zig build causal-nendb-storage-backend`.
 
 ## Derived Findings
 
@@ -1006,8 +1013,8 @@ Candidate adapters:
 - JSON Lines artifact adapter for tools and CI;
 - DOT adapter for visualization;
 - OpenTelemetry adapter for production span ecosystems;
-- NenDB embedded graph adapter for local/agent graph queries and package-backed
-  graph storage;
+- NenDB embedded graph adapter for local/agent graph queries and storage-writer
+  contracts;
 - future async backend event streams.
 
 ### Phase 8: Controlled Remediation
