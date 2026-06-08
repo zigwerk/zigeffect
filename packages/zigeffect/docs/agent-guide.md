@@ -637,6 +637,22 @@ catalog consistency, scenario docs, and required verification commands. It
 never edits source or the scenario registry, and every report keeps
 `applied=false`.
 
+After readiness, record the application boundary:
+
+```sh
+zig build causal-registry-apply -- --from-readiness .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-application-readiness.json plan --reason "prepare manual registry application"
+zig build causal-registry-apply -- --from-readiness .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-application-readiness.json record-applied --reason "registry and docs updated" --verified-command "zig build causal-run learned-dogfood-service-resolution" --verified-command "zig build examples" --verified-command "zig build test --summary none"
+```
+
+The command writes `*-registry-application.json` and
+`*-registry-application.txt` with schema
+`zigeffect.causal.registry-application.v1`. Use `plan` before manual source
+application; it keeps `applied=false`. Use `record-applied` only after the
+reviewed registry/docs update exists in source and after the verification
+commands have been run; it sets `applied=true` only when source-state and
+verification checks pass. The command records application state but does not
+silently mutate source.
+
 Generate advice directly from any saved causal JSON artifact:
 
 ```sh
@@ -709,6 +725,12 @@ and inspect the report before claiming the draft is applicable:
 
 ```sh
 zig build causal-registry-application-readiness -- --from-registry-patch <registry-patch.json> approve|reject --reason <reason>
+```
+
+Then preserve the application boundary:
+
+```sh
+zig build causal-registry-apply -- --from-readiness <readiness.json> plan|record-applied --reason <reason>
 ```
 
 Use these artifacts to review whether a catalog entry in `tools/causal_run.zig`

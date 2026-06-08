@@ -130,6 +130,19 @@ plus text. The report records the reviewer decision, readiness status,
 per-check pass/fail/skipped details, verified commands, and guardrails. It
 never edits `tools/causal_run.zig` and always records `applied=false`.
 
+Record the registry application boundary:
+
+```sh
+zig build causal-registry-apply -- --from-readiness <registry-application-readiness.json> plan --reason "prepare manual registry application"
+zig build causal-registry-apply -- --from-readiness <registry-application-readiness.json> record-applied --reason "registry and docs updated" --verified-command "zig build examples"
+```
+
+This writes schema `zigeffect.causal.registry-application.v1` as JSON plus
+text. `plan` records manual application steps with `applied=false`.
+`record-applied` records `applied=true` only after current source state and
+verification command evidence pass. The command records state; it does not
+silently edit source.
+
 Generate deterministic advice from a saved causal JSON artifact:
 
 ```sh
@@ -280,6 +293,7 @@ artifacts.
 `causal-scenario-registry-patch` writes review-only registry patch artifacts.
 `causal-registry-application-readiness` writes review readiness artifacts for
 registry patch drafts.
+`causal-registry-apply` writes registry application boundary artifacts.
 `causal-dev-session` writes the session wrapper artifacts:
 
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json`
@@ -305,6 +319,8 @@ registry patch drafts.
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-patch.zig`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-application-readiness.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-application-readiness.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-application.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-application.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session.txt`
 
@@ -319,6 +335,7 @@ write slug-specific loop artifacts. `causal-diagnosis` and
 `causal-scenario-registry-patch` adds matching registry patch artifacts.
 `causal-registry-application-readiness` adds matching review readiness
 artifacts.
+`causal-registry-apply` adds matching registry application boundary artifacts.
 `causal-dev-session` adds matching session wrapper artifacts:
 
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-before.json`
@@ -344,6 +361,8 @@ artifacts.
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-registry-patch.zig`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-registry-application-readiness.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-registry-application-readiness.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-registry-application.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-registry-application.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session-<scenario>.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session-<scenario>.txt`
 
@@ -398,8 +417,14 @@ for review only. Run the readiness gate before treating the draft as ready:
 zig build causal-registry-application-readiness -- --from-registry-patch <registry-patch.json> approve|reject --reason <reason>
 ```
 
-The draft remains unapplied until a reviewer updates `tools/causal_run.zig` and
-runs verification.
+Then record the application boundary:
+
+```sh
+zig build causal-registry-apply -- --from-readiness <registry-application-readiness.json> plan|record-applied --reason <reason>
+```
+
+The draft remains unapplied until a reviewer updates `tools/causal_run.zig`,
+runs verification, and records a passing `record-applied` report.
 
 Expected-failure scenarios are valid loop targets. For example,
 `missing-service-compile-fail` reports `expected_failure_observed` when the

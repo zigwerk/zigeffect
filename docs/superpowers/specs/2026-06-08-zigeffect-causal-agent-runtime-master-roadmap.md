@@ -81,6 +81,8 @@ The following capabilities are already merged into `master`:
   <scenario-proposal.json>`.
 - `zig build causal-registry-application-readiness -- --from-registry-patch
   <registry-patch.json> approve|reject --reason <reason>`.
+- `zig build causal-registry-apply`, which records `plan` or
+  `record-applied` registry application artifacts from readiness reports.
 
 These commands establish the review-only chain:
 
@@ -95,10 +97,11 @@ dev session
   -> scenario proposal
   -> registry patch draft
   -> registry application readiness
+  -> registry application record
 ```
 
-The next milestone is the first controlled bridge from readiness evidence to a
-real source update.
+The next milestone is policy-backed decision records that can reuse this
+application evidence without gaining silent mutation authority.
 
 ## Execution Ladder
 
@@ -569,8 +572,8 @@ Status values:
 
 | Milestone | Status | Current Evidence | Next Action |
 | --- | --- | --- | --- |
-| M0 Guarded registry application | active | readiness gate merged at `946d62b` | write design and plan, then implement `causal-registry-apply` |
-| M1 Policy engine | planned | manual decision artifacts exist | design policy schema after M0 lands |
+| M0 Guarded registry application | delivered | `causal-registry-apply` writes `registry-application` artifacts on branch `codex/zigeffect-guarded-registry-application` | merge after final verification |
+| M1 Policy engine | active | manual decision and registry application artifacts exist | design policy schema after M0 lands |
 | M2 Pervasive causal tests | planned | scenario registry and causal test helpers exist | create coverage matrix |
 | M3 Production hardening | planned | bounded store, redaction, sampling, taxonomy delivered | broaden PII/schema/taxonomy fixtures |
 | M4 Durable backends | planned | backend boundary exists | implement conformance suite first |
@@ -582,26 +585,19 @@ Status values:
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-guarded-registry-application`
-   - Write focused design doc.
-   - Write implementation plan.
-   - Add `causal-registry-apply` or final command name.
-   - Produce application JSON/text artifacts.
-   - Keep mutation guarded and registry-scoped.
-
-2. `codex/zigeffect-causal-policy-engine`
+1. `codex/zigeffect-causal-policy-engine`
    - Add policy-decision schema and evaluator.
    - Integrate with readiness/application artifacts.
    - Preserve no-silent-mutation rule.
 
-3. `codex/zigeffect-causal-test-matrix`
+2. `codex/zigeffect-causal-test-matrix`
    - Inventory core runtime invariants.
    - Map each to scenario coverage and test hooks.
 
-4. `codex/zigeffect-causal-pii-redaction-policy`
+3. `codex/zigeffect-causal-pii-redaction-policy`
    - Expand redaction coverage before app-facing traces.
 
-5. `codex/zigeffect-causal-backend-conformance`
+4. `codex/zigeffect-causal-backend-conformance`
    - Establish common adapter contract tests before durable backends.
 
 ## Risks And Controls

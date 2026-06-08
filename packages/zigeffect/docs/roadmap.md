@@ -555,6 +555,10 @@ metrics, and traces.
 - Delivered: `zig build causal-registry-application-readiness` writes
   policy-controlled JSON/text readiness reports for registry patch drafts while
   never editing `tools/causal_run.zig`.
+- Delivered: `zig build causal-registry-apply` writes guarded registry
+  application JSON/text artifacts from readiness reports. `plan` preserves
+  `applied=false`; `record-applied` records `applied=true` only after current
+  source state and verification command evidence pass.
 - Delivered: `zig build causal-artifacts` prints a deterministic retention
   manifest with upload globs and dogfood, scenario, and dev-loop artifact paths
   for agents and CI.
