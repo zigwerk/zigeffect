@@ -580,8 +580,8 @@ NenDB is the current embedded graph adapter direction because it is Zig-native
 and data-oriented. It should remain a backend adapter rather than a core
 dependency: the event taxonomy, query protocol, and memory limits should stay
 stable enough that storage can be swapped without changing runtime hooks.
-CockroachDB and RoachGraph are intentionally outside the current causal-runtime
-sequence.
+SQL-backed durable history adapters are intentionally outside the current
+causal-runtime sequence.
 
 ### Agentic Application Runtime
 
@@ -824,8 +824,6 @@ adapt the same event sink contract:
   span and event ecosystems
 - `nendb_graph`: embedded graph-history query adapter plus a NenDB-shaped
   storage writer contract for local agents
-- `cockroach_history`: reserved durable-history kind, not part of the current
-  NenDB-only roadmap sequence
 - `async_stream`: dependency-free bounded event stream for local agents,
   watch-mode tools, and future app runtime bridges
 
@@ -875,7 +873,7 @@ The concrete `async_stream` adapter is `CausalAsyncStreamBackendState`. It
 queues cloned stored events in order, optionally calls a caller-provided
 `CausalAsyncStreamSink`, and exposes `peekSnapshot`, `drain`, `clear`, and
 `flush` for explicit consumers. It is non-durable and has no scheduler,
-filesystem, network, NenDB, or Cockroach dependency. Its focused gate is
+filesystem, network, NenDB package, or SQL dependency. Its focused gate is
 `zig build causal-async-stream-backend`.
 
 ## Derived Findings

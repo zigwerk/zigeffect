@@ -381,8 +381,8 @@ test "causal report and backend kinds preserve adapter strategy" {
     try std.testing.expectEqual(fx.CausalBackendKind.dot, fx.CausalBackendKind.dot);
     try std.testing.expectEqual(fx.CausalBackendKind.opentelemetry, fx.CausalBackendKind.opentelemetry);
     try std.testing.expectEqual(fx.CausalBackendKind.nendb_graph, fx.CausalBackendKind.nendb_graph);
-    try std.testing.expectEqual(fx.CausalBackendKind.cockroach_history, fx.CausalBackendKind.cockroach_history);
     try std.testing.expectEqual(fx.CausalBackendKind.async_stream, fx.CausalBackendKind.async_stream);
+    try std.testing.expectEqual(@as(usize, 6), std.meta.fields(fx.CausalBackendKind).len);
 }
 
 const FakeCausalBackendState = struct {

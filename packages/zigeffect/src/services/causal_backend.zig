@@ -11,8 +11,6 @@ pub const CausalBackendKind = enum {
     opentelemetry,
     /// Embedded Zig graph-query backend candidate for local agent workflows.
     nendb_graph,
-    /// Durable history backend for app, CI, or fleet audit once semantics are stable.
-    cockroach_history,
     /// Future non-blocking event stream adapter for async runtimes.
     async_stream,
 };

@@ -584,8 +584,8 @@ metrics, and traces.
 - Delivered: defensive causal event redaction for common secret-shaped
   key/value details, bearer values, and URL credentials.
 - Delivered: an optional `CausalBackend` event sink contract with adapter kinds
-  for memory, JSON Lines, DOT, OpenTelemetry, NenDB graph, Cockroach/RoachGraph
-  history, and async streams.
+  for memory, JSON Lines, DOT, OpenTelemetry, NenDB graph/history, and async
+  streams.
 - Still future: production-grade adapter implementations, durable histories,
   a workbench UI, deterministic replay/forking, patch application, and
   comparing arbitrary named audit-chain snapshots.

@@ -523,7 +523,7 @@ M0 guarded registry application
   -> M1 policy engine
   -> M2 pervasive causal tests
   -> M3 production hardening
-  -> M4 durable backends
+  -> M4 NenDB/local backend adapters
   -> M5 replay and snapshots
   -> M6 workbench UI
   -> M7 app-facing runtime
