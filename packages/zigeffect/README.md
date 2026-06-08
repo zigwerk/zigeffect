@@ -210,8 +210,11 @@ Causal artifacts also include `event_taxonomy_version`. Version `1` classifies
 logs, metrics, and spans as sampleable observability; runtime lifecycle events
 as structural evidence; and service, scope, resource, fiber, schedule, and
 assertion events as finding evidence. Finding evidence is never sampleable.
-The local query, compare, and development-loop query reports warn when an
-artifact uses a newer taxonomy version than the tool supports.
+The local query, compare, development-loop query, and advice reports warn when
+an artifact uses a newer schema version, unsupported schema name, newer
+taxonomy version, or unknown event kind. These warnings do not make event ids
+unusable; they tell agents where shape or role semantics may be incomplete for
+the local tool.
 
 Causal event strings are defensively redacted before storage and backend
 emission for common secret, header, cookie, URL credential, query-parameter,

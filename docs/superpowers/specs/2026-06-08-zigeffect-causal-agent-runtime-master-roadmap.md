@@ -583,7 +583,7 @@ Status values:
 | M0 Guarded registry application | delivered | `causal-registry-apply` writes `registry-application` artifacts on branch `codex/zigeffect-guarded-registry-application` | merge after final verification |
 | M1 Policy engine | delivered | `causal-policy-decision` writes advisory policy artifacts on branch `codex/zigeffect-causal-policy-engine` | merge after final verification |
 | M2 Pervasive causal tests | delivered | `causal-test-matrix`, coverage domains, `causal-readiness`, and shared causal assertions exist on branch `codex/zigeffect-causal-test-matrix` | move to M3 hardening |
-| M3 Production hardening | in progress | bounded store, basic redaction, sampling, taxonomy, and broader PII redaction fixtures delivered | continue with schema/taxonomy compatibility fixtures |
+| M3 Production hardening | in progress | bounded store, broader redaction, sampling, taxonomy, and schema/taxonomy compatibility fixtures delivered | continue with artifact size limits |
 | M4 Durable backends | planned | backend boundary exists | implement conformance suite first |
 | M5 Replay/snapshots | planned | compare and audit-chain tools exist | design snapshot manifest |
 | M6 Workbench UI | planned | JSON/text/DOT artifacts exist | build read-only artifact viewer |
@@ -593,10 +593,7 @@ Status values:
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-causal-schema-taxonomy-fixtures`
-   - Lock compatibility tests before durable backends.
-
-2. `codex/zigeffect-causal-backend-conformance`
+1. `codex/zigeffect-causal-backend-conformance`
    - Establish common adapter contract tests before durable backends.
 
 ## Risks And Controls

@@ -383,9 +383,13 @@ keeps sampleable observability disjoint from finding evidence: logs, metrics,
 and spans may be sampled; service, scope, resource, fiber, schedule, and
 assertion evidence must not be sampled.
 
-If a query, compare, or development-loop query report warns that the artifact
-taxonomy is newer than supported, keep using the event citations but avoid
-strong claims about role semantics until the tool is updated.
+If a query, compare, development-loop query report, or advice report warns that
+the artifact schema is newer than supported, keep using event citations but
+assume future root or event fields may have been ignored. If it warns that the
+taxonomy is newer than supported, avoid strong claims about event-kind role
+semantics until the tool is updated. If it warns about an unknown event kind,
+the event id and raw fields are still usable, but query/advice/finding
+interpretation may be incomplete for that kind.
 
 Causal events also redact common secret and key-bound personal-data text before
 storage: password-like fields, API keys, token keys, authorization and proxy

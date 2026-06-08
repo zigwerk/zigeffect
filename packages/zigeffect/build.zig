@@ -222,6 +222,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const causal_artifact_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-artifact-tests",
+        .root_module = causal_artifact_tool_module,
+    });
+    const run_causal_artifact_tool_tests = b.addRunArtifact(causal_artifact_tool_tests);
 
     const causal_query_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_query.zig"),
@@ -324,6 +329,7 @@ pub fn build(b: *std.Build) void {
     run_causal_package_test_tool.addArg("package-tests");
     const test_step = b.step("test", "Run zigeffect tests with causal failure capture");
     test_step.dependOn(&run_causal_package_test_tool.step);
+    test_step.dependOn(&run_causal_artifact_tool_tests.step);
     const causal_dev_test_step = b.step("causal-dev-test", "Run zigeffect tests with causal failure capture");
     causal_dev_test_step.dependOn(&run_causal_package_test_tool.step);
 
@@ -747,6 +753,7 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_report_tool_tests.step);
     examples_step.dependOn(&causal_test_tool.step);
     examples_step.dependOn(&run_causal_test_tool_tests.step);
+    examples_step.dependOn(&run_causal_artifact_tool_tests.step);
     examples_step.dependOn(&causal_query_tool.step);
     examples_step.dependOn(&run_causal_query_tool_tests.step);
     examples_step.dependOn(&causal_advice_tool.step);
