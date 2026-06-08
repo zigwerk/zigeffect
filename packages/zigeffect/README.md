@@ -185,6 +185,10 @@ Causal JSON artifacts use this root header:
     "span_every_n": null,
     "sampled_events": 0
   },
+  "truncation": {
+    "max_event_string_bytes": null,
+    "truncated_fields": 0
+  },
   "events": []
 }
 ```
@@ -205,6 +209,22 @@ unsampled. Sampled-out events consume IDs but do not enter the retained store or
 attached backends. Reports and JSON artifacts disclose `sampled_events` so
 agents know observability evidence may be incomplete without treating the causal
 runtime trace as retention-truncated.
+
+For long-running probes with potentially large labels, statuses, type names, or
+details, configure `max_event_string_bytes` as well as `max_events`:
+
+```zig
+var store = fx.CausalStore.initWithOptions(allocator, .{
+    .max_events = 256,
+    .max_event_string_bytes = 512,
+});
+defer store.deinit();
+```
+
+Truncation is opt-in. Redaction runs before truncation, and attached backends
+receive the bounded strings. If `truncated_fields` is nonzero, cite the
+truncation metadata and avoid claims that depend on complete event payload
+text.
 
 Causal artifacts also include `event_taxonomy_version`. Version `1` classifies
 logs, metrics, and spans as sampleable observability; runtime lifecycle events

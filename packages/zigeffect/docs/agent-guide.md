@@ -356,6 +356,10 @@ Causal JSON artifacts are self-identifying:
     "span_every_n": null,
     "sampled_events": 0
   },
+  "truncation": {
+    "max_event_string_bytes": null,
+    "truncated_fields": 0
+  },
   "events": []
 }
 ```
@@ -377,6 +381,22 @@ For noisy probes, a causal store may also use opt-in deterministic sampling for
 logs, metrics, and spans. If `sampled_events` is nonzero, cite that
 observability evidence may be incomplete. Structural runtime evidence remains
 unsampled unless it is later truncated by retention.
+
+For long-running probes with potentially large labels, statuses, type names, or
+details, configure `max_event_string_bytes` as well as `max_events`:
+
+```zig
+var store = fx.CausalStore.initWithOptions(allocator, .{
+    .max_events = 256,
+    .max_event_string_bytes = 512,
+});
+defer store.deinit();
+```
+
+Truncation is opt-in. Redaction runs before truncation, and attached backends
+receive the bounded strings. If `truncated_fields` is nonzero, cite the
+truncation metadata and avoid claims that depend on complete event payload
+text.
 
 `event_taxonomy_version` identifies the event-kind role semantics. Version `1`
 keeps sampleable observability disjoint from finding evidence: logs, metrics,

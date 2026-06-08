@@ -66,7 +66,8 @@ The following capabilities are already merged into `master`:
 - CI causal workflow, uploaded failure artifacts, generated advice, CI
   handoff, CI verdict, and base/head comparison.
 - `CausalStore.initBounded`, causal schema metadata, event taxonomy metadata,
-  sampling rules, and defensive secret-shaped redaction.
+  sampling rules, defensive secret-shaped redaction, and causal artifact
+  truncation metadata.
 - `zig build causal-dev-loop -- baseline|after [scenario]`.
 - `zig build causal-dev-session -- start|assess|status [scenario]`.
 - `zig build causal-dev-agent -- local [scenario]`.
@@ -583,7 +584,7 @@ Status values:
 | M0 Guarded registry application | delivered | `causal-registry-apply` writes `registry-application` artifacts on branch `codex/zigeffect-guarded-registry-application` | merge after final verification |
 | M1 Policy engine | delivered | `causal-policy-decision` writes advisory policy artifacts on branch `codex/zigeffect-causal-policy-engine` | merge after final verification |
 | M2 Pervasive causal tests | delivered | `causal-test-matrix`, coverage domains, `causal-readiness`, and shared causal assertions exist on branch `codex/zigeffect-causal-test-matrix` | move to M3 hardening |
-| M3 Production hardening | in progress | bounded store, broader redaction, sampling, taxonomy, and schema/taxonomy compatibility fixtures delivered | continue with artifact size limits |
+| M3 Production hardening | delivered | bounded store, broader redaction, sampling, taxonomy, schema/taxonomy compatibility fixtures, and artifact string-size limits delivered | move to M4 backend conformance |
 | M4 Durable backends | planned | backend boundary exists | implement conformance suite first |
 | M5 Replay/snapshots | planned | compare and audit-chain tools exist | design snapshot manifest |
 | M6 Workbench UI | planned | JSON/text/DOT artifacts exist | build read-only artifact viewer |
