@@ -91,8 +91,9 @@ The following capabilities are already merged into `master`:
 - Scenario coverage-domain metadata in `tools/causal_run.zig`, including
   `causal-readiness` for app-shaped observability coverage.
 - Shared structural causal assertion helpers in package tests.
-- `CausalJsonLinesBackendState`, `CausalDotBackendState`, and
-  `CausalOtelBackendState` concrete causal backend adapters.
+- `CausalJsonLinesBackendState`, `CausalDotBackendState`,
+  `CausalOtelBackendState`, and `CausalGraphHistoryBackendState` concrete
+  causal backend adapters.
 
 These commands establish the review-only chain:
 
@@ -280,7 +281,7 @@ codex/zigeffect-causal-schema-taxonomy-fixtures
 codex/zigeffect-causal-artifact-size-limits
 ```
 
-### M4: Durable Causal Backend Adapters
+### M4: Causal Backend Adapters
 
 Goal: implement production-grade causal sinks behind the existing backend
 boundary while keeping the deterministic in-memory store as the source of
@@ -291,8 +292,7 @@ Deliverables:
 - JSON Lines backend implementation and rotation policy.
 - DOT backend polish for graph tooling.
 - OpenTelemetry export adapter.
-- NenDB graph adapter, if the project keeps that direction.
-- Cockroach/RoachGraph durable history adapter.
+- NenDB graph-history adapter and package-backed NenDB storage adapter.
 - Async stream adapter for long-running runtimes.
 - Backend conformance tests using a common event-sink contract.
 - Failure policy for backend write errors.
@@ -303,8 +303,8 @@ Exit criteria:
 - Adapters cannot perturb causal event ordering in the core store.
 - Backend failures are observable and bounded.
 - Tests can run against memory only.
-- Durable backends can reconstruct enough history for agent queries and replay
-  planning.
+- Backend history can reconstruct enough event context for agent queries and
+  replay planning.
 
 Recommended branches:
 
@@ -314,12 +314,13 @@ codex/zigeffect-causal-jsonl-backend
 codex/zigeffect-causal-dot-backend-polish
 codex/zigeffect-causal-otel-backend
 codex/zigeffect-causal-graph-history-backend
+codex/zigeffect-causal-nendb-storage-adapter
 ```
 
 Current branch:
 
 ```text
-codex/zigeffect-causal-graph-history-backend
+codex/zigeffect-causal-nendb-storage-adapter
 ```
 
 ### M5: Replay, Forking, And Named Snapshot Comparison
@@ -594,7 +595,7 @@ Status values:
 | M1 Policy engine | delivered | `causal-policy-decision` writes advisory policy artifacts on branch `codex/zigeffect-causal-policy-engine` | merge after final verification |
 | M2 Pervasive causal tests | delivered | `causal-test-matrix`, coverage domains, `causal-readiness`, and shared causal assertions exist on branch `codex/zigeffect-causal-test-matrix` | move to M3 hardening |
 | M3 Production hardening | delivered | bounded store, broader redaction, sampling, taxonomy, schema/taxonomy compatibility fixtures, and artifact string-size limits delivered | move to M4 backend conformance |
-| M4 Durable backends | in progress | backend boundary, conformance suite, JSONL sink, and polished DOT backend exist | design OpenTelemetry backend |
+| M4 Backend adapters | in progress | backend boundary, conformance suite, JSONL sink, polished DOT backend, OTel bridge, and graph-history adapter exist | design package-backed NenDB storage adapter |
 | M5 Replay/snapshots | planned | compare and audit-chain tools exist | design snapshot manifest |
 | M6 Workbench UI | planned | JSON/text/DOT artifacts exist | build read-only artifact viewer |
 | M7 App-facing runtime | planned | core causal vocabulary exists | design request/job adapters |

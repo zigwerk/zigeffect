@@ -573,21 +573,15 @@ is an explicit adapter boundary:
 - OpenTelemetry export bridges production tracing ecosystems;
 - an embedded graph adapter handles high-volume local and agent-session graph
   queries;
-- durable app or CI history adapters can be added separately when a workflow
-  needs cross-run audit or replay.
+- package-backed NenDB storage can be wired behind the same graph query
+  contract once the adapter boundary is proven.
 
-NenDB is the current embedded graph adapter candidate because it is Zig-native
-and data-oriented. It should not become a core dependency until the event
-taxonomy, query protocol, and memory limits are proven. The first adapter
-contract should be small enough that another backend can replace it without
-changing runtime hooks.
-
-RoachGraph and CockroachDB remain the right direction for canonical application
-data in this repository. They are not the first causal-runtime database because
-the runtime needs local, low-overhead, allocator-aware observation before it
-needs distributed durability. A later durable artifact adapter can map causal
-events into Cockroach-backed storage for CI history, app audit, or fleet-level
-analysis.
+NenDB is the current embedded graph adapter direction because it is Zig-native
+and data-oriented. It should remain a backend adapter rather than a core
+dependency: the event taxonomy, query protocol, and memory limits should stay
+stable enough that storage can be swapped without changing runtime hooks.
+CockroachDB and RoachGraph are intentionally outside the current causal-runtime
+sequence.
 
 ### Agentic Application Runtime
 
@@ -828,8 +822,11 @@ adapt the same event sink contract:
 - `dot`: artifact export for visual graph debugging
 - `opentelemetry`: dependency-free span-event/log-record bridge for production
   span and event ecosystems
-- `nendb_graph`: embedded graph-query adapter candidate for local agents
-- `cockroach_history`: durable app, CI, or fleet audit history
+- `nendb_graph`: embedded graph-history query adapter for local agents; this
+  branch is dependency-free while the next NenDB slice wires package-backed
+  storage behind the same query contract
+- `cockroach_history`: reserved durable-history kind, not part of the current
+  NenDB-only roadmap sequence
 - `async_stream`: future non-blocking event stream
 
 `zig build causal-backend-conformance` is the adapter contract gate. It proves
@@ -858,10 +855,13 @@ an exporter-neutral bridge; OTLP serialization, SDK integration, resources, and
 collector delivery remain future adapter work. Its focused gate is
 `zig build causal-otel-backend`.
 
-NenDB is attractive because it is Zig-native and data-oriented, but it should
-remain a backend adapter until the event model proves itself. CockroachDB or
-RoachGraph belongs on the durable-history side of the adapter boundary, not in
-the deterministic runtime core.
+The concrete `nendb_graph` adapter is `CausalGraphHistoryBackendState`. It
+clones stored causal events into an adapter-owned history and answers
+`snapshot`, `cause`, `lineage`, `eventsByKind`, `eventsByRun`, `eventsByScope`,
+and `eventsByFiber` queries even after the deterministic store has trimmed its
+retained event window. This branch is scan-based and dependency-free; the next
+NenDB adapter slice can replace the storage engine without changing the backend
+hook. Its focused gate is `zig build causal-graph-history-backend`.
 
 ## Derived Findings
 
@@ -1006,9 +1006,8 @@ Candidate adapters:
 - JSON Lines artifact adapter for tools and CI;
 - DOT adapter for visualization;
 - OpenTelemetry adapter for production span ecosystems;
-- NenDB embedded graph adapter for local/agent graph queries;
-- Cockroach/RoachGraph durable history adapter for app, CI, or fleet-level
-  audit once local semantics are stable;
+- NenDB embedded graph adapter for local/agent graph queries and package-backed
+  graph storage;
 - future async backend event streams.
 
 ### Phase 8: Controlled Remediation

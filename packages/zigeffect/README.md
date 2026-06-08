@@ -66,8 +66,7 @@ Included in this package:
   deterministic jitter, and owned recursive schedule composition.
 - `CausalStore` / `CausalBackend`: deterministic causal event storage, query
   helpers, report/JSON/DOT/CI formatters, and optional adapter sinks for JSON
-  Lines, DOT, OpenTelemetry, embedded graph, durable history, and future async
-  streams.
+  Lines, DOT, OpenTelemetry, embedded graph, and future async streams.
 - `TestEnv`: fake clock, memory filesystem, logger, config, metrics, tracing,
   runtime helpers, assertion helpers, and readable assertion report formatters.
 - `Clock`: fake/system time service used by schedules and tests.
@@ -274,6 +273,15 @@ exporter-neutral: complete local `trace_id` plus `span_id` context maps to a
 Records preserve `zigeffect.causal.*` typed attributes so later SDK or OTLP
 exporters can forward effect-native runtime facts without reparsing artifacts.
 Run `zig build causal-otel-backend` for the focused adapter gate.
+
+Use `fx.CausalGraphHistoryBackendState` when a local harness or agent session
+needs queryable event history beyond the core store's retention window. The
+first graph-history bridge is dependency-free and scan-based: it returns
+`CausalBackendKind.nendb_graph` and establishes the NenDB adapter contract
+before package-backed storage is wired in. Query the backend with `snapshot`,
+`cause`, `lineage`, `eventsByKind`, `eventsByRun`, `eventsByScope`, and
+`eventsByFiber`. Run `zig build causal-graph-history-backend` for the focused
+adapter gate.
 
 Causal artifacts also include `event_taxonomy_version`. Version `1` classifies
 logs, metrics, and spans as sampleable observability; runtime lifecycle events

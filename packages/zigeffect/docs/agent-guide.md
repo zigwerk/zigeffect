@@ -429,6 +429,13 @@ source of truth. A record with complete `trace_id` and `span_id` is a
 causal JSON artifact for retention, sampling, truncation, and backend-failure
 metadata. Run `zig build causal-otel-backend` for the focused adapter gate.
 
+Use `CausalGraphHistoryBackendState` when store retention may have dropped
+ancestor or child events that an agent still needs for local cause and lineage
+queries. Treat it as adapter sink history, not durable truth. If
+`failedEventCount()` or `backendFailureCount()` is nonzero, cite the graph
+history as incomplete and fall back to retained store or JSON artifact
+evidence.
+
 `event_taxonomy_version` identifies the event-kind role semantics. Version `1`
 keeps sampleable observability disjoint from finding evidence: logs, metrics,
 and spans may be sampled; service, scope, resource, fiber, schedule, and
@@ -824,9 +831,8 @@ the invariant is covered.
 
 Backend adapters are sinks, not the source of truth. Keep tests and local agent
 queries against the in-memory `CausalStore`; use `store.attachBackend` for
-JSONL, DOT, OpenTelemetry, embedded graph, durable-history, or future async
-adapters. Do not put CockroachDB, RoachGraph, NenDB, or OpenTelemetry inside
-the deterministic core.
+JSONL, DOT, OpenTelemetry, embedded graph, or future async adapters. Do not put
+NenDB or OpenTelemetry inside the deterministic core.
 
 Future causal findings should be treated as evidence pointers, not conclusions.
 An agent should cite event ids, explain whether an edge is causal or merely
