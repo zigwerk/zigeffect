@@ -7,6 +7,9 @@ pub const snapshot_manifest_schema = "zigeffect.causal.snapshot-manifest.v1";
 pub const snapshot_manifest_schema_version: u32 = 1;
 pub const snapshot_compare_schema = "zigeffect.causal.snapshot-compare.v1";
 pub const snapshot_compare_schema_version: u32 = 1;
+pub const replay_feasibility_schema = "zigeffect.causal.replay-feasibility.v1";
+pub const replay_feasibility_schema_version: u32 = 1;
+const replay_feasibility_event_sample_limit: usize = 20;
 
 pub const SnapshotManifestOptions = struct {
     name: []const u8,
@@ -841,6 +844,44 @@ const future_manifest_json =
     \\}
 ;
 
+const replay_manifest_json =
+    \\{
+    \\  "schema": "zigeffect.causal.snapshot-manifest.v1",
+    \\  "schema_version": 1,
+    \\  "name": "baseline",
+    \\  "target": "dogfood",
+    \\  "phase": "captured",
+    \\  "artifact": {
+    \\    "path": ".zig-cache/causal-artifacts/replay.json",
+    \\    "schema": "zigeffect.causal.v1",
+    \\    "schema_version": 1,
+    \\    "event_taxonomy_version": 1,
+    \\    "events": 7,
+    \\    "first_event_id": 1,
+    \\    "last_event_id": 7,
+    \\    "findings": 4
+    \\  },
+    \\  "warnings": []
+    \\}
+;
+
+const replay_artifact_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v1",
+    \\  "schema_version": 1,
+    \\  "event_taxonomy_version": 1,
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"scenario","type_name":"Command","status":"started","redacted_detail":""},
+    \\    {"id":2,"kind":"service_required","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"Config","type_name":"Config","status":"missing","redacted_detail":"missing provider"},
+    \\    {"id":3,"kind":"resource_acquired","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":10,"trace_id":null,"span_id":null,"label":"db","type_name":"Resource","status":"acquired","redacted_detail":"<redacted>"},
+    \\    {"id":4,"kind":"fiber_forked","run_id":1,"parent_id":1,"fiber_id":20,"scope_id":10,"trace_id":null,"span_id":null,"label":"worker","type_name":"Fiber","status":"pending","redacted_detail":""},
+    \\    {"id":5,"kind":"schedule_decision","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"retry","type_name":"Schedule.exponential","status":"exhausted","redacted_detail":"budget exhausted"},
+    \\    {"id":6,"kind":"log_recorded","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"logger","type_name":"Logger","status":"info","redacted_detail":"hello"},
+    \\    {"id":7,"kind":"effect_suspended","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"future","type_name":"Command","status":"pending","redacted_detail":"<truncated>"}
+    \\  ]
+    \\}
+;
+
 test "snapshot manifest json names artifact and derived event metadata" {
     const manifest = try formatSnapshotManifestJson(std.testing.allocator, sample_json, .{
         .name = "baseline",
@@ -953,6 +994,77 @@ test "snapshot compare report surfaces manifest warnings" {
     try std.testing.expect(std.mem.indexOf(u8, report, "manifest warnings:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "warning: right manifest schema_version=2 newer than supported=1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "right manifest: warning: artifact event kind effect_suspended unknown") != null);
+}
+
+test "replay feasibility report refuses replay and counts event posture" {
+    const report = try formatReplayFeasibilityText(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-baseline.json",
+        replay_manifest_json,
+        replay_artifact_json,
+    );
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect causal replay feasibility report") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.replay-feasibility.v1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "snapshot: baseline") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "artifact: .zig-cache/causal-artifacts/replay.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "feasible: false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "reason: snapshot manifest references observed causal artifact only") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "events: 7") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "structural events: 5") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "finding evidence events: 4") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "sampleable events: 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "unknown events: 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "redacted detail events: 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "truncated detail events: 1") != null);
+}
+
+test "replay feasibility report names blockers and event posture sample" {
+    const report = try formatReplayFeasibilityText(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-baseline.json",
+        replay_manifest_json,
+        replay_artifact_json,
+    );
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "blocking reasons:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "snapshot manifest references observed artifacts, not executable programs") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "service values/providers are not serialized") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "resource constructors/finalizers are not serialized") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "scheduler state and fiber closures are not serialized") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "schedule timing and randomness decisions are observations, not replay inputs") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "logs, metrics, and spans may be sampled") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "unknown event taxonomy prevents complete replay classification") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "redacted or truncated detail prevents faithful replay evidence") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "event id=1 kind=run_started posture=structural_observation") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "event id=2 kind=service_required posture=finding_evidence_observation") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "event id=6 kind=log_recorded posture=sampleable_observation") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "event id=7 kind=effect_suspended posture=unknown_taxonomy") != null);
+}
+
+test "replay feasibility event posture sample is bounded" {
+    var artifact = std.ArrayList(u8).empty;
+    defer artifact.deinit(std.testing.allocator);
+    try artifact.appendSlice(std.testing.allocator, "{\"events\":[");
+    for (1..22) |id| {
+        if (id > 1) try artifact.append(std.testing.allocator, ',');
+        try artifact.print(std.testing.allocator, "{{\"id\":{d},\"kind\":\"run_started\",\"run_id\":1,\"parent_id\":null,\"fiber_id\":null,\"scope_id\":null,\"trace_id\":null,\"span_id\":null,\"label\":\"event\",\"type_name\":\"Command\",\"status\":\"started\",\"redacted_detail\":\"\"}}", .{id});
+    }
+    try artifact.appendSlice(std.testing.allocator, "]}");
+
+    const report = try formatReplayFeasibilityText(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-baseline.json",
+        replay_manifest_json,
+        artifact.items,
+    );
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "event posture sample limit: 20") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "event id=20 kind=run_started") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "event id=21 kind=run_started") == null);
 }
 
 test "snapshot manifest references resolve names and explicit paths" {
