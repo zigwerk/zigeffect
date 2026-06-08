@@ -539,6 +539,19 @@ pub fn build(b: *std.Build) void {
         .root_module = causal_registry_apply_tool_module,
     });
     const run_causal_registry_apply_tool_tests = b.addRunArtifact(causal_registry_apply_tool_tests);
+    const causal_policy_decision_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_policy_decision.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_policy_decision_tool_module.addImport("causal_run", causal_run_tool_module);
+
+    const causal_policy_decision_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-policy-decision-tests",
+        .root_module = causal_policy_decision_tool_module,
+    });
+    const run_causal_policy_decision_tool_tests = b.addRunArtifact(causal_policy_decision_tool_tests);
+    test_step.dependOn(&run_causal_policy_decision_tool_tests.step);
 
     const causal_diagnosis_tool = b.addExecutable(.{
         .name = "zigeffect-causal-diagnosis",
