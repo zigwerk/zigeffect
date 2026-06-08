@@ -333,9 +333,20 @@ const PolicyResult = struct {
     rules: []const PolicyRuleResult,
 
     fn deinit(self: PolicyResult, allocator: std.mem.Allocator) void {
-        allocator.free(self.event_ids);
+        allocator.free(self.target);
+        if (self.event_ids.len > 0) allocator.free(self.event_ids);
         freeStringSlice(allocator, self.required_verification_commands);
         allocator.free(self.rules);
+    }
+};
+
+const PolicyDecisionReports = struct {
+    json: []const u8,
+    text: []const u8,
+
+    fn deinit(self: PolicyDecisionReports, allocator: std.mem.Allocator) void {
+        allocator.free(self.json);
+        allocator.free(self.text);
     }
 };
 
@@ -637,6 +648,8 @@ fn evaluatePolicy(allocator: std.mem.Allocator, input: PolicyInput) !PolicyResul
     errdefer if (event_ids.len > 0) allocator.free(event_ids);
     const required_verification_commands = try duplicateStringSlice(allocator, parsed_audit.value.verification_commands);
     errdefer freeStringSlice(allocator, required_verification_commands);
+    const target = try allocator.dupe(u8, parsed_audit.value.target);
+    errdefer allocator.free(target);
     const rule_slice = try rules.toOwnedSlice(allocator);
 
     return .{
@@ -645,7 +658,7 @@ fn evaluatePolicy(allocator: std.mem.Allocator, input: PolicyInput) !PolicyResul
         .reason_codes = reason_codes,
         .mutation_authority = "none",
         .applied = false,
-        .target = parsed_audit.value.target,
+        .target = target,
         .event_ids = event_ids,
         .required_verification_commands = required_verification_commands,
         .rules = rule_slice,
@@ -657,6 +670,280 @@ fn expectStringInSlice(expected: []const u8, values: []const []const u8) !void {
         if (std.mem.eql(u8, expected, value)) return;
     }
     return error.ExpectedStringNotFound;
+}
+
+fn decisionText(decision: PolicyDecision) []const u8 {
+    return switch (decision) {
+        .approve => "approve",
+        .reject => "reject",
+        .needs_human_review => "needs-human-review",
+    };
+}
+
+fn ruleStatusText(status: RuleStatus) []const u8 {
+    return switch (status) {
+        .pass => "pass",
+        .fail => "fail",
+        .skipped => "skipped",
+    };
+}
+
+fn policyGuardrails() []const []const u8 {
+    return &.{
+        "Policy approval is advisory and does not apply source changes.",
+        "Mutation authority remains none; use guarded application artifacts for source state.",
+    };
+}
+
+fn formatPolicyDecisionReports(allocator: std.mem.Allocator, input: PolicyInput) !PolicyDecisionReports {
+    var result = try evaluatePolicy(allocator, input);
+    defer result.deinit(allocator);
+
+    const json = try formatPolicyDecisionJson(allocator, input, result);
+    errdefer allocator.free(json);
+    const text = try formatPolicyDecisionText(allocator, input, result);
+
+    return .{ .json = json, .text = text };
+}
+
+fn formatPolicyDecisionJson(allocator: std.mem.Allocator, input: PolicyInput, result: PolicyResult) ![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\n");
+    try output.appendSlice(allocator, "  \"schema\": ");
+    try appendJsonString(allocator, &output, policy_schema);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"schema_version\": 1,\n");
+    try output.appendSlice(allocator, "  \"mode\": ");
+    try appendJsonString(allocator, &output, input.options.mode);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"target\": ");
+    try appendJsonString(allocator, &output, result.target);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"decision\": ");
+    try appendJsonString(allocator, &output, decisionText(result.decision));
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"approval_status\": ");
+    try appendJsonString(allocator, &output, decisionText(result.decision));
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"evaluated_by\": ");
+    try appendJsonString(allocator, &output, input.options.evaluated_by);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"policy\": ");
+    try appendJsonString(allocator, &output, input.options.policy);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"reason\": ");
+    try appendJsonString(allocator, &output, result.reason);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"reason_codes\": ");
+    try appendStringArray(allocator, &output, result.reason_codes);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"mutation_authority\": ");
+    try appendJsonString(allocator, &output, result.mutation_authority);
+    try output.appendSlice(allocator, ",\n");
+    try output.print(allocator, "  \"applied\": {},\n", .{result.applied});
+    try output.appendSlice(allocator, "  \"source\": ");
+    try appendSourceJson(allocator, &output, input);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"event_ids\": ");
+    try appendU64Array(allocator, &output, result.event_ids);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"required_verification_commands\": ");
+    try appendStringArray(allocator, &output, result.required_verification_commands);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"rules\": ");
+    try appendRulesJson(allocator, &output, result.rules);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"guardrails\": ");
+    try appendStringArray(allocator, &output, policyGuardrails());
+    try output.append(allocator, '\n');
+    try output.appendSlice(allocator, "}\n");
+
+    return output.toOwnedSlice(allocator);
+}
+
+fn formatPolicyDecisionText(allocator: std.mem.Allocator, input: PolicyInput, result: PolicyResult) ![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "zigeffect causal policy decision\n");
+    try output.print(allocator, "schema: {s}\n", .{policy_schema});
+    try output.print(allocator, "target: {s}\n", .{result.target});
+    try output.print(allocator, "decision: {s}\n", .{decisionText(result.decision)});
+    try output.print(allocator, "approval_status: {s}\n", .{decisionText(result.decision)});
+    try output.print(allocator, "evaluated_by: {s}\n", .{input.options.evaluated_by});
+    try output.print(allocator, "policy: {s}\n", .{input.options.policy});
+    try output.print(allocator, "reason: {s}\n", .{result.reason});
+    try output.appendSlice(allocator, "reason_codes:\n");
+    for (result.reason_codes) |code| try output.print(allocator, "- {s}\n", .{code});
+    try output.print(allocator, "mutation_authority: {s}\n", .{result.mutation_authority});
+    try output.print(allocator, "applied: {}\n", .{result.applied});
+
+    try output.appendSlice(allocator, "\nsource artifacts:\n");
+    try output.print(allocator, "- audit: {s}\n", .{input.paths.audit_json});
+    try appendOptionalTextPath(allocator, &output, "decision", input.paths.decision_json, input.decision_json != null);
+    try output.print(allocator, "- proposal: {s}\n", .{input.paths.proposal_json});
+    try output.print(allocator, "- audit_chain: {s}\n", .{input.paths.audit_chain_json});
+    try appendOptionalTextPath(allocator, &output, "scenario_proposal", input.paths.scenario_proposal_json, input.scenario_proposal_json != null);
+    try appendOptionalTextPath(allocator, &output, "registry_patch", input.paths.registry_patch_json, input.registry_patch_json != null);
+    try appendOptionalTextPath(allocator, &output, "registry_application_readiness", input.paths.registry_readiness_json, input.registry_readiness_json != null);
+    try appendOptionalTextPath(allocator, &output, "registry_application", input.paths.registry_application_json, input.registry_application_json != null);
+
+    try output.appendSlice(allocator, "\nevent ids:\n");
+    for (result.event_ids) |id| try output.print(allocator, "- {}\n", .{id});
+    try output.appendSlice(allocator, "\nrequired verification commands:\n");
+    for (result.required_verification_commands) |command| try output.print(allocator, "- {s}\n", .{command});
+    try output.appendSlice(allocator, "\nrules:\n");
+    for (result.rules) |rule| {
+        try output.print(allocator, "- {s} {s}: {s}\n", .{ rule.id, ruleStatusText(rule.status), rule.detail });
+    }
+    try output.appendSlice(allocator, "\nguardrails:\n");
+    for (policyGuardrails()) |guardrail| try output.print(allocator, "- {s}\n", .{guardrail});
+
+    return output.toOwnedSlice(allocator);
+}
+
+fn appendSourceJson(allocator: std.mem.Allocator, output: *std.ArrayList(u8), input: PolicyInput) !void {
+    try output.appendSlice(allocator, "{\n");
+    try output.appendSlice(allocator, "    \"audit\": ");
+    try appendJsonString(allocator, output, input.paths.audit_json);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "    \"decision\": ");
+    try appendOptionalJsonString(allocator, output, input.paths.decision_json, input.decision_json != null);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "    \"proposal\": ");
+    try appendJsonString(allocator, output, input.paths.proposal_json);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "    \"audit_chain\": ");
+    try appendJsonString(allocator, output, input.paths.audit_chain_json);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "    \"scenario_proposal\": ");
+    try appendOptionalJsonString(allocator, output, input.paths.scenario_proposal_json, input.scenario_proposal_json != null);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "    \"registry_patch\": ");
+    try appendOptionalJsonString(allocator, output, input.paths.registry_patch_json, input.registry_patch_json != null);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "    \"registry_application_readiness\": ");
+    try appendOptionalJsonString(allocator, output, input.paths.registry_readiness_json, input.registry_readiness_json != null);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "    \"registry_application\": ");
+    try appendOptionalJsonString(allocator, output, input.paths.registry_application_json, input.registry_application_json != null);
+    try output.append(allocator, '\n');
+    try output.appendSlice(allocator, "  }");
+}
+
+fn appendOptionalJsonString(
+    allocator: std.mem.Allocator,
+    output: *std.ArrayList(u8),
+    value: []const u8,
+    present: bool,
+) !void {
+    if (present) {
+        try appendJsonString(allocator, output, value);
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+}
+
+fn appendOptionalTextPath(
+    allocator: std.mem.Allocator,
+    output: *std.ArrayList(u8),
+    label: []const u8,
+    value: []const u8,
+    present: bool,
+) !void {
+    if (present) {
+        try output.print(allocator, "- {s}: {s}\n", .{ label, value });
+    } else {
+        try output.print(allocator, "- {s}: none\n", .{label});
+    }
+}
+
+fn appendRulesJson(allocator: std.mem.Allocator, output: *std.ArrayList(u8), rules: []const PolicyRuleResult) !void {
+    try output.append(allocator, '[');
+    for (rules, 0..) |rule, index| {
+        if (index > 0) try output.appendSlice(allocator, ", ");
+        try output.appendSlice(allocator, "{\"id\": ");
+        try appendJsonString(allocator, output, rule.id);
+        try output.appendSlice(allocator, ", \"status\": ");
+        try appendJsonString(allocator, output, ruleStatusText(rule.status));
+        try output.appendSlice(allocator, ", \"detail\": ");
+        try appendJsonString(allocator, output, rule.detail);
+        try output.append(allocator, '}');
+    }
+    try output.append(allocator, ']');
+}
+
+fn appendU64Array(allocator: std.mem.Allocator, output: *std.ArrayList(u8), values: []const u64) !void {
+    try output.append(allocator, '[');
+    for (values, 0..) |value, index| {
+        if (index > 0) try output.appendSlice(allocator, ", ");
+        try output.print(allocator, "{}", .{value});
+    }
+    try output.append(allocator, ']');
+}
+
+fn appendStringArray(allocator: std.mem.Allocator, output: *std.ArrayList(u8), values: []const []const u8) !void {
+    try output.append(allocator, '[');
+    for (values, 0..) |value, index| {
+        if (index > 0) try output.appendSlice(allocator, ", ");
+        try appendJsonString(allocator, output, value);
+    }
+    try output.append(allocator, ']');
+}
+
+fn appendJsonString(allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: []const u8) !void {
+    try output.append(allocator, '"');
+    for (value) |byte| switch (byte) {
+        '"' => try output.appendSlice(allocator, "\\\""),
+        '\\' => try output.appendSlice(allocator, "\\\\"),
+        '\n' => try output.appendSlice(allocator, "\\n"),
+        '\r' => try output.appendSlice(allocator, "\\r"),
+        '\t' => try output.appendSlice(allocator, "\\t"),
+        0...7,
+        11,
+        12,
+        14...31,
+        => {
+            const hex = "0123456789abcdef";
+            try output.appendSlice(allocator, "\\u00");
+            try output.append(allocator, hex[@intCast(byte >> 4)]);
+            try output.append(allocator, hex[@intCast(byte & 0x0f)]);
+        },
+        else => try output.append(allocator, byte),
+    };
+    try output.append(allocator, '"');
+}
+
+fn sampleApprovedPolicyInput() PolicyInput {
+    return .{
+        .options = .{ .mode = "local" },
+        .paths = defaultPolicyDecisionPaths(),
+        .audit_json = sample_audit_json,
+        .decision_json = sample_approved_decision_json,
+        .proposal_json = sample_patch_proposal_with_decision_json,
+        .audit_chain_json = sample_audit_chain_json,
+        .scenario_proposal_json = null,
+        .registry_patch_json = null,
+        .registry_readiness_json = null,
+        .registry_application_json = null,
+    };
+}
+
+fn sampleHumanReviewPolicyInput() PolicyInput {
+    return .{
+        .options = .{ .mode = "local" },
+        .paths = defaultPolicyDecisionPaths(),
+        .audit_json = sample_audit_json,
+        .decision_json = null,
+        .proposal_json = sample_patch_proposal_json,
+        .audit_chain_json = sample_audit_chain_json,
+        .scenario_proposal_json = null,
+        .registry_patch_json = null,
+        .registry_readiness_json = null,
+        .registry_application_json = null,
+    };
 }
 
 const sample_audit_json =
@@ -1058,4 +1345,29 @@ test "policy evaluator rejects unsupported optional artifact schema" {
         .registry_application_json = sample_wrong_schema_json,
     };
     try std.testing.expectError(error.UnsupportedApplicationSchema, evaluatePolicy(std.testing.allocator, input));
+}
+
+test "policy decision JSON records advisory approval without mutation authority" {
+    const input = sampleApprovedPolicyInput();
+    var reports = try formatPolicyDecisionReports(std.testing.allocator, input);
+    defer reports.deinit(std.testing.allocator);
+
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"schema\": \"zigeffect.causal.policy-decision.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"decision\": \"approve\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"mutation_authority\": \"none\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"applied\": false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"manual-decision-approved\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"mutation-authority-none\"") != null);
+}
+
+test "policy decision text records source paths and guardrails" {
+    const input = sampleHumanReviewPolicyInput();
+    var reports = try formatPolicyDecisionReports(std.testing.allocator, input);
+    defer reports.deinit(std.testing.allocator);
+
+    try std.testing.expect(std.mem.indexOf(u8, reports.text, "zigeffect causal policy decision") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.text, "decision: needs-human-review") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.text, "mutation_authority: none") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.text, "source artifacts:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.text, "Policy approval is advisory and does not apply source changes.") != null);
 }
