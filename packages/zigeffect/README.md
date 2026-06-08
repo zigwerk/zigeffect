@@ -260,6 +260,13 @@ full causal JSON artifact when agents need retention, sampling, truncation, or
 backend metadata. Run `zig build causal-jsonl-backend` for the focused adapter
 gate.
 
+Use `fx.CausalDotBackendState` when a local or CI harness wants graph output as
+events are recorded. DOT backend output is an artifact builder: call
+`finish()` before writing the buffer to a `.dot` file. Treat DOT as visual
+evidence for humans and graph tools; use the full causal JSON artifact for
+agent queries, schema metadata, retention, sampling, and truncation summaries.
+Run `zig build causal-dot-backend` for the focused adapter gate.
+
 Causal artifacts also include `event_taxonomy_version`. Version `1` classifies
 logs, metrics, and spans as sampleable observability; runtime lifecycle events
 as structural evidence; and service, scope, resource, fiber, schedule, and

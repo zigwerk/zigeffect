@@ -415,6 +415,13 @@ nonzero, use the in-memory or full JSON artifact as the authoritative trace and
 describe the JSONL stream as incomplete. Run `zig build causal-jsonl-backend`
 for the focused adapter gate.
 
+Use `CausalDotBackendState` when a local or CI harness wants graph output as
+events are recorded. DOT backend output is an artifact builder: call `finish()`
+before writing the buffer to a `.dot` file. Treat DOT as visual evidence for
+humans and graph tools; use the full causal JSON artifact for agent queries,
+schema metadata, retention, sampling, and truncation summaries. Run
+`zig build causal-dot-backend` for the focused adapter gate.
+
 `event_taxonomy_version` identifies the event-kind role semantics. Version `1`
 keeps sampleable observability disjoint from finding evidence: logs, metrics,
 and spans may be sampled; service, scope, resource, fiber, schedule, and

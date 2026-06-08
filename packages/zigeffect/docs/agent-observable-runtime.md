@@ -843,6 +843,12 @@ tools own filesystem persistence and rotation; the runtime service owns event
 formatting and backend conformance. Its focused gate is
 `zig build causal-jsonl-backend`.
 
+The concrete `dot` adapter is `CausalDotBackendState`. It builds graph-tool DOT
+output in a caller-owned byte buffer as events are recorded, and callers must
+run `finish()` before writing the buffer as a complete `.dot` artifact. DOT is
+visual evidence; JSON remains the structured source for agent queries and store
+metadata. Its focused gate is `zig build causal-dot-backend`.
+
 NenDB is attractive because it is Zig-native and data-oriented, but it should
 remain a backend adapter until the event model proves itself. CockroachDB or
 RoachGraph belongs on the durable-history side of the adapter boundary, not in
