@@ -75,6 +75,18 @@ const future_taxonomy_json =
     \\}
 ;
 
+const future_schema_unknown_kind_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v1",
+    \\  "schema_version": 2,
+    \\  "event_taxonomy_version": 1,
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"future schema","type_name":"Fixture","status":"started","redacted_detail":""},
+    \\    {"id":2,"kind":"effect_suspended","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"future event","type_name":"Fixture","status":"pending","redacted_detail":""}
+    \\  ]
+    \\}
+;
+
 const advice_delta_before_json =
     \\{
     \\  "events": [
@@ -104,7 +116,11 @@ pub fn buildAdviceReport(allocator: std.mem.Allocator, json: []const u8, artifac
         null,
         parsed.value.events,
         null,
-        parsed.value.event_taxonomy_version,
+        .{
+            .schema = parsed.value.schema,
+            .schema_version = parsed.value.schema_version,
+            .event_taxonomy_version = parsed.value.event_taxonomy_version,
+        },
     );
 }
 
@@ -133,7 +149,11 @@ pub fn buildAdviceReportWithBaseline(
         baseline_path,
         parsed.value.events,
         baseline_signatures.items,
-        parsed.value.event_taxonomy_version,
+        .{
+            .schema = parsed.value.schema,
+            .schema_version = parsed.value.schema_version,
+            .event_taxonomy_version = parsed.value.event_taxonomy_version,
+        },
     );
 }
 
@@ -143,7 +163,7 @@ fn formatAdviceReport(
     baseline_path: ?[]const u8,
     events: []const Event,
     baseline_signatures: ?[]const []const u8,
-    event_taxonomy_version: ?u32,
+    metadata: causal_artifact.ArtifactMetadata,
 ) ![]const u8 {
     var body = std.ArrayList(u8).empty;
     defer body.deinit(allocator);
@@ -161,7 +181,8 @@ fn formatAdviceReport(
     try output.appendSlice(allocator, "zigeffect causal advice report\n");
     try output.print(allocator, "artifact: {s}\n", .{artifact_path});
     if (baseline_path) |path| try output.print(allocator, "baseline: {s}\n", .{path});
-    try causal_artifact.appendTaxonomyVersionWarning(&output, allocator, artifact_path, event_taxonomy_version);
+    try causal_artifact.appendArtifactCompatibilityWarnings(&output, allocator, artifact_path, metadata);
+    try causal_artifact.appendUnknownEventKindWarnings(&output, allocator, artifact_path, events);
     try output.print(allocator, "actions: {d}\n", .{action_count});
     if (action_count == 0) {
         try output.appendSlice(allocator, "- no causal advice selected\n");
@@ -468,4 +489,12 @@ test "advice report warns when taxonomy is newer than supported" {
 
     try std.testing.expect(std.mem.indexOf(u8, report, "warning: .zig-cache/causal-artifacts/future.json event_taxonomy_version=2 newer than supported=1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "actions: 0") != null);
+}
+
+test "advice report warns on future schema and unknown event kind" {
+    const report = try buildAdviceReport(std.testing.allocator, future_schema_unknown_kind_json, ".zig-cache/causal-artifacts/future-schema.json");
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "warning: .zig-cache/causal-artifacts/future-schema.json schema_version=2 newer than supported=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "warning: .zig-cache/causal-artifacts/future-schema.json event kind effect_suspended unknown to supported taxonomy=1") != null);
 }

@@ -124,6 +124,18 @@ const future_taxonomy_dogfood_query_json =
     \\}
 ;
 
+const future_schema_unknown_kind_dogfood_query_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v1",
+    \\  "schema_version": 2,
+    \\  "event_taxonomy_version": 1,
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"zigeffect dogfood","type_name":"DogfoodHarness","status":"","redacted_detail":""},
+    \\    {"id":2,"kind":"effect_suspended","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"future event","type_name":"DogfoodHarness","status":"pending","redacted_detail":""}
+    \\  ]
+    \\}
+;
+
 const no_finding_query_json =
     \\{
     \\  "events": [
@@ -274,7 +286,12 @@ fn buildQueryReport(allocator: std.mem.Allocator, json: []const u8, artifact_pat
     var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
     try output.appendSlice(allocator, "zigeffect causal query report\n");
-    try causal_artifact.appendTaxonomyVersionWarning(&output, allocator, artifact_path, parsed.value.event_taxonomy_version);
+    try causal_artifact.appendArtifactCompatibilityWarnings(&output, allocator, artifact_path, .{
+        .schema = parsed.value.schema,
+        .schema_version = parsed.value.schema_version,
+        .event_taxonomy_version = parsed.value.event_taxonomy_version,
+    });
+    try causal_artifact.appendUnknownEventKindWarnings(&output, allocator, artifact_path, parsed.value.events);
     try output.print(allocator, "queries: {d}\n", .{query_count});
     if (query_count == 0) {
         try output.appendSlice(allocator, "- no follow-up queries selected\n");
@@ -754,6 +771,14 @@ test "query report warns once when artifact taxonomy is newer than supported" {
     try std.testing.expect(std.mem.indexOf(u8, report, "warning: .zig-cache/causal-artifacts/after.json event_taxonomy_version=2 newer than supported=1") != null);
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, report, "warning:"));
     try std.testing.expect(std.mem.indexOf(u8, report, "queries: 12") != null);
+}
+
+test "query report warns on future schema and unknown event kind" {
+    const report = try buildQueryReport(std.testing.allocator, future_schema_unknown_kind_dogfood_query_json, ".zig-cache/causal-artifacts/future.json");
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "warning: .zig-cache/causal-artifacts/future.json schema_version=2 newer than supported=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "warning: .zig-cache/causal-artifacts/future.json event kind effect_suspended unknown to supported taxonomy=1") != null);
 }
 
 test "query report is explicit when no follow-up queries are selected" {
