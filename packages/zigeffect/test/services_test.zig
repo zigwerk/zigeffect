@@ -822,6 +822,46 @@ test "causal store redacts secret-shaped event strings before storage and export
     try std.testing.expect(std.mem.indexOf(u8, json, "<redacted>") != null);
 }
 
+test "causal redaction removes sensitive headers cookies and query params" {
+    var backend_state = FakeCausalBackendState{};
+    var store = fx.CausalStore.init(std.testing.allocator);
+    store.attachBackend(fakeCausalBackend(&backend_state));
+    defer store.deinit();
+
+    _ = try store.record(.{
+        .kind = .log_recorded,
+        .label = "Cookie: sid=raw-cookie; theme=dark",
+        .type_name = "Proxy-Authorization: Basic raw-proxy",
+        .status = "GET /v1?vessel=demo&x-api-key=raw-query-key",
+        .redacted_detail = "Set-Cookie: session_id=raw-session; HttpOnly",
+    });
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+
+    const event = snapshot.events[0];
+    try std.testing.expect(std.mem.indexOf(u8, event.label, "raw-cookie") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.label, "theme=dark") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.label, "Cookie: <redacted>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, event.type_name, "raw-proxy") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.status, "raw-query-key") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.status, "vessel=demo") != null);
+    try std.testing.expect(std.mem.indexOf(u8, event.status, "x-api-key=<redacted>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "raw-session") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "HttpOnly") == null);
+
+    try std.testing.expect(std.mem.indexOf(u8, backend_state.labels[0], "raw-cookie") == null);
+    try std.testing.expect(std.mem.indexOf(u8, backend_state.labels[0], "Cookie: <redacted>") != null);
+
+    const json = try fx.formatCausalJson(std.testing.allocator, &store);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "raw-cookie") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "raw-proxy") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "raw-query-key") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "raw-session") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "vessel=demo") != null);
+}
+
 test "causal redaction preserves safe retry diagnostics" {
     var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();

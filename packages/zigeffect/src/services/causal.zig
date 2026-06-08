@@ -119,19 +119,60 @@ pub const CausalEvent = struct {
 };
 
 const sensitive_detail_keys = [_][]const u8{
-    "password",
-    "passwd",
-    "pwd",
-    "secret",
-    "token",
+    "authorization",
+    "proxy-authorization",
+    "cookie",
+    "set-cookie",
+    "x-api-key",
+    "x-auth-token",
     "api_key",
     "api-key",
     "apikey",
+    "token",
     "access_token",
     "access-token",
     "refresh_token",
     "refresh-token",
-    "authorization",
+    "id_token",
+    "id-token",
+    "session",
+    "session_id",
+    "session-id",
+    "sessionid",
+    "csrf",
+    "xsrf",
+    "password",
+    "passwd",
+    "pwd",
+    "secret",
+    "client_secret",
+    "client-secret",
+    "private_key",
+    "private-key",
+    "connection_string",
+    "connection-string",
+    "database_url",
+    "database-url",
+    "email",
+    "user_email",
+    "user-email",
+    "phone",
+    "phone_number",
+    "phone-number",
+    "ssn",
+    "social_security_number",
+    "social-security-number",
+    "address",
+    "street_address",
+    "street-address",
+    "ip",
+    "ip_address",
+    "ip-address",
+    "user_ip",
+    "user-ip",
+    "date_of_birth",
+    "date-of-birth",
+    "dob",
 };
 
 fn asciiLower(byte: u8) u8 {
@@ -180,20 +221,23 @@ fn skipValue(value: []const u8, start: usize) usize {
     return index;
 }
 
-fn isHardValueDelimiter(byte: u8) bool {
-    return byte == '\n' or byte == '\r' or byte == '&' or byte == ';' or byte == ',';
+fn isFullValueDelimiter(byte: u8) bool {
+    return byte == '\n' or byte == '\r';
 }
 
-fn skipAuthorizationValue(value: []const u8, start: usize) usize {
+fn skipFullSensitiveValue(value: []const u8, start: usize) usize {
     var index = start;
-    while (index < value.len and !isHardValueDelimiter(value[index])) {
+    while (index < value.len and !isFullValueDelimiter(value[index])) {
         index += 1;
     }
     return index;
 }
 
-fn isAuthorizationKey(key: []const u8) bool {
-    return eqlAsciiIgnoreCase(key, "authorization");
+fn isFullValueRedactionKey(key: []const u8) bool {
+    return eqlAsciiIgnoreCase(key, "authorization") or
+        eqlAsciiIgnoreCase(key, "proxy-authorization") or
+        eqlAsciiIgnoreCase(key, "cookie") or
+        eqlAsciiIgnoreCase(key, "set-cookie");
 }
 
 fn isSensitiveKey(key: []const u8) bool {
@@ -201,7 +245,7 @@ fn isSensitiveKey(key: []const u8) bool {
         if (eqlAsciiIgnoreCase(key, candidate)) return true;
     }
 
-    if (std.mem.lastIndexOfAny(u8, key, ".-")) |separator_index| {
+    if (std.mem.lastIndexOfAny(u8, key, "._-")) |separator_index| {
         const suffix = key[separator_index + 1 ..];
         for (sensitive_detail_keys) |candidate| {
             if (eqlAsciiIgnoreCase(suffix, candidate)) return true;
@@ -284,8 +328,8 @@ fn appendSensitiveKeyRedaction(
         value_start += 1;
     }
     try output.appendSlice(allocator, causal_redaction_marker);
-    index.* = if (isAuthorizationKey(key))
-        skipAuthorizationValue(value, value_start)
+    index.* = if (isFullValueRedactionKey(key) and value[separator_index] == ':')
+        skipFullSensitiveValue(value, value_start)
     else
         skipValue(value, value_start);
     return true;
