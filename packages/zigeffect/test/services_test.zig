@@ -810,6 +810,100 @@ test "causal artifacts disclose truncation policy when string limits are disable
     try std.testing.expect(std.mem.indexOf(u8, ci_report, "truncation: max_event_string_bytes=off truncated_fields=0") != null);
 }
 
+test "causal store truncates event strings before snapshots reports json dot and backend emission" {
+    var backend_state = FakeCausalBackendState{};
+    var store = fx.CausalStore.initWithOptions(std.testing.allocator, .{
+        .max_event_string_bytes = 24,
+    });
+    store.attachBackend(fakeCausalBackend(&backend_state));
+    defer store.deinit();
+
+    _ = try store.record(.{
+        .kind = .run_started,
+        .label = "label-prefix-that-is-too-long",
+        .type_name = "TypeNamePrefixThatIsTooLong",
+        .status = "status-prefix-that-is-too-long",
+        .redacted_detail = "detail-prefix-that-is-too-long",
+    });
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+
+    const event = snapshot.events[0];
+    try std.testing.expect(event.label.len <= 24);
+    try std.testing.expect(event.type_name.len <= 24);
+    try std.testing.expect(event.status.len <= 24);
+    try std.testing.expect(event.redacted_detail.len <= 24);
+    try std.testing.expect(std.mem.indexOf(u8, event.label, "<truncated>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "<truncated>") != null);
+    try std.testing.expectEqual(@as(u64, 4), store.truncatedFieldCount());
+
+    try std.testing.expectEqual(@as(usize, 1), backend_state.count);
+    try std.testing.expect(backend_state.labels[0].len <= 24);
+    try std.testing.expect(std.mem.indexOf(u8, backend_state.labels[0], "<truncated>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, backend_state.labels[0], "too-long") == null);
+
+    const report = try fx.formatCausalReport(std.testing.allocator, "truncated", &store);
+    defer std.testing.allocator.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "truncation: max_event_string_bytes=24 truncated_fields=4") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "too-long") == null);
+
+    const ci_report = try fx.formatCausalCiReport(std.testing.allocator, "truncated", &store);
+    defer std.testing.allocator.free(ci_report);
+    try std.testing.expect(std.mem.indexOf(u8, ci_report, "truncation: max_event_string_bytes=24 truncated_fields=4") != null);
+
+    const json = try fx.formatCausalJson(std.testing.allocator, &store);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"max_event_string_bytes\": 24") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"truncated_fields\": 4") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "too-long") == null);
+
+    const dot = try fx.formatCausalDot(std.testing.allocator, &store);
+    defer std.testing.allocator.free(dot);
+    try std.testing.expect(std.mem.indexOf(u8, dot, "<truncated>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dot, "too-long") == null);
+}
+
+test "causal string truncation happens after secret redaction" {
+    var backend_state = FakeCausalBackendState{};
+    var store = fx.CausalStore.initWithOptions(std.testing.allocator, .{
+        .max_event_string_bytes = 40,
+    });
+    store.attachBackend(fakeCausalBackend(&backend_state));
+    defer store.deinit();
+
+    _ = try store.record(.{
+        .kind = .log_recorded,
+        .label = "token=raw-secret-token safe-context-safe-context-safe-context-safe-context",
+        .type_name = "postgresql://root:raw-db-password@localhost/yachdee with trailing context",
+        .status = "api_key=raw-api-key safe=kept with trailing context",
+        .redacted_detail = "{\"email\":\"owner@example.com\",\"safe\":\"kept\",\"token\":\"raw-json-token\",\"note\":\"long\"}",
+    });
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+
+    const event = snapshot.events[0];
+    try std.testing.expect(std.mem.indexOf(u8, event.label, "raw-secret-token") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.type_name, "raw-db-password") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.status, "raw-api-key") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "owner@example.com") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "raw-json-token") == null);
+    try std.testing.expect(std.mem.indexOf(u8, event.label, "<redacted>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, event.label, "<truncated>") != null);
+    try std.testing.expectEqual(@as(u64, 4), store.truncatedFieldCount());
+
+    try std.testing.expect(std.mem.indexOf(u8, backend_state.labels[0], "raw-secret-token") == null);
+
+    const json = try fx.formatCausalJson(std.testing.allocator, &store);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "raw-secret-token") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "raw-db-password") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "raw-api-key") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "owner@example.com") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "raw-json-token") == null);
+}
+
 test "causal store redacts secret-shaped event strings before storage and export" {
     var backend_state = FakeCausalBackendState{};
     var store = fx.CausalStore.init(std.testing.allocator);

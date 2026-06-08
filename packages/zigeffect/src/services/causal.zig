@@ -414,9 +414,69 @@ fn redactCausalText(allocator: Allocator, value: []const u8) Allocator.Error![]c
     return output.toOwnedSlice(allocator);
 }
 
+fn truncateCausalText(
+    allocator: Allocator,
+    value: []const u8,
+    max_bytes: ?usize,
+    truncated_field_count: *u64,
+) Allocator.Error![]const u8 {
+    const max = max_bytes orelse return value;
+    if (value.len <= max) return value;
+
+    truncated_field_count.* += 1;
+    if (max == 0) return "";
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    if (max <= causal_truncation_marker.len) {
+        try output.appendSlice(allocator, causal_truncation_marker[0..max]);
+        return output.toOwnedSlice(allocator);
+    }
+
+    const prefix_len = max - causal_truncation_marker.len;
+    try output.appendSlice(allocator, value[0..prefix_len]);
+    try output.appendSlice(allocator, causal_truncation_marker);
+    return output.toOwnedSlice(allocator);
+}
+
+fn redactAndBoundCausalText(
+    allocator: Allocator,
+    value: []const u8,
+    max_bytes: ?usize,
+    truncated_field_count: *u64,
+) Allocator.Error![]const u8 {
+    const redacted = try redactCausalText(allocator, value);
+    errdefer if (redacted.len > 0) allocator.free(redacted);
+
+    const truncated = try truncateCausalText(allocator, redacted, max_bytes, truncated_field_count);
+    if (truncated.ptr == redacted.ptr) return redacted;
+
+    if (redacted.len > 0) allocator.free(redacted);
+    return truncated;
+}
+
 fn cloneSlice(allocator: Allocator, value: []const u8) Allocator.Error![]const u8 {
     if (value.len == 0) return "";
     return allocator.dupe(u8, value);
+}
+
+fn cloneEventForStore(
+    allocator: Allocator,
+    event: CausalEvent,
+    max_event_string_bytes: ?usize,
+    truncated_field_count: *u64,
+) Allocator.Error!CausalEvent {
+    var owned = event;
+    owned.label = try redactAndBoundCausalText(allocator, event.label, max_event_string_bytes, truncated_field_count);
+    errdefer if (owned.label.len > 0) allocator.free(owned.label);
+    owned.type_name = try redactAndBoundCausalText(allocator, event.type_name, max_event_string_bytes, truncated_field_count);
+    errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
+    owned.status = try redactAndBoundCausalText(allocator, event.status, max_event_string_bytes, truncated_field_count);
+    errdefer if (owned.status.len > 0) allocator.free(owned.status);
+    owned.redacted_detail = try redactAndBoundCausalText(allocator, event.redacted_detail, max_event_string_bytes, truncated_field_count);
+    errdefer if (owned.redacted_detail.len > 0) allocator.free(owned.redacted_detail);
+    return owned;
 }
 
 fn cloneEvent(allocator: Allocator, event: CausalEvent) Allocator.Error!CausalEvent {
@@ -594,7 +654,12 @@ pub const CausalStore = struct {
             return event_id;
         }
 
-        var owned = try cloneEvent(self.allocator, event);
+        var owned = try cloneEventForStore(
+            self.allocator,
+            event,
+            self.max_event_string_bytes,
+            &self.truncated_field_count,
+        );
         errdefer deinitEventStrings(self.allocator, owned);
         owned.id = event_id;
         self.next_event_id += 1;
