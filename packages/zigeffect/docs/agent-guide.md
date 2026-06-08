@@ -581,6 +581,12 @@ directory, or pass explicit manifest JSON paths when reviewing uploaded CI
 artifacts. Treat the report as a state-level summary; query the underlying
 causal JSON paths for event-level evidence.
 
+Use `zig build causal-snapshot -- replay-feasibility <snapshot>` when an agent
+needs to know whether a named state can be replayed. Today the answer must
+remain `feasible: false`; the report is useful because it explains which event
+categories are observations, which details are redacted or truncated, and what
+future replay work would need.
+
 For normal core-runtime development, prefer the coordinated session command:
 
 ```sh

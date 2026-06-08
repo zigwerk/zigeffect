@@ -962,6 +962,10 @@ manifests by name or path. It reports manifest identity, event/finding deltas,
 manifest warnings, and then embeds `causal-compare` output for the referenced
 causal JSON artifacts.
 
+`zig build causal-snapshot -- replay-feasibility <snapshot>` is a read-only M5
+report. It does not replay. It classifies event posture, counts blockers, keeps
+`feasible: false`, and prints safe next query commands over the artifact.
+
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around
 those pieces. The no-scenario form captures before/after dogfood evidence and

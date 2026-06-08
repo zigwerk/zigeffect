@@ -414,6 +414,7 @@ Name an existing causal JSON artifact with a snapshot manifest:
 zig build causal-snapshot -- capture baseline
 zig build causal-snapshot -- manifest baseline .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json --format text
 zig build causal-snapshot -- compare baseline baseline
+zig build causal-snapshot -- replay-feasibility baseline
 ```
 
 `causal-snapshot` writes or prints `zigeffect.causal.snapshot-manifest.v1`
@@ -426,6 +427,10 @@ artifact for event-level evidence.
 `causal-snapshot compare` accepts snapshot names or manifest JSON paths. It
 reads each manifest's referenced causal JSON artifact, prints snapshot-level
 event and finding deltas, and embeds the existing `causal-compare` event diff.
+
+`causal-snapshot replay-feasibility` reads a snapshot manifest and its causal
+JSON artifact, keeps `feasible: false`, and lists the blockers that must be
+resolved before deterministic replay can exist.
 
 Run a named scenario from the catalog:
 
