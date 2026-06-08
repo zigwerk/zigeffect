@@ -387,11 +387,15 @@ If a query, compare, or development-loop query report warns that the artifact
 taxonomy is newer than supported, keep using the event citations but avoid
 strong claims about role semantics until the tool is updated.
 
-Causal events also redact common secret-shaped text before storage:
-password-like key/value pairs, API keys, token keys, authorization bearer
-values, and URL credentials become `<redacted>`. Treat this as a backstop. Do
-not intentionally put secrets, prompts, request bodies, or credentials into
-labels, statuses, type names, or details.
+Causal events also redact common secret and key-bound personal-data text before
+storage: password-like fields, API keys, token keys, authorization and proxy
+authorization headers, cookies, URL credentials, secret query parameters,
+JSON-ish quoted keys, config-ish maps, SQL-ish key/value diagnostics, and
+personal-data keys such as email, phone, IP address, SSN, address, and date of
+birth become `<redacted>`. Treat this as a deterministic safety backstop. Do not
+intentionally put secrets, prompts, request bodies, credentials, or personal
+data into labels, statuses, type names, or details; app-facing adapters should
+emit compact semantic diagnostics instead of raw payloads.
 
 Use the non-failing probe when you want evidence:
 
