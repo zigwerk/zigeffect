@@ -457,6 +457,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     causal_snapshot_tool_module.addImport("causal_artifact", causal_artifact_tool_module);
+    causal_snapshot_tool_module.addImport("causal_compare", causal_compare_tool_module);
     causal_snapshot_tool_module.addImport("causal_run", causal_run_tool_module);
 
     const causal_snapshot_tool = b.addExecutable(.{

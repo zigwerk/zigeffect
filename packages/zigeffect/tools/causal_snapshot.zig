@@ -1,9 +1,12 @@
 const std = @import("std");
 const causal_artifact = @import("causal_artifact");
+const causal_compare = @import("causal_compare");
 const causal_run = @import("causal_run");
 
 pub const snapshot_manifest_schema = "zigeffect.causal.snapshot-manifest.v1";
 pub const snapshot_manifest_schema_version: u32 = 1;
+pub const snapshot_compare_schema = "zigeffect.causal.snapshot-compare.v1";
+pub const snapshot_compare_schema_version: u32 = 1;
 
 pub const SnapshotManifestOptions = struct {
     name: []const u8,
@@ -543,6 +546,93 @@ const future_json =
     \\}
 ;
 
+const compare_before_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v1",
+    \\  "schema_version": 1,
+    \\  "event_taxonomy_version": 1,
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"scenario","type_name":"Command","status":"started","redacted_detail":""},
+    \\    {"id":2,"kind":"service_required","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"Config","type_name":"Config","status":"missing","redacted_detail":"missing provider"}
+    \\  ]
+    \\}
+;
+
+const compare_after_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v1",
+    \\  "schema_version": 1,
+    \\  "event_taxonomy_version": 1,
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"scenario","type_name":"Command","status":"started","redacted_detail":""},
+    \\    {"id":2,"kind":"service_required","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"Config","type_name":"Config","status":"provided","redacted_detail":"provider added"},
+    \\    {"id":3,"kind":"exit_recorded","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"scenario","type_name":"Command","status":"success","redacted_detail":""}
+    \\  ]
+    \\}
+;
+
+const baseline_manifest_json =
+    \\{
+    \\  "schema": "zigeffect.causal.snapshot-manifest.v1",
+    \\  "schema_version": 1,
+    \\  "name": "baseline",
+    \\  "target": "dogfood",
+    \\  "phase": "baseline",
+    \\  "artifact": {
+    \\    "path": ".zig-cache/causal-artifacts/before.json",
+    \\    "schema": "zigeffect.causal.v1",
+    \\    "schema_version": 1,
+    \\    "event_taxonomy_version": 1,
+    \\    "events": 2,
+    \\    "first_event_id": 1,
+    \\    "last_event_id": 2,
+    \\    "findings": 1
+    \\  },
+    \\  "warnings": []
+    \\}
+;
+
+const after_manifest_json =
+    \\{
+    \\  "schema": "zigeffect.causal.snapshot-manifest.v1",
+    \\  "schema_version": 1,
+    \\  "name": "after",
+    \\  "target": "dogfood",
+    \\  "phase": "after",
+    \\  "artifact": {
+    \\    "path": ".zig-cache/causal-artifacts/after.json",
+    \\    "schema": "zigeffect.causal.v1",
+    \\    "schema_version": 1,
+    \\    "event_taxonomy_version": 1,
+    \\    "events": 3,
+    \\    "first_event_id": 1,
+    \\    "last_event_id": 3,
+    \\    "findings": 0
+    \\  },
+    \\  "warnings": []
+    \\}
+;
+
+const future_manifest_json =
+    \\{
+    \\  "schema": "zigeffect.causal.snapshot-manifest.v1",
+    \\  "schema_version": 2,
+    \\  "name": "future",
+    \\  "target": "dogfood",
+    \\  "phase": "after",
+    \\  "artifact": {
+    \\    "path": ".zig-cache/causal-artifacts/future.json",
+    \\    "events": 2,
+    \\    "first_event_id": 4,
+    \\    "last_event_id": 5,
+    \\    "findings": 0
+    \\  },
+    \\  "warnings": [
+    \\    "warning: artifact event kind effect_suspended unknown to supported taxonomy=1"
+    \\  ]
+    \\}
+;
+
 test "snapshot manifest json names artifact and derived event metadata" {
     const manifest = try formatSnapshotManifestJson(std.testing.allocator, sample_json, .{
         .name = "baseline",
@@ -609,4 +699,62 @@ test "snapshot manifest paths are deterministic" {
 
     try std.testing.expectEqualStrings(".zig-cache/causal-artifacts/zigeffect-causal-snapshot-baseline.json", paths.json_path);
     try std.testing.expectEqualStrings(".zig-cache/causal-artifacts/zigeffect-causal-snapshot-baseline.txt", paths.text_path);
+}
+
+test "snapshot compare report names manifests and embeds causal compare" {
+    const report = try formatSnapshotCompareText(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-baseline.json",
+        baseline_manifest_json,
+        compare_before_json,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-after.json",
+        after_manifest_json,
+        compare_after_json,
+    );
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect causal snapshot compare report") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.snapshot-compare.v1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "left snapshot: baseline") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "left manifest: .zig-cache/causal-artifacts/zigeffect-causal-snapshot-baseline.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "left target: dogfood") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "left phase: baseline") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "left artifact: .zig-cache/causal-artifacts/before.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "right snapshot: after") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "right phase: after") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "right artifact: .zig-cache/causal-artifacts/after.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "event delta from manifests: +1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "finding delta from manifests: -1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "event compare:\nzigeffect causal compare report") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "changed events:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "next queries:") != null);
+}
+
+test "snapshot compare report surfaces manifest warnings" {
+    const report = try formatSnapshotCompareText(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-baseline.json",
+        baseline_manifest_json,
+        compare_before_json,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-future.json",
+        future_manifest_json,
+        future_json,
+    );
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "manifest warnings:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "warning: right manifest schema_version=2 newer than supported=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "right manifest: warning: artifact event kind effect_suspended unknown") != null);
+}
+
+test "snapshot manifest references resolve names and explicit paths" {
+    const named = try resolveSnapshotManifestReference(std.testing.allocator, "baseline");
+    defer named.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings(".zig-cache/causal-artifacts/zigeffect-causal-snapshot-baseline.json", named.path);
+
+    const explicit = try resolveSnapshotManifestReference(std.testing.allocator, ".zig-cache/causal-artifacts/custom.json");
+    defer explicit.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings(".zig-cache/causal-artifacts/custom.json", explicit.path);
+
+    try std.testing.expectError(error.InvalidSnapshotName, resolveSnapshotManifestReference(std.testing.allocator, "bad name"));
 }
