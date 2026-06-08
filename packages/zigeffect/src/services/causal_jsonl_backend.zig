@@ -10,6 +10,10 @@ pub const CausalJsonLinesBackendOptions = struct {
     max_bytes: ?usize = null,
 };
 
+pub const CausalJsonLinesBackendError = error{
+    CausalJsonLinesBackendFull,
+};
+
 pub const CausalJsonLinesBackendState = struct {
     allocator: Allocator,
     output: *std.ArrayList(u8),
@@ -48,10 +52,23 @@ pub const CausalJsonLinesBackendState = struct {
 
 fn recordJsonLinesBackend(raw: ?*anyopaque, event: causal.CausalEvent) anyerror!void {
     const state: *CausalJsonLinesBackendState = @ptrCast(@alignCast(raw.?));
-    const row = try formatCausalJsonLine(state.allocator, event);
+    const row = formatCausalJsonLine(state.allocator, event) catch |err| {
+        state.failed_event_count += 1;
+        return err;
+    };
     defer state.allocator.free(row);
 
-    try state.output.appendSlice(state.allocator, row);
+    if (state.max_bytes) |max_bytes| {
+        if (state.output.items.len > max_bytes or row.len > max_bytes - state.output.items.len) {
+            state.failed_event_count += 1;
+            return error.CausalJsonLinesBackendFull;
+        }
+    }
+
+    state.output.appendSlice(state.allocator, row) catch |err| {
+        state.failed_event_count += 1;
+        return err;
+    };
     state.written_event_count += 1;
 }
 

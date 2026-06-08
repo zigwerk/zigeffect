@@ -111,3 +111,30 @@ test "json lines backend writes stored sanitized conformance events" {
     try std.testing.expectEqual(ids.completed, third.value.id);
     try std.testing.expectEqualStrings("run_completed", third.value.kind);
 }
+
+test "json lines backend max_bytes fails closed without partial rows" {
+    var output = std.ArrayList(u8).empty;
+    defer output.deinit(std.testing.allocator);
+
+    var backend_state = fx.CausalJsonLinesBackendState.init(std.testing.allocator, &output, .{ .max_bytes = 1 });
+
+    var store = fx.CausalStore.init(std.testing.allocator);
+    store.attachBackend(backend_state.backend());
+    defer store.deinit();
+
+    const id = try store.record(.{
+        .kind = .run_started,
+        .label = "overflowing-jsonl-row",
+    });
+
+    try std.testing.expectEqual(@as(u64, 1), id);
+    try std.testing.expectEqual(@as(usize, 0), output.items.len);
+    try std.testing.expectEqual(@as(u64, 0), backend_state.writtenEventCount());
+    try std.testing.expectEqual(@as(u64, 1), backend_state.failedEventCount());
+    try std.testing.expectEqual(@as(u64, 1), store.backendFailureCount());
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 1), snapshot.events.len);
+    try std.testing.expectEqual(id, snapshot.events[0].id);
+}
