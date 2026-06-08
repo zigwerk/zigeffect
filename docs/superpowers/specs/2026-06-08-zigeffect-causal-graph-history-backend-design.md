@@ -9,11 +9,11 @@ Milestone: M4 Durable Causal Backend Adapters
 Add the first embedded graph-history causal backend behind the existing
 `CausalBackend` boundary.
 
-This branch should make a local agent session more useful before adding NenDB,
-CockroachDB, RoachGraph, replay, or cross-run durability. The backend will keep
-an owned history of sanitized stored causal events and expose graph-style
-queries over that history. It will prove the query contract that a future
-embedded graph database or durable backend can replace.
+This branch should make a local agent session more useful while staying on the
+NenDB adapter lane. The backend will keep an owned history of sanitized stored
+causal events and expose graph-style queries over that history. It will prove
+the query contract that a concrete NenDB-backed storage implementation can
+replace behind the same `nendb_graph` boundary.
 
 The main win is retention independence: `CausalStore` may keep only a small
 bounded window, while the graph-history backend can still answer cause and
@@ -24,7 +24,8 @@ lineage questions over the full event stream it observed.
 `CausalBackendKind` already includes:
 
 - `nendb_graph`: embedded Zig graph-query backend candidate for local agents.
-- `cockroach_history`: durable app, CI, or fleet audit history.
+- `cockroach_history`: durable app, CI, or fleet audit history. This remains
+  out of scope for the current roadmap slice.
 
 The current concrete adapters are sink-oriented:
 
@@ -92,14 +93,15 @@ maintenance.
 
 This fits later app and CI audit use cases, but it is too heavy for the first
 graph-history branch. Durable history needs schema, migrations, connection
-configuration, retry behavior, and request-path safety rules.
+configuration, retry behavior, and request-path safety rules. It is also not
+the desired next step: the current sequence should remain NenDB-only.
 
 ### Option C: Dependency-Free Embedded Graph History
 
 Store cloned events in adapter-owned memory and expose a small query API that
 matches the causal vocabulary. Use `CausalBackendKind.nendb_graph` because this
-is the embedded graph adapter lane, while documenting that actual NenDB storage
-is still future work.
+is the embedded graph adapter lane, while documenting that package-backed NenDB
+storage is the next NenDB-specific slice once the dependency boundary is chosen.
 
 This is the recommended first slice. It proves the query contract and keeps the
 adapter replaceable.
@@ -258,7 +260,8 @@ Docs should say:
 - `CausalGraphHistoryBackendState` is an embedded graph-history adapter for
   local and agent-session queries.
 - It is dependency-free and scan-based in this branch.
-- It returns `CausalBackendKind.nendb_graph` but does not yet depend on NenDB.
+- It returns `CausalBackendKind.nendb_graph` and establishes the NenDB adapter
+  contract before wiring package-backed NenDB storage.
 - It can preserve queryable history beyond the deterministic store's retention
   window.
 - It remains a sink; failed writes mean the backend history may be incomplete.

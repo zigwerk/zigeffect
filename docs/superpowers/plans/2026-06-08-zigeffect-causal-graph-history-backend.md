@@ -4,7 +4,7 @@
 
 **Goal:** Add a dependency-free embedded graph-history backend that retains sanitized causal events and answers cause, lineage, and filter queries after the core store has dropped old retained events.
 
-**Architecture:** Implement `causal_graph_history_backend.zig` as an adapter-owned event history behind `CausalBackendKind.nendb_graph`. The first implementation is scan-based and allocator-owned; it proves the graph query contract that future NenDB or durable adapters can replace.
+**Architecture:** Implement `causal_graph_history_backend.zig` as an adapter-owned event history behind `CausalBackendKind.nendb_graph`. The first implementation is scan-based and allocator-owned; it proves the graph query contract that package-backed NenDB storage can replace without changing agent-facing queries.
 
 **Tech Stack:** Zig 0.16, `std.ArrayList`, existing `CausalStore` and `CausalBackend`, backend conformance fixtures, Bun repo checks.
 
@@ -29,7 +29,7 @@
 - Modify: `packages/zigeffect/docs/agent-observable-runtime.md`
   - Updates backend adapter strategy with the concrete scan-based graph history bridge.
 - Modify: `docs/superpowers/specs/2026-06-08-zigeffect-causal-agent-runtime-master-roadmap.md`
-  - Marks graph-history backend delivered and advances M4 to the durable Cockroach/RoachGraph history branch.
+  - Marks graph-history backend delivered and advances M4 to the next NenDB adapter/storage slice.
 
 ## Task 1: Graph-History Backend Test First
 
@@ -531,9 +531,10 @@ After the OTel backend paragraph in `packages/zigeffect/README.md`, add:
 Use `fx.CausalGraphHistoryBackendState` when a local harness or agent session
 needs queryable event history beyond the core store's retention window. The
 first graph-history bridge is dependency-free and scan-based: it returns
-`CausalBackendKind.nendb_graph` but does not yet depend on NenDB. Query the
-backend with `snapshot`, `cause`, `lineage`, `eventsByKind`, `eventsByRun`,
-`eventsByScope`, and `eventsByFiber`. Run
+`CausalBackendKind.nendb_graph` and establishes the NenDB adapter contract
+before package-backed storage is wired in. Query the backend with `snapshot`,
+`cause`, `lineage`, `eventsByKind`, `eventsByRun`, `eventsByScope`, and
+`eventsByFiber`. Run
 `zig build causal-graph-history-backend` for the focused adapter gate.
 ```
 
@@ -558,8 +559,9 @@ In `packages/zigeffect/docs/agent-observable-runtime.md`, replace the
 OTel adapter paragraph:
 
 ```markdown
-- `nendb_graph`: dependency-free embedded graph-history query adapter for
-  local agents; actual NenDB storage remains future work
+- `nendb_graph`: embedded graph-history query adapter for local agents; this
+  branch is dependency-free while the next NenDB slice wires package-backed
+  storage behind the same query contract
 ```
 
 ```markdown
@@ -567,9 +569,9 @@ The concrete `nendb_graph` adapter is `CausalGraphHistoryBackendState`. It
 clones stored causal events into an adapter-owned history and answers
 `snapshot`, `cause`, `lineage`, `eventsByKind`, `eventsByRun`, `eventsByScope`,
 and `eventsByFiber` queries even after the deterministic store has trimmed its
-retained event window. This branch is scan-based and dependency-free; NenDB can
-replace the storage engine later without changing the backend hook. Its focused
-gate is `zig build causal-graph-history-backend`.
+retained event window. This branch is scan-based and dependency-free; the next
+NenDB adapter slice can replace the storage engine without changing the backend
+hook. Its focused gate is `zig build causal-graph-history-backend`.
 ```
 
 - [ ] **Step 4: Update the master roadmap ledger**
@@ -582,7 +584,7 @@ update the current baseline list item to include
 Update the M4 current branch block to:
 
 ```text
-codex/zigeffect-causal-durable-history-backend
+codex/zigeffect-causal-nendb-storage-adapter
 ```
 
 - [ ] **Step 5: Run docs diff check**
@@ -682,7 +684,7 @@ roadmap file remains outside committed work.
 Run:
 
 ```bash
-git switch -c codex/zigeffect-causal-durable-history-backend
+git switch -c codex/zigeffect-causal-nendb-storage-adapter
 ```
 
 Expected: new feature branch is created from verified `master`.
