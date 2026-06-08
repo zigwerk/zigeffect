@@ -333,6 +333,28 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_run_tool_tests = b.addRunArtifact(causal_run_tool_tests);
 
+    const causal_test_matrix_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_test_matrix.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_test_matrix_tool_module.addImport("causal_run", causal_run_tool_module);
+
+    const causal_test_matrix_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-test-matrix",
+        .root_module = causal_test_matrix_tool_module,
+    });
+    const run_causal_test_matrix_tool = b.addRunArtifact(causal_test_matrix_tool);
+    const causal_test_matrix_step = b.step("causal-test-matrix", "Print the zigeffect causal scenario coverage matrix");
+    causal_test_matrix_step.dependOn(&run_causal_test_matrix_tool.step);
+
+    const causal_test_matrix_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-test-matrix-tests",
+        .root_module = causal_test_matrix_tool_module,
+    });
+    const run_causal_test_matrix_tool_tests = b.addRunArtifact(causal_test_matrix_tool_tests);
+    test_step.dependOn(&run_causal_test_matrix_tool_tests.step);
+
     const causal_artifacts_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_artifacts.zig"),
         .target = target,
@@ -733,6 +755,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_compare_tool_tests.step);
     examples_step.dependOn(&causal_run_tool.step);
     examples_step.dependOn(&run_causal_run_tool_tests.step);
+    examples_step.dependOn(&causal_test_matrix_tool.step);
+    examples_step.dependOn(&run_causal_test_matrix_tool_tests.step);
     examples_step.dependOn(&causal_artifacts_tool.step);
     examples_step.dependOn(&run_causal_artifacts_tool_tests.step);
     examples_step.dependOn(&run_causal_verdict_tool_tests.step);
