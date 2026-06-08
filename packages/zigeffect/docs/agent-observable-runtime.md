@@ -826,7 +826,8 @@ adapt the same event sink contract:
 - `memory`: reference deterministic store for tests and local development
 - `json_lines`: artifact export for CLIs, CI, and agent tools
 - `dot`: artifact export for visual graph debugging
-- `opentelemetry`: production bridge for span and event ecosystems
+- `opentelemetry`: dependency-free span-event/log-record bridge for production
+  span and event ecosystems
 - `nendb_graph`: embedded graph-query adapter candidate for local agents
 - `cockroach_history`: durable app, CI, or fleet audit history
 - `async_stream`: future non-blocking event stream
@@ -848,6 +849,14 @@ output in a caller-owned byte buffer as events are recorded, and callers must
 run `finish()` before writing the buffer as a complete `.dot` artifact. DOT is
 visual evidence; JSON remains the structured source for agent queries and store
 metadata. Its focused gate is `zig build causal-dot-backend`.
+
+The concrete `opentelemetry` adapter is `CausalOtelBackendState`. It maps
+stored causal events into typed `CausalOtelRecord` values with `span_event` or
+`log_record` signal classification, OTel-style trace/span hex strings where
+local ids exist, and `zigeffect.causal.*` attributes for runtime facts. This is
+an exporter-neutral bridge; OTLP serialization, SDK integration, resources, and
+collector delivery remain future adapter work. Its focused gate is
+`zig build causal-otel-backend`.
 
 NenDB is attractive because it is Zig-native and data-oriented, but it should
 remain a backend adapter until the event model proves itself. CockroachDB or

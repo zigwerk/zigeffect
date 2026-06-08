@@ -422,6 +422,13 @@ humans and graph tools; use the full causal JSON artifact for agent queries,
 schema metadata, retention, sampling, and truncation summaries. Run
 `zig build causal-dot-backend` for the focused adapter gate.
 
+Use `CausalOtelBackendState` when you need to inspect the runtime-to-OTel
+mapping directly. Treat records as best-effort adapter sink output, not as the
+source of truth. A record with complete `trace_id` and `span_id` is a
+`span_event`; missing or incomplete context is a `log_record`. Cite the full
+causal JSON artifact for retention, sampling, truncation, and backend-failure
+metadata. Run `zig build causal-otel-backend` for the focused adapter gate.
+
 `event_taxonomy_version` identifies the event-kind role semantics. Version `1`
 keeps sampleable observability disjoint from finding evidence: logs, metrics,
 and spans may be sampled; service, scope, resource, fiber, schedule, and

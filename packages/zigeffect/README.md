@@ -267,6 +267,14 @@ evidence for humans and graph tools; use the full causal JSON artifact for
 agent queries, schema metadata, retention, sampling, and truncation summaries.
 Run `zig build causal-dot-backend` for the focused adapter gate.
 
+Use `fx.CausalOtelBackendState` when a harness wants OpenTelemetry-shaped
+records while events are recorded. The first OTel bridge is dependency-free and
+exporter-neutral: complete local `trace_id` plus `span_id` context maps to a
+`span_event`, and missing or incomplete span context maps to a `log_record`.
+Records preserve `zigeffect.causal.*` typed attributes so later SDK or OTLP
+exporters can forward effect-native runtime facts without reparsing artifacts.
+Run `zig build causal-otel-backend` for the focused adapter gate.
+
 Causal artifacts also include `event_taxonomy_version`. Version `1` classifies
 logs, metrics, and spans as sampleable observability; runtime lifecycle events
 as structural evidence; and service, scope, resource, fiber, schedule, and

@@ -91,6 +91,8 @@ The following capabilities are already merged into `master`:
 - Scenario coverage-domain metadata in `tools/causal_run.zig`, including
   `causal-readiness` for app-shaped observability coverage.
 - Shared structural causal assertion helpers in package tests.
+- `CausalJsonLinesBackendState`, `CausalDotBackendState`, and
+  `CausalOtelBackendState` concrete causal backend adapters.
 
 These commands establish the review-only chain:
 
@@ -311,6 +313,12 @@ codex/zigeffect-causal-backend-conformance
 codex/zigeffect-causal-jsonl-backend
 codex/zigeffect-causal-dot-backend-polish
 codex/zigeffect-causal-otel-backend
+codex/zigeffect-causal-graph-history-backend
+```
+
+Current branch:
+
+```text
 codex/zigeffect-causal-graph-history-backend
 ```
 
