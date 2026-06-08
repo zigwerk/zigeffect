@@ -100,6 +100,16 @@ const ApplicationResult = struct {
     }
 };
 
+const ApplicationReports = struct {
+    json: []const u8,
+    text: []const u8,
+
+    fn deinit(self: ApplicationReports, allocator: std.mem.Allocator) void {
+        allocator.free(self.json);
+        allocator.free(self.text);
+    }
+};
+
 fn parseOptions(allocator: std.mem.Allocator, args: []const []const u8) !Options {
     if (args.len < 3) return error.MissingReadinessPath;
     if (!std.mem.eql(u8, args[1], "--from-readiness")) return error.UnknownFlag;
@@ -393,6 +403,253 @@ fn checkFailed(checks: []const ApplicationCheck, name: []const u8) bool {
     return false;
 }
 
+fn formatApplicationReports(allocator: std.mem.Allocator, input: ApplicationInput) !ApplicationReports {
+    var parsed = try std.json.parseFromSlice(ReadinessReport, allocator, input.readiness_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    try validateReadiness(parsed.value);
+
+    const result = try evaluateApplication(allocator, input);
+    defer result.deinit(allocator);
+
+    const json = try formatApplicationJson(allocator, input, parsed.value, result);
+    errdefer allocator.free(json);
+    const text = try formatApplicationText(allocator, input, parsed.value, result);
+    errdefer allocator.free(text);
+
+    return .{ .json = json, .text = text };
+}
+
+fn formatApplicationJson(
+    allocator: std.mem.Allocator,
+    input: ApplicationInput,
+    readiness: ReadinessReport,
+    result: ApplicationResult,
+) ![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\n");
+    try output.appendSlice(allocator, "  \"schema\": ");
+    try appendJsonString(allocator, &output, application_schema);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"schema_version\": 1,\n");
+    try output.appendSlice(allocator, "  \"source_readiness\": ");
+    try appendJsonString(allocator, &output, input.source_readiness_path);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"source_registry_patch\": ");
+    try appendJsonString(allocator, &output, readiness.source_registry_patch);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"mode\": ");
+    try appendJsonString(allocator, &output, modeText(input.mode));
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"application_status\": ");
+    try appendJsonString(allocator, &output, applicationStatusText(result.status));
+    try output.appendSlice(allocator, ",\n");
+    try output.print(allocator, "  \"applied\": {},\n", .{result.applied});
+    try output.appendSlice(allocator, "  \"applied_by\": ");
+    try appendJsonString(allocator, &output, input.applied_by);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"policy\": ");
+    try appendJsonString(allocator, &output, input.policy);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"reason\": ");
+    try appendJsonString(allocator, &output, input.reason);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"readiness_status\": ");
+    try appendJsonString(allocator, &output, readiness.readiness_status);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"target\": ");
+    try appendJsonString(allocator, &output, readiness.target);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"scenario_slug\": ");
+    if (readiness.scenario_slug) |slug| {
+        try appendJsonString(allocator, &output, slug);
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"checks\": ");
+    try appendChecksJson(allocator, &output, result.checks);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"required_verification_commands\": ");
+    try appendStringArray(allocator, &output, result.required_verification_commands);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"verified_commands\": ");
+    try appendStringArray(allocator, &output, input.verified_commands);
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"application_steps\": ");
+    try appendStringArray(allocator, &output, applicationSteps(result.status));
+    try output.appendSlice(allocator, ",\n");
+    try output.appendSlice(allocator, "  \"guardrails\": ");
+    try appendStringArray(allocator, &output, applicationGuardrails(result.status));
+    try output.append(allocator, '\n');
+    try output.appendSlice(allocator, "}\n");
+
+    return output.toOwnedSlice(allocator);
+}
+
+fn formatApplicationText(
+    allocator: std.mem.Allocator,
+    input: ApplicationInput,
+    readiness: ReadinessReport,
+    result: ApplicationResult,
+) ![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "zigeffect causal registry application\n");
+    try output.print(allocator, "schema: {s}\n", .{application_schema});
+    try output.print(allocator, "source readiness: {s}\n", .{input.source_readiness_path});
+    try output.print(allocator, "source registry patch: {s}\n", .{readiness.source_registry_patch});
+    try output.print(allocator, "mode: {s}\n", .{modeText(input.mode)});
+    try output.print(allocator, "application_status: {s}\n", .{applicationStatusText(result.status)});
+    try output.print(allocator, "applied: {}\n", .{result.applied});
+    try output.print(allocator, "applied_by: {s}\n", .{input.applied_by});
+    try output.print(allocator, "policy: {s}\n", .{input.policy});
+    try output.print(allocator, "reason: {s}\n", .{input.reason});
+    try output.print(allocator, "readiness_status: {s}\n", .{readiness.readiness_status});
+    try output.print(allocator, "target: {s}\n", .{readiness.target});
+    if (readiness.scenario_slug) |slug| {
+        try output.print(allocator, "scenario: {s}\n", .{slug});
+    } else {
+        try output.appendSlice(allocator, "scenario: none\n");
+    }
+
+    try output.appendSlice(allocator, "\nchecks:\n");
+    for (result.checks) |check| {
+        try output.print(allocator, "- {s}: {s} - {s}\n", .{ check.name, checkStatusText(check.status), check.detail });
+    }
+
+    try output.appendSlice(allocator, "\nrequired verification:\n");
+    if (result.required_verification_commands.len == 0) {
+        try output.appendSlice(allocator, "- none\n");
+    } else {
+        for (result.required_verification_commands) |command| try output.print(allocator, "- {s}\n", .{command});
+    }
+
+    try output.appendSlice(allocator, "\nverified commands:\n");
+    if (input.verified_commands.len == 0) {
+        try output.appendSlice(allocator, "- none recorded\n");
+    } else {
+        for (input.verified_commands) |command| try output.print(allocator, "- {s}\n", .{command});
+    }
+
+    try output.appendSlice(allocator, "\napplication steps:\n");
+    for (applicationSteps(result.status)) |step| try output.print(allocator, "- {s}\n", .{step});
+
+    try output.appendSlice(allocator, "\nguardrails:\n");
+    for (applicationGuardrails(result.status)) |guardrail| try output.print(allocator, "- {s}\n", .{guardrail});
+
+    return output.toOwnedSlice(allocator);
+}
+
+fn applicationStatusText(status: ApplicationStatus) []const u8 {
+    return switch (status) {
+        .planned => "planned",
+        .applied => "applied",
+        .blocked => "blocked",
+        .not_applicable => "not-applicable",
+    };
+}
+
+fn checkStatusText(status: CheckStatus) []const u8 {
+    return switch (status) {
+        .pass => "pass",
+        .fail => "fail",
+        .skipped => "skipped",
+    };
+}
+
+fn applicationSteps(status: ApplicationStatus) []const []const u8 {
+    return switch (status) {
+        .planned => &.{
+            "Apply the reviewed registry and docs changes manually.",
+            "Run every required verification command after applying the source change.",
+            "Run causal-registry-apply record-applied only after source and verification evidence exist.",
+        },
+        .applied => &.{
+            "Keep this application artifact with the source change evidence.",
+            "Do not rerun application unless source or verification evidence changes.",
+        },
+        .blocked => &.{
+            "Resolve failed readiness or source-state checks before claiming registry coverage.",
+            "Regenerate readiness and application artifacts after the fix.",
+        },
+        .not_applicable => &.{
+            "Do not apply registry changes for no-op readiness evidence.",
+            "Keep this artifact as proof that no registry update was required.",
+        },
+    };
+}
+
+fn applicationGuardrails(status: ApplicationStatus) []const []const u8 {
+    return switch (status) {
+        .planned => &.{
+            "Plan mode does not edit source and does not prove registry coverage.",
+            "The application remains unapplied until a later record-applied artifact says applied=true.",
+        },
+        .applied => &.{
+            "applied=true means current source state and verification evidence passed application checks.",
+            "This command records application state; it does not silently mutate source.",
+        },
+        .blocked => &.{
+            "Blocked application must not be treated as registry coverage.",
+            "Do not set applied=true until every application check passes.",
+        },
+        .not_applicable => &.{
+            "No registry patch applies to this evidence.",
+            "Do not create speculative scenario coverage from no-op evidence.",
+        },
+    };
+}
+
+fn appendChecksJson(allocator: std.mem.Allocator, output: *std.ArrayList(u8), checks: []const ApplicationCheck) !void {
+    try output.appendSlice(allocator, "[");
+    for (checks, 0..) |check, index| {
+        if (index > 0) try output.appendSlice(allocator, ", ");
+        try output.appendSlice(allocator, "{ \"name\": ");
+        try appendJsonString(allocator, output, check.name);
+        try output.appendSlice(allocator, ", \"status\": ");
+        try appendJsonString(allocator, output, checkStatusText(check.status));
+        try output.appendSlice(allocator, ", \"detail\": ");
+        try appendJsonString(allocator, output, check.detail);
+        try output.appendSlice(allocator, " }");
+    }
+    try output.appendSlice(allocator, "]");
+}
+
+fn appendStringArray(allocator: std.mem.Allocator, output: *std.ArrayList(u8), values: []const []const u8) !void {
+    try output.append(allocator, '[');
+    for (values, 0..) |value, index| {
+        if (index > 0) try output.appendSlice(allocator, ", ");
+        try appendJsonString(allocator, output, value);
+    }
+    try output.append(allocator, ']');
+}
+
+fn appendJsonString(allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: []const u8) !void {
+    try output.append(allocator, '"');
+    for (value) |byte| switch (byte) {
+        '"' => try output.appendSlice(allocator, "\\\""),
+        '\\' => try output.appendSlice(allocator, "\\\\"),
+        '\n' => try output.appendSlice(allocator, "\\n"),
+        '\r' => try output.appendSlice(allocator, "\\r"),
+        '\t' => try output.appendSlice(allocator, "\\t"),
+        0...7,
+        11,
+        12,
+        14...31,
+        => {
+            const hex = "0123456789abcdef";
+            try output.appendSlice(allocator, "\\u00");
+            try output.append(allocator, hex[@intCast(byte >> 4)]);
+            try output.append(allocator, hex[@intCast(byte & 0x0f)]);
+        },
+        else => try output.append(allocator, byte),
+    };
+    try output.append(allocator, '"');
+}
+
 const sample_applicable_readiness_json =
     \\{
     \\  "schema": "zigeffect.causal.registry-application-readiness.v1",
@@ -617,4 +874,47 @@ test "registry apply record-applied requires source and verification evidence" {
     try std.testing.expect(result.applied);
     try std.testing.expect(checkPassed(result.checks, "source-registry-present"));
     try std.testing.expect(checkPassed(result.checks, "post-verification-recorded"));
+}
+
+test "registry apply formats planned json and text reports" {
+    const reports = try formatApplicationReports(std.testing.allocator, .{
+        .source_readiness_path = ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-registry-application-readiness.json",
+        .readiness_json = sample_applicable_readiness_json,
+        .mode = .plan,
+        .applied_by = "local-reviewer",
+        .policy = "manual-application",
+        .reason = "prepare manual application",
+        .verified_commands = &.{},
+        .scenario_docs = "package-tests",
+    });
+    defer reports.deinit(std.testing.allocator);
+
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"schema\": \"zigeffect.causal.registry-application.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"application_status\": \"planned\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"applied\": false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.text, "application_status: planned") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.text, "applied: false") != null);
+}
+
+test "registry apply formats applied report with source paths and verification" {
+    const reports = try formatApplicationReports(std.testing.allocator, .{
+        .source_readiness_path = ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-registry-application-readiness.json",
+        .readiness_json = sample_applicable_readiness_json,
+        .mode = .record_applied,
+        .applied_by = "local-reviewer",
+        .policy = "manual-application",
+        .reason = "registry applied",
+        .verified_commands = &.{
+            "zig build causal-run package-tests",
+            "zig build examples",
+            "zig build test --summary none",
+        },
+        .scenario_docs = "package-tests",
+    });
+    defer reports.deinit(std.testing.allocator);
+
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"application_status\": \"applied\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"applied\": true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"source_registry_patch\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.text, "verified commands:") != null);
 }
