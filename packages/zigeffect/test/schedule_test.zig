@@ -1,20 +1,7 @@
 const std = @import("std");
 const fx = @import("zigeffect");
+const causal = @import("support/causal_assertions.zig");
 const fixtures = @import("support/fixtures.zig");
-
-fn expectScheduleDecision(
-    snapshot: fx.CausalSnapshot,
-    label: []const u8,
-    expected_detail: []const u8,
-) !void {
-    for (snapshot.events) |event| {
-        if (event.kind != .schedule_decision) continue;
-        if (!std.mem.eql(u8, event.label, label)) continue;
-        if (std.mem.indexOf(u8, event.redacted_detail, expected_detail) == null) continue;
-        return;
-    }
-    return error.ExpectedScheduleDecisionMissing;
-}
 
 test "schedules produce fixed and exponential retry decisions" {
     var fixed = fx.Schedule.fixed(.{ .max_retries = 2, .delay_ms = 10 });
@@ -213,8 +200,16 @@ test "retry records causal schedule decisions" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    try expectScheduleDecision(snapshot, "retry-metrics", "attempt=0 delay_ms=5 decision=retry");
-    try expectScheduleDecision(snapshot, "retry-metrics", "attempt=1 delay_ms=5 decision=retry");
+    _ = try causal.expectEvent(snapshot, .{
+        .kind = .schedule_decision,
+        .label = "retry-metrics",
+        .detail_contains = "attempt=0 delay_ms=5 decision=retry",
+    });
+    _ = try causal.expectEvent(snapshot, .{
+        .kind = .schedule_decision,
+        .label = "retry-metrics",
+        .detail_contains = "attempt=1 delay_ms=5 decision=retry",
+    });
 }
 test "repeat records causal schedule decisions" {
     fixtures.repeat_runs = 0;
@@ -237,6 +232,14 @@ test "repeat records causal schedule decisions" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    try expectScheduleDecision(snapshot, "repeat-metrics", "attempt=0 delay_ms=7 decision=repeat");
-    try expectScheduleDecision(snapshot, "repeat-metrics", "attempt=1 delay_ms=7 decision=repeat");
+    _ = try causal.expectEvent(snapshot, .{
+        .kind = .schedule_decision,
+        .label = "repeat-metrics",
+        .detail_contains = "attempt=0 delay_ms=7 decision=repeat",
+    });
+    _ = try causal.expectEvent(snapshot, .{
+        .kind = .schedule_decision,
+        .label = "repeat-metrics",
+        .detail_contains = "attempt=1 delay_ms=7 decision=repeat",
+    });
 }

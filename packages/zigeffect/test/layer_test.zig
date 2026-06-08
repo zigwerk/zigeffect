@@ -1,23 +1,7 @@
 const std = @import("std");
 const fx = @import("zigeffect");
+const causal = @import("support/causal_assertions.zig");
 const fixtures = @import("support/fixtures.zig");
-
-fn expectCausalEvent(
-    snapshot: fx.CausalSnapshot,
-    kind: fx.CausalEventKind,
-    label: []const u8,
-    type_name: []const u8,
-    status: []const u8,
-) !fx.CausalEvent {
-    for (snapshot.events) |event| {
-        if (event.kind != kind) continue;
-        if (label.len > 0 and !std.mem.eql(u8, event.label, label)) continue;
-        if (type_name.len > 0 and !std.mem.eql(u8, event.type_name, type_name)) continue;
-        if (status.len > 0 and !std.mem.eql(u8, event.status, status)) continue;
-        return event;
-    }
-    return error.ExpectedCausalEventMissing;
-}
 
 fn expectCompileFailDiagnostic(fixture: []const u8, output_path: []const u8, expected: []const u8) !void {
     _ = output_path;
@@ -270,10 +254,28 @@ test "layer graph emits service and layer causal events during startup" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    _ = try expectCausalEvent(snapshot, .service_provided, @typeName(fixtures.GraphLoggerEnv), @typeName(fx.Logger), "provided");
-    _ = try expectCausalEvent(snapshot, .service_required, @typeName(fixtures.GraphConfigEnv), @typeName(fx.Logger), "satisfied");
-    const started = try expectCausalEvent(snapshot, .layer_started, @typeName(fixtures.GraphConfigEnv), "", "starting");
-    const completed = try expectCausalEvent(snapshot, .layer_completed, @typeName(fixtures.GraphConfigEnv), "", "success");
+    _ = try causal.expectEvent(snapshot, .{
+        .kind = .service_provided,
+        .label = @typeName(fixtures.GraphLoggerEnv),
+        .type_name = @typeName(fx.Logger),
+        .status = "provided",
+    });
+    _ = try causal.expectEvent(snapshot, .{
+        .kind = .service_required,
+        .label = @typeName(fixtures.GraphConfigEnv),
+        .type_name = @typeName(fx.Logger),
+        .status = "satisfied",
+    });
+    const started = try causal.expectEvent(snapshot, .{
+        .kind = .layer_started,
+        .label = @typeName(fixtures.GraphConfigEnv),
+        .status = "starting",
+    });
+    const completed = try causal.expectEvent(snapshot, .{
+        .kind = .layer_completed,
+        .label = @typeName(fixtures.GraphConfigEnv),
+        .status = "success",
+    });
     try std.testing.expectEqual(started.run_id.?, completed.run_id.?);
     try std.testing.expectEqual(@as(?u64, 707), started.trace_id);
     try std.testing.expectEqual(@as(?u64, 808), completed.span_id);
@@ -307,7 +309,12 @@ test "layer graph emits service replacement causal events" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    const replaced = try expectCausalEvent(snapshot, .service_replaced, @typeName(fixtures.GraphConfigEnv), @typeName(fx.Config), "replaced");
+    const replaced = try causal.expectEvent(snapshot, .{
+        .kind = .service_replaced,
+        .label = @typeName(fixtures.GraphConfigEnv),
+        .type_name = @typeName(fx.Config),
+        .status = "replaced",
+    });
     try std.testing.expect(replaced.redacted_detail.len > 0);
 }
 test "graph runtime formats dependency reports directly" {
@@ -596,7 +603,11 @@ test "effect backed layer receives graph causal context" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    _ = try expectCausalEvent(snapshot, .assertion_recorded, "effect-layer-startup", "", "observed");
+    _ = try causal.expectEvent(snapshot, .{
+        .kind = .assertion_recorded,
+        .label = "effect-layer-startup",
+        .status = "observed",
+    });
 }
 test "config provider env feeds dependency-injected graph startup" {
     fixtures.database_layer_builds = 0;
@@ -718,11 +729,31 @@ test "layer graph records startup failure and cleanup causal evidence" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    _ = try expectCausalEvent(snapshot, .layer_completed, @typeName(fixtures.GraphLoggerEnv), "", "success");
-    _ = try expectCausalEvent(snapshot, .layer_started, @typeName(fixtures.DatabaseLayerEnv), "", "starting");
-    _ = try expectCausalEvent(snapshot, .exit_recorded, @typeName(fixtures.DatabaseLayerEnv), "ConnectionFailed", "failure");
-    _ = try expectCausalEvent(snapshot, .resource_finalized, "", @typeName(fixtures.GraphLoggerEnv), "success");
-    _ = try expectCausalEvent(snapshot, .scope_closed, "", "", "failure");
+    _ = try causal.expectEvent(snapshot, .{
+        .kind = .layer_completed,
+        .label = @typeName(fixtures.GraphLoggerEnv),
+        .status = "success",
+    });
+    _ = try causal.expectEvent(snapshot, .{
+        .kind = .layer_started,
+        .label = @typeName(fixtures.DatabaseLayerEnv),
+        .status = "starting",
+    });
+    _ = try causal.expectEvent(snapshot, .{
+        .kind = .exit_recorded,
+        .label = @typeName(fixtures.DatabaseLayerEnv),
+        .type_name = "ConnectionFailed",
+        .status = "failure",
+    });
+    _ = try causal.expectEvent(snapshot, .{
+        .kind = .resource_finalized,
+        .type_name = @typeName(fixtures.GraphLoggerEnv),
+        .status = "success",
+    });
+    _ = try causal.expectEvent(snapshot, .{
+        .kind = .scope_closed,
+        .status = "failure",
+    });
     try std.testing.expect(fixtures.graph_logger_released);
 }
 test "graph started environments run through regular runtime" {
@@ -797,8 +828,14 @@ test "graph runtime adapters propagate causal store" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    _ = try expectCausalEvent(snapshot, .run_started, "Runtime.run", "", "");
-    _ = try expectCausalEvent(snapshot, .fiber_forked, "", "", "pending");
+    _ = try causal.expectEvent(snapshot, .{
+        .kind = .run_started,
+        .label = "Runtime.run",
+    });
+    _ = try causal.expectEvent(snapshot, .{
+        .kind = .fiber_forked,
+        .status = "pending",
+    });
 }
 test "graph runtime runs effects against a narrowed service environment" {
     var logger_env = fixtures.GraphLoggerEnv{ .logger = fx.Logger.init(std.testing.allocator) };
@@ -873,8 +910,14 @@ test "graph narrowed runtime paths propagate causal store" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    _ = try expectCausalEvent(snapshot, .run_started, "LayerGraphRuntime.runNarrowed", "", "");
-    _ = try expectCausalEvent(snapshot, .run_started, "LayerGraphRuntime.exitNarrowed", "", "");
+    _ = try causal.expectEvent(snapshot, .{
+        .kind = .run_started,
+        .label = "LayerGraphRuntime.runNarrowed",
+    });
+    _ = try causal.expectEvent(snapshot, .{
+        .kind = .run_started,
+        .label = "LayerGraphRuntime.exitNarrowed",
+    });
 }
 test "graph runtime propagates trace context into effect context" {
     var env = try fx.TestEnv.init(std.testing.allocator);

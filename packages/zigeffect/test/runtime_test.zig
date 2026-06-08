@@ -1,13 +1,7 @@
 const std = @import("std");
 const fx = @import("zigeffect");
+const causal = @import("support/causal_assertions.zig");
 const fixtures = @import("support/fixtures.zig");
-
-fn expectCausalKinds(snapshot: fx.CausalSnapshot, expected: []const fx.CausalEventKind) !void {
-    try std.testing.expectEqual(expected.len, snapshot.events.len);
-    for (expected, 0..) |kind, index| {
-        try std.testing.expectEqual(kind, snapshot.events[index].kind);
-    }
-}
 
 test "runtime automatically closes scoped resources after success" {
     var env = try fx.TestEnv.init(std.testing.allocator);
@@ -196,7 +190,7 @@ test "runtime emits causal run and exit events when store is attached" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    try expectCausalKinds(snapshot, &.{
+    try causal.expectEventSequence(snapshot, &.{
         .run_started,
         .scope_opened,
         .scope_closed,
@@ -229,7 +223,7 @@ test "runtime causal events preserve failure and trace context" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    try expectCausalKinds(snapshot, &.{
+    try causal.expectEventSequence(snapshot, &.{
         .run_started,
         .scope_opened,
         .scope_closed,
@@ -263,7 +257,7 @@ test "runtime exit emits causal cause event when store is attached" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    try expectCausalKinds(snapshot, &.{
+    try causal.expectEventSequence(snapshot, &.{
         .run_started,
         .scope_opened,
         .scope_closed,
@@ -358,7 +352,7 @@ test "runtime causal events show resource acquisition and finalization" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    try expectCausalKinds(snapshot, &.{
+    try causal.expectEventSequence(snapshot, &.{
         .run_started,
         .scope_opened,
         .resource_acquired,
@@ -398,7 +392,7 @@ test "runtime causal events record finalizer failure evidence" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    try expectCausalKinds(snapshot, &.{
+    try causal.expectEventSequence(snapshot, &.{
         .run_started,
         .scope_opened,
         .resource_acquired,

@@ -1,13 +1,7 @@
 const std = @import("std");
 const fx = @import("zigeffect");
+const causal = @import("support/causal_assertions.zig");
 const fixtures = @import("support/fixtures.zig");
-
-fn expectCausalKinds(snapshot: fx.CausalSnapshot, expected: []const fx.CausalEventKind) !void {
-    try std.testing.expectEqual(expected.len, snapshot.events.len);
-    for (expected, 0..) |kind, index| {
-        try std.testing.expectEqual(kind, snapshot.events[index].kind);
-    }
-}
 
 test "fiber runtime forks and joins successful effects" {
     var env = try fx.TestEnv.init(std.testing.allocator);
@@ -129,7 +123,7 @@ test "fiber runtime emits causal events when forked and joined" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    try expectCausalKinds(snapshot, &.{
+    try causal.expectEventSequence(snapshot, &.{
         .fiber_forked,
         .scope_opened,
         .fiber_started,
@@ -174,7 +168,7 @@ test "fiber runtime emits causal events when interrupted" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    try expectCausalKinds(snapshot, &.{
+    try causal.expectEventSequence(snapshot, &.{
         .fiber_forked,
         .scope_opened,
         .fiber_interrupted,
@@ -236,7 +230,7 @@ test "forkScoped parent close emits child fiber interruption causality" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    try expectCausalKinds(snapshot, &.{
+    try causal.expectEventSequence(snapshot, &.{
         .fiber_forked,
         .scope_opened,
         .fiber_interrupted,
