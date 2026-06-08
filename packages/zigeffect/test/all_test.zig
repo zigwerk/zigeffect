@@ -5,6 +5,7 @@ comptime {
     _ = @import("scope_test.zig");
     _ = @import("runtime_test.zig");
     _ = @import("fiber_test.zig");
+    _ = @import("causal_backend_conformance_test.zig");
     _ = @import("invariants_test.zig");
     _ = @import("layer_test.zig");
     _ = @import("schedule_test.zig");

@@ -579,6 +579,7 @@ pub const CausalStore = struct {
     next_scope_id_value: u64 = 1,
     events: std.ArrayList(CausalEvent) = .empty,
     backend: ?CausalBackend = null,
+    backend_failure_count: u64 = 0,
     max_events: ?usize = null,
     dropped_event_count: u64 = 0,
     sampling: CausalSamplingPolicy = .{},
@@ -615,6 +616,15 @@ pub const CausalStore = struct {
 
     pub fn attachBackend(self: *CausalStore, backend: CausalBackend) void {
         self.backend = backend;
+    }
+
+    pub fn backendFailureCount(self: *const CausalStore) u64 {
+        return self.backend_failure_count;
+    }
+
+    pub fn attachedBackendKind(self: *const CausalStore) ?causal_backend.CausalBackendKind {
+        if (self.backend) |backend| return backend.kind;
+        return null;
     }
 
     pub fn droppedEventCount(self: *const CausalStore) u64 {
@@ -665,7 +675,9 @@ pub const CausalStore = struct {
         self.next_event_id += 1;
         try self.events.append(self.allocator, owned);
         if (self.backend) |backend| {
-            backend.record(backend.state, owned) catch {};
+            backend.record(backend.state, owned) catch {
+                self.backend_failure_count += 1;
+            };
         }
         self.trimRetainedEvents();
         return owned.id;
@@ -983,6 +995,16 @@ fn appendTruncationSummary(output: *std.ArrayList(u8), allocator: Allocator, sto
     try output.print(allocator, " truncated_fields={d}\n", .{store.truncated_field_count});
 }
 
+fn appendBackendSummary(output: *std.ArrayList(u8), allocator: Allocator, store: *const CausalStore) Allocator.Error!void {
+    try output.appendSlice(allocator, "backend: kind=");
+    if (store.attachedBackendKind()) |kind| {
+        try output.appendSlice(allocator, @tagName(kind));
+    } else {
+        try output.appendSlice(allocator, "none");
+    }
+    try output.print(allocator, " failed_writes={d}\n", .{store.backend_failure_count});
+}
+
 pub fn formatCausalReport(
     allocator: Allocator,
     label: []const u8,
@@ -996,6 +1018,7 @@ pub fn formatCausalReport(
     try appendRetentionSummary(&output, allocator, store);
     try appendSamplingSummary(&output, allocator, store);
     try appendTruncationSummary(&output, allocator, store);
+    try appendBackendSummary(&output, allocator, store);
 
     for (store.events.items) |event| {
         try output.print(
@@ -1094,6 +1117,7 @@ pub fn formatCausalCiReport(
     try appendRetentionSummary(&output, allocator, store);
     try appendSamplingSummary(&output, allocator, store);
     try appendTruncationSummary(&output, allocator, store);
+    try appendBackendSummary(&output, allocator, store);
 
     try output.appendSlice(allocator, "event citations:\n");
     if (store.events.items.len == 0) {
@@ -1181,6 +1205,13 @@ pub fn formatCausalJson(allocator: Allocator, store: *const CausalStore) Allocat
     try output.appendSlice(allocator, "  },\n  \"truncation\": {\n    \"max_event_string_bytes\": ");
     try appendOptionalJsonUsize(&output, allocator, store.max_event_string_bytes);
     try output.print(allocator, ",\n    \"truncated_fields\": {d}\n", .{store.truncated_field_count});
+    try output.appendSlice(allocator, "  },\n  \"backend\": {\n    \"kind\": ");
+    if (store.attachedBackendKind()) |kind| {
+        try appendJsonString(&output, allocator, @tagName(kind));
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+    try output.print(allocator, ",\n    \"failed_writes\": {d}\n", .{store.backend_failure_count});
     try output.appendSlice(allocator, "  },\n  \"events\": [\n");
     for (store.events.items, 0..) |event, index| {
         if (index > 0) try output.appendSlice(allocator, ",\n");
