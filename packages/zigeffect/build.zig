@@ -116,6 +116,21 @@ pub fn build(b: *std.Build) void {
     const causal_nendb_storage_backend_step = b.step("causal-nendb-storage-backend", "Run causal NenDB storage backend tests");
     causal_nendb_storage_backend_step.dependOn(&run_causal_nendb_storage_backend_tests.step);
 
+    const causal_async_stream_backend_test_module = b.createModule(.{
+        .root_source_file = b.path("test/causal_async_stream_backend_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_async_stream_backend_test_module.addImport("zigeffect", zigeffect);
+
+    const causal_async_stream_backend_tests = b.addTest(.{
+        .name = "zigeffect-causal-async-stream-backend-tests",
+        .root_module = causal_async_stream_backend_test_module,
+    });
+    const run_causal_async_stream_backend_tests = b.addRunArtifact(causal_async_stream_backend_tests);
+    const causal_async_stream_backend_step = b.step("causal-async-stream-backend", "Run causal async stream backend tests");
+    causal_async_stream_backend_step.dependOn(&run_causal_async_stream_backend_tests.step);
+
     const readiness_example_module = b.createModule(.{
         .root_source_file = b.path("examples/readiness.zig"),
         .target = target,
@@ -426,6 +441,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_causal_otel_backend_tests.step);
     test_step.dependOn(&run_causal_graph_history_backend_tests.step);
     test_step.dependOn(&run_causal_nendb_storage_backend_tests.step);
+    test_step.dependOn(&run_causal_async_stream_backend_tests.step);
     const causal_dev_test_step = b.step("causal-dev-test", "Run zigeffect tests with causal failure capture");
     causal_dev_test_step.dependOn(&run_causal_package_test_tool.step);
 
