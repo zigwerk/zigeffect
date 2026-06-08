@@ -1,0 +1,481 @@
+const std = @import("std");
+const causal = @import("causal.zig");
+const causal_backend = @import("causal_backend.zig");
+
+pub const Allocator = std.mem.Allocator;
+pub const causal_nendb_node_schema = "zigeffect.causal.nendb_node.v1";
+pub const causal_nendb_node_schema_version: u32 = 1;
+pub const causal_nendb_edge_schema = "zigeffect.causal.nendb_edge.v1";
+pub const causal_nendb_edge_schema_version: u32 = 1;
+
+pub const CausalNendbNode = struct {
+    id: u64,
+    label: []const u8,
+    kind: u8,
+    properties: []const u8,
+};
+
+pub const CausalNendbEdge = struct {
+    from: u64,
+    to: u64,
+    label: []const u8,
+    label_id: u16,
+    properties: []const u8,
+};
+
+pub const CausalNendbWrite = struct {
+    node: CausalNendbNode,
+    parent_edge: ?CausalNendbEdge = null,
+};
+
+pub const CausalNendbGraphWriter = struct {
+    state: ?*anyopaque = null,
+    write: *const fn (?*anyopaque, CausalNendbWrite) anyerror!void,
+    flush: ?*const fn (?*anyopaque) anyerror!void = null,
+};
+
+pub const CausalNendbStorageBackendOptions = struct {
+    max_events: ?usize = null,
+};
+
+pub const CausalNendbStorageBackendError = error{
+    CausalNendbStorageBackendFull,
+    CausalNendbWriterRejected,
+};
+
+pub const CausalNendbStorageBackendState = struct {
+    allocator: Allocator,
+    writer: CausalNendbGraphWriter,
+    events: std.ArrayList(causal.CausalEvent) = .empty,
+    max_events: ?usize = null,
+    written_event_count: u64 = 0,
+    failed_event_count: u64 = 0,
+    flushed_count: u64 = 0,
+
+    pub fn init(
+        allocator: Allocator,
+        writer: CausalNendbGraphWriter,
+        options: CausalNendbStorageBackendOptions,
+    ) CausalNendbStorageBackendState {
+        return .{
+            .allocator = allocator,
+            .writer = writer,
+            .max_events = options.max_events,
+        };
+    }
+
+    pub fn deinit(self: *CausalNendbStorageBackendState) void {
+        for (self.events.items) |event| {
+            deinitEventStrings(self.allocator, event);
+        }
+        self.events.deinit(self.allocator);
+    }
+
+    pub fn backend(self: *CausalNendbStorageBackendState) causal_backend.CausalBackend {
+        return .{
+            .kind = .nendb_graph,
+            .state = self,
+            .record = recordNendbStorageBackend,
+        };
+    }
+
+    pub fn eventCount(self: *const CausalNendbStorageBackendState) usize {
+        return self.events.items.len;
+    }
+
+    pub fn writtenEventCount(self: *const CausalNendbStorageBackendState) u64 {
+        return self.written_event_count;
+    }
+
+    pub fn failedEventCount(self: *const CausalNendbStorageBackendState) u64 {
+        return self.failed_event_count;
+    }
+
+    pub fn flushedCount(self: *const CausalNendbStorageBackendState) u64 {
+        return self.flushed_count;
+    }
+
+    pub fn flush(self: *CausalNendbStorageBackendState) anyerror!void {
+        if (self.writer.flush) |flush_writer| {
+            try flush_writer(self.writer.state);
+            self.flushed_count += 1;
+        }
+    }
+
+    pub fn snapshot(self: *const CausalNendbStorageBackendState, allocator: Allocator) Allocator.Error!causal.CausalSnapshot {
+        return snapshotFromEvents(allocator, self.events.items);
+    }
+
+    pub fn cause(self: *const CausalNendbStorageBackendState, allocator: Allocator, event_id: u64) Allocator.Error!causal.CausalLineage {
+        var output = std.ArrayList(causal.CausalEvent).empty;
+        errdefer deinitEventList(allocator, &output);
+
+        try self.appendCauseChain(allocator, &output, event_id);
+
+        return .{ .allocator = allocator, .events = try output.toOwnedSlice(allocator) };
+    }
+
+    pub fn lineage(self: *const CausalNendbStorageBackendState, allocator: Allocator, event_id: u64) Allocator.Error!causal.CausalLineage {
+        var output = std.ArrayList(causal.CausalEvent).empty;
+        errdefer deinitEventList(allocator, &output);
+
+        for (self.events.items) |event| {
+            if (event.id == event_id or event.parent_id == event_id) {
+                try appendClonedEvent(allocator, &output, event);
+            }
+        }
+
+        return .{ .allocator = allocator, .events = try output.toOwnedSlice(allocator) };
+    }
+
+    pub fn eventsByKind(self: *const CausalNendbStorageBackendState, allocator: Allocator, kind: causal.CausalEventKind) Allocator.Error!causal.CausalSnapshot {
+        return self.filterEvents(allocator, struct {
+            fn matches(event: causal.CausalEvent, expected: causal.CausalEventKind) bool {
+                return event.kind == expected;
+            }
+        }.matches, kind);
+    }
+
+    pub fn eventsByRun(self: *const CausalNendbStorageBackendState, allocator: Allocator, run_id: u64) Allocator.Error!causal.CausalSnapshot {
+        return self.filterEvents(allocator, struct {
+            fn matches(event: causal.CausalEvent, expected: u64) bool {
+                return event.run_id == expected;
+            }
+        }.matches, run_id);
+    }
+
+    pub fn eventsByScope(self: *const CausalNendbStorageBackendState, allocator: Allocator, scope_id: u64) Allocator.Error!causal.CausalSnapshot {
+        return self.filterEvents(allocator, struct {
+            fn matches(event: causal.CausalEvent, expected: u64) bool {
+                return event.scope_id == expected;
+            }
+        }.matches, scope_id);
+    }
+
+    pub fn eventsByFiber(self: *const CausalNendbStorageBackendState, allocator: Allocator, fiber_id: u64) Allocator.Error!causal.CausalSnapshot {
+        return self.filterEvents(allocator, struct {
+            fn matches(event: causal.CausalEvent, expected: u64) bool {
+                return event.fiber_id == expected;
+            }
+        }.matches, fiber_id);
+    }
+
+    fn findEvent(self: *const CausalNendbStorageBackendState, event_id: u64) ?causal.CausalEvent {
+        for (self.events.items) |event| {
+            if (event.id == event_id) return event;
+        }
+        return null;
+    }
+
+    fn appendCauseChain(
+        self: *const CausalNendbStorageBackendState,
+        allocator: Allocator,
+        output: *std.ArrayList(causal.CausalEvent),
+        event_id: u64,
+    ) Allocator.Error!void {
+        const event = self.findEvent(event_id) orelse return;
+        if (event.parent_id) |parent_id| {
+            try self.appendCauseChain(allocator, output, parent_id);
+        }
+        try appendClonedEvent(allocator, output, event);
+    }
+
+    fn filterEvents(
+        self: *const CausalNendbStorageBackendState,
+        allocator: Allocator,
+        comptime matches: anytype,
+        expected: anytype,
+    ) Allocator.Error!causal.CausalSnapshot {
+        var output = std.ArrayList(causal.CausalEvent).empty;
+        errdefer deinitEventList(allocator, &output);
+
+        for (self.events.items) |event| {
+            if (matches(event, expected)) {
+                try appendClonedEvent(allocator, &output, event);
+            }
+        }
+
+        return .{ .allocator = allocator, .events = try output.toOwnedSlice(allocator) };
+    }
+};
+
+pub fn stableCausalNendbLabelId(value: []const u8) u8 {
+    const hash = stableHash32(value);
+    const label_id: u8 = @truncate(hash);
+    return if (label_id == 0) 1 else label_id;
+}
+
+pub fn stableCausalNendbEdgeLabelId(value: []const u8) u16 {
+    const hash = stableHash32(value);
+    const label_id: u16 = @truncate(hash);
+    return if (label_id == 0) 1 else label_id;
+}
+
+pub fn mapCausalEventToNendbWrite(allocator: Allocator, event: causal.CausalEvent) Allocator.Error!CausalNendbWrite {
+    const node_label = try cloneSlice(allocator, "causal_event");
+    errdefer if (node_label.len > 0) allocator.free(node_label);
+
+    const node_properties = try formatNendbNodeProperties(allocator, event);
+    errdefer if (node_properties.len > 0) allocator.free(node_properties);
+
+    var write = CausalNendbWrite{
+        .node = .{
+            .id = event.id,
+            .label = node_label,
+            .kind = stableCausalNendbLabelId(@tagName(event.kind)),
+            .properties = node_properties,
+        },
+    };
+
+    if (event.parent_id) |parent_id| {
+        const edge_label = try cloneSlice(allocator, "causal_parent");
+        errdefer if (edge_label.len > 0) allocator.free(edge_label);
+        const edge_properties = try formatNendbEdgeProperties(allocator, event, parent_id);
+        errdefer if (edge_properties.len > 0) allocator.free(edge_properties);
+        write.parent_edge = .{
+            .from = parent_id,
+            .to = event.id,
+            .label = edge_label,
+            .label_id = stableCausalNendbEdgeLabelId("causal_parent"),
+            .properties = edge_properties,
+        };
+    }
+
+    return write;
+}
+
+pub fn cloneCausalNendbWrite(allocator: Allocator, write: CausalNendbWrite) Allocator.Error!CausalNendbWrite {
+    var cloned = CausalNendbWrite{
+        .node = .{
+            .id = write.node.id,
+            .label = try cloneSlice(allocator, write.node.label),
+            .kind = write.node.kind,
+            .properties = "",
+        },
+    };
+    errdefer if (cloned.node.label.len > 0) allocator.free(cloned.node.label);
+
+    cloned.node.properties = try cloneSlice(allocator, write.node.properties);
+    errdefer if (cloned.node.properties.len > 0) allocator.free(cloned.node.properties);
+
+    if (write.parent_edge) |edge| {
+        var cloned_edge = CausalNendbEdge{
+            .from = edge.from,
+            .to = edge.to,
+            .label = try cloneSlice(allocator, edge.label),
+            .label_id = edge.label_id,
+            .properties = "",
+        };
+        errdefer if (cloned_edge.label.len > 0) allocator.free(cloned_edge.label);
+
+        cloned_edge.properties = try cloneSlice(allocator, edge.properties);
+        errdefer if (cloned_edge.properties.len > 0) allocator.free(cloned_edge.properties);
+        cloned.parent_edge = cloned_edge;
+    }
+
+    return cloned;
+}
+
+pub fn deinitCausalNendbWrite(allocator: Allocator, write: *CausalNendbWrite) void {
+    if (write.node.label.len > 0) allocator.free(write.node.label);
+    if (write.node.properties.len > 0) allocator.free(write.node.properties);
+    if (write.parent_edge) |edge| {
+        if (edge.label.len > 0) allocator.free(edge.label);
+        if (edge.properties.len > 0) allocator.free(edge.properties);
+    }
+    write.* = .{
+        .node = .{
+            .id = 0,
+            .label = "",
+            .kind = 0,
+            .properties = "",
+        },
+    };
+}
+
+fn stableHash32(value: []const u8) u32 {
+    var hash: u32 = 2166136261;
+    for (value) |byte| {
+        hash ^= byte;
+        hash *%= 16777619;
+    }
+    return hash;
+}
+
+fn cloneSlice(allocator: Allocator, value: []const u8) Allocator.Error![]const u8 {
+    if (value.len == 0) return "";
+    return allocator.dupe(u8, value);
+}
+
+fn cloneEvent(allocator: Allocator, event: causal.CausalEvent) Allocator.Error!causal.CausalEvent {
+    var owned = event;
+    owned.label = try cloneSlice(allocator, event.label);
+    errdefer if (owned.label.len > 0) allocator.free(owned.label);
+    owned.type_name = try cloneSlice(allocator, event.type_name);
+    errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
+    owned.status = try cloneSlice(allocator, event.status);
+    errdefer if (owned.status.len > 0) allocator.free(owned.status);
+    owned.redacted_detail = try cloneSlice(allocator, event.redacted_detail);
+    errdefer if (owned.redacted_detail.len > 0) allocator.free(owned.redacted_detail);
+    return owned;
+}
+
+fn deinitEventStrings(allocator: Allocator, event: causal.CausalEvent) void {
+    if (event.label.len > 0) allocator.free(event.label);
+    if (event.type_name.len > 0) allocator.free(event.type_name);
+    if (event.status.len > 0) allocator.free(event.status);
+    if (event.redacted_detail.len > 0) allocator.free(event.redacted_detail);
+}
+
+fn deinitEventList(allocator: Allocator, events: *std.ArrayList(causal.CausalEvent)) void {
+    for (events.items) |event| {
+        deinitEventStrings(allocator, event);
+    }
+    events.deinit(allocator);
+}
+
+fn appendClonedEvent(allocator: Allocator, output: *std.ArrayList(causal.CausalEvent), event: causal.CausalEvent) Allocator.Error!void {
+    const cloned = try cloneEvent(allocator, event);
+    errdefer deinitEventStrings(allocator, cloned);
+    try output.append(allocator, cloned);
+}
+
+fn snapshotFromEvents(allocator: Allocator, source: []const causal.CausalEvent) Allocator.Error!causal.CausalSnapshot {
+    const events = try allocator.alloc(causal.CausalEvent, source.len);
+    errdefer allocator.free(events);
+
+    var initialized: usize = 0;
+    errdefer {
+        for (events[0..initialized]) |event| {
+            deinitEventStrings(allocator, event);
+        }
+    }
+
+    for (source, 0..) |event, index| {
+        events[index] = try cloneEvent(allocator, event);
+        initialized += 1;
+    }
+
+    return .{ .allocator = allocator, .events = events };
+}
+
+fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []const u8) Allocator.Error!void {
+    try output.append(allocator, '"');
+    for (value) |byte| {
+        switch (byte) {
+            '"' => try output.appendSlice(allocator, "\\\""),
+            '\\' => try output.appendSlice(allocator, "\\\\"),
+            '\n' => try output.appendSlice(allocator, "\\n"),
+            '\r' => try output.appendSlice(allocator, "\\r"),
+            '\t' => try output.appendSlice(allocator, "\\t"),
+            else => try output.append(allocator, byte),
+        }
+    }
+    try output.append(allocator, '"');
+}
+
+fn appendOptionalJsonU64(output: *std.ArrayList(u8), allocator: Allocator, value: ?u64) Allocator.Error!void {
+    if (value) |number| {
+        try output.print(allocator, "{d}", .{number});
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+}
+
+fn appendNodeCommonProperties(output: *std.ArrayList(u8), allocator: Allocator, event: causal.CausalEvent) Allocator.Error!void {
+    try output.appendSlice(allocator, "\"event_id\":");
+    try output.print(allocator, "{d}", .{event.id});
+    try output.appendSlice(allocator, ",\"kind\":");
+    try appendJsonString(output, allocator, @tagName(event.kind));
+    try output.appendSlice(allocator, ",\"run_id\":");
+    try appendOptionalJsonU64(output, allocator, event.run_id);
+    try output.appendSlice(allocator, ",\"parent_id\":");
+    try appendOptionalJsonU64(output, allocator, event.parent_id);
+    try output.appendSlice(allocator, ",\"fiber_id\":");
+    try appendOptionalJsonU64(output, allocator, event.fiber_id);
+    try output.appendSlice(allocator, ",\"scope_id\":");
+    try appendOptionalJsonU64(output, allocator, event.scope_id);
+    try output.appendSlice(allocator, ",\"trace_id\":");
+    try appendOptionalJsonU64(output, allocator, event.trace_id);
+    try output.appendSlice(allocator, ",\"span_id\":");
+    try appendOptionalJsonU64(output, allocator, event.span_id);
+    try output.appendSlice(allocator, ",\"label\":");
+    try appendJsonString(output, allocator, event.label);
+    try output.appendSlice(allocator, ",\"type_name\":");
+    try appendJsonString(output, allocator, event.type_name);
+    try output.appendSlice(allocator, ",\"status\":");
+    try appendJsonString(output, allocator, event.status);
+    try output.appendSlice(allocator, ",\"redacted_detail\":");
+    try appendJsonString(output, allocator, event.redacted_detail);
+}
+
+fn formatNendbNodeProperties(allocator: Allocator, event: causal.CausalEvent) Allocator.Error![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\"schema\":");
+    try appendJsonString(&output, allocator, causal_nendb_node_schema);
+    try output.print(
+        allocator,
+        ",\"schema_version\":{d},\"event_taxonomy_version\":{d},",
+        .{ causal_nendb_node_schema_version, causal.causal_event_taxonomy_version },
+    );
+    try appendNodeCommonProperties(&output, allocator, event);
+    try output.appendSlice(allocator, "}");
+
+    return output.toOwnedSlice(allocator);
+}
+
+fn formatNendbEdgeProperties(allocator: Allocator, event: causal.CausalEvent, parent_id: u64) Allocator.Error![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\"schema\":");
+    try appendJsonString(&output, allocator, causal_nendb_edge_schema);
+    try output.print(
+        allocator,
+        ",\"schema_version\":{d},\"from_event_id\":{d},\"to_event_id\":{d},\"kind\":",
+        .{ causal_nendb_edge_schema_version, parent_id, event.id },
+    );
+    try appendJsonString(&output, allocator, @tagName(event.kind));
+    try output.appendSlice(allocator, ",\"run_id\":");
+    try appendOptionalJsonU64(&output, allocator, event.run_id);
+    try output.appendSlice(allocator, "}");
+
+    return output.toOwnedSlice(allocator);
+}
+
+fn recordNendbStorageBackend(raw: ?*anyopaque, event: causal.CausalEvent) anyerror!void {
+    const state: *CausalNendbStorageBackendState = @ptrCast(@alignCast(raw.?));
+    if (state.max_events) |max_events| {
+        if (state.events.items.len >= max_events) {
+            state.failed_event_count += 1;
+            return error.CausalNendbStorageBackendFull;
+        }
+    }
+
+    state.events.ensureUnusedCapacity(state.allocator, 1) catch |err| {
+        state.failed_event_count += 1;
+        return err;
+    };
+
+    const owned_event = cloneEvent(state.allocator, event) catch |err| {
+        state.failed_event_count += 1;
+        return err;
+    };
+    errdefer deinitEventStrings(state.allocator, owned_event);
+
+    var write = mapCausalEventToNendbWrite(state.allocator, event) catch |err| {
+        state.failed_event_count += 1;
+        return err;
+    };
+    defer deinitCausalNendbWrite(state.allocator, &write);
+
+    state.writer.write(state.writer.state, write) catch |err| {
+        state.failed_event_count += 1;
+        return err;
+    };
+
+    state.events.appendAssumeCapacity(owned_event);
+    state.written_event_count += 1;
+}

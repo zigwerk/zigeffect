@@ -101,6 +101,21 @@ pub fn build(b: *std.Build) void {
     const causal_graph_history_backend_step = b.step("causal-graph-history-backend", "Run causal graph history backend tests");
     causal_graph_history_backend_step.dependOn(&run_causal_graph_history_backend_tests.step);
 
+    const causal_nendb_storage_backend_test_module = b.createModule(.{
+        .root_source_file = b.path("test/causal_nendb_storage_backend_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_nendb_storage_backend_test_module.addImport("zigeffect", zigeffect);
+
+    const causal_nendb_storage_backend_tests = b.addTest(.{
+        .name = "zigeffect-causal-nendb-storage-backend-tests",
+        .root_module = causal_nendb_storage_backend_test_module,
+    });
+    const run_causal_nendb_storage_backend_tests = b.addRunArtifact(causal_nendb_storage_backend_tests);
+    const causal_nendb_storage_backend_step = b.step("causal-nendb-storage-backend", "Run causal NenDB storage backend tests");
+    causal_nendb_storage_backend_step.dependOn(&run_causal_nendb_storage_backend_tests.step);
+
     const readiness_example_module = b.createModule(.{
         .root_source_file = b.path("examples/readiness.zig"),
         .target = target,
@@ -410,6 +425,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_causal_dot_backend_tests.step);
     test_step.dependOn(&run_causal_otel_backend_tests.step);
     test_step.dependOn(&run_causal_graph_history_backend_tests.step);
+    test_step.dependOn(&run_causal_nendb_storage_backend_tests.step);
     const causal_dev_test_step = b.step("causal-dev-test", "Run zigeffect tests with causal failure capture");
     causal_dev_test_step.dependOn(&run_causal_package_test_tool.step);
 
