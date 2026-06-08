@@ -280,34 +280,30 @@ The first conversion target should be a small set of existing helper users:
 
 ## Scenario Expansion
 
-Add only the smallest new scenario if the matrix needs it to avoid misleading
-coverage. The most useful candidate is an observability-focused causal scenario
-because observability is one of the requested M2 domains and currently has
-tests but no registered scenario.
+Add only the smallest scenario registration needed to avoid misleading
+coverage. The repository already has an observability-rich causal example in
+`packages/zigeffect/examples/causal_readiness.zig`; M2 should register that
+existing example instead of creating a duplicate fixture.
 
-Proposed scenario:
+Proposed registry entry:
 
 ```text
-causal-observability-context
+causal-readiness
 ```
 
 Purpose:
 
-- prove logs, metrics, spans, and trace context can be observed without
-  producing causal findings in a healthy run;
+- prove logs, metrics, spans, graph startup, app readiness, and trace context
+  can be observed in one deterministic app-shaped scenario;
 - keep observability coverage visible in the scenario registry.
 
 Expected behavior:
 
 - command passes;
 - scenario is quiet on success;
-- test asserts log/metric/span causal events or observability service output,
-  depending on the current runtime boundary;
-- no causal findings for a healthy observability scenario.
-
-If the current runtime does not naturally record log/metric/span causal events
-without a larger instrumentation change, the branch should document
-observability as partial and defer the dedicated scenario rather than fake it.
+- existing example tests assert `log_recorded`, `metric_recorded`, and
+  `span_recorded` events;
+- no causal findings for the healthy readiness path.
 
 ## Package Test Integration
 
