@@ -643,6 +643,15 @@ pub fn build(b: *std.Build) void {
     const causal_registry_apply_step = b.step("causal-registry-apply", "Write a guarded causal registry application report");
     causal_registry_apply_step.dependOn(&run_causal_registry_apply_tool.step);
 
+    const causal_policy_decision_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-policy-decision",
+        .root_module = causal_policy_decision_tool_module,
+    });
+    const run_causal_policy_decision_tool = b.addRunArtifact(causal_policy_decision_tool);
+    if (b.args) |args| run_causal_policy_decision_tool.addArgs(args);
+    const causal_policy_decision_step = b.step("causal-policy-decision", "Write a deterministic causal policy decision report");
+    causal_policy_decision_step.dependOn(&run_causal_policy_decision_tool.step);
+
     const causal_handoff_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_handoff.zig"),
         .target = target,
@@ -751,6 +760,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_registry_application_readiness_tool_tests.step);
     examples_step.dependOn(&causal_registry_apply_tool.step);
     examples_step.dependOn(&run_causal_registry_apply_tool_tests.step);
+    examples_step.dependOn(&causal_policy_decision_tool.step);
+    examples_step.dependOn(&run_causal_policy_decision_tool_tests.step);
     examples_step.dependOn(&causal_handoff_tool.step);
     examples_step.dependOn(&run_causal_handoff_tool_tests.step);
     examples_step.dependOn(&causal_loop_tool.step);

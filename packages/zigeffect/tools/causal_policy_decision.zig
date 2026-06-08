@@ -946,6 +946,100 @@ fn sampleHumanReviewPolicyInput() PolicyInput {
     };
 }
 
+fn usage() []const u8 {
+    return "usage: zig build causal-policy-decision -- local [scenario] [--policy <policy>] [--by <actor>]\n";
+}
+
+fn failUsage(err: anyerror) noreturn {
+    std.debug.print("causal-policy-decision error: {s}\n{s}", .{ @errorName(err), usage() });
+    std.process.exit(2);
+}
+
+fn readRequiredArtifact(io: std.Io, allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => error.MissingPolicyInput,
+        else => return err,
+    };
+}
+
+fn readOptionalArtifact(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !?[]const u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+}
+
+fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
+    const slash = std.mem.lastIndexOfScalar(u8, path, '/') orelse return error.InvalidArtifactPath;
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(io, path[0..slash]);
+    try cwd.writeFile(io, .{ .sub_path = path, .data = contents });
+}
+
+fn runLocalPolicyDecision(init: std.process.Init, options: Options) !void {
+    const allocator = init.gpa;
+    const paths = try policyDecisionPathsForOptions(allocator, options);
+    defer paths.deinit(allocator, options);
+
+    const audit_json = try readRequiredArtifact(init.io, allocator, paths.audit_json);
+    defer allocator.free(audit_json);
+    const proposal_json = try readRequiredArtifact(init.io, allocator, paths.proposal_json);
+    defer allocator.free(proposal_json);
+    const audit_chain_json = try readRequiredArtifact(init.io, allocator, paths.audit_chain_json);
+    defer allocator.free(audit_chain_json);
+
+    const decision_json = try readOptionalArtifact(init.io, allocator, paths.decision_json);
+    defer if (decision_json) |json| allocator.free(json);
+    const scenario_proposal_json = try readOptionalArtifact(init.io, allocator, paths.scenario_proposal_json);
+    defer if (scenario_proposal_json) |json| allocator.free(json);
+    const registry_patch_json = try readOptionalArtifact(init.io, allocator, paths.registry_patch_json);
+    defer if (registry_patch_json) |json| allocator.free(json);
+    const registry_readiness_json = try readOptionalArtifact(init.io, allocator, paths.registry_readiness_json);
+    defer if (registry_readiness_json) |json| allocator.free(json);
+    const registry_application_json = try readOptionalArtifact(init.io, allocator, paths.registry_application_json);
+    defer if (registry_application_json) |json| allocator.free(json);
+
+    const reports = try formatPolicyDecisionReports(allocator, .{
+        .options = options,
+        .paths = paths,
+        .audit_json = audit_json,
+        .decision_json = decision_json,
+        .proposal_json = proposal_json,
+        .audit_chain_json = audit_chain_json,
+        .scenario_proposal_json = scenario_proposal_json,
+        .registry_patch_json = registry_patch_json,
+        .registry_readiness_json = registry_readiness_json,
+        .registry_application_json = registry_application_json,
+    });
+    defer reports.deinit(allocator);
+
+    try writeArtifact(init.io, paths.output_json, reports.json);
+    try writeArtifact(init.io, paths.output_text, reports.text);
+    std.debug.print("{s}", .{reports.text});
+}
+
+pub fn main(init: std.process.Init) !void {
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    const options = parseOptions(args) catch |err| failUsage(err);
+    runLocalPolicyDecision(init, options) catch |err| switch (err) {
+        error.MissingPolicyInput,
+        error.InvalidArtifactPath,
+        error.UnsupportedAuditSchema,
+        error.UnsupportedDecisionSchema,
+        error.UnsupportedProposalSchema,
+        error.UnsupportedAuditChainSchema,
+        error.UnsupportedScenarioProposalSchema,
+        error.UnsupportedRegistryPatchSchema,
+        error.UnsupportedReadinessSchema,
+        error.UnsupportedApplicationSchema,
+        error.UnknownDecision,
+        error.UnknownReadinessStatus,
+        error.UnknownApplicationStatus,
+        => failUsage(err),
+        else => return err,
+    };
+}
+
 const sample_audit_json =
     \\{
     \\  "schema": "zigeffect.causal.remediation-audit.v1",
@@ -1345,6 +1439,13 @@ test "policy evaluator rejects unsupported optional artifact schema" {
         .registry_application_json = sample_wrong_schema_json,
     };
     try std.testing.expectError(error.UnsupportedApplicationSchema, evaluatePolicy(std.testing.allocator, input));
+}
+
+test "policy decision usage names local command shape" {
+    try std.testing.expectEqualStrings(
+        "usage: zig build causal-policy-decision -- local [scenario] [--policy <policy>] [--by <actor>]\n",
+        usage(),
+    );
 }
 
 test "policy decision JSON records advisory approval without mutation authority" {
