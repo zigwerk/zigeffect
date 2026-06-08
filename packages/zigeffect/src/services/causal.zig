@@ -7,6 +7,7 @@ pub const causal_json_schema = "zigeffect.causal.v1";
 pub const causal_json_schema_version: u32 = 1;
 pub const causal_event_taxonomy_version: u32 = 1;
 pub const causal_redaction_marker = "<redacted>";
+pub const causal_truncation_marker = "<truncated>";
 
 pub const CausalSamplingPolicy = struct {
     log_every_n: ?usize = null,
@@ -17,6 +18,7 @@ pub const CausalSamplingPolicy = struct {
 pub const CausalStoreOptions = struct {
     max_events: ?usize = null,
     sampling: CausalSamplingPolicy = .{},
+    max_event_string_bytes: ?usize = null,
 };
 
 pub const CausalEventKind = enum {
@@ -521,6 +523,8 @@ pub const CausalStore = struct {
     dropped_event_count: u64 = 0,
     sampling: CausalSamplingPolicy = .{},
     sampled_event_count: u64 = 0,
+    max_event_string_bytes: ?usize = null,
+    truncated_field_count: u64 = 0,
     log_seen_count: u64 = 0,
     metric_seen_count: u64 = 0,
     span_seen_count: u64 = 0,
@@ -534,6 +538,7 @@ pub const CausalStore = struct {
             .allocator = allocator,
             .max_events = options.max_events,
             .sampling = options.sampling,
+            .max_event_string_bytes = options.max_event_string_bytes,
         };
     }
 
@@ -558,6 +563,10 @@ pub const CausalStore = struct {
 
     pub fn sampledEventCount(self: *const CausalStore) u64 {
         return self.sampled_event_count;
+    }
+
+    pub fn truncatedFieldCount(self: *const CausalStore) u64 {
+        return self.truncated_field_count;
     }
 
     pub fn oldestRetainedEventId(self: *const CausalStore) ?u64 {
@@ -895,6 +904,20 @@ fn appendSamplingSummary(output: *std.ArrayList(u8), allocator: Allocator, store
     try output.print(allocator, " sampled_events={d}\n", .{store.sampled_event_count});
 }
 
+fn appendTruncationLimit(output: *std.ArrayList(u8), allocator: Allocator, value: ?usize) Allocator.Error!void {
+    if (value) |number| {
+        try output.print(allocator, "{d}", .{number});
+    } else {
+        try output.appendSlice(allocator, "off");
+    }
+}
+
+fn appendTruncationSummary(output: *std.ArrayList(u8), allocator: Allocator, store: *const CausalStore) Allocator.Error!void {
+    try output.appendSlice(allocator, "truncation: max_event_string_bytes=");
+    try appendTruncationLimit(output, allocator, store.max_event_string_bytes);
+    try output.print(allocator, " truncated_fields={d}\n", .{store.truncated_field_count});
+}
+
 pub fn formatCausalReport(
     allocator: Allocator,
     label: []const u8,
@@ -907,6 +930,7 @@ pub fn formatCausalReport(
     try output.print(allocator, "events: {d}\n", .{store.events.items.len});
     try appendRetentionSummary(&output, allocator, store);
     try appendSamplingSummary(&output, allocator, store);
+    try appendTruncationSummary(&output, allocator, store);
 
     for (store.events.items) |event| {
         try output.print(
@@ -1004,6 +1028,7 @@ pub fn formatCausalCiReport(
     );
     try appendRetentionSummary(&output, allocator, store);
     try appendSamplingSummary(&output, allocator, store);
+    try appendTruncationSummary(&output, allocator, store);
 
     try output.appendSlice(allocator, "event citations:\n");
     if (store.events.items.len == 0) {
@@ -1088,6 +1113,9 @@ pub fn formatCausalJson(allocator: Allocator, store: *const CausalStore) Allocat
     try output.appendSlice(allocator, ",\n    \"span_every_n\": ");
     try appendOptionalJsonUsize(&output, allocator, store.sampling.span_every_n);
     try output.print(allocator, ",\n    \"sampled_events\": {d}\n", .{store.sampled_event_count});
+    try output.appendSlice(allocator, "  },\n  \"truncation\": {\n    \"max_event_string_bytes\": ");
+    try appendOptionalJsonUsize(&output, allocator, store.max_event_string_bytes);
+    try output.print(allocator, ",\n    \"truncated_fields\": {d}\n", .{store.truncated_field_count});
     try output.appendSlice(allocator, "  },\n  \"events\": [\n");
     for (store.events.items, 0..) |event, index| {
         if (index > 0) try output.appendSlice(allocator, ",\n");

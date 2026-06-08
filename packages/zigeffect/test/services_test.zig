@@ -779,6 +779,37 @@ test "causal artifacts disclose sampling policy and sampled event count" {
     try std.testing.expect(std.mem.indexOf(u8, report, "sampling: log_every_n=off metric_every_n=off span_every_n=2 sampled_events=1") != null);
 }
 
+test "causal artifacts disclose truncation policy when string limits are disabled" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    _ = try store.record(.{
+        .kind = .run_started,
+        .label = "unbounded-label",
+        .type_name = "UnboundedEffect",
+        .status = "success",
+        .redacted_detail = "detail remains complete",
+    });
+
+    try std.testing.expectEqual(@as(u64, 0), store.truncatedFieldCount());
+
+    const json = try fx.formatCausalJson(std.testing.allocator, &store);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"truncation\": {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"max_event_string_bytes\": null") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"truncated_fields\": 0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "detail remains complete") != null);
+
+    const report = try fx.formatCausalReport(std.testing.allocator, "default truncation", &store);
+    defer std.testing.allocator.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "truncation: max_event_string_bytes=off truncated_fields=0") != null);
+
+    const ci_report = try fx.formatCausalCiReport(std.testing.allocator, "default truncation", &store);
+    defer std.testing.allocator.free(ci_report);
+    try std.testing.expect(std.mem.indexOf(u8, ci_report, "truncation: max_event_string_bytes=off truncated_fields=0") != null);
+}
+
 test "causal store redacts secret-shaped event strings before storage and export" {
     var backend_state = FakeCausalBackendState{};
     var store = fx.CausalStore.init(std.testing.allocator);
