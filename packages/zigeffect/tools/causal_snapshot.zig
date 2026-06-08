@@ -5,6 +5,519 @@ const causal_run = @import("causal_run");
 pub const snapshot_manifest_schema = "zigeffect.causal.snapshot-manifest.v1";
 pub const snapshot_manifest_schema_version: u32 = 1;
 
+pub const SnapshotManifestOptions = struct {
+    name: []const u8,
+    target: []const u8 = "manual",
+    phase: []const u8 = "manual",
+    artifact_path: []const u8,
+    baseline_path: ?[]const u8 = null,
+    compare_report_path: ?[]const u8 = null,
+    query_report_path: ?[]const u8 = null,
+    advice_report_path: ?[]const u8 = null,
+};
+
+pub const SnapshotManifestPaths = struct {
+    json_path: []const u8,
+    text_path: []const u8,
+
+    pub fn deinit(self: SnapshotManifestPaths, allocator: std.mem.Allocator) void {
+        allocator.free(self.json_path);
+        allocator.free(self.text_path);
+    }
+};
+
+const Artifact = struct {
+    schema: ?[]const u8 = null,
+    schema_version: ?u32 = null,
+    event_taxonomy_version: ?u32 = null,
+    events: []Event,
+};
+
+const Event = struct {
+    id: u64,
+    kind: []const u8,
+    run_id: ?u64,
+    parent_id: ?u64,
+    fiber_id: ?u64,
+    scope_id: ?u64,
+    trace_id: ?u64,
+    span_id: ?u64,
+    label: []const u8,
+    type_name: []const u8,
+    status: []const u8,
+    redacted_detail: []const u8,
+};
+
+const replay_reason = "snapshot manifest references observed causal artifact only";
+
+pub fn validateSnapshotName(name: []const u8) error{InvalidSnapshotName}!void {
+    if (name.len == 0 or name.len > 64) return error.InvalidSnapshotName;
+    if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) return error.InvalidSnapshotName;
+    for (name) |byte| {
+        const valid = (byte >= 'a' and byte <= 'z') or
+            (byte >= 'A' and byte <= 'Z') or
+            (byte >= '0' and byte <= '9') or
+            byte == '_' or
+            byte == '-';
+        if (!valid) return error.InvalidSnapshotName;
+    }
+}
+
+pub fn snapshotManifestPaths(allocator: std.mem.Allocator, name: []const u8) !SnapshotManifestPaths {
+    try validateSnapshotName(name);
+    const json_path = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-snapshot-{s}.json", .{ causal_run.artifact_dir, name });
+    errdefer allocator.free(json_path);
+    const text_path = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-snapshot-{s}.txt", .{ causal_run.artifact_dir, name });
+    errdefer allocator.free(text_path);
+    return .{
+        .json_path = json_path,
+        .text_path = text_path,
+    };
+}
+
+pub fn formatSnapshotManifestJson(
+    allocator: std.mem.Allocator,
+    artifact_json: []const u8,
+    options: SnapshotManifestOptions,
+) ![]const u8 {
+    try validateSnapshotName(options.name);
+    var parsed = try std.json.parseFromSlice(Artifact, allocator, artifact_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const events = parsed.value.events;
+    const metadata = artifactMetadata(parsed.value);
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\"schema\":");
+    try appendJsonString(&output, allocator, snapshot_manifest_schema);
+    try output.print(allocator, ",\"schema_version\":{d}", .{snapshot_manifest_schema_version});
+    try output.appendSlice(allocator, ",\"name\":");
+    try appendJsonString(&output, allocator, options.name);
+    try output.appendSlice(allocator, ",\"target\":");
+    try appendJsonString(&output, allocator, options.target);
+    try output.appendSlice(allocator, ",\"phase\":");
+    try appendJsonString(&output, allocator, options.phase);
+    try output.appendSlice(allocator, ",\"artifact\":{\"path\":");
+    try appendJsonString(&output, allocator, options.artifact_path);
+    try output.appendSlice(allocator, ",\"schema\":");
+    try appendOptionalJsonString(&output, allocator, metadata.schema);
+    try output.appendSlice(allocator, ",\"schema_version\":");
+    try appendOptionalJsonU32(&output, allocator, metadata.schema_version);
+    try output.appendSlice(allocator, ",\"event_taxonomy_version\":");
+    try appendOptionalJsonU32(&output, allocator, metadata.event_taxonomy_version);
+    try output.print(allocator, ",\"events\":{d},\"first_event_id\":", .{events.len});
+    try appendOptionalJsonU64(&output, allocator, firstEventId(events));
+    try output.appendSlice(allocator, ",\"last_event_id\":");
+    try appendOptionalJsonU64(&output, allocator, lastEventId(events));
+    try output.print(allocator, ",\"findings\":{d}", .{findingCount(events)});
+    try output.appendSlice(allocator, "},\"related\":{\"baseline_path\":");
+    try appendOptionalJsonString(&output, allocator, options.baseline_path);
+    try output.appendSlice(allocator, ",\"compare_report_path\":");
+    try appendOptionalJsonString(&output, allocator, options.compare_report_path);
+    try output.appendSlice(allocator, ",\"query_report_path\":");
+    try appendOptionalJsonString(&output, allocator, options.query_report_path);
+    try output.appendSlice(allocator, ",\"advice_report_path\":");
+    try appendOptionalJsonString(&output, allocator, options.advice_report_path);
+    try output.appendSlice(allocator, "},\"replay\":{\"feasible\":false,\"reason\":");
+    try appendJsonString(&output, allocator, replay_reason);
+    try output.appendSlice(allocator, "},\"next_queries\":[");
+    try appendNextQueriesJson(&output, allocator, options);
+    try output.appendSlice(allocator, "],\"warnings\":");
+    try appendWarningsJsonArray(allocator, &output, metadata, events);
+    try output.appendSlice(allocator, "}");
+
+    return output.toOwnedSlice(allocator);
+}
+
+pub fn formatSnapshotManifestText(
+    allocator: std.mem.Allocator,
+    artifact_json: []const u8,
+    options: SnapshotManifestOptions,
+) ![]const u8 {
+    try validateSnapshotName(options.name);
+    var parsed = try std.json.parseFromSlice(Artifact, allocator, artifact_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const events = parsed.value.events;
+    const metadata = artifactMetadata(parsed.value);
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "zigeffect causal snapshot manifest\n");
+    try output.print(allocator, "schema: {s}\n", .{snapshot_manifest_schema});
+    try output.print(allocator, "schema version: {d}\n", .{snapshot_manifest_schema_version});
+    try output.print(allocator, "name: {s}\n", .{options.name});
+    try output.print(allocator, "target: {s}\n", .{options.target});
+    try output.print(allocator, "phase: {s}\n", .{options.phase});
+    try output.print(allocator, "artifact: {s}\n", .{options.artifact_path});
+    try output.print(allocator, "events: {d}\n", .{events.len});
+    try appendEventIdRangeText(&output, allocator, events);
+    try output.print(allocator, "findings: {d}\n", .{findingCount(events)});
+    if (options.baseline_path) |path| try output.print(allocator, "baseline: {s}\n", .{path});
+    if (options.compare_report_path) |path| try output.print(allocator, "compare report: {s}\n", .{path});
+    if (options.query_report_path) |path| try output.print(allocator, "query report: {s}\n", .{path});
+    if (options.advice_report_path) |path| try output.print(allocator, "advice report: {s}\n", .{path});
+    try output.appendSlice(allocator, "replay feasible: false\n");
+    try output.print(allocator, "replay reason: {s}\n", .{replay_reason});
+    try output.appendSlice(allocator, "next queries:\n");
+    try appendNextQueriesText(&output, allocator, options);
+    try appendWarningsText(allocator, &output, metadata, events);
+
+    return output.toOwnedSlice(allocator);
+}
+
+fn artifactMetadata(artifact: Artifact) causal_artifact.ArtifactMetadata {
+    return .{
+        .schema = artifact.schema,
+        .schema_version = artifact.schema_version,
+        .event_taxonomy_version = artifact.event_taxonomy_version,
+    };
+}
+
+fn appendJsonString(output: *std.ArrayList(u8), allocator: std.mem.Allocator, value: []const u8) !void {
+    try output.append(allocator, '"');
+    for (value) |byte| {
+        switch (byte) {
+            '"' => try output.appendSlice(allocator, "\\\""),
+            '\\' => try output.appendSlice(allocator, "\\\\"),
+            '\n' => try output.appendSlice(allocator, "\\n"),
+            '\r' => try output.appendSlice(allocator, "\\r"),
+            '\t' => try output.appendSlice(allocator, "\\t"),
+            else => try output.append(allocator, byte),
+        }
+    }
+    try output.append(allocator, '"');
+}
+
+fn appendOptionalJsonString(output: *std.ArrayList(u8), allocator: std.mem.Allocator, value: ?[]const u8) !void {
+    if (value) |text| {
+        try appendJsonString(output, allocator, text);
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+}
+
+fn appendOptionalJsonU32(output: *std.ArrayList(u8), allocator: std.mem.Allocator, value: ?u32) !void {
+    if (value) |number| {
+        try output.print(allocator, "{d}", .{number});
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+}
+
+fn appendOptionalJsonU64(output: *std.ArrayList(u8), allocator: std.mem.Allocator, value: ?u64) !void {
+    if (value) |number| {
+        try output.print(allocator, "{d}", .{number});
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+}
+
+fn firstEventId(events: []const Event) ?u64 {
+    if (events.len == 0) return null;
+    return events[0].id;
+}
+
+fn lastEventId(events: []const Event) ?u64 {
+    if (events.len == 0) return null;
+    return events[events.len - 1].id;
+}
+
+fn appendEventIdRangeText(output: *std.ArrayList(u8), allocator: std.mem.Allocator, events: []const Event) !void {
+    const first = firstEventId(events) orelse {
+        try output.appendSlice(allocator, "event ids: none\n");
+        return;
+    };
+    const last = lastEventId(events).?;
+    try output.print(allocator, "event ids: {d}..{d}\n", .{ first, last });
+}
+
+fn findingCount(events: []const Event) usize {
+    var count: usize = 0;
+    for (events) |event| {
+        if (std.mem.eql(u8, event.kind, "resource_acquired") and !hasFinalizedResource(events, event)) {
+            count += 1;
+        } else if (std.mem.eql(u8, event.kind, "scope_closed")) {
+            count += pendingFiberCountAfterScopeClose(events, event);
+        } else if (std.mem.eql(u8, event.kind, "resource_finalized") and std.mem.eql(u8, event.status, "failure")) {
+            count += 1;
+        } else if (std.mem.eql(u8, event.kind, "schedule_decision") and std.mem.eql(u8, event.status, "exhausted")) {
+            count += 1;
+        } else if (std.mem.eql(u8, event.kind, "service_required") and std.mem.eql(u8, event.status, "missing")) {
+            count += 1;
+        } else if (std.mem.eql(u8, event.kind, "assertion_recorded") and std.mem.eql(u8, event.status, "failure")) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+fn hasFinalizedResource(events: []const Event, acquired: Event) bool {
+    for (events) |event| {
+        if (!std.mem.eql(u8, event.kind, "resource_finalized")) continue;
+        if (event.scope_id != acquired.scope_id) continue;
+        if (!std.mem.eql(u8, event.type_name, acquired.type_name)) continue;
+        return true;
+    }
+    return false;
+}
+
+fn pendingFiberCountAfterScopeClose(events: []const Event, closed: Event) usize {
+    const scope_id = closed.scope_id orelse return 0;
+    var count: usize = 0;
+    for (events) |event| {
+        if (event.scope_id != scope_id) continue;
+        const fiber_id = event.fiber_id orelse continue;
+        if (!std.mem.eql(u8, event.kind, "fiber_forked") and !std.mem.eql(u8, event.kind, "fiber_started")) continue;
+        if (!std.mem.eql(u8, event.status, "pending") and !std.mem.eql(u8, event.status, "running")) continue;
+        if (fiberCompletedAfter(events, fiber_id, closed.id)) continue;
+        count += 1;
+    }
+    return count;
+}
+
+fn fiberCompletedAfter(events: []const Event, fiber_id: u64, closed_event_id: u64) bool {
+    for (events) |event| {
+        if (event.id < closed_event_id) continue;
+        if (event.fiber_id != fiber_id) continue;
+        if (std.mem.eql(u8, event.kind, "fiber_joined") or std.mem.eql(u8, event.kind, "fiber_interrupted")) return true;
+    }
+    return false;
+}
+
+fn appendNextQueriesJson(output: *std.ArrayList(u8), allocator: std.mem.Allocator, options: SnapshotManifestOptions) !void {
+    const snapshot_query = try std.fmt.allocPrint(allocator, "zig build causal-query -- --file {s} snapshot", .{options.artifact_path});
+    defer allocator.free(snapshot_query);
+    try appendJsonString(output, allocator, snapshot_query);
+    if (options.baseline_path) |baseline_path| {
+        const compare_query = try std.fmt.allocPrint(allocator, "zig build causal-compare -- {s} {s}", .{ baseline_path, options.artifact_path });
+        defer allocator.free(compare_query);
+        try output.append(allocator, ',');
+        try appendJsonString(output, allocator, compare_query);
+    }
+}
+
+fn appendNextQueriesText(output: *std.ArrayList(u8), allocator: std.mem.Allocator, options: SnapshotManifestOptions) !void {
+    try output.print(allocator, "- zig build causal-query -- --file {s} snapshot\n", .{options.artifact_path});
+    if (options.baseline_path) |baseline_path| {
+        try output.print(allocator, "- zig build causal-compare -- {s} {s}\n", .{ baseline_path, options.artifact_path });
+    }
+}
+
+fn appendWarningsJsonArray(
+    allocator: std.mem.Allocator,
+    output: *std.ArrayList(u8),
+    metadata: causal_artifact.ArtifactMetadata,
+    events: []const Event,
+) !void {
+    try output.append(allocator, '[');
+    var wrote = false;
+    try appendCompatibilityWarningsJson(allocator, output, metadata, &wrote);
+    try appendUnknownKindWarningsJson(allocator, output, events, &wrote);
+    try output.append(allocator, ']');
+}
+
+fn appendWarningsText(
+    allocator: std.mem.Allocator,
+    output: *std.ArrayList(u8),
+    metadata: causal_artifact.ArtifactMetadata,
+    events: []const Event,
+) !void {
+    var warnings = std.ArrayList(u8).empty;
+    defer warnings.deinit(allocator);
+    try causal_artifact.appendArtifactCompatibilityWarnings(&warnings, allocator, "artifact", metadata);
+    try causal_artifact.appendUnknownEventKindWarnings(&warnings, allocator, "artifact", events);
+    if (warnings.items.len == 0) return;
+    try output.appendSlice(allocator, "warnings:\n");
+    var iterator = std.mem.splitScalar(u8, warnings.items, '\n');
+    while (iterator.next()) |line| {
+        if (line.len == 0) continue;
+        try output.print(allocator, "- {s}\n", .{line});
+    }
+}
+
+fn appendCompatibilityWarningsJson(
+    allocator: std.mem.Allocator,
+    output: *std.ArrayList(u8),
+    metadata: causal_artifact.ArtifactMetadata,
+    wrote: *bool,
+) !void {
+    var warnings = std.ArrayList(u8).empty;
+    defer warnings.deinit(allocator);
+    try causal_artifact.appendArtifactCompatibilityWarnings(&warnings, allocator, "artifact", metadata);
+    var iterator = std.mem.splitScalar(u8, warnings.items, '\n');
+    while (iterator.next()) |line| {
+        if (line.len == 0) continue;
+        if (wrote.*) try output.append(allocator, ',');
+        try appendJsonString(output, allocator, line);
+        wrote.* = true;
+    }
+}
+
+fn appendUnknownKindWarningsJson(
+    allocator: std.mem.Allocator,
+    output: *std.ArrayList(u8),
+    events: []const Event,
+    wrote: *bool,
+) !void {
+    var seen = std.ArrayList([]const u8).empty;
+    defer seen.deinit(allocator);
+
+    for (events) |event| {
+        if (causal_artifact.isKnownCausalEventKind(event.kind)) continue;
+        var already_seen = false;
+        for (seen.items) |kind| {
+            if (std.mem.eql(u8, kind, event.kind)) {
+                already_seen = true;
+                break;
+            }
+        }
+        if (already_seen) continue;
+        try seen.append(allocator, event.kind);
+
+        const warning = try std.fmt.allocPrint(
+            allocator,
+            "warning: artifact event kind {s} unknown to supported taxonomy={d}; query/advice role semantics may be incomplete",
+            .{ event.kind, causal_artifact.supported_event_taxonomy_version },
+        );
+        defer allocator.free(warning);
+        if (wrote.*) try output.append(allocator, ',');
+        try appendJsonString(output, allocator, warning);
+        wrote.* = true;
+    }
+}
+
+const ManifestFormat = enum {
+    json,
+    text,
+};
+
+fn usage() []const u8 {
+    return "usage: zig build causal-snapshot -- manifest <name> <artifact.json> [--format json|text] [--target <target>] [--phase <phase>] [--baseline <path>] [--compare-report <path>] [--query-report <path>] [--advice-report <path>]\n       zig build causal-snapshot -- capture <name> [scenario]\n";
+}
+
+fn failUsage(err: anyerror) noreturn {
+    std.debug.print("causal-snapshot error: {s}\n{s}", .{ @errorName(err), usage() });
+    std.process.exit(2);
+}
+
+fn parseFormat(value: []const u8) error{InvalidSnapshotFormat}!ManifestFormat {
+    if (std.mem.eql(u8, value, "json")) return .json;
+    if (std.mem.eql(u8, value, "text")) return .text;
+    return error.InvalidSnapshotFormat;
+}
+
+fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
+    const slash = std.mem.lastIndexOfScalar(u8, path, '/') orelse return error.InvalidArtifactPath;
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(io, path[0..slash]);
+    try cwd.writeFile(io, .{ .sub_path = path, .data = contents });
+}
+
+fn captureSourcePath(allocator: std.mem.Allocator, scenario_slug: ?[]const u8) ![]const u8 {
+    if (scenario_slug) |slug| {
+        const scenario = try causal_run.scenarioByName(slug);
+        const paths = try causal_run.artifactPaths(allocator, scenario.slug);
+        allocator.free(paths.report_path);
+        allocator.free(paths.dot_path);
+        return paths.json_path;
+    }
+    return allocator.dupe(u8, causal_run.artifact_dir ++ "/zigeffect-causal-dogfood.json");
+}
+
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    if (args.len < 2) {
+        std.debug.print("{s}", .{usage()});
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "manifest")) {
+        if (args.len < 4) failUsage(error.MissingSnapshotArgument);
+        const name = args[2];
+        const artifact_path = args[3];
+        var format: ManifestFormat = .json;
+        var options = SnapshotManifestOptions{
+            .name = name,
+            .artifact_path = artifact_path,
+        };
+
+        var index: usize = 4;
+        while (index < args.len) {
+            const flag = args[index];
+            if (index + 1 >= args.len) failUsage(error.MissingSnapshotOptionValue);
+            const value = args[index + 1];
+            if (std.mem.eql(u8, flag, "--format")) {
+                format = parseFormat(value) catch |err| failUsage(err);
+            } else if (std.mem.eql(u8, flag, "--target")) {
+                options.target = value;
+            } else if (std.mem.eql(u8, flag, "--phase")) {
+                options.phase = value;
+            } else if (std.mem.eql(u8, flag, "--baseline")) {
+                options.baseline_path = value;
+            } else if (std.mem.eql(u8, flag, "--compare-report")) {
+                options.compare_report_path = value;
+            } else if (std.mem.eql(u8, flag, "--query-report")) {
+                options.query_report_path = value;
+            } else if (std.mem.eql(u8, flag, "--advice-report")) {
+                options.advice_report_path = value;
+            } else {
+                failUsage(error.UnknownSnapshotOption);
+            }
+            index += 2;
+        }
+
+        const artifact_json = try std.Io.Dir.cwd().readFileAlloc(init.io, artifact_path, allocator, .limited(1024 * 1024));
+        defer allocator.free(artifact_json);
+        const manifest = switch (format) {
+            .json => try formatSnapshotManifestJson(allocator, artifact_json, options),
+            .text => try formatSnapshotManifestText(allocator, artifact_json, options),
+        };
+        defer allocator.free(manifest);
+        std.debug.print("{s}", .{manifest});
+        if (manifest.len == 0 or manifest[manifest.len - 1] != '\n') std.debug.print("\n", .{});
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "capture")) {
+        if (args.len < 3 or args.len > 4) failUsage(error.InvalidSnapshotCaptureArguments);
+        const name = args[2];
+        const scenario_slug = if (args.len == 4) args[3] else null;
+        const source_path = try captureSourcePath(allocator, scenario_slug);
+        defer allocator.free(source_path);
+        const target = scenario_slug orelse "dogfood";
+
+        const artifact_json = try std.Io.Dir.cwd().readFileAlloc(init.io, source_path, allocator, .limited(1024 * 1024));
+        defer allocator.free(artifact_json);
+        const paths = try snapshotManifestPaths(allocator, name);
+        defer paths.deinit(allocator);
+        const options = SnapshotManifestOptions{
+            .name = name,
+            .target = target,
+            .phase = "captured",
+            .artifact_path = source_path,
+        };
+        const json = try formatSnapshotManifestJson(allocator, artifact_json, options);
+        defer allocator.free(json);
+        const text = try formatSnapshotManifestText(allocator, artifact_json, options);
+        defer allocator.free(text);
+        try writeArtifact(init.io, paths.json_path, json);
+        try writeArtifact(init.io, paths.text_path, text);
+        std.debug.print("zigeffect causal snapshot captured\njson: {s}\ntext: {s}\nquery: zig build causal-query -- --file {s} snapshot\n", .{
+            paths.json_path,
+            paths.text_path,
+            source_path,
+        });
+        return;
+    }
+
+    failUsage(error.UnknownSnapshotCommand);
+}
+
 const sample_json =
     \\{
     \\  "schema": "zigeffect.causal.v1",
