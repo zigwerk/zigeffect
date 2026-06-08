@@ -831,6 +831,11 @@ adapt the same event sink contract:
 - `cockroach_history`: durable app, CI, or fleet audit history
 - `async_stream`: future non-blocking event stream
 
+`zig build causal-backend-conformance` is the adapter contract gate. It proves
+that a backend sees assigned, redacted, bounded stored events; does not receive
+sampled-out events; can observe events before retention drops them; and cannot
+make the deterministic store fail when a backend write fails.
+
 NenDB is attractive because it is Zig-native and data-oriented, but it should
 remain a backend adapter until the event model proves itself. CockroachDB or
 RoachGraph belongs on the durable-history side of the adapter boundary, not in

@@ -360,6 +360,10 @@ Causal JSON artifacts are self-identifying:
     "max_event_string_bytes": null,
     "truncated_fields": 0
   },
+  "backend": {
+    "kind": null,
+    "failed_writes": 0
+  },
   "events": []
 }
 ```
@@ -397,6 +401,12 @@ Truncation is opt-in. Redaction runs before truncation, and attached backends
 receive the bounded strings. If `truncated_fields` is nonzero, cite the
 truncation metadata and avoid claims that depend on complete event payload
 text.
+
+Backend adapters are sinks, not the source of truth. If `failed_writes` is
+nonzero, the deterministic in-memory causal trace is still usable, but backend
+durability or export evidence may be incomplete. Future backend adapter branches
+must run `zig build causal-backend-conformance` before claiming adapter
+compatibility.
 
 `event_taxonomy_version` identifies the event-kind role semantics. Version `1`
 keeps sampleable observability disjoint from finding evidence: logs, metrics,
