@@ -68,6 +68,19 @@ const SnapshotManifestArtifactForCompare = struct {
     findings: usize = 0,
 };
 
+const ReplayFeasibilityStats = struct {
+    structural_events: usize = 0,
+    finding_evidence_events: usize = 0,
+    sampleable_events: usize = 0,
+    unknown_events: usize = 0,
+    redacted_detail_events: usize = 0,
+    truncated_detail_events: usize = 0,
+    has_service_events: bool = false,
+    has_resource_events: bool = false,
+    has_fiber_events: bool = false,
+    has_schedule_events: bool = false,
+};
+
 const Event = struct {
     id: u64,
     kind: []const u8,
@@ -166,6 +179,49 @@ pub fn formatSnapshotCompareText(
     try output.print(allocator, "- zig build causal-query -- --file {s} snapshot\n", .{left.artifact.path});
     try output.print(allocator, "- zig build causal-query -- --file {s} snapshot\n", .{right.artifact.path});
     try output.print(allocator, "- zig build causal-compare -- {s} {s}\n", .{ left.artifact.path, right.artifact.path });
+
+    return output.toOwnedSlice(allocator);
+}
+
+pub fn formatReplayFeasibilityText(
+    allocator: std.mem.Allocator,
+    manifest_path: []const u8,
+    manifest_json: []const u8,
+    artifact_json: []const u8,
+) ![]const u8 {
+    var manifest_parsed = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, manifest_json, .{ .ignore_unknown_fields = true });
+    defer manifest_parsed.deinit();
+    var artifact_parsed = try std.json.parseFromSlice(Artifact, allocator, artifact_json, .{ .ignore_unknown_fields = true });
+    defer artifact_parsed.deinit();
+
+    const manifest = manifest_parsed.value;
+    const artifact = artifact_parsed.value;
+    const stats = replayFeasibilityStats(artifact.events);
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "zigeffect causal replay feasibility report\n");
+    try output.print(allocator, "schema: {s}\n", .{replay_feasibility_schema});
+    try output.print(allocator, "schema version: {d}\n", .{replay_feasibility_schema_version});
+    try output.print(allocator, "snapshot: {s}\n", .{manifest.name});
+    try output.print(allocator, "manifest: {s}\n", .{manifest_path});
+    try output.print(allocator, "target: {s}\n", .{manifest.target});
+    try output.print(allocator, "phase: {s}\n", .{manifest.phase});
+    try output.print(allocator, "artifact: {s}\n", .{manifest.artifact.path});
+    try output.appendSlice(allocator, "feasible: false\n");
+    try output.print(allocator, "reason: {s}\n", .{replay_reason});
+    try output.print(allocator, "events: {d}\n", .{artifact.events.len});
+    try output.print(allocator, "structural events: {d}\n", .{stats.structural_events});
+    try output.print(allocator, "finding evidence events: {d}\n", .{stats.finding_evidence_events});
+    try output.print(allocator, "sampleable events: {d}\n", .{stats.sampleable_events});
+    try output.print(allocator, "unknown events: {d}\n", .{stats.unknown_events});
+    try output.print(allocator, "redacted detail events: {d}\n", .{stats.redacted_detail_events});
+    try output.print(allocator, "truncated detail events: {d}\n", .{stats.truncated_detail_events});
+    try appendReplayArtifactWarnings(&output, allocator, artifact);
+    try appendReplayBlockingReasons(&output, allocator, stats);
+    try appendReplayEventPostureSample(&output, allocator, artifact.events);
+    try appendReplayNextQueries(&output, allocator, manifest_path, manifest.artifact.path, artifact.events);
 
     return output.toOwnedSlice(allocator);
 }
@@ -345,6 +401,147 @@ fn appendSnapshotManifestWarnings(
             wrote.* = true;
         }
     }
+}
+
+fn isStructuralEventKind(kind: []const u8) bool {
+    return std.mem.eql(u8, kind, "run_started") or
+        std.mem.eql(u8, kind, "run_completed") or
+        std.mem.eql(u8, kind, "effect_started") or
+        std.mem.eql(u8, kind, "effect_completed") or
+        std.mem.eql(u8, kind, "layer_started") or
+        std.mem.eql(u8, kind, "layer_completed") or
+        std.mem.eql(u8, kind, "service_required") or
+        std.mem.eql(u8, kind, "service_provided") or
+        std.mem.eql(u8, kind, "service_replaced") or
+        std.mem.eql(u8, kind, "scope_opened") or
+        std.mem.eql(u8, kind, "scope_closed") or
+        std.mem.eql(u8, kind, "resource_acquired") or
+        std.mem.eql(u8, kind, "resource_finalized") or
+        std.mem.eql(u8, kind, "fiber_forked") or
+        std.mem.eql(u8, kind, "fiber_started") or
+        std.mem.eql(u8, kind, "fiber_joined") or
+        std.mem.eql(u8, kind, "fiber_interrupted") or
+        std.mem.eql(u8, kind, "schedule_decision") or
+        std.mem.eql(u8, kind, "exit_recorded") or
+        std.mem.eql(u8, kind, "assertion_recorded");
+}
+
+fn isFindingEvidenceEventKind(kind: []const u8) bool {
+    return std.mem.eql(u8, kind, "service_required") or
+        std.mem.eql(u8, kind, "scope_closed") or
+        std.mem.eql(u8, kind, "resource_acquired") or
+        std.mem.eql(u8, kind, "resource_finalized") or
+        std.mem.eql(u8, kind, "fiber_forked") or
+        std.mem.eql(u8, kind, "fiber_started") or
+        std.mem.eql(u8, kind, "fiber_joined") or
+        std.mem.eql(u8, kind, "fiber_interrupted") or
+        std.mem.eql(u8, kind, "schedule_decision") or
+        std.mem.eql(u8, kind, "assertion_recorded");
+}
+
+fn isSampleableEventKind(kind: []const u8) bool {
+    return std.mem.eql(u8, kind, "log_recorded") or
+        std.mem.eql(u8, kind, "metric_recorded") or
+        std.mem.eql(u8, kind, "span_recorded");
+}
+
+fn isServiceEventKind(kind: []const u8) bool {
+    return std.mem.startsWith(u8, kind, "service_");
+}
+
+fn isResourceEventKind(kind: []const u8) bool {
+    return std.mem.startsWith(u8, kind, "resource_");
+}
+
+fn isFiberEventKind(kind: []const u8) bool {
+    return std.mem.startsWith(u8, kind, "fiber_");
+}
+
+fn isScheduleEventKind(kind: []const u8) bool {
+    return std.mem.eql(u8, kind, "schedule_decision");
+}
+
+fn replayEventPosture(kind: []const u8) []const u8 {
+    if (!causal_artifact.isKnownCausalEventKind(kind)) return "unknown_taxonomy";
+    if (isSampleableEventKind(kind)) return "sampleable_observation";
+    if (isFindingEvidenceEventKind(kind)) return "finding_evidence_observation";
+    return "structural_observation";
+}
+
+fn containsReplayMarker(value: []const u8, marker: []const u8) bool {
+    return std.mem.indexOf(u8, value, marker) != null;
+}
+
+fn replayFeasibilityStats(events: []const Event) ReplayFeasibilityStats {
+    var stats = ReplayFeasibilityStats{};
+    for (events) |event| {
+        if (isStructuralEventKind(event.kind)) stats.structural_events += 1;
+        if (isFindingEvidenceEventKind(event.kind)) stats.finding_evidence_events += 1;
+        if (isSampleableEventKind(event.kind)) stats.sampleable_events += 1;
+        if (!causal_artifact.isKnownCausalEventKind(event.kind)) stats.unknown_events += 1;
+        if (containsReplayMarker(event.redacted_detail, "<redacted>")) stats.redacted_detail_events += 1;
+        if (containsReplayMarker(event.redacted_detail, "<truncated>")) stats.truncated_detail_events += 1;
+        if (isServiceEventKind(event.kind)) stats.has_service_events = true;
+        if (isResourceEventKind(event.kind)) stats.has_resource_events = true;
+        if (isFiberEventKind(event.kind)) stats.has_fiber_events = true;
+        if (isScheduleEventKind(event.kind)) stats.has_schedule_events = true;
+    }
+    return stats;
+}
+
+fn appendReplayArtifactWarnings(output: *std.ArrayList(u8), allocator: std.mem.Allocator, artifact: Artifact) !void {
+    var warnings = std.ArrayList(u8).empty;
+    defer warnings.deinit(allocator);
+    try causal_artifact.appendArtifactCompatibilityWarnings(&warnings, allocator, "artifact", artifactMetadata(artifact));
+    try causal_artifact.appendUnknownEventKindWarnings(&warnings, allocator, "artifact", artifact.events);
+    try output.appendSlice(allocator, "artifact warnings:\n");
+    if (warnings.items.len == 0) {
+        try output.appendSlice(allocator, "- none\n");
+        return;
+    }
+    var iterator = std.mem.splitScalar(u8, warnings.items, '\n');
+    while (iterator.next()) |line| {
+        if (line.len == 0) continue;
+        try output.print(allocator, "- {s}\n", .{line});
+    }
+}
+
+fn appendReplayBlockingReasons(output: *std.ArrayList(u8), allocator: std.mem.Allocator, stats: ReplayFeasibilityStats) !void {
+    try output.appendSlice(allocator, "blocking reasons:\n");
+    try output.appendSlice(allocator, "- snapshot manifest references observed artifacts, not executable programs\n");
+    try output.appendSlice(allocator, "- replay engine is not implemented\n");
+    try output.appendSlice(allocator, "- event records do not serialize service implementations, closures, resource constructors, scheduler state, clock transcripts, or external effects\n");
+    if (stats.has_service_events) try output.appendSlice(allocator, "- service values/providers are not serialized\n");
+    if (stats.has_resource_events) try output.appendSlice(allocator, "- resource constructors/finalizers are not serialized\n");
+    if (stats.has_fiber_events) try output.appendSlice(allocator, "- scheduler state and fiber closures are not serialized\n");
+    if (stats.has_schedule_events) try output.appendSlice(allocator, "- schedule timing and randomness decisions are observations, not replay inputs\n");
+    if (stats.sampleable_events > 0) try output.appendSlice(allocator, "- logs, metrics, and spans may be sampled\n");
+    if (stats.unknown_events > 0) try output.appendSlice(allocator, "- unknown event taxonomy prevents complete replay classification\n");
+    if (stats.redacted_detail_events > 0 or stats.truncated_detail_events > 0) try output.appendSlice(allocator, "- redacted or truncated detail prevents faithful replay evidence\n");
+}
+
+fn appendReplayEventPostureSample(output: *std.ArrayList(u8), allocator: std.mem.Allocator, events: []const Event) !void {
+    try output.print(allocator, "event posture sample limit: {d}\n", .{replay_feasibility_event_sample_limit});
+    try output.appendSlice(allocator, "event posture sample:\n");
+    const limit = @min(events.len, replay_feasibility_event_sample_limit);
+    if (limit == 0) {
+        try output.appendSlice(allocator, "- none\n");
+        return;
+    }
+    for (events[0..limit]) |event| {
+        try output.print(allocator, "- event id={d} kind={s} posture={s}", .{ event.id, event.kind, replayEventPosture(event.kind) });
+        if (event.status.len > 0) try output.print(allocator, " status={s}", .{event.status});
+        try output.append(allocator, '\n');
+    }
+}
+
+fn appendReplayNextQueries(output: *std.ArrayList(u8), allocator: std.mem.Allocator, manifest_path: []const u8, artifact_path: []const u8, events: []const Event) !void {
+    try output.appendSlice(allocator, "next queries:\n");
+    try output.print(allocator, "- zig build causal-query -- --file {s} snapshot\n", .{artifact_path});
+    if (firstEventId(events)) |event_id| {
+        try output.print(allocator, "- zig build causal-query -- --file {s} lineage {d}\n", .{ artifact_path, event_id });
+    }
+    try output.print(allocator, "- zig build causal-snapshot -- compare {s} {s}\n", .{ manifest_path, manifest_path });
 }
 
 fn artifactMetadata(artifact: Artifact) causal_artifact.ArtifactMetadata {
@@ -574,7 +771,7 @@ const ManifestFormat = enum {
 };
 
 fn usage() []const u8 {
-    return "usage: zig build causal-snapshot -- manifest <name> <artifact.json> [--format json|text] [--target <target>] [--phase <phase>] [--baseline <path>] [--compare-report <path>] [--query-report <path>] [--advice-report <path>]\n       zig build causal-snapshot -- capture <name> [scenario]\n       zig build causal-snapshot -- compare <left> <right>\n";
+    return "usage: zig build causal-snapshot -- manifest <name> <artifact.json> [--format json|text] [--target <target>] [--phase <phase>] [--baseline <path>] [--compare-report <path>] [--query-report <path>] [--advice-report <path>]\n       zig build causal-snapshot -- capture <name> [scenario]\n       zig build causal-snapshot -- compare <left> <right>\n       zig build causal-snapshot -- replay-feasibility <snapshot>\n";
 }
 
 fn failUsage(err: anyerror) noreturn {
@@ -724,6 +921,24 @@ pub fn main(init: std.process.Init) !void {
             right_manifest_json,
             right_artifact_json,
         );
+        defer allocator.free(report);
+        std.debug.print("{s}", .{report});
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "replay-feasibility")) {
+        if (args.len != 3) failUsage(error.InvalidReplayFeasibilityArguments);
+        const manifest_ref = try resolveSnapshotManifestReference(allocator, args[2]);
+        defer manifest_ref.deinit(allocator);
+
+        const manifest_json = try std.Io.Dir.cwd().readFileAlloc(init.io, manifest_ref.path, allocator, .limited(1024 * 1024));
+        defer allocator.free(manifest_json);
+        const artifact_path = try snapshotArtifactPathFromManifestJson(allocator, manifest_json);
+        defer allocator.free(artifact_path);
+        const artifact_json = try std.Io.Dir.cwd().readFileAlloc(init.io, artifact_path, allocator, .limited(1024 * 1024));
+        defer allocator.free(artifact_json);
+
+        const report = try formatReplayFeasibilityText(allocator, manifest_ref.path, manifest_json, artifact_json);
         defer allocator.free(report);
         std.debug.print("{s}", .{report});
         return;
