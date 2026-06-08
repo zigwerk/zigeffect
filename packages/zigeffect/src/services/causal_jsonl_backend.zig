@@ -1,9 +1,59 @@
 const std = @import("std");
 const causal = @import("causal.zig");
+const causal_backend = @import("causal_backend.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const causal_jsonl_event_schema = "zigeffect.causal.event.v1";
 pub const causal_jsonl_event_schema_version: u32 = 1;
+
+pub const CausalJsonLinesBackendOptions = struct {
+    max_bytes: ?usize = null,
+};
+
+pub const CausalJsonLinesBackendState = struct {
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    max_bytes: ?usize = null,
+    written_event_count: u64 = 0,
+    failed_event_count: u64 = 0,
+
+    pub fn init(
+        allocator: Allocator,
+        output: *std.ArrayList(u8),
+        options: CausalJsonLinesBackendOptions,
+    ) CausalJsonLinesBackendState {
+        return .{
+            .allocator = allocator,
+            .output = output,
+            .max_bytes = options.max_bytes,
+        };
+    }
+
+    pub fn backend(self: *CausalJsonLinesBackendState) causal_backend.CausalBackend {
+        return .{
+            .kind = .json_lines,
+            .state = self,
+            .record = recordJsonLinesBackend,
+        };
+    }
+
+    pub fn writtenEventCount(self: *const CausalJsonLinesBackendState) u64 {
+        return self.written_event_count;
+    }
+
+    pub fn failedEventCount(self: *const CausalJsonLinesBackendState) u64 {
+        return self.failed_event_count;
+    }
+};
+
+fn recordJsonLinesBackend(raw: ?*anyopaque, event: causal.CausalEvent) anyerror!void {
+    const state: *CausalJsonLinesBackendState = @ptrCast(@alignCast(raw.?));
+    const row = try formatCausalJsonLine(state.allocator, event);
+    defer state.allocator.free(row);
+
+    try state.output.appendSlice(state.allocator, row);
+    state.written_event_count += 1;
+}
 
 fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []const u8) Allocator.Error!void {
     try output.append(allocator, '"');

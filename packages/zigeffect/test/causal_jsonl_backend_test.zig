@@ -1,5 +1,6 @@
 const std = @import("std");
 const fx = @import("zigeffect");
+const conformance = @import("support/causal_backend_conformance.zig");
 
 const JsonLineRow = struct {
     schema: []const u8,
@@ -24,6 +25,10 @@ fn expectSingleJsonLine(line: []const u8) ![]const u8 {
     try std.testing.expectEqual(@as(u8, '\n'), line[line.len - 1]);
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, line, "\n"));
     return line[0 .. line.len - 1];
+}
+
+fn parseJsonLine(row_json: []const u8) !std.json.Parsed(JsonLineRow) {
+    return std.json.parseFromSlice(JsonLineRow, std.testing.allocator, row_json, .{ .ignore_unknown_fields = true });
 }
 
 test "formatCausalJsonLine emits schema-tagged escaped row" {
@@ -62,4 +67,47 @@ test "formatCausalJsonLine emits schema-tagged escaped row" {
     try std.testing.expectEqualStrings("JsonLineFormatter", parsed.value.type_name);
     try std.testing.expectEqualStrings("success", parsed.value.status);
     try std.testing.expectEqualStrings("detail\rvalue", parsed.value.redacted_detail);
+}
+
+test "json lines backend writes stored sanitized conformance events" {
+    var output = std.ArrayList(u8).empty;
+    defer output.deinit(std.testing.allocator);
+
+    var backend_state = fx.CausalJsonLinesBackendState.init(std.testing.allocator, &output, .{});
+
+    var store = fx.CausalStore.initWithOptions(std.testing.allocator, conformance.standardStoreOptions());
+    store.attachBackend(backend_state.backend());
+    defer store.deinit();
+
+    const ids = try conformance.recordStandardTrace(&store);
+    try conformance.expectStandardStorePosture(&store, ids);
+
+    try std.testing.expectEqual(fx.CausalBackendKind.json_lines, store.attachedBackendKind().?);
+    try std.testing.expectEqual(@as(u64, 3), backend_state.writtenEventCount());
+    try std.testing.expectEqual(@as(u64, 0), backend_state.failedEventCount());
+    try std.testing.expectEqual(@as(u64, 0), store.backendFailureCount());
+    try std.testing.expect(std.mem.indexOf(u8, output.items, "raw-secret") == null);
+    try std.testing.expect(std.mem.indexOf(u8, output.items, fx.causal_redaction_marker) != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.items, fx.causal_truncation_marker) != null);
+
+    var lines = std.mem.tokenizeScalar(u8, output.items, '\n');
+    const first_line = lines.next().?;
+    const second_line = lines.next().?;
+    const third_line = lines.next().?;
+    try std.testing.expect(lines.next() == null);
+
+    var first = try parseJsonLine(first_line);
+    defer first.deinit();
+    var second = try parseJsonLine(second_line);
+    defer second.deinit();
+    var third = try parseJsonLine(third_line);
+    defer third.deinit();
+
+    try std.testing.expectEqual(ids.started, first.value.id);
+    try std.testing.expectEqualStrings("run_started", first.value.kind);
+    try std.testing.expect(first.value.label.len <= conformance.standard_max_event_string_bytes);
+    try std.testing.expectEqual(ids.retained_log, second.value.id);
+    try std.testing.expectEqualStrings("log_recorded", second.value.kind);
+    try std.testing.expectEqual(ids.completed, third.value.id);
+    try std.testing.expectEqualStrings("run_completed", third.value.kind);
 }
