@@ -137,6 +137,30 @@ const future_taxonomy_sample_json =
     \\}
 ;
 
+const future_schema_unknown_kind_sample_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v1",
+    \\  "schema_version": 2,
+    \\  "event_taxonomy_version": 1,
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"future schema","type_name":"Fixture","status":"started","redacted_detail":""},
+    \\    {"id":2,"kind":"effect_suspended","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"future event","type_name":"Fixture","status":"pending","redacted_detail":""},
+    \\    {"id":3,"kind":"effect_suspended","run_id":1,"parent_id":2,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"future duplicate","type_name":"Fixture","status":"pending","redacted_detail":""}
+    \\  ]
+    \\}
+;
+
+const unsupported_schema_sample_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v2",
+    \\  "schema_version": 1,
+    \\  "event_taxonomy_version": 1,
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"unsupported schema","type_name":"Fixture","status":"started","redacted_detail":""}
+    \\  ]
+    \\}
+;
+
 pub const QueryOptions = struct {
     include_artifact_warnings: bool = true,
     artifact_label: []const u8 = "artifact",
@@ -207,7 +231,18 @@ pub fn runQueryWithOptions(
         return error.UnknownQuery;
     }
 
-    return formatQueryResult(allocator, args, selected.items, parsed.value.event_taxonomy_version, options);
+    return formatQueryResult(
+        allocator,
+        args,
+        selected.items,
+        parsed.value.events,
+        .{
+            .schema = parsed.value.schema,
+            .schema_version = parsed.value.schema_version,
+            .event_taxonomy_version = parsed.value.event_taxonomy_version,
+        },
+        options,
+    );
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -303,7 +338,8 @@ fn formatQueryResult(
     allocator: std.mem.Allocator,
     args: []const []const u8,
     events: []const Event,
-    event_taxonomy_version: ?u32,
+    all_events: []const Event,
+    metadata: causal_artifact.ArtifactMetadata,
     options: QueryOptions,
 ) std.mem.Allocator.Error![]const u8 {
     var output = std.ArrayList(u8).empty;
@@ -315,7 +351,8 @@ fn formatQueryResult(
     }
     try output.append(allocator, '\n');
     if (options.include_artifact_warnings) {
-        try causal_artifact.appendTaxonomyVersionWarning(&output, allocator, options.artifact_label, event_taxonomy_version);
+        try causal_artifact.appendArtifactCompatibilityWarnings(&output, allocator, options.artifact_label, metadata);
+        try causal_artifact.appendUnknownEventKindWarnings(&output, allocator, options.artifact_label, all_events);
     }
     try output.print(allocator, "events: {d}\n", .{events.len});
     for (events) |event| {
@@ -361,6 +398,31 @@ test "query warns when artifact taxonomy is newer than supported" {
 
     try std.testing.expect(std.mem.indexOf(u8, output, "warning: artifact event_taxonomy_version=2 newer than supported=1") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "events: 1") != null);
+}
+
+test "query warns on future schema version and unknown event kinds" {
+    const output = try runQuery(std.testing.allocator, future_schema_unknown_kind_sample_json, &.{"snapshot"});
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "warning: artifact schema_version=2 newer than supported=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "warning: artifact event kind effect_suspended unknown to supported taxonomy=1") != null);
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, output, "warning:"));
+    try std.testing.expect(std.mem.indexOf(u8, output, "events: 3") != null);
+}
+
+test "query warns on unsupported schema family" {
+    const output = try runQuery(std.testing.allocator, unsupported_schema_sample_json, &.{"snapshot"});
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "warning: artifact schema=zigeffect.causal.v2 unsupported; expected zigeffect.causal.v1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "events: 1") != null);
+}
+
+test "query keeps legacy artifacts warning-free" {
+    const output = try runQuery(std.testing.allocator, sample_json, &.{"snapshot"});
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, output, "warning:"));
 }
 
 test "cause query prints parent chain" {

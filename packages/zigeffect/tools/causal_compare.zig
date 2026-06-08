@@ -90,6 +90,40 @@ const future_taxonomy_after_json =
     \\}
 ;
 
+const future_schema_before_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v1",
+    \\  "schema_version": 2,
+    \\  "event_taxonomy_version": 1,
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"future schema","type_name":"Command","status":"started","redacted_detail":""}
+    \\  ]
+    \\}
+;
+
+const unknown_kind_after_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v1",
+    \\  "schema_version": 1,
+    \\  "event_taxonomy_version": 1,
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"future schema","type_name":"Command","status":"started","redacted_detail":""},
+    \\    {"id":2,"kind":"effect_suspended","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"future event","type_name":"Command","status":"pending","redacted_detail":""}
+    \\  ]
+    \\}
+;
+
+const unsupported_schema_before_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v2",
+    \\  "schema_version": 1,
+    \\  "event_taxonomy_version": 1,
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"unsupported schema","type_name":"Command","status":"started","redacted_detail":""}
+    \\  ]
+    \\}
+;
+
 const removed_json =
     \\{
     \\  "events": [
@@ -113,8 +147,18 @@ pub fn runCompare(allocator: std.mem.Allocator, before_json_input: []const u8, a
     errdefer output.deinit(allocator);
 
     try output.appendSlice(allocator, "zigeffect causal compare report\n");
-    try causal_artifact.appendTaxonomyVersionWarning(&output, allocator, "before", before_parsed.value.event_taxonomy_version);
-    try causal_artifact.appendTaxonomyVersionWarning(&output, allocator, "after", after_parsed.value.event_taxonomy_version);
+    try causal_artifact.appendArtifactCompatibilityWarnings(&output, allocator, "before", .{
+        .schema = before_parsed.value.schema,
+        .schema_version = before_parsed.value.schema_version,
+        .event_taxonomy_version = before_parsed.value.event_taxonomy_version,
+    });
+    try causal_artifact.appendUnknownEventKindWarnings(&output, allocator, "before", before_events);
+    try causal_artifact.appendArtifactCompatibilityWarnings(&output, allocator, "after", .{
+        .schema = after_parsed.value.schema,
+        .schema_version = after_parsed.value.schema_version,
+        .event_taxonomy_version = after_parsed.value.event_taxonomy_version,
+    });
+    try causal_artifact.appendUnknownEventKindWarnings(&output, allocator, "after", after_events);
     try output.print(allocator, "before events: {d}\n", .{before_events.len});
     try output.print(allocator, "after events: {d}\n", .{after_events.len});
     try appendSignedDelta(&output, allocator, "event delta", @as(isize, @intCast(after_events.len)) - @as(isize, @intCast(before_events.len)));
@@ -304,6 +348,23 @@ test "compare warns when artifact taxonomy is newer than supported" {
     try std.testing.expect(std.mem.indexOf(u8, report, "warning: before event_taxonomy_version=2 newer than supported=1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "warning: after event_taxonomy_version=3 newer than supported=1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "before events: 2") != null);
+}
+
+test "compare warns on future schema and unknown event kinds" {
+    const report = try runCompare(std.testing.allocator, future_schema_before_json, unknown_kind_after_json);
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "warning: before schema_version=2 newer than supported=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "warning: after event kind effect_suspended unknown to supported taxonomy=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "before events: 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "after events: 2") != null);
+}
+
+test "compare warns on unsupported schema family" {
+    const report = try runCompare(std.testing.allocator, unsupported_schema_before_json, versioned_after_json);
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "warning: before schema=zigeffect.causal.v2 unsupported; expected zigeffect.causal.v1") != null);
 }
 
 test "compare report lists added removed and changed events" {
