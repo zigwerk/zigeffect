@@ -416,6 +416,17 @@ behavior:
 zig build causal-catalog
 ```
 
+Inspect the causal coverage matrix before proposing a new scenario or invariant:
+
+```sh
+zig build causal-test-matrix
+```
+
+If a failure belongs to a partial domain, first decide whether an existing
+scenario or invariant should be tightened. Add a new scenario only when the
+failure teaches a reusable runtime rule that should produce CI artifacts for
+agents.
+
 Use the real command capture fixture to prove that non-fixture command failures
 leave scenario-specific artifacts:
 

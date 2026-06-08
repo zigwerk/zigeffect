@@ -12,6 +12,12 @@ Print the scenario and invariant catalog:
 zig build causal-catalog
 ```
 
+Print the scenario coverage matrix:
+
+```sh
+zig build causal-test-matrix
+```
+
 Run a registered scenario:
 
 ```sh
@@ -200,10 +206,47 @@ causal-ci-handoff` on failure so the uploaded bundle contains
 - `causal-missing-config`
   Owner: `service_resolution`
   Purpose: verify missing config causal examples stay healthy.
+- `causal-readiness`
+  Owner: `observability`
+  Purpose: verify app-shaped readiness, graph startup, and observability causal
+  examples stay healthy.
 
 Each scenario has stable artifact paths under `.zig-cache/causal-artifacts/`.
 Passing scenarios may write no runner failure artifact; failing scenarios write
 text, JSON, and DOT artifacts before the command exits.
+
+## Coverage Matrix
+
+`zig build causal-test-matrix` reports causal scenario coverage by runtime
+domain. The matrix is a deterministic view over `tools/causal_run.zig`, so it
+does not become a second scenario registry.
+
+Statuses mean:
+
+- `covered`: at least one scenario and invariant or structural assertion gives
+  direct evidence for the domain.
+- `partial`: the domain has useful evidence but still needs a named invariant,
+  dedicated scenario, or tighter assertion before it is complete.
+- `missing`: no scenario declares the domain yet.
+
+Current domains:
+
+| Domain | Status | Primary Evidence |
+| --- | --- | --- |
+| service | covered | `missing-service-compile-fail`, `causal-missing-config`, `causal-readiness` |
+| layer | covered | `causal-missing-config`, `causal-readiness`, layer graph causal tests |
+| scope | covered | `causal-cleanup-failure`, `causal-scoped-fiber` |
+| fiber | covered | `causal-scoped-fiber`, fiber runtime causal tests |
+| schedule | covered | `causal-retry-exhaustion`, schedule decision tests |
+| config | partial | `causal-missing-config`, `causal-readiness`; needs a named config invariant |
+| resource | covered | `causal-cleanup-failure`, `causal-readiness`, runtime resource tests |
+| retry | covered | `causal-retry-exhaustion`, retry decision tests |
+| cause | partial | cleanup/runtime tests; needs a dedicated cause invariant |
+| observability | covered | `causal-readiness`, `observability-events-are-sampleable` |
+
+Run the matrix before proposing a new scenario. If the failing behavior belongs
+to a partial domain, prefer tightening the existing scenario or invariant before
+adding a duplicate fixture.
 
 Use `zig build causal-artifacts` when configuring CI or handing work to another
 agent. It lists the upload globs, dogfood artifacts, scenario artifacts, and
@@ -240,6 +283,9 @@ baseline-aware advice that marks actions as `status=persisting` or `status=new`.
   context.
 - `package-tests-are-development-gate`
   The package test suite remains the broad local regression gate.
+- `observability-events-are-sampleable`
+  Log, metric, and span causal events are sampleable observability evidence, not
+  finding evidence.
 
 ## Adding A Scenario From A Bug
 
@@ -258,6 +304,22 @@ When a zigeffect bug reveals a new runtime rule:
 
 The scenario should describe the runtime invariant, not merely the symptom that
 happened to fail first.
+
+### Failure Graduation Guide
+
+Keep a failure as an ordinary unit test when the behavior is local,
+deterministic, and does not teach a reusable runtime causality rule.
+
+Add a causal assertion to an existing test when the behavior already has a
+`CausalStore` and the invariant is local to that test, such as an event
+sequence, event parent id, scope id, fiber id, trace id, or finding count.
+
+Add a scenario when the bug crosses a service, layer, scope, fiber, schedule,
+resource, config, cause, retry, or observability boundary and should produce
+artifacts that agents can inspect in CI.
+
+Add a new invariant when the rule should be named, queried, and reused across
+multiple scenarios or findings.
 
 ## Comparing Before And After
 

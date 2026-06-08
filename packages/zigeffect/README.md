@@ -237,6 +237,14 @@ cd packages/zigeffect
 zig build causal-catalog
 ```
 
+Print the causal coverage matrix for service, layer, scope, fiber, schedule,
+config, resource, retry, cause, and observability domains:
+
+```bash
+cd packages/zigeffect
+zig build causal-test-matrix
+```
+
 Capture artifacts for a real expected compile-fail scenario:
 
 ```bash

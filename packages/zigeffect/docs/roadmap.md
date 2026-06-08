@@ -564,6 +564,13 @@ metrics, and traces.
   evaluates remediation/audit/registry evidence and emits `approve`, `reject`,
   or `needs-human-review` while preserving `applied=false` and
   `mutation_authority=none`.
+- Delivered: `zig build causal-test-matrix` prints a deterministic coverage
+  matrix for service, layer, scope, fiber, schedule, config, resource, retry,
+  cause, and observability domains.
+- Delivered: the scenario registry records coverage domains and includes
+  `causal-readiness` as an app-shaped observability scenario.
+- Delivered: core runtime tests share structural causal assertion helpers for
+  event patterns, event sequences, findings, and quiet stores.
 - Delivered: `zig build causal-artifacts` prints a deterministic retention
   manifest with upload globs and dogfood, scenario, and dev-loop artifact paths
   for agents and CI.
@@ -580,10 +587,10 @@ metrics, and traces.
   for memory, JSON Lines, DOT, OpenTelemetry, NenDB graph, Cockroach/RoachGraph
   history, and async streams.
 - Still future: production-grade adapter implementations, durable histories,
-  a workbench UI, deterministic replay/forking, policy engine decisions, patch
-  application, and comparing arbitrary named audit-chain snapshots.
-- Still future: using the causal graph pervasively inside `zigeffect` tests so
-  agents can diagnose engine regressions from runtime facts.
+  a workbench UI, deterministic replay/forking, patch application, and
+  comparing arbitrary named audit-chain snapshots.
+- Still future: deeper runtime regression scenarios for partial config and
+  cause coverage.
 - Leave room for a future causal workbench that visualizes effect runs, scope
   trees, fiber trees, layer graphs, retry timelines, resource ownership, and
   cause trees.

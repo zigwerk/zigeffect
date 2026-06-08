@@ -85,6 +85,11 @@ The following capabilities are already merged into `master`:
   `record-applied` registry application artifacts from readiness reports.
 - `zig build causal-policy-decision -- local [scenario]`, which records
   advisory policy decisions with `mutation_authority=none`.
+- `zig build causal-test-matrix`, which prints service, layer, scope, fiber,
+  schedule, config, resource, retry, cause, and observability coverage.
+- Scenario coverage-domain metadata in `tools/causal_run.zig`, including
+  `causal-readiness` for app-shaped observability coverage.
+- Shared structural causal assertion helpers in package tests.
 
 These commands establish the review-only chain:
 
@@ -577,7 +582,7 @@ Status values:
 | --- | --- | --- | --- |
 | M0 Guarded registry application | delivered | `causal-registry-apply` writes `registry-application` artifacts on branch `codex/zigeffect-guarded-registry-application` | merge after final verification |
 | M1 Policy engine | delivered | `causal-policy-decision` writes advisory policy artifacts on branch `codex/zigeffect-causal-policy-engine` | merge after final verification |
-| M2 Pervasive causal tests | active | policy, registry, and causal test helpers exist | create coverage matrix |
+| M2 Pervasive causal tests | delivered | `causal-test-matrix`, coverage domains, `causal-readiness`, and shared causal assertions exist on branch `codex/zigeffect-causal-test-matrix` | move to M3 hardening |
 | M3 Production hardening | planned | bounded store, redaction, sampling, taxonomy delivered | broaden PII/schema/taxonomy fixtures |
 | M4 Durable backends | planned | backend boundary exists | implement conformance suite first |
 | M5 Replay/snapshots | planned | compare and audit-chain tools exist | design snapshot manifest |
@@ -588,12 +593,11 @@ Status values:
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-causal-test-matrix`
-   - Inventory core runtime invariants.
-   - Map each to scenario coverage and test hooks.
-
-2. `codex/zigeffect-causal-pii-redaction-policy`
+1. `codex/zigeffect-causal-pii-redaction-policy`
    - Expand redaction coverage before app-facing traces.
+
+2. `codex/zigeffect-causal-schema-taxonomy-fixtures`
+   - Lock compatibility tests before durable backends.
 
 3. `codex/zigeffect-causal-backend-conformance`
    - Establish common adapter contract tests before durable backends.
