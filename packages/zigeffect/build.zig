@@ -26,6 +26,21 @@ pub fn build(b: *std.Build) void {
     const raw_test_step = b.step("test-raw", "Run zigeffect tests without causal wrapping");
     raw_test_step.dependOn(&run_unit_tests.step);
 
+    const causal_backend_conformance_test_module = b.createModule(.{
+        .root_source_file = b.path("test/causal_backend_conformance_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_backend_conformance_test_module.addImport("zigeffect", zigeffect);
+
+    const causal_backend_conformance_tests = b.addTest(.{
+        .name = "zigeffect-causal-backend-conformance-tests",
+        .root_module = causal_backend_conformance_test_module,
+    });
+    const run_causal_backend_conformance_tests = b.addRunArtifact(causal_backend_conformance_tests);
+    const causal_backend_conformance_step = b.step("causal-backend-conformance", "Run causal backend conformance contract tests");
+    causal_backend_conformance_step.dependOn(&run_causal_backend_conformance_tests.step);
+
     const readiness_example_module = b.createModule(.{
         .root_source_file = b.path("examples/readiness.zig"),
         .target = target,
@@ -330,6 +345,7 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run zigeffect tests with causal failure capture");
     test_step.dependOn(&run_causal_package_test_tool.step);
     test_step.dependOn(&run_causal_artifact_tool_tests.step);
+    test_step.dependOn(&run_causal_backend_conformance_tests.step);
     const causal_dev_test_step = b.step("causal-dev-test", "Run zigeffect tests with causal failure capture");
     causal_dev_test_step.dependOn(&run_causal_package_test_tool.step);
 
