@@ -14,7 +14,21 @@ pub const RuntimeSubsystem = enum {
     scope_lifecycle,
     fiber_runtime,
     schedule_retry,
+    observability,
     package,
+};
+
+pub const CausalCoverageDomain = enum {
+    service,
+    layer,
+    scope,
+    fiber,
+    schedule,
+    config,
+    resource,
+    retry,
+    cause,
+    observability,
 };
 
 pub const ExpectedFindingsPolicy = enum {
@@ -39,6 +53,7 @@ pub const Scenario = struct {
     purpose: []const u8,
     finding_policy: ExpectedFindingsPolicy,
     invariant_ids: []const []const u8,
+    coverage_domains: []const CausalCoverageDomain,
     argv: []const []const u8,
 };
 
@@ -165,6 +180,19 @@ const causal_missing_config_argv: []const []const u8 = &.{
     ".zig-cache/causal-run-global-cache",
 };
 
+const causal_readiness_argv: []const []const u8 = &.{
+    "zig",
+    "test",
+    "--dep",
+    "zigeffect",
+    "-Mroot=examples/causal_readiness.zig",
+    "-Mzigeffect=src/zigeffect.zig",
+    "--cache-dir",
+    ".zig-cache/causal-run-readiness-cache",
+    "--global-cache-dir",
+    ".zig-cache/causal-run-global-cache",
+};
+
 const missing_service_invariants: []const []const u8 = &.{
     "command-failure-is-causal-evidence",
     "service-requirement-has-provider",
@@ -192,6 +220,46 @@ const missing_config_invariants: []const []const u8 = &.{
     "service-requirement-has-provider",
 };
 
+const readiness_invariants: []const []const u8 = &.{
+    "service-requirement-has-provider",
+    "resource-finalized-after-acquire",
+    "observability-events-are-sampleable",
+};
+
+const missing_service_domains: []const CausalCoverageDomain = &.{.service};
+
+const package_test_domains: []const CausalCoverageDomain = &.{
+    .service,
+    .layer,
+    .scope,
+    .fiber,
+    .schedule,
+    .config,
+    .resource,
+    .retry,
+    .cause,
+    .observability,
+};
+
+const package_failure_fixture_domains: []const CausalCoverageDomain = &.{.cause};
+
+const scoped_fiber_domains: []const CausalCoverageDomain = &.{ .fiber, .scope };
+
+const retry_exhaustion_domains: []const CausalCoverageDomain = &.{ .schedule, .retry };
+
+const cleanup_failure_domains: []const CausalCoverageDomain = &.{ .scope, .resource, .cause };
+
+const missing_config_domains: []const CausalCoverageDomain = &.{ .service, .layer, .config };
+
+const readiness_domains: []const CausalCoverageDomain = &.{
+    .service,
+    .layer,
+    .config,
+    .resource,
+    .cause,
+    .observability,
+};
+
 const scenario_registry: []const Scenario = &.{
     .{
         .slug = "missing-service-compile-fail",
@@ -201,6 +269,7 @@ const scenario_registry: []const Scenario = &.{
         .purpose = "prove missing service diagnostics become causal command evidence",
         .finding_policy = .expected_failure_command_emits_assertion,
         .invariant_ids = missing_service_invariants,
+        .coverage_domains = missing_service_domains,
         .argv = missing_service_compile_fail_argv,
     },
     .{
@@ -211,6 +280,7 @@ const scenario_registry: []const Scenario = &.{
         .purpose = "run the broad zigeffect test suite with causal failure capture",
         .finding_policy = .failure_artifact_on_command_failure,
         .invariant_ids = package_test_invariants,
+        .coverage_domains = package_test_domains,
         .argv = package_tests_argv,
     },
     .{
@@ -221,6 +291,7 @@ const scenario_registry: []const Scenario = &.{
         .purpose = "prove package-shaped test failures write causal command artifacts without breaking the real package gate",
         .finding_policy = .expected_failure_command_emits_assertion,
         .invariant_ids = package_test_invariants,
+        .coverage_domains = package_failure_fixture_domains,
         .argv = package_tests_failure_fixture_argv,
     },
     .{
@@ -231,6 +302,7 @@ const scenario_registry: []const Scenario = &.{
         .purpose = "verify scoped fiber interruption causal examples stay healthy",
         .finding_policy = .failure_artifact_on_command_failure,
         .invariant_ids = scoped_fiber_invariants,
+        .coverage_domains = scoped_fiber_domains,
         .argv = causal_scoped_fiber_argv,
     },
     .{
@@ -241,6 +313,7 @@ const scenario_registry: []const Scenario = &.{
         .purpose = "verify retry exhaustion causal examples stay healthy",
         .finding_policy = .failure_artifact_on_command_failure,
         .invariant_ids = retry_exhaustion_invariants,
+        .coverage_domains = retry_exhaustion_domains,
         .argv = causal_retry_exhaustion_argv,
     },
     .{
@@ -251,6 +324,7 @@ const scenario_registry: []const Scenario = &.{
         .purpose = "verify cleanup failure causal examples stay healthy",
         .finding_policy = .failure_artifact_on_command_failure,
         .invariant_ids = cleanup_failure_invariants,
+        .coverage_domains = cleanup_failure_domains,
         .argv = causal_cleanup_failure_argv,
     },
     .{
@@ -261,7 +335,19 @@ const scenario_registry: []const Scenario = &.{
         .purpose = "verify missing config causal examples stay healthy",
         .finding_policy = .failure_artifact_on_command_failure,
         .invariant_ids = missing_config_invariants,
+        .coverage_domains = missing_config_domains,
         .argv = causal_missing_config_argv,
+    },
+    .{
+        .slug = "causal-readiness",
+        .label = "Causal Readiness",
+        .expectation = .expected_pass,
+        .owner = .observability,
+        .purpose = "verify app-shaped readiness, graph startup, and observability causal examples stay healthy",
+        .finding_policy = .failure_artifact_on_command_failure,
+        .invariant_ids = readiness_invariants,
+        .coverage_domains = readiness_domains,
+        .argv = causal_readiness_argv,
     },
 };
 
@@ -314,6 +400,13 @@ const invariant_catalog: []const Invariant = &.{
         .finding_kind = null,
         .rule = "The package test suite remains the broad local regression gate and should be run through causal-dev-test during runtime work.",
         .detection_query = "zig build causal-dev-test",
+    },
+    .{
+        .id = "observability-events-are-sampleable",
+        .subsystem = .observability,
+        .finding_kind = null,
+        .rule = "Log, metric, and span causal events are sampleable observability evidence, not finding evidence.",
+        .detection_query = "causal.lineage {event_id}",
     },
 };
 
@@ -375,6 +468,11 @@ pub fn formatCatalog(allocator: std.mem.Allocator) std.mem.Allocator.Error![]con
         try output.appendSlice(allocator, "  invariants:");
         for (scenario.invariant_ids) |id| {
             try output.print(allocator, " {s}", .{id});
+        }
+        try output.append(allocator, '\n');
+        try output.appendSlice(allocator, "  coverage:");
+        for (scenario.coverage_domains) |domain| {
+            try output.print(allocator, " {s}", .{@tagName(domain)});
         }
         try output.append(allocator, '\n');
     }
@@ -510,6 +608,13 @@ fn commandFailed(term: std.process.Child.Term) bool {
 fn argvContains(args: []const []const u8, expected: []const u8) bool {
     for (args) |arg| {
         if (std.mem.eql(u8, arg, expected)) return true;
+    }
+    return false;
+}
+
+fn scenarioHasDomain(scenario: Scenario, domain: CausalCoverageDomain) bool {
+    for (scenario.coverage_domains) |candidate| {
+        if (candidate == domain) return true;
     }
     return false;
 }
@@ -720,6 +825,39 @@ test "scenario registry records owners purposes policies invariants and paths" {
     );
 }
 
+test "scenario registry declares causal coverage domains" {
+    for (scenarioRegistry()) |scenario| {
+        try std.testing.expect(scenario.coverage_domains.len > 0);
+    }
+
+    const scoped_fiber = try scenarioByName("causal-scoped-fiber");
+    try std.testing.expect(scenarioHasDomain(scoped_fiber, .fiber));
+    try std.testing.expect(scenarioHasDomain(scoped_fiber, .scope));
+
+    const cleanup = try scenarioByName("causal-cleanup-failure");
+    try std.testing.expect(scenarioHasDomain(cleanup, .resource));
+    try std.testing.expect(scenarioHasDomain(cleanup, .cause));
+}
+
+test "causal readiness scenario is registered for observability coverage" {
+    const scenario = try scenarioByName("causal-readiness");
+
+    try std.testing.expectEqual(RuntimeSubsystem.observability, scenario.owner);
+    try std.testing.expectEqual(Expectation.expected_pass, scenario.expectation);
+    try std.testing.expect(scenarioHasDomain(scenario, .observability));
+    try std.testing.expect(scenarioHasDomain(scenario, .layer));
+    try std.testing.expect(scenarioHasDomain(scenario, .config));
+    try std.testing.expect(argvContains(scenario.argv, "-Mroot=examples/causal_readiness.zig"));
+}
+
+test "scenario invariant references resolve" {
+    for (scenarioRegistry()) |scenario| {
+        for (scenario.invariant_ids) |id| {
+            _ = try invariantById(id);
+        }
+    }
+}
+
 test "package failure fixture scenario is registered as expected package failure" {
     const scenario = try scenarioByName("package-tests-failure-fixture");
     try std.testing.expectEqual(RuntimeSubsystem.package, scenario.owner);
@@ -756,6 +894,9 @@ test "catalog output lists scenarios invariants and artifact paths" {
     try std.testing.expect(std.mem.indexOf(u8, catalog, "scenario missing-service-compile-fail") != null);
     try std.testing.expect(std.mem.indexOf(u8, catalog, "owner: service_resolution") != null);
     try std.testing.expect(std.mem.indexOf(u8, catalog, "scenario causal-scoped-fiber") != null);
+    try std.testing.expect(std.mem.indexOf(u8, catalog, "scenario causal-readiness") != null);
+    try std.testing.expect(std.mem.indexOf(u8, catalog, "coverage:") != null);
     try std.testing.expect(std.mem.indexOf(u8, catalog, "invariant scoped-fiber-must-finish-before-scope-close") != null);
+    try std.testing.expect(std.mem.indexOf(u8, catalog, "observability-events-are-sampleable") != null);
     try std.testing.expect(std.mem.indexOf(u8, catalog, ".zig-cache/causal-artifacts/zigeffect-causal-causal-scoped-fiber.json") != null);
 }
