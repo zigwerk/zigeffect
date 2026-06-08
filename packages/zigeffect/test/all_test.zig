@@ -9,6 +9,7 @@ comptime {
     _ = @import("layer_test.zig");
     _ = @import("schedule_test.zig");
     _ = @import("services_test.zig");
+    _ = @import("support/causal_assertions.zig");
     _ = @import("traits_test.zig");
     _ = @import("data_test.zig");
     _ = @import("match_test.zig");
