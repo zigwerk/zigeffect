@@ -92,8 +92,9 @@ The following capabilities are already merged into `master`:
   `causal-readiness` for app-shaped observability coverage.
 - Shared structural causal assertion helpers in package tests.
 - `CausalJsonLinesBackendState`, `CausalDotBackendState`,
-  `CausalOtelBackendState`, `CausalGraphHistoryBackendState`, and
-  `CausalNendbStorageBackendState` concrete causal backend adapters.
+  `CausalOtelBackendState`, `CausalGraphHistoryBackendState`,
+  `CausalNendbStorageBackendState`, and `CausalAsyncStreamBackendState`
+  concrete causal backend adapters.
 
 These commands establish the review-only chain:
 
@@ -112,8 +113,8 @@ dev session
   -> policy decision
 ```
 
-The next milestone is pervasive causal tests inside `zigeffect` so core
-runtime regressions can be diagnosed directly from causal event ids.
+The next milestone after backend adapter verification is snapshot manifests, so
+agents can compare named causal states before moving into replay and forking.
 
 ## Execution Ladder
 
@@ -318,10 +319,10 @@ codex/zigeffect-causal-nendb-storage-adapter
 codex/zigeffect-causal-async-stream-backend
 ```
 
-Current branch:
+Next branch:
 
 ```text
-codex/zigeffect-causal-async-stream-backend
+codex/zigeffect-causal-snapshot-manifest
 ```
 
 ### M5: Replay, Forking, And Named Snapshot Comparison
@@ -596,7 +597,7 @@ Status values:
 | M1 Policy engine | delivered | `causal-policy-decision` writes advisory policy artifacts on branch `codex/zigeffect-causal-policy-engine` | merge after final verification |
 | M2 Pervasive causal tests | delivered | `causal-test-matrix`, coverage domains, `causal-readiness`, and shared causal assertions exist on branch `codex/zigeffect-causal-test-matrix` | move to M3 hardening |
 | M3 Production hardening | delivered | bounded store, broader redaction, sampling, taxonomy, schema/taxonomy compatibility fixtures, and artifact string-size limits delivered | move to M4 backend conformance |
-| M4 Backend adapters | in progress | backend boundary, conformance suite, JSONL sink, polished DOT backend, OTel bridge, graph-history adapter, and NenDB storage writer contract exist | design async stream backend |
+| M4 Backend adapters | in progress | backend boundary, conformance suite, JSONL sink, polished DOT backend, OTel bridge, graph-history adapter, NenDB storage writer contract, and async stream adapter exist | verify backend adapter suite and move to M5 snapshot manifest |
 | M5 Replay/snapshots | planned | compare and audit-chain tools exist | design snapshot manifest |
 | M6 Workbench UI | planned | JSON/text/DOT artifacts exist | build read-only artifact viewer |
 | M7 App-facing runtime | planned | core causal vocabulary exists | design request/job adapters |
@@ -605,8 +606,8 @@ Status values:
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-causal-otel-backend`
-   - Build the first telemetry bridge behind the conformance contract.
+1. `codex/zigeffect-causal-snapshot-manifest`
+   - Build named snapshot capture and manifest metadata for M5 replay planning.
 
 ## Risks And Controls
 

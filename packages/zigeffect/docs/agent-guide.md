@@ -444,6 +444,14 @@ Treat the writer output as sink evidence: if `failedEventCount()` or
 fall back to retained store, graph-history, JSONL, or full JSON evidence. Run
 `zig build causal-nendb-storage-backend` for the focused adapter gate.
 
+Use `CausalAsyncStreamBackendState` when an agent needs incremental events from
+a running local command but does not need durable history. `peekSnapshot`
+returns a copy of the queued stream without mutating it; `drain` returns queued
+events in order and clears the stream; `clear` discards queued events; `flush`
+calls the optional sink flush hook. Treat the async stream as incomplete if
+backend failures or dropped stream events are nonzero. Run
+`zig build causal-async-stream-backend` for the focused adapter gate.
+
 `event_taxonomy_version` identifies the event-kind role semantics. Version `1`
 keeps sampleable observability disjoint from finding evidence: logs, metrics,
 and spans may be sampled; service, scope, resource, fiber, schedule, and
@@ -839,7 +847,7 @@ the invariant is covered.
 
 Backend adapters are sinks, not the source of truth. Keep tests and local agent
 queries against the in-memory `CausalStore`; use `store.attachBackend` for
-JSONL, DOT, OpenTelemetry, embedded graph, NenDB storage, or future async
+JSONL, DOT, OpenTelemetry, embedded graph, NenDB storage, or bounded async
 adapters. Do not put NenDB or OpenTelemetry inside the deterministic core.
 
 Future causal findings should be treated as evidence pointers, not conclusions.

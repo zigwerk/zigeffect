@@ -36,7 +36,7 @@ Included in this package:
   semantics.
 - `Deferred`, `Queue`, and `Semaphore`: deterministic coordination primitives
   with explicit wait-state/backpressure inspection for tests, tooling, and
-  future async backends.
+  bounded async stream adapters.
 - `Context`: typed service access and scoped finalizer registration.
 - `acquireRelease` / `acquireReleaseValue`: typed resource acquisition with
   automatic scope cleanup.
@@ -66,7 +66,7 @@ Included in this package:
   deterministic jitter, and owned recursive schedule composition.
 - `CausalStore` / `CausalBackend`: deterministic causal event storage, query
   helpers, report/JSON/DOT/CI formatters, and optional adapter sinks for JSON
-  Lines, DOT, OpenTelemetry, embedded graph, and future async streams.
+  Lines, DOT, OpenTelemetry, embedded graph, and bounded async streams.
 - `TestEnv`: fake clock, memory filesystem, logger, config, metrics, tracing,
   runtime helpers, assertion helpers, and readable assertion report formatters.
 - `Clock`: fake/system time service used by schedules and tests.
@@ -292,6 +292,16 @@ dependency because the current Zig package shape is not stable enough for this
 build; a future wrapper can target `nendb.EmbeddedDB.addNode`, `addEdge`, and
 `flush`. Run `zig build causal-nendb-storage-backend` for the focused adapter
 gate.
+
+Use `fx.CausalAsyncStreamBackendState` when a local agent, watch-mode tool, or
+app runtime wants to observe stored causal events incrementally without claiming
+durable history. The adapter keeps a bounded queue of cloned, sanitized events,
+optionally forwards accepted events to a caller-provided `CausalAsyncStreamSink`,
+and exposes `peekSnapshot`, `drain`, `clear`, and `flush`. If
+`failedEventCount()` or `backendFailureCount()` is nonzero, treat the stream as
+incomplete and fall back to retained store, graph-history, NenDB storage, JSONL,
+or full JSON evidence. Run `zig build causal-async-stream-backend` for the
+focused adapter gate.
 
 Causal artifacts also include `event_taxonomy_version`. Version `1` classifies
 logs, metrics, and spans as sampleable observability; runtime lifecycle events

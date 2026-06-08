@@ -826,7 +826,8 @@ adapt the same event sink contract:
   storage writer contract for local agents
 - `cockroach_history`: reserved durable-history kind, not part of the current
   NenDB-only roadmap sequence
-- `async_stream`: future non-blocking event stream
+- `async_stream`: dependency-free bounded event stream for local agents,
+  watch-mode tools, and future app runtime bridges
 
 `zig build causal-backend-conformance` is the adapter contract gate. It proves
 that a backend sees assigned, redacted, bounded stored events; does not receive
@@ -869,6 +870,13 @@ observable and fail closed. This branch does not add a direct upstream NenDB
 dependency; a future wrapper can adapt `nendb.EmbeddedDB.addNode`, `addEdge`,
 and `flush` once the upstream package can be pinned cleanly. Its focused gate is
 `zig build causal-nendb-storage-backend`.
+
+The concrete `async_stream` adapter is `CausalAsyncStreamBackendState`. It
+queues cloned stored events in order, optionally calls a caller-provided
+`CausalAsyncStreamSink`, and exposes `peekSnapshot`, `drain`, `clear`, and
+`flush` for explicit consumers. It is non-durable and has no scheduler,
+filesystem, network, NenDB, or Cockroach dependency. Its focused gate is
+`zig build causal-async-stream-backend`.
 
 ## Derived Findings
 
@@ -1015,7 +1023,7 @@ Candidate adapters:
 - OpenTelemetry adapter for production span ecosystems;
 - NenDB embedded graph adapter for local/agent graph queries and storage-writer
   contracts;
-- future async backend event streams.
+- bounded async backend event streams.
 
 ### Phase 8: Controlled Remediation
 
@@ -1033,7 +1041,7 @@ The causal runtime is useful when:
   resource, retry policy, and trace span;
 - event storage remains bounded and deterministic under tests;
 - secrets do not appear in exported reports;
-- the same event semantics work for deterministic and future async backends;
+- the same event semantics work for deterministic and async stream backends;
 - the docs teach agents what to query before proposing fixes.
 
 ## Non-Goals
