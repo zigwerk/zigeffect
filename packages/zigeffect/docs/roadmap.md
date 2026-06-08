@@ -559,6 +559,11 @@ metrics, and traces.
   application JSON/text artifacts from readiness reports. `plan` preserves
   `applied=false`; `record-applied` records `applied=true` only after current
   source state and verification command evidence pass.
+- Delivered: `zig build causal-policy-decision -- local [scenario]` writes
+  deterministic advisory policy JSON/text artifacts. The default local policy
+  evaluates remediation/audit/registry evidence and emits `approve`, `reject`,
+  or `needs-human-review` while preserving `applied=false` and
+  `mutation_authority=none`.
 - Delivered: `zig build causal-artifacts` prints a deterministic retention
   manifest with upload globs and dogfood, scenario, and dev-loop artifact paths
   for agents and CI.

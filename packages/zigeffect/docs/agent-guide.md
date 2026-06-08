@@ -653,6 +653,21 @@ commands have been run; it sets `applied=true` only when source-state and
 verification checks pass. The command records application state but does not
 silently mutate source.
 
+After the audit, proposal, audit-chain, and optional registry application
+artifacts exist, record the advisory policy decision:
+
+```sh
+zig build causal-policy-decision -- local
+zig build causal-policy-decision -- local causal-scoped-fiber
+```
+
+The command writes `*-policy-decision.json` and `*-policy-decision.txt` with
+schema `zigeffect.causal.policy-decision.v1`. The default
+`local-causal-self-improvement-v1` policy evaluates deterministic local
+evidence and emits `approve`, `reject`, or `needs-human-review`. It never
+applies source changes; every report keeps `applied=false` and
+`mutation_authority=none`.
+
 Generate advice directly from any saved causal JSON artifact:
 
 ```sh

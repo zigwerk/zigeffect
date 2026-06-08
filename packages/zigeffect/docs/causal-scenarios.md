@@ -143,6 +143,17 @@ text. `plan` records manual application steps with `applied=false`.
 verification command evidence pass. The command records state; it does not
 silently edit source.
 
+Record the advisory policy decision:
+
+```sh
+zig build causal-policy-decision -- local [scenario]
+```
+
+This writes schema `zigeffect.causal.policy-decision.v1` as JSON plus text.
+The default local policy can recommend `approve`, `reject`, or
+`needs-human-review`, but it always records `mutation_authority=none` and
+`applied=false`.
+
 Generate deterministic advice from a saved causal JSON artifact:
 
 ```sh
@@ -294,6 +305,7 @@ artifacts.
 `causal-registry-application-readiness` writes review readiness artifacts for
 registry patch drafts.
 `causal-registry-apply` writes registry application boundary artifacts.
+`causal-policy-decision` writes advisory policy decision artifacts.
 `causal-dev-session` writes the session wrapper artifacts:
 
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json`
@@ -321,6 +333,8 @@ registry patch drafts.
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-application-readiness.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-application.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-application.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-policy-decision.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-policy-decision.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session.txt`
 
@@ -336,6 +350,7 @@ write slug-specific loop artifacts. `causal-diagnosis` and
 `causal-registry-application-readiness` adds matching review readiness
 artifacts.
 `causal-registry-apply` adds matching registry application boundary artifacts.
+`causal-policy-decision` adds matching advisory policy decision artifacts.
 `causal-dev-session` adds matching session wrapper artifacts:
 
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-before.json`
@@ -363,6 +378,8 @@ artifacts.
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-registry-application-readiness.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-registry-application.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-registry-application.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-policy-decision.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-<scenario>-policy-decision.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session-<scenario>.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session-<scenario>.txt`
 
@@ -421,6 +438,12 @@ Then record the application boundary:
 
 ```sh
 zig build causal-registry-apply -- --from-readiness <registry-application-readiness.json> plan|record-applied --reason <reason>
+```
+
+Then record the advisory policy decision:
+
+```sh
+zig build causal-policy-decision -- local [scenario]
 ```
 
 The draft remains unapplied until a reviewer updates `tools/causal_run.zig`,

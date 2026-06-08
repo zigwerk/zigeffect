@@ -381,6 +381,7 @@ zig build causal-scenario-proposal -- local
 zig build causal-scenario-registry-patch -- --from-proposal .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-scenario-proposal.json
 zig build causal-registry-application-readiness -- --from-registry-patch .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-patch.json approve --reason "reviewed registry patch draft" --verified-command "zig build causal-run learned-dogfood-service-resolution" --verified-command "zig build examples"
 zig build causal-registry-apply -- --from-readiness .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-application-readiness.json plan --reason "prepare manual registry application"
+zig build causal-policy-decision -- local
 ```
 
 For scenario targets, pass the same scenario slug:
@@ -397,6 +398,7 @@ zig build causal-scenario-proposal -- local causal-scoped-fiber
 zig build causal-scenario-registry-patch -- --from-proposal .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-scenario-proposal.json
 zig build causal-registry-application-readiness -- --from-registry-patch .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-registry-patch.json approve --reason "no registry patch applies"
 zig build causal-registry-apply -- --from-readiness .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-registry-application-readiness.json plan --reason "no registry patch applies"
+zig build causal-policy-decision -- local causal-scoped-fiber
 ```
 
 `causal-dev-agent` prints the inspection order, `causal-diagnosis` writes
@@ -445,6 +447,14 @@ application steps with `applied=false`. `record-applied` mode records
 `applied=true` only when current source state and supplied verification
 commands prove the reviewed registry/docs update has already happened. The
 command records application state; it does not silently edit source.
+`causal-policy-decision` reads the audit, optional manual decision, patch
+proposal, audit chain, and any scenario-registry readiness/application
+artifacts, then writes `*-policy-decision.json` plus
+`*-policy-decision.txt` with schema
+`zigeffect.causal.policy-decision.v1`. The default policy is
+`local-causal-self-improvement-v1`; it can recommend `approve`, `reject`, or
+`needs-human-review`, but every report keeps `applied=false` and
+`mutation_authority=none`.
 
 Compare two saved causal JSON artifacts:
 

@@ -83,6 +83,8 @@ The following capabilities are already merged into `master`:
   <registry-patch.json> approve|reject --reason <reason>`.
 - `zig build causal-registry-apply`, which records `plan` or
   `record-applied` registry application artifacts from readiness reports.
+- `zig build causal-policy-decision -- local [scenario]`, which records
+  advisory policy decisions with `mutation_authority=none`.
 
 These commands establish the review-only chain:
 
@@ -98,10 +100,11 @@ dev session
   -> registry patch draft
   -> registry application readiness
   -> registry application record
+  -> policy decision
 ```
 
-The next milestone is policy-backed decision records that can reuse this
-application evidence without gaining silent mutation authority.
+The next milestone is pervasive causal tests inside `zigeffect` so core
+runtime regressions can be diagnosed directly from causal event ids.
 
 ## Execution Ladder
 
@@ -573,8 +576,8 @@ Status values:
 | Milestone | Status | Current Evidence | Next Action |
 | --- | --- | --- | --- |
 | M0 Guarded registry application | delivered | `causal-registry-apply` writes `registry-application` artifacts on branch `codex/zigeffect-guarded-registry-application` | merge after final verification |
-| M1 Policy engine | active | manual decision and registry application artifacts exist | design policy schema after M0 lands |
-| M2 Pervasive causal tests | planned | scenario registry and causal test helpers exist | create coverage matrix |
+| M1 Policy engine | delivered | `causal-policy-decision` writes advisory policy artifacts on branch `codex/zigeffect-causal-policy-engine` | merge after final verification |
+| M2 Pervasive causal tests | active | policy, registry, and causal test helpers exist | create coverage matrix |
 | M3 Production hardening | planned | bounded store, redaction, sampling, taxonomy delivered | broaden PII/schema/taxonomy fixtures |
 | M4 Durable backends | planned | backend boundary exists | implement conformance suite first |
 | M5 Replay/snapshots | planned | compare and audit-chain tools exist | design snapshot manifest |
@@ -585,19 +588,14 @@ Status values:
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-causal-policy-engine`
-   - Add policy-decision schema and evaluator.
-   - Integrate with readiness/application artifacts.
-   - Preserve no-silent-mutation rule.
-
-2. `codex/zigeffect-causal-test-matrix`
+1. `codex/zigeffect-causal-test-matrix`
    - Inventory core runtime invariants.
    - Map each to scenario coverage and test hooks.
 
-3. `codex/zigeffect-causal-pii-redaction-policy`
+2. `codex/zigeffect-causal-pii-redaction-policy`
    - Expand redaction coverage before app-facing traces.
 
-4. `codex/zigeffect-causal-backend-conformance`
+3. `codex/zigeffect-causal-backend-conformance`
    - Establish common adapter contract tests before durable backends.
 
 ## Risks And Controls
