@@ -29,11 +29,40 @@ pub const SnapshotManifestPaths = struct {
     }
 };
 
+pub const SnapshotManifestReferencePath = struct {
+    path: []const u8,
+
+    pub fn deinit(self: SnapshotManifestReferencePath, allocator: std.mem.Allocator) void {
+        allocator.free(self.path);
+    }
+};
+
 const Artifact = struct {
     schema: ?[]const u8 = null,
     schema_version: ?u32 = null,
     event_taxonomy_version: ?u32 = null,
     events: []Event,
+};
+
+const SnapshotManifestForCompare = struct {
+    schema: ?[]const u8 = null,
+    schema_version: ?u32 = null,
+    name: []const u8,
+    target: []const u8,
+    phase: []const u8,
+    artifact: SnapshotManifestArtifactForCompare,
+    warnings: ?[]const []const u8 = null,
+};
+
+const SnapshotManifestArtifactForCompare = struct {
+    path: []const u8,
+    schema: ?[]const u8 = null,
+    schema_version: ?u32 = null,
+    event_taxonomy_version: ?u32 = null,
+    events: usize = 0,
+    first_event_id: ?u64 = null,
+    last_event_id: ?u64 = null,
+    findings: usize = 0,
 };
 
 const Event = struct {
@@ -76,6 +105,66 @@ pub fn snapshotManifestPaths(allocator: std.mem.Allocator, name: []const u8) !Sn
         .json_path = json_path,
         .text_path = text_path,
     };
+}
+
+pub fn resolveSnapshotManifestReference(allocator: std.mem.Allocator, value: []const u8) !SnapshotManifestReferencePath {
+    if (isExplicitSnapshotManifestPath(value)) {
+        return .{ .path = try allocator.dupe(u8, value) };
+    }
+
+    const paths = try snapshotManifestPaths(allocator, value);
+    allocator.free(paths.text_path);
+    return .{ .path = paths.json_path };
+}
+
+pub fn formatSnapshotCompareText(
+    allocator: std.mem.Allocator,
+    left_manifest_path: []const u8,
+    left_manifest_json: []const u8,
+    left_artifact_json: []const u8,
+    right_manifest_path: []const u8,
+    right_manifest_json: []const u8,
+    right_artifact_json: []const u8,
+) ![]const u8 {
+    var left_parsed = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, left_manifest_json, .{ .ignore_unknown_fields = true });
+    defer left_parsed.deinit();
+    var right_parsed = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, right_manifest_json, .{ .ignore_unknown_fields = true });
+    defer right_parsed.deinit();
+
+    const compare_report = try causal_compare.runCompare(allocator, left_artifact_json, right_artifact_json);
+    defer allocator.free(compare_report);
+
+    const left = left_parsed.value;
+    const right = right_parsed.value;
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "zigeffect causal snapshot compare report\n");
+    try output.print(allocator, "schema: {s}\n", .{snapshot_compare_schema});
+    try output.print(allocator, "schema version: {d}\n", .{snapshot_compare_schema_version});
+    try appendSnapshotManifestSummary(&output, allocator, "left", left_manifest_path, left);
+    try appendSnapshotManifestSummary(&output, allocator, "right", right_manifest_path, right);
+    try appendSignedDeltaText(&output, allocator, "event delta from manifests", countDelta(right.artifact.events, left.artifact.events));
+    try appendSignedDeltaText(&output, allocator, "finding delta from manifests", countDelta(right.artifact.findings, left.artifact.findings));
+
+    try output.appendSlice(allocator, "manifest warnings:\n");
+    var wrote_warning = false;
+    try appendSnapshotManifestWarnings(&output, allocator, "left", left, &wrote_warning);
+    try appendSnapshotManifestWarnings(&output, allocator, "right", right, &wrote_warning);
+    if (!wrote_warning) try output.appendSlice(allocator, "- none\n");
+
+    try output.appendSlice(allocator, "event compare:\n");
+    try output.appendSlice(allocator, compare_report);
+    if (compare_report.len == 0 or compare_report[compare_report.len - 1] != '\n') {
+        try output.append(allocator, '\n');
+    }
+    try output.appendSlice(allocator, "next queries:\n");
+    try output.print(allocator, "- zig build causal-query -- --file {s} snapshot\n", .{left.artifact.path});
+    try output.print(allocator, "- zig build causal-query -- --file {s} snapshot\n", .{right.artifact.path});
+    try output.print(allocator, "- zig build causal-compare -- {s} {s}\n", .{ left.artifact.path, right.artifact.path });
+
+    return output.toOwnedSlice(allocator);
 }
 
 pub fn formatSnapshotManifestJson(
@@ -170,6 +259,89 @@ pub fn formatSnapshotManifestText(
     try appendWarningsText(allocator, &output, metadata, events);
 
     return output.toOwnedSlice(allocator);
+}
+
+fn isExplicitSnapshotManifestPath(value: []const u8) bool {
+    return std.mem.indexOfScalar(u8, value, '/') != null or std.mem.endsWith(u8, value, ".json");
+}
+
+fn snapshotArtifactPathFromManifestJson(allocator: std.mem.Allocator, manifest_json: []const u8) ![]const u8 {
+    var parsed = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, manifest_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    return allocator.dupe(u8, parsed.value.artifact.path);
+}
+
+fn countDelta(after: usize, before: usize) isize {
+    if (after >= before) return @intCast(after - before);
+    return -@as(isize, @intCast(before - after));
+}
+
+fn appendSignedDeltaText(output: *std.ArrayList(u8), allocator: std.mem.Allocator, label: []const u8, delta: isize) !void {
+    if (delta >= 0) {
+        try output.print(allocator, "{s}: +{d}\n", .{ label, delta });
+    } else {
+        try output.print(allocator, "{s}: {d}\n", .{ label, delta });
+    }
+}
+
+fn appendSnapshotManifestSummary(
+    output: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    side: []const u8,
+    manifest_path: []const u8,
+    manifest: SnapshotManifestForCompare,
+) !void {
+    try output.print(allocator, "{s} snapshot: {s}\n", .{ side, manifest.name });
+    try output.print(allocator, "{s} manifest: {s}\n", .{ side, manifest_path });
+    try output.print(allocator, "{s} target: {s}\n", .{ side, manifest.target });
+    try output.print(allocator, "{s} phase: {s}\n", .{ side, manifest.phase });
+    try output.print(allocator, "{s} artifact: {s}\n", .{ side, manifest.artifact.path });
+    try output.print(allocator, "{s} events: {d}\n", .{ side, manifest.artifact.events });
+    if (manifest.artifact.first_event_id) |first| {
+        if (manifest.artifact.last_event_id) |last| {
+            try output.print(allocator, "{s} event ids: {d}..{d}\n", .{ side, first, last });
+        } else {
+            try output.print(allocator, "{s} event ids: {d}..unknown\n", .{ side, first });
+        }
+    } else {
+        try output.print(allocator, "{s} event ids: none\n", .{side});
+    }
+    try output.print(allocator, "{s} findings: {d}\n", .{ side, manifest.artifact.findings });
+}
+
+fn appendSnapshotManifestWarnings(
+    output: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    side: []const u8,
+    manifest: SnapshotManifestForCompare,
+    wrote: *bool,
+) !void {
+    if (manifest.schema) |schema| {
+        if (!std.mem.eql(u8, schema, snapshot_manifest_schema)) {
+            try output.print(allocator, "- warning: {s} manifest schema={s} unsupported; expected {s}\n", .{ side, schema, snapshot_manifest_schema });
+            wrote.* = true;
+        }
+    } else {
+        try output.print(allocator, "- warning: {s} manifest schema missing; expected {s}\n", .{ side, snapshot_manifest_schema });
+        wrote.* = true;
+    }
+
+    if (manifest.schema_version) |version| {
+        if (version > snapshot_manifest_schema_version) {
+            try output.print(allocator, "- warning: {s} manifest schema_version={d} newer than supported={d}\n", .{ side, version, snapshot_manifest_schema_version });
+            wrote.* = true;
+        }
+    } else {
+        try output.print(allocator, "- warning: {s} manifest schema_version missing; expected {d}\n", .{ side, snapshot_manifest_schema_version });
+        wrote.* = true;
+    }
+
+    if (manifest.warnings) |warnings| {
+        for (warnings) |warning| {
+            try output.print(allocator, "- {s} manifest: {s}\n", .{ side, warning });
+            wrote.* = true;
+        }
+    }
 }
 
 fn artifactMetadata(artifact: Artifact) causal_artifact.ArtifactMetadata {
@@ -399,7 +571,7 @@ const ManifestFormat = enum {
 };
 
 fn usage() []const u8 {
-    return "usage: zig build causal-snapshot -- manifest <name> <artifact.json> [--format json|text] [--target <target>] [--phase <phase>] [--baseline <path>] [--compare-report <path>] [--query-report <path>] [--advice-report <path>]\n       zig build causal-snapshot -- capture <name> [scenario]\n";
+    return "usage: zig build causal-snapshot -- manifest <name> <artifact.json> [--format json|text] [--target <target>] [--phase <phase>] [--baseline <path>] [--compare-report <path>] [--query-report <path>] [--advice-report <path>]\n       zig build causal-snapshot -- capture <name> [scenario]\n       zig build causal-snapshot -- compare <left> <right>\n";
 }
 
 fn failUsage(err: anyerror) noreturn {
@@ -515,6 +687,42 @@ pub fn main(init: std.process.Init) !void {
             paths.text_path,
             source_path,
         });
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "compare")) {
+        if (args.len != 4) failUsage(error.InvalidSnapshotCompareArguments);
+        const left_manifest_ref = try resolveSnapshotManifestReference(allocator, args[2]);
+        defer left_manifest_ref.deinit(allocator);
+        const right_manifest_ref = try resolveSnapshotManifestReference(allocator, args[3]);
+        defer right_manifest_ref.deinit(allocator);
+
+        const left_manifest_json = try std.Io.Dir.cwd().readFileAlloc(init.io, left_manifest_ref.path, allocator, .limited(1024 * 1024));
+        defer allocator.free(left_manifest_json);
+        const right_manifest_json = try std.Io.Dir.cwd().readFileAlloc(init.io, right_manifest_ref.path, allocator, .limited(1024 * 1024));
+        defer allocator.free(right_manifest_json);
+
+        const left_artifact_path = try snapshotArtifactPathFromManifestJson(allocator, left_manifest_json);
+        defer allocator.free(left_artifact_path);
+        const right_artifact_path = try snapshotArtifactPathFromManifestJson(allocator, right_manifest_json);
+        defer allocator.free(right_artifact_path);
+
+        const left_artifact_json = try std.Io.Dir.cwd().readFileAlloc(init.io, left_artifact_path, allocator, .limited(1024 * 1024));
+        defer allocator.free(left_artifact_json);
+        const right_artifact_json = try std.Io.Dir.cwd().readFileAlloc(init.io, right_artifact_path, allocator, .limited(1024 * 1024));
+        defer allocator.free(right_artifact_json);
+
+        const report = try formatSnapshotCompareText(
+            allocator,
+            left_manifest_ref.path,
+            left_manifest_json,
+            left_artifact_json,
+            right_manifest_ref.path,
+            right_manifest_json,
+            right_artifact_json,
+        );
+        defer allocator.free(report);
+        std.debug.print("{s}", .{report});
         return;
     }
 
