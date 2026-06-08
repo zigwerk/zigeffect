@@ -5,6 +5,7 @@ const registry_patch_suffix = "-registry-patch.json";
 const readiness_suffix = "-registry-application-readiness";
 const registry_patch_schema = "zigeffect.causal.registry-patch.v1";
 const readiness_schema = "zigeffect.causal.registry-application-readiness.v1";
+const scenario_docs_path = "docs/causal-scenarios.md";
 
 const Decision = enum {
     approve,
@@ -562,6 +563,70 @@ fn appendJsonString(allocator: std.mem.Allocator, output: *std.ArrayList(u8), va
         else => try output.append(allocator, byte),
     };
     try output.append(allocator, '"');
+}
+
+fn readRequiredArtifact(io: std.Io, allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => error.MissingRegistryPatchInput,
+        else => return err,
+    };
+}
+
+fn readOptionalArtifact(io: std.Io, allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => return allocator.dupe(u8, ""),
+        else => return err,
+    };
+}
+
+fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
+    const slash = std.mem.lastIndexOfScalar(u8, path, '/') orelse return error.InvalidArtifactPath;
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(io, path[0..slash]);
+    try cwd.writeFile(io, .{ .sub_path = path, .data = contents });
+}
+
+fn runFromRegistryPatch(init: std.process.Init, options: Options) !void {
+    const allocator = init.gpa;
+    const registry_patch_json = try readRequiredArtifact(init.io, allocator, options.registry_patch_path);
+    defer allocator.free(registry_patch_json);
+    const scenario_docs = try readOptionalArtifact(init.io, allocator, scenario_docs_path);
+    defer allocator.free(scenario_docs);
+
+    const reports = try formatReadinessReports(allocator, .{
+        .source_registry_patch_path = options.registry_patch_path,
+        .registry_patch_json = registry_patch_json,
+        .decision = options.decision,
+        .decided_by = options.decided_by,
+        .policy = options.policy,
+        .reason = options.reason,
+        .verified_commands = options.verified_commands,
+        .scenario_docs = scenario_docs,
+    });
+    defer reports.deinit(allocator);
+
+    const paths = try readinessPathsFromRegistryPatch(allocator, options.registry_patch_path);
+    defer paths.deinit(allocator);
+
+    try writeArtifact(init.io, paths.json, reports.json);
+    try writeArtifact(init.io, paths.text, reports.text);
+    std.debug.print("{s}", .{reports.text});
+}
+
+pub fn main(init: std.process.Init) !void {
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    const options = parseOptions(init.gpa, args) catch |err| failUsage(err);
+    defer options.deinit(init.gpa);
+    runFromRegistryPatch(init, options) catch |err| switch (err) {
+        error.MissingRegistryPatchInput,
+        error.InvalidRegistryPatchPath,
+        error.InvalidArtifactPath,
+        error.UnsupportedRegistryPatchSchema,
+        error.UnknownRecommendation,
+        error.MissingReason,
+        => failUsage(err),
+        else => return err,
+    };
 }
 
 const sample_add_registry_patch_json =

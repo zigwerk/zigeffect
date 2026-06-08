@@ -599,6 +599,15 @@ pub fn build(b: *std.Build) void {
     const causal_scenario_registry_patch_step = b.step("causal-scenario-registry-patch", "Write a reviewable causal scenario registry patch draft");
     causal_scenario_registry_patch_step.dependOn(&run_causal_scenario_registry_patch_tool.step);
 
+    const causal_registry_application_readiness_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-registry-application-readiness",
+        .root_module = causal_registry_application_readiness_tool_module,
+    });
+    const run_causal_registry_application_readiness_tool = b.addRunArtifact(causal_registry_application_readiness_tool);
+    if (b.args) |args| run_causal_registry_application_readiness_tool.addArgs(args);
+    const causal_registry_application_readiness_step = b.step("causal-registry-application-readiness", "Write a policy-controlled causal registry application readiness report");
+    causal_registry_application_readiness_step.dependOn(&run_causal_registry_application_readiness_tool.step);
+
     const causal_handoff_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_handoff.zig"),
         .target = target,
@@ -703,6 +712,7 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_scenario_proposal_tool_tests.step);
     examples_step.dependOn(&causal_scenario_registry_patch_tool.step);
     examples_step.dependOn(&run_causal_scenario_registry_patch_tool_tests.step);
+    examples_step.dependOn(&causal_registry_application_readiness_tool.step);
     examples_step.dependOn(&run_causal_registry_application_readiness_tool_tests.step);
     examples_step.dependOn(&causal_handoff_tool.step);
     examples_step.dependOn(&run_causal_handoff_tool_tests.step);
