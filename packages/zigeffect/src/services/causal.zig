@@ -203,6 +203,10 @@ fn isSensitiveKeyChar(byte: u8) bool {
     return isAsciiAlphaNumeric(byte) or byte == '_' or byte == '-' or byte == '.';
 }
 
+fn isQuote(byte: u8) bool {
+    return byte == '"' or byte == '\'';
+}
+
 fn isValueDelimiter(byte: u8) bool {
     return byte == ' ' or
         byte == '\t' or
@@ -216,6 +220,15 @@ fn isValueDelimiter(byte: u8) bool {
 fn skipValue(value: []const u8, start: usize) usize {
     var index = start;
     while (index < value.len and !isValueDelimiter(value[index])) {
+        index += 1;
+    }
+    return index;
+}
+
+fn skipQuotedValue(value: []const u8, start: usize, quote: u8) usize {
+    var index = start;
+    while (index < value.len) {
+        if (value[index] == quote) return index;
         index += 1;
     }
     return index;
@@ -304,31 +317,69 @@ fn appendSensitiveKeyRedaction(
     value: []const u8,
     index: *usize,
 ) Allocator.Error!bool {
-    if (!isSensitiveKeyChar(value[index.*])) return false;
+    var key_start = index.*;
+    var key_quote: ?u8 = null;
+    if (isQuote(value[key_start])) {
+        key_quote = value[key_start];
+        key_start += 1;
+    }
 
-    var key_end = index.*;
+    if (key_start >= value.len or !isSensitiveKeyChar(value[key_start])) return false;
+
+    var key_end = key_start;
     while (key_end < value.len and isSensitiveKeyChar(value[key_end])) {
         key_end += 1;
     }
 
-    var separator_index = key_end;
-    while (separator_index < value.len and value[separator_index] == ' ') {
+    var after_key = key_end;
+    if (key_quote) |quote| {
+        if (after_key >= value.len or value[after_key] != quote) return false;
+        after_key += 1;
+    }
+
+    var separator_index = after_key;
+    while (separator_index < value.len and std.ascii.isWhitespace(value[separator_index])) {
         separator_index += 1;
     }
     if (separator_index >= value.len) return false;
-    if (value[separator_index] != '=' and value[separator_index] != ':') return false;
 
-    const key = value[index.*..key_end];
+    var separator: ?u8 = null;
+    if (value[separator_index] == '=' or value[separator_index] == ':') {
+        separator = value[separator_index];
+        separator_index += 1;
+    } else if (!isQuote(value[separator_index])) {
+        return false;
+    }
+
+    const key = value[key_start..key_end];
     if (!isSensitiveKey(key)) return false;
 
-    try output.appendSlice(allocator, value[index.* .. separator_index + 1]);
-    var value_start = separator_index + 1;
-    while (value_start < value.len and value[value_start] == ' ') {
-        try output.append(allocator, value[value_start]);
+    var value_start = separator_index;
+    while (value_start < value.len and std.ascii.isWhitespace(value[value_start])) {
         value_start += 1;
     }
+
+    var value_quote: ?u8 = null;
+    if (value_start < value.len and isQuote(value[value_start])) {
+        value_quote = value[value_start];
+        value_start += 1;
+    }
+
+    try output.appendSlice(allocator, value[index.*..value_start]);
     try output.appendSlice(allocator, causal_redaction_marker);
-    index.* = if (isFullValueRedactionKey(key) and value[separator_index] == ':')
+
+    if (value_quote) |quote| {
+        const value_end = skipQuotedValue(value, value_start, quote);
+        if (value_end < value.len) {
+            try output.append(allocator, quote);
+            index.* = value_end + 1;
+        } else {
+            index.* = value_end;
+        }
+        return true;
+    }
+
+    index.* = if (separator != null and separator.? == ':' and isFullValueRedactionKey(key))
         skipFullSensitiveValue(value, value_start)
     else
         skipValue(value, value_start);
