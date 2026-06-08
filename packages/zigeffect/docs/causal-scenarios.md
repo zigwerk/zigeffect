@@ -48,6 +48,13 @@ Compare two saved causal JSON artifacts:
 zig build causal-compare -- <before.json> <after.json>
 ```
 
+Name an existing causal JSON artifact with a snapshot manifest:
+
+```sh
+zig build causal-snapshot -- capture <name> [scenario]
+zig build causal-snapshot -- manifest <name> <artifact.json> --format text
+```
+
 Run the two-phase causal development loop:
 
 ```sh
@@ -399,6 +406,8 @@ registry patch drafts.
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-policy-decision.txt`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session.json`
 - `.zig-cache/causal-artifacts/zigeffect-causal-dev-session.txt`
+- `.zig-cache/causal-artifacts/zigeffect-causal-snapshot-baseline.json`
+- `.zig-cache/causal-artifacts/zigeffect-causal-snapshot-baseline.txt`
 
 Scenario loops compare command-level artifacts for the selected scenario and
 write slug-specific loop artifacts. `causal-diagnosis` and

@@ -408,6 +408,20 @@ package-test gate, and prints the report paths. Scenario targets use
 slug-specific before, after, compare, query-report, advice-report, and verdict
 paths under `.zig-cache/causal-artifacts/`.
 
+Name an existing causal JSON artifact with a snapshot manifest:
+
+```bash
+zig build causal-snapshot -- capture baseline
+zig build causal-snapshot -- manifest baseline .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json --format text
+```
+
+`causal-snapshot` writes or prints `zigeffect.causal.snapshot-manifest.v1`
+metadata for an existing causal JSON artifact. The manifest records the
+snapshot name, artifact path, event count, event id range, finding count, replay
+feasibility, warnings, and next query commands. It does not embed events, rerun
+tests, or make replay feasible yet; query and compare the underlying causal JSON
+artifact for event-level evidence.
+
 Run a named scenario from the catalog:
 
 ```bash

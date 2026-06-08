@@ -950,6 +950,15 @@ causal JSON artifacts. It reports event deltas, finding deltas, added events,
 removed events, and changed events so an agent can explain whether a patch
 improved the runtime trace.
 
+`zig build causal-snapshot -- capture <name> [scenario]` names an existing
+causal JSON artifact with a `zigeffect.causal.snapshot-manifest.v1` JSON/text
+pair. The command is read-only over the source artifact: it records the
+snapshot name, artifact path, event count, event id range, finding count,
+compatibility warnings, replay feasibility, and next query commands, but it
+does not rerun tests or embed the event list. Use
+`zig build causal-snapshot -- manifest <name> <artifact.json> --format text`
+when you only want a stdout report for a specific artifact path.
+
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around
 those pieces. The no-scenario form captures before/after dogfood evidence and

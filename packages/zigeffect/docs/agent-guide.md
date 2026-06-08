@@ -567,6 +567,13 @@ aggregate action counts and `next_action`, then inspect `*-advice.txt`,
 `*-queries.txt`, and `*-compare.txt` for detailed event evidence before
 proposing the next fix.
 
+Use `zig build causal-snapshot -- capture <name> [scenario]` after the causal
+JSON artifact already exists. It writes
+`zigeffect.causal.snapshot-manifest.v1` JSON/text metadata that names the
+artifact, records event counts and finding posture, and prints stable next
+query commands. Snapshot manifests do not embed events and do not make replay
+feasible yet; keep citing the underlying causal JSON event ids.
+
 For normal core-runtime development, prefer the coordinated session command:
 
 ```sh
