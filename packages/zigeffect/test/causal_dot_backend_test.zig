@@ -88,3 +88,46 @@ test "formatCausalDotEvent emits one complete event statement group" {
     try std.testing.expect(std.mem.indexOf(u8, dot, "event_4 -> event_9 [label=\"parent\"]") != null);
     try std.testing.expect(std.mem.indexOf(u8, dot, "\nline") == null);
 }
+
+test "dot backend max_bytes fails closed without partial statements" {
+    var output = std.ArrayList(u8).empty;
+    defer output.deinit(std.testing.allocator);
+
+    var backend_state = fx.CausalDotBackendState.init(std.testing.allocator, &output, .{ .max_bytes = 1 });
+
+    var store = fx.CausalStore.init(std.testing.allocator);
+    store.attachBackend(backend_state.backend());
+    defer store.deinit();
+
+    const id = try store.record(.{ .kind = .run_started, .label = "overflowing-dot-row" });
+
+    try std.testing.expectEqual(@as(u64, 1), id);
+    try std.testing.expectEqual(@as(usize, 0), output.items.len);
+    try std.testing.expectEqual(@as(u64, 0), backend_state.writtenEventCount());
+    try std.testing.expectEqual(@as(u64, 1), backend_state.failedWriteCount());
+    try std.testing.expectEqual(@as(u64, 1), store.backendFailureCount());
+}
+
+test "dot backend records after finish as sink failures only" {
+    var output = std.ArrayList(u8).empty;
+    defer output.deinit(std.testing.allocator);
+
+    var backend_state = fx.CausalDotBackendState.init(std.testing.allocator, &output, .{});
+
+    var store = fx.CausalStore.init(std.testing.allocator);
+    store.attachBackend(backend_state.backend());
+    defer store.deinit();
+
+    const first = try store.record(.{ .kind = .run_started, .label = "finished" });
+    try backend_state.finish();
+    const second = try store.record(.{ .kind = .run_completed, .parent_id = first, .status = "success" });
+
+    try std.testing.expectEqual(@as(u64, 2), second);
+    try std.testing.expectEqual(@as(u64, 1), backend_state.writtenEventCount());
+    try std.testing.expectEqual(@as(u64, 1), backend_state.failedWriteCount());
+    try std.testing.expectEqual(@as(u64, 1), store.backendFailureCount());
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 2), snapshot.events.len);
+}

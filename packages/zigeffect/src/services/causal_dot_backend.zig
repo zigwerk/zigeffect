@@ -46,14 +46,20 @@ pub const CausalDotBackendState = struct {
         if (self.include_graph_header and !self.opened) {
             var header = std.ArrayList(u8).empty;
             defer header.deinit(self.allocator);
-            try causal.appendCausalDotGraphHeader(&header, self.allocator);
+            causal.appendCausalDotGraphHeader(&header, self.allocator) catch |err| {
+                self.failed_write_count += 1;
+                return err;
+            };
             try self.appendFragment(header.items);
             self.opened = true;
         }
         if (self.include_graph_header) {
             var footer = std.ArrayList(u8).empty;
             defer footer.deinit(self.allocator);
-            try causal.appendCausalDotGraphFooter(&footer, self.allocator);
+            causal.appendCausalDotGraphFooter(&footer, self.allocator) catch |err| {
+                self.failed_write_count += 1;
+                return err;
+            };
             try self.appendFragment(footer.items);
         }
         self.finished = true;
@@ -72,7 +78,17 @@ pub const CausalDotBackendState = struct {
     }
 
     fn appendFragment(self: *CausalDotBackendState, fragment: []const u8) anyerror!void {
-        try self.output.appendSlice(self.allocator, fragment);
+        if (self.max_bytes) |max_bytes| {
+            if (self.output.items.len > max_bytes or fragment.len > max_bytes - self.output.items.len) {
+                self.failed_write_count += 1;
+                return error.CausalDotBackendFull;
+            }
+        }
+
+        self.output.appendSlice(self.allocator, fragment) catch |err| {
+            self.failed_write_count += 1;
+            return err;
+        };
     }
 };
 
@@ -94,11 +110,17 @@ fn recordDotBackend(raw: ?*anyopaque, event: causal.CausalEvent) anyerror!void {
     if (state.include_graph_header and !state.opened) {
         var header = std.ArrayList(u8).empty;
         defer header.deinit(state.allocator);
-        try causal.appendCausalDotGraphHeader(&header, state.allocator);
+        causal.appendCausalDotGraphHeader(&header, state.allocator) catch |err| {
+            state.failed_write_count += 1;
+            return err;
+        };
         try state.appendFragment(header.items);
         state.opened = true;
     }
-    const fragment = try formatCausalDotEvent(state.allocator, event);
+    const fragment = formatCausalDotEvent(state.allocator, event) catch |err| {
+        state.failed_write_count += 1;
+        return err;
+    };
     defer state.allocator.free(fragment);
     try state.appendFragment(fragment);
     state.written_event_count += 1;
