@@ -610,6 +610,21 @@ before treating a replay as a forked diagnostic path. It writes
 does not execute commands, fork runtime memory, replay arbitrary event logs,
 mutate source, or update the scenario registry.
 
+Use the read-only causal workbench when a saved artifact would be faster to
+inspect visually than through raw JSON:
+
+```sh
+zig build causal-test
+zig build causal-workbench -- .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json
+```
+
+The workbench is a SolidJS app hosted by `zig-webui`. It reads exactly one
+artifact through a bounded Zig bridge and renders timeline, findings,
+relationships, query commands, metadata, and event inspector views. It is local
+and read-only: no source edits, registry edits, policy decisions, or
+remediation writes happen through the UI. Use copied `causal-query` commands as
+explicit follow-up evidence, not as implied approval.
+
 For normal core-runtime development, prefer the coordinated session command:
 
 ```sh

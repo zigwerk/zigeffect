@@ -983,6 +983,14 @@ writes `zigeffect.causal.scenario-fork-proposal.v1` JSON/text files with
 and blocks runtime memory forking, arbitrary event-log replay, source mutation,
 and scenario registry mutation.
 
+`zig build causal-workbench -- <artifact.json>` opens the first M6 read-only
+workbench. The command builds the SolidJS renderer, launches it through
+`zig-webui`, and serves the selected causal JSON artifact through bounded Zig
+bindings. The workbench is local and non-mutating: it can inspect timelines,
+findings, relationships, query commands, metadata, and selected event details,
+but it cannot apply patches, update the registry, approve policy decisions, or
+write remediation artifacts.
+
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around
 those pieces. The no-scenario form captures before/after dogfood evidence and

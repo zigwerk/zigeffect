@@ -136,6 +136,20 @@ zig build causal-test
 The harness writes a text report, JSON event snapshot, and DOT graph under
 `.zig-cache/causal-artifacts/`.
 
+Open the read-only SolidJS causal workbench for a saved artifact:
+
+```bash
+cd packages/zigeffect
+zig build causal-test
+zig build causal-workbench -- .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json
+```
+
+`causal-workbench` builds the SolidJS renderer with Bun/Vite, opens it through
+`zig-webui`, and exposes the selected artifact through a bounded read-only Zig
+bridge. The workbench has timeline, findings, relationship, query, metadata,
+and inspector views. It does not edit source, update the scenario registry,
+make policy decisions, or write remediation artifacts.
+
 Print the causal artifact retention manifest for agents and CI:
 
 ```bash
@@ -473,6 +487,13 @@ For example:
 
 ```bash
 zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-missing-service-compile-fail.json cause 3
+```
+
+When event evidence needs a visual pass, open the same JSON artifact in the
+local workbench:
+
+```bash
+zig build causal-workbench -- .zig-cache/causal-artifacts/zigeffect-causal-missing-service-compile-fail.json
 ```
 
 Generate deterministic next-action advice from a saved causal JSON artifact:

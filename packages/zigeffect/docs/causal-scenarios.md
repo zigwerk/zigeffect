@@ -342,7 +342,9 @@ When a zigeffect bug reveals a new runtime rule:
 5. Run `zig build causal-run -- <scenario>` before and after the fix.
 6. Query any failure artifact with `zig build causal-query -- --file <path>
    <query>`.
-7. Compare before and after artifacts with `zig build causal-compare --
+7. Open the failure artifact with `zig build causal-workbench -- <path>` when
+   timeline, finding, relationship, or inspector views help triage the run.
+8. Compare before and after artifacts with `zig build causal-compare --
    <before.json> <after.json>`.
 
 The scenario should describe the runtime invariant, not merely the symptom that

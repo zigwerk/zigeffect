@@ -369,24 +369,27 @@ manually opening many text artifacts.
 
 Deliverables:
 
-- Local static or dev-server workbench for saved artifacts.
-- Artifact loader for `zigeffect.causal.v1` and derived report schemas.
+- SolidJS workbench renderer built with Bun/Vite.
+- Zig WebUI launcher:
+  - `zig build causal-workbench -- <artifact.json>`.
+- UI build step:
+  - `zig build causal-workbench-ui`.
+- Bounded read-only Zig bridge for one selected artifact.
+- Artifact loader for `zigeffect.causal.v1`.
 - Views for:
   - effect run timeline;
-  - scope tree;
-  - fiber tree;
-  - layer graph;
-  - service requirement graph;
+  - lightweight parent/scope/fiber relationships;
   - retry timeline;
   - resource ownership;
-  - cause tree;
-  - findings and advice;
-  - remediation/audit chain;
-  - scenario registry proposal and application state.
+  - findings;
+  - metadata and compatibility posture;
+  - selected event inspector.
 - Cross-linking from event ids to related cause, children, resources, fibers,
   requirements, retries, and remediation evidence.
 - Copyable agent query commands.
 - Redaction and "safe to share" indicators.
+- Later slices for remediation/audit chains, scenario registry proposal state,
+  richer graph layout, and multi-artifact loading.
 
 Exit criteria:
 
@@ -401,7 +404,7 @@ Exit criteria:
 Recommended branches:
 
 ```text
-codex/zigeffect-causal-workbench-viewer
+codex/zigeffect-causal-workbench-readonly
 codex/zigeffect-causal-workbench-graphs
 codex/zigeffect-causal-workbench-remediation-chain
 ```
@@ -602,7 +605,7 @@ Status values:
 | M3 Production hardening | delivered | bounded store, broader redaction, sampling, taxonomy, schema/taxonomy compatibility fixtures, and artifact string-size limits delivered | move to M4 backend conformance |
 | M4 Backend adapters | delivered | backend boundary, conformance suite, JSONL sink, polished DOT backend, OTel bridge, graph-history adapter, NenDB storage writer contract, and async stream adapter exist | move to M5 snapshot manifests |
 | M5 Replay/snapshots | delivered | snapshot manifest schema/tool, named snapshot compare, replay-feasibility reports, deterministic registered-scenario replay, and safe scenario fork proposals exist | move to M6 read-only workbench |
-| M6 Workbench UI | planned | JSON/text/DOT artifacts exist | build read-only artifact viewer |
+| M6 Workbench UI | active | SolidJS renderer, `causal-workbench-ui`, and `zig-webui` launcher exist on branch `codex/zigeffect-causal-workbench-readonly` | verify, merge, then build graph/remediation-chain views |
 | M7 App-facing runtime | planned | core causal vocabulary exists | design request/job adapters |
 | M8 App remediation gates | deferred | app-facing runtime not started | wait for M7 |
 | M9 Operating model | deferred | schema/versioning docs partial | consolidate after M4-M8 |
@@ -610,8 +613,10 @@ Status values:
 ## Immediate Branch Queue
 
 1. `codex/zigeffect-causal-workbench-readonly`
-   - Build the read-only local artifact viewer once the M5 replay/forking boundary is closed.
-2. `codex/zigeffect-app-facing-causal-runtime`
+   - Verify and merge the SolidJS + `zig-webui` single-artifact workbench.
+2. `codex/zigeffect-causal-workbench-graphs`
+   - Add richer relationship graph, remediation/audit-chain visualization, and multi-artifact comparison entry points.
+3. `codex/zigeffect-app-facing-causal-runtime`
    - Design request/job adapters and app-facing causal vocabulary after the workbench can inspect artifacts.
 
 ## Risks And Controls
