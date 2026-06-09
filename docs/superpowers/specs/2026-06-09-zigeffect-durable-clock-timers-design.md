@@ -34,7 +34,12 @@ If replay history contains `timer_fired`, sleep returns `.fired`. If it contains
 
 `DurableClock.fireDueTimers(now_ms)` reads the journal, finds scheduled timers
 whose `fire_at_ms <= now_ms`, skips fired/cancelled timers, and appends
-`timer_fired`.
+`timer_fired`. When the execution is suspended, it also appends one correlated
+`workflow_resumed` wake-up row so replay state is running after the timer fires.
+
+`DurableClock.cancel(label)` reads the journal, skips missing or already
+terminal timers, appends `timer_cancelled`, and wakes the suspended execution
+with `workflow_resumed`.
 
 The file-store wake-up loop for this milestone is a synchronous local helper:
 `fireDueTimers` works against any `JournalStore`, including `FileJournalStore`.
@@ -50,9 +55,10 @@ The file-store wake-up loop for this milestone is a synchronous local helper:
 
 - Sleeping on a missing timer appends scheduled and suspended rows.
 - Replaying before fire returns suspension without duplicate schedule rows.
-- Firing due timers appends `timer_fired`.
+- Firing due timers appends `timer_fired` and resumes suspended workflow state.
 - Replaying after fire returns `.fired`.
-- Cancelling a timer appends `timer_cancelled` and replay returns cancelled.
+- Cancelling a timer appends `timer_cancelled`, resumes suspended workflow
+  state, and replay returns cancelled.
 - Due timer query reports pending due timers.
 - The same helper works with `FileJournalStore`.
 - `bun run zigeffect:test` passes.

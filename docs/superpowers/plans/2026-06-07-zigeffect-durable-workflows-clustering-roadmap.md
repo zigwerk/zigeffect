@@ -403,15 +403,15 @@ Goal: support durable sleep and wake-up.
 
 Deliverables:
 
-- [ ] Add `DurableClock`.
-- [ ] Add `sleep`, `sleepUntil`, and timer cancellation.
-- [ ] Append timer scheduled and timer fired events.
-- [ ] Add timer query API for the local scheduler.
-- [ ] Add file-store timer wake-up loop.
+- [x] Add `DurableClock`.
+- [x] Add `sleep`, `sleepUntil`, and timer cancellation.
+- [x] Append timer scheduled and timer fired events.
+- [x] Add timer query API for the local scheduler.
+- [x] Add file-store timer wake-up loop.
 
 Acceptance:
 
-- [ ] Workflow sleeps, exits process, restarts, fires timer, and resumes.
+- [x] Workflow sleeps, exits process, restarts, fires timer, and resumes.
 
 ## Milestone 15: External Signals And Events
 

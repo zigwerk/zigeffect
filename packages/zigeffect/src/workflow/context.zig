@@ -6,6 +6,7 @@ const causal_mod = @import("../services/causal.zig");
 const clock_mod = @import("../services/clock.zig");
 const traits_mod = @import("../traits/root.zig");
 const deferred_mod = @import("deferred.zig");
+const durable_clock_mod = @import("clock.zig");
 const journal_mod = @import("journal.zig");
 const store_mod = @import("store.zig");
 
@@ -18,9 +19,11 @@ pub const JournalStore = store_mod.JournalStore;
 pub const JournalEventBatch = store_mod.JournalEventBatch;
 pub const Schedule = schedule_mod.Schedule;
 pub const Suspension = control_mod.Suspension;
+pub const TimerSleepResult = durable_clock_mod.TimerSleepResult;
 pub const WorkflowId = journal_mod.WorkflowId;
 pub const ExecutionId = journal_mod.ExecutionId;
 pub const ActivityId = journal_mod.ActivityId;
+pub const TimerId = journal_mod.TimerId;
 pub const CompensationId = journal_mod.CompensationId;
 pub const JournalSequence = journal_mod.JournalSequence;
 pub const WorkflowStepCause = result_mod.Cause(anyerror);
@@ -203,6 +206,35 @@ pub const WorkflowContext = struct {
         } };
     }
 
+    pub fn sleep(self: *WorkflowContext, label: []const u8, delay_ms: u64) !TimerSleepResult {
+        const now_ms = if (self.clock) |clock| clock.nowMs() else 0;
+        const fire_at_ms = std.math.add(u64, now_ms, delay_ms) catch std.math.maxInt(u64);
+        return self.sleepUntil(label, fire_at_ms);
+    }
+
+    pub fn sleepUntil(self: *WorkflowContext, label: []const u8, fire_at_ms: u64) !TimerSleepResult {
+        const id = durable_clock_mod.timerId(label);
+        var events = try self.journal_store.readAll(self.allocator);
+        defer events.deinit();
+
+        const replay = timerReplayState(events.events, self.workflow_id, self.execution_id, id);
+        if (replay.terminal) |terminal| return terminal;
+
+        if (!replay.scheduled) {
+            const detail = try timerFireAtDetail(self.allocator, fire_at_ms);
+            defer self.allocator.free(detail);
+            try self.appendTimerEvent(.timer_scheduled, id, label, "scheduled", detail);
+        }
+        if (!replay.suspended) {
+            try self.appendTimerEvent(.workflow_suspended, id, label, "waiting", "timer");
+        }
+        return .{ .suspended = .{
+            .kind = .timer,
+            .id = id,
+            .label = label,
+        } };
+    }
+
     fn recordedStepU64(self: *const WorkflowContext, label: []const u8) !?u64 {
         for (self.replay_events.events) |event| {
             if (event.kind == .step_completed and
@@ -348,6 +380,32 @@ pub const WorkflowContext = struct {
                 .workflow_id = self.workflow_id,
                 .execution_id = self.execution_id,
                 .deferred_id = id,
+                .name = name,
+                .status = status,
+                .redacted_detail = redacted_detail,
+                .idempotency_key = idempotency_key,
+            },
+        });
+        self.next_sequence += 1;
+    }
+
+    fn appendTimerEvent(
+        self: *WorkflowContext,
+        kind: journal_mod.WorkflowEventKind,
+        id: TimerId,
+        name: []const u8,
+        status: []const u8,
+        redacted_detail: []const u8,
+    ) !void {
+        const idempotency_key = try timerEventIdempotencyKey(self.allocator, kind, id, self.next_sequence);
+        defer self.allocator.free(idempotency_key);
+        _ = try self.journal_store.append(.{
+            .event = .{
+                .sequence = self.next_sequence,
+                .kind = kind,
+                .workflow_id = self.workflow_id,
+                .execution_id = self.execution_id,
+                .timer_id = id,
                 .name = name,
                 .status = status,
                 .redacted_detail = redacted_detail,
@@ -569,6 +627,51 @@ fn deferredEventIdempotencyKey(
         "deferred:{d}:{s}:{d}",
         .{ id, journal_mod.workflowEventKindName(kind), sequence },
     );
+}
+
+fn timerEventIdempotencyKey(
+    allocator: Allocator,
+    kind: journal_mod.WorkflowEventKind,
+    id: TimerId,
+    sequence: JournalSequence,
+) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "timer:{d}:{s}:{d}",
+        .{ id, journal_mod.workflowEventKindName(kind), sequence },
+    );
+}
+
+fn timerFireAtDetail(allocator: Allocator, fire_at_ms: u64) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(allocator, "fire_at_ms={d}", .{fire_at_ms});
+}
+
+const TimerReplay = struct {
+    scheduled: bool = false,
+    suspended: bool = false,
+    terminal: ?TimerSleepResult = null,
+};
+
+fn timerReplayState(
+    events: []const journal_mod.WorkflowEvent,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    id: TimerId,
+) TimerReplay {
+    var replay = TimerReplay{};
+    for (events) |event| {
+        if (event.workflow_id != workflow_id or event.execution_id != execution_id) continue;
+        if (event.timer_id == null or event.timer_id.? != id) continue;
+
+        switch (event.kind) {
+            .timer_scheduled => replay.scheduled = true,
+            .workflow_suspended => replay.suspended = true,
+            .timer_fired => replay.terminal = .fired,
+            .timer_cancelled => replay.terminal = .cancelled,
+            else => {},
+        }
+    }
+    return replay;
 }
 
 fn compensationCompleted(

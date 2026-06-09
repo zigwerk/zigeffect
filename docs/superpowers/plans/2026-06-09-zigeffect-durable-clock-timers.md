@@ -32,7 +32,7 @@
 - Modify `packages/zigeffect/src/workflow/root.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing identity/export tests**
+- [x] **Step 1: Write failing identity/export tests**
 
 Add:
 
@@ -44,7 +44,7 @@ test "workflow timer ids are stable by label" {
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -54,12 +54,12 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until durable clock exports exist.
 
-- [ ] **Step 3: Implement clock module shell**
+- [x] **Step 3: Implement clock module shell**
 
 Add `clock.zig` with `timerId(label)`, `TimerSleepResult`, `DueTimer`,
 `DueTimerList`, and `DurableClock.init`. Export names from `workflow/root.zig`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -75,14 +75,14 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/context.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing sleep suspension test**
+- [x] **Step 1: Write failing sleep suspension test**
 
 With fake clock at `1_000`, call `context.sleep("wake", 250)`. Assert
 `.suspended`, `timer_scheduled` detail `fire_at_ms=1250`, and
 `workflow_suspended`. Create a fresh context and call sleep again; assert no
 duplicate timer row is appended.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -92,13 +92,13 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until `WorkflowContext.sleep` exists.
 
-- [ ] **Step 3: Implement sleep/sleepUntil pending behavior**
+- [x] **Step 3: Implement sleep/sleepUntil pending behavior**
 
 Add `sleep(label, delay_ms)` and `sleepUntil(label, fire_at_ms)`. If no fired or
 cancelled terminal row exists, append `timer_scheduled` only when absent, append
 `workflow_suspended`, and return `.suspended`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -115,13 +115,13 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/context.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing fire/resume tests**
+- [x] **Step 1: Write failing fire/resume tests**
 
 Use `DurableClock.init(...).dueTimers(1_250)` and assert it returns the pending
 timer. Call `fireDueTimers(1_250)`, create a fresh context, call sleep again,
 and assert `.fired` with no duplicate schedule rows.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -131,13 +131,13 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until due query and fire APIs exist.
 
-- [ ] **Step 3: Implement due query and fire**
+- [x] **Step 3: Implement due query and fire**
 
 Parse `fire_at_ms=<timestamp>` details, collect scheduled timers due at or
 before `now_ms`, skip fired/cancelled timers, append `timer_fired`, and return
 the fired count.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -154,13 +154,13 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/context.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing cancel and file-store tests**
+- [x] **Step 1: Write failing cancel and file-store tests**
 
 Call `DurableClock.cancel("wake")` and assert sleep replay returns
 `.cancelled`. Add a file-store test that schedules a timer, reopens the file
 store, calls `fireDueTimers`, and verifies replay returns `.fired`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -170,12 +170,12 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until cancellation and file-store firing work.
 
-- [ ] **Step 3: Implement cancellation and file-store-compatible firing**
+- [x] **Step 3: Implement cancellation and file-store-compatible firing**
 
 Append `timer_cancelled` through `DurableClock.cancel`. Ensure `fireDueTimers`
 only uses the `JournalStore` interface so both in-memory and file stores work.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -193,11 +193,11 @@ Expected: PASS.
 - Add `docs/superpowers/specs/2026-06-09-zigeffect-durable-clock-timers-design.md`
 - Add `docs/superpowers/plans/2026-06-09-zigeffect-durable-clock-timers.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Document `workflow/clock.zig` and `WorkflowContext.sleep` ownership.
 
-- [ ] **Step 2: Run full gate**
+- [x] **Step 2: Run full gate**
 
 Run:
 
@@ -212,7 +212,7 @@ rg -n 'T''BD|TO''DO|implement la''ter|fill in de''tails|appropriate error hand''
 Expected: compile/test commands PASS, `git diff --check` exits 0, and the
 placeholder scan exits 1 with no matches.
 
-- [ ] **Step 3: Mark Milestone 14 complete**
+- [x] **Step 3: Mark Milestone 14 complete**
 
 After the full gate passes, mark all Milestone 14 deliverables and acceptance
 boxes complete in

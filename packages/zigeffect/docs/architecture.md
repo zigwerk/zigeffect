@@ -206,10 +206,14 @@ Owns local durable workflow runtime surfaces:
   activity sequence assignment, recorded outcome lookup, activity result codec
   boundaries, attempt counters, retry schedule decisions, clock-backed retry
   delays, timeout terminal events, durable compensation registration and
-  reverse-order execution, durable deferred awaits, causal schedule mapping,
-  and `Exit`/`Cause` failure journaling.
+  reverse-order execution, durable deferred awaits, durable `sleep` and
+  `sleepUntil` suspension, causal schedule mapping, and `Exit`/`Cause` failure
+  journaling.
 - `deferred.zig`: durable deferred await result type, stable deferred identity,
   and external complete, fail, and cancel APIs.
+- `clock.zig`: stable timer identity, durable sleep result type, due timer
+  query, timer firing, timer cancellation, and journal-store-compatible wake-up
+  helpers for in-memory and append-only file stores.
 - `engine.zig`: workflow engine registration, provider requirement validation,
   durable `workflow_started` appends, typed poll results, execution inspection,
   duplicate execution checks, and in-memory execution indexing.

@@ -7,6 +7,7 @@ pub const activity = @import("activity.zig");
 pub const engine = @import("engine.zig");
 pub const context = @import("context.zig");
 pub const deferred = @import("deferred.zig");
+pub const clock = @import("clock.zig");
 
 pub const workflow_journal_event_schema = journal.workflow_journal_event_schema;
 pub const workflow_journal_event_schema_version = journal.workflow_journal_event_schema_version;
@@ -91,3 +92,9 @@ pub const activityId = context.activityId;
 pub const DeferredAwaitResult = deferred.DeferredAwaitResult;
 pub const DurableDeferred = deferred.DurableDeferred;
 pub const deferredId = deferred.deferredId;
+
+pub const TimerSleepResult = clock.TimerSleepResult;
+pub const DueTimer = clock.DueTimer;
+pub const DueTimerList = clock.DueTimerList;
+pub const DurableClock = clock.DurableClock;
+pub const timerId = clock.timerId;

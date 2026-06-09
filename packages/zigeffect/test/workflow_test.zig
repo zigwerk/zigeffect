@@ -222,6 +222,15 @@ test "workflow deferred ids are stable by label" {
     try std.testing.expect(@hasDecl(fx.workflow, "DurableDeferred"));
 }
 
+test "workflow timer ids are stable by label" {
+    try std.testing.expectEqual(
+        fx.workflow.timerId("wake"),
+        fx.workflow.timerId("wake"),
+    );
+    try std.testing.expect(fx.workflow.timerId("wake") != fx.workflow.timerId("timeout"));
+    try std.testing.expect(@hasDecl(fx.workflow, "DurableClock"));
+}
+
 test "workflow replay folds lifecycle events" {
     const events = [_]fx.workflow.WorkflowEvent{
         .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8, .name = "approval" },
@@ -1283,10 +1292,10 @@ test "workflow context retries failed activities with clock and causal decisions
     };
     const Charge = fx.workflow.Activity("charge", Payload, u64, error{Declined}, void)
         .withIdempotencyKey(struct {
-        fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
-            return std.fmt.allocPrint(allocator, "charge:{d}", .{payload.account_id});
-        }
-    }.key)
+            fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "charge:{d}", .{payload.account_id});
+            }
+        }.key)
         .withRetrySchedule(fx.Schedule.fixed(.{ .max_retries = 2, .delay_ms = 25 }).withLabel("charge-retry"));
     const codec = fx.Codec(u64){
         .encode = struct {
@@ -1387,10 +1396,10 @@ test "workflow context records exhausted activity retry budgets" {
     };
     const Charge = fx.workflow.Activity("charge", Payload, u64, error{Declined}, void)
         .withIdempotencyKey(struct {
-        fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
-            return std.fmt.allocPrint(allocator, "charge:{d}", .{payload.account_id});
-        }
-    }.key)
+            fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "charge:{d}", .{payload.account_id});
+            }
+        }.key)
         .withRetrySchedule(fx.Schedule.fixed(.{ .max_retries = 1, .delay_ms = 25 }).withLabel("charge-retry"));
     const codec = fx.Codec(u64){
         .encode = struct {
@@ -1488,10 +1497,10 @@ test "workflow context records and replays activity timeouts" {
     };
     const Charge = fx.workflow.Activity("charge", Payload, u64, error{ActivityTimeout}, void)
         .withIdempotencyKey(struct {
-        fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
-            return std.fmt.allocPrint(allocator, "charge:{d}", .{payload.account_id});
-        }
-    }.key)
+            fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "charge:{d}", .{payload.account_id});
+            }
+        }.key)
         .withTimeoutMs(0);
     const codec = fx.Codec(u64){
         .encode = struct {
@@ -1569,10 +1578,10 @@ test "workflow context records elapsed activity timeouts" {
     };
     const Charge = fx.workflow.Activity("charge", Payload, u64, error{ActivityTimeout}, void)
         .withIdempotencyKey(struct {
-        fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
-            return std.fmt.allocPrint(allocator, "charge:{d}", .{payload.account_id});
-        }
-    }.key)
+            fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "charge:{d}", .{payload.account_id});
+            }
+        }.key)
         .withTimeoutMs(5);
     const codec = fx.Codec(u64){
         .encode = struct {
@@ -2029,6 +2038,258 @@ test "durable deferred external cancellation replays cancellation reasons" {
     try std.testing.expectEqual(@as(usize, 5), events.events.len);
     try std.testing.expectEqual(fx.workflow.WorkflowEventKind.deferred_cancelled, events.events[4].kind);
     try std.testing.expectEqualStrings("operator", events.events[4].redacted_detail);
+}
+
+test "workflow context sleep schedules a durable timer and replays pending suspension" {
+    var clock = fx.FakeClock.fake(1_000);
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "timer-workflow",
+        .status = "running",
+        .idempotency_key = "timer-sleep",
+    } });
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+            .clock = &clock,
+        });
+        defer context.deinit();
+
+        const result = try context.sleep("wake", 250);
+        switch (result) {
+            .suspended => |suspension| {
+                try std.testing.expectEqual(fx.SuspensionKind.timer, suspension.kind);
+                try std.testing.expectEqual(fx.workflow.timerId("wake"), suspension.id);
+                try std.testing.expectEqualStrings("wake", suspension.label);
+            },
+            else => return error.ExpectedTimerSuspension,
+        }
+    }
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+            .clock = &clock,
+        });
+        defer context.deinit();
+
+        const result = try context.sleep("wake", 250);
+        switch (result) {
+            .suspended => {},
+            else => return error.ExpectedTimerSuspension,
+        }
+    }
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 3), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.timer_scheduled, events.events[1].kind);
+    try std.testing.expectEqual(fx.workflow.timerId("wake"), events.events[1].timer_id.?);
+    try std.testing.expectEqualStrings("fire_at_ms=1250", events.events[1].redacted_detail);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_suspended, events.events[2].kind);
+    try std.testing.expectEqualStrings("waiting", events.events[2].status);
+}
+
+test "durable clock queries due timers and fires them once" {
+    var clock = fx.FakeClock.fake(1_000);
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "timer-workflow",
+        .status = "running",
+        .idempotency_key = "timer-fire",
+    } });
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+            .clock = &clock,
+        });
+        defer context.deinit();
+
+        const result = try context.sleep("wake", 250);
+        switch (result) {
+            .suspended => {},
+            else => return error.ExpectedTimerSuspension,
+        }
+    }
+
+    var durable_clock = fx.workflow.DurableClock.init(std.testing.allocator, journal, 7, 8);
+    var early = try durable_clock.dueTimers(1_249);
+    defer early.deinit();
+    try std.testing.expectEqual(@as(usize, 0), early.timers.len);
+
+    var due = try durable_clock.dueTimers(1_250);
+    defer due.deinit();
+    try std.testing.expectEqual(@as(usize, 1), due.timers.len);
+    try std.testing.expectEqual(fx.workflow.timerId("wake"), due.timers[0].timer_id);
+    try std.testing.expectEqual(@as(u64, 7), due.timers[0].workflow_id);
+    try std.testing.expectEqual(@as(u64, 8), due.timers[0].execution_id);
+    try std.testing.expectEqualStrings("wake", due.timers[0].name);
+    try std.testing.expectEqual(@as(u64, 1_250), due.timers[0].fire_at_ms);
+
+    try std.testing.expectEqual(@as(usize, 1), try durable_clock.fireDueTimers(1_250));
+    try std.testing.expectEqual(@as(usize, 0), try durable_clock.fireDueTimers(1_250));
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+            .clock = &clock,
+        });
+        defer context.deinit();
+
+        const result = try context.sleep("wake", 250);
+        switch (result) {
+            .fired => {},
+            else => return error.ExpectedFiredTimer,
+        }
+    }
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 5), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.timer_scheduled, events.events[1].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_suspended, events.events[2].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.timer_fired, events.events[3].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[4].kind);
+}
+
+test "durable clock cancellation wakes timer sleepers once" {
+    var clock = fx.FakeClock.fake(1_000);
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "timer-workflow",
+        .status = "running",
+        .idempotency_key = "timer-cancel",
+    } });
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+            .clock = &clock,
+        });
+        defer context.deinit();
+
+        const result = try context.sleep("wake", 250);
+        switch (result) {
+            .suspended => {},
+            else => return error.ExpectedTimerSuspension,
+        }
+    }
+
+    var durable_clock = fx.workflow.DurableClock.init(std.testing.allocator, journal, 7, 8);
+    try std.testing.expect(try durable_clock.cancel("wake"));
+    try std.testing.expect(!try durable_clock.cancel("wake"));
+    try std.testing.expectEqual(@as(usize, 0), try durable_clock.fireDueTimers(1_250));
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+            .clock = &clock,
+        });
+        defer context.deinit();
+
+        const result = try context.sleep("wake", 250);
+        switch (result) {
+            .cancelled => {},
+            else => return error.ExpectedCancelledTimer,
+        }
+    }
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 5), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.timer_cancelled, events.events[3].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[4].kind);
+}
+
+test "durable clock fires file journal timers after reopen" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var clock = fx.FakeClock.fake(1_000);
+
+    {
+        var file_store = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer file_store.deinit();
+        const journal = file_store.asJournalStore();
+
+        _ = try journal.append(.{ .event = .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .name = "timer-workflow",
+            .status = "running",
+            .idempotency_key = "timer-file",
+        } });
+
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+            .clock = &clock,
+        });
+        defer context.deinit();
+
+        const result = try context.sleep("wake", 250);
+        switch (result) {
+            .suspended => {},
+            else => return error.ExpectedTimerSuspension,
+        }
+    }
+
+    {
+        var reopened = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer reopened.deinit();
+        const journal = reopened.asJournalStore();
+
+        var durable_clock = fx.workflow.DurableClock.init(std.testing.allocator, journal, 7, 8);
+        try std.testing.expectEqual(@as(usize, 1), try durable_clock.fireDueTimers(1_250));
+
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+            .clock = &clock,
+        });
+        defer context.deinit();
+
+        const result = try context.sleep("wake", 250);
+        switch (result) {
+            .fired => {},
+            else => return error.ExpectedFiredTimer,
+        }
+
+        var state = try journal.latestState(std.testing.allocator);
+        defer state.deinit();
+        try std.testing.expectEqual(fx.workflow.WorkflowStatus.running, state.workflow_status);
+        try std.testing.expectEqual(fx.workflow.TimerStatus.fired, state.timers.items[0].status);
+    }
 }
 
 test "workflow context records failed compensation cause details" {
