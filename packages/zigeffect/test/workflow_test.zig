@@ -1667,6 +1667,51 @@ test "workflow checkpoint json round-trips replay-equivalent state" {
     try std.testing.expectEqual(fx.workflow.CompensationStatus.completed, parsed.compensations.items[0].status);
 }
 
+test "workflow snapshot commit json round-trips file references" {
+    const checkpoint_name = try fx.workflow.checkpointFileName(std.testing.allocator, 42);
+    defer std.testing.allocator.free(checkpoint_name);
+    const commit_name = try fx.workflow.snapshotCommitFileName(std.testing.allocator, 42);
+    defer std.testing.allocator.free(commit_name);
+    const archive_name = try fx.workflow.archiveFileName(std.testing.allocator, 1, 42);
+    defer std.testing.allocator.free(archive_name);
+
+    try std.testing.expectEqualStrings("workflow-snapshot-commit-0000000000000042.json", commit_name);
+    try std.testing.expectEqualStrings("workflow-archive-0000000000000001-0000000000000042.jsonl", archive_name);
+
+    const json = try fx.workflow.formatWorkflowSnapshotCommitJson(std.testing.allocator, .{
+        .last_sequence = 42,
+        .checkpoint_name = checkpoint_name,
+        .segment_name = "workflow-0000000000000001.jsonl",
+        .archive_name = archive_name,
+    });
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.workflow.snapshot-commit.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"archive_name\":\"workflow-archive-0000000000000001-0000000000000042.jsonl\"") != null);
+
+    var parsed = try fx.workflow.parseWorkflowSnapshotCommitJson(std.testing.allocator, json);
+    defer parsed.deinit();
+
+    try std.testing.expectEqual(@as(u64, 42), parsed.last_sequence);
+    try std.testing.expectEqualStrings(checkpoint_name, parsed.checkpoint_name);
+    try std.testing.expectEqualStrings("workflow-0000000000000001.jsonl", parsed.segment_name);
+    try std.testing.expectEqualStrings(archive_name, parsed.archive_name.?);
+}
+
+test "in-memory journal store can validate compacted tail sequence" {
+    var store = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer store.deinit();
+    store.resetFromSequence(3);
+
+    _ = try store.append(.{
+        .event = .{ .sequence = 4, .kind = .workflow_completed, .workflow_id = 7, .execution_id = 8, .idempotency_key = "completed" },
+    });
+
+    try std.testing.expectError(error.SequenceConflict, store.append(.{
+        .event = .{ .sequence = 4, .kind = .workflow_completed, .workflow_id = 7, .execution_id = 8, .idempotency_key = "duplicate-sequence" },
+    }));
+}
+
 test "workflow definition exposes metadata requirements and execution ids" {
     const Payload = struct {
         account_id: u64,

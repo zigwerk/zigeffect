@@ -10,6 +10,8 @@ pub const WorkflowReplayState = replay.WorkflowReplayState;
 
 pub const workflow_checkpoint_schema = "zigeffect.workflow.checkpoint.v1";
 pub const workflow_checkpoint_schema_version: u32 = 1;
+pub const workflow_snapshot_commit_schema = "zigeffect.workflow.snapshot-commit.v1";
+pub const workflow_snapshot_commit_schema_version: u32 = 1;
 
 pub const JournalStoreError = error{
     SequenceConflict,
@@ -73,6 +75,14 @@ pub fn checkpointFileName(allocator: Allocator, last_sequence: JournalSequence) 
     return std.fmt.allocPrint(allocator, "workflow-checkpoint-{d:0>16}.json", .{last_sequence});
 }
 
+pub fn snapshotCommitFileName(allocator: Allocator, last_sequence: JournalSequence) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(allocator, "workflow-snapshot-commit-{d:0>16}.json", .{last_sequence});
+}
+
+pub fn archiveFileName(allocator: Allocator, first_sequence: JournalSequence, last_sequence: JournalSequence) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(allocator, "workflow-archive-{d:0>16}-{d:0>16}.jsonl", .{ first_sequence, last_sequence });
+}
+
 fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []const u8) Allocator.Error!void {
     try output.append(allocator, '"');
     for (value) |byte| {
@@ -86,6 +96,14 @@ fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []c
         }
     }
     try output.append(allocator, '"');
+}
+
+fn appendOptionalJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: ?[]const u8) Allocator.Error!void {
+    if (value) |text| {
+        try appendJsonString(output, allocator, text);
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
 }
 
 fn appendOptionalJsonU64(output: *std.ArrayList(u8), allocator: Allocator, value: ?u64) Allocator.Error!void {
@@ -188,6 +206,82 @@ pub fn formatWorkflowCheckpointJson(allocator: Allocator, state: *const Workflow
     try output.append(allocator, '}');
 
     return output.toOwnedSlice(allocator);
+}
+
+pub const WorkflowSnapshotCommit = struct {
+    allocator: ?Allocator = null,
+    last_sequence: JournalSequence,
+    checkpoint_name: []const u8,
+    segment_name: []const u8,
+    archive_name: ?[]const u8 = null,
+
+    pub fn deinit(self: *WorkflowSnapshotCommit) void {
+        const allocator = self.allocator orelse return;
+        allocator.free(self.checkpoint_name);
+        allocator.free(self.segment_name);
+        if (self.archive_name) |name| allocator.free(name);
+        self.* = undefined;
+    }
+};
+
+const WorkflowSnapshotCommitJson = struct {
+    schema: []const u8,
+    schema_version: u32,
+    last_sequence: JournalSequence,
+    checkpoint_name: []const u8,
+    segment_name: []const u8,
+    archive_name: ?[]const u8 = null,
+};
+
+pub const WorkflowSnapshotCommitParseError = error{
+    InvalidWorkflowSnapshotCommitSchema,
+    InvalidWorkflowSnapshotCommitSchemaVersion,
+};
+
+pub fn formatWorkflowSnapshotCommitJson(allocator: Allocator, commit: WorkflowSnapshotCommit) Allocator.Error![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\"schema\":");
+    try appendJsonString(&output, allocator, workflow_snapshot_commit_schema);
+    try output.print(allocator, ",\"schema_version\":{d}", .{workflow_snapshot_commit_schema_version});
+    try output.print(allocator, ",\"last_sequence\":{d}", .{commit.last_sequence});
+    try output.appendSlice(allocator, ",\"checkpoint_name\":");
+    try appendJsonString(&output, allocator, commit.checkpoint_name);
+    try output.appendSlice(allocator, ",\"segment_name\":");
+    try appendJsonString(&output, allocator, commit.segment_name);
+    try output.appendSlice(allocator, ",\"archive_name\":");
+    try appendOptionalJsonString(&output, allocator, commit.archive_name);
+    try output.append(allocator, '}');
+
+    return output.toOwnedSlice(allocator);
+}
+
+pub fn parseWorkflowSnapshotCommitJson(allocator: Allocator, commit_json: []const u8) !WorkflowSnapshotCommit {
+    var parsed = try std.json.parseFromSlice(WorkflowSnapshotCommitJson, allocator, commit_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    if (!std.mem.eql(u8, parsed.value.schema, workflow_snapshot_commit_schema)) {
+        return error.InvalidWorkflowSnapshotCommitSchema;
+    }
+    if (parsed.value.schema_version != workflow_snapshot_commit_schema_version) {
+        return error.InvalidWorkflowSnapshotCommitSchemaVersion;
+    }
+
+    const checkpoint_name = try allocator.dupe(u8, parsed.value.checkpoint_name);
+    errdefer allocator.free(checkpoint_name);
+    const segment_name = try allocator.dupe(u8, parsed.value.segment_name);
+    errdefer allocator.free(segment_name);
+    const archive_name = if (parsed.value.archive_name) |name| try allocator.dupe(u8, name) else null;
+    errdefer if (archive_name) |name| allocator.free(name);
+
+    return .{
+        .allocator = allocator,
+        .last_sequence = parsed.value.last_sequence,
+        .checkpoint_name = checkpoint_name,
+        .segment_name = segment_name,
+        .archive_name = archive_name,
+    };
 }
 
 pub const WorkflowCheckpointParseError = error{
@@ -395,6 +489,7 @@ pub const JournalStore = struct {
 pub const InMemoryJournalStore = struct {
     allocator: Allocator,
     events: std.ArrayList(WorkflowEvent) = .empty,
+    base_sequence: JournalSequence = 0,
 
     pub fn init(allocator: Allocator) InMemoryJournalStore {
         return .{ .allocator = allocator };
@@ -468,10 +563,19 @@ pub const InMemoryJournalStore = struct {
             journal.deinitWorkflowEventStrings(self.allocator, event);
         }
         self.events.clearRetainingCapacity();
+        self.base_sequence = 0;
+    }
+
+    pub fn resetFromSequence(self: *InMemoryJournalStore, sequence: JournalSequence) void {
+        self.reset();
+        self.base_sequence = sequence;
     }
 
     fn nextSequence(self: *const InMemoryJournalStore) JournalStoreError!JournalSequence {
-        if (self.events.items.len == 0) return 1;
+        if (self.events.items.len == 0) {
+            if (self.base_sequence == std.math.maxInt(JournalSequence)) return error.SequenceOverflow;
+            return self.base_sequence + 1;
+        }
         const latest = self.events.items[self.events.items.len - 1].sequence;
         if (latest == std.math.maxInt(JournalSequence)) return error.SequenceOverflow;
         return latest + 1;
