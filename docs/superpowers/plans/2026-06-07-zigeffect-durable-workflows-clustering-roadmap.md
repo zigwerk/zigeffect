@@ -213,20 +213,20 @@ Goal: turn event history into deterministic workflow state.
 
 Deliverables:
 
-- [ ] Add `WorkflowReplayState`.
-- [ ] Fold lifecycle events into pending, running, suspended, completed,
-  failed, interrupted, and defect states.
-- [ ] Fold activities into scheduled, running, completed, failed, and
+- [x] Add `WorkflowReplayState`.
+- [x] Fold lifecycle events into pending, running, suspended, completed,
+  failed, interrupted, cancelled, and defect states.
+- [x] Fold activities into scheduled, running, completed, failed, and
   retry-ready states.
-- [ ] Fold timers into scheduled and fired states.
-- [ ] Fold deferreds into pending and completed states.
-- [ ] Fold queues into offered, claimed, completed, failed, and acked states.
-- [ ] Detect malformed histories with structured replay errors.
+- [x] Fold timers into scheduled and fired states.
+- [x] Fold deferreds into pending and completed states.
+- [x] Fold queues into offered, claimed, completed, failed, and acked states.
+- [x] Detect malformed histories with structured replay errors.
 
 Acceptance:
 
-- [ ] Golden tests cover valid and invalid histories.
-- [ ] Replay is allocation-explicit and deterministic.
+- [x] Golden tests cover valid and invalid histories.
+- [x] Replay is allocation-explicit and deterministic.
 
 ## Milestone 4: In-Memory Journal Store
 

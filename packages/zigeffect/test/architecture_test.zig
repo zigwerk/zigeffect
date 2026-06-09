@@ -81,4 +81,6 @@ test "root facade exposes durable workflow and cluster namespaces" {
     try std.testing.expectEqualStrings("cluster", fx.cluster.domain);
     try std.testing.expect(@hasDecl(fx.workflow, "journal"));
     try std.testing.expect(fx.workflow.WorkflowEvent == fx.workflow.journal.WorkflowEvent);
+    try std.testing.expect(@hasDecl(fx.workflow, "replay"));
+    try std.testing.expect(fx.workflow.WorkflowReplayState == fx.workflow.replay.WorkflowReplayState);
 }

@@ -98,3 +98,146 @@ test "workflow event text is readable for agents and CLIs" {
     try std.testing.expect(std.mem.indexOf(u8, text, "timer_id: 10") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "name: wake-up") != null);
 }
+
+test "workflow replay folds lifecycle events" {
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8, .name = "approval" },
+        .{ .sequence = 2, .kind = .workflow_suspended, .workflow_id = 7, .execution_id = 8, .status = "waiting" },
+        .{ .sequence = 3, .kind = .workflow_resumed, .workflow_id = 7, .execution_id = 8 },
+        .{ .sequence = 4, .kind = .workflow_completed, .workflow_id = 7, .execution_id = 8, .status = "success" },
+    };
+
+    var state = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &events);
+    defer state.deinit();
+
+    try std.testing.expectEqual(fx.workflow.WorkflowStatus.completed, state.workflow_status);
+    try std.testing.expectEqual(@as(?u64, 7), state.workflow_id);
+    try std.testing.expectEqual(@as(?u64, 8), state.execution_id);
+    try std.testing.expectEqual(@as(u64, 4), state.last_sequence);
+}
+
+test "workflow replay rejects events before start and duplicate starts" {
+    const before_start = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_completed, .workflow_id = 7, .execution_id = 8 },
+    };
+    try std.testing.expectError(error.WorkflowNotStarted, fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &before_start));
+
+    const duplicate_start = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8 },
+        .{ .sequence = 2, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8 },
+    };
+    try std.testing.expectError(error.WorkflowAlreadyStarted, fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &duplicate_start));
+}
+
+test "workflow replay folds defect terminal status" {
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8 },
+        .{ .sequence = 2, .kind = .workflow_failed, .workflow_id = 7, .execution_id = 8, .status = "defect" },
+    };
+
+    var state = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &events);
+    defer state.deinit();
+
+    try std.testing.expectEqual(fx.workflow.WorkflowStatus.defect, state.workflow_status);
+    try std.testing.expectEqual(@as(u64, 2), state.last_sequence);
+}
+
+test "workflow replay rejects terminal and lifecycle transition violations" {
+    const after_terminal = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8 },
+        .{ .sequence = 2, .kind = .workflow_completed, .workflow_id = 7, .execution_id = 8 },
+        .{ .sequence = 3, .kind = .timer_scheduled, .workflow_id = 7, .execution_id = 8, .timer_id = 20 },
+    };
+    try std.testing.expectError(error.WorkflowAlreadyTerminal, fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &after_terminal));
+
+    const resume_without_suspend = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8 },
+        .{ .sequence = 2, .kind = .workflow_resumed, .workflow_id = 7, .execution_id = 8 },
+    };
+    try std.testing.expectError(error.InvalidWorkflowTransition, fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &resume_without_suspend));
+}
+
+test "workflow replay folds activity timer deferred and queue rows" {
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8 },
+        .{ .sequence = 2, .kind = .activity_scheduled, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .name = "charge" },
+        .{ .sequence = 3, .kind = .activity_started, .workflow_id = 7, .execution_id = 8, .activity_id = 10 },
+        .{ .sequence = 4, .kind = .activity_completed, .workflow_id = 7, .execution_id = 8, .activity_id = 10 },
+        .{ .sequence = 5, .kind = .timer_scheduled, .workflow_id = 7, .execution_id = 8, .timer_id = 20, .name = "wake-up" },
+        .{ .sequence = 6, .kind = .timer_fired, .workflow_id = 7, .execution_id = 8, .timer_id = 20 },
+        .{ .sequence = 7, .kind = .deferred_created, .workflow_id = 7, .execution_id = 8, .deferred_id = 30, .name = "approval" },
+        .{ .sequence = 8, .kind = .deferred_awaited, .workflow_id = 7, .execution_id = 8, .deferred_id = 30 },
+        .{ .sequence = 9, .kind = .deferred_completed, .workflow_id = 7, .execution_id = 8, .deferred_id = 30 },
+        .{ .sequence = 10, .kind = .queue_offered, .workflow_id = 7, .execution_id = 8, .queue_id = 40, .name = "mailbox" },
+        .{ .sequence = 11, .kind = .queue_claimed, .workflow_id = 7, .execution_id = 8, .queue_id = 40 },
+        .{ .sequence = 12, .kind = .queue_acked, .workflow_id = 7, .execution_id = 8, .queue_id = 40 },
+    };
+
+    var state = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &events);
+    defer state.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), state.activities.items.len);
+    try std.testing.expectEqual(@as(u64, 10), state.activities.items[0].id);
+    try std.testing.expectEqual(fx.workflow.ActivityStatus.completed, state.activities.items[0].status);
+    try std.testing.expectEqual(@as(u64, 4), state.activities.items[0].last_sequence);
+    try std.testing.expectEqualStrings("charge", state.activities.items[0].name);
+
+    try std.testing.expectEqual(@as(usize, 1), state.timers.items.len);
+    try std.testing.expectEqual(@as(u64, 20), state.timers.items[0].id);
+    try std.testing.expectEqual(fx.workflow.TimerStatus.fired, state.timers.items[0].status);
+    try std.testing.expectEqual(@as(u64, 6), state.timers.items[0].last_sequence);
+    try std.testing.expectEqualStrings("wake-up", state.timers.items[0].name);
+
+    try std.testing.expectEqual(@as(usize, 1), state.deferreds.items.len);
+    try std.testing.expectEqual(@as(u64, 30), state.deferreds.items[0].id);
+    try std.testing.expectEqual(fx.workflow.DeferredStatus.completed, state.deferreds.items[0].status);
+    try std.testing.expectEqual(@as(u64, 9), state.deferreds.items[0].last_sequence);
+    try std.testing.expectEqualStrings("approval", state.deferreds.items[0].name);
+
+    try std.testing.expectEqual(@as(usize, 1), state.queues.items.len);
+    try std.testing.expectEqual(@as(u64, 40), state.queues.items[0].id);
+    try std.testing.expectEqual(fx.workflow.QueueStatus.acked, state.queues.items[0].status);
+    try std.testing.expectEqual(@as(u64, 12), state.queues.items[0].last_sequence);
+    try std.testing.expectEqualStrings("mailbox", state.queues.items[0].name);
+}
+
+test "workflow replay folds retry-ready activity failures" {
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8 },
+        .{ .sequence = 2, .kind = .activity_scheduled, .workflow_id = 7, .execution_id = 8, .activity_id = 10 },
+        .{ .sequence = 3, .kind = .activity_failed, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .status = "retry_ready" },
+    };
+
+    var state = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &events);
+    defer state.deinit();
+
+    try std.testing.expectEqual(fx.workflow.ActivityStatus.retry_ready, state.activities.items[0].status);
+    try std.testing.expectEqual(@as(u64, 3), state.activities.items[0].last_sequence);
+}
+
+test "workflow replay rejects malformed resource histories" {
+    const unknown_activity = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8 },
+        .{ .sequence = 2, .kind = .activity_completed, .workflow_id = 7, .execution_id = 8, .activity_id = 10 },
+    };
+    try std.testing.expectError(error.UnknownActivity, fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &unknown_activity));
+
+    const duplicate_timer = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8 },
+        .{ .sequence = 2, .kind = .timer_scheduled, .workflow_id = 7, .execution_id = 8, .timer_id = 20 },
+        .{ .sequence = 3, .kind = .timer_scheduled, .workflow_id = 7, .execution_id = 8, .timer_id = 20 },
+    };
+    try std.testing.expectError(error.DuplicateTimer, fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &duplicate_timer));
+
+    const missing_deferred = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8 },
+        .{ .sequence = 2, .kind = .deferred_completed, .workflow_id = 7, .execution_id = 8 },
+    };
+    try std.testing.expectError(error.MissingTargetId, fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &missing_deferred));
+
+    const unknown_queue = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8 },
+        .{ .sequence = 2, .kind = .queue_acked, .workflow_id = 7, .execution_id = 8, .queue_id = 40 },
+    };
+    try std.testing.expectError(error.UnknownQueue, fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &unknown_queue));
+}

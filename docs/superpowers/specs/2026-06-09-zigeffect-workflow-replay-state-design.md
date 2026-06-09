@@ -15,7 +15,7 @@ Add `packages/zigeffect/src/workflow/replay.zig` and expose it through
 The replay module owns:
 
 - `WorkflowStatus`: `pending`, `running`, `suspended`, `completed`, `failed`,
-  `interrupted`, `defect`;
+  `interrupted`, `cancelled`, `defect`;
 - `ActivityStatus`: `scheduled`, `running`, `completed`, `failed`,
   `retry_ready`;
 - `TimerStatus`: `scheduled`, `fired`, `cancelled`;
@@ -37,10 +37,14 @@ fold contract.
   execution ids.
 - workflow terminal events transition to `completed`, `failed`,
   `interrupted`, or `cancelled`.
+- `workflow_failed` transitions to `defect` when its status field is
+  `defect`; otherwise it transitions to `failed`.
 - `workflow_suspended` transitions `running` to `suspended`.
 - `workflow_resumed` transitions `suspended` to `running`.
 - activity scheduled/started/completed/failed events update an activity row by
   `activity_id`.
+- `activity_failed` transitions to `retry_ready` when its status field is
+  `retry_ready`; otherwise it transitions to `failed`.
 - timer scheduled/fired/cancelled events update a timer row by `timer_id`.
 - deferred created/awaited/completed/failed/cancelled events update a deferred
   row by `deferred_id`.
