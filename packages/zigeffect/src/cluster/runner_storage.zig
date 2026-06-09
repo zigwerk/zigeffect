@@ -304,21 +304,52 @@ pub const FileRunnerStorage = struct {
     }
 
     pub fn refresh(self: *FileRunnerStorage, request: RunnerLeaseRefresh) !ShardLease {
-        _ = self;
-        _ = request;
-        return error.LeaseNotFound;
+        const expires_at_ms = try leaseExpiresAt(request.now_ms, request.ttl_ms);
+        const name = try runnerLeaseFileName(self.allocator, self.options, request.shard_id);
+        defer self.allocator.free(name);
+
+        const current = (try self.readLeaseFile(name)) orelse return error.LeaseNotFound;
+        if (!current.owner.eql(request.owner)) return error.LeaseNotOwned;
+        if (leaseExpired(current, request.now_ms)) return error.LeaseExpired;
+
+        const refreshed: ShardLease = .{
+            .shard_id = current.shard_id,
+            .owner = current.owner,
+            .acquired_at_ms = current.acquired_at_ms,
+            .refreshed_at_ms = request.now_ms,
+            .expires_at_ms = expires_at_ms,
+            .version = current.version + 1,
+        };
+        try self.writeLeaseFileAtomic(name, refreshed);
+        return refreshed;
     }
 
     pub fn release(self: *FileRunnerStorage, request: RunnerLeaseRelease) !void {
-        _ = self;
-        _ = request;
-        return error.LeaseNotFound;
+        const name = try runnerLeaseFileName(self.allocator, self.options, request.shard_id);
+        defer self.allocator.free(name);
+
+        const current = (try self.readLeaseFile(name)) orelse return error.LeaseNotFound;
+        if (!current.owner.eql(request.owner)) return error.LeaseNotOwned;
+        self.dir.deleteFile(self.io, name) catch |err| switch (err) {
+            error.FileNotFound => return error.LeaseNotFound,
+            else => return err,
+        };
     }
 
     pub fn releaseAll(self: *FileRunnerStorage, owner: RunnerAddress) !usize {
-        _ = self;
-        _ = owner;
-        return 0;
+        var released: usize = 0;
+        var iterator = self.dir.iterate();
+        while (try iterator.next(self.io)) |entry| {
+            if (shardIdFromLeaseFileName(self.options, entry.name) == null) continue;
+            const current = (try self.readLeaseFile(entry.name)) orelse continue;
+            if (!current.owner.eql(owner)) continue;
+            self.dir.deleteFile(self.io, entry.name) catch |err| switch (err) {
+                error.FileNotFound => continue,
+                else => return err,
+            };
+            released += 1;
+        }
+        return released;
     }
 
     pub fn lease(self: *FileRunnerStorage, shard_id: ShardId) !?ShardLease {
@@ -328,16 +359,29 @@ pub const FileRunnerStorage = struct {
     }
 
     pub fn leases(self: *FileRunnerStorage, allocator: Allocator) !RunnerLeaseBatch {
-        _ = self;
-        const lease_items = try allocator.alloc(ShardLease, 0);
+        var lease_items: std.ArrayList(ShardLease) = .empty;
+        errdefer lease_items.deinit(allocator);
+
+        var iterator = self.dir.iterate();
+        while (try iterator.next(self.io)) |entry| {
+            if (shardIdFromLeaseFileName(self.options, entry.name) == null) continue;
+            if (try self.readLeaseFile(entry.name)) |lease_record| {
+                try lease_items.append(allocator, lease_record);
+            }
+        }
+
         return .{
             .allocator = allocator,
-            .leases = lease_items,
+            .leases = try lease_items.toOwnedSlice(allocator),
         };
     }
 
     pub fn reset(self: *FileRunnerStorage) void {
-        _ = self;
+        var iterator = self.dir.iterate();
+        while (iterator.next(self.io) catch null) |entry| {
+            if (shardIdFromLeaseFileName(self.options, entry.name) == null) continue;
+            self.dir.deleteFile(self.io, entry.name) catch {};
+        }
     }
 
     fn readLeaseFile(self: *FileRunnerStorage, name: []const u8) !?ShardLease {
@@ -363,6 +407,16 @@ pub const FileRunnerStorage = struct {
         defer file.close(self.io);
         try file.writeStreamingAll(self.io, content);
     }
+
+    fn writeLeaseFileAtomic(self: *FileRunnerStorage, name: []const u8, lease_record: ShardLease) !void {
+        const content = try formatShardLeaseJson(self.allocator, lease_record);
+        defer self.allocator.free(content);
+
+        var file = try self.dir.createFileAtomic(self.io, name, .{ .replace = true });
+        defer file.deinit(self.io);
+        try file.file.writeStreamingAll(self.io, content);
+        try file.replace(self.io);
+    }
 };
 
 const ShardLeaseJson = struct {
@@ -379,6 +433,15 @@ const ShardLeaseJson = struct {
 
 pub fn runnerLeaseFileName(allocator: Allocator, options: FileRunnerStorageOptions, shard_id: ShardId) Allocator.Error![]const u8 {
     return std.fmt.allocPrint(allocator, "{s}{d}{s}", .{ options.lease_prefix, shard_id, options.lease_suffix });
+}
+
+fn shardIdFromLeaseFileName(options: FileRunnerStorageOptions, name: []const u8) ?ShardId {
+    if (!std.mem.startsWith(u8, name, options.lease_prefix)) return null;
+    if (!std.mem.endsWith(u8, name, options.lease_suffix)) return null;
+    const start = options.lease_prefix.len;
+    const end = name.len - options.lease_suffix.len;
+    if (end <= start) return null;
+    return std.fmt.parseUnsigned(ShardId, name[start..end], 10) catch null;
 }
 
 pub fn formatShardLeaseJson(allocator: Allocator, lease_record: ShardLease) Allocator.Error![]const u8 {

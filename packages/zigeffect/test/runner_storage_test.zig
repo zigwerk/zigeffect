@@ -195,3 +195,80 @@ test "file runner storage replaces expired persisted leases" {
     try std.testing.expect(replacement.owner.eql(contender));
     try std.testing.expectEqual(@as(u64, 2), replacement.version);
 }
+
+test "file runner storage refresh persists across reopen" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const owner = fx.runnerAddress("machine-a", "runner-a");
+    {
+        var storage = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer storage.deinit();
+        var contract = storage.asRunnerStorage();
+        _ = try contract.acquire(.{ .shard_id = 21, .owner = owner, .now_ms = 1_000, .ttl_ms = 100 });
+        const refreshed = try contract.refresh(.{ .shard_id = 21, .owner = owner, .now_ms = 1_050, .ttl_ms = 500 });
+        try std.testing.expectEqual(@as(u64, 1_550), refreshed.expires_at_ms);
+        try std.testing.expectEqual(@as(u64, 2), refreshed.version);
+    }
+
+    var reopened = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer reopened.deinit();
+    var reopened_contract = reopened.asRunnerStorage();
+    const found = (try reopened_contract.lease(21)).?;
+    try std.testing.expectEqual(@as(u64, 1_550), found.expires_at_ms);
+    try std.testing.expectEqual(@as(u64, 2), found.version);
+}
+
+test "file runner storage validates refresh and release ownership" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var storage = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer storage.deinit();
+    var contract = storage.asRunnerStorage();
+    const owner = fx.runnerAddress("machine-a", "runner-a");
+    const intruder = fx.runnerAddress("machine-b", "runner-b");
+    _ = try contract.acquire(.{ .shard_id = 22, .owner = owner, .now_ms = 100, .ttl_ms = 50 });
+
+    try std.testing.expectError(error.LeaseNotOwned, contract.refresh(.{
+        .shard_id = 22,
+        .owner = intruder,
+        .now_ms = 125,
+        .ttl_ms = 50,
+    }));
+    try std.testing.expectError(error.LeaseExpired, contract.refresh(.{
+        .shard_id = 22,
+        .owner = owner,
+        .now_ms = 150,
+        .ttl_ms = 50,
+    }));
+    try std.testing.expectError(error.LeaseNotOwned, contract.release(.{ .shard_id = 22, .owner = intruder }));
+    try contract.release(.{ .shard_id = 22, .owner = owner });
+    try std.testing.expect((try contract.lease(22)) == null);
+}
+
+test "file runner storage release-all removes only owner leases and lists current leases" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var storage = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer storage.deinit();
+    var contract = storage.asRunnerStorage();
+    const owner = fx.runnerAddress("machine-a", "runner-a");
+    const other = fx.runnerAddress("machine-b", "runner-b");
+    _ = try contract.acquire(.{ .shard_id = 31, .owner = owner, .now_ms = 0, .ttl_ms = 100 });
+    _ = try contract.acquire(.{ .shard_id = 32, .owner = owner, .now_ms = 0, .ttl_ms = 100 });
+    _ = try contract.acquire(.{ .shard_id = 33, .owner = other, .now_ms = 0, .ttl_ms = 100 });
+
+    var before = try contract.leases(std.testing.allocator);
+    defer before.deinit();
+    try std.testing.expectEqual(@as(usize, 3), before.leases.len);
+
+    const released = try contract.releaseAll(owner);
+    try std.testing.expectEqual(@as(usize, 2), released);
+
+    var after = try contract.leases(std.testing.allocator);
+    defer after.deinit();
+    try std.testing.expectEqual(@as(usize, 1), after.leases.len);
+    try std.testing.expect(after.leases[0].owner.eql(other));
+}
