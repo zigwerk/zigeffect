@@ -252,3 +252,122 @@ test "workflow scheduler processes typed queue worker success" {
     try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_completed, events.events[4].kind);
     try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[5].kind);
 }
+
+const SchedulerQueueFailureHandler = struct {
+    var calls: usize = 0;
+
+    fn run(_: SchedulerQueuePayload, _: u32) error{DeliveryFailed}!u64 {
+        calls += 1;
+        return error.DeliveryFailed;
+    }
+};
+
+test "workflow scheduler records typed queue worker failure" {
+    SchedulerQueueFailureHandler.calls = 0;
+
+    var clock = fx.FakeClock.fake(1_000);
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "queue-workflow",
+        .status = "running",
+        .idempotency_key = "scheduler-queue-failure",
+    } });
+
+    var durable_queue = fx.workflow.DurableQueue.init(std.testing.allocator, journal, 7, 8);
+    _ = try durable_queue.offer(SchedulerEmailQueue, scheduler_payload_codec, .{ .account_id = 42 });
+
+    var worker = fx.workflow.QueueWorker(SchedulerEmailQueue, SchedulerQueueFailureHandler.run).init(
+        std.testing.allocator,
+        journal,
+        7,
+        8,
+        scheduler_payload_codec,
+        scheduler_result_codec,
+        "scheduler-worker-failure",
+    );
+    var scheduler = fx.workflow.WorkflowScheduler.init(std.testing.allocator, journal, &clock);
+    defer scheduler.deinit();
+    try scheduler.registerQueueWorker(worker.asRegisteredQueueWorker());
+
+    const tick = try scheduler.tick(.{ .max_workflow_polls = 0, .max_timers = 0, .max_queue_retries = 0, .max_queue_claims = 1 });
+    try std.testing.expectEqual(@as(usize, 1), tick.queue_claims);
+    try std.testing.expectEqual(@as(usize, 0), tick.queue_completions);
+    try std.testing.expectEqual(@as(usize, 1), tick.queue_failures);
+    try std.testing.expectEqual(@as(usize, 1), SchedulerQueueFailureHandler.calls);
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_failed, events.events[3].kind);
+}
+
+const SchedulerTimeoutQueue = fx.workflow
+    .Queue("scheduler-timeout-email", SchedulerQueuePayload, u64, error{DeliveryFailed})
+    .withIdempotencyKey(struct {
+        fn key(allocator: std.mem.Allocator, payload: SchedulerQueuePayload) ![]const u8 {
+            return std.fmt.allocPrint(allocator, "scheduler-timeout-email:{d}", .{payload.account_id});
+        }
+    }.key)
+    .withClaimTimeoutMs(250)
+    .withMaxConcurrency(1);
+
+test "workflow scheduler retries expired queue claims before processing claims" {
+    SchedulerQueueSuccessHandler.calls = 0;
+    SchedulerQueueSuccessHandler.last_attempt = 0;
+
+    var clock = fx.FakeClock.fake(1_000);
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "queue-workflow",
+        .status = "running",
+        .idempotency_key = "scheduler-queue-retry",
+    } });
+
+    var durable_queue = fx.workflow.DurableQueue.initWithClock(std.testing.allocator, journal, 7, 8, &clock);
+    _ = try durable_queue.offer(SchedulerTimeoutQueue, scheduler_payload_codec, .{ .account_id = 42 });
+    _ = (try durable_queue.claim(SchedulerTimeoutQueue, scheduler_payload_codec, "stale-worker")).?;
+
+    var worker = fx.workflow.QueueWorker(SchedulerTimeoutQueue, SchedulerQueueSuccessHandler.run).initWithClock(
+        std.testing.allocator,
+        journal,
+        7,
+        8,
+        &clock,
+        scheduler_payload_codec,
+        scheduler_result_codec,
+        "scheduler-retry-worker",
+    );
+    var scheduler = fx.workflow.WorkflowScheduler.init(std.testing.allocator, journal, &clock);
+    defer scheduler.deinit();
+    try scheduler.registerQueueWorker(worker.asRegisteredQueueWorker());
+
+    const early = try scheduler.tick(.{ .max_workflow_polls = 0, .max_timers = 0, .max_queue_retries = 1, .max_queue_claims = 1 });
+    try std.testing.expectEqual(@as(usize, 0), early.queue_retries);
+    try std.testing.expectEqual(@as(usize, 0), early.queue_claims);
+
+    clock.sleep(250);
+    const due = try scheduler.tick(.{ .max_workflow_polls = 0, .max_timers = 0, .max_queue_retries = 1, .max_queue_claims = 1 });
+    try std.testing.expectEqual(@as(usize, 1), due.queue_retries);
+    try std.testing.expectEqual(@as(usize, 1), due.queue_claims);
+    try std.testing.expectEqual(@as(usize, 1), due.queue_completions);
+    try std.testing.expectEqual(@as(u32, 2), SchedulerQueueSuccessHandler.last_attempt);
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_retry_scheduled, events.events[3].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_claimed, events.events[4].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_completed, events.events[5].kind);
+}
