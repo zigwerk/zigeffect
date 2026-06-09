@@ -244,7 +244,8 @@ Owns local durable workflow runtime surfaces:
   sequence checks, idempotency-key duplicate detection, in-memory store,
   append-only file store, segment naming, lock guard, partial-write recovery,
   future-schema downgrade failure before mutation, corruption reports, fsync
-  policy, and checkpoint JSON.
+  policy, checkpoint JSON, snapshot commit metadata, archive export, retention
+  policies, and completed-workflow compaction.
 
 Workflow definitions, activity definitions, journal events, replay state,
 journal stores, durable timers, durable deferreds, durable queues, durable
@@ -257,6 +258,21 @@ Workflow causal integration belongs in `src/workflow/causal.zig`, with the
 shared causal runtime remaining in `src/services/causal.zig`. Query tools and
 dogfood harnesses should consume workflow causal JSON/DOT/report helpers rather
 than re-parsing workflow journal rows ad hoc.
+
+### Workflow Snapshots, Archives, And Compaction
+
+The local workflow file store writes normal events to the active JSONL segment.
+Replay snapshots use `workflow-checkpoint-{sequence}.json`, and
+`workflow-snapshot-commit-{sequence}.json` is the commit point that makes a
+checkpoint eligible for recovery. Recovery loads the highest committed
+checkpoint and then replays only segment rows with a greater sequence.
+
+Completed workflow compaction exports acknowledged rows to
+`workflow-archive-{first}-{last}.jsonl`, commits a checkpoint, and truncates the
+active segment only after the commit marker exists. A crash before the commit
+falls back to full segment replay; a crash after the commit recovers from
+checkpoint plus tail. Retention policies can keep all rows, archive then
+compact completed workflows, or checkpoint-only compact completed workflows.
 
 ```text
 src/cluster/

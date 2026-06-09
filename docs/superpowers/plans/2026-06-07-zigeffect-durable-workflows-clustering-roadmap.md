@@ -518,16 +518,16 @@ Goal: keep long-running workflows bounded without losing correctness.
 
 Deliverables:
 
-- [ ] Add replay snapshots.
-- [ ] Add safe compaction after completed sequences.
-- [ ] Add retention policies for completed workflows.
-- [ ] Add archive export.
-- [ ] Add corruption-safe compaction commit protocol.
+- [x] Add replay snapshots.
+- [x] Add safe compaction after completed sequences.
+- [x] Add retention policies for completed workflows.
+- [x] Add archive export.
+- [x] Add corruption-safe compaction commit protocol.
 
 Acceptance:
 
-- [ ] Snapshot plus tail replay equals full replay.
-- [ ] Crash during compaction does not lose acknowledged events.
+- [x] Snapshot plus tail replay equals full replay.
+- [x] Crash during compaction does not lose acknowledged events.
 
 ## Milestone 22: Async Backend Contract Expansion
 
