@@ -237,6 +237,22 @@ distinguishes `source-only`, `config-only`, `migration-required`,
 `operational-human-required`, and `rollback-required`, but remains advisory:
 every report keeps `mutation_authority=none` and `applied=false`.
 
+Draft a non-mutating app patch proposal after an approved source/config policy
+decision:
+
+```bash
+cd packages/zigeffect
+zig build causal-app-patch-proposal -- local --policy <app-policy-decision-json> --summary <summary> --change <description> --file <path> --config <key>
+```
+
+The proposal uses schema `zigeffect.causal.app-patch-proposal.v1` and writes
+`*-app-patch-proposal.json` plus `*-app-patch-proposal.txt`. It cites app source
+files, config keys or bindings, migration files, runbooks, and rollback plans
+without applying any of them. It always records `proposal_status=draft`,
+`approval_status=pending`, `approved=false`, `applied=false`, and
+`mutation_authority=none`; config citations name keys only and must not include
+secret values.
+
 Print the causal artifact retention manifest for agents and CI:
 
 ```bash

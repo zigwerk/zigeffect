@@ -1022,6 +1022,15 @@ to proposal drafting; migration, operational-human, and rollback gates force
 human review. The policy artifact is advisory and still records
 `mutation_authority=none` plus `applied=false`.
 
+`zig build causal-app-patch-proposal -- local --policy
+<app-policy-decision-json> --summary <summary> --change <description>
+--file <path> --config <key>` turns an approved app policy decision into a
+draft `zigeffect.causal.app-patch-proposal.v1` artifact. The proposal cites app
+source files, config keys or bindings, migration files, runbooks, and rollback
+plans, but keeps `approved=false`, `applied=false`, and
+`mutation_authority=none`. It is evidence for review, not permission to mutate
+source, config, data, deployment state, or rollback plans.
+
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around
 those pieces. The no-scenario form captures before/after dogfood evidence and

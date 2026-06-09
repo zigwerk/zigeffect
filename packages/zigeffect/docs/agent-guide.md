@@ -688,6 +688,20 @@ gates can approve proposal drafting; `migration-required`,
 Every app policy decision remains advisory with `mutation_authority=none` and
 `applied=false`.
 
+When the app policy decision is `approve`, draft the app patch proposal:
+
+```sh
+zig build causal-app-patch-proposal -- local --policy <app-policy-decision-json> --summary <summary> --change <description> --file <path> --config <key>
+```
+
+The command writes `*-app-patch-proposal.json` and
+`*-app-patch-proposal.txt` with schema
+`zigeffect.causal.app-patch-proposal.v1`. It remains a draft review artifact:
+`proposal_status=draft`, `approval_status=pending`, `approved=false`,
+`applied=false`, and `mutation_authority=none`. Use repeated `--file`,
+`--config`, `--migration`, `--runbook`, and `--rollback` flags to cite paths or
+binding names. Never place secret values in config citations.
+
 For normal core-runtime development, prefer the coordinated session command:
 
 ```sh

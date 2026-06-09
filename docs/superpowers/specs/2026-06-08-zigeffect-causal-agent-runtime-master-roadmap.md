@@ -503,6 +503,7 @@ Recommended branches:
 codex/zigeffect-app-remediation-audit
 codex/zigeffect-app-policy-gates
 codex/zigeffect-app-patch-proposal
+codex/zigeffect-app-remediation-workbench
 ```
 
 ### M9: Production Operating Model
@@ -625,20 +626,18 @@ Status values:
 | M5 Replay/snapshots | delivered | snapshot manifest schema/tool, named snapshot compare, replay-feasibility reports, deterministic registered-scenario replay, and safe scenario fork proposals exist | move to M6 read-only workbench |
 | M6 Workbench UI | delivered | SolidJS renderer, `causal-workbench-ui`, `zig-webui` launcher, graph cause-path/runtime-lane branch, and remediation-chain branch `codex/zigeffect-causal-workbench-remediation-chain` exist | move to M7 app-facing runtime |
 | M7 App-facing runtime | delivered | `CausalAppTrace`, Worker-shaped app request example, app incident classifier, and app-specific advice/diagnosis mappings exist | move to M8 app remediation audit |
-| M8 App remediation gates | active | app remediation audit artifacts and app policy gate decisions exist; app patch proposals remain | move to app patch proposals |
+| M8 App remediation gates | active | app remediation audit artifacts, app policy gate decisions, and draft app patch proposal artifacts exist; detailed workbench rendering remains | move to app remediation workbench |
 | M9 Operating model | deferred | schema/versioning docs partial | consolidate after M4-M8 |
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-app-policy-gates`
-   - Deliver advisory app policy gate decisions for source/config/migration/
-     operational/rollback remediation gates.
-2. `codex/zigeffect-app-patch-proposal`
-   - Add app patch proposal artifacts that cite source files, config,
-     migrations, or operational runbooks after policy review.
-3. `codex/zigeffect-app-remediation-workbench`
-   - Render app audit and app policy gate details directly in the SolidJS
-     workbench.
+1. `codex/zigeffect-app-remediation-workbench`
+   - Render app audit, app policy gate, and app patch proposal details directly
+     in the SolidJS workbench hosted by `zig-webui`.
+2. `codex/zigeffect-app-human-review-boundary`
+   - Define the later human-reviewed path for migration, operational, and
+     rollback-required app remediation proposals without granting automatic
+     mutation authority.
 
 ## Risks And Controls
 
