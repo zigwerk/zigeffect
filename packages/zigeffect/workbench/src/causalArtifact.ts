@@ -62,6 +62,65 @@ export type GraphModel = {
   unhealthyLanes: GraphLane[];
 };
 
+export type GovernanceArtifactKind =
+  | "audit-chain"
+  | "remediation-audit"
+  | "remediation-decision"
+  | "patch-proposal"
+  | "registry-readiness"
+  | "registry-application"
+  | "policy-decision";
+
+export type ChainSourceKind = "session" | "audit" | "decision" | "proposal" | "before" | "after" | "compare";
+
+export type ChainSourceStep = {
+  kind: ChainSourceKind;
+  label: string;
+  path: string;
+  workbenchCommand: string | null;
+};
+
+export type EventClassifications = {
+  eventIds: string[];
+  disappeared: string[];
+  persisting: string[];
+  appeared: string[];
+  missing: string[];
+};
+
+export type RemediationChainModel = {
+  artifactPath: string;
+  schema: string;
+  schemaVersion: string;
+  kind: "audit-chain";
+  mode: string;
+  target: string;
+  assessment: string;
+  proposalStatus: string;
+  approvalStatus: string;
+  approved: boolean | null;
+  applied: boolean | null;
+  findingDelta: string;
+  sourceSteps: ChainSourceStep[];
+  classifications: EventClassifications;
+  verificationCommands: string[];
+  guardrails: string[];
+  warnings: string[];
+};
+
+export type GovernanceModel = {
+  artifactPath: string;
+  schema: string;
+  schemaVersion: string;
+  kind: GovernanceArtifactKind;
+  target: string;
+  summary: string;
+  applied: boolean | null;
+  mutationAuthority: string | null;
+  chain: RemediationChainModel | null;
+  warnings: string[];
+};
+
 export type WorkbenchModel = {
   artifactPath: string;
   schema: string;
@@ -96,6 +155,17 @@ const pendingFiberStatuses = new Set(["pending", "running"]);
 const graphFailureStatuses = new Set(["failure"]);
 const graphWarningStatuses = new Set(["missing", "exhausted", "pending", "running"]);
 const graphLaneKindOrder: GraphLaneKind[] = ["run", "scope", "fiber", "resource", "retry"];
+const auditChainSchema = "zigeffect.causal.audit-chain.v1";
+const chainSourceKinds: ChainSourceKind[] = ["session", "audit", "decision", "proposal", "before", "after", "compare"];
+const chainSourceLabels: Record<ChainSourceKind, string> = {
+  session: "Dev session",
+  audit: "Remediation audit",
+  decision: "Manual decision",
+  proposal: "Patch proposal",
+  before: "Before artifact",
+  after: "After artifact",
+  compare: "Compare report",
+};
 
 export function parseArtifactJson(json: string): unknown {
   const parsed = JSON.parse(json) as unknown;
@@ -251,6 +321,82 @@ export function causePathForEvent(events: CausalEvent[], eventId: string): Causa
   }
 
   return path.reverse();
+}
+
+export function deriveRemediationChainModel(raw: unknown, options: WorkbenchOptions): RemediationChainModel | null {
+  const artifact = isRecord(raw) ? raw : {};
+  const schema = textValue(artifact.schema, "unknown");
+  if (schema !== auditChainSchema) {
+    return null;
+  }
+
+  const warnings: string[] = [];
+  const schemaVersion = textValue(artifact.schema_version, "unknown");
+  if (schemaVersion === "unknown") {
+    warnings.push("artifact schema_version is missing");
+  }
+
+  const source = isRecord(artifact.source) ? artifact.source : {};
+  if (!isRecord(artifact.source)) {
+    warnings.push("artifact source object is missing");
+  }
+
+  return {
+    artifactPath: options.artifactPath,
+    schema,
+    schemaVersion,
+    kind: "audit-chain",
+    mode: textValue(artifact.mode, "unknown"),
+    target: textValue(artifact.target, "unknown"),
+    assessment: textValue(artifact.assessment, "unknown"),
+    proposalStatus: textValue(artifact.proposal_status, "unknown"),
+    approvalStatus: textValue(artifact.approval_status, "unknown"),
+    approved: booleanValue(artifact.approved),
+    applied: booleanValue(artifact.applied),
+    findingDelta: textValue(artifact.finding_delta, "unknown"),
+    sourceSteps: chainSourceSteps(source),
+    classifications: {
+      eventIds: eventIdList(artifact.event_ids),
+      disappeared: eventIdList(artifact.disappeared_event_ids),
+      persisting: eventIdList(artifact.persisting_event_ids),
+      appeared: eventIdList(artifact.appeared_event_ids),
+      missing: eventIdList(artifact.missing_event_ids),
+    },
+    verificationCommands: stringList(artifact.verification_commands),
+    guardrails: uniqueInOrder([
+      ...stringList(artifact.claim_guardrails),
+      ...stringList(artifact.proposal_guardrails),
+      ...stringList(artifact.chain_guardrails),
+    ]),
+    warnings,
+  };
+}
+
+export function deriveGovernanceModel(raw: unknown, options: WorkbenchOptions): GovernanceModel | null {
+  const artifact = isRecord(raw) ? raw : {};
+  const schema = textValue(artifact.schema, "unknown");
+  const kind = governanceKindForSchema(schema);
+  if (!kind) {
+    return null;
+  }
+
+  const chain = deriveRemediationChainModel(raw, options);
+  const schemaVersion = textValue(artifact.schema_version, "unknown");
+  const target = textValue(artifact.target, "unknown");
+  const warnings = chain?.warnings ?? (schemaVersion === "unknown" ? ["artifact schema_version is missing"] : []);
+
+  return {
+    artifactPath: options.artifactPath,
+    schema,
+    schemaVersion,
+    kind,
+    target,
+    summary: chain ? `${chain.assessment} audit chain for ${target}` : `${kind} for ${target}`,
+    applied: booleanValue(artifact.applied),
+    mutationAuthority: nullableTextValue(artifact.mutation_authority),
+    chain,
+    warnings,
+  };
 }
 
 function deriveFindings(events: CausalEvent[]): CausalFinding[] {
@@ -423,6 +569,69 @@ function compareGraphLanes(left: GraphLane, right: GraphLane): number {
   return left.key.localeCompare(right.key);
 }
 
+function governanceKindForSchema(schema: string): GovernanceArtifactKind | null {
+  switch (schema) {
+    case auditChainSchema:
+      return "audit-chain";
+    case "zigeffect.causal.remediation-audit.v1":
+      return "remediation-audit";
+    case "zigeffect.causal.remediation-decision.v1":
+      return "remediation-decision";
+    case "zigeffect.causal.patch-proposal.v1":
+      return "patch-proposal";
+    case "zigeffect.causal.registry-application-readiness.v1":
+      return "registry-readiness";
+    case "zigeffect.causal.registry-application.v1":
+      return "registry-application";
+    case "zigeffect.causal.policy-decision.v1":
+      return "policy-decision";
+    default:
+      return null;
+  }
+}
+
+function chainSourceSteps(source: UnknownRecord): ChainSourceStep[] {
+  return chainSourceKinds.flatMap((kind) => {
+    const path = textValue(source[kind], "");
+    if (!path) {
+      return [];
+    }
+
+    return [{
+      kind,
+      label: chainSourceLabels[kind],
+      path,
+      workbenchCommand: workbenchCommandForPath(path),
+    }];
+  });
+}
+
+function workbenchCommandForPath(path: string): string | null {
+  return path.endsWith(".json") ? `zig build causal-workbench -- ${path}` : null;
+}
+
+function eventIdList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map(idValue)
+    .filter((id): id is string => id !== null);
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => textValue(item, ""))
+    .filter((item) => item.length > 0);
+}
+
+function uniqueInOrder(values: string[]): string[] {
+  return Array.from(new Set(values));
+}
+
 function pendingFiberFindings(events: CausalEvent[], closed: CausalEvent): CausalFinding[] {
   if (!closed.scopeId) {
     return [];
@@ -553,6 +762,15 @@ function textValue(value: unknown, fallback: string): string {
     return String(value);
   }
   return fallback;
+}
+
+function nullableTextValue(value: unknown): string | null {
+  const text = textValue(value, "");
+  return text.length > 0 ? text : null;
+}
+
+function booleanValue(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
 }
 
 function idValue(value: unknown): string | null {

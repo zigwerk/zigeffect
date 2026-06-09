@@ -2,8 +2,10 @@ import { expect, test } from "bun:test";
 import {
   type CausalEvent,
   causePathForEvent,
+  deriveGovernanceModel,
   deriveWorkbenchModel,
   deriveGraphModel,
+  deriveRemediationChainModel,
   filterEvents,
   parseArtifactJson,
   queryCommandsForEvent,
@@ -124,6 +126,37 @@ const sampleArtifact = JSON.stringify({
     },
   ],
 });
+
+const sampleAuditChain = {
+  schema: "zigeffect.causal.audit-chain.v1",
+  schema_version: 1,
+  mode: "local",
+  target: "package-tests",
+  assessment: "unchanged",
+  source: {
+    session: ".zig-cache/causal-artifacts/zigeffect-causal-dev-session-package-tests.json",
+    audit: ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-remediation-audit.json",
+    decision: ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-remediation-decision.json",
+    proposal: ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-patch-proposal.json",
+    before: ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-before.json",
+    after: ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-after.json",
+    compare: ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-compare.txt",
+  },
+  proposal_status: "ready-for-review",
+  approval_status: "approved",
+  approved: true,
+  applied: false,
+  finding_delta: 0,
+  event_ids: [1, 2, 3, 5],
+  disappeared_event_ids: [1],
+  persisting_event_ids: [2],
+  appeared_event_ids: [3],
+  missing_event_ids: [5],
+  verification_commands: ["zig build examples", "zig build test --summary none"],
+  claim_guardrails: ["Do not claim remediation without verification."],
+  proposal_guardrails: ["This proposal does not apply source changes."],
+  chain_guardrails: ["Chain comparison is evidence, not authorization to edit source."],
+};
 
 test("parseArtifactJson parses causal artifacts", () => {
   const parsed = parseArtifactJson(sampleArtifact);
@@ -270,6 +303,55 @@ test("causePathForEvent stops at cycles", () => {
   ];
 
   expect(causePathForEvent(events, "1").map((event) => event.idText)).toEqual(["2", "1"]);
+});
+
+test("deriveRemediationChainModel normalizes audit-chain evidence", () => {
+  const chain = deriveRemediationChainModel(sampleAuditChain, {
+    artifactPath: ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-audit-chain.json",
+  });
+
+  expect(chain).toBeDefined();
+  expect(chain?.schema).toBe("zigeffect.causal.audit-chain.v1");
+  expect(chain?.target).toBe("package-tests");
+  expect(chain?.assessment).toBe("unchanged");
+  expect(chain?.approvalStatus).toBe("approved");
+  expect(chain?.applied).toBe(false);
+  expect(chain?.sourceSteps.map((step) => step.kind)).toEqual([
+    "session",
+    "audit",
+    "decision",
+    "proposal",
+    "before",
+    "after",
+    "compare",
+  ]);
+  expect(chain?.sourceSteps.find((step) => step.kind === "before")?.workbenchCommand).toBe(
+    "zig build causal-workbench -- .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-before.json",
+  );
+  expect(chain?.classifications.eventIds).toEqual(["1", "2", "3", "5"]);
+  expect(chain?.classifications.persisting).toEqual(["2"]);
+  expect(chain?.verificationCommands).toEqual(["zig build examples", "zig build test --summary none"]);
+  expect(chain?.guardrails).toContain("Chain comparison is evidence, not authorization to edit source.");
+  expect(chain?.guardrails.length).toBe(3);
+});
+
+test("deriveGovernanceModel detects supported governance artifacts", () => {
+  const governance = deriveGovernanceModel(sampleAuditChain, { artifactPath: "chain.json" });
+
+  expect(governance?.kind).toBe("audit-chain");
+  expect(governance?.summary).toContain("package-tests");
+});
+
+test("deriveRemediationChainModel tolerates partial chain artifacts", () => {
+  const chain = deriveRemediationChainModel({
+    schema: "zigeffect.causal.audit-chain.v1",
+    source: { before: "before.json" },
+  }, { artifactPath: "partial-chain.json" });
+
+  expect(chain?.target).toBe("unknown");
+  expect(chain?.sourceSteps.map((step) => step.kind)).toEqual(["before"]);
+  expect(chain?.warnings).toContain("artifact schema_version is missing");
+  expect(chain?.classifications.disappeared).toEqual([]);
 });
 
 function minimalEvent(idText: string): CausalEvent {
