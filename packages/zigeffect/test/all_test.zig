@@ -6,6 +6,7 @@ comptime {
     _ = @import("runtime_test.zig");
     _ = @import("fiber_test.zig");
     _ = @import("supervisor_test.zig");
+    _ = @import("entity_test.zig");
     _ = @import("backend_conformance_test.zig");
     _ = @import("causal_backend_conformance_test.zig");
     _ = @import("causal_jsonl_backend_test.zig");

@@ -310,6 +310,11 @@ pub const SuspensionKind = runtime.control.SuspensionKind;
 pub const Suspension = runtime.control.Suspension;
 pub const RuntimeDecision = runtime.control.RuntimeDecision;
 pub const Cancellation = runtime.control.Cancellation;
+pub const EntityType = cluster.EntityType;
+pub const EntityId = cluster.EntityId;
+pub const EntityAddress = cluster.EntityAddress;
+pub const entityId = cluster.entityId;
+pub const entityAddress = cluster.entityAddress;
 
 pub const ServiceSet = dependency.service_sets.ServiceSet;
 pub const DependencyIssueKind = dependency.report.DependencyIssueKind;
