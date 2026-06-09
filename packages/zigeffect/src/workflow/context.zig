@@ -1,13 +1,19 @@
 const std = @import("std");
 const result_mod = @import("../core/result.zig");
+const schedule_mod = @import("../effect/schedule.zig");
+const causal_mod = @import("../services/causal.zig");
+const clock_mod = @import("../services/clock.zig");
 const traits_mod = @import("../traits/root.zig");
 const journal_mod = @import("journal.zig");
 const store_mod = @import("store.zig");
 
 pub const Allocator = std.mem.Allocator;
+pub const CausalStore = causal_mod.CausalStore;
+pub const Clock = clock_mod.Clock;
 pub const Codec = traits_mod.Codec;
 pub const JournalStore = store_mod.JournalStore;
 pub const JournalEventBatch = store_mod.JournalEventBatch;
+pub const Schedule = schedule_mod.Schedule;
 pub const WorkflowId = journal_mod.WorkflowId;
 pub const ExecutionId = journal_mod.ExecutionId;
 pub const ActivityId = journal_mod.ActivityId;
@@ -23,6 +29,9 @@ pub const WorkflowContextError = error{
 pub const WorkflowContextOptions = struct {
     workflow_id: WorkflowId,
     execution_id: ExecutionId,
+    clock: ?*Clock = null,
+    causal_store: ?*CausalStore = null,
+    causal_run_id: ?u64 = null,
 };
 
 pub const WorkflowContext = struct {
@@ -30,6 +39,9 @@ pub const WorkflowContext = struct {
     journal_store: JournalStore,
     workflow_id: WorkflowId,
     execution_id: ExecutionId,
+    clock: ?*Clock,
+    causal_store: ?*CausalStore,
+    causal_run_id: ?u64,
     next_sequence: JournalSequence,
     replay_events: JournalEventBatch,
 
@@ -47,6 +59,9 @@ pub const WorkflowContext = struct {
             .journal_store = journal_store,
             .workflow_id = options.workflow_id,
             .execution_id = options.execution_id,
+            .clock = options.clock,
+            .causal_store = options.causal_store,
+            .causal_run_id = options.causal_run_id,
             .next_sequence = next_sequence,
             .replay_events = replay_events,
         };
@@ -93,20 +108,39 @@ pub const WorkflowContext = struct {
             };
         }
 
-        const attempt: u32 = 1;
-        try self.appendActivityEvent(.activity_scheduled, id, ActivityType.name, attempt, "scheduled", "");
-        try self.appendActivityEvent(.activity_started, id, ActivityType.name, attempt, "running", "");
+        var attempt: u32 = 1;
+        while (true) {
+            try self.appendActivityEvent(.activity_scheduled, id, ActivityType.name, attempt, "scheduled", "");
+            if (comptime ActivityType.metadata().timeout_ms != null) {
+                if (try self.timeoutBeforeStart(ActivityType, id, attempt)) {
+                    return activityTimeoutError(ActivityType.FailureType);
+                }
+            }
+            const started_ms = if (self.clock) |clock| clock.nowMs() else null;
+            try self.appendActivityEvent(.activity_started, id, ActivityType.name, attempt, "running", "");
 
-        const value = run_fn(payload) catch |err| {
-            const detail = try workflowFailureDetail(self.allocator, err);
-            defer self.allocator.free(detail);
-            try self.appendActivityEvent(.activity_failed, id, ActivityType.name, attempt, "failed", detail);
-            return err;
-        };
-        const encoded = try result_codec.encodeValue(self.allocator, value);
-        defer self.allocator.free(encoded);
-        try self.appendActivityEvent(.activity_completed, id, ActivityType.name, attempt, "completed", encoded);
-        return value;
+            const value = run_fn(payload) catch |err| {
+                if (try self.scheduleRetry(ActivityType, id, attempt)) {
+                    attempt += 1;
+                    continue;
+                }
+                if (try self.exhaustRetry(ActivityType, id, attempt, err)) return err;
+
+                const detail = try workflowFailureDetail(self.allocator, err);
+                defer self.allocator.free(detail);
+                try self.appendActivityEvent(.activity_failed, id, ActivityType.name, attempt, "failed", detail);
+                return err;
+            };
+            if (comptime ActivityType.metadata().timeout_ms != null) {
+                if (try self.timeoutAfterRun(ActivityType, id, attempt, started_ms)) {
+                    return activityTimeoutError(ActivityType.FailureType);
+                }
+            }
+            const encoded = try result_codec.encodeValue(self.allocator, value);
+            defer self.allocator.free(encoded);
+            try self.appendActivityEvent(.activity_completed, id, ActivityType.name, attempt, "completed", encoded);
+            return value;
+        }
     }
 
     fn recordedStepU64(self: *const WorkflowContext, label: []const u8) !?u64 {
@@ -169,6 +203,13 @@ pub const WorkflowContext = struct {
                         ) orelse return error.RecordedActivityFailureParseFailed;
                         return .{ .failed = failure };
                     },
+                    .activity_timed_out => {
+                        const failure = activityFailureFromDetail(
+                            ActivityType.FailureType,
+                            event.redacted_detail,
+                        ) orelse return error.RecordedActivityFailureParseFailed;
+                        return .{ .failed = failure };
+                    },
                     else => {},
                 }
             }
@@ -203,6 +244,117 @@ pub const WorkflowContext = struct {
         });
         self.next_sequence += 1;
     }
+
+    fn scheduleRetry(
+        self: *WorkflowContext,
+        comptime ActivityType: type,
+        id: ActivityId,
+        attempt: u32,
+    ) !bool {
+        var schedule = ActivityType.retrySchedule() orelse return false;
+        const schedule_attempt: usize = @intCast(attempt - 1);
+        const decision = schedule.decision(schedule_attempt);
+        const delay_ms = decision.delay_ms orelse return false;
+
+        const detail = try scheduleDecisionDetail(self.allocator, decision.attempt, delay_ms, "retry");
+        defer self.allocator.free(detail);
+        try self.appendActivityEvent(.activity_retry_scheduled, id, ActivityType.name, attempt, "retry", detail);
+        self.recordCausalScheduleDecision(&schedule, "retry", detail);
+        if (self.clock) |clock| clock.sleep(delay_ms);
+        return true;
+    }
+
+    fn timeoutBeforeStart(
+        self: *WorkflowContext,
+        comptime ActivityType: type,
+        id: ActivityId,
+        attempt: u32,
+    ) !bool {
+        const timeout_ms = ActivityType.metadata().timeout_ms orelse return false;
+        if (timeout_ms != 0) return false;
+        try self.appendActivityTimeout(ActivityType, id, attempt);
+        return true;
+    }
+
+    fn timeoutAfterRun(
+        self: *WorkflowContext,
+        comptime ActivityType: type,
+        id: ActivityId,
+        attempt: u32,
+        started_ms: ?u64,
+    ) !bool {
+        const timeout_ms = ActivityType.metadata().timeout_ms orelse return false;
+        const started = started_ms orelse return false;
+        const clock = self.clock orelse return false;
+        const now = clock.nowMs();
+        const elapsed = if (now >= started) now - started else 0;
+        if (elapsed <= timeout_ms) return false;
+        try self.appendActivityTimeout(ActivityType, id, attempt);
+        return true;
+    }
+
+    fn appendActivityTimeout(
+        self: *WorkflowContext,
+        comptime ActivityType: type,
+        id: ActivityId,
+        attempt: u32,
+    ) !void {
+        const detail = try workflowFailureDetail(
+            self.allocator,
+            activityTimeoutError(ActivityType.FailureType),
+        );
+        defer self.allocator.free(detail);
+        try self.appendActivityEvent(.activity_timed_out, id, ActivityType.name, attempt, "timeout", detail);
+    }
+
+    fn exhaustRetry(
+        self: *WorkflowContext,
+        comptime ActivityType: type,
+        id: ActivityId,
+        attempt: u32,
+        err: anyerror,
+    ) !bool {
+        var schedule = ActivityType.retrySchedule() orelse return false;
+        const schedule_attempt: usize = @intCast(attempt - 1);
+        const decision = schedule.decision(schedule_attempt);
+        if (decision.delay_ms != null) return false;
+
+        const causal_detail = try scheduleTerminalDecisionDetail(
+            self.allocator,
+            decision.attempt,
+            "exhausted",
+        );
+        defer self.allocator.free(causal_detail);
+
+        const failure_detail = try workflowFailureDetail(self.allocator, err);
+        defer self.allocator.free(failure_detail);
+        const journal_detail = try std.fmt.allocPrint(
+            self.allocator,
+            "{s};{s}",
+            .{ causal_detail, failure_detail },
+        );
+        defer self.allocator.free(journal_detail);
+
+        try self.appendActivityEvent(.activity_failed, id, ActivityType.name, attempt, "exhausted", journal_detail);
+        self.recordCausalScheduleDecision(&schedule, "exhausted", causal_detail);
+        return true;
+    }
+
+    fn recordCausalScheduleDecision(
+        self: *WorkflowContext,
+        schedule: *Schedule,
+        status: []const u8,
+        detail: []const u8,
+    ) void {
+        const store = self.causal_store orelse return;
+        _ = store.record(.{
+            .kind = .schedule_decision,
+            .run_id = self.causal_run_id,
+            .label = schedule.labelOrKind(),
+            .status = status,
+            .redacted_detail = detail,
+        }) catch {};
+    }
 };
 
 fn ActivityReplay(comptime Success: type, comptime Failure: type) type {
@@ -233,6 +385,31 @@ fn activityEventIdempotencyKey(
     );
 }
 
+fn scheduleDecisionDetail(
+    allocator: Allocator,
+    schedule_attempt: usize,
+    delay_ms: u64,
+    decision: []const u8,
+) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "attempt={d} delay_ms={d} decision={s}",
+        .{ schedule_attempt, delay_ms, decision },
+    );
+}
+
+fn scheduleTerminalDecisionDetail(
+    allocator: Allocator,
+    schedule_attempt: usize,
+    decision: []const u8,
+) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "attempt={d} delay_ms=null decision={s}",
+        .{ schedule_attempt, decision },
+    );
+}
+
 fn assertActivityFailureIsErrorSet(comptime Failure: type) void {
     switch (@typeInfo(Failure)) {
         .error_set => {},
@@ -242,10 +419,31 @@ fn assertActivityFailureIsErrorSet(comptime Failure: type) void {
     }
 }
 
+fn activityTimeoutError(comptime Failure: type) Failure {
+    switch (@typeInfo(Failure)) {
+        .error_set => |maybe_errors| {
+            const errors = maybe_errors orelse @compileError(
+                "zigeffect timed activities require a concrete activity error set.",
+            );
+            inline for (errors) |err| {
+                if (comptime std.mem.eql(u8, err.name, "ActivityTimeout")) {
+                    return @field(anyerror, err.name);
+                }
+            }
+            @compileError(
+                "zigeffect timed activities require Activity FailureType to include error.ActivityTimeout.",
+            );
+        },
+        else => @compileError(
+            "zigeffect timed activities require Activity FailureType to be an error set.",
+        ),
+    }
+}
+
 fn activityFailureFromDetail(comptime Failure: type, detail: []const u8) ?Failure {
     const prefix = "exit.cause.failure:";
-    if (!std.mem.startsWith(u8, detail, prefix)) return null;
-    return errorFromName(Failure, detail[prefix.len..]);
+    const start = std.mem.indexOf(u8, detail, prefix) orelse return null;
+    return errorFromName(Failure, detail[start + prefix.len ..]);
 }
 
 fn errorFromName(comptime ErrorSet: type, name: []const u8) ?ErrorSet {

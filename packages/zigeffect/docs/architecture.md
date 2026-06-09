@@ -204,7 +204,9 @@ Owns local durable workflow runtime surfaces:
   compensation metadata, formatting, and service requirements.
 - `context.zig`: replay-aware workflow context, deterministic step and
   activity sequence assignment, recorded outcome lookup, activity result codec
-  boundaries, attempt counters, and `Exit`/`Cause` failure journaling.
+  boundaries, attempt counters, retry schedule decisions, clock-backed retry
+  delays, timeout terminal events, causal schedule mapping, and `Exit`/`Cause`
+  failure journaling.
 - `engine.zig`: workflow engine registration, provider requirement validation,
   durable `workflow_started` appends, typed poll results, execution inspection,
   duplicate execution checks, and in-memory execution indexing.

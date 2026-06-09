@@ -37,7 +37,7 @@
 - Modify `packages/zigeffect/src/workflow/replay.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing event and replay tests**
+- [x] **Step 1: Write failing event and replay tests**
 
 Extend the event-name test:
 
@@ -68,7 +68,7 @@ defer timeout_state.deinit();
 try std.testing.expectEqual(fx.workflow.ActivityStatus.failed, timeout_state.activities.items[0].status);
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -78,14 +78,14 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until the new event kinds exist.
 
-- [ ] **Step 3: Implement event kinds and replay folding**
+- [x] **Step 3: Implement event kinds and replay folding**
 
 Add `activity_retry_scheduled` and `activity_timed_out` to
 `WorkflowEventKind`, map them in `workflowEventKindName`, fold retry scheduled
 events with `updateActivity(event, .retry_ready)`, and fold timed-out events
 with `updateActivity(event, .failed)`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -101,7 +101,7 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/context.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing retry success test**
+- [x] **Step 1: Write failing retry success test**
 
 Add a test with an activity definition that has
 `withRetrySchedule(fx.Schedule.fixed(.{ .max_retries = 2, .delay_ms = 25 }).withLabel("charge-retry"))`.
@@ -132,7 +132,7 @@ try std.testing.expectEqualStrings("charge-retry", retries.events[0].label);
 try std.testing.expectEqualStrings("retry", retries.events[0].status);
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -143,7 +143,7 @@ cd packages/zigeffect && zig build test-raw --summary all
 Expected: FAIL because activity retry loops, clock sleeping, and causal mapping
 are absent.
 
-- [ ] **Step 3: Implement retry success path**
+- [x] **Step 3: Implement retry success path**
 
 Add optional fields to `WorkflowContextOptions` and `WorkflowContext`:
 
@@ -160,7 +160,7 @@ continues, append `activity_retry_scheduled`, record a causal
 `schedule_decision`, sleep the optional clock, increment the activity attempt,
 and continue.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -176,7 +176,7 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/context.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing exhaustion test**
+- [x] **Step 1: Write failing exhaustion test**
 
 Use a retry schedule with one retry and a runner that always returns
 `error.Declined`. Assert first run and replay both return `error.Declined`,
@@ -189,7 +189,7 @@ attempt=1 delay_ms=null decision=exhausted;exit.cause.failure:Declined
 
 Assert causal retries contain both a `retry` and an `exhausted` decision.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -199,7 +199,7 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until exhausted retry decisions are terminal and replayable.
 
-- [ ] **Step 3: Implement exhausted retry terminal behavior**
+- [x] **Step 3: Implement exhausted retry terminal behavior**
 
 When a retry schedule returns `delay_ms = null`, format the exhausted detail,
 append `activity_failed` with status `exhausted`, record causal
@@ -207,7 +207,7 @@ append `activity_failed` with status `exhausted`, record causal
 failure. Update recorded failure parsing to read the failure detail after the
 semicolon.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -223,7 +223,7 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/context.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing timeout test**
+- [x] **Step 1: Write failing timeout test**
 
 Define an activity with `.withTimeoutMs(0)` and failure type
 `error{ActivityTimeout}`. Assert first run and replay both return
@@ -235,7 +235,7 @@ try std.testing.expectEqualStrings("timeout", events.events[2].status);
 try std.testing.expectEqualStrings("exit.cause.failure:ActivityTimeout", events.events[2].redacted_detail);
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -245,14 +245,14 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until timeout metadata is enforced.
 
-- [ ] **Step 3: Implement timeout terminal behavior**
+- [x] **Step 3: Implement timeout terminal behavior**
 
 Before each attempt, if `ActivityType.metadata().timeout_ms` is `0`, append
 `activity_scheduled`, append `activity_timed_out`, and return
 `error.ActivityTimeout`. Update recorded activity replay to parse
 `activity_timed_out` as a failed terminal outcome.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -270,12 +270,12 @@ Expected: PASS.
 - Add `docs/superpowers/specs/2026-06-09-zigeffect-activity-retry-timeout-design.md`
 - Add `docs/superpowers/plans/2026-06-09-zigeffect-activity-retry-timeout.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Update the `src/workflow/` section so `context.zig` mentions retry schedules,
 clock-backed delays, timeout terminal events, and causal schedule decisions.
 
-- [ ] **Step 2: Run full gate**
+- [x] **Step 2: Run full gate**
 
 Run:
 
@@ -290,13 +290,13 @@ rg -n 'T''BD|TO''DO|implement la''ter|fill in de''tails|appropriate error hand''
 Expected: compile/test commands PASS, `git diff --check` exits 0, and the
 placeholder scan exits 1 with no matches.
 
-- [ ] **Step 3: Mark Milestone 11 complete**
+- [x] **Step 3: Mark Milestone 11 complete**
 
 After the full gate passes, mark all Milestone 11 deliverables and acceptance
 boxes complete in
 `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/zigeffect/src/workflow/context.zig packages/zigeffect/src/workflow/journal.zig packages/zigeffect/src/workflow/replay.zig packages/zigeffect/test/workflow_test.zig packages/zigeffect/docs/architecture.md docs/superpowers/specs/2026-06-09-zigeffect-activity-retry-timeout-design.md docs/superpowers/plans/2026-06-09-zigeffect-activity-retry-timeout.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md
@@ -305,9 +305,9 @@ git commit -m "feat(zigeffect): add activity retry and timeout semantics"
 
 ## Self-Review Checklist
 
-- [ ] Retry decisions are durable journal rows.
-- [ ] Retry delays use optional `Clock`.
-- [ ] Retry decisions record existing causal `schedule_decision` events.
-- [ ] Exhausted retries replay typed failures without rerunning activities.
-- [ ] Timeout rows replay `error.ActivityTimeout` without rerunning activities.
-- [ ] No worker polling, durable timer wakeups, compensation, or clustering is added in this milestone.
+- [x] Retry decisions are durable journal rows.
+- [x] Retry delays use optional `Clock`.
+- [x] Retry decisions record existing causal `schedule_decision` events.
+- [x] Exhausted retries replay typed failures without rerunning activities.
+- [x] Timeout rows replay `error.ActivityTimeout` without rerunning activities.
+- [x] No worker polling, durable timer wakeups, compensation, or clustering is added in this milestone.

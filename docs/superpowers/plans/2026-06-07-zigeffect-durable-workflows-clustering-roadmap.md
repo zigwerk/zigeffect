@@ -354,15 +354,15 @@ Goal: connect activity failure to existing `Schedule` behavior.
 
 Deliverables:
 
-- [ ] Record schedule decisions in journal events.
-- [ ] Add retry delay calculation using `Clock`.
-- [ ] Add timeout events and timeout failure causes.
-- [ ] Add exhausted retry behavior.
-- [ ] Add causal mapping to existing schedule decision events.
+- [x] Record schedule decisions in journal events.
+- [x] Add retry delay calculation using `Clock`.
+- [x] Add timeout events and timeout failure causes.
+- [x] Add exhausted retry behavior.
+- [x] Add causal mapping to existing schedule decision events.
 
 Acceptance:
 
-- [ ] Tests cover retry success, retry exhaustion, timeout, and replay.
+- [x] Tests cover retry success, retry exhaustion, timeout, and replay.
 
 ## Milestone 12: Compensation
 
