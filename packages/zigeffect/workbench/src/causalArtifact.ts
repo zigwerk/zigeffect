@@ -67,6 +67,7 @@ export type GovernanceArtifactKind =
   | "remediation-audit"
   | "app-remediation-audit"
   | "app-policy-decision"
+  | "app-human-review"
   | "app-patch-proposal"
   | "remediation-decision"
   | "patch-proposal"
@@ -114,6 +115,7 @@ export type RemediationChainModel = {
 export type AppRemediationArtifactKind =
   | "app-remediation-audit"
   | "app-policy-decision"
+  | "app-human-review"
   | "app-patch-proposal";
 
 export type AppIncidentModel = {
@@ -432,7 +434,7 @@ export function deriveAppRemediationModel(raw: unknown, options: WorkbenchOption
   const artifact = isRecord(raw) ? raw : {};
   const schema = textValue(artifact.schema, "unknown");
   const kind = governanceKindForSchema(schema);
-  if (kind !== "app-remediation-audit" && kind !== "app-policy-decision" && kind !== "app-patch-proposal") {
+  if (kind !== "app-remediation-audit" && kind !== "app-policy-decision" && kind !== "app-human-review" && kind !== "app-patch-proposal") {
     return null;
   }
 
@@ -456,7 +458,7 @@ export function deriveAppRemediationModel(raw: unknown, options: WorkbenchOption
     target: textValue(artifact.target, "unknown"),
     summary: appSummary(kind, artifact),
     decision: textValue(artifact.decision, "unknown"),
-    proposalStatus: textValue(artifact.proposal_status, "unknown"),
+    proposalStatus: textValue(artifact.proposal_status, textValue(artifact.review_status, "unknown")),
     approvalStatus: textValue(artifact.approval_status, "unknown"),
     approved: booleanValue(artifact.approved),
     applied: booleanValue(artifact.applied),
@@ -470,11 +472,13 @@ export function deriveAppRemediationModel(raw: unknown, options: WorkbenchOption
     verificationCommands: uniqueInOrder([
       ...stringList(artifact.verification_commands),
       ...stringList(artifact.required_verification_commands),
+      ...stringList(artifact.reviewed_verification_commands),
     ]),
     guardrails: uniqueInOrder([
       ...stringList(artifact.claim_guardrails),
       ...stringList(artifact.guardrails),
       ...stringList(artifact.proposal_guardrails),
+      ...stringList(artifact.review_guardrails),
     ]),
     warnings,
   };
@@ -496,10 +500,13 @@ export function deriveGovernanceModel(raw: unknown, options: WorkbenchOptions): 
   const incidentCount = numericValue(artifact.incident_count);
   const decision = textValue(artifact.decision, "unknown");
   const proposalStatus = textValue(artifact.proposal_status, "unknown");
+  const reviewStatus = textValue(artifact.review_status, "unknown");
   const summary = kind === "app-remediation-audit" && incidentCount !== null
     ? `${incidentCount} app incidents for ${target}`
     : kind === "app-policy-decision"
       ? `${decision} app policy decision for ${target}`
+    : kind === "app-human-review"
+      ? `${reviewStatus} app human review for ${target}`
     : kind === "app-patch-proposal"
       ? `${proposalStatus} app patch proposal for ${target}`
     : chain
@@ -701,6 +708,8 @@ function governanceKindForSchema(schema: string): GovernanceArtifactKind | null 
       return "app-remediation-audit";
     case "zigeffect.causal.app-policy-decision.v1":
       return "app-policy-decision";
+    case "zigeffect.causal.app-human-review.v1":
+      return "app-human-review";
     case "zigeffect.causal.app-patch-proposal.v1":
       return "app-patch-proposal";
     case "zigeffect.causal.remediation-decision.v1":
@@ -743,6 +752,9 @@ function appSummary(kind: AppRemediationArtifactKind, artifact: UnknownRecord): 
   if (kind === "app-policy-decision") {
     return `${textValue(artifact.decision, "unknown")} app policy decision for ${target}`;
   }
+  if (kind === "app-human-review") {
+    return `${textValue(artifact.review_status, "unknown")} app human review for ${target}`;
+  }
   return `${textValue(artifact.proposal_status, "unknown")} app patch proposal for ${target}`;
 }
 
@@ -751,7 +763,9 @@ function appSourceSteps(kind: AppRemediationArtifactKind, source: UnknownRecord)
     ? [["app_artifact", "App artifact"], ["advice", "Advice"]]
     : kind === "app-policy-decision"
       ? [["app_remediation_audit", "App remediation audit"], ["app_artifact", "App artifact"]]
-      : [["policy", "App policy decision"], ["app_remediation_audit", "App remediation audit"], ["app_artifact", "App artifact"]];
+    : kind === "app-human-review"
+      ? [["policy", "App policy decision"], ["app_remediation_audit", "App remediation audit"], ["app_artifact", "App artifact"]]
+      : [["policy", "App policy decision"], ["human_review", "App human review"], ["app_remediation_audit", "App remediation audit"], ["app_artifact", "App artifact"]];
 
   return definitions
     .map(([field, label]) => appSourceStep(field, label, source))

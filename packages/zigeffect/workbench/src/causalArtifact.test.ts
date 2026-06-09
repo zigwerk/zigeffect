@@ -261,6 +261,37 @@ const sampleAppProposal = {
   proposal_guardrails: ["Config citations name keys or bindings only; never include secret values."],
 };
 
+const sampleAppReview = {
+  schema: "zigeffect.causal.app-human-review.v1",
+  schema_version: 1,
+  mode: "local",
+  target: "yachdee-platform",
+  review_status: "approved",
+  approval_status: "approved",
+  approved: true,
+  applied: false,
+  mutation_authority: "none",
+  reviewed_by: "local-reviewer",
+  reason: "migration and rollback evidence reviewed",
+  source: {
+    policy: ".zig-cache/causal-artifacts/app-policy.json",
+    app_remediation_audit: ".zig-cache/causal-artifacts/app-audit.json",
+    app_artifact: ".zig-cache/causal-artifacts/app.json",
+  },
+  policy_gates: ["migration-required", "rollback-required"],
+  citations: {
+    source_files: [],
+    config_keys: [],
+    migration_files: ["packages/app/migrations/001.sql"],
+    runbooks: ["docs/runbooks/migration.md"],
+    rollback_plans: ["docs/runbooks/rollback.md"],
+  },
+  event_ids: [4],
+  required_verification_commands: ["zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 4"],
+  reviewed_verification_commands: ["zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 4"],
+  review_guardrails: ["Human review approves proposal drafting only; it does not apply app source, config, migrations, operations, rollback plans, or deployment state."],
+};
+
 test("parseArtifactJson parses causal artifacts", () => {
   const parsed = parseArtifactJson(sampleArtifact);
 
@@ -543,6 +574,35 @@ test("deriveAppRemediationModel reads app patch proposal citations and guardrail
   ]);
   expect(app?.sourceSteps.map((step) => step.label)).toEqual(["App policy decision", "App remediation audit", "App artifact"]);
   expect(app?.guardrails).toContain("Config citations name keys or bindings only; never include secret values.");
+});
+
+test("deriveGovernanceModel detects app human review artifacts", () => {
+  const governance = deriveGovernanceModel(sampleAppReview, { artifactPath: "app-review.json" });
+
+  expect(governance?.kind).toBe("app-human-review");
+  expect(governance?.summary).toContain("approved app human review");
+  expect(governance?.applied).toBe(false);
+  expect(governance?.mutationAuthority).toBe("none");
+});
+
+test("deriveAppRemediationModel reads app human review citations and verification", () => {
+  const app = deriveAppRemediationModel(sampleAppReview, { artifactPath: "app-review.json" });
+
+  expect(app?.kind).toBe("app-human-review");
+  expect(app?.approvalStatus).toBe("approved");
+  expect(app?.approved).toBe(true);
+  expect(app?.proposalStatus).toBe("approved");
+  expect(app?.policyGates).toEqual(["migration-required", "rollback-required"]);
+  expect(app?.citations.map((group) => `${group.label}:${group.values.length}`)).toEqual([
+    "Source files:0",
+    "Config keys:0",
+    "Migration files:1",
+    "Runbooks:1",
+    "Rollback plans:1",
+  ]);
+  expect(app?.sourceSteps.map((step) => step.label)).toEqual(["App policy decision", "App remediation audit", "App artifact"]);
+  expect(app?.verificationCommands).toContain("zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 4");
+  expect(app?.guardrails).toContain("Human review approves proposal drafting only; it does not apply app source, config, migrations, operations, rollback plans, or deployment state.");
 });
 
 test("deriveAppRemediationModel tolerates partial app artifacts", () => {

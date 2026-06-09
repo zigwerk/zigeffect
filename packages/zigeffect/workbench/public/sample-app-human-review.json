@@ -1,0 +1,38 @@
+{
+  "schema": "zigeffect.causal.app-human-review.v1",
+  "schema_version": 1,
+  "mode": "local",
+  "target": "yachdee-platform",
+  "review_status": "approved",
+  "approval_status": "approved",
+  "approved": true,
+  "applied": false,
+  "mutation_authority": "none",
+  "reviewed_by": "local-reviewer",
+  "reason": "migration plan and rollback notes reviewed",
+  "source": {
+    "policy": ".zig-cache/causal-artifacts/app-policy.json",
+    "app_remediation_audit": ".zig-cache/causal-artifacts/app-audit.json",
+    "app_artifact": ".zig-cache/causal-artifacts/app.json"
+  },
+  "policy_gates": ["migration-required", "rollback-required"],
+  "citations": {
+    "source_files": [],
+    "config_keys": [],
+    "migration_files": ["packages/app/migrations/001_add_status.sql"],
+    "runbooks": ["docs/runbooks/yachdee-migration.md"],
+    "rollback_plans": ["docs/runbooks/yachdee-rollback.md"]
+  },
+  "event_ids": [4],
+  "required_verification_commands": [
+    "zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 4"
+  ],
+  "reviewed_verification_commands": [
+    "zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 4"
+  ],
+  "review_guardrails": [
+    "Human review approves proposal drafting only; it does not apply app source, config, migrations, operations, rollback plans, or deployment state.",
+    "Mutation authority remains none until a later reviewed application artifact records actual source/external-state changes and post-apply verification.",
+    "High-risk citations must name files, runbooks, rollback plans, or command strings only; do not include secret values."
+  ]
+}
