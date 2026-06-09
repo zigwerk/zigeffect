@@ -207,6 +207,8 @@ pub const WorkflowScheduler = struct {
     allocator: Allocator,
     journal_store: JournalStore,
     clock: *Clock,
+    workflow_workers: std.ArrayList(RegisteredWorkflowWorker) = .empty,
+    workflow_cursor: usize = 0,
 
     pub fn init(allocator: Allocator, journal_store: JournalStore, clock: *Clock) WorkflowScheduler {
         return .{
@@ -217,6 +219,36 @@ pub const WorkflowScheduler = struct {
     }
 
     pub fn deinit(self: *WorkflowScheduler) void {
-        _ = self;
+        self.workflow_workers.deinit(self.allocator);
+    }
+
+    pub fn registerWorkflowWorker(self: *WorkflowScheduler, worker: RegisteredWorkflowWorker) Allocator.Error!void {
+        try self.workflow_workers.append(self.allocator, worker);
+    }
+
+    pub fn tick(self: *WorkflowScheduler, budget: WorkflowSchedulerBudget) anyerror!WorkflowSchedulerTickResult {
+        var result = WorkflowSchedulerTickResult{ .iterations = 1 };
+        try self.pollWorkflowWorkers(budget.max_workflow_polls, &result);
+        return result;
+    }
+
+    fn pollWorkflowWorkers(self: *WorkflowScheduler, max_polls: usize, result: *WorkflowSchedulerTickResult) anyerror!void {
+        const len = self.workflow_workers.items.len;
+        if (len == 0 or max_polls == 0) return;
+
+        const visits = @min(max_polls, len);
+        var count: usize = 0;
+        while (count < visits) : (count += 1) {
+            const index = self.workflow_cursor % len;
+            self.workflow_cursor = (index + 1) % len;
+            const step = try self.workflow_workers.items[index].poll();
+            result.workflow_polls += 1;
+            switch (step) {
+                .idle => {},
+                .progressed => result.workflow_progress += 1,
+                .completed => result.workflow_completions += 1,
+                .failed => result.workflow_failures += 1,
+            }
+        }
     }
 };
