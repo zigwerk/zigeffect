@@ -124,6 +124,48 @@ pub const LocalRunnerRegistry = struct {
         return self.records.items[index].state;
     }
 
+    pub fn recordHeartbeat(self: *LocalRunnerRegistry, heartbeat: RunnerHeartbeat) (Allocator.Error || RunnerRegistryError)!RunnerHealthSnapshot {
+        const record_index = self.findRecordIndex(heartbeat.address) orelse return error.RunnerNotFound;
+        const current_record = self.records.items[record_index];
+        if (current_record.last_heartbeat_index) |heartbeat_index| {
+            const previous_heartbeat = self.heartbeats.items[heartbeat_index];
+            if (heartbeat.sequence <= previous_heartbeat.sequence) return error.InvalidHeartbeatSequence;
+        }
+
+        const previous_state = current_record.state;
+        try self.heartbeats.ensureUnusedCapacity(self.allocator, 1);
+        if (previous_state != .healthy) try self.events.ensureUnusedCapacity(self.allocator, 1);
+
+        const heartbeat_index = self.heartbeats.items.len;
+        self.heartbeats.appendAssumeCapacity(heartbeat);
+        self.records.items[record_index].last_heartbeat_index = heartbeat_index;
+        self.records.items[record_index].state = .healthy;
+        if (previous_state != .healthy) {
+            self.events.appendAssumeCapacity(.{
+                .address = heartbeat.address,
+                .previous_state = previous_state,
+                .next_state = .healthy,
+                .reason = .heartbeat_recorded,
+                .at_ms = heartbeat.observed_at_ms,
+            });
+        }
+        return try self.snapshot(heartbeat.address, heartbeat.observed_at_ms);
+    }
+
+    pub fn heartbeatCount(self: *const LocalRunnerRegistry, address: RunnerAddress) RunnerRegistryError!usize {
+        if (self.findRecordIndex(address) == null) return error.RunnerNotFound;
+        var count: usize = 0;
+        for (self.heartbeats.items) |heartbeat| {
+            if (heartbeat.address.eql(address)) count += 1;
+        }
+        return count;
+    }
+
+    pub fn lastHeartbeat(self: *const LocalRunnerRegistry, address: RunnerAddress) RunnerRegistryError!?RunnerHeartbeat {
+        const index = self.findRecordIndex(address) orelse return error.RunnerNotFound;
+        return if (self.records.items[index].last_heartbeat_index) |heartbeat_index| self.heartbeats.items[heartbeat_index] else null;
+    }
+
     pub fn snapshot(self: *const LocalRunnerRegistry, address: RunnerAddress, now_ms: u64) RunnerRegistryError!RunnerHealthSnapshot {
         const index = self.findRecordIndex(address) orelse return error.RunnerNotFound;
         const record = self.records.items[index];

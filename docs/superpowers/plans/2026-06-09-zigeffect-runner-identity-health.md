@@ -318,7 +318,7 @@ git commit -m "feat(zigeffect): persist runner startup registration"
 - Modify: `packages/zigeffect/test/runner_test.zig`
 - Modify: `packages/zigeffect/src/cluster/runner.zig`
 
-- [ ] **Step 1: Add failing heartbeat tests**
+- [x] **Step 1: Add failing heartbeat tests**
 
 Append this test:
 
@@ -360,7 +360,7 @@ test "runner heartbeat records are monotonic and transition to healthy" {
 }
 ```
 
-- [ ] **Step 2: Run the red heartbeat test**
+- [x] **Step 2: Run the red heartbeat test**
 
 Run:
 
@@ -371,14 +371,14 @@ bun run zigeffect:test
 Expected: FAIL with missing methods such as `recordHeartbeat` or
 `heartbeatCount`.
 
-- [ ] **Step 3: Implement heartbeat storage and monotonic sequence validation**
+- [x] **Step 3: Implement heartbeat storage and monotonic sequence validation**
 
 Add a `heartbeats` array, `heartbeatCount`, `lastHeartbeat`, and
 `recordHeartbeat`. `recordHeartbeat` must reject missing runners and
 non-increasing sequences, append the heartbeat, update the runner state to
 `healthy`, and record a health event only when the state changes.
 
-- [ ] **Step 4: Run the green heartbeat test**
+- [x] **Step 4: Run the green heartbeat test**
 
 Run:
 
@@ -390,7 +390,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Commit heartbeat records**
+- [x] **Step 5: Commit heartbeat records**
 
 ```bash
 git add packages/zigeffect/src/cluster/runner.zig packages/zigeffect/test/runner_test.zig

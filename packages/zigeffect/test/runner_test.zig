@@ -61,3 +61,39 @@ test "local runner registry persists startup registration and event" {
         .started_at_ms = 1_100,
     }));
 }
+
+test "runner heartbeat records are monotonic and transition to healthy" {
+    var registry = fx.LocalRunnerRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    const address = fx.runnerAddress("machine-a", "runner-a");
+    _ = try registry.registerRunner(.{ .address = address, .name = "runner-a", .started_at_ms = 1_000 });
+
+    const snapshot = try registry.recordHeartbeat(.{
+        .address = address,
+        .sequence = 1,
+        .observed_at_ms = 1_250,
+    });
+
+    try std.testing.expectEqual(fx.RunnerHealthState.healthy, snapshot.state);
+    try std.testing.expectEqual(@as(usize, 1), try registry.heartbeatCount(address));
+    try std.testing.expectEqual(@as(u64, 1_250), snapshot.last_heartbeat_at_ms.?);
+    try std.testing.expectEqual(@as(fx.RunnerHeartbeatSequence, 1), snapshot.last_heartbeat_sequence.?);
+    try std.testing.expectEqual(@as(usize, 2), try registry.healthEventCount(address));
+
+    const event = (try registry.lastHealthEvent(address)).?;
+    try std.testing.expectEqual(fx.RunnerHealthState.starting, event.previous_state.?);
+    try std.testing.expectEqual(fx.RunnerHealthState.healthy, event.next_state);
+    try std.testing.expectEqual(fx.RunnerHealthReason.heartbeat_recorded, event.reason);
+
+    try std.testing.expectError(error.InvalidHeartbeatSequence, registry.recordHeartbeat(.{
+        .address = address,
+        .sequence = 1,
+        .observed_at_ms = 1_300,
+    }));
+    try std.testing.expectError(error.RunnerNotFound, registry.recordHeartbeat(.{
+        .address = fx.runnerAddress("missing", "runner"),
+        .sequence = 1,
+        .observed_at_ms = 1_300,
+    }));
+}
