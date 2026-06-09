@@ -91,6 +91,9 @@ Owns execution runtimes and deterministic concurrency primitives:
 - `backend_diagnostics.zig`: backend capability requirements and formatted
   diagnostics for unsupported runtime features.
 - `control.zig`: shared suspension and cooperative cancellation vocabulary.
+- `supervisor.zig`: local supervision definitions, child specs, restart modes,
+  one-for-one/one-for-all/rest-for-one strategies, restart intensity, shutdown
+  ordering, `Cause` evidence, and causal supervisor events.
 
 Runtime/scope/fiber cohesion, coordination backpressure, scoped permits,
 controlled suspension vocabulary, cooperative cancellation, and future backend
@@ -102,6 +105,11 @@ vtable names the future suspend, wake, timer, and interrupt operations without
 implementing real async I/O yet. Backend diagnostics format missing capability
 errors so workflow code can fail clearly before a deterministic backend attempts
 async-only behavior.
+
+Local supervision is a deterministic policy layer. It records child specs and
+restart decisions, preserves failure evidence through `Cause`, and emits causal
+events, but real async execution and distributed supervision remain separate
+backend and cluster milestones.
 
 ```text
 src/layer/

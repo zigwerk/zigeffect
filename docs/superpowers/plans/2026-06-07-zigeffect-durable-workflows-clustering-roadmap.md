@@ -569,15 +569,15 @@ Goal: introduce Erlang-style restart policy locally before clustering.
 
 Deliverables:
 
-- [ ] Add supervisor definitions.
-- [ ] Add one-for-one, one-for-all, and rest-for-one policies.
-- [ ] Add restart intensity limits.
-- [ ] Add child specs for workflow workers, queue workers, and entities.
-- [ ] Preserve failures in `Cause` and causal reports.
+- [x] Add supervisor definitions.
+- [x] Add one-for-one, one-for-all, and rest-for-one policies.
+- [x] Add restart intensity limits.
+- [x] Add child specs for workflow workers, queue workers, and entities.
+- [x] Preserve failures in `Cause` and causal reports.
 
 Acceptance:
 
-- [ ] Supervisor tests cover restart, escalation, and shutdown ordering.
+- [x] Supervisor tests cover restart, escalation, and shutdown ordering.
 
 ## Milestone 25: Local Entity Actor Model
 
