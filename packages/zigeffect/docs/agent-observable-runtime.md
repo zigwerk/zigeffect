@@ -1056,8 +1056,11 @@ and traces. Add examples showing an agent diagnosing a failing app effect and a
 resource leak.
 
 Initial app diagnostic coverage exists in `examples/causal_readiness.zig`.
-Future examples should add resource leaks, retries, and fiber interruption
-paths so agents can compare multiple failure shapes.
+The first M7 request-path reference exists in
+`examples/causal_app_request.zig`: it models a Worker-compatible app request
+that returns a response plus owned causal JSON for caller-managed persistence.
+Future examples should add resource leaks, retries, and fiber interruption paths
+so agents can compare multiple failure shapes.
 
 ### Phase 6: Engine Improvement Harness
 

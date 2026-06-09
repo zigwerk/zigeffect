@@ -648,6 +648,11 @@ config keys, and requirement names are useful; raw URLs, headers, cookies,
 bodies, rows, and user identifiers are not. The store still redacts and bounds
 event strings before retention and JSON export.
 
+Use `examples/causal_app_request.zig` as the first app request reference. It
+models a Worker-compatible request path that returns the HTTP response shape and
+owned causal JSON without file writes, process APIs, or Bun dependencies.
+Compile and test it with `zig build causal-app-request-example`.
+
 For normal core-runtime development, prefer the coordinated session command:
 
 ```sh

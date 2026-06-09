@@ -586,9 +586,12 @@ metrics, and traces.
 - Delivered: an optional `CausalBackend` event sink contract with adapter kinds
   for memory, JSON Lines, DOT, OpenTelemetry, NenDB graph/history, and async
   streams.
-- Still future: production-grade adapter implementations, durable histories,
-  a workbench UI, deterministic replay/forking, patch application, and
-  comparing arbitrary named audit-chain snapshots.
+- Delivered: `CausalAppTrace` and `examples/causal_app_request.zig` show how a
+  Worker-shaped app request can emit bounded, redacted, workbench-compatible
+  causal JSON without request-path filesystem, process, or Bun APIs.
+- Still future: production-grade app-facing integrations, durable history
+  hardening, app remediation policy gates, and comparing arbitrary named
+  audit-chain snapshots.
 - Still future: deeper runtime regression scenarios for partial config and
   cause coverage.
 - Leave room for a future causal workbench that visualizes effect runs, scope

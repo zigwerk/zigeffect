@@ -97,6 +97,7 @@ Docs:
 - [Causal Scenario Registry](docs/causal-scenarios.md)
 - [Readiness Example](examples/readiness.zig)
 - [Causal Readiness Example](examples/causal_readiness.zig)
+- [Causal App Request Example](examples/causal_app_request.zig)
 - [Causal Missing Config Scenario](examples/causal_missing_config.zig)
 - [Causal Cleanup Failure Scenario](examples/causal_cleanup_failure.zig)
 - [Causal Scoped Fiber Scenario](examples/causal_scoped_fiber.zig)
@@ -186,6 +187,19 @@ and 256 bytes per event string; `defaultJobCausalStoreOptions` uses a 1024-event
 budget for background jobs. The adapter emits normal `zigeffect.causal.v1`
 events, so app artifacts can be opened in the same SolidJS `zig-webui`
 workbench and queried with the existing causal tools.
+
+Compile and test the Worker-shaped app request example:
+
+```bash
+cd packages/zigeffect
+zig build causal-app-request-example
+```
+
+`examples/causal_app_request.zig` keeps the request path pure: it returns a
+response plus owned causal JSON and leaves persistence to the caller. Use that
+shape when a Worker app wants to put app incidents into R2, Durable Objects,
+D1, logs, or another app-owned sink before opening the artifact in the
+workbench.
 
 Print the causal artifact retention manifest for agents and CI:
 

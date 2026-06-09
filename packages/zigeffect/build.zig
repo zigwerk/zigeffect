@@ -207,6 +207,27 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_readiness_example_tests = b.addRunArtifact(causal_readiness_example_tests);
 
+    const causal_app_request_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/causal_app_request.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_app_request_example_module.addImport("zigeffect", zigeffect);
+
+    const causal_app_request_example = b.addExecutable(.{
+        .name = "zigeffect-causal-app-request",
+        .root_module = causal_app_request_example_module,
+    });
+
+    const causal_app_request_example_tests = b.addTest(.{
+        .name = "zigeffect-causal-app-request-tests",
+        .root_module = causal_app_request_example_module,
+    });
+    const run_causal_app_request_example_tests = b.addRunArtifact(causal_app_request_example_tests);
+    const causal_app_request_example_step = b.step("causal-app-request-example", "Compile and test the causal app request example");
+    causal_app_request_example_step.dependOn(&causal_app_request_example.step);
+    causal_app_request_example_step.dependOn(&run_causal_app_request_example_tests.step);
+
     const causal_missing_config_example_module = b.createModule(.{
         .root_source_file = b.path("examples/causal_missing_config.zig"),
         .target = target,
@@ -935,6 +956,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_data_and_matching_example_tests.step);
     examples_step.dependOn(&causal_readiness_example.step);
     examples_step.dependOn(&run_causal_readiness_example_tests.step);
+    examples_step.dependOn(&causal_app_request_example.step);
+    examples_step.dependOn(&run_causal_app_request_example_tests.step);
     examples_step.dependOn(&causal_missing_config_example.step);
     examples_step.dependOn(&run_causal_missing_config_example_tests.step);
     examples_step.dependOn(&causal_cleanup_failure_example.step);
