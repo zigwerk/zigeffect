@@ -232,6 +232,9 @@ Owns local durable workflow runtime surfaces:
 - `queue.zig`: typed durable queue definitions, stable queue item identity,
   idempotent offers, worker claims, concurrency limits, completion/failure,
   expired-claim retry, ack state, and workflow wake-up for queue terminals.
+- `scheduler.zig`: local cooperative workflow scheduler, runnable workflow
+  worker registry, durable timer watches, typed durable queue workers, graceful
+  shutdown, fair cursors, and bounded tick/drain budgets.
 - `lifecycle.zig`: external suspend, resume, interrupt, and cancel controls
   over `JournalStore`, including durable lifecycle rows, idempotent terminal
   transitions, and explicit terminal rows for pending timers, deferreds,
@@ -285,6 +288,15 @@ active segment only after the commit marker exists. A crash before the commit
 falls back to full segment replay; a crash after the commit recovers from
 checkpoint plus tail. Retention policies can keep all rows, archive then
 compact completed workflows, or checkpoint-only compact completed workflows.
+
+### Cooperative Local Scheduling
+
+The workflow scheduler is a local orchestration boundary over the journal,
+durable clock, and durable queues. It does not provide real async I/O or
+distributed execution; it fairly visits registered workflow workers, timer
+watches, and queue workers within explicit budgets and records durable progress
+through existing workflow events. Later cluster and supervision modules should
+reuse this boundary instead of bypassing the workflow journal.
 
 ```text
 src/cluster/

@@ -553,15 +553,15 @@ Goal: run pending workflow work, timers, and queues in one local process.
 
 Deliverables:
 
-- [ ] Add runnable work registry.
-- [ ] Add timer wake-up polling.
-- [ ] Add fair queue processing loop.
-- [ ] Add graceful shutdown.
-- [ ] Add bounded work budgets.
+- [x] Add runnable work registry.
+- [x] Add timer wake-up polling.
+- [x] Add fair queue processing loop.
+- [x] Add graceful shutdown.
+- [x] Add bounded work budgets.
 
 Acceptance:
 
-- [ ] Scheduler can drive multiple workflows and queues deterministically.
+- [x] Scheduler can drive multiple workflows and queues deterministically.
 
 ## Milestone 24: Supervision Trees
 
