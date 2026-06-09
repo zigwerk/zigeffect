@@ -213,6 +213,7 @@ pub const WorkflowScheduler = struct {
     timer_cursor: usize = 0,
     queue_workers: std.ArrayList(RegisteredQueueWorker) = .empty,
     queue_cursor: usize = 0,
+    shutdown_requested: bool = false,
 
     pub fn init(allocator: Allocator, journal_store: JournalStore, clock: *Clock) WorkflowScheduler {
         return .{
@@ -240,13 +241,46 @@ pub const WorkflowScheduler = struct {
         try self.queue_workers.append(self.allocator, worker);
     }
 
+    pub fn requestShutdown(self: *WorkflowScheduler) void {
+        self.shutdown_requested = true;
+    }
+
+    pub fn isShutdownRequested(self: *const WorkflowScheduler) bool {
+        return self.shutdown_requested;
+    }
+
     pub fn tick(self: *WorkflowScheduler, budget: WorkflowSchedulerBudget) anyerror!WorkflowSchedulerTickResult {
-        var result = WorkflowSchedulerTickResult{ .iterations = 1 };
+        var result = WorkflowSchedulerTickResult{
+            .iterations = 1,
+            .shutdown_requested = self.shutdown_requested,
+        };
+        if (self.shutdown_requested) return result;
+
         try self.pollWorkflowWorkers(budget.max_workflow_polls, &result);
         try self.fireDueTimers(budget.max_timers, &result);
         try self.retryExpiredQueueClaims(budget.max_queue_retries, &result);
         try self.processQueueClaims(budget.max_queue_claims, &result);
         return result;
+    }
+
+    pub fn drain(self: *WorkflowScheduler, budget: WorkflowSchedulerBudget) anyerror!WorkflowSchedulerTickResult {
+        var merged = WorkflowSchedulerTickResult{};
+        if (budget.max_iterations == 0) {
+            merged.budget_exhausted = true;
+            merged.shutdown_requested = self.shutdown_requested;
+            return merged;
+        }
+
+        var iteration: usize = 0;
+        while (iteration < budget.max_iterations) : (iteration += 1) {
+            const tick_result = try self.tick(budget);
+            const made_progress = tick_result.progressed();
+            merged.merge(tick_result);
+            if (tick_result.shutdown_requested or !made_progress) return merged;
+        }
+
+        if (merged.progressed()) merged.budget_exhausted = true;
+        return merged;
     }
 
     fn pollWorkflowWorkers(self: *WorkflowScheduler, max_polls: usize, result: *WorkflowSchedulerTickResult) anyerror!void {

@@ -371,3 +371,61 @@ test "workflow scheduler retries expired queue claims before processing claims" 
     try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_claimed, events.events[4].kind);
     try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_completed, events.events[5].kind);
 }
+
+test "workflow scheduler shutdown stops new cooperative work" {
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    var clock = fx.FakeClock.fake(1_000);
+
+    var visits = std.ArrayList(u64).empty;
+    defer visits.deinit(std.testing.allocator);
+    var worker_state = FakeWorkflowWorker{ .visits = &visits, .id = 1 };
+
+    var scheduler = fx.workflow.WorkflowScheduler.init(std.testing.allocator, journal_memory.asJournalStore(), &clock);
+    defer scheduler.deinit();
+    try scheduler.registerWorkflowWorker(worker_state.registered());
+    scheduler.requestShutdown();
+
+    try std.testing.expect(scheduler.isShutdownRequested());
+    const tick = try scheduler.tick(.{ .max_workflow_polls = 1, .max_timers = 1, .max_queue_retries = 1, .max_queue_claims = 1 });
+    try std.testing.expect(tick.shutdown_requested);
+    try std.testing.expectEqual(@as(usize, 0), tick.workflow_polls);
+    try std.testing.expectEqual(@as(usize, 0), visits.items.len);
+}
+
+test "workflow scheduler drain stops at idle and reports budget exhaustion" {
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    var clock = fx.FakeClock.fake(1_000);
+
+    var visits = std.ArrayList(u64).empty;
+    defer visits.deinit(std.testing.allocator);
+    var worker_state = FakeWorkflowWorker{ .visits = &visits, .id = 1 };
+
+    var scheduler = fx.workflow.WorkflowScheduler.init(std.testing.allocator, journal_memory.asJournalStore(), &clock);
+    defer scheduler.deinit();
+    try scheduler.registerWorkflowWorker(worker_state.registered());
+
+    const exhausted = try scheduler.drain(.{
+        .max_iterations = 2,
+        .max_workflow_polls = 1,
+        .max_timers = 0,
+        .max_queue_retries = 0,
+        .max_queue_claims = 0,
+    });
+    try std.testing.expectEqual(@as(usize, 2), exhausted.iterations);
+    try std.testing.expectEqual(@as(usize, 2), exhausted.workflow_polls);
+    try std.testing.expect(exhausted.budget_exhausted);
+
+    worker_state.step = .idle;
+    const idle = try scheduler.drain(.{
+        .max_iterations = 4,
+        .max_workflow_polls = 1,
+        .max_timers = 0,
+        .max_queue_retries = 0,
+        .max_queue_claims = 0,
+    });
+    try std.testing.expectEqual(@as(usize, 1), idle.iterations);
+    try std.testing.expectEqual(@as(usize, 1), idle.workflow_polls);
+    try std.testing.expect(!idle.budget_exhausted);
+}
