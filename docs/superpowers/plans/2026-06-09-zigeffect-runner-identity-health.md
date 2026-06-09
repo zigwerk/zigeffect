@@ -29,7 +29,7 @@
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 - Modify: `packages/zigeffect/test/all_test.zig`
 
-- [ ] **Step 1: Write failing public export and identity tests**
+- [x] **Step 1: Write failing public export and identity tests**
 
 Create `packages/zigeffect/test/runner_test.zig`:
 
@@ -76,7 +76,7 @@ Add this import to `packages/zigeffect/test/all_test.zig`:
     _ = @import("runner_test.zig");
 ```
 
-- [ ] **Step 2: Run the red test**
+- [x] **Step 2: Run the red test**
 
 Run:
 
@@ -86,7 +86,7 @@ bun run zigeffect:test
 
 Expected: FAIL with missing declarations for runner types or helper functions.
 
-- [ ] **Step 3: Implement runner identity types and exports**
+- [x] **Step 3: Implement runner identity types and exports**
 
 Create the first version of `packages/zigeffect/src/cluster/runner.zig`:
 
@@ -215,7 +215,7 @@ In `cluster/root.zig`, import `runner.zig` and re-export the public types and
 helper functions. In `zigeffect.zig`, add top-level aliases near the cluster
 aliases.
 
-- [ ] **Step 4: Run the green identity test**
+- [x] **Step 4: Run the green identity test**
 
 Run:
 
@@ -227,7 +227,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Commit runner identity**
+- [x] **Step 5: Commit runner identity**
 
 ```bash
 git add packages/zigeffect/src/cluster/runner.zig packages/zigeffect/src/cluster/root.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/test/runner_test.zig packages/zigeffect/test/all_test.zig
