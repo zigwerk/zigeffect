@@ -9,6 +9,8 @@ pub const snapshot_compare_schema = "zigeffect.causal.snapshot-compare.v1";
 pub const snapshot_compare_schema_version: u32 = 1;
 pub const replay_feasibility_schema = "zigeffect.causal.replay-feasibility.v1";
 pub const replay_feasibility_schema_version: u32 = 1;
+pub const deterministic_replay_schema = "zigeffect.causal.deterministic-replay.v1";
+pub const deterministic_replay_schema_version: u32 = 1;
 const replay_feasibility_event_sample_limit: usize = 20;
 
 pub const SnapshotManifestOptions = struct {
@@ -123,6 +125,40 @@ pub fn snapshotManifestPaths(allocator: std.mem.Allocator, name: []const u8) !Sn
     };
 }
 
+fn deterministicReplayArtifactPaths(
+    allocator: std.mem.Allocator,
+    snapshot_name: []const u8,
+    scenario_slug: []const u8,
+) !causal_run.ArtifactPaths {
+    try validateSnapshotName(snapshot_name);
+    _ = try causal_run.scenarioByName(scenario_slug);
+
+    const report_path = try std.fmt.allocPrint(
+        allocator,
+        "{s}/zigeffect-causal-replay-{s}-{s}.txt",
+        .{ causal_run.artifact_dir, snapshot_name, scenario_slug },
+    );
+    errdefer allocator.free(report_path);
+    const json_path = try std.fmt.allocPrint(
+        allocator,
+        "{s}/zigeffect-causal-replay-{s}-{s}.json",
+        .{ causal_run.artifact_dir, snapshot_name, scenario_slug },
+    );
+    errdefer allocator.free(json_path);
+    const dot_path = try std.fmt.allocPrint(
+        allocator,
+        "{s}/zigeffect-causal-replay-{s}-{s}.dot",
+        .{ causal_run.artifact_dir, snapshot_name, scenario_slug },
+    );
+    errdefer allocator.free(dot_path);
+
+    return .{
+        .report_path = report_path,
+        .json_path = json_path,
+        .dot_path = dot_path,
+    };
+}
+
 pub fn resolveSnapshotManifestReference(allocator: std.mem.Allocator, value: []const u8) !SnapshotManifestReferencePath {
     if (isExplicitSnapshotManifestPath(value)) {
         return .{ .path = try allocator.dupe(u8, value) };
@@ -131,6 +167,74 @@ pub fn resolveSnapshotManifestReference(allocator: std.mem.Allocator, value: []c
     const paths = try snapshotManifestPaths(allocator, value);
     allocator.free(paths.text_path);
     return .{ .path = paths.json_path };
+}
+
+fn commandSucceeded(term: std.process.Child.Term) bool {
+    return switch (term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+}
+
+fn deterministicReplayCommandStatus(term: std.process.Child.Term) []const u8 {
+    return if (commandSucceeded(term)) "success" else "failure";
+}
+
+fn deterministicReplayVerdict(term: std.process.Child.Term) []const u8 {
+    return if (commandSucceeded(term)) "replay_completed" else "command_failed";
+}
+
+pub fn formatDeterministicReplayText(
+    allocator: std.mem.Allocator,
+    manifest_path: []const u8,
+    manifest_json: []const u8,
+    baseline_artifact_json: []const u8,
+    scenario: causal_run.Scenario,
+    replay_paths: causal_run.ArtifactPaths,
+    term: std.process.Child.Term,
+    replay_json: []const u8,
+) ![]const u8 {
+    var manifest_parsed = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, manifest_json, .{ .ignore_unknown_fields = true });
+    defer manifest_parsed.deinit();
+
+    const compare_report = try causal_compare.runCompare(allocator, baseline_artifact_json, replay_json);
+    defer allocator.free(compare_report);
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "zigeffect causal deterministic replay report\n");
+    try output.print(allocator, "schema: {s}\n", .{deterministic_replay_schema});
+    try output.print(allocator, "schema version: {d}\n", .{deterministic_replay_schema_version});
+    try output.appendSlice(allocator, "mode: registered_scenario_rerun\n");
+    try output.appendSlice(allocator, "executed: true\n");
+    try output.appendSlice(allocator, "arbitrary event replay: false\n");
+    try output.print(allocator, "snapshot: {s}\n", .{manifest_parsed.value.name});
+    try output.print(allocator, "manifest: {s}\n", .{manifest_path});
+    try output.print(allocator, "baseline artifact: {s}\n", .{manifest_parsed.value.artifact.path});
+    try output.print(allocator, "scenario: {s}\n", .{scenario.slug});
+    try output.print(allocator, "scenario label: {s}\n", .{scenario.label});
+    try output.print(allocator, "scenario expectation: {s}\n", .{@tagName(scenario.expectation)});
+    try output.print(allocator, "scenario owner: {s}\n", .{@tagName(scenario.owner)});
+    try output.print(allocator, "replay report: {s}\n", .{replay_paths.report_path});
+    try output.print(allocator, "replay artifact: {s}\n", .{replay_paths.json_path});
+    try output.print(allocator, "replay dot: {s}\n", .{replay_paths.dot_path});
+    try output.print(allocator, "command status: {s}\n", .{deterministicReplayCommandStatus(term)});
+    try output.print(allocator, "verdict: {s}\n", .{deterministicReplayVerdict(term)});
+    try output.appendSlice(allocator, "boundary:\n");
+    try output.appendSlice(allocator, "- reruns a registered causal scenario command\n");
+    try output.appendSlice(allocator, "- compares the original snapshot artifact to the rerun artifact\n");
+    try output.appendSlice(allocator, "- does not replay arbitrary recorded event logs as executable programs\n");
+    try output.appendSlice(allocator, "event compare:\n");
+    try output.appendSlice(allocator, compare_report);
+    if (compare_report.len == 0 or compare_report[compare_report.len - 1] != '\n') {
+        try output.append(allocator, '\n');
+    }
+    try output.appendSlice(allocator, "next queries:\n");
+    try output.print(allocator, "- zig build causal-query -- --file {s} snapshot\n", .{replay_paths.json_path});
+    try output.print(allocator, "- zig build causal-compare -- {s} {s}\n", .{ manifest_parsed.value.artifact.path, replay_paths.json_path });
+
+    return output.toOwnedSlice(allocator);
 }
 
 pub fn formatSnapshotCompareText(
@@ -771,7 +875,7 @@ const ManifestFormat = enum {
 };
 
 fn usage() []const u8 {
-    return "usage: zig build causal-snapshot -- manifest <name> <artifact.json> [--format json|text] [--target <target>] [--phase <phase>] [--baseline <path>] [--compare-report <path>] [--query-report <path>] [--advice-report <path>]\n       zig build causal-snapshot -- capture <name> [scenario]\n       zig build causal-snapshot -- compare <left> <right>\n       zig build causal-snapshot -- replay-feasibility <snapshot>\n";
+    return "usage: zig build causal-snapshot -- manifest <name> <artifact.json> [--format json|text] [--target <target>] [--phase <phase>] [--baseline <path>] [--compare-report <path>] [--query-report <path>] [--advice-report <path>]\n       zig build causal-snapshot -- capture <name> [scenario]\n       zig build causal-snapshot -- compare <left> <right>\n       zig build causal-snapshot -- replay-feasibility <snapshot>\n       zig build causal-snapshot -- replay-scenario <snapshot> <scenario>\n";
 }
 
 fn failUsage(err: anyerror) noreturn {

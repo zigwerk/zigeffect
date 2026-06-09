@@ -59,6 +59,12 @@ Current boundary decisions:
   make Effect composition more ergonomic without cloning EffectTS, harden the
   deterministic core as the compatibility suite, then design and prototype the
   async backend boundary.
+- The durable workflows and clustering execution roadmap is captured in
+  [`../../../docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`](../../../docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md):
+  add the small core prerequisites for durability, then build local durable
+  workflow journals, workflow execution, durable timers/deferreds/queues,
+  entity actors, sharding, multi-runner clustering, real async IO, production
+  leases, transports, and full supervision.
 
 ## Engine Integration Invariants
 
