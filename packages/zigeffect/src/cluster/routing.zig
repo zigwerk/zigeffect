@@ -56,8 +56,45 @@ pub const ShardRoutingTable = struct {
         return table;
     }
 
+    pub fn reloadLocal(allocator: Allocator, routing_snapshot: ShardRoutingSnapshot) (Allocator.Error || ShardRoutingError)!ShardRoutingTable {
+        return initLocal(allocator, .{
+            .shard_count = routing_snapshot.shard_count,
+            .version = routing_snapshot.version,
+        });
+    }
+
     pub fn deinit(self: *ShardRoutingTable) void {
         self.entries.deinit(self.allocator);
+    }
+
+    pub fn shardCount(self: *const ShardRoutingTable) ShardCount {
+        return @intCast(self.entries.items.len);
+    }
+
+    pub fn version(self: *const ShardRoutingTable) ShardRoutingVersion {
+        return self.version_value;
+    }
+
+    pub fn route(self: *const ShardRoutingTable, address: EntityAddress) ShardRoutingError!ShardRoute {
+        const shard_id = try shardIdForAddress(address, self.shardCount());
+        return .{
+            .shard_id = shard_id,
+            .target = try self.routeShard(shard_id),
+        };
+    }
+
+    pub fn routeShard(self: *const ShardRoutingTable, shard_id: ShardId) ShardRoutingError!ShardRouteTarget {
+        for (self.entries.items) |entry| {
+            if (entry.shard_id == shard_id) return entry.target;
+        }
+        return error.ShardNotFound;
+    }
+
+    pub fn snapshot(self: *const ShardRoutingTable) ShardRoutingSnapshot {
+        return .{
+            .shard_count = self.shardCount(),
+            .version = self.version_value,
+        };
     }
 };
 

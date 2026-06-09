@@ -26,7 +26,7 @@
 - Create: `packages/zigeffect/test/routing_test.zig`
 - Modify: `packages/zigeffect/test/all_test.zig`
 
-- [ ] **Step 1: Write the failing public export and shard-id tests**
+- [x] **Step 1: Write the failing public export and shard-id tests**
 
 Add this file:
 
@@ -92,7 +92,7 @@ Add this import to `packages/zigeffect/test/all_test.zig`:
     _ = @import("routing_test.zig");
 ```
 
-- [ ] **Step 2: Run the focused test and verify it fails for missing declarations**
+- [x] **Step 2: Run the focused test and verify it fails for missing declarations**
 
 Run:
 
@@ -103,7 +103,7 @@ bun run zigeffect:test
 Expected: FAIL with errors naming missing declarations such as `routing`,
 `ShardId`, or `ShardRoutingTable`.
 
-- [ ] **Step 3: Keep the red tests in the worktree for the green implementation**
+- [x] **Step 3: Keep the red tests in the worktree for the green implementation**
 
 Do not commit the failing state. Task 2 commits the tests and implementation
 together after the focused test command exits 0.
@@ -115,7 +115,7 @@ together after the focused test command exits 0.
 - Modify: `packages/zigeffect/src/cluster/root.zig`
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 
-- [ ] **Step 1: Implement shard identity helpers and local table skeleton**
+- [x] **Step 1: Implement shard identity helpers and local table skeleton**
 
 Add `packages/zigeffect/src/cluster/routing.zig`:
 
@@ -224,7 +224,7 @@ pub const shardIdForAddress = routing.shardIdForAddress;
 In `packages/zigeffect/src/zigeffect.zig`, add matching top-level aliases near
 the entity and message aliases.
 
-- [ ] **Step 2: Run tests and verify Task 1 passes**
+- [x] **Step 2: Run tests and verify Task 1 passes**
 
 Run:
 
@@ -234,7 +234,7 @@ bun run zigeffect:test
 
 Expected: PASS for the new public export, stability, and invalid-count tests.
 
-- [ ] **Step 3: Commit shard identity implementation and tests**
+- [x] **Step 3: Commit shard identity implementation and tests**
 
 ```bash
 git add packages/zigeffect/test/routing_test.zig packages/zigeffect/test/all_test.zig packages/zigeffect/src/cluster/routing.zig packages/zigeffect/src/cluster/root.zig packages/zigeffect/src/zigeffect.zig
@@ -246,7 +246,7 @@ git commit -m "feat(zigeffect): add shard identity routing"
 **Files:**
 - Modify: `packages/zigeffect/test/routing_test.zig`
 
-- [ ] **Step 1: Add failing local routing and reload tests**
+- [x] **Step 1: Add failing local routing and reload tests**
 
 Append these tests:
 
@@ -294,7 +294,7 @@ test "routing table snapshot reload preserves entity routes" {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify the new tests fail for missing methods**
+- [x] **Step 2: Run tests and verify the new tests fail for missing methods**
 
 Run:
 
@@ -305,7 +305,7 @@ bun run zigeffect:test
 Expected: FAIL with missing declarations such as `shardCount`, `version`,
 `routeShard`, `route`, `snapshot`, or `reloadLocal`.
 
-- [ ] **Step 3: Keep the red routing-table tests in the worktree for the green implementation**
+- [x] **Step 3: Keep the red routing-table tests in the worktree for the green implementation**
 
 Do not commit the failing state. Task 4 commits the routing-table tests and
 implementation together after the focused test command exits 0.
@@ -315,15 +315,15 @@ implementation together after the focused test command exits 0.
 **Files:**
 - Modify: `packages/zigeffect/src/cluster/routing.zig`
 
-- [ ] **Step 1: Implement table methods**
+- [x] **Step 1: Implement table methods**
 
 Add these methods inside `ShardRoutingTable`:
 
 ```zig
-    pub fn reloadLocal(allocator: Allocator, snapshot: ShardRoutingSnapshot) (Allocator.Error || ShardRoutingError)!ShardRoutingTable {
+    pub fn reloadLocal(allocator: Allocator, routing_snapshot: ShardRoutingSnapshot) (Allocator.Error || ShardRoutingError)!ShardRoutingTable {
         return initLocal(allocator, .{
-            .shard_count = snapshot.shard_count,
-            .version = snapshot.version,
+            .shard_count = routing_snapshot.shard_count,
+            .version = routing_snapshot.version,
         });
     }
 
@@ -358,7 +358,7 @@ Add these methods inside `ShardRoutingTable`:
     }
 ```
 
-- [ ] **Step 2: Run tests and verify routing table behavior passes**
+- [x] **Step 2: Run tests and verify routing table behavior passes**
 
 Run:
 

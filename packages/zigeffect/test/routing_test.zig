@@ -51,3 +51,45 @@ test "zero shard counts fail clearly" {
     try std.testing.expectError(error.InvalidShardCount, fx.shardIdForEntityId(address.id, 0));
     try std.testing.expectError(error.InvalidShardCount, fx.ShardRoutingTable.initLocal(std.testing.allocator, .{ .shard_count = 0 }));
 }
+
+test "local routing table owns every configured shard" {
+    var table = try fx.ShardRoutingTable.initLocal(std.testing.allocator, .{ .shard_count = 8 });
+    defer table.deinit();
+
+    try std.testing.expectEqual(@as(fx.ShardCount, 8), table.shardCount());
+    try std.testing.expectEqual(@as(fx.ShardRoutingVersion, 1), table.version());
+
+    for (0..8) |index| {
+        const shard_id: fx.ShardId = @intCast(index);
+        try std.testing.expectEqual(fx.ShardRouteTarget.local, try table.routeShard(shard_id));
+    }
+    try std.testing.expectError(error.ShardNotFound, table.routeShard(8));
+
+    const address = fx.entityAddress("counter", "one");
+    const route = try table.route(address);
+    try std.testing.expectEqual(try fx.shardIdForAddress(address, 8), route.shard_id);
+    try std.testing.expectEqual(fx.ShardRouteTarget.local, route.target);
+}
+
+test "routing table snapshot reload preserves entity routes" {
+    var table = try fx.ShardRoutingTable.initLocal(std.testing.allocator, .{
+        .shard_count = 12,
+        .version = 7,
+    });
+    defer table.deinit();
+
+    const address = fx.entityAddress("counter", "reload");
+    const before = try table.route(address);
+    const snapshot = table.snapshot();
+
+    var reloaded = try fx.ShardRoutingTable.reloadLocal(std.testing.allocator, snapshot);
+    defer reloaded.deinit();
+    const after = try reloaded.route(address);
+
+    try std.testing.expectEqual(@as(fx.ShardCount, 12), snapshot.shard_count);
+    try std.testing.expectEqual(@as(fx.ShardRoutingVersion, 7), snapshot.version);
+    try std.testing.expectEqual(before.shard_id, after.shard_id);
+    try std.testing.expectEqual(before.target, after.target);
+    try std.testing.expectEqual(table.shardCount(), reloaded.shardCount());
+    try std.testing.expectEqual(table.version(), reloaded.version());
+}
