@@ -338,7 +338,9 @@ Deliverables:
 - Audit-chain comparison across arbitrary named snapshots.
 - Replay feasibility report that explains which events are replayable and which
   are observational only.
-- Deterministic replay/forking for supported pure or simulated scenarios.
+- Deterministic registered-scenario replay for supported pure or simulated
+  scenarios.
+- Fork proposals for supported scenario reruns without runtime memory mutation.
 - Clear refusal for arbitrary runtime memory mutation.
 
 Exit criteria:
@@ -357,6 +359,7 @@ codex/zigeffect-causal-snapshot-manifest
 codex/zigeffect-causal-snapshot-compare
 codex/zigeffect-causal-replay-feasibility
 codex/zigeffect-causal-deterministic-replay
+codex/zigeffect-causal-scenario-fork-proposals
 ```
 
 ### M6: Causal Workbench UI
@@ -598,7 +601,7 @@ Status values:
 | M2 Pervasive causal tests | delivered | `causal-test-matrix`, coverage domains, `causal-readiness`, and shared causal assertions exist on branch `codex/zigeffect-causal-test-matrix` | move to M3 hardening |
 | M3 Production hardening | delivered | bounded store, broader redaction, sampling, taxonomy, schema/taxonomy compatibility fixtures, and artifact string-size limits delivered | move to M4 backend conformance |
 | M4 Backend adapters | delivered | backend boundary, conformance suite, JSONL sink, polished DOT backend, OTel bridge, graph-history adapter, NenDB storage writer contract, and async stream adapter exist | move to M5 snapshot manifests |
-| M5 Replay/snapshots | in progress | snapshot manifest schema/tool, named snapshot compare, and replay-feasibility reports exist; compare and audit-chain tools already exist | build deterministic replay for supported pure/simulated scenarios |
+| M5 Replay/snapshots | in progress | snapshot manifest schema/tool, named snapshot compare, replay-feasibility reports, and deterministic registered-scenario replay exist; compare and audit-chain tools already exist | add safe scenario fork proposals or move to M6 workbench after M5 closeout |
 | M6 Workbench UI | planned | JSON/text/DOT artifacts exist | build read-only artifact viewer |
 | M7 App-facing runtime | planned | core causal vocabulary exists | design request/job adapters |
 | M8 App remediation gates | deferred | app-facing runtime not started | wait for M7 |
@@ -606,8 +609,10 @@ Status values:
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-causal-deterministic-replay`
-   - Add the first replay execution path for explicitly supported deterministic scenarios.
+1. `codex/zigeffect-causal-scenario-fork-proposals`
+   - Add safe fork proposal artifacts for supported scenario reruns without runtime memory mutation.
+2. `codex/zigeffect-causal-workbench-readonly`
+   - Build the read-only local artifact viewer once the M5 replay/forking boundary is closed.
 
 ## Risks And Controls
 

@@ -966,6 +966,16 @@ causal JSON artifacts.
 report. It does not replay. It classifies event posture, counts blockers, keeps
 `feasible: false`, and prints safe next query commands over the artifact.
 
+`zig build causal-snapshot -- replay-scenario <snapshot> <scenario>` is the
+first M5 replay execution path. It resolves a named snapshot manifest, reruns a
+registered `causal_run` scenario command, writes replay-specific causal
+artifacts, and embeds a `causal-compare` report between the baseline and replay
+artifacts. Its schema is `zigeffect.causal.deterministic-replay.v1`, its mode is
+`registered_scenario_rerun`, and it always states `arbitrary event replay:
+false`. This keeps the feature useful for deterministic agent development
+without implying closure, service, resource, fiber, clock, scheduler, external
+IO, or runtime-memory reconstruction.
+
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around
 those pieces. The no-scenario form captures before/after dogfood evidence and

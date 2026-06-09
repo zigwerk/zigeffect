@@ -587,6 +587,21 @@ remain `feasible: false`; the report is useful because it explains which event
 categories are observations, which details are redacted or truncated, and what
 future replay work would need.
 
+Use `zig build causal-snapshot -- replay-scenario <snapshot> <scenario>` only
+when the snapshot names an existing causal JSON artifact and `<scenario>` is a
+registered slug from `zig build causal-catalog`. This command reruns the
+registered scenario command, writes replay-specific causal artifacts, compares
+the baseline artifact with the replay artifact, and prints
+`zigeffect.causal.deterministic-replay.v1`. It is evidence for a scenario rerun
+and compare, not evidence that zigeffect can execute arbitrary event logs. A
+clean-cache walkthrough that reliably writes the baseline artifact is:
+
+```sh
+zig build causal-run -- missing-service-compile-fail
+zig build causal-snapshot -- capture missing-service-baseline missing-service-compile-fail
+zig build causal-snapshot -- replay-scenario missing-service-baseline missing-service-compile-fail
+```
+
 For normal core-runtime development, prefer the coordinated session command:
 
 ```sh
