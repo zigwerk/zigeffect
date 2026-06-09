@@ -36,6 +36,32 @@ export type QueryCommand = {
   command: string;
 };
 
+export type GraphEdge = {
+  from: string;
+  to: string;
+  kind: "parent";
+  label: string;
+};
+
+export type GraphLaneKind = "run" | "scope" | "fiber" | "resource" | "retry";
+
+export type GraphLane = {
+  kind: GraphLaneKind;
+  key: string;
+  label: string;
+  status: "ok" | "warning" | "failure";
+  events: CausalEvent[];
+  findingEventIds: string[];
+};
+
+export type GraphModel = {
+  roots: CausalEvent[];
+  orphans: CausalEvent[];
+  parentEdges: GraphEdge[];
+  lanes: GraphLane[];
+  unhealthyLanes: GraphLane[];
+};
+
 export type WorkbenchModel = {
   artifactPath: string;
   schema: string;
@@ -67,6 +93,9 @@ const fiberLifecycleKinds = new Set([
 ]);
 
 const pendingFiberStatuses = new Set(["pending", "running"]);
+const graphFailureStatuses = new Set(["failure"]);
+const graphWarningStatuses = new Set(["missing", "exhausted", "pending", "running"]);
+const graphLaneKindOrder: GraphLaneKind[] = ["run", "scope", "fiber", "resource", "retry"];
 
 export function parseArtifactJson(json: string): unknown {
   const parsed = JSON.parse(json) as unknown;
@@ -162,6 +191,68 @@ export function queryCommandsForEvent(event: CausalEvent, artifactPath: string):
   return commands;
 }
 
+export function deriveGraphModel(events: CausalEvent[], findings: CausalFinding[]): GraphModel {
+  const byId = eventMap(events);
+  const roots: CausalEvent[] = [];
+  const orphans: CausalEvent[] = [];
+  const parentEdges: GraphEdge[] = [];
+
+  for (const event of events) {
+    if (!event.parentId) {
+      roots.push(event);
+      continue;
+    }
+
+    if (byId.has(event.parentId)) {
+      parentEdges.push({
+        from: event.parentId,
+        to: event.idText,
+        kind: "parent",
+        label: "parent",
+      });
+    } else {
+      orphans.push(event);
+    }
+  }
+
+  const findingEventIds = new Set(findings.map((finding) => finding.eventId));
+  const lanes = [
+    ...groupLaneByEventField("run", "run", events, "runId", findingEventIds),
+    ...groupLaneByEventField("scope", "scope", events, "scopeId", findingEventIds),
+    ...groupLaneByEventField("fiber", "fiber", events, "fiberId", findingEventIds),
+    ...resourceLanes(events, findingEventIds),
+    ...retryLanes(events, findingEventIds),
+  ].sort(compareGraphLanes);
+
+  return {
+    roots,
+    orphans,
+    parentEdges,
+    lanes,
+    unhealthyLanes: lanes.filter((lane) => lane.status !== "ok"),
+  };
+}
+
+export function causePathForEvent(events: CausalEvent[], eventId: string): CausalEvent[] {
+  const byId = eventMap(events);
+  const path: CausalEvent[] = [];
+  const seen = new Set<string>();
+  let current = byId.get(eventId) ?? null;
+
+  while (current) {
+    path.push(current);
+    seen.add(current.idText);
+
+    if (!current.parentId || seen.has(current.parentId)) {
+      break;
+    }
+
+    current = byId.get(current.parentId) ?? null;
+  }
+
+  return path.reverse();
+}
+
 function deriveFindings(events: CausalEvent[]): CausalFinding[] {
   const findings: CausalFinding[] = [];
 
@@ -226,6 +317,110 @@ function deriveFindings(events: CausalEvent[]): CausalFinding[] {
   }
 
   return findings;
+}
+
+function eventMap(events: CausalEvent[]): Map<string, CausalEvent> {
+  return new Map(events.map((event) => [event.idText, event]));
+}
+
+function groupLaneByEventField(
+  kind: GraphLaneKind,
+  labelPrefix: string,
+  events: CausalEvent[],
+  field: "runId" | "scopeId" | "fiberId",
+  findingEventIds: Set<string>,
+): GraphLane[] {
+  const groups = new Map<string, CausalEvent[]>();
+
+  for (const event of events) {
+    const key = event[field];
+    if (!key) {
+      continue;
+    }
+    const existing = groups.get(key) ?? [];
+    existing.push(event);
+    groups.set(key, existing);
+  }
+
+  return Array.from(groups, ([key, laneEvents]) => graphLane(kind, key, `${labelPrefix} ${key}`, laneEvents, findingEventIds));
+}
+
+function resourceLanes(events: CausalEvent[], findingEventIds: Set<string>): GraphLane[] {
+  const groups = new Map<string, CausalEvent[]>();
+
+  for (const event of events) {
+    if (event.kind !== "resource_acquired" && event.kind !== "resource_finalized") {
+      continue;
+    }
+
+    const resourceName = event.typeName || event.label || "resource";
+    const key = `${event.scopeId ?? "scope-unknown"}:${resourceName}`;
+    const existing = groups.get(key) ?? [];
+    existing.push(event);
+    groups.set(key, existing);
+  }
+
+  return Array.from(groups, ([key, laneEvents]) => graphLane("resource", key, key, laneEvents, findingEventIds));
+}
+
+function retryLanes(events: CausalEvent[], findingEventIds: Set<string>): GraphLane[] {
+  const groups = new Map<string, CausalEvent[]>();
+
+  for (const event of events) {
+    if (event.kind !== "schedule_decision") {
+      continue;
+    }
+
+    const key = event.runId ?? "run-unknown";
+    const existing = groups.get(key) ?? [];
+    existing.push(event);
+    groups.set(key, existing);
+  }
+
+  return Array.from(groups, ([key, laneEvents]) => graphLane("retry", key, `retry ${key}`, laneEvents, findingEventIds));
+}
+
+function graphLane(
+  kind: GraphLaneKind,
+  key: string,
+  label: string,
+  events: CausalEvent[],
+  allFindingEventIds: Set<string>,
+): GraphLane {
+  const findingEventIds = events
+    .map((event) => event.idText)
+    .filter((eventId) => allFindingEventIds.has(eventId));
+
+  return {
+    kind,
+    key,
+    label,
+    status: graphLaneStatus(events, findingEventIds),
+    events,
+    findingEventIds,
+  };
+}
+
+function graphLaneStatus(events: CausalEvent[], findingEventIds: string[]): GraphLane["status"] {
+  if (events.some((event) => graphFailureStatuses.has(event.status))) {
+    return "failure";
+  }
+  if (
+    findingEventIds.length > 0 ||
+    events.some((event) => graphWarningStatuses.has(event.status))
+  ) {
+    return "warning";
+  }
+  return "ok";
+}
+
+function compareGraphLanes(left: GraphLane, right: GraphLane): number {
+  const leftKind = graphLaneKindOrder.indexOf(left.kind);
+  const rightKind = graphLaneKindOrder.indexOf(right.kind);
+  if (leftKind !== rightKind) {
+    return leftKind - rightKind;
+  }
+  return left.key.localeCompare(right.key);
 }
 
 function pendingFiberFindings(events: CausalEvent[], closed: CausalEvent): CausalFinding[] {

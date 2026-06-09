@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import {
+  type CausalEvent,
+  causePathForEvent,
   deriveWorkbenchModel,
+  deriveGraphModel,
   filterEvents,
   parseArtifactJson,
   queryCommandsForEvent,
@@ -232,3 +235,58 @@ test("deriveWorkbenchModel tolerates partial artifacts", () => {
   expect(model.events[0]?.status).toBe("unknown");
   expect(model.warnings).toContain("artifact schema is missing");
 });
+
+test("deriveGraphModel summarizes roots parent edges and runtime lanes", () => {
+  const model = deriveWorkbenchModel(parseArtifactJson(sampleArtifact), {
+    artifactPath: "artifact.json",
+  });
+  const graph = deriveGraphModel(model.events, model.findings);
+
+  expect(graph.roots.map((event) => event.idText)).toEqual(["1"]);
+  expect(graph.parentEdges.length).toBe(8);
+  expect(graph.parentEdges.map((edge) => `${edge.from}->${edge.to}`)).toContain("2->5");
+  expect(causePathForEvent(model.events, "5").map((event) => event.idText)).toEqual(["1", "2", "5"]);
+  expect(graph.lanes.some((lane) => lane.kind === "resource" && lane.status === "warning")).toBe(true);
+  expect(graph.lanes.some((lane) => lane.kind === "retry" && lane.status === "warning")).toBe(true);
+  expect(graph.unhealthyLanes.length).toBeGreaterThan(0);
+});
+
+test("deriveGraphModel tracks orphaned parent references", () => {
+  const graph = deriveGraphModel([
+    { ...minimalEvent("1"), parentId: null },
+    { ...minimalEvent("2"), parentId: "missing" },
+  ], []);
+
+  expect(graph.roots.map((event) => event.idText)).toEqual(["1"]);
+  expect(graph.orphans.map((event) => event.idText)).toEqual(["2"]);
+  expect(graph.parentEdges).toEqual([]);
+  expect(causePathForEvent(graph.orphans, "2").map((event) => event.idText)).toEqual(["2"]);
+});
+
+test("causePathForEvent stops at cycles", () => {
+  const events = [
+    { ...minimalEvent("1"), parentId: "2" },
+    { ...minimalEvent("2"), parentId: "1" },
+  ];
+
+  expect(causePathForEvent(events, "1").map((event) => event.idText)).toEqual(["2", "1"]);
+});
+
+function minimalEvent(idText: string): CausalEvent {
+  return {
+    idText,
+    numericId: Number(idText),
+    kind: "unknown",
+    status: "unknown",
+    label: "",
+    typeName: "",
+    redactedDetail: "",
+    runId: null,
+    parentId: null,
+    fiberId: null,
+    scopeId: null,
+    traceId: null,
+    spanId: null,
+    raw: { id: Number(idText) },
+  };
+}
