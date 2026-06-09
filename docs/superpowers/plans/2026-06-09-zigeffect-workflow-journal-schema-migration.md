@@ -38,7 +38,7 @@
 - Modify `packages/zigeffect/src/workflow/root.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing compatibility tests**
+- [x] **Step 1: Write failing compatibility tests**
 
 Add tests named:
 
@@ -62,7 +62,7 @@ try std.testing.expectError(error.MissingWorkflowEventMigration, fx.workflow.par
 try std.testing.expectError(error.UnknownWorkflowEventKind, fx.workflow.parseWorkflowEventJson(std.testing.allocator, unknown_kind_json));
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -72,7 +72,7 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL because the compatibility API and parser options are missing.
 
-- [ ] **Step 3: Implement compatibility reader**
+- [x] **Step 3: Implement compatibility reader**
 
 Add to `journal.zig`:
 
@@ -112,7 +112,7 @@ Then split the existing body of `parseWorkflowEventJson` into a private
 
 Export the new types and functions in `workflow/root.zig`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 

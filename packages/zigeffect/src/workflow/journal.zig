@@ -1,5 +1,6 @@
 const std = @import("std");
 
+pub const Allocator = std.mem.Allocator;
 pub const workflow_journal_event_schema = "zigeffect.workflow.journal-event.v1";
 pub const workflow_journal_event_schema_version: u32 = 1;
 
@@ -99,6 +100,8 @@ pub fn workflowEventKindFromName(name: []const u8) ?WorkflowEventKind {
 pub const WorkflowEventParseError = error{
     InvalidWorkflowEventSchema,
     InvalidWorkflowEventSchemaVersion,
+    FutureWorkflowEventSchemaVersion,
+    MissingWorkflowEventMigration,
     UnknownWorkflowEventKind,
 };
 
@@ -165,7 +168,89 @@ const WorkflowEventJsonRow = struct {
     idempotency_key: []const u8 = "",
 };
 
-pub fn parseWorkflowEventJson(allocator: std.mem.Allocator, row_json: []const u8) !WorkflowEvent {
+const WorkflowEventHeaderJson = struct {
+    schema: []const u8,
+    schema_version: u32,
+    kind: []const u8,
+};
+
+pub const WorkflowEventCompatibility = enum {
+    current,
+    future_schema_version,
+    missing_migration,
+    invalid_schema,
+    unknown_event_kind,
+};
+
+pub const WorkflowUnknownEventPolicy = enum {
+    fail,
+};
+
+pub const WorkflowEventReadOptions = struct {
+    unknown_event_policy: WorkflowUnknownEventPolicy = .fail,
+};
+
+pub const WorkflowEventMigrationRegistry = struct {
+    pub fn current() WorkflowEventMigrationRegistry {
+        return .{};
+    }
+
+    pub fn migrateJsonToCurrent(
+        _: WorkflowEventMigrationRegistry,
+        allocator: Allocator,
+        row_json: []const u8,
+    ) ![]const u8 {
+        const compatibility = try classifyWorkflowEventJson(allocator, row_json);
+        return switch (compatibility) {
+            .current => allocator.dupe(u8, row_json),
+            .future_schema_version => error.FutureWorkflowEventSchemaVersion,
+            .missing_migration => error.MissingWorkflowEventMigration,
+            .invalid_schema => error.InvalidWorkflowEventSchema,
+            .unknown_event_kind => error.UnknownWorkflowEventKind,
+        };
+    }
+};
+
+pub fn classifyWorkflowEventJson(
+    allocator: Allocator,
+    row_json: []const u8,
+) !WorkflowEventCompatibility {
+    var parsed = try std.json.parseFromSlice(WorkflowEventHeaderJson, allocator, row_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    if (!std.mem.eql(u8, parsed.value.schema, workflow_journal_event_schema)) {
+        return .invalid_schema;
+    }
+    if (parsed.value.schema_version > workflow_journal_event_schema_version) {
+        return .future_schema_version;
+    }
+    if (parsed.value.schema_version < workflow_journal_event_schema_version) {
+        return .missing_migration;
+    }
+    if (workflowEventKindFromName(parsed.value.kind) == null) {
+        return .unknown_event_kind;
+    }
+
+    return .current;
+}
+
+pub fn parseWorkflowEventJsonWithOptions(
+    allocator: Allocator,
+    row_json: []const u8,
+    options: WorkflowEventReadOptions,
+) !WorkflowEvent {
+    _ = options.unknown_event_policy;
+    const registry = WorkflowEventMigrationRegistry.current();
+    const migrated_json = try registry.migrateJsonToCurrent(allocator, row_json);
+    defer allocator.free(migrated_json);
+    return parseWorkflowEventJsonV1(allocator, migrated_json);
+}
+
+pub fn parseWorkflowEventJson(allocator: Allocator, row_json: []const u8) !WorkflowEvent {
+    return parseWorkflowEventJsonWithOptions(allocator, row_json, .{});
+}
+
+fn parseWorkflowEventJsonV1(allocator: Allocator, row_json: []const u8) !WorkflowEvent {
     var parsed = try std.json.parseFromSlice(WorkflowEventJsonRow, allocator, row_json, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
 

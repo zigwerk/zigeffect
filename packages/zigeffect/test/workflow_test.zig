@@ -179,6 +179,23 @@ fn workflowCausalFixtureEvents() [5]fx.workflow.WorkflowEvent {
     };
 }
 
+fn replaceFirstOwned(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    needle: []const u8,
+    replacement: []const u8,
+) ![]const u8 {
+    const index = std.mem.indexOf(u8, source, needle) orelse return error.ExpectedReplacementNeedle;
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, source[0..index]);
+    try output.appendSlice(allocator, replacement);
+    try output.appendSlice(allocator, source[index + needle.len ..]);
+
+    return output.toOwnedSlice(allocator);
+}
+
 test "workflow journal schema constants are stable" {
     try std.testing.expectEqualStrings("zigeffect.workflow.journal-event.v1", fx.workflow.workflow_journal_event_schema);
     try std.testing.expectEqual(@as(u32, 1), fx.workflow.workflow_journal_event_schema_version);
@@ -334,6 +351,59 @@ test "workflow event json parses back into an owned event" {
     try std.testing.expectEqualStrings(event.status, parsed.status);
     try std.testing.expectEqualStrings(event.redacted_detail, parsed.redacted_detail);
     try std.testing.expectEqualStrings(event.idempotency_key, parsed.idempotency_key);
+}
+
+test "workflow journal classifies schema headers before full parse" {
+    const json = try fx.workflow.formatWorkflowEventJson(std.testing.allocator, .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "compat",
+        .status = "running",
+        .idempotency_key = "compat-start",
+    });
+    defer std.testing.allocator.free(json);
+
+    const future_json = try replaceFirstOwned(std.testing.allocator, json, "\"schema_version\":1", "\"schema_version\":2");
+    defer std.testing.allocator.free(future_json);
+    const version_zero_json = try replaceFirstOwned(std.testing.allocator, json, "\"schema_version\":1", "\"schema_version\":0");
+    defer std.testing.allocator.free(version_zero_json);
+    const unknown_kind_json = try replaceFirstOwned(std.testing.allocator, json, "\"kind\":\"workflow_started\"", "\"kind\":\"future_event\"");
+    defer std.testing.allocator.free(unknown_kind_json);
+
+    try std.testing.expectEqual(fx.workflow.WorkflowEventCompatibility.current, try fx.workflow.classifyWorkflowEventJson(std.testing.allocator, json));
+    try std.testing.expectEqual(fx.workflow.WorkflowEventCompatibility.future_schema_version, try fx.workflow.classifyWorkflowEventJson(std.testing.allocator, future_json));
+    try std.testing.expectEqual(fx.workflow.WorkflowEventCompatibility.missing_migration, try fx.workflow.classifyWorkflowEventJson(std.testing.allocator, version_zero_json));
+    try std.testing.expectEqual(fx.workflow.WorkflowEventCompatibility.unknown_event_kind, try fx.workflow.classifyWorkflowEventJson(std.testing.allocator, unknown_kind_json));
+}
+
+test "workflow journal migration registry parses current v1 rows" {
+    const json = try fx.workflow.formatWorkflowEventJson(std.testing.allocator, .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "compat",
+        .status = "running",
+        .idempotency_key = "compat-start",
+    });
+    defer std.testing.allocator.free(json);
+
+    const future_json = try replaceFirstOwned(std.testing.allocator, json, "\"schema_version\":1", "\"schema_version\":2");
+    defer std.testing.allocator.free(future_json);
+    const version_zero_json = try replaceFirstOwned(std.testing.allocator, json, "\"schema_version\":1", "\"schema_version\":0");
+    defer std.testing.allocator.free(version_zero_json);
+    const unknown_kind_json = try replaceFirstOwned(std.testing.allocator, json, "\"kind\":\"workflow_started\"", "\"kind\":\"future_event\"");
+    defer std.testing.allocator.free(unknown_kind_json);
+
+    const parsed = try fx.workflow.parseWorkflowEventJsonWithOptions(std.testing.allocator, json, .{});
+    defer fx.workflow.deinitWorkflowEventStrings(std.testing.allocator, parsed);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_started, parsed.kind);
+
+    try std.testing.expectError(error.FutureWorkflowEventSchemaVersion, fx.workflow.parseWorkflowEventJson(std.testing.allocator, future_json));
+    try std.testing.expectError(error.MissingWorkflowEventMigration, fx.workflow.parseWorkflowEventJson(std.testing.allocator, version_zero_json));
+    try std.testing.expectError(error.UnknownWorkflowEventKind, fx.workflow.parseWorkflowEventJson(std.testing.allocator, unknown_kind_json));
 }
 
 test "workflow compensation ids are stable by label" {
