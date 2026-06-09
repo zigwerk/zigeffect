@@ -1,0 +1,39 @@
+{
+  "schema": "zigeffect.causal.audit-chain.v1",
+  "schema_version": 1,
+  "mode": "local",
+  "target": "package-tests",
+  "assessment": "unchanged",
+  "source": {
+    "session": ".zig-cache/causal-artifacts/zigeffect-causal-dev-session-package-tests.json",
+    "audit": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-remediation-audit.json",
+    "decision": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-remediation-decision.json",
+    "proposal": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-patch-proposal.json",
+    "before": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-before.json",
+    "after": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-after.json",
+    "compare": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-package-tests-compare.txt"
+  },
+  "proposal_status": "ready-for-review",
+  "approval_status": "approved",
+  "approved": true,
+  "applied": false,
+  "finding_delta": 0,
+  "event_ids": [1, 2, 3, 5],
+  "disappeared_event_ids": [1],
+  "persisting_event_ids": [2],
+  "appeared_event_ids": [3],
+  "missing_event_ids": [5],
+  "verification_commands": [
+    "zig build examples",
+    "zig build test --summary none"
+  ],
+  "claim_guardrails": [
+    "Do not claim remediation without verification."
+  ],
+  "proposal_guardrails": [
+    "This proposal does not apply source changes."
+  ],
+  "chain_guardrails": [
+    "Chain comparison is evidence, not authorization to edit source."
+  ]
+}

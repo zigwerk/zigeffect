@@ -23,7 +23,7 @@ export type BridgeWindow = {
 };
 
 type BridgeFunctionName = "zigeffect_load_artifact" | "zigeffect_load_session";
-type SampleArtifactLoader = () => Promise<string>;
+type SampleArtifactLoader = (sampleName: string) => Promise<string>;
 
 export async function loadPayload(): Promise<LoadedPayload> {
   const bridge = window as BridgeWindow;
@@ -35,6 +35,7 @@ export async function loadPayload(): Promise<LoadedPayload> {
 export async function loadPayloadFromBridge(
   bridge: BridgeWindow,
   loadSample: SampleArtifactLoader = loadSampleArtifact,
+  search?: string,
 ): Promise<LoadedPayload> {
   const session = await loadSession(bridge);
   const artifactJson = await callBridgeFunction(bridge, "zigeffect_load_artifact");
@@ -43,11 +44,13 @@ export async function loadPayloadFromBridge(
     return { artifactJson, session };
   }
 
+  const sampleName = sampleNameFromSearch(search ?? currentSearch());
+
   return {
-    artifactJson: await loadSample(),
+    artifactJson: await loadSample(sampleName),
     session: session ?? {
       schema: "zigeffect.causal.workbench-session.v1",
-      artifact_path: "sample-artifact.json",
+      artifact_path: sampleName,
       read_only: true,
       warnings: ["development sample artifact"],
     },
@@ -84,8 +87,17 @@ async function callBridgeFunction(bridge: BridgeWindow, name: BridgeFunctionName
   return null;
 }
 
-async function loadSampleArtifact(): Promise<string> {
-  const response = await fetch("./sample-artifact.json");
+function currentSearch(): string {
+  return typeof window === "undefined" ? "" : window.location.search;
+}
+
+function sampleNameFromSearch(search: string): string {
+  const params = new URLSearchParams(search);
+  return params.get("sample") === "chain" ? "sample-chain-artifact.json" : "sample-artifact.json";
+}
+
+async function loadSampleArtifact(sampleName: string): Promise<string> {
+  const response = await fetch(`./${sampleName}`);
   return response.text();
 }
 

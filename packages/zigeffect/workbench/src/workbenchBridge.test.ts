@@ -37,6 +37,17 @@ test("loadPayloadFromBridge loads artifact and session through webui.call", asyn
   expect(payload.session?.artifact_path).toBe(".zig-cache/causal-artifacts/zigeffect-causal-dogfood.json");
 });
 
+test("loadPayloadFromBridge can load the chain development sample", async () => {
+  const payload = await loadPayloadFromBridge(
+    {},
+    async (sampleName) => JSON.stringify({ schema: sampleName }),
+    "?sample=chain",
+  );
+
+  expect(payload.artifactJson).toBe(JSON.stringify({ schema: "sample-chain-artifact.json" }));
+  expect(payload.session?.artifact_path).toBe("sample-chain-artifact.json");
+});
+
 test("workbench HTML loads the WebUI bridge before the Solid bundle", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const webuiScript = html.indexOf('src="/webui.js"');
