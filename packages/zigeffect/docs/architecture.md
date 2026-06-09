@@ -326,6 +326,9 @@ Owns Erlang-style distributed runtime surfaces:
 - `routing.zig`: deterministic shard ids, entity-id shard hashing,
   configurable local shard routing tables, local route targets, and
   snapshot/reload helpers for restart-stable routing.
+- `runner.zig`: stable runner and machine identity, startup registration,
+  heartbeat history, in-memory health events, and local runner health
+  inspection reports.
 
 Entity identity, actor references, message envelopes, durable message storage,
 shard ids, runner ids, runner storage, leases, rebalancing, transports,

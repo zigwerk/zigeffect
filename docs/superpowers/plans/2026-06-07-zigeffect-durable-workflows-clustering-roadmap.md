@@ -634,15 +634,15 @@ Goal: define cluster participants before leases and rebalancing.
 
 Deliverables:
 
-- [ ] Add `RunnerId`, `RunnerAddress`, and `MachineId`.
-- [ ] Add runner startup registration.
-- [ ] Add runner heartbeat records.
-- [ ] Add health states.
-- [ ] Add local runner health inspector.
+- [x] Add `RunnerId`, `RunnerAddress`, and `MachineId`.
+- [x] Add runner startup registration.
+- [x] Add runner heartbeat records.
+- [x] Add health states.
+- [x] Add local runner health inspector.
 
 Acceptance:
 
-- [ ] Runner health transitions are persisted and inspectable.
+- [x] Runner health transitions are persisted and inspectable.
 
 ## Milestone 29: Runner Storage
 
