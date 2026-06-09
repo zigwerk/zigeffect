@@ -626,19 +626,19 @@ Status values:
 | M5 Replay/snapshots | delivered | snapshot manifest schema/tool, named snapshot compare, replay-feasibility reports, deterministic registered-scenario replay, and safe scenario fork proposals exist | move to M6 read-only workbench |
 | M6 Workbench UI | delivered | SolidJS renderer, `causal-workbench-ui`, `zig-webui` launcher, graph cause-path/runtime-lane branch, and remediation-chain branch `codex/zigeffect-causal-workbench-remediation-chain` exist | move to M7 app-facing runtime |
 | M7 App-facing runtime | delivered | `CausalAppTrace`, Worker-shaped app request example, app incident classifier, and app-specific advice/diagnosis mappings exist | move to M8 app remediation audit |
-| M8 App remediation gates | active | app remediation audit artifacts, app policy gate decisions, draft app patch proposal artifacts, and detailed SolidJS workbench rendering exist | move to app human-review boundary |
+| M8 App remediation gates | active | app remediation audit artifacts, app policy gate decisions, app human-review boundary artifacts, draft app patch proposal artifacts, and detailed SolidJS workbench rendering exist | move to app application readiness |
 | M9 Operating model | deferred | schema/versioning docs partial | consolidate after M4-M8 |
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-app-human-review-boundary`
-   - Define the later human-reviewed path for migration, operational, and
-     rollback-required app remediation proposals without granting automatic
-     mutation authority.
-2. `codex/zigeffect-app-application-readiness`
+1. `codex/zigeffect-app-application-readiness`
    - Define reviewed readiness artifacts for app-level remediation application
      attempts while preserving `applied=false` until an explicit application
      boundary exists.
+2. `codex/zigeffect-app-application-boundary`
+   - Define the guarded app application record that can mark `applied=true`
+     only after reviewed source or external-state changes and after
+     before/after verification.
 
 ## Risks And Controls
 

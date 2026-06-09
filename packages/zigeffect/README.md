@@ -240,12 +240,25 @@ distinguishes `source-only`, `config-only`, `migration-required`,
 `operational-human-required`, and `rollback-required`, but remains advisory:
 every report keeps `mutation_authority=none` and `applied=false`.
 
-Draft a non-mutating app patch proposal after an approved source/config policy
-decision:
+Record human review evidence when policy says `needs-human-review`:
 
 ```bash
 cd packages/zigeffect
-zig build causal-app-patch-proposal -- local --policy <app-policy-decision-json> --summary <summary> --change <description> --file <path> --config <key>
+zig build causal-app-human-review -- local --policy <app-policy-decision-json> --reviewer <actor> --decision approve --reason <reason> --migration <path> --runbook <path> --rollback <path>
+```
+
+The review uses schema `zigeffect.causal.app-human-review.v1` and writes
+`*-app-human-review.json` plus `*-app-human-review.txt`. It can approve draft
+proposal creation for migration, operational, or rollback-required app work,
+but still records `applied=false` and `mutation_authority=none`.
+
+Draft a non-mutating app patch proposal after an approved source/config policy
+decision, or after a matching approved human-review artifact for high-risk
+gates:
+
+```bash
+cd packages/zigeffect
+zig build causal-app-patch-proposal -- local --policy <app-policy-decision-json> --review <app-human-review-json> --summary <summary> --change <description> --file <path> --config <key>
 ```
 
 The proposal uses schema `zigeffect.causal.app-patch-proposal.v1` and writes

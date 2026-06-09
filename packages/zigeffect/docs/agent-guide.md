@@ -695,10 +695,25 @@ gates can approve proposal drafting; `migration-required`,
 Every app policy decision remains advisory with `mutation_authority=none` and
 `applied=false`.
 
-When the app policy decision is `approve`, draft the app patch proposal:
+When the app policy decision is `needs-human-review`, do not retry app patch
+proposal directly. Produce or request a matching app human-review artifact with
+the migration, runbook, and rollback citations required by the policy gates:
 
 ```sh
-zig build causal-app-patch-proposal -- local --policy <app-policy-decision-json> --summary <summary> --change <description> --file <path> --config <key>
+zig build causal-app-human-review -- local --policy <app-policy-decision-json> --reviewer <actor> --decision approve --reason <reason> --migration <path> --runbook <path> --rollback <path>
+```
+
+The command writes `*-app-human-review.json` and `*-app-human-review.txt` with
+schema `zigeffect.causal.app-human-review.v1`. Even an approved review only
+authorizes draft proposal creation; it keeps `mutation_authority=none` and
+`applied=false`.
+
+When the app policy decision is `approve`, or when it is
+`needs-human-review` and a matching approved app human-review artifact exists,
+draft the app patch proposal:
+
+```sh
+zig build causal-app-patch-proposal -- local --policy <app-policy-decision-json> --review <app-human-review-json> --summary <summary> --change <description> --file <path> --config <key>
 ```
 
 The command writes `*-app-patch-proposal.json` and
