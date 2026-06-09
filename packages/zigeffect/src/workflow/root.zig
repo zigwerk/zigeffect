@@ -8,6 +8,7 @@ pub const engine = @import("engine.zig");
 pub const context = @import("context.zig");
 pub const deferred = @import("deferred.zig");
 pub const clock = @import("clock.zig");
+pub const signal = @import("signal.zig");
 
 pub const workflow_journal_event_schema = journal.workflow_journal_event_schema;
 pub const workflow_journal_event_schema_version = journal.workflow_journal_event_schema_version;
@@ -98,3 +99,9 @@ pub const DueTimer = clock.DueTimer;
 pub const DueTimerList = clock.DueTimerList;
 pub const DurableClock = clock.DurableClock;
 pub const timerId = clock.timerId;
+
+pub const SignalMetadata = signal.SignalMetadata;
+pub const SignalWaitResult = signal.SignalWaitResult;
+pub const DurableSignal = signal.DurableSignal;
+pub const Signal = signal.Signal;
+pub const signalId = signal.signalId;

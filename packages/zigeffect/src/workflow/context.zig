@@ -8,6 +8,7 @@ const traits_mod = @import("../traits/root.zig");
 const deferred_mod = @import("deferred.zig");
 const durable_clock_mod = @import("clock.zig");
 const journal_mod = @import("journal.zig");
+const signal_mod = @import("signal.zig");
 const store_mod = @import("store.zig");
 
 pub const Allocator = std.mem.Allocator;
@@ -20,6 +21,7 @@ pub const JournalEventBatch = store_mod.JournalEventBatch;
 pub const Schedule = schedule_mod.Schedule;
 pub const Suspension = control_mod.Suspension;
 pub const TimerSleepResult = durable_clock_mod.TimerSleepResult;
+pub const SignalWaitResult = signal_mod.SignalWaitResult;
 pub const WorkflowId = journal_mod.WorkflowId;
 pub const ExecutionId = journal_mod.ExecutionId;
 pub const ActivityId = journal_mod.ActivityId;
@@ -33,6 +35,8 @@ pub const WorkflowContextError = error{
     CompensationHandlerNotFound,
     RecordedStepParseFailed,
     RecordedActivityFailureParseFailed,
+    SignalConsumptionParseFailed,
+    SignalReceivedMissing,
 };
 
 pub const WorkflowContextOptions = struct {
@@ -235,6 +239,46 @@ pub const WorkflowContext = struct {
         } };
     }
 
+    pub fn waitForSignal(
+        self: *WorkflowContext,
+        comptime SignalType: type,
+        payload_codec: anytype,
+    ) !SignalWaitResult(SignalType.PayloadType) {
+        var events = try self.journal_store.readAll(self.allocator);
+        defer events.deinit();
+
+        if (signalTimedOut(events.events, self.workflow_id, self.execution_id, SignalType.name)) {
+            return .timed_out;
+        }
+
+        if (try consumedSignalReceivedSequence(events.events, self.workflow_id, self.execution_id, SignalType.name)) |sequence| {
+            const received = findSignalReceivedBySequence(events.events, self.workflow_id, self.execution_id, SignalType.name, sequence) orelse
+                return error.SignalReceivedMissing;
+            return .{ .received = try payload_codec.decodeValue(self.allocator, received.redacted_detail) };
+        }
+
+        if (try firstUnconsumedSignal(events.events, self.workflow_id, self.execution_id, SignalType.name)) |received| {
+            try self.cancelSignalTimeoutIfPending(SignalType, events.events);
+            try self.appendSignalConsumed(SignalType.name, received.sequence);
+            return .{ .received = try payload_codec.decodeValue(self.allocator, received.redacted_detail) };
+        }
+
+        if (try self.signalTimeoutFired(SignalType, events.events)) |timer_id| {
+            try self.appendSignalTimedOut(SignalType.name, timer_id);
+            return .timed_out;
+        }
+
+        try self.scheduleSignalTimeoutIfNeeded(SignalType, events.events);
+        if (!signalSuspensionExists(events.events, self.workflow_id, self.execution_id, SignalType.name)) {
+            try self.appendSignalSuspension(SignalType.name);
+        }
+        return .{ .suspended = .{
+            .kind = .signal,
+            .id = signal_mod.signalId(SignalType.name),
+            .label = SignalType.name,
+        } };
+    }
+
     fn recordedStepU64(self: *const WorkflowContext, label: []const u8) !?u64 {
         for (self.replay_events.events) |event| {
             if (event.kind == .step_completed and
@@ -409,6 +453,130 @@ pub const WorkflowContext = struct {
                 .name = name,
                 .status = status,
                 .redacted_detail = redacted_detail,
+                .idempotency_key = idempotency_key,
+            },
+        });
+        self.next_sequence += 1;
+    }
+
+    fn appendSignalSuspension(self: *WorkflowContext, name: []const u8) !void {
+        const idempotency_key = try signalEventIdempotencyKey(
+            self.allocator,
+            .workflow_suspended,
+            name,
+            self.next_sequence,
+        );
+        defer self.allocator.free(idempotency_key);
+        _ = try self.journal_store.append(.{
+            .event = .{
+                .sequence = self.next_sequence,
+                .kind = .workflow_suspended,
+                .workflow_id = self.workflow_id,
+                .execution_id = self.execution_id,
+                .name = name,
+                .status = "waiting",
+                .redacted_detail = "signal",
+                .idempotency_key = idempotency_key,
+            },
+        });
+        self.next_sequence += 1;
+    }
+
+    fn scheduleSignalTimeoutIfNeeded(
+        self: *WorkflowContext,
+        comptime SignalType: type,
+        events: []const journal_mod.WorkflowEvent,
+    ) !void {
+        const timeout_ms = SignalType.metadata().timeout_ms orelse return;
+        const label = try signalTimeoutLabel(self.allocator, SignalType.name);
+        defer self.allocator.free(label);
+
+        const id = durable_clock_mod.timerId(label);
+        const replay = timerReplayState(events, self.workflow_id, self.execution_id, id);
+        if (replay.scheduled or replay.terminal != null) return;
+
+        const now_ms = if (self.clock) |clock| clock.nowMs() else 0;
+        const fire_at_ms = std.math.add(u64, now_ms, timeout_ms) catch std.math.maxInt(u64);
+        const detail = try timerFireAtDetail(self.allocator, fire_at_ms);
+        defer self.allocator.free(detail);
+        try self.appendTimerEvent(.timer_scheduled, id, label, "scheduled", detail);
+    }
+
+    fn signalTimeoutFired(
+        self: *WorkflowContext,
+        comptime SignalType: type,
+        events: []const journal_mod.WorkflowEvent,
+    ) !?TimerId {
+        _ = SignalType.metadata().timeout_ms orelse return null;
+        const label = try signalTimeoutLabel(self.allocator, SignalType.name);
+        defer self.allocator.free(label);
+
+        const id = durable_clock_mod.timerId(label);
+        const replay = timerReplayState(events, self.workflow_id, self.execution_id, id);
+        if (replay.terminal) |terminal| switch (terminal) {
+            .fired => return id,
+            .cancelled, .suspended => return null,
+        };
+        return null;
+    }
+
+    fn cancelSignalTimeoutIfPending(
+        self: *WorkflowContext,
+        comptime SignalType: type,
+        events: []const journal_mod.WorkflowEvent,
+    ) !void {
+        _ = SignalType.metadata().timeout_ms orelse return;
+        const label = try signalTimeoutLabel(self.allocator, SignalType.name);
+        defer self.allocator.free(label);
+
+        const id = durable_clock_mod.timerId(label);
+        const replay = timerReplayState(events, self.workflow_id, self.execution_id, id);
+        if (!replay.scheduled or replay.terminal != null) return;
+        try self.appendTimerEvent(.timer_cancelled, id, label, "cancelled", "");
+    }
+
+    fn appendSignalConsumed(self: *WorkflowContext, name: []const u8, received_sequence: JournalSequence) !void {
+        const detail = try receivedSequenceDetail(self.allocator, received_sequence);
+        defer self.allocator.free(detail);
+        const idempotency_key = try signalConsumedIdempotencyKey(
+            self.allocator,
+            name,
+            received_sequence,
+        );
+        defer self.allocator.free(idempotency_key);
+        _ = try self.journal_store.append(.{
+            .event = .{
+                .sequence = self.next_sequence,
+                .kind = .signal_consumed,
+                .workflow_id = self.workflow_id,
+                .execution_id = self.execution_id,
+                .name = name,
+                .status = "received",
+                .redacted_detail = detail,
+                .idempotency_key = idempotency_key,
+            },
+        });
+        self.next_sequence += 1;
+    }
+
+    fn appendSignalTimedOut(self: *WorkflowContext, name: []const u8, timer_id: TimerId) !void {
+        const detail = try signalTimeoutDetail(self.allocator, timer_id);
+        defer self.allocator.free(detail);
+        const idempotency_key = try signalTimedOutIdempotencyKey(
+            self.allocator,
+            name,
+            timer_id,
+        );
+        defer self.allocator.free(idempotency_key);
+        _ = try self.journal_store.append(.{
+            .event = .{
+                .sequence = self.next_sequence,
+                .kind = .signal_consumed,
+                .workflow_id = self.workflow_id,
+                .execution_id = self.execution_id,
+                .name = name,
+                .status = "timed_out",
+                .redacted_detail = detail,
                 .idempotency_key = idempotency_key,
             },
         });
@@ -646,6 +814,55 @@ fn timerFireAtDetail(allocator: Allocator, fire_at_ms: u64) Allocator.Error![]co
     return std.fmt.allocPrint(allocator, "fire_at_ms={d}", .{fire_at_ms});
 }
 
+fn signalEventIdempotencyKey(
+    allocator: Allocator,
+    kind: journal_mod.WorkflowEventKind,
+    name: []const u8,
+    sequence: JournalSequence,
+) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "signal:{s}:{s}:{d}",
+        .{ name, journal_mod.workflowEventKindName(kind), sequence },
+    );
+}
+
+fn signalConsumedIdempotencyKey(
+    allocator: Allocator,
+    name: []const u8,
+    received_sequence: JournalSequence,
+) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "signal:{s}:consumed:{d}",
+        .{ name, received_sequence },
+    );
+}
+
+fn receivedSequenceDetail(allocator: Allocator, received_sequence: JournalSequence) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(allocator, "received_sequence={d}", .{received_sequence});
+}
+
+fn signalTimedOutIdempotencyKey(
+    allocator: Allocator,
+    name: []const u8,
+    timer_id: TimerId,
+) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "signal:{s}:timed_out:{d}",
+        .{ name, timer_id },
+    );
+}
+
+fn signalTimeoutDetail(allocator: Allocator, timer_id: TimerId) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(allocator, "timer_id={d}", .{timer_id});
+}
+
+fn signalTimeoutLabel(allocator: Allocator, name: []const u8) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(allocator, "signal:{s}:timeout", .{name});
+}
+
 const TimerReplay = struct {
     scheduled: bool = false,
     suspended: bool = false,
@@ -672,6 +889,127 @@ fn timerReplayState(
         }
     }
     return replay;
+}
+
+fn signalSuspensionExists(
+    events: []const journal_mod.WorkflowEvent,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    name: []const u8,
+) bool {
+    var suspended = false;
+    for (events) |event| {
+        if (event.workflow_id != workflow_id or event.execution_id != execution_id) continue;
+        switch (event.kind) {
+            .workflow_suspended => {
+                if (std.mem.eql(u8, event.name, name) and
+                    std.mem.eql(u8, event.redacted_detail, "signal"))
+                {
+                    suspended = true;
+                }
+            },
+            .workflow_resumed => suspended = false,
+            else => {},
+        }
+    }
+    return suspended;
+}
+
+fn consumedSignalReceivedSequence(
+    events: []const journal_mod.WorkflowEvent,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    name: []const u8,
+) !?JournalSequence {
+    var consumed_sequence: ?JournalSequence = null;
+    for (events) |event| {
+        if (event.workflow_id != workflow_id or event.execution_id != execution_id) continue;
+        if (event.kind != .signal_consumed or !std.mem.eql(u8, event.name, name)) continue;
+        if (!std.mem.eql(u8, event.status, "received")) continue;
+        consumed_sequence = parseReceivedSequence(event.redacted_detail) catch
+            return error.SignalConsumptionParseFailed;
+    }
+    return consumed_sequence;
+}
+
+fn signalTimedOut(
+    events: []const journal_mod.WorkflowEvent,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    name: []const u8,
+) bool {
+    for (events) |event| {
+        if (event.workflow_id == workflow_id and
+            event.execution_id == execution_id and
+            event.kind == .signal_consumed and
+            std.mem.eql(u8, event.name, name) and
+            std.mem.eql(u8, event.status, "timed_out"))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn firstUnconsumedSignal(
+    events: []const journal_mod.WorkflowEvent,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    name: []const u8,
+) !?journal_mod.WorkflowEvent {
+    for (events) |event| {
+        if (event.workflow_id != workflow_id or event.execution_id != execution_id) continue;
+        if (event.kind != .signal_received or !std.mem.eql(u8, event.name, name)) continue;
+        if (!try signalReceivedSequenceConsumed(events, workflow_id, execution_id, name, event.sequence)) {
+            return event;
+        }
+    }
+    return null;
+}
+
+fn signalReceivedSequenceConsumed(
+    events: []const journal_mod.WorkflowEvent,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    name: []const u8,
+    received_sequence: JournalSequence,
+) !bool {
+    for (events) |event| {
+        if (event.workflow_id != workflow_id or event.execution_id != execution_id) continue;
+        if (event.kind != .signal_consumed or !std.mem.eql(u8, event.name, name)) continue;
+        if (!std.mem.eql(u8, event.status, "received")) continue;
+        const consumed_sequence = parseReceivedSequence(event.redacted_detail) catch
+            return error.SignalConsumptionParseFailed;
+        if (consumed_sequence == received_sequence) return true;
+    }
+    return false;
+}
+
+fn findSignalReceivedBySequence(
+    events: []const journal_mod.WorkflowEvent,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    name: []const u8,
+    received_sequence: JournalSequence,
+) ?journal_mod.WorkflowEvent {
+    for (events) |event| {
+        if (event.workflow_id == workflow_id and
+            event.execution_id == execution_id and
+            event.sequence == received_sequence and
+            event.kind == .signal_received and
+            std.mem.eql(u8, event.name, name))
+        {
+            return event;
+        }
+    }
+    return null;
+}
+
+fn parseReceivedSequence(detail: []const u8) !JournalSequence {
+    const prefix = "received_sequence=";
+    if (!std.mem.startsWith(u8, detail, prefix)) return error.SignalConsumptionParseFailed;
+    return std.fmt.parseInt(JournalSequence, detail[prefix.len..], 10) catch
+        error.SignalConsumptionParseFailed;
 }
 
 fn compensationCompleted(

@@ -419,15 +419,15 @@ Goal: make human-in-the-loop and webhook-style workflows possible.
 
 Deliverables:
 
-- [ ] Add named signal definitions.
-- [ ] Add `waitForSignal`.
-- [ ] Add signal append API.
-- [ ] Add signal idempotency keys.
-- [ ] Add signal timeout support.
+- [x] Add named signal definitions.
+- [x] Add `waitForSignal`.
+- [x] Add signal append API.
+- [x] Add signal idempotency keys.
+- [x] Add signal timeout support.
 
 Acceptance:
 
-- [ ] Workflow can wait for a signal, receive it after restart, and continue.
+- [x] Workflow can wait for a signal, receive it after restart, and continue.
 
 ## Milestone 16: Durable Queue
 

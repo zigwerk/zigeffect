@@ -32,12 +32,12 @@
 - Modify `packages/zigeffect/src/workflow/root.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing definition/export tests**
+- [x] **Step 1: Write failing definition/export tests**
 
 Add tests for stable `signalId`, `Signal("approval", u64).metadata()`, payload
 type exposure, and `withTimeoutMs`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -47,12 +47,12 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until signal module exports exist.
 
-- [ ] **Step 3: Implement signal module shell**
+- [x] **Step 3: Implement signal module shell**
 
 Add signal definition metadata, timeout attachment, stable signal id, wait
 result type, and `DurableSignal.init`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -68,13 +68,13 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/context.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing wait suspension test**
+- [x] **Step 1: Write failing wait suspension test**
 
 Call `context.waitForSignal(Approval, codec)` with no received signal. Assert
 `.suspended`, `SuspensionKind.signal`, stable id, one `workflow_suspended`
 event, and no duplicate suspension on a fresh replay before receipt.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -84,12 +84,12 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until `WorkflowContext.waitForSignal` exists.
 
-- [ ] **Step 3: Implement wait pending behavior**
+- [x] **Step 3: Implement wait pending behavior**
 
 Read the current journal, detect prior consumed rows, detect unconsumed received
 rows, append signal suspension only when absent, and return `.suspended`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -106,7 +106,7 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/context.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing append/consume tests**
+- [x] **Step 1: Write failing append/consume tests**
 
 Use `DurableSignal.send(Approval, codec, payload, "operator-1")`. Assert
 `signal_received`, duplicate key returns false, `workflow_resumed` is appended
@@ -114,7 +114,7 @@ when suspended, `waitForSignal` returns decoded payload and appends
 `signal_consumed`, and replay returns the same consumed payload without
 duplicates.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -124,14 +124,14 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until append and consume APIs exist.
 
-- [ ] **Step 3: Implement append/resume and deterministic consume**
+- [x] **Step 3: Implement append/resume and deterministic consume**
 
 Encode payloads through `Codec`, derive signal idempotency keys, convert
 duplicate append keys to `false`, append `workflow_resumed` for suspended
 executions, append `signal_consumed` with `received_sequence=<n>`, and replay
 consumed rows.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -148,13 +148,13 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/signal.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing timeout tests**
+- [x] **Step 1: Write failing timeout tests**
 
 Use `Signal("approval", u64).withTimeoutMs(250)`. Assert missing signal wait
 schedules a durable timeout timer, firing it makes wait return `.timed_out`,
 and receiving the signal first cancels the timeout timer.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -164,13 +164,13 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until signal timeout handling exists.
 
-- [ ] **Step 3: Implement timeout scheduling and terminal replay**
+- [x] **Step 3: Implement timeout scheduling and terminal replay**
 
 Schedule `signal:<name>:timeout` timer rows, detect `timer_fired` as timeout,
 append timed-out `signal_consumed`, cancel pending timeout on received signal,
 and avoid stale timeout firing.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -185,13 +185,13 @@ Expected: PASS.
 **Files:**
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing file-store restart test**
+- [x] **Step 1: Write file-store restart test**
 
 Schedule a wait in `FileJournalStore`, close/reopen, append the signal, close
 reopen again, and assert wait returns the decoded payload with running replay
 state.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify compatibility**
 
 Run:
 
@@ -199,14 +199,15 @@ Run:
 cd packages/zigeffect && zig build test-raw --summary all
 ```
 
-Expected: FAIL until file-store-compatible append/wait paths are complete.
+Expected: FAIL until file-store-compatible append/wait paths are complete; PASS
+is acceptable if prior signal tasks already made all paths use `JournalStore`.
 
-- [ ] **Step 3: Fix any file-store compatibility gaps**
+- [x] **Step 3: Fix any file-store compatibility gaps**
 
 Ensure all signal operations use only the `JournalStore` interface and strict
 append sequencing.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -224,11 +225,11 @@ Expected: PASS.
 - Add `docs/superpowers/specs/2026-06-09-zigeffect-external-signals-design.md`
 - Add `docs/superpowers/plans/2026-06-09-zigeffect-external-signals.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Document `workflow/signal.zig` and `WorkflowContext.waitForSignal` ownership.
 
-- [ ] **Step 2: Run full gate**
+- [x] **Step 2: Run full gate**
 
 Run:
 
@@ -244,7 +245,7 @@ rg -n 'T''BD|TO''DO|implement la''ter|fill in de''tails|appropriate error hand''
 Expected: compile/test commands PASS, format and diff checks exit 0, and the
 placeholder scan exits 1 with no matches.
 
-- [ ] **Step 3: Mark Milestone 15 complete**
+- [x] **Step 3: Mark Milestone 15 complete**
 
 After the full gate passes, mark all Milestone 15 deliverables and acceptance
 boxes complete in

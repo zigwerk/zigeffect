@@ -231,6 +231,32 @@ test "workflow timer ids are stable by label" {
     try std.testing.expect(@hasDecl(fx.workflow, "DurableClock"));
 }
 
+test "workflow signal ids are stable by name" {
+    try std.testing.expectEqual(
+        fx.workflow.signalId("approval"),
+        fx.workflow.signalId("approval"),
+    );
+    try std.testing.expect(fx.workflow.signalId("approval") != fx.workflow.signalId("webhook"));
+    try std.testing.expect(@hasDecl(fx.workflow, "DurableSignal"));
+    try std.testing.expect(@hasDecl(fx.workflow, "SignalWaitResult"));
+}
+
+test "workflow signal definitions expose metadata and timeout" {
+    const Approval = fx.workflow.Signal("approval", u64);
+    try std.testing.expect(Approval.PayloadType == u64);
+
+    const metadata = Approval.metadata();
+    try std.testing.expectEqualStrings("approval", metadata.name);
+    try std.testing.expectEqualStrings(@typeName(u64), metadata.payload_type_name);
+    try std.testing.expectEqual(@as(?u64, null), metadata.timeout_ms);
+
+    const TimedApproval = Approval.withTimeoutMs(250);
+    const timed_metadata = TimedApproval.metadata();
+    try std.testing.expectEqualStrings("approval", timed_metadata.name);
+    try std.testing.expectEqualStrings(@typeName(u64), timed_metadata.payload_type_name);
+    try std.testing.expectEqual(@as(?u64, 250), timed_metadata.timeout_ms);
+}
+
 test "workflow replay folds lifecycle events" {
     const events = [_]fx.workflow.WorkflowEvent{
         .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8, .name = "approval" },
@@ -2038,6 +2064,404 @@ test "durable deferred external cancellation replays cancellation reasons" {
     try std.testing.expectEqual(@as(usize, 5), events.events.len);
     try std.testing.expectEqual(fx.workflow.WorkflowEventKind.deferred_cancelled, events.events[4].kind);
     try std.testing.expectEqualStrings("operator", events.events[4].redacted_detail);
+}
+
+test "workflow context waiting for a missing signal suspends durably" {
+    const Approval = fx.workflow.Signal("approval", u64);
+    const codec = fx.Codec(u64){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, value: u64) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{value});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !u64 {
+                return std.fmt.parseInt(u64, bytes, 10);
+            }
+        }.decode,
+    };
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "signal-workflow",
+        .status = "running",
+        .idempotency_key = "signal-wait",
+    } });
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const result = try context.waitForSignal(Approval, codec);
+        switch (result) {
+            .suspended => |suspension| {
+                try std.testing.expectEqual(fx.SuspensionKind.signal, suspension.kind);
+                try std.testing.expectEqual(fx.workflow.signalId("approval"), suspension.id);
+                try std.testing.expectEqualStrings("approval", suspension.label);
+            },
+            else => return error.ExpectedSignalSuspension,
+        }
+    }
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const result = try context.waitForSignal(Approval, codec);
+        switch (result) {
+            .suspended => {},
+            else => return error.ExpectedSignalSuspension,
+        }
+    }
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 2), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_suspended, events.events[1].kind);
+    try std.testing.expectEqualStrings("approval", events.events[1].name);
+    try std.testing.expectEqualStrings("waiting", events.events[1].status);
+    try std.testing.expectEqualStrings("signal", events.events[1].redacted_detail);
+}
+
+test "durable signal append resumes and wait consumes once" {
+    const Approval = fx.workflow.Signal("approval", u64);
+    const codec = fx.Codec(u64){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, value: u64) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{value});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !u64 {
+                return std.fmt.parseInt(u64, bytes, 10);
+            }
+        }.decode,
+    };
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "signal-workflow",
+        .status = "running",
+        .idempotency_key = "signal-consume",
+    } });
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const result = try context.waitForSignal(Approval, codec);
+        switch (result) {
+            .suspended => {},
+            else => return error.ExpectedSignalSuspension,
+        }
+    }
+
+    var external = fx.workflow.DurableSignal.init(std.testing.allocator, journal, 7, 8);
+    try std.testing.expect(try external.send(Approval, codec, 42, "operator-1"));
+    try std.testing.expect(!try external.send(Approval, codec, 42, "operator-1"));
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const result = try context.waitForSignal(Approval, codec);
+        switch (result) {
+            .received => |value| try std.testing.expectEqual(@as(u64, 42), value),
+            else => return error.ExpectedReceivedSignal,
+        }
+    }
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const result = try context.waitForSignal(Approval, codec);
+        switch (result) {
+            .received => |value| try std.testing.expectEqual(@as(u64, 42), value),
+            else => return error.ExpectedReceivedSignal,
+        }
+    }
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 5), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.signal_received, events.events[2].kind);
+    try std.testing.expectEqualStrings("approval", events.events[2].name);
+    try std.testing.expectEqualStrings("42", events.events[2].redacted_detail);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[3].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.signal_consumed, events.events[4].kind);
+    try std.testing.expectEqualStrings("received", events.events[4].status);
+    try std.testing.expectEqualStrings("received_sequence=3", events.events[4].redacted_detail);
+}
+
+test "workflow signal wait times out through durable timer firing" {
+    const Approval = fx.workflow.Signal("approval", u64).withTimeoutMs(250);
+    const codec = fx.Codec(u64){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, value: u64) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{value});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !u64 {
+                return std.fmt.parseInt(u64, bytes, 10);
+            }
+        }.decode,
+    };
+    var clock = fx.FakeClock.fake(1_000);
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "signal-workflow",
+        .status = "running",
+        .idempotency_key = "signal-timeout",
+    } });
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+            .clock = &clock,
+        });
+        defer context.deinit();
+
+        const result = try context.waitForSignal(Approval, codec);
+        switch (result) {
+            .suspended => {},
+            else => return error.ExpectedSignalSuspension,
+        }
+    }
+
+    var durable_clock = fx.workflow.DurableClock.init(std.testing.allocator, journal, 7, 8);
+    try std.testing.expectEqual(@as(usize, 1), try durable_clock.fireDueTimers(1_250));
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+            .clock = &clock,
+        });
+        defer context.deinit();
+
+        const result = try context.waitForSignal(Approval, codec);
+        switch (result) {
+            .timed_out => {},
+            else => return error.ExpectedSignalTimeout,
+        }
+    }
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+            .clock = &clock,
+        });
+        defer context.deinit();
+
+        const result = try context.waitForSignal(Approval, codec);
+        switch (result) {
+            .timed_out => {},
+            else => return error.ExpectedSignalTimeout,
+        }
+    }
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 6), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.timer_scheduled, events.events[1].kind);
+    try std.testing.expectEqualStrings("signal:approval:timeout", events.events[1].name);
+    try std.testing.expectEqualStrings("fire_at_ms=1250", events.events[1].redacted_detail);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_suspended, events.events[2].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.timer_fired, events.events[3].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[4].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.signal_consumed, events.events[5].kind);
+    try std.testing.expectEqualStrings("timed_out", events.events[5].status);
+}
+
+test "durable signal received before timeout cancels timeout timer" {
+    const Approval = fx.workflow.Signal("approval", u64).withTimeoutMs(250);
+    const codec = fx.Codec(u64){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, value: u64) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{value});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !u64 {
+                return std.fmt.parseInt(u64, bytes, 10);
+            }
+        }.decode,
+    };
+    var clock = fx.FakeClock.fake(1_000);
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "signal-workflow",
+        .status = "running",
+        .idempotency_key = "signal-before-timeout",
+    } });
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+            .clock = &clock,
+        });
+        defer context.deinit();
+
+        const result = try context.waitForSignal(Approval, codec);
+        switch (result) {
+            .suspended => {},
+            else => return error.ExpectedSignalSuspension,
+        }
+    }
+
+    var external = fx.workflow.DurableSignal.init(std.testing.allocator, journal, 7, 8);
+    try std.testing.expect(try external.send(Approval, codec, 42, "operator-1"));
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+            .clock = &clock,
+        });
+        defer context.deinit();
+
+        const result = try context.waitForSignal(Approval, codec);
+        switch (result) {
+            .received => |value| try std.testing.expectEqual(@as(u64, 42), value),
+            else => return error.ExpectedReceivedSignal,
+        }
+    }
+
+    var durable_clock = fx.workflow.DurableClock.init(std.testing.allocator, journal, 7, 8);
+    try std.testing.expectEqual(@as(usize, 0), try durable_clock.fireDueTimers(1_250));
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 7), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.timer_scheduled, events.events[1].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.signal_received, events.events[3].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[4].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.timer_cancelled, events.events[5].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.signal_consumed, events.events[6].kind);
+    try std.testing.expectEqualStrings("received", events.events[6].status);
+}
+
+test "durable signal wait receives after file journal reopen" {
+    const Approval = fx.workflow.Signal("approval", u64);
+    const codec = fx.Codec(u64){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, value: u64) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{value});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !u64 {
+                return std.fmt.parseInt(u64, bytes, 10);
+            }
+        }.decode,
+    };
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    {
+        var file_store = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer file_store.deinit();
+        const journal = file_store.asJournalStore();
+
+        _ = try journal.append(.{ .event = .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .name = "signal-workflow",
+            .status = "running",
+            .idempotency_key = "signal-file",
+        } });
+
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const result = try context.waitForSignal(Approval, codec);
+        switch (result) {
+            .suspended => {},
+            else => return error.ExpectedSignalSuspension,
+        }
+    }
+
+    {
+        var reopened = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer reopened.deinit();
+        const journal = reopened.asJournalStore();
+
+        var external = fx.workflow.DurableSignal.init(std.testing.allocator, journal, 7, 8);
+        try std.testing.expect(try external.send(Approval, codec, 42, "operator-1"));
+    }
+
+    {
+        var reopened = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer reopened.deinit();
+        const journal = reopened.asJournalStore();
+
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const result = try context.waitForSignal(Approval, codec);
+        switch (result) {
+            .received => |value| try std.testing.expectEqual(@as(u64, 42), value),
+            else => return error.ExpectedReceivedSignal,
+        }
+
+        var state = try journal.latestState(std.testing.allocator);
+        defer state.deinit();
+        try std.testing.expectEqual(fx.workflow.WorkflowStatus.running, state.workflow_status);
+    }
 }
 
 test "workflow context sleep schedules a durable timer and replays pending suspension" {
