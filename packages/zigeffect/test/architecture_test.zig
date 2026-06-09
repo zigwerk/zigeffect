@@ -73,3 +73,10 @@ test "root facade exposes data match pattern and trait namespaces" {
     try std.testing.expect(@hasDecl(fx, "match"));
     try std.testing.expect(@hasDecl(fx, "pattern"));
 }
+
+test "root facade exposes durable workflow and cluster namespaces" {
+    try std.testing.expect(@hasDecl(fx, "workflow"));
+    try std.testing.expect(@hasDecl(fx, "cluster"));
+    try std.testing.expectEqualStrings("workflow", fx.workflow.domain);
+    try std.testing.expectEqualStrings("cluster", fx.cluster.domain);
+}

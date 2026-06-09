@@ -16,11 +16,12 @@ packages/zigeffect/src/zigeffect.zig
 
 That file is a facade. It exports domain namespaces such as `fx.core`,
 `fx.effect`, `fx.runtime`, `fx.layer`, `fx.services`, `fx.data`, `fx.match`,
-`fx.pattern`, and `fx.traits`, while preserving the existing top-level aliases
-such as `fx.Effect`, `fx.Context`, `fx.Scope`, `fx.Runtime`, `fx.Layer`,
-`fx.Schedule`, and `fx.TestEnv`. Domain namespaces also expose ergonomic
-aliases, for example `fx.effect.Effect`, `fx.runtime.Runtime`,
-`fx.layer.Layer`, `fx.services.Logger`, and `fx.data.Option`.
+`fx.pattern`, `fx.traits`, `fx.workflow`, and `fx.cluster`, while preserving
+the existing top-level aliases such as `fx.Effect`, `fx.Context`, `fx.Scope`,
+`fx.Runtime`, `fx.Layer`, `fx.Schedule`, and `fx.TestEnv`. Domain namespaces
+also expose ergonomic aliases, for example `fx.effect.Effect`,
+`fx.runtime.Runtime`, `fx.layer.Layer`, `fx.services.Logger`, and
+`fx.data.Option`.
 
 Package users should keep importing the facade:
 
@@ -189,6 +190,34 @@ Wildcards, ranges, predicates, optionals, nested struct patterns, typed
 captures, and structural union arms belong here.
 
 ```text
+src/workflow/
+```
+
+Owns local durable workflow runtime surfaces:
+
+- `root.zig`: workflow namespace marker until the journal/event modules land.
+
+Workflow definitions, activity definitions, journal events, replay state,
+journal stores, durable timers, durable deferreds, durable queues, signals,
+lifecycle controls, inspectors, and replay helpers belong here. Workflow code
+should consume `core`, `runtime`, `effect`, `layer`, `services`, and `traits`
+contracts instead of expanding those domains with workflow-specific behavior.
+
+```text
+src/cluster/
+```
+
+Owns Erlang-style distributed runtime surfaces:
+
+- `root.zig`: cluster namespace marker until actor/shard modules land.
+
+Entity identity, actor references, message envelopes, durable message storage,
+shard ids, runner ids, runner storage, leases, rebalancing, transports,
+cluster workflow integration, and supervision across entities, shards, runners,
+and transports belong here. Cluster code should build on workflow and runtime
+contracts instead of making durable state depend on runner memory.
+
+```text
 src/testing/
 ```
 
@@ -210,6 +239,9 @@ Implementation modules follow this direction:
   helpers only when sharing an execution path.
 - `services/*` imports `std` and service-local dependencies.
 - `testing/*` may import any public domain needed to assemble test services.
+- `workflow/*` may import core, dependency, effect, runtime, layer, services,
+  traits, and data modules, but not `cluster/*`.
+- `cluster/*` may import workflow and lower-level domains.
 - No implementation module imports `src/zigeffect.zig`.
 
 When adding a feature, start in the owning domain and pull in smaller contracts

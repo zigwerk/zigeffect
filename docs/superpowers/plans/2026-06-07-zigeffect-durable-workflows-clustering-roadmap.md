@@ -176,16 +176,16 @@ Goal: create the module boundaries before behavior lands.
 
 Deliverables:
 
-- [ ] Add `src/workflow/` for local durable workflow types and engine code.
-- [ ] Add `src/cluster/` for actor, sharding, runner, and storage contracts.
-- [ ] Add facade namespaces `fx.workflow` and `fx.cluster`.
-- [ ] Add architecture docs for import direction and ownership.
-- [ ] Add empty architecture tests that enforce facade export shape.
+- [x] Add `src/workflow/` for local durable workflow types and engine code.
+- [x] Add `src/cluster/` for actor, sharding, runner, and storage contracts.
+- [x] Add facade namespaces `fx.workflow` and `fx.cluster`.
+- [x] Add architecture docs for import direction and ownership.
+- [x] Add empty architecture tests that enforce facade export shape.
 
 Acceptance:
 
-- [ ] `bun run zigeffect:test` passes.
-- [ ] Architecture docs explain what belongs in workflow vs cluster.
+- [x] `bun run zigeffect:test` passes.
+- [x] Architecture docs explain what belongs in workflow vs cluster.
 
 ## Milestone 2: Journal Event Model
 

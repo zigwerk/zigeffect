@@ -6,6 +6,8 @@ pub const traits = @import("traits/root.zig");
 pub const data = @import("data/root.zig");
 pub const match = @import("match/root.zig");
 pub const pattern = @import("pattern/root.zig");
+pub const workflow = @import("workflow/root.zig");
+pub const cluster = @import("cluster/root.zig");
 
 pub const core = struct {
     pub const result = @import("core/result.zig");
