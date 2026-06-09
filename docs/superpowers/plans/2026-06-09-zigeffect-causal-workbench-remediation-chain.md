@@ -38,7 +38,7 @@
 - Modify: `packages/zigeffect/workbench/src/causalArtifact.ts`
 - Modify: `packages/zigeffect/workbench/src/causalArtifact.test.ts`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add imports:
 
@@ -132,7 +132,7 @@ test("deriveRemediationChainModel tolerates partial chain artifacts", () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify red**
+- [x] **Step 2: Run tests to verify red**
 
 Run:
 
@@ -143,7 +143,7 @@ bun run zigeffect:workbench:test
 Expected: fail because `deriveGovernanceModel` and
 `deriveRemediationChainModel` do not exist.
 
-- [ ] **Step 3: Implement minimal model**
+- [x] **Step 3: Implement minimal model**
 
 Add exported types:
 
@@ -223,7 +223,7 @@ Generate workbench commands only for JSON paths:
 path.endsWith(".json") ? `zig build causal-workbench -- ${path}` : null
 ```
 
-- [ ] **Step 4: Run focused tests to verify green**
+- [x] **Step 4: Run focused tests to verify green**
 
 Run:
 
@@ -233,7 +233,7 @@ bun run zigeffect:workbench:test
 
 Expected: all workbench tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```sh
 git add packages/zigeffect/workbench/src/causalArtifact.ts packages/zigeffect/workbench/src/causalArtifact.test.ts
@@ -247,7 +247,7 @@ git commit -m "feat(zigeffect): derive workbench remediation chain model"
 - Modify: `packages/zigeffect/workbench/src/workbenchBridge.ts`
 - Modify: `packages/zigeffect/workbench/src/workbenchBridge.test.ts`
 
-- [ ] **Step 1: Write failing bridge test**
+- [x] **Step 1: Write failing bridge test**
 
 Add a test that installs a fake `location.search` and asserts the chain sample
 path is requested:
@@ -265,7 +265,7 @@ test("loadPayloadFromBridge can load the chain development sample", async () => 
 });
 ```
 
-- [ ] **Step 2: Run test to verify red**
+- [x] **Step 2: Run test to verify red**
 
 Run:
 
@@ -276,7 +276,7 @@ bun run zigeffect:workbench:test
 Expected: fail because the sample loader does not accept a sample name or query
 string.
 
-- [ ] **Step 3: Implement loader support**
+- [x] **Step 3: Implement loader support**
 
 Change:
 
@@ -327,7 +327,7 @@ async function loadSampleArtifact(sampleName: string): Promise<string> {
 Create `sample-chain-artifact.json` with the same fields as `sampleAuditChain`
 from Task 1.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run:
 
@@ -337,7 +337,7 @@ bun run zigeffect:workbench:test
 
 Expected: all workbench tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```sh
 git add packages/zigeffect/workbench/public/sample-chain-artifact.json packages/zigeffect/workbench/src/workbenchBridge.ts packages/zigeffect/workbench/src/workbenchBridge.test.ts
@@ -350,7 +350,7 @@ git commit -m "feat(zigeffect): add remediation chain workbench sample"
 - Modify: `packages/zigeffect/workbench/src/App.tsx`
 - Modify: `packages/zigeffect/workbench/src/styles.css`
 
-- [ ] **Step 1: Add model assertions that support UI fields**
+- [x] **Step 1: Add model assertions that support UI fields**
 
 Extend the Task 1 chain model test with:
 
@@ -371,7 +371,7 @@ bun run zigeffect:workbench:test
 Expected: fail if source commands, combined guardrails, or event id strings are
 not implemented.
 
-- [ ] **Step 2: Render Chain tab**
+- [x] **Step 2: Render Chain tab**
 
 In `App.tsx`:
 
@@ -394,7 +394,7 @@ Add `ChainView`, `ChainStatusStrip`, `ChainSources`, `ChainClassifications`,
 `ChainVerification`, and `ChainGuardrails` components. Use existing `Metric`,
 `CommandList`, and `EmptyState` helpers where they fit.
 
-- [ ] **Step 3: Add responsive styles**
+- [x] **Step 3: Add responsive styles**
 
 Add classes:
 
@@ -409,7 +409,7 @@ Add classes:
 At mobile width, collapse `.chain-status`, `.chain-grid`, and
 `.chain-classification-grid` to one column.
 
-- [ ] **Step 4: Run focused checks**
+- [x] **Step 4: Run focused checks**
 
 Run:
 
@@ -421,7 +421,7 @@ bun run zigeffect:workbench:build
 
 Expected: all pass.
 
-- [ ] **Step 5: Browser verify chain sample**
+- [x] **Step 5: Browser verify chain sample**
 
 Run:
 
@@ -438,7 +438,15 @@ Open `http://127.0.0.1:5179/?sample=chain`, switch to Chain, and verify:
 - mobile viewport has no horizontal overflow;
 - browser console has no errors.
 
-- [ ] **Step 6: Commit**
+Result: browser verification passed on 2026-06-09. The Chain tab rendered
+target `package-tests`, assessment `unchanged`, approval `approved`, and
+`applied=false`; source rows included session, audit, decision, proposal,
+before, after, and compare paths; event classifications rendered disappeared
+`#1`, persisting `#2`, appeared `#3`, and missing `#5`; mobile viewport
+`390x844` had no document or element horizontal overflow; the browser console
+had no errors.
+
+- [x] **Step 6: Commit**
 
 ```sh
 git add packages/zigeffect/workbench/src/App.tsx packages/zigeffect/workbench/src/styles.css
@@ -453,7 +461,7 @@ git commit -m "feat(zigeffect): render remediation chain workbench tab"
 - Modify: `docs/superpowers/specs/2026-06-09-zigeffect-causal-workbench-remediation-chain-design.md`
 - Modify: `docs/superpowers/plans/2026-06-09-zigeffect-causal-workbench-remediation-chain.md`
 
-- [ ] **Step 1: Update README and roadmap**
+- [x] **Step 1: Update README and roadmap**
 
 Add README text near the workbench command:
 
@@ -467,7 +475,7 @@ read-only.
 Update M6 in the master roadmap to say the graph and chain workbench branches
 exist and the next branch is app-facing runtime.
 
-- [ ] **Step 2: Run full verification**
+- [x] **Step 2: Run full verification**
 
 Run:
 
@@ -483,7 +491,9 @@ Expected:
 - `bun run zig:test` passes;
 - `git diff --check` exits zero.
 
-- [ ] **Step 3: Commit**
+Result: all three commands passed on 2026-06-09.
+
+- [x] **Step 3: Commit**
 
 ```sh
 git add packages/zigeffect/README.md docs/superpowers/specs/2026-06-08-zigeffect-causal-agent-runtime-master-roadmap.md docs/superpowers/specs/2026-06-09-zigeffect-causal-workbench-remediation-chain-design.md docs/superpowers/plans/2026-06-09-zigeffect-causal-workbench-remediation-chain.md
