@@ -12,6 +12,7 @@ pub const signal = @import("signal.zig");
 pub const queue = @import("queue.zig");
 pub const lifecycle = @import("lifecycle.zig");
 pub const inspect = @import("inspect.zig");
+pub const causal = @import("causal.zig");
 
 pub const workflow_journal_event_schema = journal.workflow_journal_event_schema;
 pub const workflow_journal_event_schema_version = journal.workflow_journal_event_schema_version;
@@ -138,3 +139,6 @@ pub const formatListReportText = inspect.formatListReportText;
 pub const formatListReportJson = inspect.formatListReportJson;
 pub const formatInspectReportText = inspect.formatInspectReportText;
 pub const formatInspectReportJson = inspect.formatInspectReportJson;
+
+pub const mapWorkflowEventToCausal = causal.mapWorkflowEventToCausal;
+pub const mapWorkflowEventsToCausal = causal.mapWorkflowEventsToCausal;

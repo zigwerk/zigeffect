@@ -791,6 +791,91 @@ test "workflow inspector formats event inspection reports" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"redacted_detail\":\"exit.cause.failure:Boom\"") != null);
 }
 
+test "workflow causal mapping links journal events to causal ids" {
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .name = "causal-workflow",
+            .status = "running",
+            .idempotency_key = "causal-start",
+        },
+        .{
+            .sequence = 2,
+            .kind = .workflow_suspended,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .parent_sequence = 1,
+            .name = "wake",
+            .status = "waiting",
+            .redacted_detail = "timer",
+            .idempotency_key = "causal-suspend",
+        },
+        .{
+            .sequence = 3,
+            .kind = .workflow_resumed,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .parent_sequence = 2,
+            .name = "wake",
+            .status = "running",
+            .redacted_detail = "timer_fired",
+            .idempotency_key = "causal-resume",
+        },
+        .{
+            .sequence = 4,
+            .kind = .activity_retry_scheduled,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .parent_sequence = 3,
+            .activity_id = 50,
+            .attempt = 2,
+            .name = "charge",
+            .status = "retry",
+            .redacted_detail = "attempt=1;delay_ms=250;reason=retry",
+            .idempotency_key = "causal-retry",
+        },
+        .{
+            .sequence = 5,
+            .kind = .workflow_failed,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .parent_sequence = 4,
+            .name = "causal-workflow",
+            .status = "failed",
+            .redacted_detail = "exit.cause.failure:Boom",
+            .idempotency_key = "causal-failed",
+        },
+    };
+
+    var mapped = try fx.workflow.mapWorkflowEventsToCausal(std.testing.allocator, &events);
+    defer mapped.deinit();
+
+    try std.testing.expectEqual(@as(usize, 5), mapped.events.len);
+    try std.testing.expectEqual(fx.CausalEventKind.workflow_event_recorded, mapped.events[0].kind);
+    try std.testing.expectEqual(@as(?u64, 7), mapped.events[0].run_id);
+    try std.testing.expectEqual(@as(?u64, 8), mapped.events[0].scope_id);
+    try std.testing.expectEqual(@as(?u64, 7), mapped.events[0].trace_id);
+    try std.testing.expectEqual(@as(?u64, 1), mapped.events[0].span_id);
+    try std.testing.expectEqual(@as(?u64, null), mapped.events[0].parent_id);
+    try std.testing.expectEqualStrings("causal-workflow", mapped.events[0].label);
+    try std.testing.expectEqualStrings("workflow.workflow_started", mapped.events[0].type_name);
+
+    try std.testing.expectEqual(@as(?u64, 1), mapped.events[1].parent_id);
+    try std.testing.expectEqual(@as(?u64, 2), mapped.events[1].span_id);
+    try std.testing.expectEqualStrings("workflow.workflow_suspended", mapped.events[1].type_name);
+    try std.testing.expectEqualStrings("waiting", mapped.events[1].status);
+
+    try std.testing.expectEqual(@as(?u64, 50), mapped.events[3].fiber_id);
+    try std.testing.expectEqualStrings("workflow.activity_retry_scheduled", mapped.events[3].type_name);
+    try std.testing.expectEqualStrings("retry", mapped.events[3].status);
+
+    try std.testing.expectEqualStrings("workflow.workflow_failed", mapped.events[4].type_name);
+    try std.testing.expectEqualStrings("exit.cause.failure:Boom", mapped.events[4].redacted_detail);
+}
+
 test "workflow replay rejects events before start and duplicate starts" {
     const before_start = [_]fx.workflow.WorkflowEvent{
         .{ .sequence = 1, .kind = .workflow_completed, .workflow_id = 7, .execution_id = 8 },

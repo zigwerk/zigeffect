@@ -57,6 +57,7 @@ pub const CausalEventKind = enum {
     metric_recorded,
     span_recorded,
     assertion_recorded,
+    workflow_event_recorded,
 };
 
 pub const CausalEventTaxonomy = struct {
@@ -82,6 +83,7 @@ pub fn causalEventTaxonomy(kind: CausalEventKind) CausalEventTaxonomy {
         .fiber_interrupted,
         .schedule_decision,
         .assertion_recorded,
+        .workflow_event_recorded,
         => .{
             .structural = true,
             .finding_evidence = true,

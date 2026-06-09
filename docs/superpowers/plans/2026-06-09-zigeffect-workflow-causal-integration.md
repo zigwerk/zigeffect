@@ -42,7 +42,7 @@
 - Modify `packages/zigeffect/src/workflow/root.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing workflow mapping test**
+- [x] **Step 1: Write failing workflow mapping test**
 
 Add `workflow causal mapping links journal events to causal ids`. Build workflow
 events for start, suspend, resume, activity retry, and failure. Assert mapped
@@ -58,7 +58,7 @@ parent_id: parent_sequence when present
 type_name: workflow.<workflow_event_kind>
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -69,7 +69,7 @@ cd packages/zigeffect && zig build test-raw --summary all
 Expected: FAIL because `workflow_event_recorded` and workflow causal mapping do
 not exist.
 
-- [ ] **Step 3: Implement event kind and mapper**
+- [x] **Step 3: Implement event kind and mapper**
 
 Add `.workflow_event_recorded` to `CausalEventKind` and classify it as
 structural, finding evidence, and not sampleable. Add:
@@ -79,7 +79,7 @@ pub fn mapWorkflowEventToCausal(event: journal_mod.WorkflowEvent) causal_mod.Cau
 pub fn mapWorkflowEventsToCausal(allocator: Allocator, events: []const journal_mod.WorkflowEvent) Allocator.Error!causal_mod.CausalSnapshot
 ```
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
