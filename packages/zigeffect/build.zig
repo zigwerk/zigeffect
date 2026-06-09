@@ -138,6 +138,21 @@ pub fn build(b: *std.Build) void {
     const causal_async_stream_backend_step = b.step("causal-async-stream-backend", "Run causal async stream backend tests");
     causal_async_stream_backend_step.dependOn(&run_causal_async_stream_backend_tests.step);
 
+    const causal_app_runtime_test_module = b.createModule(.{
+        .root_source_file = b.path("test/causal_app_runtime_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_app_runtime_test_module.addImport("zigeffect", zigeffect);
+
+    const causal_app_runtime_tests = b.addTest(.{
+        .name = "zigeffect-causal-app-runtime-tests",
+        .root_module = causal_app_runtime_test_module,
+    });
+    const run_causal_app_runtime_tests = b.addRunArtifact(causal_app_runtime_tests);
+    const causal_app_runtime_step = b.step("causal-app-runtime", "Run causal app-facing runtime adapter tests");
+    causal_app_runtime_step.dependOn(&run_causal_app_runtime_tests.step);
+
     const readiness_example_module = b.createModule(.{
         .root_source_file = b.path("examples/readiness.zig"),
         .target = target,
@@ -449,6 +464,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_causal_graph_history_backend_tests.step);
     test_step.dependOn(&run_causal_nendb_storage_backend_tests.step);
     test_step.dependOn(&run_causal_async_stream_backend_tests.step);
+    test_step.dependOn(&run_causal_app_runtime_tests.step);
     const causal_dev_test_step = b.step("causal-dev-test", "Run zigeffect tests with causal failure capture");
     causal_dev_test_step.dependOn(&run_causal_package_test_tool.step);
 

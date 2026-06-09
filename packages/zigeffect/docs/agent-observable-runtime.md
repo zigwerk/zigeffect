@@ -991,6 +991,16 @@ findings, relationships, query commands, metadata, and selected event details,
 but it cannot apply patches, update the registry, approve policy decisions, or
 write remediation artifacts.
 
+The first M7 app-facing adapter is `CausalAppTrace`. It wraps a caller-owned
+`CausalStore` and maps request/job lifecycle facts onto existing causal event
+kinds: `run_started`, `run_completed`, `service_required`, `layer_completed`,
+`scope_opened`, `resource_acquired`, `resource_finalized`, `fiber_started`,
+`fiber_joined`, `schedule_decision`, and `assertion_recorded`. Request paths
+should initialize stores with `defaultRequestCausalStoreOptions`; background
+jobs should use `defaultJobCausalStoreOptions`. Both defaults bound memory and
+event string length, and both export standard `zigeffect.causal.v1` JSON for
+the existing query, advice, diagnosis, and SolidJS workbench tools.
+
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around
 those pieces. The no-scenario form captures before/after dogfood evidence and

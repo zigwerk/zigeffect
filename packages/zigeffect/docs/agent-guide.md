@@ -625,6 +625,29 @@ and read-only: no source edits, registry edits, policy decisions, or
 remediation writes happen through the UI. Use copied `causal-query` commands as
 explicit follow-up evidence, not as implied approval.
 
+For app-facing request and job traces, use the M7 adapter rather than inventing
+new app log schemas. Start with a bounded store, record semantic app lifecycle
+facts, export normal causal JSON, then inspect the artifact through the same
+workbench and `causal-query` flow:
+
+```zig
+var store = fx.CausalStore.initWithOptions(allocator, fx.defaultRequestCausalStoreOptions());
+var trace = try fx.CausalAppTrace.startRequest(&store, .{
+    .method = "GET",
+    .route = "/api/projects/:id",
+    .runtime = "worker",
+});
+try trace.recordServiceResolution("ProjectService", "satisfied");
+try trace.recordConfigFailure("readiness.region", "MissingConfig");
+try trace.complete(.failure);
+const json = try fx.formatCausalJson(allocator, &store);
+```
+
+Keep labels semantic and bounded: route templates, service names, job names,
+config keys, and requirement names are useful; raw URLs, headers, cookies,
+bodies, rows, and user identifiers are not. The store still redacts and bounds
+event strings before retention and JSON export.
+
 For normal core-runtime development, prefer the coordinated session command:
 
 ```sh

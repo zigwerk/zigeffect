@@ -159,6 +159,34 @@ cannot be opened, the launcher falls back to a local WebUI server URL;
 `--server-only` starts that local read-only server directly for agent/browser
 inspection.
 
+Record app-facing request or background-job incidents with the same causal
+runtime vocabulary:
+
+```zig
+var store = fx.CausalStore.initWithOptions(
+    allocator,
+    fx.defaultRequestCausalStoreOptions(),
+);
+defer store.deinit();
+
+var trace = try fx.CausalAppTrace.startRequest(&store, .{
+    .method = "GET",
+    .route = "/api/projects/:id",
+    .runtime = "worker",
+});
+try trace.recordServiceResolution("ProjectService", "satisfied");
+try trace.complete(.success);
+
+const json = try fx.formatCausalJson(allocator, &store);
+defer allocator.free(json);
+```
+
+`defaultRequestCausalStoreOptions` keeps request traces bounded at 256 events
+and 256 bytes per event string; `defaultJobCausalStoreOptions` uses a 1024-event
+budget for background jobs. The adapter emits normal `zigeffect.causal.v1`
+events, so app artifacts can be opened in the same SolidJS `zig-webui`
+workbench and queried with the existing causal tools.
+
 Print the causal artifact retention manifest for agents and CI:
 
 ```bash

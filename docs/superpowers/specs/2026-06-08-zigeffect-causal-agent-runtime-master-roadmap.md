@@ -432,6 +432,13 @@ Deliverables:
   stays Worker-compatible.
 - Redaction and bounded-memory defaults suitable for request paths.
 
+Current foundation branch:
+
+- `codex/zigeffect-app-facing-causal-runtime` adds the first
+  `CausalAppTrace` request/job adapter. It records app lifecycle facts into the
+  existing `CausalStore`, preserves `zigeffect.causal.v1` artifact
+  compatibility, and keeps SolidJS plus `zig-webui` as the inspection surface.
+
 Exit criteria:
 
 - Agents can reason about app incidents using the same event ids, query
@@ -605,17 +612,22 @@ Status values:
 | M3 Production hardening | delivered | bounded store, broader redaction, sampling, taxonomy, schema/taxonomy compatibility fixtures, and artifact string-size limits delivered | move to M4 backend conformance |
 | M4 Backend adapters | delivered | backend boundary, conformance suite, JSONL sink, polished DOT backend, OTel bridge, graph-history adapter, NenDB storage writer contract, and async stream adapter exist | move to M5 snapshot manifests |
 | M5 Replay/snapshots | delivered | snapshot manifest schema/tool, named snapshot compare, replay-feasibility reports, deterministic registered-scenario replay, and safe scenario fork proposals exist | move to M6 read-only workbench |
-| M6 Workbench UI | active | SolidJS renderer, `causal-workbench-ui`, `zig-webui` launcher, graph cause-path/runtime-lane branch, and remediation-chain branch `codex/zigeffect-causal-workbench-remediation-chain` exist | finish chain verification/docs, then move to M7 app-facing runtime |
-| M7 App-facing runtime | planned | core causal vocabulary exists | design request/job adapters |
-| M8 App remediation gates | deferred | app-facing runtime not started | wait for M7 |
+| M6 Workbench UI | delivered | SolidJS renderer, `causal-workbench-ui`, `zig-webui` launcher, graph cause-path/runtime-lane branch, and remediation-chain branch `codex/zigeffect-causal-workbench-remediation-chain` exist | move to M7 app-facing runtime |
+| M7 App-facing runtime | active | `CausalAppTrace` request/job foundation exists on branch `codex/zigeffect-app-facing-causal-runtime` | add app incident examples and mapping polish |
+| M8 App remediation gates | deferred | app-facing runtime foundation is starting | wait for app incident examples |
 | M9 Operating model | deferred | schema/versioning docs partial | consolidate after M4-M8 |
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-causal-workbench-remediation-chain`
-   - Finish remediation/audit-chain visualization and multi-artifact comparison entry points.
-2. `codex/zigeffect-app-facing-causal-runtime`
-   - Design request/job adapters and app-facing causal vocabulary after the workbench can inspect artifacts.
+1. `codex/zigeffect-app-facing-causal-runtime`
+   - Deliver the first request/job app trace adapter with bounded defaults and
+     workbench-compatible causal JSON.
+2. `codex/zigeffect-app-causal-example`
+   - Add a small Worker-compatible sample or Yachdee platform path that exports
+     app incidents without Bun-only request-path APIs.
+3. `codex/zigeffect-app-incident-mapping`
+   - Polish app incident categories and advice/diagnosis affordances after real
+     examples exist.
 
 ## Risks And Controls
 
