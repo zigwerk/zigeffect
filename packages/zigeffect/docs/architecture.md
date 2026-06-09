@@ -332,6 +332,9 @@ Owns Erlang-style distributed runtime surfaces:
 - `runner_storage.zig`: runner storage contract, shard lease metadata,
   in-memory lease table, file-backed per-shard lease files, and local atomic
   acquire/refresh/release operations.
+- `shard_lease.zig`: local shard lease manager with bounded TTLs, refresh
+  cadence, owned-lease tracking, graceful handoff, dead-runner recovery, and
+  causal shard ownership events.
 
 Entity identity, actor references, message envelopes, durable message storage,
 shard ids, runner ids, runner storage, leases, rebalancing, transports,

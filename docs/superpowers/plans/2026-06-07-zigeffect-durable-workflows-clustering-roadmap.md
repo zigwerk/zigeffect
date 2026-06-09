@@ -666,15 +666,15 @@ Goal: let runners own shards safely for bounded time.
 
 Deliverables:
 
-- [ ] Add lease duration and refresh cadence.
-- [ ] Add expired lease acquisition.
-- [ ] Add graceful shard handoff.
-- [ ] Add forced recovery after runner death.
-- [ ] Add causal events for shard ownership.
+- [x] Add lease duration and refresh cadence.
+- [x] Add expired lease acquisition.
+- [x] Add graceful shard handoff.
+- [x] Add forced recovery after runner death.
+- [x] Add causal events for shard ownership.
 
 Acceptance:
 
-- [ ] Tests simulate runner death and shard reacquisition.
+- [x] Tests simulate runner death and shard reacquisition.
 
 ## Milestone 31: Message Storage
 

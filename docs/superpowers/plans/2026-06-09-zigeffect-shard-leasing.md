@@ -31,7 +31,7 @@
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 - Modify: `packages/zigeffect/test/all_test.zig`
 
-- [ ] **Step 1: Write failing public export and cadence tests**
+- [x] **Step 1: Write failing public export and cadence tests**
 
 Create `packages/zigeffect/test/shard_lease_test.zig`:
 
@@ -99,7 +99,7 @@ Add this import to `packages/zigeffect/test/all_test.zig`:
     _ = @import("shard_lease_test.zig");
 ```
 
-- [ ] **Step 2: Run the red test**
+- [x] **Step 2: Run the red test**
 
 Run:
 
@@ -111,7 +111,7 @@ Expected: FAIL with missing `LocalShardLeaseManager` or `shardLeaseRefreshDue`.
 Use `zig build test-raw` from `packages/zigeffect` if the causal wrapper hides
 the compile error.
 
-- [ ] **Step 3: Implement minimal public surface and cadence helpers**
+- [x] **Step 3: Implement minimal public surface and cadence helpers**
 
 Create `packages/zigeffect/src/cluster/shard_lease.zig` with:
 
@@ -178,7 +178,7 @@ pub fn shardLeaseRefreshDue(lease: ShardLease, options: ShardLeaseManagerOptions
 
 Export the module and aliases from `cluster/root.zig` and `zigeffect.zig`.
 
-- [ ] **Step 4: Run green checks**
+- [x] **Step 4: Run green checks**
 
 Run:
 
@@ -190,7 +190,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Commit public surface**
+- [x] **Step 5: Commit public surface**
 
 ```bash
 git add packages/zigeffect/src/cluster/shard_lease.zig packages/zigeffect/src/cluster/root.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/test/shard_lease_test.zig packages/zigeffect/test/all_test.zig
@@ -206,7 +206,7 @@ git commit -m "feat(zigeffect): add shard lease manager surface"
 - Modify: `packages/zigeffect/src/cluster/root.zig`
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 
-- [ ] **Step 1: Add failing acquire, refresh, and causal tests**
+- [x] **Step 1: Add failing acquire, refresh, and causal tests**
 
 Append:
 
@@ -282,7 +282,7 @@ fn snapshotHasKind(snapshot: fx.CausalSnapshot, kind: fx.CausalEventKind) bool {
 }
 ```
 
-- [ ] **Step 2: Run the red test**
+- [x] **Step 2: Run the red test**
 
 Run:
 
@@ -292,7 +292,7 @@ bun run zigeffect:test
 
 Expected: FAIL on missing manager methods and missing causal event kinds.
 
-- [ ] **Step 3: Implement acquire, refresh, owned lease tracking, and causal event kinds**
+- [x] **Step 3: Implement acquire, refresh, owned lease tracking, and causal event kinds**
 
 Add causal enum variants to `CausalEventKind` and the structural taxonomy:
 
@@ -321,7 +321,7 @@ pub fn ownedLeases(self: *const LocalShardLeaseManager, allocator: Allocator) Al
 `recordCausal` should allocate a label like `shard-{d}` and a redacted detail
 with shard id, owner ids, version, and expiration, then call `CausalStore.record`.
 
-- [ ] **Step 4: Run green checks**
+- [x] **Step 4: Run green checks**
 
 Run:
 
@@ -333,7 +333,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Commit acquire and refresh**
+- [x] **Step 5: Commit acquire and refresh**
 
 ```bash
 git add packages/zigeffect/src/cluster/shard_lease.zig packages/zigeffect/src/services/causal.zig packages/zigeffect/src/cluster/root.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/test/shard_lease_test.zig
@@ -346,7 +346,7 @@ git commit -m "feat(zigeffect): acquire and refresh shard leases"
 - Modify: `packages/zigeffect/test/shard_lease_test.zig`
 - Modify: `packages/zigeffect/src/cluster/shard_lease.zig`
 
-- [ ] **Step 1: Add failing expired reacquire and handoff tests**
+- [x] **Step 1: Add failing expired reacquire and handoff tests**
 
 Append:
 
@@ -410,7 +410,7 @@ test "shard lease manager gracefully hands off owned shards" {
 }
 ```
 
-- [ ] **Step 2: Run the red test**
+- [x] **Step 2: Run the red test**
 
 Run:
 
@@ -421,7 +421,7 @@ bun run zigeffect:test
 Expected: FAIL on missing expired reacquire behavior, `releaseShard`, or
 `handoffShard`.
 
-- [ ] **Step 3: Implement expired reacquire, release, and handoff**
+- [x] **Step 3: Implement expired reacquire, release, and handoff**
 
 Implement:
 
@@ -436,7 +436,7 @@ On successful reacquire, replace the owned lease and increment `reacquired`.
 On `LeaseConflict`, remove the local owned lease, increment `conflicts`, record a
 conflict event, and continue.
 
-- [ ] **Step 4: Run green checks**
+- [x] **Step 4: Run green checks**
 
 Run:
 
@@ -448,7 +448,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Commit handoff and expired reacquire**
+- [x] **Step 5: Commit handoff and expired reacquire**
 
 ```bash
 git add packages/zigeffect/src/cluster/shard_lease.zig packages/zigeffect/test/shard_lease_test.zig
@@ -461,7 +461,7 @@ git commit -m "feat(zigeffect): hand off and reacquire shard leases"
 - Modify: `packages/zigeffect/test/shard_lease_test.zig`
 - Modify: `packages/zigeffect/src/cluster/shard_lease.zig`
 
-- [ ] **Step 1: Add failing runner death recovery tests**
+- [x] **Step 1: Add failing runner death recovery tests**
 
 Append:
 
@@ -530,7 +530,7 @@ test "shard lease recovery releases dead runner leases for survivor reacquisitio
 }
 ```
 
-- [ ] **Step 2: Run the red test**
+- [x] **Step 2: Run the red test**
 
 Run:
 
@@ -540,7 +540,7 @@ bun run zigeffect:test
 
 Expected: FAIL on missing `recoverDeadRunner`.
 
-- [ ] **Step 3: Implement runner death recovery**
+- [x] **Step 3: Implement runner death recovery**
 
 Implement:
 
@@ -559,7 +559,7 @@ the resulting state is `.unhealthy` or `.stopped`. Record recovery started,
 call `storage.releaseAll(dead_runner)`, record recovery completed, and return
 the release count.
 
-- [ ] **Step 4: Run green checks**
+- [x] **Step 4: Run green checks**
 
 Run:
 
@@ -571,7 +571,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Commit runner death recovery**
+- [x] **Step 5: Commit runner death recovery**
 
 ```bash
 git add packages/zigeffect/src/cluster/shard_lease.zig packages/zigeffect/test/shard_lease_test.zig
@@ -585,7 +585,7 @@ git commit -m "feat(zigeffect): recover shard leases after runner death"
 - Modify: `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`
 - Modify: `docs/superpowers/plans/2026-06-09-zigeffect-shard-leasing.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Add this bullet in the `src/cluster/` section:
 
@@ -595,18 +595,18 @@ Add this bullet in the `src/cluster/` section:
   causal shard ownership events.
 ```
 
-- [ ] **Step 2: Mark Milestone 30 complete in the roadmap**
+- [x] **Step 2: Mark Milestone 30 complete in the roadmap**
 
 Change every Milestone 30 deliverable and acceptance checkbox from `[ ]` to
 `[x]`.
 
-- [ ] **Step 3: Mark this implementation plan complete**
+- [x] **Step 3: Mark this implementation plan complete**
 
 Change each task checkbox in
 `docs/superpowers/plans/2026-06-09-zigeffect-shard-leasing.md` from `[ ]` to
 `[x]`.
 
-- [ ] **Step 4: Run the full Milestone 30 verification gate**
+- [x] **Step 4: Run the full Milestone 30 verification gate**
 
 Run:
 
@@ -623,7 +623,7 @@ Run `zig build examples` from `packages/zigeffect`. Run the other commands from
 the repository root. Expected: build/test/format/diff commands exit 0. The
 placeholder scan exits 1 with no matches.
 
-- [ ] **Step 5: Commit docs and roadmap**
+- [x] **Step 5: Commit docs and roadmap**
 
 ```bash
 git add packages/zigeffect/docs/architecture.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md docs/superpowers/plans/2026-06-09-zigeffect-shard-leasing.md
