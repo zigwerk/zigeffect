@@ -618,15 +618,15 @@ Goal: map entity ids to shard ids deterministically.
 
 Deliverables:
 
-- [ ] Add `ShardId`.
-- [ ] Add configurable shard count.
-- [ ] Add stable hash function for entity ids.
-- [ ] Add shard routing table.
-- [ ] Add local single-runner routing.
+- [x] Add `ShardId`.
+- [x] Add configurable shard count.
+- [x] Add stable hash function for entity ids.
+- [x] Add shard routing table.
+- [x] Add local single-runner routing.
 
 Acceptance:
 
-- [ ] Routing stays stable across restart and shard table reload.
+- [x] Routing stays stable across restart and shard table reload.
 
 ## Milestone 28: Runner Identity And Health
 

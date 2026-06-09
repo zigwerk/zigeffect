@@ -368,7 +368,7 @@ bun run zigeffect:test
 
 Expected: PASS.
 
-- [ ] **Step 3: Commit routing table implementation and tests**
+- [x] **Step 3: Commit routing table implementation and tests**
 
 ```bash
 git add packages/zigeffect/test/routing_test.zig packages/zigeffect/src/cluster/routing.zig
@@ -381,7 +381,7 @@ git commit -m "feat(zigeffect): add local shard routing table"
 - Modify: `packages/zigeffect/docs/architecture.md`
 - Modify: `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Add this bullet in the `src/cluster/` section:
 
@@ -391,12 +391,12 @@ Add this bullet in the `src/cluster/` section:
   snapshot/reload helpers for restart-stable routing.
 ```
 
-- [ ] **Step 2: Mark Milestone 27 complete in the roadmap**
+- [x] **Step 2: Mark Milestone 27 complete in the roadmap**
 
 Change every Milestone 27 deliverable and acceptance checkbox from `[ ]` to
 `[x]`.
 
-- [ ] **Step 3: Run the full Milestone 27 verification gate**
+- [x] **Step 3: Run the full Milestone 27 verification gate**
 
 Run:
 
@@ -412,7 +412,7 @@ rg -n 'TO''DO|TB''D|implement'' later|fill'' in' packages/zigeffect/src/cluster 
 Expected: the build/test/format/diff commands exit 0. The `rg` placeholder scan
 exits 1 with no matches.
 
-- [ ] **Step 4: Commit docs and roadmap**
+- [x] **Step 4: Commit docs and roadmap**
 
 ```bash
 git add packages/zigeffect/docs/architecture.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md
