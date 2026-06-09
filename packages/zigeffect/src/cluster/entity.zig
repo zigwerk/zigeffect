@@ -326,6 +326,7 @@ pub const LocalEntityRuntime = struct {
         for (self.entities.items) |*instance| {
             if (instance.status != .running and instance.status != .idle) continue;
             const timeout = instance.idle_timeout_ms orelse continue;
+            if (self.mailbox.pendingCount(instance.address) > 0) continue;
             if (now_ms < instance.last_active_ms + timeout) continue;
             instance.status = .stopped;
             instance.scope.close(.success);

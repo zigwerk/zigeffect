@@ -214,3 +214,21 @@ test "interrupt envelope marks entity interrupted and closes scope" {
     try std.testing.expectEqual(fx.EntityEnvelopeKind.interrupt, result.envelope.kind);
     try std.testing.expectEqual(fx.EntityStatus.interrupted, try runtime.status(address));
 }
+
+test "idle shutdown only stops entities with empty expired mailboxes" {
+    var runtime = fx.LocalEntityRuntime.init(std.testing.allocator, .{});
+    defer runtime.deinit();
+
+    const idle = fx.entityAddress("counter", "idle");
+    const busy = fx.entityAddress("counter", "busy");
+    const ref_idle = try runtime.registerEntity(.{ .address = idle, .name = "idle", .idle_timeout_ms = 100 }, 1_000);
+    const ref_busy = try runtime.registerEntity(.{ .address = busy, .name = "busy", .idle_timeout_ms = 100 }, 1_000);
+
+    const queued = try ref_busy.tell("text", "work", "queued");
+    defer fx.deinitEntityEnvelope(std.testing.allocator, queued);
+    _ = ref_idle;
+
+    runtime.shutdownIdle(1_101);
+    try std.testing.expectEqual(fx.EntityStatus.stopped, try runtime.status(idle));
+    try std.testing.expectEqual(fx.EntityStatus.running, try runtime.status(busy));
+}
