@@ -15,6 +15,7 @@ pub const RuntimeSubsystem = enum {
     fiber_runtime,
     schedule_retry,
     observability,
+    workflow_runtime,
     package,
 };
 
@@ -29,6 +30,7 @@ pub const CausalCoverageDomain = enum {
     retry,
     cause,
     observability,
+    workflow,
 };
 
 pub const ExpectedFindingsPolicy = enum {
@@ -193,6 +195,16 @@ const causal_readiness_argv: []const []const u8 = &.{
     ".zig-cache/causal-run-global-cache",
 };
 
+const workflow_crash_recovery_argv: []const []const u8 = &.{
+    "zig",
+    "build",
+    "--cache-dir",
+    ".zig-cache/causal-run-workflow-crash-recovery-cache",
+    "--global-cache-dir",
+    ".zig-cache/causal-run-global-cache",
+    "causal-test",
+};
+
 const missing_service_invariants: []const []const u8 = &.{
     "command-failure-is-causal-evidence",
     "service-requirement-has-provider",
@@ -224,6 +236,10 @@ const readiness_invariants: []const []const u8 = &.{
     "service-requirement-has-provider",
     "resource-finalized-after-acquire",
     "observability-events-are-sampleable",
+};
+
+const workflow_crash_recovery_invariants: []const []const u8 = &.{
+    "workflow-crash-recovery-preserves-durable-evidence",
 };
 
 const missing_service_domains: []const CausalCoverageDomain = &.{.service};
@@ -258,6 +274,12 @@ const readiness_domains: []const CausalCoverageDomain = &.{
     .resource,
     .cause,
     .observability,
+};
+
+const workflow_crash_recovery_domains: []const CausalCoverageDomain = &.{
+    .workflow,
+    .cause,
+    .retry,
 };
 
 const scenario_registry: []const Scenario = &.{
@@ -349,6 +371,17 @@ const scenario_registry: []const Scenario = &.{
         .coverage_domains = readiness_domains,
         .argv = causal_readiness_argv,
     },
+    .{
+        .slug = "workflow-crash-recovery",
+        .label = "Workflow Crash Recovery",
+        .expectation = .expected_pass,
+        .owner = .workflow_runtime,
+        .purpose = "verify durable workflow crash recovery emits workflow causal artifacts and findings",
+        .finding_policy = .failure_artifact_on_command_failure,
+        .invariant_ids = workflow_crash_recovery_invariants,
+        .coverage_domains = workflow_crash_recovery_domains,
+        .argv = workflow_crash_recovery_argv,
+    },
 };
 
 const invariant_catalog: []const Invariant = &.{
@@ -407,6 +440,13 @@ const invariant_catalog: []const Invariant = &.{
         .finding_kind = null,
         .rule = "Log, metric, and span causal events are sampleable observability evidence, not finding evidence.",
         .detection_query = "causal.lineage {event_id}",
+    },
+    .{
+        .id = "workflow-crash-recovery-preserves-durable-evidence",
+        .subsystem = .workflow_runtime,
+        .finding_kind = null,
+        .rule = "Workflow journal replay must preserve suspend, resume, retry, and failure evidence in causal artifacts.",
+        .detection_query = "causal.workflow-findings {run_id}",
     },
 };
 
@@ -848,6 +888,22 @@ test "causal readiness scenario is registered for observability coverage" {
     try std.testing.expect(scenarioHasDomain(scenario, .layer));
     try std.testing.expect(scenarioHasDomain(scenario, .config));
     try std.testing.expect(argvContains(scenario.argv, "-Mroot=examples/causal_readiness.zig"));
+}
+
+test "workflow crash recovery scenario is registered for durable workflow coverage" {
+    const scenario = try scenarioByName("workflow-crash-recovery");
+
+    try std.testing.expectEqual(RuntimeSubsystem.workflow_runtime, scenario.owner);
+    try std.testing.expectEqual(Expectation.expected_pass, scenario.expectation);
+    try std.testing.expect(scenarioHasDomain(scenario, .workflow));
+    try std.testing.expect(argvContains(scenario.argv, "causal-test"));
+
+    const paths = try artifactPaths(std.testing.allocator, scenario.slug);
+    defer paths.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-workflow-crash-recovery.json",
+        paths.json_path,
+    );
 }
 
 test "scenario invariant references resolve" {

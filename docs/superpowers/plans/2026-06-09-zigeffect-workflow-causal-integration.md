@@ -197,7 +197,7 @@ Expected: PASS.
 - Modify `packages/zigeffect/tools/causal_run.zig` if the scenario registry
   needs a new entry.
 
-- [ ] **Step 1: Write failing dogfood tests**
+- [x] **Step 1: Write failing dogfood tests**
 
 Add tests that build workflow crash-recovery artifacts and assert:
 
@@ -206,7 +206,7 @@ Add tests that build workflow crash-recovery artifacts and assert:
 - DOT contains `workflow.workflow_suspended` and `workflow.workflow_resumed`;
 - causal findings mention workflow failure and retry evidence.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -216,14 +216,14 @@ cd packages/zigeffect && zig build examples --summary all
 
 Expected: FAIL because workflow dogfood artifacts are not implemented.
 
-- [ ] **Step 3: Implement dogfood scenario**
+- [x] **Step 3: Implement dogfood scenario**
 
 Build deterministic workflow journal rows in the tool, map them through
 `formatWorkflowCausalReport`, `formatWorkflowCausalJson`, and
 `formatWorkflowCausalDot`, and expose them through the causal artifact manifest
 or scenario registry with the slug `workflow-crash-recovery`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
