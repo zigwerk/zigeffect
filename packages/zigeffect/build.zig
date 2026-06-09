@@ -518,6 +518,19 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_artifacts_tool_tests = b.addRunArtifact(causal_artifacts_tool_tests);
 
+    const causal_workbench_session_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_workbench_session.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_workbench_session_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-workbench-session-tests",
+        .root_module = causal_workbench_session_tool_module,
+    });
+    const run_causal_workbench_session_tool_tests = b.addRunArtifact(causal_workbench_session_tool_tests);
+    test_step.dependOn(&run_causal_workbench_session_tool_tests.step);
+
     const causal_verdict_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_verdict.zig"),
         .target = target,
@@ -904,6 +917,7 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_test_matrix_tool_tests.step);
     examples_step.dependOn(&causal_artifacts_tool.step);
     examples_step.dependOn(&run_causal_artifacts_tool_tests.step);
+    examples_step.dependOn(&run_causal_workbench_session_tool_tests.step);
     examples_step.dependOn(&run_causal_verdict_tool_tests.step);
     examples_step.dependOn(&causal_dev_agent_tool.step);
     examples_step.dependOn(&run_causal_dev_agent_tool_tests.step);
