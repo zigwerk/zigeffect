@@ -482,6 +482,13 @@ parsing legacy event-only artifacts so saved evidence remains useful. Query,
 compare, and development-loop query reports warn when an artifact's taxonomy
 version is newer than the tool understands.
 
+For schemas beyond core causal JSON, use `zig build causal-schema-governance`
+as the authoritative compatibility matrix. It records each official artifact
+family, current version, producer, consumer, compatibility posture, migration
+policy, and new-schema checklist. Update that registry and
+`docs/schema-governance.md` before changing artifact fields or adding a
+user-facing workbench mapping.
+
 Bounded stores are opt-in through `CausalStore.initBounded(allocator,
 max_events)`. Retention applies to the in-memory store, not attached backends.
 Queries operate on retained events only, so `dropped_events` is the signal that

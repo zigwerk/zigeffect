@@ -370,6 +370,8 @@ manually opening many text artifacts.
 Deliverables:
 
 - SolidJS workbench renderer built with Bun/Vite.
+- Preferred frontend path: SolidJS plus `webui-dev/zig-webui`; React remains a
+  future adapter option only for a specific integration need.
 - Zig WebUI launcher:
   - `zig build causal-workbench -- <artifact.json>`.
 - UI build step:
@@ -543,7 +545,6 @@ Exit criteria:
 Recommended branches:
 
 ```text
-codex/zigeffect-causal-schema-governance
 codex/zigeffect-causal-operations-docs
 codex/zigeffect-causal-performance-budget
 ```
@@ -634,16 +635,16 @@ Status values:
 | M6 Workbench UI | delivered | SolidJS renderer, `causal-workbench-ui`, `zig-webui` launcher, graph cause-path/runtime-lane branch, and remediation-chain branch `codex/zigeffect-causal-workbench-remediation-chain` exist | move to M7 app-facing runtime |
 | M7 App-facing runtime | delivered | `CausalAppTrace`, Worker-shaped app request example, app incident classifier, and app-specific advice/diagnosis mappings exist | move to M8 app remediation audit |
 | M8 App remediation gates | delivered | app remediation audit artifacts, app policy gate decisions, app human-review boundary artifacts, draft app patch proposal artifacts, app application readiness artifacts, guarded app application records, and detailed SolidJS/zig-webui workbench rendering exist | move to M9 production operating model |
-| M9 Operating model | deferred | schema/versioning docs partial | consolidate after M4-M8 |
+| M9 Operating model | active | schema governance report and policy docs exist; operations docs, performance budget, and release template remain | move to operations docs |
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-causal-schema-governance`
-   - Consolidate stable schema/versioning rules, artifact compatibility checks,
-     and naming conventions before deeper operating-model automation.
-2. `codex/zigeffect-causal-operations-docs`
+1. `codex/zigeffect-causal-operations-docs`
    - Document local CI artifact retention, branch handoff, human review, and
      record-only application procedures for day-to-day zigeffect development.
+2. `codex/zigeffect-causal-performance-budget`
+   - Add measurable causal instrumentation overhead budgets and release-note
+     guidance before declaring the operating model production-grade.
 
 ## Risks And Controls
 

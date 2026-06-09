@@ -617,13 +617,16 @@ metrics, and traces.
   writes guarded app application artifacts. `applied=true` is possible only
   after ready readiness, category-specific change evidence, before/after
   evidence, and post-application verification evidence are recorded.
+- Delivered: `zig build causal-schema-governance` prints the authoritative
+  causal artifact schema/version matrix with compatibility posture, producer,
+  consumer, migration policy, and new-schema checklist.
 - Still future: production-grade app-facing integrations, durable history
   hardening, and comparing arbitrary named audit-chain snapshots.
 - Still future: deeper runtime regression scenarios for partial config and
   cause coverage.
-- Leave room for a future causal workbench that visualizes effect runs, scope
-  trees, fiber trees, layer graphs, retry timelines, resource ownership, and
-  cause trees.
+- Extend the SolidJS `zig-webui` causal workbench when future UI branches need
+  richer effect-run, scope-tree, fiber-tree, layer-graph, retry-timeline,
+  resource-ownership, and cause-tree views.
 - Keep remediation controlled: agents may propose retries, graph restarts,
   provider replacement, config-layer replacement, fiber interruption, or
   deterministic replay, but arbitrary runtime memory mutation is out of scope.

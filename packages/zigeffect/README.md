@@ -137,6 +137,19 @@ zig build causal-test
 The harness writes a text report, JSON event snapshot, and DOT graph under
 `.zig-cache/causal-artifacts/`.
 
+Print the causal schema governance report:
+
+```bash
+cd packages/zigeffect
+zig build causal-schema-governance
+zig build causal-schema-governance -- --format json
+```
+
+The report lists every official causal artifact schema, current version,
+producer, consumer, compatibility posture, and schema-change checklist. Treat it
+as the first stop before adding or changing causal artifact fields. The full
+policy is in [docs/schema-governance.md](docs/schema-governance.md).
+
 Open the read-only SolidJS causal workbench for a saved artifact:
 
 ```bash

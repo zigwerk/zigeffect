@@ -371,6 +371,12 @@ Causal JSON artifacts are self-identifying:
 The query, compare, and development-loop tools still accept older artifacts
 that only contain `events`.
 
+Before changing any causal artifact schema, run
+`zig build causal-schema-governance` and update the registry, docs, and
+compatibility tests with the schema change. Do not infer schema compatibility
+from string search alone; test fixtures intentionally include fake schema names
+that are not official artifact families.
+
 For longer-running local or CI probes, use a bounded store:
 
 ```zig

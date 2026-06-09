@@ -640,6 +640,29 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_artifacts_tool_tests = b.addRunArtifact(causal_artifacts_tool_tests);
 
+    const causal_schema_governance_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_schema_governance.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_schema_governance_tool_module.addImport("causal_artifact", causal_artifact_tool_module);
+
+    const causal_schema_governance_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-schema-governance",
+        .root_module = causal_schema_governance_tool_module,
+    });
+    const run_causal_schema_governance_tool = b.addRunArtifact(causal_schema_governance_tool);
+    if (b.args) |args| run_causal_schema_governance_tool.addArgs(args);
+    const causal_schema_governance_step = b.step("causal-schema-governance", "Print causal artifact schema/version governance report");
+    causal_schema_governance_step.dependOn(&run_causal_schema_governance_tool.step);
+
+    const causal_schema_governance_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-schema-governance-tests",
+        .root_module = causal_schema_governance_tool_module,
+    });
+    const run_causal_schema_governance_tool_tests = b.addRunArtifact(causal_schema_governance_tool_tests);
+    test_step.dependOn(&run_causal_schema_governance_tool_tests.step);
+
     const causal_workbench_session_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_workbench_session.zig"),
         .target = target,
@@ -1119,6 +1142,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_test_matrix_tool_tests.step);
     examples_step.dependOn(&causal_artifacts_tool.step);
     examples_step.dependOn(&run_causal_artifacts_tool_tests.step);
+    examples_step.dependOn(&causal_schema_governance_tool.step);
+    examples_step.dependOn(&run_causal_schema_governance_tool_tests.step);
     examples_step.dependOn(&run_causal_workbench_session_tool_tests.step);
     examples_step.dependOn(&causal_workbench_tool.step);
     examples_step.dependOn(&run_causal_verdict_tool_tests.step);
