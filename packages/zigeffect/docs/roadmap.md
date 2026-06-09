@@ -637,8 +637,7 @@ metrics, and traces.
   production-hardening branch queue, NenDB-only durable direction, SolidJS plus
   `webui-dev/zig-webui` workbench direction, the post-streaming
   `workbench-graph-visual-debugging` milestone, non-goals, verification
-  commands, and the next branch
-  `codex/zigeffect-causal-production-deployment-runbooks`.
+  commands, and the next branch `codex/zigeffect-causal-artifact-access-control`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
@@ -647,6 +646,11 @@ metrics, and traces.
   `zigeffect.causal.durable-production-retention.v1` with the NenDB-only
   retention policy, TTL and compaction thresholds, backup and recovery
   expectations, retained-bundle fixture, and deployment-runbooks handoff.
+- Delivered: `causal-production-deployment-runbooks` publishes
+  `zigeffect.causal.production-deployment-runbooks.v1` with manual deployment,
+  rollback, causal verification, and incident-response gates. It consumes the
+  aggregation and durable-retention contracts, keeps deploy/rollback execution
+  outside zigeffect authority, and hands off to artifact access control.
 - Still future: production-grade app-facing integrations, durable history
   hardening, and comparing arbitrary named audit-chain snapshots.
 - Still future: deeper runtime regression scenarios for partial config and

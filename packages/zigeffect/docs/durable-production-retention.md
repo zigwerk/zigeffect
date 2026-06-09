@@ -102,6 +102,15 @@ source/config/app/registry/production mutation authority.
 Workbench follow-up remains SolidJS inside `webui-dev/zig-webui`. React remains
 a non-goal for this path.
 
+## Deployment Runbooks Handoff
+
+Durable retention now hands off to
+[production-deployment-runbooks.md](production-deployment-runbooks.md). That
+contract consumes this schema plus the aggregation schema and defines manual
+deploy, rollback, causal verification, and incident-response gates. It does
+not automate deployment or rollback and does not grant production mutation
+authority.
+
 ## Verification Suite
 
 Run:
@@ -110,6 +119,8 @@ Run:
 cd packages/zigeffect
 zig build causal-durable-production-retention
 zig build causal-durable-production-retention -- --format json
+zig build causal-production-deployment-runbooks
+zig build causal-production-deployment-runbooks -- --format json
 zig build causal-nendb-storage-backend
 zig build causal-production-artifact-aggregation
 zig build causal-production-hardening-backlog

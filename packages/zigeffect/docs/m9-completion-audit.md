@@ -46,13 +46,12 @@ blocking M9.
 It does not mean the runtime has production dashboards, durable production
 retention, access control, or mutation authority.
 
-## Deferred Production Gaps
+## Deferred Production Gaps At M9
 
-The audit keeps these as explicit future hardening:
+The audit originally kept these as explicit future hardening:
 
 - distributed artifact aggregation;
 - durable production retention beyond local files and CI uploads;
-- production deployment runbooks;
 - alerting, paging, Slack, Linear, Jira, or SIEM integrations;
 - RBAC or access control over artifact bundles;
 - encryption-at-rest policy;
@@ -80,8 +79,9 @@ That report uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, keeps durable work on the
 NenDB adapter path, keeps workbench work on SolidJS inside
 `webui-dev/zig-webui`, and now recommends
-`codex/zigeffect-causal-production-deployment-runbooks` after the production
-artifact aggregation and durable production retention contract branches.
+`codex/zigeffect-causal-artifact-access-control` after the production artifact
+aggregation, durable production retention, and production deployment runbook
+contract branches.
 
 ## Verification Suite
 

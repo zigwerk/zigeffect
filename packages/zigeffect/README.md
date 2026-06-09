@@ -189,8 +189,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-deployment-runbooks` as the next branch
-after durable retention.
+`codex/zigeffect-causal-artifact-access-control` as the next branch after
+deployment runbooks.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in
@@ -227,6 +227,22 @@ recovery, and retained-bundle fixture policy before deployment runbooks. It
 does not ingest live telemetry, restore production data, add Cockroach scope,
 or grant mutation authority. The full policy is in
 [docs/durable-production-retention.md](docs/durable-production-retention.md).
+
+Print the causal production deployment runbooks contract:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-deployment-runbooks
+zig build causal-production-deployment-runbooks -- --format json
+```
+
+The contract uses schema
+`zigeffect.causal.production-deployment-runbooks.v1`, consumes the production
+artifact aggregation and durable retention contracts, and defines manual deploy,
+rollback, causal verification, and incident-response gates without deployment
+automation or production mutation authority. The next branch is
+`codex/zigeffect-causal-artifact-access-control`. The full policy is in
+[docs/production-deployment-runbooks.md](docs/production-deployment-runbooks.md).
 
 Open the read-only SolidJS causal workbench for a saved artifact:
 

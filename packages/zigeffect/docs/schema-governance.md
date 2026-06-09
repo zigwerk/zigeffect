@@ -152,6 +152,15 @@ the NenDB-only TTL, compaction, backup, recovery, retained-bundle fixture, and
 verification expectations. It does not ingest live telemetry, enforce TTL from
 wall-clock time, restore production data, or grant mutation authority.
 
+- `zigeffect.causal.production-deployment-runbooks.v1`
+
+The production-deployment-runbooks report is a record-only production
+hardening contract. It consumes production artifact aggregation and durable
+retention contracts, then defines manual deployment, rollback, causal
+verification, and incident-response gates. It does not deploy services, roll
+back services, page humans, automate rollouts, or grant production mutation
+authority.
+
 ### Test Coverage
 
 - `zigeffect.causal.test-matrix.v1`

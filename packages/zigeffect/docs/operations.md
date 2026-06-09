@@ -100,6 +100,9 @@ zig build causal-performance-budget
 zig build causal-performance-budget -- --format json
 zig build causal-m9-completion-audit
 zig build causal-m9-completion-audit -- --format json
+zig build causal-production-hardening-backlog
+zig build causal-production-deployment-runbooks
+zig build causal-production-deployment-runbooks -- --format json
 zig build causal-workbench -- <artifact.json>
 zig build causal-workbench -- --server-only <artifact.json>
 zig build causal-workbench-ui
@@ -432,8 +435,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and recommends
-`codex/zigeffect-causal-production-deployment-runbooks` as the next branch
-after durable retention.
+`codex/zigeffect-causal-artifact-access-control` as the next branch after
+deployment runbooks.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -472,7 +475,8 @@ The contract records schema
 `zigeffect.causal.production-artifact-aggregation.v1`, and defines the
 NenDB-only retention policy for reviewed aggregation bundles. It names TTL,
 compaction, backup, recovery, privacy gates, retained source fixtures, and the
-next branch `codex/zigeffect-causal-production-deployment-runbooks`.
+deployment-runbooks handoff consumed by
+`zigeffect.causal.production-deployment-runbooks.v1`.
 
 TTL remains policy-only here because causal events do not carry wall-clock
 capture timestamps and deterministic tools do not inspect clocks. Recovery
@@ -480,13 +484,37 @@ evidence must prove queryable causal lineage after restore. This contract does
 not scan artifacts, write durable production state, restore data, open
 dashboards, add Cockroach scope, or grant mutation authority.
 
+## Production Deployment Runbooks
+
+Run the production deployment runbooks contract after artifact aggregation and
+durable retention:
+
+```sh
+cd packages/zigeffect
+zig build causal-production-deployment-runbooks
+zig build causal-production-deployment-runbooks -- --format json
+```
+
+The contract records schema
+`zigeffect.causal.production-deployment-runbooks.v1`, consumes the aggregation
+and durable-retention contracts, and defines manual deployment, rollback,
+causal verification, and incident-response runbooks. It requires reviewed
+artifact bundles, redaction review, NenDB adapter retention readiness, human
+approval, external deploy/rollback record ids, queryable event ids, and
+post-action verification commands.
+
+Deployment and rollback execution stay outside zigeffect authority. This
+contract does not deploy services, roll back services, page humans, open live
+production telemetry, add Cockroach scope, or grant production mutation
+authority. The next branch is
+`codex/zigeffect-causal-artifact-access-control`.
+
 ## Production Gaps
 
 The current operating model does not provide:
 
 - distributed artifact aggregation;
 - durable production retention beyond local files and CI uploads;
-- production deployment runbooks;
 - alerting, paging, Slack, Linear, Jira, or SIEM integrations;
 - RBAC or access control over artifact bundles;
 - encryption-at-rest policy;

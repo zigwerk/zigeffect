@@ -25,10 +25,10 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-deployment-runbooks` means both the
-aggregation bundle contract and the NenDB-only durable-retention contract now
-exist. The next branch should be
-`codex/zigeffect-causal-production-deployment-runbooks`.
+The recommendation `start-artifact-access-control` means the aggregation
+bundle contract, the NenDB-only durable-retention contract, and the manual
+production deployment runbooks now exist. The next branch should be
+`codex/zigeffect-causal-artifact-access-control`.
 
 ## Dependency Order
 
@@ -36,7 +36,7 @@ The backlog currently orders future production-hardening branches as:
 
 1. `production-artifact-aggregation` delivered
 2. `durable-production-retention` delivered
-3. `production-deployment-runbooks`
+3. `production-deployment-runbooks` delivered
 4. `artifact-access-control`
 5. `encryption-at-rest-policy`
 6. `alerting-integrations`
@@ -59,6 +59,12 @@ Durable retention is documented in
 TTL, compaction, backup, recovery, and verification fixture contracts without
 adding live ingestion or production mutation authority.
 
+Deployment runbooks are documented in
+[production-deployment-runbooks.md](production-deployment-runbooks.md). They
+define manual deploy, rollback, causal verification, and incident-response
+gates without adding deployment automation, rollback automation, alerting, or
+production mutation authority.
+
 Workbench work remains SolidJS inside `webui-dev/zig-webui`. React remains a
 non-goal unless a later adapter proves a concrete need.
 
@@ -80,6 +86,8 @@ the next branch:
 
 ```sh
 cd packages/zigeffect
+zig build causal-production-deployment-runbooks
+zig build causal-production-deployment-runbooks -- --format json
 zig build causal-durable-production-retention
 zig build causal-durable-production-retention -- --format json
 zig build causal-production-artifact-aggregation

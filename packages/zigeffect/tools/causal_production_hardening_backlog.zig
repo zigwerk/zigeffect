@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-production-deployment-runbooks";
-pub const recommended_next_branch = "codex/zigeffect-causal-production-deployment-runbooks";
+pub const recommendation = "start-artifact-access-control";
+pub const recommended_next_branch = "codex/zigeffect-causal-artifact-access-control";
 
 const OutputFormat = enum { text, json };
 
@@ -90,9 +90,9 @@ const backlog_items: []const BacklogItem = &.{
         .title = "Production Deployment Runbooks",
         .gap_id = "production-deployment-runbooks",
         .priority = "P1",
-        .status = "planned",
-        .summary = "Create reviewed deploy, rollback, verification, and incident-response runbooks for causal-instrumented production services.",
-        .depends_on = &.{"production-artifact-aggregation"},
+        .status = "delivered",
+        .summary = "Creates reviewed deploy, rollback, verification, and incident-response runbook contracts for causal-instrumented production services.",
+        .depends_on = &.{ "production-artifact-aggregation", "durable-production-retention" },
         .deliverables = &.{
             "deployment checklist",
             "rollback checklist",
@@ -100,8 +100,10 @@ const backlog_items: []const BacklogItem = &.{
             "incident response template",
         },
         .evidence_sources = &.{
+            "packages/zigeffect/tools/causal_production_deployment_runbooks.zig",
+            "packages/zigeffect/docs/production-deployment-runbooks.md",
             "packages/zigeffect/docs/operations.md",
-            "packages/zigeffect/docs/performance-budget.md",
+            "packages/zigeffect/docs/durable-production-retention.md",
         },
         .branch = "codex/zigeffect-causal-production-deployment-runbooks",
         .agent_guidance = "Document manual gates first; do not automate deployment or rollback mutation.",
@@ -296,6 +298,8 @@ const dependency_order: []const []const u8 = &.{
 
 const verification_commands: []const []const u8 = &.{
     "cd packages/zigeffect",
+    "zig build causal-production-deployment-runbooks",
+    "zig build causal-production-deployment-runbooks -- --format json",
     "zig build causal-durable-production-retention",
     "zig build causal-durable-production-retention -- --format json",
     "zig build causal-production-artifact-aggregation",
@@ -556,11 +560,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-production-deployment-runbooks",
+        "start-artifact-access-control",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-production-deployment-runbooks",
+        "codex/zigeffect-causal-artifact-access-control",
         recommended_next_branch,
     );
 }
@@ -568,6 +572,7 @@ test "production hardening backlog constants preserve the branch boundary" {
 test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItem("production-artifact-aggregation");
     try expectBacklogItem("durable-production-retention");
+    try expectBacklogItem("production-deployment-runbooks");
     try expectBacklogItem("live-dashboard-streaming-workbench");
     try expectBacklogItem("workbench-graph-visual-debugging");
     try expectBacklogItem("production-capacity-planning");
@@ -588,9 +593,10 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-production-deployment-runbooks") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-artifact-access-control") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
 }
 
 test "production hardening backlog JSON is agent-readable" {
@@ -599,7 +605,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-production-deployment-runbooks\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-artifact-access-control\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
 }

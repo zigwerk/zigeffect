@@ -102,6 +102,12 @@ and findings. Future work is about production adapters, durable histories,
 replay, workbench UI, and policy-controlled remediation rather than inventing
 the core event shape.
 
+The production-hardening surface now includes deterministic contracts for
+artifact aggregation, NenDB-only durable retention, and manual production
+deployment runbooks. Agents can use those contracts to reason about deploy,
+rollback, causal verification, and incident-response readiness without
+assuming zigeffect can mutate production systems.
+
 ## Two Agent Audiences
 
 The causal runtime should serve two related but different users.
