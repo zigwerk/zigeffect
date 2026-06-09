@@ -45,7 +45,7 @@
 - Modify `packages/zigeffect/src/workflow/root.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing report test**
+- [x] **Step 1: Write failing report test**
 
 Add a test named `workflow inspector summarizes replay state and pending work`.
 Build fixture events with one running workflow, one scheduled timer, one
@@ -54,7 +54,7 @@ step. Assert the report has event count `7`, one execution summary, pending
 counts of `1` for each durable work type, and last failure detail
 `exit.cause.failure:Boom`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -65,7 +65,7 @@ cd packages/zigeffect && zig build test-raw --summary all
 Expected: FAIL because `fx.workflow.inspectExecution` and report types do not
 exist.
 
-- [ ] **Step 3: Implement report structs and grouping**
+- [x] **Step 3: Implement report structs and grouping**
 
 Add these public types to `workflow/inspect.zig`:
 
@@ -140,7 +140,7 @@ The implementation filters events by selected key, folds them with
 `WorkflowReplayState.fold`, copies pending rows out of the replay state, and
 stores owned names/details so callers can free reports deterministically.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -156,7 +156,7 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/inspect.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing formatting tests**
+- [x] **Step 1: Write failing formatting tests**
 
 Add tests named:
 
@@ -183,7 +183,7 @@ Assert the JSON contains:
 and fields for `pending_timers`, `pending_deferreds`, `pending_queues`,
 `pending_activities`, and `last_failure_detail`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -193,7 +193,7 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL because formatting functions do not exist.
 
-- [ ] **Step 3: Implement formatters**
+- [x] **Step 3: Implement formatters**
 
 Add:
 
@@ -210,7 +210,7 @@ pub fn formatInspectReportJson(allocator: Allocator, report: *const WorkflowInsp
 Use `journal_mod.workflowEventKindName` and the existing JSON string escaping
 pattern from `journal.zig`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 

@@ -11,6 +11,7 @@ pub const clock = @import("clock.zig");
 pub const signal = @import("signal.zig");
 pub const queue = @import("queue.zig");
 pub const lifecycle = @import("lifecycle.zig");
+pub const inspect = @import("inspect.zig");
 
 pub const workflow_journal_event_schema = journal.workflow_journal_event_schema;
 pub const workflow_journal_event_schema_version = journal.workflow_journal_event_schema_version;
@@ -118,3 +119,22 @@ pub const queueItemId = queue.queueItemId;
 
 pub const LifecycleActionResult = lifecycle.LifecycleActionResult;
 pub const WorkflowLifecycle = lifecycle.WorkflowLifecycle;
+
+pub const workflow_inspect_schema = inspect.workflow_inspect_schema;
+pub const workflow_replay_schema = inspect.workflow_replay_schema;
+pub const workflow_list_schema = inspect.workflow_list_schema;
+pub const workflow_report_schema_version = inspect.workflow_report_schema_version;
+pub const WorkflowReportError = inspect.WorkflowReportError;
+pub const WorkflowReportFormat = inspect.WorkflowReportFormat;
+pub const WorkflowExecutionKey = inspect.WorkflowExecutionKey;
+pub const WorkflowExecutionSummary = inspect.WorkflowExecutionSummary;
+pub const WorkflowPendingSummary = inspect.WorkflowPendingSummary;
+pub const WorkflowInspectionReport = inspect.WorkflowInspectionReport;
+pub const listExecutions = inspect.listExecutions;
+pub const inspectExecution = inspect.inspectExecution;
+pub const formatReplayReportText = inspect.formatReplayReportText;
+pub const formatReplayReportJson = inspect.formatReplayReportJson;
+pub const formatListReportText = inspect.formatListReportText;
+pub const formatListReportJson = inspect.formatListReportJson;
+pub const formatInspectReportText = inspect.formatInspectReportText;
+pub const formatInspectReportJson = inspect.formatInspectReportJson;

@@ -49,6 +49,76 @@ fn expectWorkflowReplayStatesEqual(expected: *const fx.workflow.WorkflowReplaySt
     }
 }
 
+fn workflowInspectorFixtureEvents() [7]fx.workflow.WorkflowEvent {
+    return .{
+        .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .name = "inspected-workflow",
+            .status = "running",
+            .idempotency_key = "inspect-start",
+        },
+        .{
+            .sequence = 2,
+            .kind = .timer_scheduled,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .timer_id = 20,
+            .name = "wake",
+            .idempotency_key = "inspect-timer",
+        },
+        .{
+            .sequence = 3,
+            .kind = .deferred_created,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .deferred_id = 30,
+            .name = "approval",
+            .idempotency_key = "inspect-deferred-create",
+        },
+        .{
+            .sequence = 4,
+            .kind = .deferred_awaited,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .deferred_id = 30,
+            .name = "approval",
+            .idempotency_key = "inspect-deferred-await",
+        },
+        .{
+            .sequence = 5,
+            .kind = .queue_offered,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .queue_id = 40,
+            .name = "email",
+            .idempotency_key = "inspect-queue",
+        },
+        .{
+            .sequence = 6,
+            .kind = .activity_scheduled,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .activity_id = 50,
+            .attempt = 1,
+            .name = "charge",
+            .idempotency_key = "inspect-activity",
+        },
+        .{
+            .sequence = 7,
+            .kind = .step_failed,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .name = "boom",
+            .status = "failed",
+            .redacted_detail = "exit.cause.failure:Boom",
+            .idempotency_key = "inspect-step-failed",
+        },
+    };
+}
+
 test "workflow journal schema constants are stable" {
     try std.testing.expectEqualStrings("zigeffect.workflow.journal-event.v1", fx.workflow.workflow_journal_event_schema);
     try std.testing.expectEqual(@as(u32, 1), fx.workflow.workflow_journal_event_schema_version);
@@ -622,6 +692,103 @@ test "workflow lifecycle controls replay after file journal reopen" {
         try std.testing.expectEqualStrings("operator", events.events[2].redacted_detail);
         try std.testing.expectEqualStrings("reason=operator", events.events[3].redacted_detail);
     }
+}
+
+test "workflow inspector summarizes replay state and pending work" {
+    const events = workflowInspectorFixtureEvents();
+
+    var report = try fx.workflow.inspectExecution(std.testing.allocator, &events, null);
+    defer report.deinit();
+
+    try std.testing.expectEqual(@as(usize, 7), report.event_count);
+    try std.testing.expectEqual(@as(?u64, 1), report.first_sequence);
+    try std.testing.expectEqual(@as(?u64, 7), report.last_sequence);
+    try std.testing.expectEqual(@as(usize, 1), report.executions.len);
+    try std.testing.expectEqual(@as(u64, 7), report.executions[0].workflow_id);
+    try std.testing.expectEqual(@as(u64, 8), report.executions[0].execution_id);
+    try std.testing.expectEqualStrings("inspected-workflow", report.executions[0].name);
+    try std.testing.expectEqualStrings("running", report.executions[0].status);
+    try std.testing.expectEqual(fx.workflow.WorkflowStatus.running, report.state.?.workflow_status);
+    try std.testing.expectEqual(@as(usize, 1), report.pending.timers.len);
+    try std.testing.expectEqual(@as(usize, 1), report.pending.deferreds.len);
+    try std.testing.expectEqual(@as(usize, 1), report.pending.queues.len);
+    try std.testing.expectEqual(@as(usize, 1), report.pending.activities.len);
+    try std.testing.expectEqualStrings("exit.cause.failure:Boom", report.last_failure_detail);
+}
+
+test "workflow inspector formats text report" {
+    const events = workflowInspectorFixtureEvents();
+    var report = try fx.workflow.inspectExecution(std.testing.allocator, &events, null);
+    defer report.deinit();
+
+    const text = try fx.workflow.formatReplayReportText(std.testing.allocator, &report);
+    defer std.testing.allocator.free(text);
+
+    try std.testing.expect(std.mem.indexOf(u8, text, "zigeffect workflow replay\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "workflow_id: 7\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "execution_id: 8\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "status: running\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "pending_timers: 1\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "pending_deferreds: 1\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "pending_queues: 1\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "pending_activities: 1\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "last_failure: exit.cause.failure:Boom\n") != null);
+}
+
+test "workflow inspector formats json report" {
+    const events = workflowInspectorFixtureEvents();
+    var report = try fx.workflow.inspectExecution(std.testing.allocator, &events, null);
+    defer report.deinit();
+
+    const json = try fx.workflow.formatReplayReportJson(std.testing.allocator, &report);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "{\"schema\":\"zigeffect.workflow.replay.v1\",\"schema_version\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"workflow_id\":7") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"execution_id\":8") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"status\":\"running\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"pending_timers\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"pending_deferreds\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"pending_queues\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"pending_activities\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"last_failure_detail\":\"exit.cause.failure:Boom\"") != null);
+}
+
+test "workflow inspector formats list reports" {
+    const events = workflowInspectorFixtureEvents();
+    var report = try fx.workflow.listExecutions(std.testing.allocator, &events);
+    defer report.deinit();
+
+    const text = try fx.workflow.formatListReportText(std.testing.allocator, &report);
+    defer std.testing.allocator.free(text);
+    try std.testing.expect(std.mem.indexOf(u8, text, "zigeffect workflow list\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "executions: 1\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "- workflow_id: 7 execution_id: 8 status: running events: 7\n") != null);
+
+    const json = try fx.workflow.formatListReportJson(std.testing.allocator, &report);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "{\"schema\":\"zigeffect.workflow.list.v1\",\"schema_version\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"executions\":[{\"workflow_id\":7,\"execution_id\":8") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"event_count\":7") != null);
+}
+
+test "workflow inspector formats event inspection reports" {
+    const events = workflowInspectorFixtureEvents();
+    var report = try fx.workflow.inspectExecution(std.testing.allocator, &events, null);
+    defer report.deinit();
+
+    const text = try fx.workflow.formatInspectReportText(std.testing.allocator, &report, &events);
+    defer std.testing.allocator.free(text);
+    try std.testing.expect(std.mem.indexOf(u8, text, "zigeffect workflow journal inspect\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "events: 7\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "7 step_failed failed exit.cause.failure:Boom\n") != null);
+
+    const json = try fx.workflow.formatInspectReportJson(std.testing.allocator, &report, &events);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "{\"schema\":\"zigeffect.workflow.inspect.v1\",\"schema_version\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"events\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"step_failed\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"redacted_detail\":\"exit.cause.failure:Boom\"") != null);
 }
 
 test "workflow replay rejects events before start and duplicate starts" {
