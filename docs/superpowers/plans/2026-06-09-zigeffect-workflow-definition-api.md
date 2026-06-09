@@ -36,12 +36,12 @@
 - Modify `packages/zigeffect/test/workflow_test.zig`
 - Modify `packages/zigeffect/test/architecture_test.zig`
 
-- [ ] **Step 1: Write failing valid-definition tests**
+- [x] **Step 1: Write failing valid-definition tests**
 
 Add tests for `Workflow`, `.withIdempotencyKey`, `.requires`, metadata,
 required service set output, idempotency key output, and stable execution id.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -51,13 +51,13 @@ bun run zigeffect:test
 
 Expected: FAIL until `workflow/definition.zig` exists.
 
-- [ ] **Step 3: Implement definition module**
+- [x] **Step 3: Implement definition module**
 
 Add `WorkflowMetadata`, `Workflow`, callback validation, `idempotencyKey`,
 `deriveExecutionId`, `.requires`, `.withIdempotencyKey`, and
 `requiredServices`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -73,7 +73,7 @@ Expected: PASS.
 - Add `packages/zigeffect/test/compile_fail/invalid_workflow_idempotency_key.zig`
 - Modify `packages/zigeffect/test/layer_test.zig`
 
-- [ ] **Step 1: Write failing compile-fail fixture**
+- [x] **Step 1: Write failing compile-fail fixture**
 
 Add a fixture using an idempotency callback with the wrong parameter or return
 shape, then assert the compile output contains:
@@ -82,7 +82,7 @@ shape, then assert the compile output contains:
 zigeffect invalid workflow idempotency key callback
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -92,12 +92,12 @@ bun run zigeffect:test
 
 Expected: FAIL until callback validation emits the diagnostic.
 
-- [ ] **Step 3: Implement diagnostics**
+- [x] **Step 3: Implement diagnostics**
 
 Use `@typeInfo` validation and `@compileError` messages for invalid callback
 shape.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -115,16 +115,16 @@ Expected: PASS.
 - Add `docs/superpowers/specs/2026-06-09-zigeffect-workflow-definition-api-design.md`
 - Add `docs/superpowers/plans/2026-06-09-zigeffect-workflow-definition-api.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Document `definition.zig` under `src/workflow/`.
 
-- [ ] **Step 2: Mark Milestone 6 complete**
+- [x] **Step 2: Mark Milestone 6 complete**
 
 Mark all Milestone 6 deliverables and acceptance boxes in the roadmap after
 the full gate passes.
 
-- [ ] **Step 3: Run full gate**
+- [x] **Step 3: Run full gate**
 
 Run:
 
@@ -137,7 +137,7 @@ git diff --check
 
 Expected: all commands PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/zigeffect/src/workflow/definition.zig packages/zigeffect/src/workflow/root.zig packages/zigeffect/test/workflow_test.zig packages/zigeffect/test/architecture_test.zig packages/zigeffect/test/layer_test.zig packages/zigeffect/test/compile_fail/invalid_workflow_idempotency_key.zig packages/zigeffect/docs/architecture.md docs/superpowers/specs/2026-06-09-zigeffect-workflow-definition-api-design.md docs/superpowers/plans/2026-06-09-zigeffect-workflow-definition-api.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md
@@ -146,10 +146,10 @@ git commit -m "feat(zigeffect): add workflow definition API"
 
 ## Self-Review Checklist
 
-- [ ] Definitions are type-level and do not execute workflow bodies.
-- [ ] Idempotency keys are caller-owned and deinitialized by tests.
-- [ ] Execution id derivation is deterministic.
-- [ ] Requirement declarations use existing service tuple validation.
-- [ ] Compile-fail diagnostic covers invalid callback shape.
-- [ ] No workflow engine, activity API, journal write, or payload codec is added.
-- [ ] Full verification passes before Milestone 6 is marked complete.
+- [x] Definitions are type-level and do not execute workflow bodies.
+- [x] Idempotency keys are caller-owned and deinitialized by tests.
+- [x] Execution id derivation is deterministic.
+- [x] Requirement declarations use existing service tuple validation.
+- [x] Compile-fail diagnostic covers invalid callback shape.
+- [x] No workflow engine, activity API, journal write, or payload codec is added.
+- [x] Full verification passes before Milestone 6 is marked complete.

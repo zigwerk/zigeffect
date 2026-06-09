@@ -693,3 +693,55 @@ test "workflow checkpoint json round-trips replay-equivalent state" {
 
     try expectWorkflowReplayStatesEqual(&state, &parsed);
 }
+
+test "workflow definition exposes metadata requirements and execution ids" {
+    const Payload = struct {
+        account_id: u64,
+        region: []const u8,
+    };
+    const Success = struct {
+        approved: bool,
+    };
+    const Failure = error{Rejected};
+    const Helpers = struct {
+        fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+            return std.fmt.allocPrint(allocator, "{d}:{s}", .{ payload.account_id, payload.region });
+        }
+    };
+
+    const Approval = fx.workflow
+        .Workflow("approval", Payload, Success, Failure, fx.TestServices)
+        .withIdempotencyKey(Helpers.key)
+        .requires(.{ fx.Logger, fx.Config });
+
+    try std.testing.expect(Approval.PayloadType == Payload);
+    try std.testing.expect(Approval.SuccessType == Success);
+    try std.testing.expect(Approval.FailureType == Failure);
+    try std.testing.expect(Approval.EnvType == fx.TestServices);
+    try std.testing.expectEqual(@as(usize, 2), Approval.RequiredServices.len);
+
+    const metadata = Approval.metadata();
+    try std.testing.expectEqualStrings("approval", metadata.name);
+    try std.testing.expectEqualStrings(@typeName(Payload), metadata.payload_type_name);
+    try std.testing.expectEqualStrings(@typeName(Success), metadata.success_type_name);
+    try std.testing.expectEqualStrings(@typeName(Failure), metadata.failure_type_name);
+    try std.testing.expectEqualStrings(@typeName(fx.TestServices), metadata.env_type_name);
+    try std.testing.expectEqual(@as(usize, 2), metadata.requirement_count);
+    try std.testing.expect(metadata.has_idempotency_key);
+
+    var required = try Approval.requiredServices(std.testing.allocator);
+    defer required.deinit();
+    try std.testing.expect(required.contains(@typeName(fx.Logger)));
+    try std.testing.expect(required.contains(@typeName(fx.Config)));
+
+    const payload = Payload{ .account_id = 42, .region = "eu" };
+    const key = try Approval.idempotencyKey(std.testing.allocator, payload);
+    defer std.testing.allocator.free(key);
+    try std.testing.expectEqualStrings("42:eu", key);
+
+    const execution_id = try Approval.deriveExecutionId(std.testing.allocator, payload);
+    const same_execution_id = try Approval.deriveExecutionId(std.testing.allocator, payload);
+    const different_execution_id = try Approval.deriveExecutionId(std.testing.allocator, .{ .account_id = 43, .region = "eu" });
+    try std.testing.expectEqual(execution_id, same_execution_id);
+    try std.testing.expect(execution_id != different_execution_id);
+}

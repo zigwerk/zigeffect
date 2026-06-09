@@ -269,15 +269,15 @@ Goal: define typed workflows without executing them yet.
 
 Deliverables:
 
-- [ ] Add `Workflow(Name, Payload, Success, Failure, Env)`.
-- [ ] Add payload idempotency key callback.
-- [ ] Add execution id derivation.
-- [ ] Add workflow metadata and requirement declarations.
-- [ ] Add compile diagnostics for invalid workflow functions.
+- [x] Add `Workflow(Name, Payload, Success, Failure, Env)`.
+- [x] Add payload idempotency key callback.
+- [x] Add execution id derivation.
+- [x] Add workflow metadata and requirement declarations.
+- [x] Add compile diagnostics for invalid workflow functions.
 
 Acceptance:
 
-- [ ] Tests cover valid definitions, invalid callback shapes, and metadata.
+- [x] Tests cover valid definitions, invalid callback shapes, and metadata.
 
 ## Milestone 7: Activity Definition API
 

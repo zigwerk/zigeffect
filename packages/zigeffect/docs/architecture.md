@@ -196,6 +196,9 @@ src/workflow/
 Owns local durable workflow runtime surfaces:
 
 - `root.zig`: workflow namespace facade and ergonomic public aliases.
+- `definition.zig`: typed workflow definitions, metadata, idempotency key
+  callback validation, deterministic execution id derivation, and service
+  requirements.
 - `journal.zig`: workflow journal id aliases, event kinds, event envelope,
   schema constants, event clone/free helpers, JSON parser, and JSON/text
   formatters.

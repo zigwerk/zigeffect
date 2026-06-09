@@ -1094,6 +1094,13 @@ test "compile fail fixture captures invalid effect function diagnostics" {
         "zigeffect invalid effect function",
     );
 }
+test "compile fail fixture captures invalid workflow idempotency key diagnostics" {
+    try expectCompileFailDiagnostic(
+        "invalid_workflow_idempotency_key.zig",
+        ".zig-cache/invalid_workflow_idempotency_key_compile_fail.txt",
+        "zigeffect invalid workflow idempotency key callback",
+    );
+}
 test "compile fail fixture captures invalid layer merge diagnostics" {
     try expectCompileFailDiagnostic(
         "invalid_layer_merge.zig",
