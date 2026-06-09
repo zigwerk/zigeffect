@@ -631,6 +631,19 @@ pub const FileJournalStoreOptions = struct {
     max_segment_bytes: usize = 16 * 1024 * 1024,
 };
 
+pub const WorkflowSnapshotPublication = struct {
+    last_sequence: JournalSequence,
+    checkpoint_name: []const u8,
+    commit_name: []const u8,
+    archive_name: ?[]const u8 = null,
+
+    pub fn deinit(self: *const WorkflowSnapshotPublication, allocator: Allocator) void {
+        allocator.free(self.checkpoint_name);
+        allocator.free(self.commit_name);
+        if (self.archive_name) |name| allocator.free(name);
+    }
+};
+
 pub const FileJournalStore = struct {
     allocator: Allocator,
     io: std.Io,
@@ -638,6 +651,7 @@ pub const FileJournalStore = struct {
     options: FileJournalStoreOptions,
     segment_name: []const u8,
     memory: InMemoryJournalStore,
+    base_state: ?WorkflowReplayState = null,
     lock_acquired: bool = false,
     sync_count: u64 = 0,
     recovered_partial_bytes: u64 = 0,
@@ -668,6 +682,10 @@ pub const FileJournalStore = struct {
         if (self.lock_acquired) {
             self.dir.deleteFile(self.io, self.options.lock_name) catch {};
             self.lock_acquired = false;
+        }
+        if (self.base_state) |*state| {
+            state.deinit();
+            self.base_state = null;
         }
         self.memory.deinit();
         self.allocator.free(self.segment_name);
@@ -705,13 +723,57 @@ pub const FileJournalStore = struct {
     }
 
     pub fn latestState(self: *const FileJournalStore, allocator: Allocator) JournalStoreReplayError!WorkflowReplayState {
+        if (self.base_state) |*base| {
+            var state = try base.clone(allocator);
+            errdefer state.deinit();
+            for (self.memory.events.items) |event| {
+                try state.apply(event);
+            }
+            return state;
+        }
         return self.memory.latestState(allocator);
     }
 
     pub fn reset(self: *FileJournalStore) void {
+        if (self.base_state) |*state| {
+            state.deinit();
+            self.base_state = null;
+        }
         self.memory.reset();
         const file = self.dir.createFile(self.io, self.segment_name, .{ .truncate = true }) catch return;
         file.close(self.io);
+    }
+
+    pub fn writeReplaySnapshot(self: *FileJournalStore, archive_name: ?[]const u8) !WorkflowSnapshotPublication {
+        var state = try self.latestState(self.allocator);
+        defer state.deinit();
+
+        const checkpoint_name = try checkpointFileName(self.allocator, state.last_sequence);
+        errdefer self.allocator.free(checkpoint_name);
+        const commit_name = try snapshotCommitFileName(self.allocator, state.last_sequence);
+        errdefer self.allocator.free(commit_name);
+        const owned_archive_name = if (archive_name) |name| try self.allocator.dupe(u8, name) else null;
+        errdefer if (owned_archive_name) |name| self.allocator.free(name);
+
+        const checkpoint_json = try formatWorkflowCheckpointJson(self.allocator, &state);
+        defer self.allocator.free(checkpoint_json);
+        try self.writeAtomicFile(checkpoint_name, checkpoint_json);
+
+        const commit_json = try formatWorkflowSnapshotCommitJson(self.allocator, .{
+            .last_sequence = state.last_sequence,
+            .checkpoint_name = checkpoint_name,
+            .segment_name = self.segment_name,
+            .archive_name = owned_archive_name,
+        });
+        defer self.allocator.free(commit_json);
+        try self.writeAtomicFile(commit_name, commit_json);
+
+        return .{
+            .last_sequence = state.last_sequence,
+            .checkpoint_name = checkpoint_name,
+            .commit_name = commit_name,
+            .archive_name = owned_archive_name,
+        };
     }
 
     pub fn syncCount(self: *const FileJournalStore) u64 {
@@ -738,6 +800,8 @@ pub const FileJournalStore = struct {
     }
 
     pub fn recover(self: *FileJournalStore) !void {
+        try self.recoverLatestCommittedSnapshot();
+
         const file = self.dir.openFile(self.io, self.segment_name, .{ .mode = .read_write }) catch |err| switch (err) {
             error.FileNotFound => {
                 const created = try self.dir.createFile(self.io, self.segment_name, .{ .read = true });
@@ -770,6 +834,12 @@ pub const FileJournalStore = struct {
                 };
                 defer journal.deinitWorkflowEventStrings(self.allocator, event);
 
+                if (event.sequence <= self.baseSequence()) {
+                    line_start = newline_index + 1;
+                    last_complete_offset = line_start;
+                    continue;
+                }
+
                 _ = self.memory.append(.{ .event = event }) catch |err| {
                     self.recordCorruption(line_start, corruptionReasonFromError(err));
                     return error.CorruptJournal;
@@ -784,6 +854,70 @@ pub const FileJournalStore = struct {
             try file.setLength(self.io, last_complete_offset);
             try self.syncFile(&file, .after_recovery);
         }
+    }
+
+    fn writeAtomicFile(self: *FileJournalStore, name: []const u8, content: []const u8) !void {
+        var file = try self.dir.createFileAtomic(self.io, name, .{ .replace = true });
+        defer file.deinit(self.io);
+        try file.file.writeStreamingAll(self.io, content);
+        try file.replace(self.io);
+    }
+
+    fn baseSequence(self: *const FileJournalStore) JournalSequence {
+        if (self.base_state) |state| return state.last_sequence;
+        return 0;
+    }
+
+    fn recoverLatestCommittedSnapshot(self: *FileJournalStore) !void {
+        const latest_sequence = try self.latestSnapshotCommitSequence() orelse return;
+        const commit_name = try snapshotCommitFileName(self.allocator, latest_sequence);
+        defer self.allocator.free(commit_name);
+
+        const commit_content = self.dir.readFileAlloc(
+            self.io,
+            commit_name,
+            self.allocator,
+            std.Io.Limit.limited(16 * 1024),
+        ) catch return;
+        defer self.allocator.free(commit_content);
+
+        var commit = parseWorkflowSnapshotCommitJson(self.allocator, commit_content) catch return;
+        defer commit.deinit();
+
+        if (!std.mem.eql(u8, commit.segment_name, self.segment_name)) return;
+
+        const checkpoint_content = self.dir.readFileAlloc(
+            self.io,
+            commit.checkpoint_name,
+            self.allocator,
+            std.Io.Limit.limited(self.options.max_segment_bytes),
+        ) catch return;
+        defer self.allocator.free(checkpoint_content);
+
+        var state = parseWorkflowCheckpointJson(self.allocator, checkpoint_content) catch return;
+        errdefer state.deinit();
+        if (state.last_sequence != commit.last_sequence) {
+            state.deinit();
+            return;
+        }
+
+        if (self.base_state) |*old_state| {
+            old_state.deinit();
+        }
+        self.base_state = state;
+        self.memory.resetFromSequence(state.last_sequence);
+    }
+
+    fn latestSnapshotCommitSequence(self: *FileJournalStore) !?JournalSequence {
+        var iterator = self.dir.iterate();
+        var latest: ?JournalSequence = null;
+        while (try iterator.next(self.io)) |entry| {
+            const sequence = snapshotCommitSequenceFromFileName(entry.name) orelse continue;
+            if (latest == null or sequence > latest.?) {
+                latest = sequence;
+            }
+        }
+        return latest;
     }
 
     fn recordCorruption(self: *FileJournalStore, offset: usize, reason: JournalCorruptionReason) void {
@@ -845,6 +979,16 @@ fn corruptionReasonFromError(err: anyerror) JournalCorruptionReason {
         error.DuplicateEvent => .duplicate_event,
         else => .invalid_json,
     };
+}
+
+fn snapshotCommitSequenceFromFileName(name: []const u8) ?JournalSequence {
+    const prefix = "workflow-snapshot-commit-";
+    const suffix = ".json";
+    if (!std.mem.startsWith(u8, name, prefix)) return null;
+    if (!std.mem.endsWith(u8, name, suffix)) return null;
+    const digits = name[prefix.len .. name.len - suffix.len];
+    if (digits.len != 16) return null;
+    return std.fmt.parseInt(JournalSequence, digits, 10) catch null;
 }
 
 const file_vtable: JournalStore.VTable = .{

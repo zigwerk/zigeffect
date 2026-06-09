@@ -85,6 +85,7 @@ pub const formatWorkflowSnapshotCommitJson = store.formatWorkflowSnapshotCommitJ
 pub const parseWorkflowSnapshotCommitJson = store.parseWorkflowSnapshotCommitJson;
 pub const InMemoryJournalStore = store.InMemoryJournalStore;
 pub const FileJournalStoreOptions = store.FileJournalStoreOptions;
+pub const WorkflowSnapshotPublication = store.WorkflowSnapshotPublication;
 pub const FileJournalStore = store.FileJournalStore;
 
 pub const WorkflowMetadata = definition.WorkflowMetadata;

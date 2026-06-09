@@ -1522,6 +1522,80 @@ test "file workflow journal store recovers partial trailing row" {
     try std.testing.expect(std.mem.indexOf(u8, recovered_segment, partial) == null);
 }
 
+test "file workflow journal snapshot plus tail replay equals full replay after reopen" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8, .name = "snap", .idempotency_key = "start" },
+        .{ .sequence = 2, .kind = .activity_scheduled, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .attempt = 1, .name = "charge", .idempotency_key = "activity" },
+        .{ .sequence = 3, .kind = .activity_completed, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .attempt = 1, .idempotency_key = "activity-done" },
+        .{ .sequence = 4, .kind = .timer_scheduled, .workflow_id = 7, .execution_id = 8, .timer_id = 20, .name = "wake", .idempotency_key = "timer" },
+        .{ .sequence = 5, .kind = .timer_fired, .workflow_id = 7, .execution_id = 8, .timer_id = 20, .idempotency_key = "timer-fired" },
+    };
+
+    var expected = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &events);
+    defer expected.deinit();
+
+    {
+        var store = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer store.deinit();
+        for (events[0..3]) |event| _ = try store.append(.{ .event = event });
+
+        const publication = try store.writeReplaySnapshot(null);
+        defer publication.deinit(std.testing.allocator);
+        try std.testing.expectEqual(@as(u64, 3), publication.last_sequence);
+
+        for (events[3..]) |event| _ = try store.append(.{ .event = event });
+    }
+
+    {
+        var reopened = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer reopened.deinit();
+
+        var actual = try reopened.latestState(std.testing.allocator);
+        defer actual.deinit();
+        try expectWorkflowReplayStatesEqual(&expected, &actual);
+    }
+}
+
+test "file workflow journal ignores uncommitted checkpoint files" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8, .idempotency_key = "start" },
+        .{ .sequence = 2, .kind = .workflow_completed, .workflow_id = 7, .execution_id = 8, .idempotency_key = "complete" },
+    };
+
+    {
+        var store = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer store.deinit();
+        for (events[0..1]) |event| _ = try store.append(.{ .event = event });
+
+        var state = try store.latestState(std.testing.allocator);
+        defer state.deinit();
+        const checkpoint_json = try fx.workflow.formatWorkflowCheckpointJson(std.testing.allocator, &state);
+        defer std.testing.allocator.free(checkpoint_json);
+        const checkpoint_name = try fx.workflow.checkpointFileName(std.testing.allocator, state.last_sequence);
+        defer std.testing.allocator.free(checkpoint_name);
+        const file = try tmp.dir.createFile(std.testing.io, checkpoint_name, .{ .read = true });
+        defer file.close(std.testing.io);
+        try file.writeStreamingAll(std.testing.io, checkpoint_json);
+
+        _ = try store.append(.{ .event = events[1] });
+    }
+
+    var expected = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &events);
+    defer expected.deinit();
+
+    var reopened = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer reopened.deinit();
+    var actual = try reopened.latestState(std.testing.allocator);
+    defer actual.deinit();
+    try expectWorkflowReplayStatesEqual(&expected, &actual);
+}
+
 test "file journal refuses future schema versions without truncating" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
