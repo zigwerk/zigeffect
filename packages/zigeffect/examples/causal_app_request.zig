@@ -44,24 +44,18 @@ pub fn handleRequest(
 
     if (env.environment) |environment| {
         try trace.recordServiceResolution("HealthService", "satisfied");
-        _ = try store.record(.{
-            .kind = .span_recorded,
-            .run_id = trace.run_id,
-            .parent_id = trace.root_event_id,
-            .label = "app.environment",
-            .type_name = "zigeffect.app.config",
-            .status = "observed",
-            .redacted_detail = environment,
-        });
-        _ = try store.record(.{
-            .kind = .span_recorded,
-            .run_id = trace.run_id,
-            .parent_id = trace.root_event_id,
-            .label = "app.response",
-            .type_name = "zigeffect.app.response",
-            .status = "200",
-            .redacted_detail = "body=ok",
-        });
+        _ = try trace.recordDataRead("app.environment", .{
+            .data_subject_ref = environment,
+            .schema_ref = "AppEnv.v1",
+        }, "observed");
+        _ = try trace.recordResponseSent("app.response", .{
+            .artifact_id = "response:health",
+            .schema_ref = "HealthResponse.v1",
+        }, "200");
+        _ = try trace.recordArtifactEmitted("causal app health response", .{
+            .artifact_id = "response:health",
+            .schema_ref = "HealthResponse.v1",
+        }, "success");
         try trace.closeScope(scope_id, "success");
         try trace.complete(.success);
 
@@ -74,15 +68,10 @@ pub fn handleRequest(
 
     try trace.recordConfigFailure("YACHDEE_ENV", "MissingConfig");
     try trace.recordRequirementFailure("HealthService", "MissingService");
-    _ = try store.record(.{
-        .kind = .span_recorded,
-        .run_id = trace.run_id,
-        .parent_id = trace.root_event_id,
-        .label = "app.response",
-        .type_name = "zigeffect.app.response",
-        .status = "500",
-        .redacted_detail = "body=missing_environment",
-    });
+    _ = try trace.recordResponseSent("app.response", .{
+        .artifact_id = "response:health-error",
+        .schema_ref = "ErrorResponse.v1",
+    }, "500");
     try trace.closeScope(scope_id, "failure");
     try trace.complete(.failure);
 

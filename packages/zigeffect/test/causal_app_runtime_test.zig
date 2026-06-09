@@ -130,6 +130,70 @@ test "app background job trace uses job defaults and distinct lifecycle labels" 
     try std.testing.expect(hasEvent(snapshot, .run_completed, "app.job daily-rollup", "success"));
 }
 
+test "app semantic trace records data lineage refs without raw payloads" {
+    var store = fx.CausalStore.initWithOptions(std.testing.allocator, fx.defaultRequestCausalStoreOptions());
+    defer store.deinit();
+
+    var trace = try fx.CausalAppTrace.startRequest(&store, .{
+        .method = "GET",
+        .route = "/api/projects/:id",
+        .runtime = "worker",
+    });
+
+    const refs = fx.CausalAppSemanticRefs{
+        .data_subject_ref = "tenant:acme",
+        .domain_entity_ref = "project:123",
+        .schema_ref = "Project.v1",
+    };
+    _ = try trace.recordDataRead("load project", refs, "success");
+    _ = try trace.recordDataTransformed("shape project response", refs, "success");
+    _ = try trace.recordDataWritten("cache project", refs, "success");
+    _ = try trace.recordPolicyDecision("project visibility", refs, "allowed");
+    _ = try trace.recordResponseSent("GET /api/projects/:id", .{
+        .data_subject_ref = "tenant:acme",
+        .artifact_id = "response:project:123",
+        .schema_ref = "ProjectResponse.v1",
+    }, "200");
+    try trace.complete(.success);
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+
+    try std.testing.expectEqualStrings("tenant:acme", snapshot.events[1].data_subject_ref);
+    try std.testing.expectEqualStrings("project:123", snapshot.events[1].domain_entity_ref);
+    try std.testing.expectEqualStrings("Project.v1", snapshot.events[1].schema_ref);
+    try std.testing.expectEqualStrings("zigeffect.app.data_read", snapshot.events[1].type_name);
+
+    const json = try fx.formatCausalJson(std.testing.allocator, &store);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"data_subject_ref\": \"tenant:acme\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"artifact_id\": \"response:project:123\"") != null);
+}
+
+test "app semantic refs are redacted and bounded before export" {
+    var store = fx.CausalStore.initWithOptions(std.testing.allocator, .{
+        .max_events = 16,
+        .max_event_string_bytes = 32,
+    });
+    defer store.deinit();
+
+    var trace = try fx.CausalAppTrace.startRequest(&store, .{
+        .method = "POST",
+        .route = "/api/private",
+        .runtime = "worker",
+    });
+    _ = try trace.recordDataRead("read private payload", .{
+        .data_subject_ref = "user_email=person@example.com token=raw-secret",
+        .schema_ref = "PrivatePayload.v1",
+    }, "success");
+
+    const json = try fx.formatCausalJson(std.testing.allocator, &store);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "person@example.com") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "raw-secret") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, fx.causal_redaction_marker) != null);
+}
+
 test "deriveCausalAppIncidents classifies app config requirement and response failures" {
     var store = fx.CausalStore.initWithOptions(std.testing.allocator, fx.defaultRequestCausalStoreOptions());
     defer store.deinit();
@@ -141,15 +205,10 @@ test "deriveCausalAppIncidents classifies app config requirement and response fa
     });
     try trace.recordConfigFailure("YACHDEE_ENV", "MissingConfig");
     try trace.recordRequirementFailure("HealthService", "MissingService");
-    _ = try store.record(.{
-        .kind = .span_recorded,
-        .run_id = trace.run_id,
-        .parent_id = trace.root_event_id,
-        .label = "app.response",
-        .type_name = "zigeffect.app.response",
-        .status = "500",
-        .redacted_detail = "body=missing_environment",
-    });
+    _ = try trace.recordResponseSent("app.response", .{
+        .artifact_id = "response:health-error",
+        .schema_ref = "ErrorResponse.v1",
+    }, "500");
     try trace.complete(.failure);
 
     var incidents = try fx.deriveCausalAppIncidents(std.testing.allocator, &store);

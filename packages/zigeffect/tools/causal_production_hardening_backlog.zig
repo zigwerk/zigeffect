@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-deep-runtime-internals";
-pub const recommended_next_branch = "codex/zigeffect-causal-deep-runtime-internals";
+pub const recommendation = "start-encryption-at-rest-policy";
+pub const recommended_next_branch = "codex/zigeffect-causal-encryption-at-rest-policy";
 
 const OutputFormat = enum { text, json };
 
@@ -162,7 +162,7 @@ const backlog_items: []const BacklogItem = &.{
         .title = "Deep Runtime Internals",
         .gap_id = "runtime-internal-causal-depth",
         .priority = "P2",
-        .status = "planned",
+        .status = "delivered",
         .summary = "Emit deeper zigeffect runtime facts for layers, services, scopes, fibers, resources, finalizers, retries, defects, interruptions, and cause chains.",
         .depends_on = &.{"unified-causal-spine-contract"},
         .deliverables = &.{
@@ -186,7 +186,7 @@ const backlog_items: []const BacklogItem = &.{
         .title = "App Semantic Trace API",
         .gap_id = "app-semantic-lineage",
         .priority = "P2",
-        .status = "planned",
+        .status = "delivered",
         .summary = "Expose an app-facing semantic trace API for data movement, service calls, domain actions, policy decisions, artifacts, and responses.",
         .depends_on = &.{"unified-causal-spine-contract"},
         .deliverables = &.{
@@ -210,7 +210,7 @@ const backlog_items: []const BacklogItem = &.{
         .gap_id = "machine-native-causal-queries",
         .priority = "P2",
         .status = "partial",
-        .summary = "Expose compact bounded agent queries over the unified spine while preserving evidence ids, redaction state, truncation state, confidence, and next-query hints. Runtime query JSON is delivered first; app semantic trace_data and cross-run comparison remain future work.",
+        .summary = "Expose compact bounded agent queries over the unified spine while preserving evidence ids, redaction state, truncation state, confidence, and next-query hints. Runtime query JSON and app semantic trace_data are delivered; cross-run comparison remains future work.",
         .depends_on = &.{ "unified-causal-spine-contract", "deep-runtime-internals", "app-semantic-trace-api" },
         .deliverables = &.{
             "runtime summarize_run query",
@@ -219,7 +219,7 @@ const backlog_items: []const BacklogItem = &.{
             "runtime trace_cause query",
             "runtime list_findings and next_queries queries",
             "bounded runtime response schema",
-            "future app trace_data query",
+            "app trace_data query",
             "future compare_runs query",
         },
         .evidence_sources = &.{
@@ -700,11 +700,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-deep-runtime-internals",
+        "start-encryption-at-rest-policy",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-deep-runtime-internals",
+        "codex/zigeffect-causal-encryption-at-rest-policy",
         recommended_next_branch,
     );
 }
@@ -740,7 +740,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-deep-runtime-internals") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-encryption-at-rest-policy") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -755,7 +755,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-deep-runtime-internals\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-encryption-at-rest-policy\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);

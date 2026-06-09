@@ -14,6 +14,10 @@ export type CausalEvent = {
   scopeId: string | null;
   traceId: string | null;
   spanId: string | null;
+  artifactId: string;
+  domainEntityRef: string;
+  dataSubjectRef: string;
+  schemaRef: string;
   raw: UnknownRecord;
 };
 
@@ -1004,6 +1008,10 @@ function normalizeEvent(raw: UnknownRecord, index: number): CausalEvent {
     scopeId: nullableIdValue(raw.scope_id),
     traceId: nullableIdValue(raw.trace_id),
     spanId: nullableIdValue(raw.span_id),
+    artifactId: textValue(raw.artifact_id, ""),
+    domainEntityRef: textValue(raw.domain_entity_ref, ""),
+    dataSubjectRef: textValue(raw.data_subject_ref, ""),
+    schemaRef: textValue(raw.schema_ref, ""),
     raw,
   };
 }

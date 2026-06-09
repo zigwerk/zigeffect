@@ -192,8 +192,8 @@ The agent-query response is emitted by `causal-query --agent`. It is a compact
 bounded graph slice for agents, with query name, arguments, selected events,
 derived relationships, policy metadata, compatibility warnings, limitations,
 and next-query hints. It is read-only evidence over the unified runtime spine.
-The first version covers runtime events; app semantic `trace_data` and
-cross-artifact run comparison remain future schema-compatible extensions.
+Version `1` covers runtime queries and app semantic `trace_data` slices.
+Cross-artifact run comparison remains a future schema-compatible extension.
 
 ### Test Coverage
 

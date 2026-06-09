@@ -375,6 +375,14 @@ fn cloneEvent(allocator: Allocator, event: causal.CausalEvent) Allocator.Error!c
     errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
     owned.service_key = try cloneSlice(allocator, event.service_key);
     errdefer if (owned.service_key.len > 0) allocator.free(owned.service_key);
+    owned.artifact_id = try cloneSlice(allocator, event.artifact_id);
+    errdefer if (owned.artifact_id.len > 0) allocator.free(owned.artifact_id);
+    owned.domain_entity_ref = try cloneSlice(allocator, event.domain_entity_ref);
+    errdefer if (owned.domain_entity_ref.len > 0) allocator.free(owned.domain_entity_ref);
+    owned.data_subject_ref = try cloneSlice(allocator, event.data_subject_ref);
+    errdefer if (owned.data_subject_ref.len > 0) allocator.free(owned.data_subject_ref);
+    owned.schema_ref = try cloneSlice(allocator, event.schema_ref);
+    errdefer if (owned.schema_ref.len > 0) allocator.free(owned.schema_ref);
     owned.status = try cloneSlice(allocator, event.status);
     errdefer if (owned.status.len > 0) allocator.free(owned.status);
     owned.redacted_detail = try cloneSlice(allocator, event.redacted_detail);
@@ -386,6 +394,10 @@ fn deinitEventStrings(allocator: Allocator, event: causal.CausalEvent) void {
     if (event.label.len > 0) allocator.free(event.label);
     if (event.type_name.len > 0) allocator.free(event.type_name);
     if (event.service_key.len > 0) allocator.free(event.service_key);
+    if (event.artifact_id.len > 0) allocator.free(event.artifact_id);
+    if (event.domain_entity_ref.len > 0) allocator.free(event.domain_entity_ref);
+    if (event.data_subject_ref.len > 0) allocator.free(event.data_subject_ref);
+    if (event.schema_ref.len > 0) allocator.free(event.schema_ref);
     if (event.status.len > 0) allocator.free(event.status);
     if (event.redacted_detail.len > 0) allocator.free(event.redacted_detail);
 }
@@ -468,6 +480,14 @@ fn appendNodeCommonProperties(output: *std.ArrayList(u8), allocator: Allocator, 
     try appendOptionalJsonU64(output, allocator, event.cause_event_id);
     try output.appendSlice(allocator, ",\"schedule_id\":");
     try appendOptionalJsonU64(output, allocator, event.schedule_id);
+    try output.appendSlice(allocator, ",\"artifact_id\":");
+    try appendJsonString(output, allocator, event.artifact_id);
+    try output.appendSlice(allocator, ",\"domain_entity_ref\":");
+    try appendJsonString(output, allocator, event.domain_entity_ref);
+    try output.appendSlice(allocator, ",\"data_subject_ref\":");
+    try appendJsonString(output, allocator, event.data_subject_ref);
+    try output.appendSlice(allocator, ",\"schema_ref\":");
+    try appendJsonString(output, allocator, event.schema_ref);
     try output.appendSlice(allocator, ",\"trace_id\":");
     try appendOptionalJsonU64(output, allocator, event.trace_id);
     try output.appendSlice(allocator, ",\"span_id\":");

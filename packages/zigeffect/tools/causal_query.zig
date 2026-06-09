@@ -58,6 +58,10 @@ const Event = struct {
     resource_id: ?u64 = null,
     cause_event_id: ?u64 = null,
     schedule_id: ?u64 = null,
+    artifact_id: []const u8 = "",
+    domain_entity_ref: []const u8 = "",
+    data_subject_ref: []const u8 = "",
+    schema_ref: []const u8 = "",
     trace_id: ?u64,
     span_id: ?u64,
     label: []const u8,
@@ -247,6 +251,36 @@ const cyclic_cause_sample_json =
     \\}
 ;
 
+const app_semantic_sample_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v1",
+    \\  "schema_version": 1,
+    \\  "event_taxonomy_version": 1,
+    \\  "retention": {
+    \\    "max_events": 64,
+    \\    "dropped_events": 0,
+    \\    "oldest_retained_event_id": 1
+    \\  },
+    \\  "sampling": {
+    \\    "log_every_n": null,
+    \\    "metric_every_n": null,
+    \\    "span_every_n": null,
+    \\    "sampled_events": 0
+    \\  },
+    \\  "truncation": {
+    \\    "max_event_string_bytes": 128,
+    \\    "truncated_fields": 0
+    \\  },
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"layer_id":null,"service_key":"","resource_id":null,"cause_event_id":null,"schedule_id":null,"artifact_id":"","domain_entity_ref":"","data_subject_ref":"","schema_ref":"","trace_id":null,"span_id":null,"label":"app.request GET /api/projects/:id","type_name":"zigeffect.app.request","status":"started","redacted_detail":""},
+    \\    {"id":2,"kind":"span_recorded","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"layer_id":null,"service_key":"","resource_id":null,"cause_event_id":null,"schedule_id":null,"artifact_id":"","domain_entity_ref":"project:123","data_subject_ref":"tenant:acme","schema_ref":"Project.v1","trace_id":null,"span_id":null,"label":"load project","type_name":"zigeffect.app.data_read","status":"success","redacted_detail":""},
+    \\    {"id":3,"kind":"span_recorded","run_id":1,"parent_id":2,"fiber_id":null,"scope_id":null,"layer_id":null,"service_key":"","resource_id":null,"cause_event_id":2,"schedule_id":null,"artifact_id":"","domain_entity_ref":"project:123","data_subject_ref":"tenant:acme","schema_ref":"ProjectResponse.v1","trace_id":null,"span_id":null,"label":"shape project response","type_name":"zigeffect.app.data_transformed","status":"success","redacted_detail":""},
+    \\    {"id":4,"kind":"span_recorded","run_id":1,"parent_id":3,"fiber_id":null,"scope_id":null,"layer_id":null,"service_key":"","resource_id":null,"cause_event_id":3,"schedule_id":null,"artifact_id":"","domain_entity_ref":"project:123","data_subject_ref":"tenant:acme","schema_ref":"ProjectCache.v1","trace_id":null,"span_id":null,"label":"cache project","type_name":"zigeffect.app.data_written","status":"success","redacted_detail":""},
+    \\    {"id":5,"kind":"span_recorded","run_id":1,"parent_id":4,"fiber_id":null,"scope_id":null,"layer_id":null,"service_key":"","resource_id":null,"cause_event_id":4,"schedule_id":null,"artifact_id":"response:project:123","domain_entity_ref":"project:123","data_subject_ref":"tenant:acme","schema_ref":"ProjectResponse.v1","trace_id":null,"span_id":null,"label":"response sent","type_name":"zigeffect.app.response_sent","status":"200","redacted_detail":""}
+    \\  ]
+    \\}
+;
+
 pub const QueryOptions = struct {
     include_artifact_warnings: bool = true,
     artifact_label: []const u8 = "artifact",
@@ -337,6 +371,14 @@ pub fn runQueryWithOptions(
                 try appendUniqueEvent(allocator, &matched, event);
             }
         }
+    } else if (std.mem.eql(u8, query, "trace_data")) {
+        if (query_args.len <= 1) return error.MissingQueryArgument;
+        const data_subject_ref = query_args[1];
+        for (parsed.value.events) |event| {
+            if (std.mem.eql(u8, event.data_subject_ref, data_subject_ref)) {
+                try matched.append(allocator, event);
+            }
+        }
     } else if (std.mem.eql(u8, query, "next_queries")) {
         const event_id = try requiredU64(query_args, 1);
         if (findEvent(parsed.value.events, event_id)) |event| {
@@ -418,7 +460,7 @@ pub fn main(init: std.process.Init) !void {
 
 fn printUsage(err: anyerror) void {
     std.debug.print(
-        "causal-query error: {s}\nusage: zig build causal-query -- [--agent] [--limit <n>] [--file <path>] <snapshot|cause|lineage|resources|fibers|requirements|retries|summarize_run|find_failures|explain_event|trace_cause|list_findings|next_queries> [argument]\n",
+        "causal-query error: {s}\nusage: zig build causal-query -- [--agent] [--limit <n>] [--file <path>] <snapshot|cause|lineage|resources|fibers|requirements|retries|summarize_run|find_failures|explain_event|trace_cause|trace_data|list_findings|next_queries> [argument]\n",
         .{@errorName(err)},
     );
 }
@@ -732,6 +774,14 @@ fn appendAgentEvent(output: *std.ArrayList(u8), allocator: std.mem.Allocator, ev
     try appendOptionalJsonU64(output, allocator, event.resource_id);
     try output.appendSlice(allocator, ",\"schedule_id\":");
     try appendOptionalJsonU64(output, allocator, event.schedule_id);
+    try output.appendSlice(allocator, ",\"artifact_id\":");
+    try appendJsonString(output, allocator, event.artifact_id);
+    try output.appendSlice(allocator, ",\"domain_entity_ref\":");
+    try appendJsonString(output, allocator, event.domain_entity_ref);
+    try output.appendSlice(allocator, ",\"data_subject_ref\":");
+    try appendJsonString(output, allocator, event.data_subject_ref);
+    try output.appendSlice(allocator, ",\"schema_ref\":");
+    try appendJsonString(output, allocator, event.schema_ref);
     try output.appendSlice(allocator, ",\"label\":");
     try appendJsonString(output, allocator, event.label);
     try output.appendSlice(allocator, ",\"type_name\":");
@@ -796,6 +846,15 @@ fn appendAgentRelationships(output: *std.ArrayList(u8), allocator: std.mem.Alloc
         } else if (isFiberEvent(event.kind) and event.scope_id != null) {
             try appendAgentRelationship(output, allocator, &wrote, "owns", event, event.scope_id, event.fiber_id);
         }
+        if (std.mem.eql(u8, event.type_name, "zigeffect.app.data_read")) {
+            try appendAgentRelationship(output, allocator, &wrote, "reads", event, null, event.id);
+        } else if (std.mem.eql(u8, event.type_name, "zigeffect.app.data_written")) {
+            try appendAgentRelationship(output, allocator, &wrote, "writes", event, null, event.id);
+        } else if (std.mem.eql(u8, event.type_name, "zigeffect.app.data_transformed")) {
+            try appendAgentRelationship(output, allocator, &wrote, "transforms", event, event.cause_event_id, event.id);
+        } else if (std.mem.eql(u8, event.type_name, "zigeffect.app.artifact_emitted") or std.mem.eql(u8, event.type_name, "zigeffect.app.response_sent")) {
+            try appendAgentRelationship(output, allocator, &wrote, "emits", event, event.cause_event_id, event.id);
+        }
     }
     try output.append(allocator, ']');
 }
@@ -825,6 +884,9 @@ fn appendAgentNextQueries(output: *std.ArrayList(u8), allocator: std.mem.Allocat
             try appendNextQueryString(output, allocator, &wrote, "zig build causal-query -- --agent --file <artifact.json> summarize_run {d}", .{run_id});
             try appendNextQueryString(output, allocator, &wrote, "zig build causal-query -- --agent --file <artifact.json> find_failures {d}", .{run_id});
             try appendNextQueryString(output, allocator, &wrote, "zig build causal-query -- --agent --file <artifact.json> list_findings {d}", .{run_id});
+        }
+        if (event.data_subject_ref.len > 0) {
+            try appendNextQueryString(output, allocator, &wrote, "zig build causal-query -- --agent --file <artifact.json> trace_data {s}", .{event.data_subject_ref});
         }
     }
     try output.append(allocator, ']');
@@ -1086,4 +1148,19 @@ test "agent cause chains stop at malformed cycles" {
     try std.testing.expect(std.mem.indexOf(u8, output, "\"id\":1") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "\"id\":2") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "\"id\":3") != null);
+}
+
+test "agent trace_data returns semantic data lineage relationships" {
+    const output = try runQuery(std.testing.allocator, app_semantic_sample_json, &.{ "--agent", "trace_data", "tenant:acme" });
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "\"query\":\"trace_data\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "\"data_subject_ref\":\"tenant:acme\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "\"domain_entity_ref\":\"project:123\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "\"schema_ref\":\"Project.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "\"artifact_id\":\"response:project:123\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "\"relationship\":\"reads\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "\"relationship\":\"writes\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "\"relationship\":\"transforms\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "\"relationship\":\"emits\"") != null);
 }

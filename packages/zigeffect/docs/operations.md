@@ -438,9 +438,10 @@ zig build causal-production-hardening-backlog -- --format json
 
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
-production gaps into ordered future branches, and recommends
-`codex/zigeffect-causal-deep-runtime-internals` as the next branch after the
-unified causal spine contract.
+production gaps into ordered future branches, and now recommends
+`codex/zigeffect-causal-encryption-at-rest-policy` after the unified causal
+spine, deep runtime internals, app semantic trace API, and bounded agent query
+surface.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -552,10 +553,10 @@ contracts, and defines canonical runtime ids, app semantic ids, relationship
 types, policy stages, derived index families, consumer contracts, and fixture
 mappings.
 
-This contract is the handoff into
-`codex/zigeffect-causal-deep-runtime-internals`. It does not change live
-runtime emission, implement app trace APIs, write NenDB, add Cockroach scope,
-switch the workbench to React, or grant mutation authority.
+This contract was the handoff into
+`codex/zigeffect-causal-deep-runtime-internals`. The later runtime and app
+semantic branches preserve the same boundaries: no Cockroach scope, no React
+workbench switch, and no production mutation authority.
 
 ## Production Gaps
 

@@ -29,6 +29,27 @@ pub const CausalAppIncidentKind = enum {
     fiber_unresolved,
 };
 
+pub const CausalAppSemanticKind = enum {
+    function_boundary,
+    data_read,
+    data_transformed,
+    data_written,
+    service_call,
+    domain_action,
+    policy_decision,
+    artifact_emitted,
+    response_sent,
+};
+
+pub const CausalAppSemanticRefs = struct {
+    artifact_id: []const u8 = "",
+    domain_entity_ref: []const u8 = "",
+    data_subject_ref: []const u8 = "",
+    schema_ref: []const u8 = "",
+    service_key: []const u8 = "",
+    cause_event_id: ?u64 = null,
+};
+
 pub const CausalAppIncident = struct {
     kind: CausalAppIncidentKind,
     event_id: u64,
@@ -268,6 +289,110 @@ pub const CausalAppTrace = struct {
         });
     }
 
+    pub fn recordSemanticEvent(
+        self: *CausalAppTrace,
+        semantic_kind: CausalAppSemanticKind,
+        label: []const u8,
+        refs: CausalAppSemanticRefs,
+        status: []const u8,
+    ) std.mem.Allocator.Error!u64 {
+        return self.record(.{
+            .kind = .span_recorded,
+            .label = label,
+            .type_name = causalAppSemanticTypeName(semantic_kind),
+            .status = status,
+            .service_key = refs.service_key,
+            .cause_event_id = refs.cause_event_id,
+            .artifact_id = refs.artifact_id,
+            .domain_entity_ref = refs.domain_entity_ref,
+            .data_subject_ref = refs.data_subject_ref,
+            .schema_ref = refs.schema_ref,
+        });
+    }
+
+    pub fn recordFunctionBoundary(
+        self: *CausalAppTrace,
+        label: []const u8,
+        status: []const u8,
+    ) std.mem.Allocator.Error!u64 {
+        return self.recordSemanticEvent(.function_boundary, label, .{}, status);
+    }
+
+    pub fn recordDataRead(
+        self: *CausalAppTrace,
+        label: []const u8,
+        refs: CausalAppSemanticRefs,
+        status: []const u8,
+    ) std.mem.Allocator.Error!u64 {
+        return self.recordSemanticEvent(.data_read, label, refs, status);
+    }
+
+    pub fn recordDataTransformed(
+        self: *CausalAppTrace,
+        label: []const u8,
+        refs: CausalAppSemanticRefs,
+        status: []const u8,
+    ) std.mem.Allocator.Error!u64 {
+        return self.recordSemanticEvent(.data_transformed, label, refs, status);
+    }
+
+    pub fn recordDataWritten(
+        self: *CausalAppTrace,
+        label: []const u8,
+        refs: CausalAppSemanticRefs,
+        status: []const u8,
+    ) std.mem.Allocator.Error!u64 {
+        return self.recordSemanticEvent(.data_written, label, refs, status);
+    }
+
+    pub fn recordServiceCall(
+        self: *CausalAppTrace,
+        label: []const u8,
+        service_key: []const u8,
+        refs: CausalAppSemanticRefs,
+        status: []const u8,
+    ) std.mem.Allocator.Error!u64 {
+        var service_refs = refs;
+        service_refs.service_key = service_key;
+        return self.recordSemanticEvent(.service_call, label, service_refs, status);
+    }
+
+    pub fn recordDomainAction(
+        self: *CausalAppTrace,
+        label: []const u8,
+        refs: CausalAppSemanticRefs,
+        status: []const u8,
+    ) std.mem.Allocator.Error!u64 {
+        return self.recordSemanticEvent(.domain_action, label, refs, status);
+    }
+
+    pub fn recordPolicyDecision(
+        self: *CausalAppTrace,
+        label: []const u8,
+        refs: CausalAppSemanticRefs,
+        status: []const u8,
+    ) std.mem.Allocator.Error!u64 {
+        return self.recordSemanticEvent(.policy_decision, label, refs, status);
+    }
+
+    pub fn recordArtifactEmitted(
+        self: *CausalAppTrace,
+        label: []const u8,
+        refs: CausalAppSemanticRefs,
+        status: []const u8,
+    ) std.mem.Allocator.Error!u64 {
+        return self.recordSemanticEvent(.artifact_emitted, label, refs, status);
+    }
+
+    pub fn recordResponseSent(
+        self: *CausalAppTrace,
+        label: []const u8,
+        refs: CausalAppSemanticRefs,
+        status: []const u8,
+    ) std.mem.Allocator.Error!u64 {
+        return self.recordSemanticEvent(.response_sent, label, refs, status);
+    }
+
     pub fn recordConfigFailure(
         self: *CausalAppTrace,
         key: []const u8,
@@ -370,6 +495,20 @@ pub const CausalAppTrace = struct {
     }
 };
 
+fn causalAppSemanticTypeName(kind: CausalAppSemanticKind) []const u8 {
+    return switch (kind) {
+        .function_boundary => "zigeffect.app.function_boundary",
+        .data_read => "zigeffect.app.data_read",
+        .data_transformed => "zigeffect.app.data_transformed",
+        .data_written => "zigeffect.app.data_written",
+        .service_call => "zigeffect.app.service_call",
+        .domain_action => "zigeffect.app.domain_action",
+        .policy_decision => "zigeffect.app.policy_decision",
+        .artifact_emitted => "zigeffect.app.artifact_emitted",
+        .response_sent => "zigeffect.app.response_sent",
+    };
+}
+
 fn classifyAppIncident(events: []const causal.CausalEvent, event: causal.CausalEvent) ?CausalAppIncidentKind {
     if (isAppConfigFailure(event)) return .missing_config;
     if (isAppRequirementFailure(event)) return .missing_requirement;
@@ -395,8 +534,10 @@ fn isAppRequirementFailure(event: causal.CausalEvent) bool {
 }
 
 fn isAppResponseFailure(event: causal.CausalEvent) bool {
+    const is_response_span = std.mem.eql(u8, event.type_name, "zigeffect.app.response") or
+        std.mem.eql(u8, event.type_name, "zigeffect.app.response_sent");
     return event.kind == .span_recorded and
-        std.mem.eql(u8, event.type_name, "zigeffect.app.response") and
+        is_response_span and
         std.mem.startsWith(u8, event.status, "5");
 }
 

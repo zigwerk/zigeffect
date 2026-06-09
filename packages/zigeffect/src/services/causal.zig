@@ -117,6 +117,10 @@ pub const CausalEvent = struct {
     resource_id: ?u64 = null,
     cause_event_id: ?u64 = null,
     schedule_id: ?u64 = null,
+    artifact_id: []const u8 = "",
+    domain_entity_ref: []const u8 = "",
+    data_subject_ref: []const u8 = "",
+    schema_ref: []const u8 = "",
     trace_id: ?u64 = null,
     span_id: ?u64 = null,
     label: []const u8 = "",
@@ -479,6 +483,14 @@ fn cloneEventForStore(
     errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
     owned.service_key = try redactAndBoundCausalText(allocator, event.service_key, max_event_string_bytes, truncated_field_count);
     errdefer if (owned.service_key.len > 0) allocator.free(owned.service_key);
+    owned.artifact_id = try redactAndBoundCausalText(allocator, event.artifact_id, max_event_string_bytes, truncated_field_count);
+    errdefer if (owned.artifact_id.len > 0) allocator.free(owned.artifact_id);
+    owned.domain_entity_ref = try redactAndBoundCausalText(allocator, event.domain_entity_ref, max_event_string_bytes, truncated_field_count);
+    errdefer if (owned.domain_entity_ref.len > 0) allocator.free(owned.domain_entity_ref);
+    owned.data_subject_ref = try redactAndBoundCausalText(allocator, event.data_subject_ref, max_event_string_bytes, truncated_field_count);
+    errdefer if (owned.data_subject_ref.len > 0) allocator.free(owned.data_subject_ref);
+    owned.schema_ref = try redactAndBoundCausalText(allocator, event.schema_ref, max_event_string_bytes, truncated_field_count);
+    errdefer if (owned.schema_ref.len > 0) allocator.free(owned.schema_ref);
     owned.status = try redactAndBoundCausalText(allocator, event.status, max_event_string_bytes, truncated_field_count);
     errdefer if (owned.status.len > 0) allocator.free(owned.status);
     owned.redacted_detail = try redactAndBoundCausalText(allocator, event.redacted_detail, max_event_string_bytes, truncated_field_count);
@@ -494,6 +506,14 @@ fn cloneEvent(allocator: Allocator, event: CausalEvent) Allocator.Error!CausalEv
     errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
     owned.service_key = try redactCausalText(allocator, event.service_key);
     errdefer if (owned.service_key.len > 0) allocator.free(owned.service_key);
+    owned.artifact_id = try redactCausalText(allocator, event.artifact_id);
+    errdefer if (owned.artifact_id.len > 0) allocator.free(owned.artifact_id);
+    owned.domain_entity_ref = try redactCausalText(allocator, event.domain_entity_ref);
+    errdefer if (owned.domain_entity_ref.len > 0) allocator.free(owned.domain_entity_ref);
+    owned.data_subject_ref = try redactCausalText(allocator, event.data_subject_ref);
+    errdefer if (owned.data_subject_ref.len > 0) allocator.free(owned.data_subject_ref);
+    owned.schema_ref = try redactCausalText(allocator, event.schema_ref);
+    errdefer if (owned.schema_ref.len > 0) allocator.free(owned.schema_ref);
     owned.status = try redactCausalText(allocator, event.status);
     errdefer if (owned.status.len > 0) allocator.free(owned.status);
     owned.redacted_detail = try redactCausalText(allocator, event.redacted_detail);
@@ -505,6 +525,10 @@ fn deinitEventStrings(allocator: Allocator, event: CausalEvent) void {
     if (event.label.len > 0) allocator.free(event.label);
     if (event.type_name.len > 0) allocator.free(event.type_name);
     if (event.service_key.len > 0) allocator.free(event.service_key);
+    if (event.artifact_id.len > 0) allocator.free(event.artifact_id);
+    if (event.domain_entity_ref.len > 0) allocator.free(event.domain_entity_ref);
+    if (event.data_subject_ref.len > 0) allocator.free(event.data_subject_ref);
+    if (event.schema_ref.len > 0) allocator.free(event.schema_ref);
     if (event.status.len > 0) allocator.free(event.status);
     if (event.redacted_detail.len > 0) allocator.free(event.redacted_detail);
 }
@@ -1276,6 +1300,14 @@ pub fn formatCausalJson(allocator: Allocator, store: *const CausalStore) Allocat
         try appendOptionalJsonU64(&output, allocator, event.cause_event_id);
         try output.appendSlice(allocator, ",\n      \"schedule_id\": ");
         try appendOptionalJsonU64(&output, allocator, event.schedule_id);
+        try output.appendSlice(allocator, ",\n      \"artifact_id\": ");
+        try appendJsonString(&output, allocator, event.artifact_id);
+        try output.appendSlice(allocator, ",\n      \"domain_entity_ref\": ");
+        try appendJsonString(&output, allocator, event.domain_entity_ref);
+        try output.appendSlice(allocator, ",\n      \"data_subject_ref\": ");
+        try appendJsonString(&output, allocator, event.data_subject_ref);
+        try output.appendSlice(allocator, ",\n      \"schema_ref\": ");
+        try appendJsonString(&output, allocator, event.schema_ref);
         try output.appendSlice(allocator, ",\n      \"trace_id\": ");
         try appendOptionalJsonU64(&output, allocator, event.trace_id);
         try output.appendSlice(allocator, ",\n      \"span_id\": ");
@@ -1372,19 +1404,32 @@ fn appendDotEventTooltip(output: *std.ArrayList(u8), allocator: Allocator, event
     try appendDotOptionalU64Tooltip(output, allocator, "trace", event.trace_id, &wrote);
     try appendDotOptionalU64Tooltip(output, allocator, "span", event.span_id, &wrote);
     if (event.service_key.len > 0) {
-        if (wrote) try output.append(allocator, ' ');
-        try output.appendSlice(allocator, "service=");
-        try appendDotEscaped(output, allocator, event.service_key);
-        wrote = true;
+        try appendDotStringTooltip(output, allocator, "service", event.service_key, &wrote);
     }
+    try appendDotStringTooltip(output, allocator, "artifact", event.artifact_id, &wrote);
+    try appendDotStringTooltip(output, allocator, "domain", event.domain_entity_ref, &wrote);
+    try appendDotStringTooltip(output, allocator, "subject", event.data_subject_ref, &wrote);
+    try appendDotStringTooltip(output, allocator, "schema", event.schema_ref, &wrote);
     if (event.type_name.len > 0) {
-        if (wrote) try output.append(allocator, ' ');
-        try output.appendSlice(allocator, "type=");
-        try appendDotEscaped(output, allocator, event.type_name);
-        wrote = true;
+        try appendDotStringTooltip(output, allocator, "type", event.type_name, &wrote);
     }
     if (!wrote) try output.appendSlice(allocator, "event");
     try output.append(allocator, '"');
+}
+
+fn appendDotStringTooltip(
+    output: *std.ArrayList(u8),
+    allocator: Allocator,
+    name: []const u8,
+    value: []const u8,
+    wrote: *bool,
+) Allocator.Error!void {
+    if (value.len == 0) return;
+    if (wrote.*) try output.append(allocator, ' ');
+    try output.appendSlice(allocator, name);
+    try output.append(allocator, '=');
+    try appendDotEscaped(output, allocator, value);
+    wrote.* = true;
 }
 
 pub fn appendCausalDotEvent(output: *std.ArrayList(u8), allocator: Allocator, event: CausalEvent) Allocator.Error!void {

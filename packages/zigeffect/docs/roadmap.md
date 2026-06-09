@@ -638,7 +638,7 @@ metrics, and traces.
   `webui-dev/zig-webui` workbench direction, the post-streaming
   `workbench-graph-visual-debugging` milestone, non-goals, verification
   commands, and the next branch
-  `codex/zigeffect-causal-deep-runtime-internals`.
+  `codex/zigeffect-causal-encryption-at-rest-policy`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
@@ -661,21 +661,22 @@ metrics, and traces.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,
-  consumer contracts, and fixture mappings. It is the handoff into
+  consumer contracts, and fixture mappings. It was the handoff into
   `codex/zigeffect-causal-deep-runtime-internals`.
+- Delivered: deep runtime internals now emit stable runtime ids for layers,
+  services, scopes, fibers, resources, finalizers, retries, defects,
+  interruptions, and cause chains through the unified causal spine.
+- Delivered: app semantic tracing records `artifact_id`, `domain_entity_ref`,
+  `data_subject_ref`, and `schema_ref` through helper methods for data reads,
+  transforms, writes, service calls, domain actions, policy decisions,
+  artifacts, and responses.
+- Delivered: the compact agent query interface returns bounded JSON for run
+  summaries, failures, event explanations, cause traces, data lineage,
+  findings, and recommended next queries. Cross-run comparison remains future.
 - Still future: production-grade app-facing integrations, durable history
   hardening, and comparing arbitrary named audit-chain snapshots.
 - Still future: deeper runtime regression scenarios for partial config and
   cause coverage.
-- Next intelligence track: emit deeper runtime facts through the unified causal
-  spine. Runtime events should carry stable run, event, cause, fiber, scope,
-  layer, service, and resource ids. App events should carry artifact, domain
-  entity, data subject, and schema references instead of raw payloads.
-- Add a compact agent query interface over that spine with bounded responses
-  for run summaries, failures, event explanations, cause traces, data lineage,
-  run comparisons, findings, and recommended next queries. This interface is
-  separate from the human WebUI even though both consume the same causal truth
-  model.
 - Extend the SolidJS `zig-webui` causal workbench when future UI branches need
   richer effect-run, scope-tree, fiber-tree, layer-graph, retry-timeline,
   resource-ownership, and cause-tree views.

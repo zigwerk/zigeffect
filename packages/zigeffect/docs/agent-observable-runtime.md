@@ -612,7 +612,8 @@ flowchart TD
   Index --> Agent["Agent query interface"]
 ```
 
-The first expanded agent query surface should include:
+The expanded agent query surface now includes bounded agent JSON for runtime
+queries plus app data-lineage slices:
 
 - `summarize_run(run_id)`
 - `find_failures(run_id)`
@@ -622,6 +623,10 @@ The first expanded agent query surface should include:
 - `compare_runs(left_run_id, right_run_id)`
 - `list_findings(run_id)`
 - `next_queries(context)`
+
+`compare_runs(left_run_id, right_run_id)` remains future work because it needs
+snapshot/compare semantics across two retained artifacts, not just one bounded
+event slice.
 
 ### Causal Workbench
 
@@ -1039,11 +1044,11 @@ zig build causal-query -- --agent --file <artifact.json> find_failures 1
 ```
 
 Agent mode emits `zigeffect.causal.agent-query.v1` with selected events,
-derived runtime relationships, `bounded`/`truncated` flags, a compact
+derived runtime and app semantic relationships, `bounded`/`truncated` flags, a compact
 confidence signal, artifact policy metadata, compatibility warnings,
-limitations, and recommended next queries. The first version is the runtime-only
-query boundary; app semantic `trace_data` and cross-artifact run comparison
-remain future work.
+limitations, and recommended next queries. Use `trace_data <data_subject_ref>`
+for semantic app data-lineage events; cross-artifact run comparison remains
+future work.
 
 The companion `zig build causal-check` command runs the same dogfood scenario in
 fail-on-findings mode. It writes artifacts first, then exits nonzero when
@@ -1126,6 +1131,15 @@ should initialize stores with `defaultRequestCausalStoreOptions`; background
 jobs should use `defaultJobCausalStoreOptions`. Both defaults bound memory and
 event string length, and both export standard `zigeffect.causal.v1` JSON for
 the existing query, advice, diagnosis, and SolidJS workbench tools.
+
+The M7 adapter also records app semantic facts through
+`CausalAppSemanticRefs`. `recordDataRead`, `recordDataTransformed`,
+`recordDataWritten`, `recordServiceCall`, `recordDomainAction`,
+`recordPolicyDecision`, `recordArtifactEmitted`, and `recordResponseSent`
+emit stable `zigeffect.app.*` spans with `artifact_id`, `domain_entity_ref`,
+`data_subject_ref`, and `schema_ref`. Agents can query those refs with
+`causal-query --agent trace_data <data_subject_ref>` and receive `reads`,
+`writes`, `transforms`, and `emits` relationships without raw app payloads.
 
 `deriveCausalAppIncidents` is the first app incident mapping layer. It derives
 typed app incident categories from existing event fields and does not introduce

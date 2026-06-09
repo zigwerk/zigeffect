@@ -797,6 +797,10 @@ function minimalEvent(idText: string): CausalEvent {
     scopeId: null,
     traceId: null,
     spanId: null,
+    artifactId: "",
+    domainEntityRef: "",
+    dataSubjectRef: "",
+    schemaRef: "",
     raw: { id: Number(idText) },
   };
 }

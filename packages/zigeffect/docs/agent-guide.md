@@ -468,6 +468,12 @@ keeps sampleable observability disjoint from finding evidence: logs, metrics,
 and spans may be sampled; service, scope, resource, fiber, schedule, and
 assertion evidence must not be sampled.
 
+App semantic references are first-class event fields in the same causal
+artifact: `artifact_id`, `domain_entity_ref`, `data_subject_ref`, and
+`schema_ref`. Use them for stable references that agents can query, not for
+raw app data. JSON, JSONL, NenDB projection, OTel adapter records, and the
+workbench parser preserve these fields after store redaction and bounds.
+
 If a query, compare, development-loop query report, or advice report warns that
 the artifact schema is newer than supported, keep using event citations but
 assume future root or event fields may have been ignored. If it warns that the
@@ -657,15 +663,44 @@ var trace = try fx.CausalAppTrace.startRequest(&store, .{
     .runtime = "worker",
 });
 try trace.recordServiceResolution("ProjectService", "satisfied");
+_ = try trace.recordDataRead("load project", .{
+    .data_subject_ref = "tenant:acme",
+    .domain_entity_ref = "project:123",
+    .schema_ref = "Project.v1",
+}, "success");
+_ = try trace.recordResponseSent("GET /api/projects/:id", .{
+    .data_subject_ref = "tenant:acme",
+    .artifact_id = "response:project:error",
+    .schema_ref = "ErrorResponse.v1",
+}, "500");
 try trace.recordConfigFailure("readiness.region", "MissingConfig");
 try trace.complete(.failure);
 const json = try fx.formatCausalJson(allocator, &store);
 ```
 
+The semantic helper methods are `recordFunctionBoundary`, `recordDataRead`,
+`recordDataTransformed`, `recordDataWritten`, `recordServiceCall`,
+`recordDomainAction`, `recordPolicyDecision`, `recordArtifactEmitted`, and
+`recordResponseSent`. They emit `span_recorded` events with stable
+`zigeffect.app.*` type names and typed refs. Use `CausalAppSemanticRefs` to pass
+refs and `cause_event_id` when a semantic app event is caused by an earlier
+event.
+
 Keep labels semantic and bounded: route templates, service names, job names,
 config keys, and requirement names are useful; raw URLs, headers, cookies,
 bodies, rows, and user identifiers are not. The store still redacts and bounds
 event strings before retention and JSON export.
+
+When an artifact carries app semantic refs, ask for data lineage with:
+
+```sh
+zig build causal-query -- --agent --file <artifact.json> trace_data <data_subject_ref>
+```
+
+Agent mode returns matching events, semantic refs, `reads`, `writes`,
+`transforms`, and `emits` relationships, policy metadata, confidence, and next
+query hints. If retention, sampling, or truncation metadata says the slice is
+incomplete, cite that limitation in the fix summary.
 
 Use `examples/causal_app_request.zig` as the first app request reference. It
 models a Worker-compatible request path that returns the HTTP response shape and

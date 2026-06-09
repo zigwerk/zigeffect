@@ -25,11 +25,12 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-deep-runtime-internals` means the aggregation bundle
-contract, the NenDB-only durable-retention contract, manual production
-deployment runbooks, record-only artifact access-control contract, and unified
-causal spine contract now exist. The next branch should be
-`codex/zigeffect-causal-deep-runtime-internals`.
+The recommendation `start-encryption-at-rest-policy` means the aggregation
+bundle contract, NenDB-only durable-retention contract, manual production
+deployment runbooks, record-only artifact access-control contract, unified
+causal spine contract, deep runtime internals, app semantic trace API, and
+bounded agent query surface now exist. The next branch should be
+`codex/zigeffect-causal-encryption-at-rest-policy`.
 
 ## Dependency Order
 
@@ -40,9 +41,9 @@ The backlog currently orders future production-hardening branches as:
 3. `production-deployment-runbooks` delivered
 4. `artifact-access-control` delivered
 5. `unified-causal-spine-contract` delivered
-6. `deep-runtime-internals`
-7. `app-semantic-trace-api`
-8. `agent-query-interface`
+6. `deep-runtime-internals` delivered
+7. `app-semantic-trace-api` delivered
+8. `agent-query-interface` partial
 9. `encryption-at-rest-policy`
 10. `alerting-integrations`
 11. `live-dashboard-streaming-workbench`
@@ -54,9 +55,8 @@ The backlog currently orders future production-hardening branches as:
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
-split: runtime bounded JSON queries can ship after deep runtime internals,
-while app semantic `trace_data` and cross-run comparison stay future work until
-the app semantic trace API exists.
+split: runtime bounded JSON queries and app semantic `trace_data` are
+delivered, while cross-run comparison remains future work.
 
 ## Authority Boundaries
 

@@ -17,6 +17,10 @@ const JsonLineRow = struct {
     resource_id: ?u64,
     cause_event_id: ?u64,
     schedule_id: ?u64,
+    artifact_id: []const u8,
+    domain_entity_ref: []const u8,
+    data_subject_ref: []const u8,
+    schema_ref: []const u8,
     trace_id: ?u64,
     span_id: ?u64,
     label: []const u8,
@@ -49,6 +53,10 @@ test "formatCausalJsonLine emits schema-tagged escaped row" {
         .resource_id = 13,
         .cause_event_id = 41,
         .schedule_id = 14,
+        .artifact_id = "artifact:health",
+        .domain_entity_ref = "project:123",
+        .data_subject_ref = "tenant:acme",
+        .schema_ref = "Project.v1",
         .trace_id = 101,
         .span_id = 202,
         .label = "quote \" newline\n tab\t slash \\",
@@ -76,6 +84,10 @@ test "formatCausalJsonLine emits schema-tagged escaped row" {
     try std.testing.expectEqual(@as(?u64, 13), parsed.value.resource_id);
     try std.testing.expectEqual(@as(?u64, 41), parsed.value.cause_event_id);
     try std.testing.expectEqual(@as(?u64, 14), parsed.value.schedule_id);
+    try std.testing.expectEqualStrings("artifact:health", parsed.value.artifact_id);
+    try std.testing.expectEqualStrings("project:123", parsed.value.domain_entity_ref);
+    try std.testing.expectEqualStrings("tenant:acme", parsed.value.data_subject_ref);
+    try std.testing.expectEqualStrings("Project.v1", parsed.value.schema_ref);
     try std.testing.expectEqual(@as(?u64, 101), parsed.value.trace_id);
     try std.testing.expectEqual(@as(?u64, 202), parsed.value.span_id);
     try std.testing.expectEqualStrings("quote \" newline\n tab\t slash \\", parsed.value.label);
