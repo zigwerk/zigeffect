@@ -137,3 +137,82 @@ test "in-memory message storage persists replies and removes replied requests fr
     }));
     try std.testing.expect((try storage.unprocessedById(request.envelope.id, std.testing.allocator)) == null);
 }
+
+test "stored message record json round-trips" {
+    const address = fx.entityAddress("counter", "json");
+    var storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asMessageStorage();
+    var submitted = try storage.submit(.{
+        .shard_id = 7,
+        .now_ms = 2_000,
+        .envelope = .{ .kind = .request, .address = address, .idempotency_key = "json", .payload = "inc" },
+    });
+    defer submitted.deinit(std.testing.allocator);
+    var record = (try storage.unprocessedById(submitted.envelope.id, std.testing.allocator)).?;
+    defer record.deinit(std.testing.allocator);
+
+    const json = try fx.formatStoredMessageRecordJson(std.testing.allocator, record);
+    defer std.testing.allocator.free(json);
+    var parsed = try fx.parseStoredMessageRecordJson(std.testing.allocator, json);
+    defer parsed.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(record.shard_id, parsed.shard_id);
+    try std.testing.expectEqual(record.envelope.id, parsed.envelope.id);
+    try std.testing.expectEqualStrings(record.envelope.payload, parsed.envelope.payload);
+}
+
+test "file message storage replays unprocessed messages after reopen" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const address = fx.entityAddress("counter", "file");
+
+    {
+        var file_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer file_state.deinit();
+        const storage = file_state.asMessageStorage();
+        var submitted = try storage.submit(.{
+            .shard_id = 7,
+            .now_ms = 3_000,
+            .envelope = .{ .kind = .request, .address = address, .idempotency_key = "file", .payload = "inc" },
+        });
+        defer submitted.deinit(std.testing.allocator);
+    }
+
+    var reopened_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer reopened_state.deinit();
+    const reopened = reopened_state.asMessageStorage();
+    var by_shard = try reopened.unprocessedByShard(7, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 1), by_shard.records.len);
+    try std.testing.expectEqualStrings("inc", by_shard.records[0].envelope.payload);
+}
+
+test "file message storage detects duplicate submissions after reopen" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const address = fx.entityAddress("counter", "file-duplicate");
+
+    {
+        var file_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer file_state.deinit();
+        const storage = file_state.asMessageStorage();
+        var submitted = try storage.submit(.{
+            .shard_id = 7,
+            .now_ms = 3_000,
+            .envelope = .{ .kind = .request, .address = address, .idempotency_key = "file-duplicate", .payload = "inc" },
+        });
+        defer submitted.deinit(std.testing.allocator);
+    }
+
+    var reopened_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer reopened_state.deinit();
+    const reopened = reopened_state.asMessageStorage();
+    var duplicate = try reopened.submit(.{
+        .shard_id = 7,
+        .now_ms = 3_100,
+        .envelope = .{ .kind = .request, .address = address, .idempotency_key = "file-duplicate", .payload = "again" },
+    });
+    defer duplicate.deinit(std.testing.allocator);
+    try std.testing.expect(duplicate.duplicate);
+}

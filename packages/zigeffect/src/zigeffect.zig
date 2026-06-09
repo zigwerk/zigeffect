@@ -416,7 +416,16 @@ pub const MessageStorageReply = cluster.MessageStorageReply;
 pub const MessageRecordBatch = cluster.MessageRecordBatch;
 pub const MessageStorage = cluster.MessageStorage;
 pub const InMemoryMessageStorage = cluster.InMemoryMessageStorage;
+pub const FileMessageStorageOptions = cluster.FileMessageStorageOptions;
 pub const FileMessageStorage = cluster.FileMessageStorage;
+pub const message_record_schema = cluster.message_record_schema;
+pub const message_record_schema_version = cluster.message_record_schema_version;
+pub const message_reply_schema = cluster.message_reply_schema;
+pub const message_reply_schema_version = cluster.message_reply_schema_version;
+pub const messageRecordFileName = cluster.messageRecordFileName;
+pub const replyRecordFileName = cluster.replyRecordFileName;
+pub const formatStoredMessageRecordJson = cluster.formatStoredMessageRecordJson;
+pub const parseStoredMessageRecordJson = cluster.parseStoredMessageRecordJson;
 
 pub const ServiceSet = dependency.service_sets.ServiceSet;
 pub const DependencyIssueKind = dependency.report.DependencyIssueKind;
