@@ -8,15 +8,44 @@ pub const WorkflowEvent = journal.WorkflowEvent;
 pub const JournalSequence = journal.JournalSequence;
 pub const WorkflowReplayState = replay.WorkflowReplayState;
 
+pub const workflow_checkpoint_schema = "zigeffect.workflow.checkpoint.v1";
+pub const workflow_checkpoint_schema_version: u32 = 1;
+
 pub const JournalStoreError = error{
     SequenceConflict,
     DuplicateEvent,
     SequenceOverflow,
 };
 
-pub const JournalStoreAppendError = Allocator.Error || JournalStoreError;
-pub const JournalStoreReadError = Allocator.Error;
-pub const JournalStoreReplayError = Allocator.Error || JournalStoreError || replay.ReplayError;
+pub const FileJournalStoreError = error{
+    JournalStoreLocked,
+    CorruptJournal,
+};
+
+pub const JournalStoreAppendError = anyerror;
+pub const JournalStoreReadError = anyerror;
+pub const JournalStoreReplayError = anyerror;
+
+pub const JournalFsyncPolicy = enum {
+    never,
+    after_append,
+    after_recovery,
+    always,
+};
+
+pub const JournalCorruptionReason = enum {
+    invalid_json,
+    invalid_schema,
+    unknown_kind,
+    sequence_conflict,
+    duplicate_event,
+};
+
+pub const JournalCorruptionReport = struct {
+    segment_name: []const u8,
+    offset: u64,
+    reason: JournalCorruptionReason,
+};
 
 pub const JournalAppend = struct {
     expected_next_sequence: ?JournalSequence = null,
@@ -34,6 +63,259 @@ pub const JournalEventBatch = struct {
         self.allocator.free(self.events);
     }
 };
+
+pub fn segmentFileName(allocator: Allocator, first_sequence: JournalSequence) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(allocator, "workflow-{d:0>16}.jsonl", .{first_sequence});
+}
+
+pub fn checkpointFileName(allocator: Allocator, last_sequence: JournalSequence) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(allocator, "workflow-checkpoint-{d:0>16}.json", .{last_sequence});
+}
+
+fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []const u8) Allocator.Error!void {
+    try output.append(allocator, '"');
+    for (value) |byte| {
+        switch (byte) {
+            '"' => try output.appendSlice(allocator, "\\\""),
+            '\\' => try output.appendSlice(allocator, "\\\\"),
+            '\n' => try output.appendSlice(allocator, "\\n"),
+            '\r' => try output.appendSlice(allocator, "\\r"),
+            '\t' => try output.appendSlice(allocator, "\\t"),
+            else => try output.append(allocator, byte),
+        }
+    }
+    try output.append(allocator, '"');
+}
+
+fn appendOptionalJsonU64(output: *std.ArrayList(u8), allocator: Allocator, value: ?u64) Allocator.Error!void {
+    if (value) |number| {
+        try output.print(allocator, "{d}", .{number});
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+}
+
+fn appendActivityCheckpointRows(output: *std.ArrayList(u8), allocator: Allocator, rows: []const replay.ActivityState) Allocator.Error!void {
+    try output.appendSlice(allocator, "\"activities\":[");
+    for (rows, 0..) |row, index| {
+        if (index != 0) try output.append(allocator, ',');
+        try output.print(allocator, "{{\"activity_id\":{d},\"status\":", .{row.id});
+        try appendJsonString(output, allocator, @tagName(row.status));
+        try output.print(allocator, ",\"last_sequence\":{d},\"name\":", .{row.last_sequence});
+        try appendJsonString(output, allocator, row.name);
+        try output.append(allocator, '}');
+    }
+    try output.append(allocator, ']');
+}
+
+fn appendTimerCheckpointRows(output: *std.ArrayList(u8), allocator: Allocator, rows: []const replay.TimerState) Allocator.Error!void {
+    try output.appendSlice(allocator, "\"timers\":[");
+    for (rows, 0..) |row, index| {
+        if (index != 0) try output.append(allocator, ',');
+        try output.print(allocator, "{{\"timer_id\":{d},\"status\":", .{row.id});
+        try appendJsonString(output, allocator, @tagName(row.status));
+        try output.print(allocator, ",\"last_sequence\":{d},\"name\":", .{row.last_sequence});
+        try appendJsonString(output, allocator, row.name);
+        try output.append(allocator, '}');
+    }
+    try output.append(allocator, ']');
+}
+
+fn appendDeferredCheckpointRows(output: *std.ArrayList(u8), allocator: Allocator, rows: []const replay.DeferredState) Allocator.Error!void {
+    try output.appendSlice(allocator, "\"deferreds\":[");
+    for (rows, 0..) |row, index| {
+        if (index != 0) try output.append(allocator, ',');
+        try output.print(allocator, "{{\"deferred_id\":{d},\"status\":", .{row.id});
+        try appendJsonString(output, allocator, @tagName(row.status));
+        try output.print(allocator, ",\"last_sequence\":{d},\"name\":", .{row.last_sequence});
+        try appendJsonString(output, allocator, row.name);
+        try output.append(allocator, '}');
+    }
+    try output.append(allocator, ']');
+}
+
+fn appendQueueCheckpointRows(output: *std.ArrayList(u8), allocator: Allocator, rows: []const replay.QueueState) Allocator.Error!void {
+    try output.appendSlice(allocator, "\"queues\":[");
+    for (rows, 0..) |row, index| {
+        if (index != 0) try output.append(allocator, ',');
+        try output.print(allocator, "{{\"queue_id\":{d},\"status\":", .{row.id});
+        try appendJsonString(output, allocator, @tagName(row.status));
+        try output.print(allocator, ",\"last_sequence\":{d},\"name\":", .{row.last_sequence});
+        try appendJsonString(output, allocator, row.name);
+        try output.append(allocator, '}');
+    }
+    try output.append(allocator, ']');
+}
+
+pub fn formatWorkflowCheckpointJson(allocator: Allocator, state: *const WorkflowReplayState) Allocator.Error![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\"schema\":");
+    try appendJsonString(&output, allocator, workflow_checkpoint_schema);
+    try output.print(allocator, ",\"schema_version\":{d}", .{workflow_checkpoint_schema_version});
+    try output.print(allocator, ",\"last_sequence\":{d}", .{state.last_sequence});
+    try output.appendSlice(allocator, ",\"workflow_status\":");
+    try appendJsonString(&output, allocator, @tagName(state.workflow_status));
+    try output.appendSlice(allocator, ",\"workflow_id\":");
+    try appendOptionalJsonU64(&output, allocator, state.workflow_id);
+    try output.appendSlice(allocator, ",\"execution_id\":");
+    try appendOptionalJsonU64(&output, allocator, state.execution_id);
+    try output.append(allocator, ',');
+    try appendActivityCheckpointRows(&output, allocator, state.activities.items);
+    try output.append(allocator, ',');
+    try appendTimerCheckpointRows(&output, allocator, state.timers.items);
+    try output.append(allocator, ',');
+    try appendDeferredCheckpointRows(&output, allocator, state.deferreds.items);
+    try output.append(allocator, ',');
+    try appendQueueCheckpointRows(&output, allocator, state.queues.items);
+    try output.append(allocator, '}');
+
+    return output.toOwnedSlice(allocator);
+}
+
+pub const WorkflowCheckpointParseError = error{
+    InvalidWorkflowCheckpointSchema,
+    InvalidWorkflowCheckpointSchemaVersion,
+    UnknownWorkflowCheckpointStatus,
+    UnknownActivityCheckpointStatus,
+    UnknownTimerCheckpointStatus,
+    UnknownDeferredCheckpointStatus,
+    UnknownQueueCheckpointStatus,
+};
+
+const ActivityCheckpointRow = struct {
+    activity_id: journal.ActivityId,
+    status: []const u8,
+    last_sequence: JournalSequence,
+    name: []const u8 = "",
+};
+
+const TimerCheckpointRow = struct {
+    timer_id: journal.TimerId,
+    status: []const u8,
+    last_sequence: JournalSequence,
+    name: []const u8 = "",
+};
+
+const DeferredCheckpointRow = struct {
+    deferred_id: journal.DeferredId,
+    status: []const u8,
+    last_sequence: JournalSequence,
+    name: []const u8 = "",
+};
+
+const QueueCheckpointRow = struct {
+    queue_id: journal.QueueId,
+    status: []const u8,
+    last_sequence: JournalSequence,
+    name: []const u8 = "",
+};
+
+const WorkflowCheckpointJson = struct {
+    schema: []const u8,
+    schema_version: u32,
+    last_sequence: JournalSequence,
+    workflow_status: []const u8,
+    workflow_id: ?journal.WorkflowId = null,
+    execution_id: ?journal.ExecutionId = null,
+    activities: []ActivityCheckpointRow,
+    timers: []TimerCheckpointRow,
+    deferreds: []DeferredCheckpointRow,
+    queues: []QueueCheckpointRow,
+};
+
+fn cloneCheckpointName(allocator: Allocator, name: []const u8) Allocator.Error![]const u8 {
+    if (name.len == 0) return "";
+    return allocator.dupe(u8, name);
+}
+
+fn freeCheckpointName(allocator: Allocator, name: []const u8) void {
+    if (name.len != 0) allocator.free(name);
+}
+
+pub fn parseWorkflowCheckpointJson(allocator: Allocator, checkpoint_json: []const u8) !WorkflowReplayState {
+    var parsed = try std.json.parseFromSlice(WorkflowCheckpointJson, allocator, checkpoint_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    if (!std.mem.eql(u8, parsed.value.schema, workflow_checkpoint_schema)) {
+        return error.InvalidWorkflowCheckpointSchema;
+    }
+    if (parsed.value.schema_version != workflow_checkpoint_schema_version) {
+        return error.InvalidWorkflowCheckpointSchemaVersion;
+    }
+
+    var state = WorkflowReplayState.init(allocator);
+    errdefer state.deinit();
+
+    state.workflow_status = std.meta.stringToEnum(replay.WorkflowStatus, parsed.value.workflow_status) orelse
+        return error.UnknownWorkflowCheckpointStatus;
+    state.workflow_id = parsed.value.workflow_id;
+    state.execution_id = parsed.value.execution_id;
+    state.last_sequence = parsed.value.last_sequence;
+
+    for (parsed.value.activities) |row| {
+        const status = std.meta.stringToEnum(replay.ActivityStatus, row.status) orelse
+            return error.UnknownActivityCheckpointStatus;
+        {
+            const name = try cloneCheckpointName(allocator, row.name);
+            errdefer freeCheckpointName(allocator, name);
+            try state.activities.append(allocator, .{
+                .id = row.activity_id,
+                .status = status,
+                .last_sequence = row.last_sequence,
+                .name = name,
+            });
+        }
+    }
+
+    for (parsed.value.timers) |row| {
+        const status = std.meta.stringToEnum(replay.TimerStatus, row.status) orelse
+            return error.UnknownTimerCheckpointStatus;
+        {
+            const name = try cloneCheckpointName(allocator, row.name);
+            errdefer freeCheckpointName(allocator, name);
+            try state.timers.append(allocator, .{
+                .id = row.timer_id,
+                .status = status,
+                .last_sequence = row.last_sequence,
+                .name = name,
+            });
+        }
+    }
+
+    for (parsed.value.deferreds) |row| {
+        const status = std.meta.stringToEnum(replay.DeferredStatus, row.status) orelse
+            return error.UnknownDeferredCheckpointStatus;
+        {
+            const name = try cloneCheckpointName(allocator, row.name);
+            errdefer freeCheckpointName(allocator, name);
+            try state.deferreds.append(allocator, .{
+                .id = row.deferred_id,
+                .status = status,
+                .last_sequence = row.last_sequence,
+                .name = name,
+            });
+        }
+    }
+
+    for (parsed.value.queues) |row| {
+        const status = std.meta.stringToEnum(replay.QueueStatus, row.status) orelse
+            return error.UnknownQueueCheckpointStatus;
+        {
+            const name = try cloneCheckpointName(allocator, row.name);
+            errdefer freeCheckpointName(allocator, name);
+            try state.queues.append(allocator, .{
+                .id = row.queue_id,
+                .status = status,
+                .last_sequence = row.last_sequence,
+                .name = name,
+            });
+        }
+    }
+
+    return state;
+}
 
 pub const JournalStore = struct {
     context: *anyopaque,
@@ -89,18 +371,22 @@ pub const InMemoryJournalStore = struct {
     }
 
     pub fn append(self: *InMemoryJournalStore, request: JournalAppend) JournalStoreAppendError!JournalSequence {
-        const next_sequence = try self.nextSequence();
-        if (request.expected_next_sequence) |expected| {
-            if (expected != next_sequence) return error.SequenceConflict;
-        }
-        if (request.event.sequence != next_sequence) return error.SequenceConflict;
-        if (self.hasIdempotencyKey(request.event.idempotency_key)) return error.DuplicateEvent;
+        try self.validateAppend(request);
 
         const owned = try journal.cloneWorkflowEvent(self.allocator, request.event);
         errdefer journal.deinitWorkflowEventStrings(self.allocator, owned);
         try self.events.append(self.allocator, owned);
 
         return owned.sequence;
+    }
+
+    pub fn validateAppend(self: *const InMemoryJournalStore, request: JournalAppend) JournalStoreError!void {
+        const next_sequence = try self.nextSequence();
+        if (request.expected_next_sequence) |expected| {
+            if (expected != next_sequence) return error.SequenceConflict;
+        }
+        if (request.event.sequence != next_sequence) return error.SequenceConflict;
+        if (self.hasIdempotencyKey(request.event.idempotency_key)) return error.DuplicateEvent;
     }
 
     pub fn readAll(self: *const InMemoryJournalStore, allocator: Allocator) JournalStoreReadError!JournalEventBatch {
@@ -189,4 +475,233 @@ const in_memory_vtable: JournalStore.VTable = .{
     .read_from_sequence = InMemoryJournalStore.readFromSequenceAdapter,
     .latest_state = InMemoryJournalStore.latestStateAdapter,
     .reset = InMemoryJournalStore.resetAdapter,
+};
+
+pub const FileJournalStoreOptions = struct {
+    fsync_policy: JournalFsyncPolicy = .never,
+    segment_first_sequence: JournalSequence = 1,
+    lock_name: []const u8 = "workflow.lock",
+    owner_id: []const u8 = "zigeffect-local",
+    max_segment_bytes: usize = 16 * 1024 * 1024,
+};
+
+pub const FileJournalStore = struct {
+    allocator: Allocator,
+    io: std.Io,
+    dir: *std.Io.Dir,
+    options: FileJournalStoreOptions,
+    segment_name: []const u8,
+    memory: InMemoryJournalStore,
+    lock_acquired: bool = false,
+    sync_count: u64 = 0,
+    recovered_partial_bytes: u64 = 0,
+    last_corruption_report: ?JournalCorruptionReport = null,
+
+    pub fn open(allocator: Allocator, io: std.Io, dir: *std.Io.Dir, options: FileJournalStoreOptions) !FileJournalStore {
+        var store = try FileJournalStore.init(allocator, io, dir, options);
+        errdefer store.deinit();
+
+        try store.acquireLock();
+        try store.recover();
+
+        return store;
+    }
+
+    pub fn init(allocator: Allocator, io: std.Io, dir: *std.Io.Dir, options: FileJournalStoreOptions) Allocator.Error!FileJournalStore {
+        return .{
+            .allocator = allocator,
+            .io = io,
+            .dir = dir,
+            .options = options,
+            .segment_name = try segmentFileName(allocator, options.segment_first_sequence),
+            .memory = InMemoryJournalStore.init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *FileJournalStore) void {
+        if (self.lock_acquired) {
+            self.dir.deleteFile(self.io, self.options.lock_name) catch {};
+            self.lock_acquired = false;
+        }
+        self.memory.deinit();
+        self.allocator.free(self.segment_name);
+    }
+
+    pub fn asJournalStore(self: *FileJournalStore) JournalStore {
+        return .{
+            .context = self,
+            .vtable = &file_vtable,
+        };
+    }
+
+    pub fn append(self: *FileJournalStore, request: JournalAppend) JournalStoreAppendError!JournalSequence {
+        try self.memory.validateAppend(request);
+
+        const row = try journal.formatWorkflowEventJson(self.allocator, request.event);
+        defer self.allocator.free(row);
+
+        var file = try self.dir.openFile(self.io, self.segment_name, .{ .mode = .read_write });
+        defer file.close(self.io);
+        const offset = try file.length(self.io);
+        try file.writePositionalAll(self.io, row, offset);
+        try file.writePositionalAll(self.io, "\n", offset + row.len);
+        try self.syncFile(&file, .after_append);
+
+        return self.memory.append(request);
+    }
+
+    pub fn readAll(self: *const FileJournalStore, allocator: Allocator) JournalStoreReadError!JournalEventBatch {
+        return self.memory.readAll(allocator);
+    }
+
+    pub fn readFromSequence(self: *const FileJournalStore, allocator: Allocator, sequence: JournalSequence) JournalStoreReadError!JournalEventBatch {
+        return self.memory.readFromSequence(allocator, sequence);
+    }
+
+    pub fn latestState(self: *const FileJournalStore, allocator: Allocator) JournalStoreReplayError!WorkflowReplayState {
+        return self.memory.latestState(allocator);
+    }
+
+    pub fn reset(self: *FileJournalStore) void {
+        self.memory.reset();
+        const file = self.dir.createFile(self.io, self.segment_name, .{ .truncate = true }) catch return;
+        file.close(self.io);
+    }
+
+    pub fn syncCount(self: *const FileJournalStore) u64 {
+        return self.sync_count;
+    }
+
+    pub fn recoveredPartialBytes(self: *const FileJournalStore) u64 {
+        return self.recovered_partial_bytes;
+    }
+
+    pub fn lastCorruption(self: *const FileJournalStore) ?JournalCorruptionReport {
+        return self.last_corruption_report;
+    }
+
+    pub fn acquireLock(self: *FileJournalStore) !void {
+        if (self.lock_acquired) return;
+        const file = self.dir.createFile(self.io, self.options.lock_name, .{ .exclusive = true }) catch |err| switch (err) {
+            error.PathAlreadyExists => return error.JournalStoreLocked,
+            else => return err,
+        };
+        defer file.close(self.io);
+        try file.writeStreamingAll(self.io, self.options.owner_id);
+        self.lock_acquired = true;
+    }
+
+    pub fn recover(self: *FileJournalStore) !void {
+        const file = self.dir.openFile(self.io, self.segment_name, .{ .mode = .read_write }) catch |err| switch (err) {
+            error.FileNotFound => {
+                const created = try self.dir.createFile(self.io, self.segment_name, .{ .read = true });
+                created.close(self.io);
+                return;
+            },
+            else => return err,
+        };
+        defer file.close(self.io);
+
+        const content = try self.dir.readFileAlloc(
+            self.io,
+            self.segment_name,
+            self.allocator,
+            std.Io.Limit.limited(self.options.max_segment_bytes),
+        );
+        defer self.allocator.free(content);
+
+        var line_start: usize = 0;
+        var last_complete_offset: usize = 0;
+        while (std.mem.indexOfScalarPos(u8, content, line_start, '\n')) |newline_index| {
+            const line = content[line_start..newline_index];
+            if (line.len != 0) {
+                const event = journal.parseWorkflowEventJson(self.allocator, line) catch |err| {
+                    self.recordCorruption(line_start, corruptionReasonFromError(err));
+                    return error.CorruptJournal;
+                };
+                defer journal.deinitWorkflowEventStrings(self.allocator, event);
+
+                _ = self.memory.append(.{ .event = event }) catch |err| {
+                    self.recordCorruption(line_start, corruptionReasonFromError(err));
+                    return error.CorruptJournal;
+                };
+            }
+            line_start = newline_index + 1;
+            last_complete_offset = line_start;
+        }
+
+        if (last_complete_offset < content.len) {
+            self.recovered_partial_bytes += content.len - last_complete_offset;
+            try file.setLength(self.io, last_complete_offset);
+            try self.syncFile(&file, .after_recovery);
+        }
+    }
+
+    fn recordCorruption(self: *FileJournalStore, offset: usize, reason: JournalCorruptionReason) void {
+        self.last_corruption_report = .{
+            .segment_name = self.segment_name,
+            .offset = @as(u64, @intCast(offset)),
+            .reason = reason,
+        };
+    }
+
+    fn syncFile(self: *FileJournalStore, file: *const std.Io.File, trigger: JournalFsyncPolicy) !void {
+        const should_sync = switch (self.options.fsync_policy) {
+            .never => false,
+            .always => true,
+            .after_append => trigger == .after_append,
+            .after_recovery => trigger == .after_recovery,
+        };
+        if (should_sync) {
+            try file.sync(self.io);
+            self.sync_count += 1;
+        }
+    }
+
+    fn appendAdapter(context: *anyopaque, request: JournalAppend) JournalStoreAppendError!JournalSequence {
+        const self: *FileJournalStore = @ptrCast(@alignCast(context));
+        return self.append(request);
+    }
+
+    fn readAllAdapter(context: *anyopaque, allocator: Allocator) JournalStoreReadError!JournalEventBatch {
+        const self: *FileJournalStore = @ptrCast(@alignCast(context));
+        return self.readAll(allocator);
+    }
+
+    fn readFromSequenceAdapter(context: *anyopaque, allocator: Allocator, sequence: JournalSequence) JournalStoreReadError!JournalEventBatch {
+        const self: *FileJournalStore = @ptrCast(@alignCast(context));
+        return self.readFromSequence(allocator, sequence);
+    }
+
+    fn latestStateAdapter(context: *anyopaque, allocator: Allocator) JournalStoreReplayError!WorkflowReplayState {
+        const self: *FileJournalStore = @ptrCast(@alignCast(context));
+        return self.latestState(allocator);
+    }
+
+    fn resetAdapter(context: *anyopaque) void {
+        const self: *FileJournalStore = @ptrCast(@alignCast(context));
+        self.reset();
+    }
+};
+
+fn corruptionReasonFromError(err: anyerror) JournalCorruptionReason {
+    return switch (err) {
+        error.InvalidWorkflowEventSchema,
+        error.InvalidWorkflowEventSchemaVersion,
+        => .invalid_schema,
+        error.UnknownWorkflowEventKind => .unknown_kind,
+        error.SequenceConflict,
+        error.SequenceOverflow,
+        => .sequence_conflict,
+        error.DuplicateEvent => .duplicate_event,
+        else => .invalid_json,
+    };
+}
+
+const file_vtable: JournalStore.VTable = .{
+    .append = FileJournalStore.appendAdapter,
+    .read_all = FileJournalStore.readAllAdapter,
+    .read_from_sequence = FileJournalStore.readFromSequenceAdapter,
+    .latest_state = FileJournalStore.latestStateAdapter,
+    .reset = FileJournalStore.resetAdapter,
 };

@@ -24,6 +24,7 @@ The journal module owns:
 - `workflowEventKindName(kind)`;
 - `WorkflowEvent`;
 - `formatWorkflowEventJson(allocator, event)`;
+- `parseWorkflowEventJson(allocator, row_json)`;
 - `formatWorkflowEventText(allocator, event)`.
 
 `WorkflowEvent` is a stable envelope with required workflow/execution ids and
@@ -78,8 +79,9 @@ JSON formatting should emit a single event object with schema metadata. Optional
 ids are emitted as `null`. Text formatting should emit a readable report for
 CLI tools and agent diagnostics.
 
-The formatter is intentionally one-way for this milestone. Parsing belongs to
-the replay-state and journal-store milestones.
+The formatter was intentionally one-way in Milestone 2. Milestone 5 added the
+structured parser so file journal stores can recover rows through
+`std.json.parseFromSlice`.
 
 ## Public Surface
 
@@ -90,7 +92,9 @@ Expose through `fx.workflow`:
 - `WorkflowEventKind`;
 - `WorkflowEvent`;
 - `workflowEventKindName`;
+- `workflowEventKindFromName`;
 - `formatWorkflowEventJson`;
+- `parseWorkflowEventJson`;
 - `formatWorkflowEventText`.
 
 No root aliases are added.

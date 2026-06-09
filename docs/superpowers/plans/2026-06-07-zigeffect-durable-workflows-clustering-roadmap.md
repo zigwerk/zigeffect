@@ -251,17 +251,17 @@ Goal: make local durability real before workflow execution becomes complex.
 
 Deliverables:
 
-- [ ] Implement newline-delimited JSON journal segments.
-- [ ] Add fsync policy options.
-- [ ] Add segment naming and recovery from partial trailing records.
-- [ ] Add lock file or process ownership guard.
-- [ ] Add corruption reporting with exact file and offset.
-- [ ] Add compaction checkpoint format that preserves replay equivalence.
+- [x] Implement newline-delimited JSON journal segments.
+- [x] Add fsync policy options.
+- [x] Add segment naming and recovery from partial trailing records.
+- [x] Add lock file or process ownership guard.
+- [x] Add corruption reporting with exact file and offset.
+- [x] Add compaction checkpoint format that preserves replay equivalence.
 
 Acceptance:
 
-- [ ] Crash fixture tests simulate partial writes and restart replay.
-- [ ] File store and memory store produce the same folded state.
+- [x] Crash fixture tests simulate partial writes and restart replay.
+- [x] File store and memory store produce the same folded state.
 
 ## Milestone 6: Workflow Definition API
 

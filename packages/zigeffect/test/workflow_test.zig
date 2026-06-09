@@ -1,6 +1,45 @@
 const std = @import("std");
 const fx = @import("zigeffect");
 
+fn expectWorkflowReplayStatesEqual(expected: *const fx.workflow.WorkflowReplayState, actual: *const fx.workflow.WorkflowReplayState) !void {
+    try std.testing.expectEqual(expected.workflow_status, actual.workflow_status);
+    try std.testing.expectEqual(expected.workflow_id, actual.workflow_id);
+    try std.testing.expectEqual(expected.execution_id, actual.execution_id);
+    try std.testing.expectEqual(expected.last_sequence, actual.last_sequence);
+
+    try std.testing.expectEqual(expected.activities.items.len, actual.activities.items.len);
+    for (expected.activities.items, actual.activities.items) |expected_row, actual_row| {
+        try std.testing.expectEqual(expected_row.id, actual_row.id);
+        try std.testing.expectEqual(expected_row.status, actual_row.status);
+        try std.testing.expectEqual(expected_row.last_sequence, actual_row.last_sequence);
+        try std.testing.expectEqualStrings(expected_row.name, actual_row.name);
+    }
+
+    try std.testing.expectEqual(expected.timers.items.len, actual.timers.items.len);
+    for (expected.timers.items, actual.timers.items) |expected_row, actual_row| {
+        try std.testing.expectEqual(expected_row.id, actual_row.id);
+        try std.testing.expectEqual(expected_row.status, actual_row.status);
+        try std.testing.expectEqual(expected_row.last_sequence, actual_row.last_sequence);
+        try std.testing.expectEqualStrings(expected_row.name, actual_row.name);
+    }
+
+    try std.testing.expectEqual(expected.deferreds.items.len, actual.deferreds.items.len);
+    for (expected.deferreds.items, actual.deferreds.items) |expected_row, actual_row| {
+        try std.testing.expectEqual(expected_row.id, actual_row.id);
+        try std.testing.expectEqual(expected_row.status, actual_row.status);
+        try std.testing.expectEqual(expected_row.last_sequence, actual_row.last_sequence);
+        try std.testing.expectEqualStrings(expected_row.name, actual_row.name);
+    }
+
+    try std.testing.expectEqual(expected.queues.items.len, actual.queues.items.len);
+    for (expected.queues.items, actual.queues.items) |expected_row, actual_row| {
+        try std.testing.expectEqual(expected_row.id, actual_row.id);
+        try std.testing.expectEqual(expected_row.status, actual_row.status);
+        try std.testing.expectEqual(expected_row.last_sequence, actual_row.last_sequence);
+        try std.testing.expectEqualStrings(expected_row.name, actual_row.name);
+    }
+}
+
 test "workflow journal schema constants are stable" {
     try std.testing.expectEqualStrings("zigeffect.workflow.journal-event.v1", fx.workflow.workflow_journal_event_schema);
     try std.testing.expectEqual(@as(u32, 1), fx.workflow.workflow_journal_event_schema_version);
@@ -101,6 +140,39 @@ test "workflow event text is readable for agents and CLIs" {
     try std.testing.expect(std.mem.indexOf(u8, text, "timer_id: 10") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "name: wake-up") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "idempotency_key: timer-2") != null);
+}
+
+test "workflow event json parses back into an owned event" {
+    const event = fx.workflow.WorkflowEvent{
+        .sequence = 3,
+        .kind = .queue_claimed,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .parent_sequence = 2,
+        .queue_id = 40,
+        .name = "mailbox \"primary\"",
+        .status = "claimed\nready",
+        .redacted_detail = "safe\tpayload",
+        .idempotency_key = "queue-claim",
+    };
+
+    const json = try fx.workflow.formatWorkflowEventJson(std.testing.allocator, event);
+    defer std.testing.allocator.free(json);
+
+    const parsed = try fx.workflow.parseWorkflowEventJson(std.testing.allocator, json);
+    defer fx.workflow.deinitWorkflowEventStrings(std.testing.allocator, parsed);
+
+    try std.testing.expectEqual(event.sequence, parsed.sequence);
+    try std.testing.expectEqual(event.kind, parsed.kind);
+    try std.testing.expectEqual(event.workflow_id, parsed.workflow_id);
+    try std.testing.expectEqual(event.execution_id, parsed.execution_id);
+    try std.testing.expectEqual(event.parent_sequence, parsed.parent_sequence);
+    try std.testing.expectEqual(event.queue_id, parsed.queue_id);
+    try std.testing.expectEqual(@as(?u64, null), parsed.activity_id);
+    try std.testing.expectEqualStrings(event.name, parsed.name);
+    try std.testing.expectEqualStrings(event.status, parsed.status);
+    try std.testing.expectEqualStrings(event.redacted_detail, parsed.redacted_detail);
+    try std.testing.expectEqualStrings(event.idempotency_key, parsed.idempotency_key);
 }
 
 test "workflow replay folds lifecycle events" {
@@ -400,4 +472,224 @@ test "in-memory workflow journal store replays latest state and resets" {
         },
     });
     try std.testing.expectEqual(@as(u64, 1), restarted_sequence);
+}
+
+test "file workflow journal store appends json lines and replays after reopen" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .idempotency_key = "start",
+        },
+        .{
+            .sequence = 2,
+            .kind = .activity_scheduled,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .activity_id = 10,
+            .name = "charge",
+            .idempotency_key = "activity-scheduled",
+        },
+        .{
+            .sequence = 3,
+            .kind = .activity_completed,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .activity_id = 10,
+            .idempotency_key = "activity-completed",
+        },
+    };
+
+    const segment_name = try fx.workflow.segmentFileName(std.testing.allocator, 1);
+    defer std.testing.allocator.free(segment_name);
+
+    {
+        var file_store = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer file_store.deinit();
+
+        var journal_store = file_store.asJournalStore();
+        try std.testing.expect(@TypeOf(journal_store) == fx.workflow.JournalStore);
+        for (events) |event| {
+            _ = try journal_store.append(.{ .event = event });
+        }
+
+        var file_state = try journal_store.latestState(std.testing.allocator);
+        defer file_state.deinit();
+        try std.testing.expectEqual(fx.workflow.ActivityStatus.completed, file_state.activities.items[0].status);
+    }
+
+    const raw_segment = try tmp.dir.readFileAlloc(
+        std.testing.io,
+        segment_name,
+        std.testing.allocator,
+        std.Io.Limit.limited(16 * 1024),
+    );
+    defer std.testing.allocator.free(raw_segment);
+    try std.testing.expectEqual(@as(usize, 3), std.mem.count(u8, raw_segment, "\n"));
+    try std.testing.expect(std.mem.indexOf(u8, raw_segment, "\"idempotency_key\":\"activity-completed\"") != null);
+
+    var memory_store = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer memory_store.deinit();
+    for (events) |event| {
+        _ = try memory_store.append(.{ .event = event });
+    }
+    var memory_state = try memory_store.latestState(std.testing.allocator);
+    defer memory_state.deinit();
+
+    {
+        var reopened = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer reopened.deinit();
+
+        var file_state = try reopened.latestState(std.testing.allocator);
+        defer file_state.deinit();
+        try expectWorkflowReplayStatesEqual(&memory_state, &file_state);
+    }
+}
+
+test "file workflow journal store recovers partial trailing row" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const segment_name = try fx.workflow.segmentFileName(std.testing.allocator, 1);
+    defer std.testing.allocator.free(segment_name);
+
+    const started = fx.workflow.WorkflowEvent{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .idempotency_key = "start",
+    };
+    const started_json = try fx.workflow.formatWorkflowEventJson(std.testing.allocator, started);
+    defer std.testing.allocator.free(started_json);
+
+    const partial = "{\"schema\":\"zigeffect.workflow.journal-event.v1\",\"sequence\":";
+    {
+        const file = try tmp.dir.createFile(std.testing.io, segment_name, .{ .read = true });
+        defer file.close(std.testing.io);
+        try file.writeStreamingAll(std.testing.io, started_json);
+        try file.writeStreamingAll(std.testing.io, "\n");
+        try file.writeStreamingAll(std.testing.io, partial);
+    }
+
+    var store = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{ .fsync_policy = .after_recovery });
+    defer store.deinit();
+
+    try std.testing.expectEqual(partial.len, store.recoveredPartialBytes());
+    try std.testing.expectEqual(@as(u64, 1), store.syncCount());
+
+    var state = try store.latestState(std.testing.allocator);
+    defer state.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowStatus.running, state.workflow_status);
+    try std.testing.expectEqual(@as(u64, 1), state.last_sequence);
+
+    const recovered_segment = try tmp.dir.readFileAlloc(
+        std.testing.io,
+        segment_name,
+        std.testing.allocator,
+        std.Io.Limit.limited(16 * 1024),
+    );
+    defer std.testing.allocator.free(recovered_segment);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, recovered_segment, "\n"));
+    try std.testing.expect(std.mem.indexOf(u8, recovered_segment, partial) == null);
+}
+
+test "file workflow journal store reports complete-row corruption" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const segment_name = try fx.workflow.segmentFileName(std.testing.allocator, 1);
+    defer std.testing.allocator.free(segment_name);
+
+    {
+        const file = try tmp.dir.createFile(std.testing.io, segment_name, .{ .read = true });
+        defer file.close(std.testing.io);
+        try file.writeStreamingAll(std.testing.io, "{\"schema\":\"not-json\"\n");
+    }
+
+    var store = try fx.workflow.FileJournalStore.init(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer store.deinit();
+    try store.acquireLock();
+    try std.testing.expectError(error.CorruptJournal, store.recover());
+
+    const report = store.lastCorruption().?;
+    try std.testing.expectEqualStrings(segment_name, report.segment_name);
+    try std.testing.expectEqual(@as(u64, 0), report.offset);
+    try std.testing.expectEqual(fx.workflow.JournalCorruptionReason.invalid_json, report.reason);
+}
+
+test "file workflow journal store lock rejects a second local opener" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var first = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer first.deinit();
+
+    try std.testing.expectError(
+        error.JournalStoreLocked,
+        fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{}),
+    );
+}
+
+test "file workflow journal store fsync policy is observable after appends" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var store = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{ .fsync_policy = .after_append });
+    defer store.deinit();
+
+    _ = try store.append(.{
+        .event = .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .idempotency_key = "start",
+        },
+    });
+    _ = try store.append(.{
+        .event = .{
+            .sequence = 2,
+            .kind = .workflow_completed,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .idempotency_key = "complete",
+        },
+    });
+
+    try std.testing.expectEqual(@as(u64, 2), store.syncCount());
+}
+
+test "workflow checkpoint json round-trips replay-equivalent state" {
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8 },
+        .{ .sequence = 2, .kind = .activity_scheduled, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .name = "charge" },
+        .{ .sequence = 3, .kind = .activity_completed, .workflow_id = 7, .execution_id = 8, .activity_id = 10 },
+        .{ .sequence = 4, .kind = .timer_scheduled, .workflow_id = 7, .execution_id = 8, .timer_id = 20, .name = "wake-up" },
+        .{ .sequence = 5, .kind = .timer_fired, .workflow_id = 7, .execution_id = 8, .timer_id = 20 },
+        .{ .sequence = 6, .kind = .deferred_created, .workflow_id = 7, .execution_id = 8, .deferred_id = 30, .name = "approval" },
+        .{ .sequence = 7, .kind = .deferred_completed, .workflow_id = 7, .execution_id = 8, .deferred_id = 30 },
+        .{ .sequence = 8, .kind = .queue_offered, .workflow_id = 7, .execution_id = 8, .queue_id = 40, .name = "mailbox" },
+        .{ .sequence = 9, .kind = .queue_acked, .workflow_id = 7, .execution_id = 8, .queue_id = 40 },
+    };
+
+    var state = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &events);
+    defer state.deinit();
+
+    const checkpoint_json = try fx.workflow.formatWorkflowCheckpointJson(std.testing.allocator, &state);
+    defer std.testing.allocator.free(checkpoint_json);
+
+    try std.testing.expect(std.mem.indexOf(u8, checkpoint_json, "\"schema\":\"zigeffect.workflow.checkpoint.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, checkpoint_json, "\"activity_id\":10") != null);
+    try std.testing.expect(std.mem.indexOf(u8, checkpoint_json, "\"queue_id\":40") != null);
+
+    var parsed = try fx.workflow.parseWorkflowCheckpointJson(std.testing.allocator, checkpoint_json);
+    defer parsed.deinit();
+
+    try expectWorkflowReplayStatesEqual(&state, &parsed);
 }

@@ -35,13 +35,13 @@
 - Modify `packages/zigeffect/src/workflow/journal.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing parser tests**
+- [x] **Step 1: Write failing parser tests**
 
 Add tests proving `formatWorkflowEventJson` output can parse back into an
 equivalent `WorkflowEvent`, including optional ids, escaped text, and
 `idempotency_key`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -51,13 +51,13 @@ bun run zigeffect:test
 
 Expected: FAIL until parser APIs exist.
 
-- [ ] **Step 3: Implement parser**
+- [x] **Step 3: Implement parser**
 
 Add `WorkflowEventParseError`, `parseWorkflowEventJson`, and
 `workflowEventKindFromName`. Use `std.json.parseFromSlice` and clone parsed
 strings into the caller allocator.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -75,7 +75,7 @@ Expected: PASS.
 - Modify `packages/zigeffect/test/workflow_test.zig`
 - Modify `packages/zigeffect/test/architecture_test.zig`
 
-- [ ] **Step 1: Write failing file-store tests**
+- [x] **Step 1: Write failing file-store tests**
 
 Add tests proving:
 
@@ -85,7 +85,7 @@ Add tests proving:
   events;
 - `FileJournalStore.asJournalStore` satisfies the same vtable contract.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -95,13 +95,13 @@ bun run zigeffect:test
 
 Expected: FAIL until file-store APIs exist.
 
-- [ ] **Step 3: Implement file append/recovery**
+- [x] **Step 3: Implement file append/recovery**
 
 Add `FileJournalStore`, `FileJournalStoreOptions`, segment naming helpers,
 append-to-segment-before-memory ordering, and restart recovery into the memory
 store.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -117,7 +117,7 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/store.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing edge-case tests**
+- [x] **Step 1: Write failing edge-case tests**
 
 Add tests proving:
 
@@ -129,7 +129,7 @@ Add tests proving:
 - `JournalFsyncPolicy.after_recovery` increments `syncCount` after partial
   truncation.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -139,12 +139,12 @@ bun run zigeffect:test
 
 Expected: FAIL until the edge behavior exists.
 
-- [ ] **Step 3: Implement edge behavior**
+- [x] **Step 3: Implement edge behavior**
 
 Implement lock-file acquisition/removal, partial-tail truncation, corruption
 reports, and fsync policy checks.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -161,13 +161,13 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/root.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing checkpoint tests**
+- [x] **Step 1: Write failing checkpoint tests**
 
 Add tests that fold a journal to `WorkflowReplayState`, format a checkpoint,
 parse the checkpoint back, and compare workflow status, ids, sequence, and all
 row states.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -177,13 +177,13 @@ bun run zigeffect:test
 
 Expected: FAIL until checkpoint formatter/parser exist.
 
-- [ ] **Step 3: Implement checkpoint formatter/parser**
+- [x] **Step 3: Implement checkpoint formatter/parser**
 
 Add checkpoint schema constants, status formatting/parsing helpers, JSON array
 formatters, `formatWorkflowCheckpointJson`, and
 `parseWorkflowCheckpointJson`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -201,17 +201,17 @@ Expected: PASS.
 - Add `docs/superpowers/specs/2026-06-09-zigeffect-file-journal-store-design.md`
 - Add `docs/superpowers/plans/2026-06-09-zigeffect-file-journal-store.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Document `FileJournalStore`, segment naming, recovery posture, corruption
 reports, fsync policy, and checkpoints under `src/workflow/store.zig`.
 
-- [ ] **Step 2: Mark Milestone 5 complete**
+- [x] **Step 2: Mark Milestone 5 complete**
 
 Mark all Milestone 5 deliverables and acceptance boxes in the roadmap after
 the full gate passes.
 
-- [ ] **Step 3: Run full gate**
+- [x] **Step 3: Run full gate**
 
 Run:
 
@@ -224,7 +224,7 @@ git diff --check
 
 Expected: all commands PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/zigeffect/src/workflow/journal.zig packages/zigeffect/src/workflow/store.zig packages/zigeffect/src/workflow/root.zig packages/zigeffect/test/workflow_test.zig packages/zigeffect/test/architecture_test.zig packages/zigeffect/docs/architecture.md docs/superpowers/specs/2026-06-09-zigeffect-file-journal-store-design.md docs/superpowers/plans/2026-06-09-zigeffect-file-journal-store.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md
@@ -233,12 +233,12 @@ git commit -m "feat(zigeffect): add file workflow journal store"
 
 ## Self-Review Checklist
 
-- [ ] Complete rows parse through `std.json`, not string slicing.
-- [ ] Partial trailing rows are truncated; malformed complete rows are not.
-- [ ] Corruption reports include segment name and byte offset.
-- [ ] Lock file prevents two local openers.
-- [ ] Fsync policies are observable in tests.
-- [ ] Checkpoint JSON round-trips to an equivalent replay state.
-- [ ] File store and memory store fold to the same state.
-- [ ] No workflow engine, activity runner, timers, or cluster leasing is added.
-- [ ] Full verification passes before Milestone 5 is marked complete.
+- [x] Complete rows parse through `std.json`, not string slicing.
+- [x] Partial trailing rows are truncated; malformed complete rows are not.
+- [x] Corruption reports include segment name and byte offset.
+- [x] Lock file prevents two local openers.
+- [x] Fsync policies are observable in tests.
+- [x] Checkpoint JSON round-trips to an equivalent replay state.
+- [x] File store and memory store fold to the same state.
+- [x] No workflow engine, activity runner, timers, or cluster leasing is added.
+- [x] Full verification passes before Milestone 5 is marked complete.

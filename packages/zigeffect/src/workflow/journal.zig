@@ -71,6 +71,16 @@ pub fn workflowEventKindName(kind: WorkflowEventKind) []const u8 {
     };
 }
 
+pub fn workflowEventKindFromName(name: []const u8) ?WorkflowEventKind {
+    return std.meta.stringToEnum(WorkflowEventKind, name);
+}
+
+pub const WorkflowEventParseError = error{
+    InvalidWorkflowEventSchema,
+    InvalidWorkflowEventSchemaVersion,
+    UnknownWorkflowEventKind,
+};
+
 pub const WorkflowEvent = struct {
     sequence: JournalSequence,
     kind: WorkflowEventKind,
@@ -110,6 +120,53 @@ pub fn deinitWorkflowEventStrings(allocator: std.mem.Allocator, event: WorkflowE
     if (event.status.len > 0) allocator.free(event.status);
     if (event.redacted_detail.len > 0) allocator.free(event.redacted_detail);
     if (event.idempotency_key.len > 0) allocator.free(event.idempotency_key);
+}
+
+const WorkflowEventJsonRow = struct {
+    schema: []const u8,
+    schema_version: u32,
+    sequence: JournalSequence,
+    kind: []const u8,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    parent_sequence: ?JournalSequence = null,
+    activity_id: ?ActivityId = null,
+    timer_id: ?TimerId = null,
+    deferred_id: ?DeferredId = null,
+    queue_id: ?QueueId = null,
+    name: []const u8 = "",
+    status: []const u8 = "",
+    redacted_detail: []const u8 = "",
+    idempotency_key: []const u8 = "",
+};
+
+pub fn parseWorkflowEventJson(allocator: std.mem.Allocator, row_json: []const u8) !WorkflowEvent {
+    var parsed = try std.json.parseFromSlice(WorkflowEventJsonRow, allocator, row_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    if (!std.mem.eql(u8, parsed.value.schema, workflow_journal_event_schema)) {
+        return error.InvalidWorkflowEventSchema;
+    }
+    if (parsed.value.schema_version != workflow_journal_event_schema_version) {
+        return error.InvalidWorkflowEventSchemaVersion;
+    }
+    const kind = workflowEventKindFromName(parsed.value.kind) orelse return error.UnknownWorkflowEventKind;
+
+    return cloneWorkflowEvent(allocator, .{
+        .sequence = parsed.value.sequence,
+        .kind = kind,
+        .workflow_id = parsed.value.workflow_id,
+        .execution_id = parsed.value.execution_id,
+        .parent_sequence = parsed.value.parent_sequence,
+        .activity_id = parsed.value.activity_id,
+        .timer_id = parsed.value.timer_id,
+        .deferred_id = parsed.value.deferred_id,
+        .queue_id = parsed.value.queue_id,
+        .name = parsed.value.name,
+        .status = parsed.value.status,
+        .redacted_detail = parsed.value.redacted_detail,
+        .idempotency_key = parsed.value.idempotency_key,
+    });
 }
 
 fn appendJsonString(output: *std.ArrayList(u8), allocator: std.mem.Allocator, value: []const u8) !void {
