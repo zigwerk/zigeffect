@@ -141,3 +141,75 @@ test "supervisor rest-for-one restarts failed child and later children" {
     try std.testing.expectEqual(fx.SupervisorChildStatus.running, try supervisor.childStatus(2));
     try std.testing.expectEqual(fx.SupervisorChildStatus.running, try supervisor.childStatus(3));
 }
+
+test "supervisor restart modes handle success and failure differently" {
+    var supervisor = fx.Supervisor.init(std.testing.allocator, .{
+        .id = 10,
+        .name = "root",
+        .strategy = .one_for_one,
+    });
+    defer supervisor.deinit();
+
+    try supervisor.addChild(.{ .id = 1, .name = "permanent", .kind = .fiber, .restart_mode = .permanent });
+    try supervisor.addChild(.{ .id = 2, .name = "transient", .kind = .workflow_worker, .restart_mode = .transient });
+    try supervisor.addChild(.{ .id = 3, .name = "temporary", .kind = .queue_worker, .restart_mode = .temporary });
+    try supervisor.startAll(1_000);
+
+    const permanent_success = try supervisor.reportChildExit(1, .success, 1_100);
+    try std.testing.expectEqual(@as(usize, 1), permanent_success.restarted_children);
+    try std.testing.expectEqual(@as(usize, 0), permanent_success.stopped_children);
+    try std.testing.expectEqual(@as(usize, 1), try supervisor.childRestartCount(1));
+    try std.testing.expectEqual(fx.SupervisorChildStatus.running, try supervisor.childStatus(1));
+
+    const transient_success = try supervisor.reportChildExit(2, .success, 1_200);
+    try std.testing.expectEqual(@as(usize, 0), transient_success.restarted_children);
+    try std.testing.expectEqual(@as(usize, 1), transient_success.stopped_children);
+    try std.testing.expectEqual(@as(usize, 0), try supervisor.childRestartCount(2));
+    try std.testing.expectEqual(fx.SupervisorChildStatus.stopped, try supervisor.childStatus(2));
+
+    const transient_failure = try supervisor.reportChildExit(2, .{ .failure = "boom" }, 1_300);
+    try std.testing.expectEqual(@as(usize, 1), transient_failure.restarted_children);
+    try std.testing.expectEqual(@as(usize, 0), transient_failure.stopped_children);
+    try std.testing.expectEqual(@as(usize, 1), try supervisor.childRestartCount(2));
+    try std.testing.expectEqual(fx.SupervisorChildStatus.running, try supervisor.childStatus(2));
+
+    const temporary_failure = try supervisor.reportChildExit(3, .{ .failure = "boom" }, 1_400);
+    try std.testing.expectEqual(@as(usize, 0), temporary_failure.restarted_children);
+    try std.testing.expectEqual(@as(usize, 1), temporary_failure.stopped_children);
+    try std.testing.expectEqual(@as(usize, 0), try supervisor.childRestartCount(3));
+    try std.testing.expectEqual(fx.SupervisorChildStatus.failed, try supervisor.childStatus(3));
+}
+
+test "supervisor escalates when restart intensity is exceeded" {
+    var supervisor = fx.Supervisor.init(std.testing.allocator, .{
+        .id = 10,
+        .name = "root",
+        .strategy = .one_for_one,
+        .intensity = .{ .max_restarts = 2, .within_ms = 1_000 },
+    });
+    defer supervisor.deinit();
+
+    try supervisor.addChild(.{ .id = 1, .name = "worker", .kind = .fiber });
+    try supervisor.startAll(1_000);
+
+    const first = try supervisor.reportChildExit(1, .{ .failure = "boom" }, 1_100);
+    try std.testing.expect(!first.escalated);
+    try std.testing.expectEqual(@as(usize, 1), first.restarted_children);
+
+    const second = try supervisor.reportChildExit(1, .{ .failure = "boom" }, 1_200);
+    try std.testing.expect(!second.escalated);
+    try std.testing.expectEqual(@as(usize, 1), second.restarted_children);
+
+    const third = try supervisor.reportChildExit(1, .{ .failure = "boom" }, 1_300);
+    try std.testing.expect(third.escalated);
+    try std.testing.expectEqual(@as(usize, 0), third.restarted_children);
+    try std.testing.expectEqual(@as(usize, 2), try supervisor.childRestartCount(1));
+    try std.testing.expectEqual(fx.SupervisorChildStatus.escalated, try supervisor.childStatus(1));
+
+    const cause = third.cause().?;
+    try std.testing.expectEqual(error.RestartIntensityExceeded, cause.failure);
+
+    const report = try fx.formatCause(std.testing.allocator, "restart worker", cause);
+    defer std.testing.allocator.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "RestartIntensityExceeded") != null);
+}

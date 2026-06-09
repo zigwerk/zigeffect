@@ -102,6 +102,7 @@ pub const Supervisor = struct {
     allocator: Allocator,
     options: SupervisorOptions,
     children: std.ArrayList(ChildState) = .empty,
+    restart_history: std.ArrayList(u64) = .empty,
 
     pub fn init(allocator: Allocator, options: SupervisorOptions) Supervisor {
         return .{ .allocator = allocator, .options = options };
@@ -109,6 +110,7 @@ pub const Supervisor = struct {
 
     pub fn deinit(self: *Supervisor) void {
         self.children.deinit(self.allocator);
+        self.restart_history.deinit(self.allocator);
     }
 
     pub fn addChild(self: *Supervisor, spec: SupervisorChildSpec) (Allocator.Error || SupervisorError)!void {
@@ -159,8 +161,6 @@ pub const Supervisor = struct {
         exit: SupervisorChildExit,
         now_ms: u64,
     ) (Allocator.Error || SupervisorError)!SupervisorDecision {
-        _ = now_ms;
-
         const failed_index = self.findChildIndex(child_id) orelse return error.ChildNotFound;
         var decision = SupervisorDecision{
             .supervisor_id = self.options.id,
@@ -175,12 +175,20 @@ pub const Supervisor = struct {
             return decision;
         }
 
+        const planned_restarts = self.countRestartableAffected(failed_index, exit);
+        if (planned_restarts > 0 and !self.canRestartWithinIntensity(now_ms, planned_restarts)) {
+            decision.escalated = true;
+            decision.stopped_children = self.markAffectedEscalated(failed_index);
+            return decision;
+        }
+
         for (self.children.items, 0..) |*child, candidate_index| {
             if (!strategyAffects(self.options.strategy, failed_index, candidate_index)) continue;
 
             if (restartAllowed(child.spec.restart_mode, exit)) {
                 child.status = .running;
                 child.restart_count += 1;
+                try self.recordRestart(now_ms);
                 decision.restarted_children += 1;
             } else {
                 markStoppedOrFailed(child, exit);
@@ -189,6 +197,41 @@ pub const Supervisor = struct {
         }
 
         return decision;
+    }
+
+    fn countRestartableAffected(self: *const Supervisor, failed_index: usize, exit: SupervisorChildExit) usize {
+        var count: usize = 0;
+        for (self.children.items, 0..) |child, candidate_index| {
+            if (!strategyAffects(self.options.strategy, failed_index, candidate_index)) continue;
+            if (restartAllowed(child.spec.restart_mode, exit)) count += 1;
+        }
+        return count;
+    }
+
+    fn pruneRestartHistory(self: *Supervisor, now_ms: u64) void {
+        const window_start = now_ms -| self.options.intensity.within_ms;
+        while (self.restart_history.items.len > 0 and self.restart_history.items[0] < window_start) {
+            _ = self.restart_history.orderedRemove(0);
+        }
+    }
+
+    fn canRestartWithinIntensity(self: *Supervisor, now_ms: u64, planned_restarts: usize) bool {
+        self.pruneRestartHistory(now_ms);
+        return self.restart_history.items.len + planned_restarts <= self.options.intensity.max_restarts;
+    }
+
+    fn recordRestart(self: *Supervisor, now_ms: u64) Allocator.Error!void {
+        try self.restart_history.append(self.allocator, now_ms);
+    }
+
+    fn markAffectedEscalated(self: *Supervisor, failed_index: usize) usize {
+        var count: usize = 0;
+        for (self.children.items, 0..) |*child, candidate_index| {
+            if (!strategyAffects(self.options.strategy, failed_index, candidate_index)) continue;
+            child.status = .escalated;
+            count += 1;
+        }
+        return count;
     }
 
     fn findChildIndex(self: *const Supervisor, child_id: SupervisorChildId) ?usize {
