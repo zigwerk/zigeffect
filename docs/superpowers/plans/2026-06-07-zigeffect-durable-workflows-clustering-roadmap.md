@@ -486,15 +486,15 @@ Goal: connect durable execution to the existing agent-observable runtime.
 
 Deliverables:
 
-- [ ] Add causal event kinds or mappings for workflow events.
-- [ ] Link workflow events to run id, fiber id, scope id, trace id, and span id.
-- [ ] Add durable workflow findings to causal query tools.
-- [ ] Add DOT graph rendering for workflow histories.
-- [ ] Add causal dogfood scenario for workflow crash recovery.
+- [x] Add causal event kinds or mappings for workflow events.
+- [x] Link workflow events to run id, fiber id, scope id, trace id, and span id.
+- [x] Add durable workflow findings to causal query tools.
+- [x] Add DOT graph rendering for workflow histories.
+- [x] Add causal dogfood scenario for workflow crash recovery.
 
 Acceptance:
 
-- [ ] Causal reports explain workflow failure, retry, suspend, and resume.
+- [x] Causal reports explain workflow failure, retry, suspend, and resume.
 
 ## Milestone 20: Journal Schema Versioning And Migration
 

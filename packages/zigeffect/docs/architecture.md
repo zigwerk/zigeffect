@@ -228,6 +228,9 @@ Owns local durable workflow runtime surfaces:
 - `inspect.zig`: workflow journal execution grouping, replay report building,
   pending-work summaries, last-failure extraction, and stable text/JSON report
   formatting for humans and agents.
+- `causal.zig`: workflow journal to causal event mapping, workflow causal
+  store construction, workflow failure/retry/suspend/resume findings, and
+  reuse of shared causal report, JSON, and DOT rendering for durable histories.
 - `engine.zig`: workflow engine registration, provider requirement validation,
   durable `workflow_started` appends, typed poll results, execution inspection,
   duplicate execution checks, and in-memory execution indexing.
@@ -247,6 +250,11 @@ compensations, signals, lifecycle controls, inspectors, and replay helpers
 belong here. Workflow code should consume `core`, `runtime`, `effect`, `layer`,
 `services`, and `traits` contracts instead of expanding those domains with
 workflow-specific behavior.
+
+Workflow causal integration belongs in `src/workflow/causal.zig`, with the
+shared causal runtime remaining in `src/services/causal.zig`. Query tools and
+dogfood harnesses should consume workflow causal JSON/DOT/report helpers rather
+than re-parsing workflow journal rows ad hoc.
 
 ```text
 src/cluster/

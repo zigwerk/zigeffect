@@ -241,22 +241,23 @@ Expected: PASS.
 - Add `docs/superpowers/specs/2026-06-09-zigeffect-workflow-causal-integration-design.md`
 - Add `docs/superpowers/plans/2026-06-09-zigeffect-workflow-causal-integration.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Document `workflow/causal.zig` ownership and query/dogfood reuse of causal
 tooling.
 
-- [ ] **Step 2: Run full gate**
+- [x] **Step 2: Run full gate**
 
 Run:
 
 ```bash
 bun run zigeffect:test
 cd packages/zigeffect && zig build examples
-cd packages/zigeffect && zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json workflow 1
-cd packages/zigeffect && zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json workflow-findings 1
+cd packages/zigeffect && zig build causal-test
+cd packages/zigeffect && zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-workflow-crash-recovery.json workflow 7
+cd packages/zigeffect && zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-workflow-crash-recovery.json workflow-findings 7
 bun run zig:test
-zig fmt --check packages/zigeffect/src/workflow/causal.zig packages/zigeffect/src/workflow/root.zig packages/zigeffect/src/services/causal.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/tools/causal_query.zig packages/zigeffect/tools/causal_test.zig packages/zigeffect/tools/causal_run.zig packages/zigeffect/test/workflow_test.zig
+zig fmt --check packages/zigeffect/src/workflow/causal.zig packages/zigeffect/src/workflow/root.zig packages/zigeffect/src/services/causal.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/tools/causal_artifact.zig packages/zigeffect/tools/causal_query.zig packages/zigeffect/tools/causal_test.zig packages/zigeffect/tools/causal_run.zig packages/zigeffect/tools/causal_test_matrix.zig packages/zigeffect/test/workflow_test.zig
 git diff --check
 rg -n 'T''BD|TO''DO|implement la''ter|fill in de''tails|appropriate error hand''ling|handle edge ca''ses|Similar to Ta''sk|deferred bu''cket|par''ked' packages/zigeffect/src/workflow packages/zigeffect/src/services packages/zigeffect/tools packages/zigeffect/test/workflow_test.zig packages/zigeffect/docs/architecture.md docs/superpowers/specs/2026-06-09-zigeffect-workflow-causal-integration-design.md docs/superpowers/plans/2026-06-09-zigeffect-workflow-causal-integration.md
 ```
@@ -265,17 +266,17 @@ Expected: compile/test commands PASS, causal workflow queries print workflow
 events/findings, format and diff checks exit 0, and the placeholder scan exits 1
 with no matches.
 
-- [ ] **Step 3: Mark Milestone 19 complete**
+- [x] **Step 3: Mark Milestone 19 complete**
 
 After the full gate passes, mark all Milestone 19 deliverables and acceptance
 boxes complete in
 `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 
 ```bash
-git add docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md docs/superpowers/plans/2026-06-09-zigeffect-workflow-causal-integration.md docs/superpowers/specs/2026-06-09-zigeffect-workflow-causal-integration-design.md packages/zigeffect/docs/architecture.md packages/zigeffect/src/workflow/causal.zig packages/zigeffect/src/workflow/root.zig packages/zigeffect/src/services/causal.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/tools/causal_query.zig packages/zigeffect/tools/causal_test.zig packages/zigeffect/tools/causal_run.zig packages/zigeffect/test/workflow_test.zig
+git add docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md docs/superpowers/plans/2026-06-09-zigeffect-workflow-causal-integration.md docs/superpowers/specs/2026-06-09-zigeffect-workflow-causal-integration-design.md packages/zigeffect/docs/architecture.md packages/zigeffect/src/workflow/causal.zig packages/zigeffect/src/workflow/root.zig packages/zigeffect/src/services/causal.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/tools/causal_artifact.zig packages/zigeffect/tools/causal_query.zig packages/zigeffect/tools/causal_test.zig packages/zigeffect/tools/causal_run.zig packages/zigeffect/tools/causal_test_matrix.zig packages/zigeffect/test/workflow_test.zig
 git commit -m "feat(zigeffect): add workflow causal integration"
 ```
