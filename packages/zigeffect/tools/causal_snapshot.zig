@@ -1165,6 +1165,56 @@ test "snapshot manifest paths are deterministic" {
     try std.testing.expectEqualStrings(".zig-cache/causal-artifacts/zigeffect-causal-snapshot-baseline.txt", paths.text_path);
 }
 
+test "deterministic replay artifact paths include snapshot and scenario" {
+    const paths = try deterministicReplayArtifactPaths(std.testing.allocator, "scoped-baseline", "causal-scoped-fiber");
+    defer paths.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-replay-scoped-baseline-causal-scoped-fiber.txt",
+        paths.report_path,
+    );
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-replay-scoped-baseline-causal-scoped-fiber.json",
+        paths.json_path,
+    );
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-replay-scoped-baseline-causal-scoped-fiber.dot",
+        paths.dot_path,
+    );
+}
+
+test "deterministic replay report states registered rerun boundary" {
+    const scenario = try causal_run.scenarioByName("causal-scoped-fiber");
+    const paths = try deterministicReplayArtifactPaths(std.testing.allocator, "scoped-baseline", scenario.slug);
+    defer paths.deinit(std.testing.allocator);
+
+    const report = try formatDeterministicReplayText(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-scoped-baseline.json",
+        baseline_manifest_json,
+        compare_before_json,
+        scenario,
+        paths,
+        .{ .exited = 0 },
+        compare_before_json,
+    );
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.deterministic-replay.v1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "mode: registered_scenario_rerun") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "executed: true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "arbitrary event replay: false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "scenario: causal-scoped-fiber") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "command status: success") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "boundary:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "event compare:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect causal compare report") != null);
+}
+
+test "causal snapshot usage lists replay scenario command" {
+    try std.testing.expect(std.mem.indexOf(u8, usage(), "replay-scenario <snapshot> <scenario>") != null);
+}
+
 test "snapshot compare report names manifests and embeds causal compare" {
     const report = try formatSnapshotCompareText(
         std.testing.allocator,
