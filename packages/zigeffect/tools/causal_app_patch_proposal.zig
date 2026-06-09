@@ -2,6 +2,7 @@ const std = @import("std");
 
 const app_policy_schema = "zigeffect.causal.app-policy-decision.v1";
 const app_patch_proposal_schema = "zigeffect.causal.app-patch-proposal.v1";
+const app_human_review_schema = "zigeffect.causal.app-human-review.v1";
 
 const Options = struct {
     mode: []const u8,
@@ -13,6 +14,7 @@ const Options = struct {
     migration_files: []const []const u8 = &.{},
     runbooks: []const []const u8 = &.{},
     rollback_plans: []const []const u8 = &.{},
+    review_path: ?[]const u8 = null,
     out_prefix: ?[]const u8 = null,
 
     fn deinit(self: *Options, allocator: std.mem.Allocator) void {
@@ -55,10 +57,45 @@ const AppPolicyRecord = struct {
     guardrails: []const []const u8 = &.{},
 };
 
+const ReviewSource = struct {
+    policy: []const u8,
+    app_remediation_audit: []const u8,
+    app_artifact: []const u8,
+};
+
+const ReviewCitations = struct {
+    source_files: []const []const u8 = &.{},
+    config_keys: []const []const u8 = &.{},
+    migration_files: []const []const u8 = &.{},
+    runbooks: []const []const u8 = &.{},
+    rollback_plans: []const []const u8 = &.{},
+};
+
+const AppHumanReviewRecord = struct {
+    schema: []const u8,
+    schema_version: u32,
+    mode: []const u8,
+    target: []const u8,
+    review_status: []const u8,
+    approval_status: []const u8,
+    approved: bool,
+    applied: bool,
+    mutation_authority: []const u8,
+    source: ReviewSource,
+    policy_gates: []const []const u8,
+    citations: ReviewCitations,
+};
+
+const AppHumanReviewInput = struct {
+    path: []const u8,
+    record: AppHumanReviewRecord,
+};
+
 const ProposalSource = struct {
     policy: []const u8,
     app_remediation_audit: []const u8,
     app_artifact: []const u8,
+    human_review: ?[]const u8 = null,
 };
 
 const ProposalInput = struct {
@@ -69,6 +106,7 @@ const ProposalInput = struct {
     event_ids: []const u64,
     required_verification_commands: []const []const u8,
     claim_guardrails: []const []const u8,
+    review_citations: ?ReviewCitations = null,
 
     fn deinit(self: *ProposalInput, allocator: std.mem.Allocator) void {
         _ = self;
@@ -87,7 +125,7 @@ const AppPatchProposalReports = struct {
 };
 
 fn usage() []const u8 {
-    return "usage: zig build causal-app-patch-proposal -- local --policy <app-policy-decision-json> --summary <summary> --change <description> [--file <path>] [--config <key>] [--migration <path>] [--runbook <path>] [--rollback <path>] [--out-prefix <path-prefix>]\n";
+    return "usage: zig build causal-app-patch-proposal -- local --policy <app-policy-decision-json> --summary <summary> --change <description> [--review <app-human-review-json>] [--file <path>] [--config <key>] [--migration <path>] [--runbook <path>] [--rollback <path>] [--out-prefix <path-prefix>]\n";
 }
 
 fn parseOptions(allocator: std.mem.Allocator, args: []const []const u8) !Options {
@@ -97,6 +135,7 @@ fn parseOptions(allocator: std.mem.Allocator, args: []const []const u8) !Options
     var policy_path: ?[]const u8 = null;
     var summary: ?[]const u8 = null;
     var change: ?[]const u8 = null;
+    var review_path: ?[]const u8 = null;
     var out_prefix: ?[]const u8 = null;
     var source_files = std.ArrayList([]const u8).empty;
     var config_keys = std.ArrayList([]const u8).empty;
@@ -133,6 +172,8 @@ fn parseOptions(allocator: std.mem.Allocator, args: []const []const u8) !Options
             try runbooks.append(allocator, value);
         } else if (std.mem.eql(u8, arg, "--rollback")) {
             try rollback_plans.append(allocator, value);
+        } else if (std.mem.eql(u8, arg, "--review")) {
+            review_path = value;
         } else if (std.mem.eql(u8, arg, "--out-prefix")) {
             out_prefix = value;
         } else {
@@ -151,6 +192,7 @@ fn parseOptions(allocator: std.mem.Allocator, args: []const []const u8) !Options
         .migration_files = try migration_files.toOwnedSlice(allocator),
         .runbooks = try runbooks.toOwnedSlice(allocator),
         .rollback_plans = try rollback_plans.toOwnedSlice(allocator),
+        .review_path = review_path,
         .out_prefix = out_prefix,
     };
 }
@@ -183,30 +225,49 @@ fn validateAppPolicy(policy: AppPolicyRecord) !void {
     if (!std.mem.eql(u8, policy.mode, "local")) return error.UnsupportedAppPolicySchema;
 }
 
+fn parseAppHumanReview(allocator: std.mem.Allocator, json: []const u8) !std.json.Parsed(AppHumanReviewRecord) {
+    var parsed = try std.json.parseFromSlice(AppHumanReviewRecord, allocator, json, .{ .ignore_unknown_fields = true });
+    errdefer parsed.deinit();
+    try validateAppHumanReview(parsed.value);
+    return parsed;
+}
+
+fn validateAppHumanReview(review: AppHumanReviewRecord) !void {
+    if (!std.mem.eql(u8, review.schema, app_human_review_schema)) return error.UnsupportedAppHumanReviewSchema;
+    if (review.schema_version != 1) return error.UnsupportedAppHumanReviewSchema;
+    if (!std.mem.eql(u8, review.mode, "local")) return error.UnsupportedAppHumanReviewSchema;
+}
+
 fn proposalInputFromPolicy(
     allocator: std.mem.Allocator,
     options: Options,
     policy_path: []const u8,
     policy: AppPolicyRecord,
+    review: ?AppHumanReviewInput,
 ) !ProposalInput {
     _ = allocator;
     if (!std.mem.eql(u8, options.mode, "local")) return error.UnknownMode;
     if (options.summary.len == 0) return error.MissingSummary;
     if (options.change.len == 0) return error.MissingChange;
-    if (!std.mem.eql(u8, policy.decision, "approve") or !std.mem.eql(u8, policy.approval_status, "approve")) {
+    const low_risk_policy = std.mem.eql(u8, policy.decision, "approve") and std.mem.eql(u8, policy.approval_status, "approve");
+    const needs_review_policy = std.mem.eql(u8, policy.decision, "needs-human-review") and std.mem.eql(u8, policy.approval_status, "needs-human-review");
+    if (!low_risk_policy and !needs_review_policy) {
         return error.PolicyNotApproved;
     }
     if (policy.applied) return error.PolicyAlreadyApplied;
     if (!std.mem.eql(u8, policy.mutation_authority, "none")) return error.PolicyMutationAuthorityNotNone;
-    if (!hasAnyCitation(options)) return error.MissingProposalCitation;
+    if (low_risk_policy and !hasAnyCitation(options)) return error.MissingProposalCitation;
+    if (needs_review_policy and review == null) return error.HumanReviewRequired;
+    if (review) |review_input| try validateReviewMatchesPolicy(policy_path, policy, review_input);
 
     for (policy.policy_gates) |gate| {
         if (std.mem.eql(u8, gate, "source-only")) {
-            if (options.source_files.len == 0) return error.MissingSourceCitation;
+            if (!hasSourceCitation(options, review)) return error.MissingSourceCitation;
         } else if (std.mem.eql(u8, gate, "config-only")) {
-            if (options.config_keys.len == 0) return error.MissingConfigCitation;
+            if (!hasConfigCitation(options, review)) return error.MissingConfigCitation;
         } else if (isHighRiskGate(gate)) {
-            return error.HighRiskGateRequiresHumanReview;
+            if (low_risk_policy) return error.HighRiskGateRequiresHumanReview;
+            try validateReviewCitationForGate(gate, review.?);
         } else {
             return error.UnknownPolicyGate;
         }
@@ -219,11 +280,13 @@ fn proposalInputFromPolicy(
             .policy = policy_path,
             .app_remediation_audit = policy.source.app_remediation_audit,
             .app_artifact = policy.source.app_artifact,
+            .human_review = if (review) |review_input| review_input.path else null,
         },
         .policy_gates = policy.policy_gates,
         .event_ids = policy.event_ids,
         .required_verification_commands = policy.required_verification_commands,
         .claim_guardrails = policy.guardrails,
+        .review_citations = if (review) |review_input| review_input.record.citations else null,
     };
 }
 
@@ -239,6 +302,61 @@ fn isHighRiskGate(gate: []const u8) bool {
     return std.mem.eql(u8, gate, "migration-required") or
         std.mem.eql(u8, gate, "operational-human-required") or
         std.mem.eql(u8, gate, "rollback-required");
+}
+
+fn validateReviewMatchesPolicy(policy_path: []const u8, policy: AppPolicyRecord, review: AppHumanReviewInput) !void {
+    const record = review.record;
+    if (!std.mem.eql(u8, record.review_status, "approved") or
+        !std.mem.eql(u8, record.approval_status, "approved") or
+        !record.approved)
+    {
+        return error.HumanReviewNotApproved;
+    }
+    if (record.applied) return error.HumanReviewAlreadyApplied;
+    if (!std.mem.eql(u8, record.mutation_authority, "none")) return error.HumanReviewMutationAuthorityNotNone;
+    if (!std.mem.eql(u8, record.source.policy, policy_path)) return error.HumanReviewPolicyMismatch;
+    if (!std.mem.eql(u8, record.target, policy.target)) return error.HumanReviewTargetMismatch;
+    if (!sameStringSet(record.policy_gates, policy.policy_gates)) return error.HumanReviewGateMismatch;
+}
+
+fn validateReviewCitationForGate(gate: []const u8, review: AppHumanReviewInput) !void {
+    if (std.mem.eql(u8, gate, "migration-required")) {
+        if (review.record.citations.migration_files.len == 0) return error.MissingMigrationCitation;
+    } else if (std.mem.eql(u8, gate, "operational-human-required")) {
+        if (review.record.citations.runbooks.len == 0) return error.MissingRunbookCitation;
+    } else if (std.mem.eql(u8, gate, "rollback-required")) {
+        if (review.record.citations.rollback_plans.len == 0) return error.MissingRollbackCitation;
+    }
+}
+
+fn hasSourceCitation(options: Options, review: ?AppHumanReviewInput) bool {
+    if (options.source_files.len > 0) return true;
+    if (review) |review_input| return review_input.record.citations.source_files.len > 0;
+    return false;
+}
+
+fn hasConfigCitation(options: Options, review: ?AppHumanReviewInput) bool {
+    if (options.config_keys.len > 0) return true;
+    if (review) |review_input| return review_input.record.citations.config_keys.len > 0;
+    return false;
+}
+
+fn sameStringSet(left: []const []const u8, right: []const []const u8) bool {
+    if (left.len != right.len) return false;
+    for (left) |value| {
+        if (!containsString(right, value)) return false;
+    }
+    for (right) |value| {
+        if (!containsString(left, value)) return false;
+    }
+    return true;
+}
+
+fn containsString(values: []const []const u8, candidate: []const u8) bool {
+    for (values) |value| {
+        if (std.mem.eql(u8, value, candidate)) return true;
+    }
+    return false;
 }
 
 fn firstProposalGuardrail() []const u8 {
@@ -288,19 +406,23 @@ fn formatAppPatchProposalJson(allocator: std.mem.Allocator, input: ProposalInput
     try appendJsonString(allocator, &output, input.source.app_remediation_audit);
     try output.appendSlice(allocator, ",\n    \"app_artifact\": ");
     try appendJsonString(allocator, &output, input.source.app_artifact);
+    if (input.source.human_review) |human_review| {
+        try output.appendSlice(allocator, ",\n    \"human_review\": ");
+        try appendJsonString(allocator, &output, human_review);
+    }
     try output.appendSlice(allocator, "\n  },\n  \"policy_gates\": ");
     try appendStringArray(allocator, &output, input.policy_gates);
     try output.appendSlice(allocator, ",\n  \"citations\": {\n");
     try output.appendSlice(allocator, "    \"source_files\": ");
-    try appendStringArray(allocator, &output, input.options.source_files);
+    try appendStringArray(allocator, &output, proposalSourceFiles(input));
     try output.appendSlice(allocator, ",\n    \"config_keys\": ");
-    try appendStringArray(allocator, &output, input.options.config_keys);
+    try appendStringArray(allocator, &output, proposalConfigKeys(input));
     try output.appendSlice(allocator, ",\n    \"migration_files\": ");
-    try appendStringArray(allocator, &output, input.options.migration_files);
+    try appendStringArray(allocator, &output, proposalMigrationFiles(input));
     try output.appendSlice(allocator, ",\n    \"runbooks\": ");
-    try appendStringArray(allocator, &output, input.options.runbooks);
+    try appendStringArray(allocator, &output, proposalRunbooks(input));
     try output.appendSlice(allocator, ",\n    \"rollback_plans\": ");
-    try appendStringArray(allocator, &output, input.options.rollback_plans);
+    try appendStringArray(allocator, &output, proposalRollbackPlans(input));
     try output.appendSlice(allocator, "\n  },\n  \"event_ids\": ");
     try appendU64Array(allocator, &output, input.event_ids);
     try output.appendSlice(allocator, ",\n  \"required_verification_commands\": ");
@@ -336,17 +458,21 @@ fn formatAppPatchProposalText(allocator: std.mem.Allocator, input: ProposalInput
     try output.appendSlice(allocator, "source:\n");
     try output.print(allocator, "- policy: {s}\n", .{input.source.policy});
     try output.print(allocator, "- app remediation audit: {s}\n", .{input.source.app_remediation_audit});
-    try output.print(allocator, "- app artifact: {s}\n\n", .{input.source.app_artifact});
+    try output.print(allocator, "- app artifact: {s}\n", .{input.source.app_artifact});
+    if (input.source.human_review) |human_review| {
+        try output.print(allocator, "- human review: {s}\n", .{human_review});
+    }
+    try output.append(allocator, '\n');
 
     try output.appendSlice(allocator, "policy gates:\n");
     for (input.policy_gates) |gate| try output.print(allocator, "- {s}\n", .{gate});
     try output.append(allocator, '\n');
 
-    try appendTextList(allocator, &output, "source files", input.options.source_files);
-    try appendTextList(allocator, &output, "config keys", input.options.config_keys);
-    try appendTextList(allocator, &output, "migration files", input.options.migration_files);
-    try appendTextList(allocator, &output, "runbooks", input.options.runbooks);
-    try appendTextList(allocator, &output, "rollback plans", input.options.rollback_plans);
+    try appendTextList(allocator, &output, "source files", proposalSourceFiles(input));
+    try appendTextList(allocator, &output, "config keys", proposalConfigKeys(input));
+    try appendTextList(allocator, &output, "migration files", proposalMigrationFiles(input));
+    try appendTextList(allocator, &output, "runbooks", proposalRunbooks(input));
+    try appendTextList(allocator, &output, "rollback plans", proposalRollbackPlans(input));
 
     try output.appendSlice(allocator, "event ids:\n");
     if (input.event_ids.len == 0) {
@@ -385,6 +511,36 @@ fn appendTextList(allocator: std.mem.Allocator, output: *std.ArrayList(u8), labe
     }
     for (values) |value| try output.print(allocator, "- {s}\n", .{value});
     try output.append(allocator, '\n');
+}
+
+fn proposalSourceFiles(input: ProposalInput) []const []const u8 {
+    if (input.options.source_files.len > 0) return input.options.source_files;
+    if (input.review_citations) |citations| return citations.source_files;
+    return &.{};
+}
+
+fn proposalConfigKeys(input: ProposalInput) []const []const u8 {
+    if (input.options.config_keys.len > 0) return input.options.config_keys;
+    if (input.review_citations) |citations| return citations.config_keys;
+    return &.{};
+}
+
+fn proposalMigrationFiles(input: ProposalInput) []const []const u8 {
+    if (input.options.migration_files.len > 0) return input.options.migration_files;
+    if (input.review_citations) |citations| return citations.migration_files;
+    return &.{};
+}
+
+fn proposalRunbooks(input: ProposalInput) []const []const u8 {
+    if (input.options.runbooks.len > 0) return input.options.runbooks;
+    if (input.review_citations) |citations| return citations.runbooks;
+    return &.{};
+}
+
+fn proposalRollbackPlans(input: ProposalInput) []const []const u8 {
+    if (input.options.rollback_plans.len > 0) return input.options.rollback_plans;
+    if (input.review_citations) |citations| return citations.rollback_plans;
+    return &.{};
 }
 
 fn appendJsonString(allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: []const u8) !void {
@@ -443,15 +599,30 @@ fn runLocal(init: std.process.Init, options: Options) !void {
     var parsed = try parseAppPolicy(allocator, policy_json);
     defer parsed.deinit();
 
-    var input = try proposalInputFromPolicy(allocator, options, options.policy_path, parsed.value);
-    defer input.deinit(allocator);
-
-    var reports = try formatAppPatchProposalReports(allocator, input);
-    defer reports.deinit(allocator);
-
-    try writeArtifact(init.io, paths.json_path, reports.json);
-    try writeArtifact(init.io, paths.text_path, reports.text);
-    std.debug.print("{s}", .{reports.text});
+    if (options.review_path) |review_path| {
+        const review_json = try readArtifact(init.io, allocator, review_path);
+        defer allocator.free(review_json);
+        var parsed_review = try parseAppHumanReview(allocator, review_json);
+        defer parsed_review.deinit();
+        var input = try proposalInputFromPolicy(allocator, options, options.policy_path, parsed.value, .{
+            .path = review_path,
+            .record = parsed_review.value,
+        });
+        defer input.deinit(allocator);
+        var reports = try formatAppPatchProposalReports(allocator, input);
+        defer reports.deinit(allocator);
+        try writeArtifact(init.io, paths.json_path, reports.json);
+        try writeArtifact(init.io, paths.text_path, reports.text);
+        std.debug.print("{s}", .{reports.text});
+    } else {
+        var input = try proposalInputFromPolicy(allocator, options, options.policy_path, parsed.value, null);
+        defer input.deinit(allocator);
+        var reports = try formatAppPatchProposalReports(allocator, input);
+        defer reports.deinit(allocator);
+        try writeArtifact(init.io, paths.json_path, reports.json);
+        try writeArtifact(init.io, paths.text_path, reports.text);
+        std.debug.print("{s}", .{reports.text});
+    }
 }
 
 fn failUsage(err: anyerror) noreturn {
@@ -468,9 +639,20 @@ pub fn main(init: std.process.Init) !void {
         error.MissingAppPolicyInput,
         error.InvalidArtifactPath,
         error.UnsupportedAppPolicySchema,
+        error.UnsupportedAppHumanReviewSchema,
         error.PolicyNotApproved,
         error.PolicyAlreadyApplied,
         error.PolicyMutationAuthorityNotNone,
+        error.HumanReviewRequired,
+        error.HumanReviewNotApproved,
+        error.HumanReviewAlreadyApplied,
+        error.HumanReviewMutationAuthorityNotNone,
+        error.HumanReviewPolicyMismatch,
+        error.HumanReviewTargetMismatch,
+        error.HumanReviewGateMismatch,
+        error.MissingMigrationCitation,
+        error.MissingRunbookCitation,
+        error.MissingRollbackCitation,
         error.MissingProposalCitation,
         error.MissingSourceCitation,
         error.MissingConfigCitation,
@@ -543,6 +725,75 @@ const high_risk_approved_policy_json =
     \\}
 ;
 
+const needs_review_policy_json =
+    \\{
+    \\  "schema": "zigeffect.causal.app-policy-decision.v1",
+    \\  "schema_version": 1,
+    \\  "mode": "local",
+    \\  "target": "yachdee-platform",
+    \\  "decision": "needs-human-review",
+    \\  "approval_status": "needs-human-review",
+    \\  "mutation_authority": "none",
+    \\  "applied": false,
+    \\  "source": {"app_remediation_audit": "app-audit.json", "app_artifact": "app.json"},
+    \\  "policy_gates": ["migration-required"],
+    \\  "event_ids": [4],
+    \\  "required_verification_commands": ["zig build causal-query -- --file app.json cause 4"],
+    \\  "guardrails": []
+    \\}
+;
+
+const approved_human_review_json =
+    \\{
+    \\  "schema": "zigeffect.causal.app-human-review.v1",
+    \\  "schema_version": 1,
+    \\  "mode": "local",
+    \\  "target": "yachdee-platform",
+    \\  "review_status": "approved",
+    \\  "approval_status": "approved",
+    \\  "approved": true,
+    \\  "applied": false,
+    \\  "mutation_authority": "none",
+    \\  "source": {"policy": "app-policy.json", "app_remediation_audit": "app-audit.json", "app_artifact": "app.json"},
+    \\  "policy_gates": ["migration-required"],
+    \\  "citations": {"source_files": [], "config_keys": [], "migration_files": ["packages/app/migrations/001.sql"], "runbooks": [], "rollback_plans": []}
+    \\}
+;
+
+const rejected_human_review_json =
+    \\{
+    \\  "schema": "zigeffect.causal.app-human-review.v1",
+    \\  "schema_version": 1,
+    \\  "mode": "local",
+    \\  "target": "yachdee-platform",
+    \\  "review_status": "rejected",
+    \\  "approval_status": "rejected",
+    \\  "approved": false,
+    \\  "applied": false,
+    \\  "mutation_authority": "none",
+    \\  "source": {"policy": "app-policy.json", "app_remediation_audit": "app-audit.json", "app_artifact": "app.json"},
+    \\  "policy_gates": ["migration-required"],
+    \\  "citations": {"source_files": [], "config_keys": [], "migration_files": ["packages/app/migrations/001.sql"], "runbooks": [], "rollback_plans": []}
+    \\}
+;
+
+const mismatched_human_review_json =
+    \\{
+    \\  "schema": "zigeffect.causal.app-human-review.v1",
+    \\  "schema_version": 1,
+    \\  "mode": "local",
+    \\  "target": "yachdee-platform",
+    \\  "review_status": "approved",
+    \\  "approval_status": "approved",
+    \\  "approved": true,
+    \\  "applied": false,
+    \\  "mutation_authority": "none",
+    \\  "source": {"policy": "other-policy.json", "app_remediation_audit": "app-audit.json", "app_artifact": "app.json"},
+    \\  "policy_gates": ["migration-required"],
+    \\  "citations": {"source_files": [], "config_keys": [], "migration_files": ["packages/app/migrations/001.sql"], "runbooks": [], "rollback_plans": []}
+    \\}
+;
+
 test "usage text names app proposal inputs" {
     try std.testing.expect(std.mem.indexOf(u8, usage(), "causal-app-patch-proposal") != null);
     try std.testing.expect(std.mem.indexOf(u8, usage(), "--policy <app-policy-decision-json>") != null);
@@ -561,6 +812,8 @@ test "app proposal options parse repeated citations" {
         "wire app requirement",
         "--change",
         "add provider layer",
+        "--review",
+        "app-human-review.json",
         "--file",
         "apps/platform/src/worker.ts",
         "--config",
@@ -574,6 +827,7 @@ test "app proposal options parse repeated citations" {
 
     try std.testing.expectEqualStrings("local", options.mode);
     try std.testing.expectEqualStrings("app-policy.json", options.policy_path);
+    try std.testing.expectEqualStrings("app-human-review.json", options.review_path.?);
     try std.testing.expectEqual(@as(usize, 1), options.source_files.len);
     try std.testing.expectEqual(@as(usize, 1), options.config_keys.len);
     try std.testing.expectEqual(@as(usize, 1), options.rollback_plans.len);
@@ -626,7 +880,7 @@ test "approved app policy produces pending non-mutating app patch proposal" {
         .source_files = &.{"apps/platform/src/worker.ts"},
         .config_keys = &.{"YACHDEE_ENV"},
     };
-    var input = try proposalInputFromPolicy(std.testing.allocator, options, "app-policy.json", parsed.value);
+    var input = try proposalInputFromPolicy(std.testing.allocator, options, "app-policy.json", parsed.value, null);
     defer input.deinit(std.testing.allocator);
 
     var reports = try formatAppPatchProposalReports(std.testing.allocator, input);
@@ -653,7 +907,7 @@ test "app proposal rejects non-approved policy decisions" {
         .summary = "summary",
         .change = "change",
         .source_files = &.{"apps/platform/src/worker.ts"},
-    }, "app-policy.json", parsed.value));
+    }, "app-policy.json", parsed.value, null));
 }
 
 test "app proposal requires citations matching low-risk gates" {
@@ -665,7 +919,7 @@ test "app proposal requires citations matching low-risk gates" {
         .policy_path = "app-policy.json",
         .summary = "summary",
         .change = "change",
-    }, "app-policy.json", parsed.value));
+    }, "app-policy.json", parsed.value, null));
 
     try std.testing.expectError(error.MissingSourceCitation, proposalInputFromPolicy(std.testing.allocator, .{
         .mode = "local",
@@ -673,7 +927,7 @@ test "app proposal requires citations matching low-risk gates" {
         .summary = "summary",
         .change = "change",
         .config_keys = &.{"YACHDEE_ENV"},
-    }, "app-policy.json", parsed.value));
+    }, "app-policy.json", parsed.value, null));
 
     try std.testing.expectError(error.MissingConfigCitation, proposalInputFromPolicy(std.testing.allocator, .{
         .mode = "local",
@@ -681,7 +935,7 @@ test "app proposal requires citations matching low-risk gates" {
         .summary = "summary",
         .change = "change",
         .source_files = &.{"apps/platform/src/worker.ts"},
-    }, "app-policy.json", parsed.value));
+    }, "app-policy.json", parsed.value, null));
 }
 
 test "app proposal rejects high-risk gates until human-reviewed flow exists" {
@@ -694,5 +948,66 @@ test "app proposal rejects high-risk gates until human-reviewed flow exists" {
         .summary = "summary",
         .change = "change",
         .migration_files = &.{"packages/app/migrations/001.sql"},
-    }, "app-policy.json", parsed.value));
+    }, "app-policy.json", parsed.value, null));
+}
+
+test "app proposal rejects high-risk needs-review policy without review artifact" {
+    var parsed = try parseAppPolicy(std.testing.allocator, needs_review_policy_json);
+    defer parsed.deinit();
+
+    try std.testing.expectError(error.HumanReviewRequired, proposalInputFromPolicy(std.testing.allocator, .{
+        .mode = "local",
+        .policy_path = "app-policy.json",
+        .summary = "summary",
+        .change = "change",
+        .migration_files = &.{"packages/app/migrations/001.sql"},
+    }, "app-policy.json", parsed.value, null));
+}
+
+test "app proposal accepts high-risk policy with approved human review" {
+    var policy = try parseAppPolicy(std.testing.allocator, needs_review_policy_json);
+    defer policy.deinit();
+    var review = try parseAppHumanReview(std.testing.allocator, approved_human_review_json);
+    defer review.deinit();
+
+    var input = try proposalInputFromPolicy(std.testing.allocator, .{
+        .mode = "local",
+        .policy_path = "app-policy.json",
+        .summary = "reviewed migration",
+        .change = "draft reviewed migration plan",
+    }, "app-policy.json", policy.value, .{ .path = "app-human-review.json", .record = review.value });
+    defer input.deinit(std.testing.allocator);
+
+    var reports = try formatAppPatchProposalReports(std.testing.allocator, input);
+    defer reports.deinit(std.testing.allocator);
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"human_review\": \"app-human-review.json\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"applied\": false") != null);
+}
+
+test "app proposal rejects rejected human review" {
+    var policy = try parseAppPolicy(std.testing.allocator, needs_review_policy_json);
+    defer policy.deinit();
+    var review = try parseAppHumanReview(std.testing.allocator, rejected_human_review_json);
+    defer review.deinit();
+
+    try std.testing.expectError(error.HumanReviewNotApproved, proposalInputFromPolicy(std.testing.allocator, .{
+        .mode = "local",
+        .policy_path = "app-policy.json",
+        .summary = "summary",
+        .change = "change",
+    }, "app-policy.json", policy.value, .{ .path = "app-human-review.json", .record = review.value }));
+}
+
+test "app proposal rejects human review for a different policy path" {
+    var policy = try parseAppPolicy(std.testing.allocator, needs_review_policy_json);
+    defer policy.deinit();
+    var review = try parseAppHumanReview(std.testing.allocator, mismatched_human_review_json);
+    defer review.deinit();
+
+    try std.testing.expectError(error.HumanReviewPolicyMismatch, proposalInputFromPolicy(std.testing.allocator, .{
+        .mode = "local",
+        .policy_path = "app-policy.json",
+        .summary = "summary",
+        .change = "change",
+    }, "app-policy.json", policy.value, .{ .path = "app-human-review.json", .record = review.value }));
 }
