@@ -126,3 +126,72 @@ test "in-memory runner storage rejects expired refreshes and releases all owned 
     try std.testing.expectEqual(@as(usize, 1), leases.leases.len);
     try std.testing.expect(leases.leases[0].owner.eql(other));
 }
+
+test "runner lease json round-trips" {
+    const owner = fx.runnerAddress("machine-a", "runner-a");
+    const lease: fx.ShardLease = .{
+        .shard_id = 42,
+        .owner = owner,
+        .acquired_at_ms = 1_000,
+        .refreshed_at_ms = 1_000,
+        .expires_at_ms = 2_000,
+        .version = 7,
+    };
+
+    const json = try fx.formatShardLeaseJson(std.testing.allocator, lease);
+    defer std.testing.allocator.free(json);
+
+    const parsed = try fx.parseShardLeaseJson(std.testing.allocator, json);
+    try std.testing.expectEqual(lease.shard_id, parsed.shard_id);
+    try std.testing.expect(parsed.owner.eql(owner));
+    try std.testing.expectEqual(lease.version, parsed.version);
+}
+
+test "file runner storage acquires leases atomically across store instances" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var first = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer first.deinit();
+    var second = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer second.deinit();
+
+    var first_contract = first.asRunnerStorage();
+    var second_contract = second.asRunnerStorage();
+    const owner = fx.runnerAddress("machine-a", "runner-a");
+    const contender = fx.runnerAddress("machine-b", "runner-b");
+
+    _ = try first_contract.acquire(.{ .shard_id = 17, .owner = owner, .now_ms = 500, .ttl_ms = 250 });
+    try std.testing.expectError(error.LeaseConflict, second_contract.acquire(.{
+        .shard_id = 17,
+        .owner = contender,
+        .now_ms = 600,
+        .ttl_ms = 250,
+    }));
+
+    const found = (try second_contract.lease(17)).?;
+    try std.testing.expect(found.owner.eql(owner));
+
+    const file = try tmp.dir.openFile(std.testing.io, "runner-shard-17.json", .{});
+    file.close(std.testing.io);
+}
+
+test "file runner storage replaces expired persisted leases" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var first = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer first.deinit();
+    var second = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer second.deinit();
+
+    var first_contract = first.asRunnerStorage();
+    var second_contract = second.asRunnerStorage();
+    const owner = fx.runnerAddress("machine-a", "runner-a");
+    const contender = fx.runnerAddress("machine-b", "runner-b");
+    _ = try first_contract.acquire(.{ .shard_id = 18, .owner = owner, .now_ms = 100, .ttl_ms = 25 });
+
+    const replacement = try second_contract.acquire(.{ .shard_id = 18, .owner = contender, .now_ms = 125, .ttl_ms = 100 });
+    try std.testing.expect(replacement.owner.eql(contender));
+    try std.testing.expectEqual(@as(u64, 2), replacement.version);
+}
