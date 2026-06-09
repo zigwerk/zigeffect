@@ -11,6 +11,7 @@ comptime {
     _ = @import("routing_test.zig");
     _ = @import("runner_test.zig");
     _ = @import("runner_storage_test.zig");
+    _ = @import("shard_lease_test.zig");
     _ = @import("backend_conformance_test.zig");
     _ = @import("causal_backend_conformance_test.zig");
     _ = @import("causal_jsonl_backend_test.zig");
