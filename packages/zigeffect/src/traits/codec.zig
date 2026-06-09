@@ -8,6 +8,7 @@ pub const CodecError = error{
 pub fn Codec(comptime Value: type) type {
     return struct {
         const Self = @This();
+        pub const ValueType = Value;
 
         encode: *const fn (std.mem.Allocator, Value) anyerror![]const u8,
         decode: *const fn (std.mem.Allocator, []const u8) anyerror!Value,

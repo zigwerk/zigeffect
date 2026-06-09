@@ -213,6 +213,15 @@ test "workflow compensation ids are stable by label" {
     try std.testing.expect(fx.workflow.compensationId("refund-charge") != fx.workflow.compensationId("release-seat"));
 }
 
+test "workflow deferred ids are stable by label" {
+    try std.testing.expectEqual(
+        fx.workflow.deferredId("approval"),
+        fx.workflow.deferredId("approval"),
+    );
+    try std.testing.expect(fx.workflow.deferredId("approval") != fx.workflow.deferredId("payment"));
+    try std.testing.expect(@hasDecl(fx.workflow, "DurableDeferred"));
+}
+
 test "workflow replay folds lifecycle events" {
     const events = [_]fx.workflow.WorkflowEvent{
         .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8, .name = "approval" },
@@ -1776,6 +1785,250 @@ test "workflow context skips completed compensations on replay" {
     var events = try journal.readAll(std.testing.allocator);
     defer events.deinit();
     try std.testing.expectEqual(@as(usize, 4), events.events.len);
+}
+
+test "workflow context awaiting a missing deferred suspends durably" {
+    const codec = fx.Codec(u64){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, value: u64) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{value});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !u64 {
+                return std.fmt.parseInt(u64, bytes, 10);
+            }
+        }.decode,
+    };
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "deferred-workflow",
+        .status = "running",
+        .idempotency_key = "deferred-await",
+    } });
+
+    var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+        .workflow_id = 7,
+        .execution_id = 8,
+    });
+    defer context.deinit();
+
+    const result = try context.awaitDeferred("approval", codec, error{Rejected});
+    switch (result) {
+        .suspended => |suspension| {
+            try std.testing.expectEqual(fx.SuspensionKind.deferred, suspension.kind);
+            try std.testing.expectEqual(fx.workflow.deferredId("approval"), suspension.id);
+            try std.testing.expectEqualStrings("approval", suspension.label);
+        },
+        else => return error.ExpectedSuspension,
+    }
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 4), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.deferred_created, events.events[1].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.deferred_awaited, events.events[2].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_suspended, events.events[3].kind);
+    try std.testing.expectEqual(fx.workflow.deferredId("approval"), events.events[1].deferred_id.?);
+    try std.testing.expectEqualStrings("waiting", events.events[3].status);
+}
+
+test "durable deferred external completion replays completed values" {
+    const codec = fx.Codec(u64){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, value: u64) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{value});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !u64 {
+                return std.fmt.parseInt(u64, bytes, 10);
+            }
+        }.decode,
+    };
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "deferred-workflow",
+        .status = "running",
+        .idempotency_key = "deferred-complete",
+    } });
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const result = try context.awaitDeferred("approval", codec, error{Rejected});
+        switch (result) {
+            .suspended => {},
+            else => return error.ExpectedSuspension,
+        }
+    }
+
+    var external = fx.workflow.DurableDeferred.init(std.testing.allocator, journal, 7, 8);
+    try external.complete("approval", codec, @as(u64, 42));
+    try external.complete("approval", codec, @as(u64, 42));
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const result = try context.awaitDeferred("approval", codec, error{Rejected});
+        switch (result) {
+            .completed => |value| try std.testing.expectEqual(@as(u64, 42), value),
+            else => return error.ExpectedCompletedDeferred,
+        }
+    }
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 5), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.deferred_completed, events.events[4].kind);
+    try std.testing.expectEqual(fx.workflow.deferredId("approval"), events.events[4].deferred_id.?);
+    try std.testing.expectEqualStrings("42", events.events[4].redacted_detail);
+}
+
+test "durable deferred external failure replays typed failures" {
+    const codec = fx.Codec(u64){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, value: u64) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{value});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !u64 {
+                return std.fmt.parseInt(u64, bytes, 10);
+            }
+        }.decode,
+    };
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "deferred-workflow",
+        .status = "running",
+        .idempotency_key = "deferred-fail",
+    } });
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+        _ = try context.awaitDeferred("approval", codec, error{Rejected});
+    }
+
+    var external = fx.workflow.DurableDeferred.init(std.testing.allocator, journal, 7, 8);
+    try external.fail("approval", error.Rejected);
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const result = try context.awaitDeferred("approval", codec, error{Rejected});
+        switch (result) {
+            .failed => |err| try std.testing.expectEqual(error.Rejected, err),
+            else => return error.ExpectedFailedDeferred,
+        }
+    }
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 5), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.deferred_failed, events.events[4].kind);
+    try std.testing.expectEqualStrings("exit.cause.failure:Rejected", events.events[4].redacted_detail);
+}
+
+test "durable deferred external cancellation replays cancellation reasons" {
+    const codec = fx.Codec(u64){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, value: u64) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{value});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !u64 {
+                return std.fmt.parseInt(u64, bytes, 10);
+            }
+        }.decode,
+    };
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "deferred-workflow",
+        .status = "running",
+        .idempotency_key = "deferred-cancel",
+    } });
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+        _ = try context.awaitDeferred("approval", codec, error{Rejected});
+    }
+
+    var external = fx.workflow.DurableDeferred.init(std.testing.allocator, journal, 7, 8);
+    try external.cancel("approval", "operator");
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const result = try context.awaitDeferred("approval", codec, error{Rejected});
+        switch (result) {
+            .cancelled => |reason| try std.testing.expectEqualStrings("operator", reason),
+            else => return error.ExpectedCancelledDeferred,
+        }
+    }
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 5), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.deferred_cancelled, events.events[4].kind);
+    try std.testing.expectEqualStrings("operator", events.events[4].redacted_detail);
 }
 
 test "workflow context records failed compensation cause details" {

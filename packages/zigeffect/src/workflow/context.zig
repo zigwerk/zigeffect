@@ -1,9 +1,11 @@
 const std = @import("std");
 const result_mod = @import("../core/result.zig");
 const schedule_mod = @import("../effect/schedule.zig");
+const control_mod = @import("../runtime/control.zig");
 const causal_mod = @import("../services/causal.zig");
 const clock_mod = @import("../services/clock.zig");
 const traits_mod = @import("../traits/root.zig");
+const deferred_mod = @import("deferred.zig");
 const journal_mod = @import("journal.zig");
 const store_mod = @import("store.zig");
 
@@ -11,9 +13,11 @@ pub const Allocator = std.mem.Allocator;
 pub const CausalStore = causal_mod.CausalStore;
 pub const Clock = clock_mod.Clock;
 pub const Codec = traits_mod.Codec;
+pub const DeferredAwaitResult = deferred_mod.DeferredAwaitResult;
 pub const JournalStore = store_mod.JournalStore;
 pub const JournalEventBatch = store_mod.JournalEventBatch;
 pub const Schedule = schedule_mod.Schedule;
+pub const Suspension = control_mod.Suspension;
 pub const WorkflowId = journal_mod.WorkflowId;
 pub const ExecutionId = journal_mod.ExecutionId;
 pub const ActivityId = journal_mod.ActivityId;
@@ -179,6 +183,26 @@ pub const WorkflowContext = struct {
         }
     }
 
+    pub fn awaitDeferred(
+        self: *WorkflowContext,
+        label: []const u8,
+        result_codec: anytype,
+        comptime Failure: type,
+    ) !DeferredAwaitResult(@TypeOf(result_codec).ValueType, Failure) {
+        const id = deferred_mod.deferredId(label);
+        if (try self.recordedDeferred(label, id, result_codec, Failure)) |recorded| return recorded;
+        if (!self.deferredExists(id)) {
+            try self.appendDeferredEvent(.deferred_created, id, label, "pending", "");
+        }
+        try self.appendDeferredEvent(.deferred_awaited, id, label, "waiting", "");
+        try self.appendDeferredEvent(.workflow_suspended, id, label, "waiting", "deferred");
+        return .{ .suspended = .{
+            .kind = .deferred,
+            .id = id,
+            .label = label,
+        } };
+    }
+
     fn recordedStepU64(self: *const WorkflowContext, label: []const u8) !?u64 {
         for (self.replay_events.events) |event| {
             if (event.kind == .step_completed and
@@ -305,6 +329,80 @@ pub const WorkflowContext = struct {
             },
         });
         self.next_sequence += 1;
+    }
+
+    fn appendDeferredEvent(
+        self: *WorkflowContext,
+        kind: journal_mod.WorkflowEventKind,
+        id: journal_mod.DeferredId,
+        name: []const u8,
+        status: []const u8,
+        redacted_detail: []const u8,
+    ) !void {
+        const idempotency_key = try deferredEventIdempotencyKey(self.allocator, kind, id, self.next_sequence);
+        defer self.allocator.free(idempotency_key);
+        _ = try self.journal_store.append(.{
+            .event = .{
+                .sequence = self.next_sequence,
+                .kind = kind,
+                .workflow_id = self.workflow_id,
+                .execution_id = self.execution_id,
+                .deferred_id = id,
+                .name = name,
+                .status = status,
+                .redacted_detail = redacted_detail,
+                .idempotency_key = idempotency_key,
+            },
+        });
+        self.next_sequence += 1;
+    }
+
+    fn deferredExists(self: *const WorkflowContext, id: journal_mod.DeferredId) bool {
+        for (self.replay_events.events) |event| {
+            if (event.deferred_id != null and
+                event.deferred_id.? == id and
+                event.workflow_id == self.workflow_id and
+                event.execution_id == self.execution_id and
+                event.kind == .deferred_created)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn recordedDeferred(
+        self: *const WorkflowContext,
+        label: []const u8,
+        id: journal_mod.DeferredId,
+        result_codec: anytype,
+        comptime Failure: type,
+    ) !?DeferredAwaitResult(@TypeOf(result_codec).ValueType, Failure) {
+        _ = label;
+        var index = self.replay_events.events.len;
+        while (index > 0) {
+            index -= 1;
+            const event = self.replay_events.events[index];
+            if (event.deferred_id != null and
+                event.deferred_id.? == id and
+                event.workflow_id == self.workflow_id and
+                event.execution_id == self.execution_id)
+            {
+                switch (event.kind) {
+                    .deferred_completed => return .{
+                        .completed = try result_codec.decodeValue(self.allocator, event.redacted_detail),
+                    },
+                    .deferred_failed => {
+                        const failure = activityFailureFromDetail(Failure, event.redacted_detail) orelse
+                            return error.RecordedActivityFailureParseFailed;
+                        return .{ .failed = failure };
+                    },
+                    .deferred_cancelled => return .{ .cancelled = event.redacted_detail },
+                    else => {},
+                }
+            }
+        }
+        return null;
     }
 
     fn scheduleRetry(
@@ -456,6 +554,19 @@ fn compensationEventIdempotencyKey(
     return std.fmt.allocPrint(
         allocator,
         "compensation:{d}:{s}:{d}",
+        .{ id, journal_mod.workflowEventKindName(kind), sequence },
+    );
+}
+
+fn deferredEventIdempotencyKey(
+    allocator: Allocator,
+    kind: journal_mod.WorkflowEventKind,
+    id: journal_mod.DeferredId,
+    sequence: JournalSequence,
+) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "deferred:{d}:{s}:{d}",
         .{ id, journal_mod.workflowEventKindName(kind), sequence },
     );
 }

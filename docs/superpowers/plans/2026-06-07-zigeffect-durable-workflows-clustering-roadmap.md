@@ -386,16 +386,16 @@ Goal: provide durable waiting for externally completed values.
 
 Deliverables:
 
-- [ ] Add `DurableDeferred`.
-- [ ] Append create, await, complete, fail, and cancel events.
-- [ ] Add typed success and failure serialization boundary.
-- [ ] Add `WorkflowContext.awaitDeferred`.
-- [ ] Add external completion API.
+- [x] Add `DurableDeferred`.
+- [x] Append create, await, complete, fail, and cancel events.
+- [x] Add typed success and failure serialization boundary.
+- [x] Add `WorkflowContext.awaitDeferred`.
+- [x] Add external completion API.
 
 Acceptance:
 
-- [ ] Workflow can suspend on a deferred and resume after completion.
-- [ ] Replay preserves the completed value.
+- [x] Workflow can suspend on a deferred and resume after completion.
+- [x] Replay preserves the completed value.
 
 ## Milestone 14: Durable Timers And Durable Clock
 
