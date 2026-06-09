@@ -46,6 +46,13 @@ pub const QueueStatus = enum {
     acked,
 };
 
+pub const CompensationStatus = enum {
+    registered,
+    running,
+    completed,
+    failed,
+};
+
 pub const ReplayError = error{
     WorkflowNotStarted,
     WorkflowAlreadyStarted,
@@ -60,6 +67,8 @@ pub const ReplayError = error{
     UnknownDeferred,
     DuplicateQueue,
     UnknownQueue,
+    DuplicateCompensation,
+    UnknownCompensation,
 };
 
 pub const ActivityState = struct {
@@ -91,6 +100,13 @@ pub const QueueState = struct {
     name: []const u8 = "",
 };
 
+pub const CompensationState = struct {
+    id: journal.CompensationId,
+    status: CompensationStatus,
+    last_sequence: JournalSequence,
+    name: []const u8 = "",
+};
+
 pub const WorkflowReplayState = struct {
     allocator: std.mem.Allocator,
     workflow_status: WorkflowStatus = .pending,
@@ -101,12 +117,17 @@ pub const WorkflowReplayState = struct {
     timers: std.ArrayList(TimerState) = .empty,
     deferreds: std.ArrayList(DeferredState) = .empty,
     queues: std.ArrayList(QueueState) = .empty,
+    compensations: std.ArrayList(CompensationState) = .empty,
 
     pub fn init(allocator: std.mem.Allocator) WorkflowReplayState {
         return .{ .allocator = allocator };
     }
 
     pub fn deinit(self: *WorkflowReplayState) void {
+        for (self.compensations.items) |compensation| {
+            self.freeName(compensation.name);
+        }
+        self.compensations.deinit(self.allocator);
         for (self.queues.items) |queue| {
             self.freeName(queue.name);
         }
@@ -165,6 +186,10 @@ pub const WorkflowReplayState = struct {
             .queue_completed => try self.updateQueue(event, .completed),
             .queue_failed => try self.updateQueue(event, .failed),
             .queue_acked => try self.updateQueue(event, .acked),
+            .compensation_registered => try self.applyCompensationRegistered(event),
+            .compensation_started => try self.updateCompensation(event, .running),
+            .compensation_completed => try self.updateCompensation(event, .completed),
+            .compensation_failed => try self.updateCompensation(event, .failed),
             else => {},
         }
         self.last_sequence = event.sequence;
@@ -305,6 +330,30 @@ pub const WorkflowReplayState = struct {
         self.commitNameUpdate(&queue.name, name_update);
     }
 
+    fn applyCompensationRegistered(self: *WorkflowReplayState, event: WorkflowEvent) (std.mem.Allocator.Error || ReplayError)!void {
+        const id = try requireCompensationId(event);
+        if (self.findCompensationIndex(id) != null) return error.DuplicateCompensation;
+        const name = try self.cloneName(event.name);
+        errdefer self.freeName(name);
+        try self.compensations.append(self.allocator, .{
+            .id = id,
+            .status = .registered,
+            .last_sequence = event.sequence,
+            .name = name,
+        });
+    }
+
+    fn updateCompensation(self: *WorkflowReplayState, event: WorkflowEvent, status: CompensationStatus) (std.mem.Allocator.Error || ReplayError)!void {
+        const id = try requireCompensationId(event);
+        const index = self.findCompensationIndex(id) orelse return error.UnknownCompensation;
+        const name_update = try self.prepareNameUpdate(event.name);
+        errdefer if (name_update) |name| self.freeName(name);
+        const compensation = &self.compensations.items[index];
+        compensation.status = status;
+        compensation.last_sequence = event.sequence;
+        self.commitNameUpdate(&compensation.name, name_update);
+    }
+
     fn findActivityIndex(self: *const WorkflowReplayState, id: journal.ActivityId) ?usize {
         for (self.activities.items, 0..) |activity, index| {
             if (activity.id == id) return index;
@@ -329,6 +378,13 @@ pub const WorkflowReplayState = struct {
     fn findQueueIndex(self: *const WorkflowReplayState, id: journal.QueueId) ?usize {
         for (self.queues.items, 0..) |queue, index| {
             if (queue.id == id) return index;
+        }
+        return null;
+    }
+
+    fn findCompensationIndex(self: *const WorkflowReplayState, id: journal.CompensationId) ?usize {
+        for (self.compensations.items, 0..) |compensation, index| {
+            if (compensation.id == id) return index;
         }
         return null;
     }
@@ -384,6 +440,10 @@ fn requireDeferredId(event: WorkflowEvent) ReplayError!journal.DeferredId {
 
 fn requireQueueId(event: WorkflowEvent) ReplayError!journal.QueueId {
     return event.queue_id orelse error.MissingTargetId;
+}
+
+fn requireCompensationId(event: WorkflowEvent) ReplayError!journal.CompensationId {
+    return event.compensation_id orelse error.MissingTargetId;
 }
 
 fn workflowFailureStatus(event: WorkflowEvent) WorkflowStatus {

@@ -205,8 +205,9 @@ Owns local durable workflow runtime surfaces:
 - `context.zig`: replay-aware workflow context, deterministic step and
   activity sequence assignment, recorded outcome lookup, activity result codec
   boundaries, attempt counters, retry schedule decisions, clock-backed retry
-  delays, timeout terminal events, causal schedule mapping, and `Exit`/`Cause`
-  failure journaling.
+  delays, timeout terminal events, durable compensation registration and
+  reverse-order execution, causal schedule mapping, and `Exit`/`Cause` failure
+  journaling.
 - `engine.zig`: workflow engine registration, provider requirement validation,
   durable `workflow_started` appends, typed poll results, execution inspection,
   duplicate execution checks, and in-memory execution indexing.
@@ -221,10 +222,11 @@ Owns local durable workflow runtime surfaces:
   corruption reports, fsync policy, and checkpoint JSON.
 
 Workflow definitions, activity definitions, journal events, replay state,
-journal stores, durable timers, durable deferreds, durable queues, signals,
-lifecycle controls, inspectors, and replay helpers belong here. Workflow code
-should consume `core`, `runtime`, `effect`, `layer`, `services`, and `traits`
-contracts instead of expanding those domains with workflow-specific behavior.
+journal stores, durable timers, durable deferreds, durable queues, durable
+compensations, signals, lifecycle controls, inspectors, and replay helpers
+belong here. Workflow code should consume `core`, `runtime`, `effect`, `layer`,
+`services`, and `traits` contracts instead of expanding those domains with
+workflow-specific behavior.
 
 ```text
 src/cluster/

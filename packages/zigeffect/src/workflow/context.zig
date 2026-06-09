@@ -17,11 +17,13 @@ pub const Schedule = schedule_mod.Schedule;
 pub const WorkflowId = journal_mod.WorkflowId;
 pub const ExecutionId = journal_mod.ExecutionId;
 pub const ActivityId = journal_mod.ActivityId;
+pub const CompensationId = journal_mod.CompensationId;
 pub const JournalSequence = journal_mod.JournalSequence;
 pub const WorkflowStepCause = result_mod.Cause(anyerror);
 pub const WorkflowStepExit = result_mod.Exit(void, anyerror);
 
 pub const WorkflowContextError = error{
+    CompensationHandlerNotFound,
     RecordedStepParseFailed,
     RecordedActivityFailureParseFailed,
 };
@@ -143,6 +145,40 @@ pub const WorkflowContext = struct {
         }
     }
 
+    pub fn registerCompensation(self: *WorkflowContext, label: []const u8) !void {
+        const id = journal_mod.compensationId(label);
+        try self.appendCompensationEvent(.compensation_registered, id, label, "registered", "");
+    }
+
+    pub fn runCompensations(self: *WorkflowContext, comptime handlers: anytype) !void {
+        var events = try self.journal_store.readAll(self.allocator);
+        defer events.deinit();
+
+        var index = events.events.len;
+        while (index > 0) {
+            index -= 1;
+            const event = events.events[index];
+            if (event.kind != .compensation_registered or
+                event.workflow_id != self.workflow_id or
+                event.execution_id != self.execution_id)
+            {
+                continue;
+            }
+
+            const id = event.compensation_id orelse continue;
+            if (compensationCompleted(events.events, id, self.workflow_id, self.execution_id)) continue;
+
+            try self.appendCompensationEvent(.compensation_started, id, event.name, "running", "");
+            runCompensationHandler(handlers, event.name) catch |err| {
+                const detail = try workflowFailureDetail(self.allocator, err);
+                defer self.allocator.free(detail);
+                try self.appendCompensationEvent(.compensation_failed, id, event.name, "failed", detail);
+                return err;
+            };
+            try self.appendCompensationEvent(.compensation_completed, id, event.name, "completed", "");
+        }
+    }
+
     fn recordedStepU64(self: *const WorkflowContext, label: []const u8) !?u64 {
         for (self.replay_events.events) |event| {
             if (event.kind == .step_completed and
@@ -236,6 +272,32 @@ pub const WorkflowContext = struct {
                 .execution_id = self.execution_id,
                 .activity_id = id,
                 .attempt = attempt,
+                .name = name,
+                .status = status,
+                .redacted_detail = redacted_detail,
+                .idempotency_key = idempotency_key,
+            },
+        });
+        self.next_sequence += 1;
+    }
+
+    fn appendCompensationEvent(
+        self: *WorkflowContext,
+        kind: journal_mod.WorkflowEventKind,
+        id: CompensationId,
+        name: []const u8,
+        status: []const u8,
+        redacted_detail: []const u8,
+    ) !void {
+        const idempotency_key = try compensationEventIdempotencyKey(self.allocator, kind, id, self.next_sequence);
+        defer self.allocator.free(idempotency_key);
+        _ = try self.journal_store.append(.{
+            .event = .{
+                .sequence = self.next_sequence,
+                .kind = kind,
+                .workflow_id = self.workflow_id,
+                .execution_id = self.execution_id,
+                .compensation_id = id,
                 .name = name,
                 .status = status,
                 .redacted_detail = redacted_detail,
@@ -383,6 +445,45 @@ fn activityEventIdempotencyKey(
         "activity:{d}:{s}:{d}",
         .{ id, journal_mod.workflowEventKindName(kind), attempt },
     );
+}
+
+fn compensationEventIdempotencyKey(
+    allocator: Allocator,
+    kind: journal_mod.WorkflowEventKind,
+    id: CompensationId,
+    sequence: JournalSequence,
+) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "compensation:{d}:{s}:{d}",
+        .{ id, journal_mod.workflowEventKindName(kind), sequence },
+    );
+}
+
+fn compensationCompleted(
+    events: []const journal_mod.WorkflowEvent,
+    id: CompensationId,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+) bool {
+    for (events) |event| {
+        if (event.kind == .compensation_completed and
+            event.compensation_id != null and
+            event.compensation_id.? == id and
+            event.workflow_id == workflow_id and
+            event.execution_id == execution_id)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn runCompensationHandler(comptime handlers: anytype, label: []const u8) !void {
+    inline for (handlers) |handler| {
+        if (std.mem.eql(u8, handler.label, label)) return handler.run();
+    }
+    return error.CompensationHandlerNotFound;
 }
 
 fn scheduleDecisionDetail(

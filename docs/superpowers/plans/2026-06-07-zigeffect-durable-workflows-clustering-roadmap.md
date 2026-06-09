@@ -370,15 +370,15 @@ Goal: support cleanup for already completed durable steps when workflows fail.
 
 Deliverables:
 
-- [ ] Add compensation registration event.
-- [ ] Add compensation execution events.
-- [ ] Define compensation ordering.
-- [ ] Preserve compensation failures in `Cause`.
-- [ ] Add idempotent compensation completion.
+- [x] Add compensation registration event.
+- [x] Add compensation execution events.
+- [x] Define compensation ordering.
+- [x] Preserve compensation failures in `Cause`.
+- [x] Add idempotent compensation completion.
 
 Acceptance:
 
-- [ ] Tests cover success, failure, repeated replay, and compensation failure.
+- [x] Tests cover success, failure, repeated replay, and compensation failure.
 
 ## Milestone 13: Durable Deferred
 

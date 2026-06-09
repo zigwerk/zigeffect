@@ -147,6 +147,19 @@ fn appendQueueCheckpointRows(output: *std.ArrayList(u8), allocator: Allocator, r
     try output.append(allocator, ']');
 }
 
+fn appendCompensationCheckpointRows(output: *std.ArrayList(u8), allocator: Allocator, rows: []const replay.CompensationState) Allocator.Error!void {
+    try output.appendSlice(allocator, "\"compensations\":[");
+    for (rows, 0..) |row, index| {
+        if (index != 0) try output.append(allocator, ',');
+        try output.print(allocator, "{{\"compensation_id\":{d},\"status\":", .{row.id});
+        try appendJsonString(output, allocator, @tagName(row.status));
+        try output.print(allocator, ",\"last_sequence\":{d},\"name\":", .{row.last_sequence});
+        try appendJsonString(output, allocator, row.name);
+        try output.append(allocator, '}');
+    }
+    try output.append(allocator, ']');
+}
+
 pub fn formatWorkflowCheckpointJson(allocator: Allocator, state: *const WorkflowReplayState) Allocator.Error![]const u8 {
     var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
@@ -169,6 +182,8 @@ pub fn formatWorkflowCheckpointJson(allocator: Allocator, state: *const Workflow
     try appendDeferredCheckpointRows(&output, allocator, state.deferreds.items);
     try output.append(allocator, ',');
     try appendQueueCheckpointRows(&output, allocator, state.queues.items);
+    try output.append(allocator, ',');
+    try appendCompensationCheckpointRows(&output, allocator, state.compensations.items);
     try output.append(allocator, '}');
 
     return output.toOwnedSlice(allocator);
@@ -182,6 +197,7 @@ pub const WorkflowCheckpointParseError = error{
     UnknownTimerCheckpointStatus,
     UnknownDeferredCheckpointStatus,
     UnknownQueueCheckpointStatus,
+    UnknownCompensationCheckpointStatus,
 };
 
 const ActivityCheckpointRow = struct {
@@ -213,6 +229,13 @@ const QueueCheckpointRow = struct {
     name: []const u8 = "",
 };
 
+const CompensationCheckpointRow = struct {
+    compensation_id: journal.CompensationId,
+    status: []const u8,
+    last_sequence: JournalSequence,
+    name: []const u8 = "",
+};
+
 const WorkflowCheckpointJson = struct {
     schema: []const u8,
     schema_version: u32,
@@ -224,6 +247,7 @@ const WorkflowCheckpointJson = struct {
     timers: []TimerCheckpointRow,
     deferreds: []DeferredCheckpointRow,
     queues: []QueueCheckpointRow,
+    compensations: []CompensationCheckpointRow,
 };
 
 fn cloneCheckpointName(allocator: Allocator, name: []const u8) Allocator.Error![]const u8 {
@@ -309,6 +333,21 @@ pub fn parseWorkflowCheckpointJson(allocator: Allocator, checkpoint_json: []cons
             errdefer freeCheckpointName(allocator, name);
             try state.queues.append(allocator, .{
                 .id = row.queue_id,
+                .status = status,
+                .last_sequence = row.last_sequence,
+                .name = name,
+            });
+        }
+    }
+
+    for (parsed.value.compensations) |row| {
+        const status = std.meta.stringToEnum(replay.CompensationStatus, row.status) orelse
+            return error.UnknownCompensationCheckpointStatus;
+        {
+            const name = try cloneCheckpointName(allocator, row.name);
+            errdefer freeCheckpointName(allocator, name);
+            try state.compensations.append(allocator, .{
+                .id = row.compensation_id,
                 .status = status,
                 .last_sequence = row.last_sequence,
                 .name = name,

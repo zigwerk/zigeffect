@@ -9,6 +9,7 @@ pub const ActivityId = u64;
 pub const TimerId = u64;
 pub const DeferredId = u64;
 pub const QueueId = u64;
+pub const CompensationId = u64;
 pub const JournalSequence = u64;
 
 pub const WorkflowEventKind = enum {
@@ -25,6 +26,10 @@ pub const WorkflowEventKind = enum {
     activity_failed,
     activity_retry_scheduled,
     activity_timed_out,
+    compensation_registered,
+    compensation_started,
+    compensation_completed,
+    compensation_failed,
     timer_scheduled,
     timer_fired,
     timer_cancelled,
@@ -60,6 +65,10 @@ pub fn workflowEventKindName(kind: WorkflowEventKind) []const u8 {
         .activity_failed => "activity_failed",
         .activity_retry_scheduled => "activity_retry_scheduled",
         .activity_timed_out => "activity_timed_out",
+        .compensation_registered => "compensation_registered",
+        .compensation_started => "compensation_started",
+        .compensation_completed => "compensation_completed",
+        .compensation_failed => "compensation_failed",
         .timer_scheduled => "timer_scheduled",
         .timer_fired => "timer_fired",
         .timer_cancelled => "timer_cancelled",
@@ -101,6 +110,7 @@ pub const WorkflowEvent = struct {
     timer_id: ?TimerId = null,
     deferred_id: ?DeferredId = null,
     queue_id: ?QueueId = null,
+    compensation_id: ?CompensationId = null,
     attempt: u32 = 0,
     name: []const u8 = "",
     status: []const u8 = "",
@@ -145,6 +155,7 @@ const WorkflowEventJsonRow = struct {
     timer_id: ?TimerId = null,
     deferred_id: ?DeferredId = null,
     queue_id: ?QueueId = null,
+    compensation_id: ?CompensationId = null,
     attempt: u32 = 0,
     name: []const u8 = "",
     status: []const u8 = "",
@@ -174,6 +185,7 @@ pub fn parseWorkflowEventJson(allocator: std.mem.Allocator, row_json: []const u8
         .timer_id = parsed.value.timer_id,
         .deferred_id = parsed.value.deferred_id,
         .queue_id = parsed.value.queue_id,
+        .compensation_id = parsed.value.compensation_id,
         .attempt = parsed.value.attempt,
         .name = parsed.value.name,
         .status = parsed.value.status,
@@ -235,6 +247,8 @@ pub fn formatWorkflowEventJson(allocator: std.mem.Allocator, event: WorkflowEven
     try appendOptionalJsonU64(&output, allocator, event.deferred_id);
     try output.appendSlice(allocator, ",\"queue_id\":");
     try appendOptionalJsonU64(&output, allocator, event.queue_id);
+    try output.appendSlice(allocator, ",\"compensation_id\":");
+    try appendOptionalJsonU64(&output, allocator, event.compensation_id);
     try output.print(allocator, ",\"attempt\":{d}", .{event.attempt});
     try output.appendSlice(allocator, ",\"name\":");
     try appendJsonString(&output, allocator, event.name);
@@ -265,6 +279,7 @@ pub fn formatWorkflowEventText(allocator: std.mem.Allocator, event: WorkflowEven
     try appendOptionalTextU64(&output, allocator, "timer_id", event.timer_id);
     try appendOptionalTextU64(&output, allocator, "deferred_id", event.deferred_id);
     try appendOptionalTextU64(&output, allocator, "queue_id", event.queue_id);
+    try appendOptionalTextU64(&output, allocator, "compensation_id", event.compensation_id);
     try output.print(allocator, "attempt: {d}\n", .{event.attempt});
     try output.print(allocator, "name: {s}\n", .{event.name});
     try output.print(allocator, "status: {s}\n", .{event.status});
@@ -272,4 +287,8 @@ pub fn formatWorkflowEventText(allocator: std.mem.Allocator, event: WorkflowEven
     try output.print(allocator, "idempotency_key: {s}\n", .{event.idempotency_key});
 
     return output.toOwnedSlice(allocator);
+}
+
+pub fn compensationId(label: []const u8) CompensationId {
+    return std.hash.Fnv1a_64.hash(label);
 }

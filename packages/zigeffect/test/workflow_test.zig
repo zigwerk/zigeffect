@@ -39,6 +39,14 @@ fn expectWorkflowReplayStatesEqual(expected: *const fx.workflow.WorkflowReplaySt
         try std.testing.expectEqual(expected_row.last_sequence, actual_row.last_sequence);
         try std.testing.expectEqualStrings(expected_row.name, actual_row.name);
     }
+
+    try std.testing.expectEqual(expected.compensations.items.len, actual.compensations.items.len);
+    for (expected.compensations.items, actual.compensations.items) |expected_row, actual_row| {
+        try std.testing.expectEqual(expected_row.id, actual_row.id);
+        try std.testing.expectEqual(expected_row.status, actual_row.status);
+        try std.testing.expectEqual(expected_row.last_sequence, actual_row.last_sequence);
+        try std.testing.expectEqualStrings(expected_row.name, actual_row.name);
+    }
 }
 
 test "workflow journal schema constants are stable" {
@@ -71,6 +79,10 @@ test "workflow event kind names are stable" {
         .{ fx.workflow.WorkflowEventKind.activity_failed, "activity_failed" },
         .{ fx.workflow.WorkflowEventKind.activity_retry_scheduled, "activity_retry_scheduled" },
         .{ fx.workflow.WorkflowEventKind.activity_timed_out, "activity_timed_out" },
+        .{ fx.workflow.WorkflowEventKind.compensation_registered, "compensation_registered" },
+        .{ fx.workflow.WorkflowEventKind.compensation_started, "compensation_started" },
+        .{ fx.workflow.WorkflowEventKind.compensation_completed, "compensation_completed" },
+        .{ fx.workflow.WorkflowEventKind.compensation_failed, "compensation_failed" },
         .{ fx.workflow.WorkflowEventKind.timer_scheduled, "timer_scheduled" },
         .{ fx.workflow.WorkflowEventKind.timer_fired, "timer_fired" },
         .{ fx.workflow.WorkflowEventKind.timer_cancelled, "timer_cancelled" },
@@ -103,6 +115,7 @@ test "workflow event json includes schema metadata and optional ids" {
         .workflow_id = 7,
         .execution_id = 8,
         .activity_id = 9,
+        .compensation_id = 50,
         .attempt = 2,
         .name = "charge-card",
         .status = "success",
@@ -120,6 +133,7 @@ test "workflow event json includes schema metadata and optional ids" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"workflow_id\":7") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"execution_id\":8") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"activity_id\":9") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"compensation_id\":50") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"attempt\":2") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"timer_id\":null") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"name\":\"charge-card\"") != null);
@@ -135,6 +149,7 @@ test "workflow event text is readable for agents and CLIs" {
         .workflow_id = 7,
         .execution_id = 8,
         .timer_id = 10,
+        .compensation_id = 50,
         .attempt = 2,
         .name = "wake-up",
         .status = "scheduled",
@@ -147,6 +162,7 @@ test "workflow event text is readable for agents and CLIs" {
     try std.testing.expect(std.mem.indexOf(u8, text, "zigeffect workflow journal event") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "kind: timer_scheduled") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "timer_id: 10") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "compensation_id: 50") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "attempt: 2") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "name: wake-up") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "idempotency_key: timer-2") != null);
@@ -160,6 +176,7 @@ test "workflow event json parses back into an owned event" {
         .execution_id = 8,
         .parent_sequence = 2,
         .queue_id = 40,
+        .compensation_id = 50,
         .attempt = 3,
         .name = "mailbox \"primary\"",
         .status = "claimed\nready",
@@ -179,12 +196,21 @@ test "workflow event json parses back into an owned event" {
     try std.testing.expectEqual(event.execution_id, parsed.execution_id);
     try std.testing.expectEqual(event.parent_sequence, parsed.parent_sequence);
     try std.testing.expectEqual(event.queue_id, parsed.queue_id);
+    try std.testing.expectEqual(event.compensation_id, parsed.compensation_id);
     try std.testing.expectEqual(event.attempt, parsed.attempt);
     try std.testing.expectEqual(@as(?u64, null), parsed.activity_id);
     try std.testing.expectEqualStrings(event.name, parsed.name);
     try std.testing.expectEqualStrings(event.status, parsed.status);
     try std.testing.expectEqualStrings(event.redacted_detail, parsed.redacted_detail);
     try std.testing.expectEqualStrings(event.idempotency_key, parsed.idempotency_key);
+}
+
+test "workflow compensation ids are stable by label" {
+    try std.testing.expectEqual(
+        fx.workflow.compensationId("refund-charge"),
+        fx.workflow.compensationId("refund-charge"),
+    );
+    try std.testing.expect(fx.workflow.compensationId("refund-charge") != fx.workflow.compensationId("release-seat"));
 }
 
 test "workflow replay folds lifecycle events" {
@@ -326,6 +352,23 @@ test "workflow replay folds activity retry and timeout events" {
     try std.testing.expectEqual(fx.workflow.ActivityStatus.failed, timeout_state.activities.items[0].status);
     try std.testing.expectEqual(@as(u32, 1), timeout_state.activities.items[0].attempt);
     try std.testing.expectEqual(@as(u64, 3), timeout_state.activities.items[0].last_sequence);
+}
+
+test "workflow replay folds compensation rows" {
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8 },
+        .{ .sequence = 2, .kind = .compensation_registered, .workflow_id = 7, .execution_id = 8, .compensation_id = 50, .name = "refund-charge" },
+        .{ .sequence = 3, .kind = .compensation_started, .workflow_id = 7, .execution_id = 8, .compensation_id = 50 },
+        .{ .sequence = 4, .kind = .compensation_completed, .workflow_id = 7, .execution_id = 8, .compensation_id = 50 },
+    };
+
+    var state = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &events);
+    defer state.deinit();
+    try std.testing.expectEqual(@as(usize, 1), state.compensations.items.len);
+    try std.testing.expectEqual(@as(u64, 50), state.compensations.items[0].id);
+    try std.testing.expectEqual(fx.workflow.CompensationStatus.completed, state.compensations.items[0].status);
+    try std.testing.expectEqual(@as(u64, 4), state.compensations.items[0].last_sequence);
+    try std.testing.expectEqualStrings("refund-charge", state.compensations.items[0].name);
 }
 
 test "workflow replay rejects malformed resource histories" {
@@ -713,6 +756,8 @@ test "workflow checkpoint json round-trips replay-equivalent state" {
         .{ .sequence = 7, .kind = .deferred_completed, .workflow_id = 7, .execution_id = 8, .deferred_id = 30 },
         .{ .sequence = 8, .kind = .queue_offered, .workflow_id = 7, .execution_id = 8, .queue_id = 40, .name = "mailbox" },
         .{ .sequence = 9, .kind = .queue_acked, .workflow_id = 7, .execution_id = 8, .queue_id = 40 },
+        .{ .sequence = 10, .kind = .compensation_registered, .workflow_id = 7, .execution_id = 8, .compensation_id = 50, .name = "refund-charge" },
+        .{ .sequence = 11, .kind = .compensation_completed, .workflow_id = 7, .execution_id = 8, .compensation_id = 50 },
     };
 
     var state = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &events);
@@ -725,12 +770,15 @@ test "workflow checkpoint json round-trips replay-equivalent state" {
     try std.testing.expect(std.mem.indexOf(u8, checkpoint_json, "\"activity_id\":10") != null);
     try std.testing.expect(std.mem.indexOf(u8, checkpoint_json, "\"attempt\":1") != null);
     try std.testing.expect(std.mem.indexOf(u8, checkpoint_json, "\"queue_id\":40") != null);
+    try std.testing.expect(std.mem.indexOf(u8, checkpoint_json, "\"compensations\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, checkpoint_json, "\"compensation_id\":50") != null);
 
     var parsed = try fx.workflow.parseWorkflowCheckpointJson(std.testing.allocator, checkpoint_json);
     defer parsed.deinit();
 
     try expectWorkflowReplayStatesEqual(&state, &parsed);
     try std.testing.expectEqual(@as(u32, 1), parsed.activities.items[0].attempt);
+    try std.testing.expectEqual(fx.workflow.CompensationStatus.completed, parsed.compensations.items[0].status);
 }
 
 test "workflow definition exposes metadata requirements and execution ids" {
@@ -1591,4 +1639,187 @@ test "workflow context records elapsed activity timeouts" {
     try std.testing.expectEqual(@as(u32, 1), events.events[3].attempt);
     try std.testing.expectEqualStrings("timeout", events.events[3].status);
     try std.testing.expectEqualStrings("exit.cause.failure:ActivityTimeout", events.events[3].redacted_detail);
+}
+
+test "workflow context runs registered compensations in reverse order" {
+    const Log = struct {
+        var entries: [2][]const u8 = undefined;
+        var len: usize = 0;
+
+        fn push(label: []const u8) void {
+            entries[len] = label;
+            len += 1;
+        }
+    };
+    const ReleaseSeat = struct {
+        fn run() !void {
+            Log.push("release-seat");
+        }
+    };
+    const RefundCharge = struct {
+        fn run() !void {
+            Log.push("refund-charge");
+        }
+    };
+    Log.len = 0;
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{
+        .event = .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .name = "compensating-workflow",
+            .status = "running",
+            .idempotency_key = "compensating-workflow",
+        },
+    });
+
+    var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+        .workflow_id = 7,
+        .execution_id = 8,
+    });
+    defer context.deinit();
+
+    try context.registerCompensation("release-seat");
+    try context.registerCompensation("refund-charge");
+    try context.runCompensations(.{
+        .{ .label = "release-seat", .run = ReleaseSeat.run },
+        .{ .label = "refund-charge", .run = RefundCharge.run },
+    });
+
+    try std.testing.expectEqual(@as(usize, 2), Log.len);
+    try std.testing.expectEqualStrings("refund-charge", Log.entries[0]);
+    try std.testing.expectEqualStrings("release-seat", Log.entries[1]);
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 7), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.compensation_registered, events.events[1].kind);
+    try std.testing.expectEqualStrings("release-seat", events.events[1].name);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.compensation_registered, events.events[2].kind);
+    try std.testing.expectEqualStrings("refund-charge", events.events[2].name);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.compensation_started, events.events[3].kind);
+    try std.testing.expectEqualStrings("refund-charge", events.events[3].name);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.compensation_completed, events.events[4].kind);
+    try std.testing.expectEqualStrings("refund-charge", events.events[4].name);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.compensation_started, events.events[5].kind);
+    try std.testing.expectEqualStrings("release-seat", events.events[5].name);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.compensation_completed, events.events[6].kind);
+    try std.testing.expectEqualStrings("release-seat", events.events[6].name);
+}
+
+test "workflow context skips completed compensations on replay" {
+    const RefundCharge = struct {
+        var calls: u64 = 0;
+
+        fn run() !void {
+            calls += 1;
+        }
+    };
+    RefundCharge.calls = 0;
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+    const id = fx.workflow.compensationId("refund-charge");
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "compensating-workflow",
+        .status = "running",
+        .idempotency_key = "completed-compensation",
+    } });
+    _ = try journal.append(.{ .event = .{
+        .sequence = 2,
+        .kind = .compensation_registered,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .compensation_id = id,
+        .name = "refund-charge",
+    } });
+    _ = try journal.append(.{ .event = .{
+        .sequence = 3,
+        .kind = .compensation_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .compensation_id = id,
+        .name = "refund-charge",
+    } });
+    _ = try journal.append(.{ .event = .{
+        .sequence = 4,
+        .kind = .compensation_completed,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .compensation_id = id,
+        .name = "refund-charge",
+    } });
+
+    var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+        .workflow_id = 7,
+        .execution_id = 8,
+    });
+    defer context.deinit();
+
+    try context.runCompensations(.{
+        .{ .label = "refund-charge", .run = RefundCharge.run },
+    });
+    try std.testing.expectEqual(@as(u64, 0), RefundCharge.calls);
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 4), events.events.len);
+}
+
+test "workflow context records failed compensation cause details" {
+    const RefundCharge = struct {
+        var calls: u64 = 0;
+
+        fn run() error{RefundFailed}!void {
+            calls += 1;
+            return error.RefundFailed;
+        }
+    };
+    RefundCharge.calls = 0;
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "compensating-workflow",
+        .status = "running",
+        .idempotency_key = "failed-compensation",
+    } });
+
+    var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+        .workflow_id = 7,
+        .execution_id = 8,
+    });
+    defer context.deinit();
+
+    try context.registerCompensation("refund-charge");
+    try std.testing.expectError(error.RefundFailed, context.runCompensations(.{
+        .{ .label = "refund-charge", .run = RefundCharge.run },
+    }));
+    try std.testing.expectEqual(@as(u64, 1), RefundCharge.calls);
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 4), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.compensation_started, events.events[2].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.compensation_failed, events.events[3].kind);
+    try std.testing.expectEqualStrings("failed", events.events[3].status);
+    try std.testing.expectEqualStrings("exit.cause.failure:RefundFailed", events.events[3].redacted_detail);
 }
