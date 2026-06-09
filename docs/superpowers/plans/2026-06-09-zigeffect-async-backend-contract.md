@@ -390,7 +390,7 @@ Create `packages/zigeffect/src/runtime/backend_diagnostics.zig` with
 `formatBackendCapabilityDiagnostic`. Map features to capability fields:
 
 ```zig
-.suspend => backend.can_suspend,
+.suspension => backend.can_suspend,
 .wake => backend.can_wake,
 .timer => backend.can_schedule_timers,
 .interrupt => backend.can_interrupt,

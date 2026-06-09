@@ -81,8 +81,9 @@ real backends a contract while keeping deterministic behavior explicit.
 
 Add `packages/zigeffect/src/runtime/backend_diagnostics.zig` with:
 
-- `BackendFeature`: `suspend`, `wake`, `timer`, `interrupt`, `durable_suspend`,
-  `persistence`, `distribution`, `supervision`, `parallelism`.
+- `BackendFeature`: `suspension`, `wake`, `timer`, `interrupt`,
+  `durable_suspend`, `persistence`, `distribution`, `supervision`,
+  `parallelism`.
 - `BackendCapabilityRequirement`.
 - `BackendCapabilityDiagnostic`.
 - `backendSupportsFeature`.

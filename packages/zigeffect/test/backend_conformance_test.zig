@@ -60,3 +60,23 @@ test "deterministic unsupported async backend rejects suspend wake timer and int
         .reason = "operator",
     }));
 }
+
+test "backend diagnostics explain unsupported async feature" {
+    const requirement = fx.BackendCapabilityRequirement{
+        .feature = .timer,
+        .operation = "workflow.sleep",
+        .workflow_name = "approval",
+    };
+
+    try std.testing.expect(!fx.backendSupportsFeature(fx.deterministicBackend(), .timer));
+    try std.testing.expect(fx.backendSupportsFeature(fx.durableLocalBackend(), .timer));
+    try std.testing.expectError(error.UnsupportedBackendCapability, fx.requireBackendFeature(fx.deterministicBackend(), requirement));
+
+    const diagnostic = try fx.formatBackendCapabilityDiagnostic(std.testing.allocator, fx.deterministicBackend(), requirement);
+    defer std.testing.allocator.free(diagnostic);
+    try std.testing.expect(std.mem.indexOf(u8, diagnostic, "backend=deterministic") != null);
+    try std.testing.expect(std.mem.indexOf(u8, diagnostic, "operation=workflow.sleep") != null);
+    try std.testing.expect(std.mem.indexOf(u8, diagnostic, "feature=timer") != null);
+    try std.testing.expect(std.mem.indexOf(u8, diagnostic, "workflow=approval") != null);
+    try std.testing.expect(std.mem.indexOf(u8, diagnostic, "use durableLocalBackend, asyncLocalBackend, or clusteredBackend") != null);
+}
