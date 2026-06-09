@@ -58,6 +58,10 @@ pub const CausalEventKind = enum {
     span_recorded,
     assertion_recorded,
     workflow_event_recorded,
+    supervisor_child_started,
+    supervisor_restart_decided,
+    supervisor_escalated,
+    supervisor_shutdown_ordered,
 };
 
 pub const CausalEventTaxonomy = struct {
@@ -84,6 +88,10 @@ pub fn causalEventTaxonomy(kind: CausalEventKind) CausalEventTaxonomy {
         .schedule_decision,
         .assertion_recorded,
         .workflow_event_recorded,
+        .supervisor_child_started,
+        .supervisor_restart_decided,
+        .supervisor_escalated,
+        .supervisor_shutdown_ordered,
         => .{
             .structural = true,
             .finding_evidence = true,

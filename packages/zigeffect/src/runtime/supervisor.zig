@@ -103,6 +103,8 @@ pub const Supervisor = struct {
     options: SupervisorOptions,
     children: std.ArrayList(ChildState) = .empty,
     restart_history: std.ArrayList(u64) = .empty,
+    causal_store: ?*CausalStore = null,
+    causal_run_id: ?u64 = null,
 
     pub fn init(allocator: Allocator, options: SupervisorOptions) Supervisor {
         return .{ .allocator = allocator, .options = options };
@@ -111,6 +113,11 @@ pub const Supervisor = struct {
     pub fn deinit(self: *Supervisor) void {
         self.children.deinit(self.allocator);
         self.restart_history.deinit(self.allocator);
+    }
+
+    pub fn attachCausalStore(self: *Supervisor, store: *CausalStore, run_id: u64) void {
+        self.causal_store = store;
+        self.causal_run_id = run_id;
     }
 
     pub fn addChild(self: *Supervisor, spec: SupervisorChildSpec) (Allocator.Error || SupervisorError)!void {
@@ -125,6 +132,7 @@ pub const Supervisor = struct {
         _ = now_ms;
         for (self.children.items) |*child| {
             child.status = .running;
+            try self.recordChildStarted(child.*);
         }
     }
 
@@ -149,6 +157,7 @@ pub const Supervisor = struct {
         for (ordered, 0..) |child, index| {
             snapshots[index] = child.snapshot();
         }
+        try self.recordShutdownOrdered(snapshots.len);
         return .{
             .allocator = allocator,
             .children = snapshots,
@@ -172,6 +181,7 @@ pub const Supervisor = struct {
         if (!restartAllowed(self.children.items[failed_index].spec.restart_mode, exit)) {
             markStoppedOrFailed(&self.children.items[failed_index], exit);
             decision.stopped_children = 1;
+            try self.recordRestartDecision(self.children.items[failed_index], decision);
             return decision;
         }
 
@@ -179,6 +189,8 @@ pub const Supervisor = struct {
         if (planned_restarts > 0 and !self.canRestartWithinIntensity(now_ms, planned_restarts)) {
             decision.escalated = true;
             decision.stopped_children = self.markAffectedEscalated(failed_index);
+            try self.recordRestartDecision(self.children.items[failed_index], decision);
+            try self.recordEscalated(self.children.items[failed_index]);
             return decision;
         }
 
@@ -196,7 +208,105 @@ pub const Supervisor = struct {
             }
         }
 
+        try self.recordRestartDecision(self.children.items[failed_index], decision);
         return decision;
+    }
+
+    fn recordCausal(
+        self: *Supervisor,
+        kind: causal_mod.CausalEventKind,
+        label: []const u8,
+        type_name: []const u8,
+        status: []const u8,
+        redacted_detail: []const u8,
+    ) Allocator.Error!void {
+        const store = self.causal_store orelse return;
+        _ = try store.record(.{
+            .kind = kind,
+            .run_id = self.causal_run_id,
+            .label = label,
+            .type_name = type_name,
+            .status = status,
+            .redacted_detail = redacted_detail,
+        });
+    }
+
+    fn recordChildStarted(self: *Supervisor, child: ChildState) Allocator.Error!void {
+        if (self.causal_store == null) return;
+        const detail = try std.fmt.allocPrint(
+            self.allocator,
+            "supervisor_id={d} child_id={d}",
+            .{ self.options.id, child.spec.id },
+        );
+        defer self.allocator.free(detail);
+
+        try self.recordCausal(
+            .supervisor_child_started,
+            child.spec.name,
+            @tagName(child.spec.kind),
+            "running",
+            detail,
+        );
+    }
+
+    fn recordRestartDecision(self: *Supervisor, child: ChildState, decision: SupervisorDecision) Allocator.Error!void {
+        if (self.causal_store == null) return;
+        const detail = try std.fmt.allocPrint(
+            self.allocator,
+            "supervisor_id={d} child_id={d} exit={s} restarted={d} stopped={d}",
+            .{
+                self.options.id,
+                child.spec.id,
+                exitStatus(decision.exit),
+                decision.restarted_children,
+                decision.stopped_children,
+            },
+        );
+        defer self.allocator.free(detail);
+
+        try self.recordCausal(
+            .supervisor_restart_decided,
+            child.spec.name,
+            @tagName(decision.strategy),
+            decisionStatus(decision),
+            detail,
+        );
+    }
+
+    fn recordEscalated(self: *Supervisor, child: ChildState) Allocator.Error!void {
+        if (self.causal_store == null) return;
+        const detail = try std.fmt.allocPrint(
+            self.allocator,
+            "supervisor_id={d} child_id={d} cause=RestartIntensityExceeded",
+            .{ self.options.id, child.spec.id },
+        );
+        defer self.allocator.free(detail);
+
+        try self.recordCausal(
+            .supervisor_escalated,
+            child.spec.name,
+            @tagName(child.spec.kind),
+            "intensity_exceeded",
+            detail,
+        );
+    }
+
+    fn recordShutdownOrdered(self: *Supervisor, child_count: usize) Allocator.Error!void {
+        if (self.causal_store == null) return;
+        const detail = try std.fmt.allocPrint(
+            self.allocator,
+            "supervisor_id={d} children={d}",
+            .{ self.options.id, child_count },
+        );
+        defer self.allocator.free(detail);
+
+        try self.recordCausal(
+            .supervisor_shutdown_ordered,
+            self.options.name,
+            "supervisor",
+            "ordered",
+            detail,
+        );
     }
 
     fn countRestartableAffected(self: *const Supervisor, failed_index: usize, exit: SupervisorChildExit) usize {
@@ -277,4 +387,20 @@ fn markStoppedOrFailed(child: *ChildState, exit: SupervisorChildExit) void {
         .success, .interrupted => .stopped,
         .failure, .defect => .failed,
     };
+}
+
+fn exitStatus(exit: SupervisorChildExit) []const u8 {
+    return switch (exit) {
+        .success => "success",
+        .failure => "failure",
+        .defect => "defect",
+        .interrupted => "interrupted",
+    };
+}
+
+fn decisionStatus(decision: SupervisorDecision) []const u8 {
+    if (decision.escalated) return "escalated";
+    if (decision.restarted_children > 0) return "restarted";
+    if (decision.stopped_children > 0) return "stopped";
+    return exitStatus(decision.exit);
 }

@@ -213,3 +213,43 @@ test "supervisor escalates when restart intensity is exceeded" {
     defer std.testing.allocator.free(report);
     try std.testing.expect(std.mem.indexOf(u8, report, "RestartIntensityExceeded") != null);
 }
+
+test "supervisor records causal lifecycle decision escalation and shutdown events" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    var supervisor = fx.Supervisor.init(std.testing.allocator, .{
+        .id = 10,
+        .name = "root",
+        .strategy = .one_for_one,
+        .intensity = .{ .max_restarts = 1, .within_ms = 1_000 },
+    });
+    defer supervisor.deinit();
+
+    supervisor.attachCausalStore(&store, 777);
+    try supervisor.addChild(.{ .id = 1, .name = "first", .kind = .fiber });
+    try supervisor.addChild(.{ .id = 2, .name = "second", .kind = .workflow_worker });
+    try supervisor.startAll(1_000);
+    _ = try supervisor.reportChildExit(1, .{ .failure = "boom" }, 1_100);
+    _ = try supervisor.reportChildExit(1, .{ .failure = "boom" }, 1_200);
+    var plan = try supervisor.shutdownPlan(std.testing.allocator);
+    defer plan.deinit();
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+
+    try std.testing.expect(snapshotHasKind(snapshot, .supervisor_child_started));
+    try std.testing.expect(snapshotHasKind(snapshot, .supervisor_restart_decided));
+    try std.testing.expect(snapshotHasKind(snapshot, .supervisor_escalated));
+    try std.testing.expect(snapshotHasKind(snapshot, .supervisor_shutdown_ordered));
+    for (snapshot.events) |event| {
+        try std.testing.expectEqual(@as(u64, 777), event.run_id.?);
+    }
+}
+
+fn snapshotHasKind(snapshot: fx.CausalSnapshot, kind: fx.CausalEventKind) bool {
+    for (snapshot.events) |event| {
+        if (event.kind == kind) return true;
+    }
+    return false;
+}
