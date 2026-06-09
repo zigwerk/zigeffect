@@ -146,7 +146,7 @@ Expected: PASS.
 **Files:**
 - Modify `packages/zigeffect/tools/causal_query.zig`
 
-- [ ] **Step 1: Write failing query tests**
+- [x] **Step 1: Write failing query tests**
 
 Add tests:
 
@@ -157,7 +157,7 @@ Use JSON with `workflow_event_recorded` events for suspend, resume, retry, and
 failure. Assert query output includes the matching workflow events and excludes
 other runs.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -167,7 +167,7 @@ cd packages/zigeffect && zig build examples --summary all
 
 Expected: FAIL because `workflow` and `workflow-findings` queries are missing.
 
-- [ ] **Step 3: Implement query filters**
+- [x] **Step 3: Implement query filters**
 
 Add query names:
 
@@ -180,7 +180,7 @@ workflow-findings <run_id>
 `workflow-findings` filters workflow causal events whose `type_name` or status
 represents failure, retry, suspend, or resume evidence.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 

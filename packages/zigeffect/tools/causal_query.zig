@@ -150,6 +150,23 @@ const future_schema_unknown_kind_sample_json =
     \\}
 ;
 
+const workflow_sample_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v1",
+    \\  "schema_version": 1,
+    \\  "event_taxonomy_version": 1,
+    \\  "events": [
+    \\    {"id":1,"kind":"workflow_event_recorded","run_id":7,"parent_id":null,"fiber_id":null,"scope_id":8,"trace_id":7,"span_id":1,"label":"causal-workflow","type_name":"workflow.workflow_started","status":"running","redacted_detail":""},
+    \\    {"id":2,"kind":"workflow_event_recorded","run_id":7,"parent_id":1,"fiber_id":null,"scope_id":8,"trace_id":7,"span_id":2,"label":"wake","type_name":"workflow.workflow_suspended","status":"waiting","redacted_detail":"timer"},
+    \\    {"id":3,"kind":"workflow_event_recorded","run_id":7,"parent_id":2,"fiber_id":null,"scope_id":8,"trace_id":7,"span_id":3,"label":"wake","type_name":"workflow.workflow_resumed","status":"running","redacted_detail":"timer_fired"},
+    \\    {"id":4,"kind":"workflow_event_recorded","run_id":7,"parent_id":3,"fiber_id":50,"scope_id":8,"trace_id":7,"span_id":4,"label":"charge","type_name":"workflow.activity_retry_scheduled","status":"retry","redacted_detail":"attempt=1;delay_ms=250;reason=retry"},
+    \\    {"id":5,"kind":"workflow_event_recorded","run_id":7,"parent_id":4,"fiber_id":null,"scope_id":8,"trace_id":7,"span_id":5,"label":"causal-workflow","type_name":"workflow.workflow_failed","status":"failed","redacted_detail":"exit.cause.failure:Boom"},
+    \\    {"id":6,"kind":"workflow_event_recorded","run_id":99,"parent_id":null,"fiber_id":null,"scope_id":100,"trace_id":99,"span_id":1,"label":"other-workflow","type_name":"workflow.workflow_started","status":"running","redacted_detail":""},
+    \\    {"id":7,"kind":"schedule_decision","run_id":7,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"non workflow retry","type_name":"Schedule.exponential","status":"exhausted","redacted_detail":""}
+    \\  ]
+    \\}
+;
+
 const unsupported_schema_sample_json =
     \\{
     \\  "schema": "zigeffect.causal.v2",
@@ -227,6 +244,20 @@ pub fn runQueryWithOptions(
                 try selected.append(allocator, event);
             }
         }
+    } else if (std.mem.eql(u8, query, "workflow")) {
+        const run_id = try requiredU64(args, 1);
+        for (parsed.value.events) |event| {
+            if (event.run_id == run_id and isWorkflowEvent(event)) {
+                try selected.append(allocator, event);
+            }
+        }
+    } else if (std.mem.eql(u8, query, "workflow-findings")) {
+        const run_id = try requiredU64(args, 1);
+        for (parsed.value.events) |event| {
+            if (event.run_id == run_id and isWorkflowFindingEvent(event)) {
+                try selected.append(allocator, event);
+            }
+        }
     } else {
         return error.UnknownQuery;
     }
@@ -286,7 +317,7 @@ pub fn main(init: std.process.Init) !void {
 
 fn printUsage(err: anyerror) void {
     std.debug.print(
-        "causal-query error: {s}\nusage: zig build causal-query -- [--file <path>] <snapshot|cause|lineage|resources|fibers|requirements|retries> [argument]\n",
+        "causal-query error: {s}\nusage: zig build causal-query -- [--file <path>] <snapshot|cause|lineage|resources|fibers|requirements|retries|workflow|workflow-findings> [argument]\n",
         .{@errorName(err)},
     );
 }
@@ -332,6 +363,21 @@ fn isFiberEvent(kind: []const u8) bool {
         std.mem.eql(u8, kind, "fiber_started") or
         std.mem.eql(u8, kind, "fiber_joined") or
         std.mem.eql(u8, kind, "fiber_interrupted");
+}
+
+fn isWorkflowEvent(event: Event) bool {
+    return std.mem.eql(u8, event.kind, "workflow_event_recorded");
+}
+
+fn isWorkflowFindingEvent(event: Event) bool {
+    if (!isWorkflowEvent(event)) return false;
+    if (std.mem.eql(u8, event.type_name, "workflow.workflow_suspended")) return true;
+    if (std.mem.eql(u8, event.type_name, "workflow.workflow_resumed")) return true;
+    if (std.mem.endsWith(u8, event.type_name, "_retry_scheduled")) return true;
+    if (std.mem.endsWith(u8, event.type_name, "_failed")) return true;
+    if (std.mem.eql(u8, event.status, "retry")) return true;
+    if (std.mem.eql(u8, event.status, "failed")) return true;
+    return false;
 }
 
 fn formatQueryResult(
@@ -462,6 +508,32 @@ test "resource fiber requirement and retry queries filter events" {
     const retries = try runQuery(std.testing.allocator, sample_json, &.{ "retries", "1" });
     defer std.testing.allocator.free(retries);
     try std.testing.expect(std.mem.indexOf(u8, retries, "event id=6 kind=schedule_decision") != null);
+}
+
+test "workflow query selects workflow events by run" {
+    const output = try runQuery(std.testing.allocator, workflow_sample_json, &.{ "workflow", "7" });
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "causal.query: workflow 7") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "events: 5") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "event id=1 kind=workflow_event_recorded") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "type=workflow.workflow_failed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "event id=6 kind=workflow_event_recorded") == null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "event id=7 kind=schedule_decision") == null);
+}
+
+test "workflow findings query selects workflow evidence by run" {
+    const output = try runQuery(std.testing.allocator, workflow_sample_json, &.{ "workflow-findings", "7" });
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "causal.query: workflow-findings 7") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "events: 4") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "type=workflow.workflow_suspended") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "type=workflow.workflow_resumed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "type=workflow.activity_retry_scheduled") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "type=workflow.workflow_failed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "type=workflow.workflow_started") == null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "event id=6 kind=workflow_event_recorded") == null);
 }
 
 test "invalid query arguments return typed errors" {
