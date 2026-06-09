@@ -18,6 +18,7 @@ test "root facade exposes domain namespaces and compatibility aliases" {
     try std.testing.expect(fx.Tracing == fx.services.Tracing);
     try std.testing.expect(fx.MemoryFileSystem == fx.services.MemoryFileSystem);
     try std.testing.expect(fx.Clock == fx.services.Clock);
+    try std.testing.expect(fx.IdGenerator == fx.services.IdGenerator);
     try std.testing.expect(fx.TestEnv == fx.testing.TestEnv);
 }
 test "runtime backend boundary exposes deterministic capabilities" {
