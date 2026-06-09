@@ -1710,6 +1710,62 @@ test "file workflow journal crash after snapshot commit replays without losing a
     try expectWorkflowReplayStatesEqual(&expected, &actual);
 }
 
+test "workflow retention keep all leaves completed segment intact" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var store = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{
+        .retention_policy = .{ .completed = .keep_all },
+    });
+    defer store.deinit();
+    _ = try store.append(.{ .event = .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8, .idempotency_key = "start" } });
+    _ = try store.append(.{ .event = .{ .sequence = 2, .kind = .workflow_completed, .workflow_id = 7, .execution_id = 8, .idempotency_key = "complete" } });
+
+    const result = try store.applyRetentionPolicy();
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(!result.compacted);
+
+    const segment_name = try fx.workflow.segmentFileName(std.testing.allocator, 1);
+    defer std.testing.allocator.free(segment_name);
+    const segment = try tmp.dir.readFileAlloc(std.testing.io, segment_name, std.testing.allocator, std.Io.Limit.limited(16 * 1024));
+    defer std.testing.allocator.free(segment);
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, segment, "\n"));
+}
+
+test "workflow retention archive then compact completed exports archive" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var store = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{
+        .retention_policy = .{ .completed = .archive_then_compact_completed },
+    });
+    defer store.deinit();
+    _ = try store.append(.{ .event = .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8, .idempotency_key = "start" } });
+    _ = try store.append(.{ .event = .{ .sequence = 2, .kind = .workflow_completed, .workflow_id = 7, .execution_id = 8, .idempotency_key = "complete" } });
+
+    const result = try store.applyRetentionPolicy();
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.compacted);
+    try std.testing.expect(result.archive_name != null);
+}
+
+test "workflow retention checkpoint only completed skips archive export" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var store = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{
+        .retention_policy = .{ .completed = .checkpoint_only_completed },
+    });
+    defer store.deinit();
+    _ = try store.append(.{ .event = .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8, .idempotency_key = "start" } });
+    _ = try store.append(.{ .event = .{ .sequence = 2, .kind = .workflow_completed, .workflow_id = 7, .execution_id = 8, .idempotency_key = "complete" } });
+
+    const result = try store.applyRetentionPolicy();
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.compacted);
+    try std.testing.expect(result.archive_name == null);
+}
+
 test "file journal refuses future schema versions without truncating" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

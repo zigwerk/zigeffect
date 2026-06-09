@@ -623,12 +623,23 @@ const in_memory_vtable: JournalStore.VTable = .{
     .reset = InMemoryJournalStore.resetAdapter,
 };
 
+pub const WorkflowCompletedRetentionPolicy = enum {
+    keep_all,
+    archive_then_compact_completed,
+    checkpoint_only_completed,
+};
+
+pub const WorkflowRetentionPolicy = struct {
+    completed: WorkflowCompletedRetentionPolicy = .keep_all,
+};
+
 pub const FileJournalStoreOptions = struct {
     fsync_policy: JournalFsyncPolicy = .never,
     segment_first_sequence: JournalSequence = 1,
     lock_name: []const u8 = "workflow.lock",
     owner_id: []const u8 = "zigeffect-local",
     max_segment_bytes: usize = 16 * 1024 * 1024,
+    retention_policy: WorkflowRetentionPolicy = .{},
 };
 
 pub const WorkflowSnapshotPublication = struct {
@@ -878,6 +889,14 @@ pub const FileJournalStore = struct {
             .commit_name = publication.commit_name,
             .archive_name = publication.archive_name,
             .archived_event_count = archived_event_count,
+        };
+    }
+
+    pub fn applyRetentionPolicy(self: *FileJournalStore) !WorkflowCompactionResult {
+        return switch (self.options.retention_policy.completed) {
+            .keep_all => .{ .compacted = false },
+            .archive_then_compact_completed => try self.compactCompleted(.{ .export_archive = true }),
+            .checkpoint_only_completed => try self.compactCompleted(.{ .export_archive = false }),
         };
     }
 
