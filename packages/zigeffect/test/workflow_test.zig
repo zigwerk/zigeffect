@@ -1596,6 +1596,39 @@ test "file workflow journal ignores uncommitted checkpoint files" {
     try expectWorkflowReplayStatesEqual(&expected, &actual);
 }
 
+test "file workflow journal archive export writes replayable json lines" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8, .idempotency_key = "start" },
+        .{ .sequence = 2, .kind = .activity_scheduled, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .name = "charge", .idempotency_key = "activity" },
+        .{ .sequence = 3, .kind = .activity_completed, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .idempotency_key = "activity-done" },
+    };
+
+    var expected = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &events);
+    defer expected.deinit();
+
+    var store = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer store.deinit();
+    for (events) |event| _ = try store.append(.{ .event = event });
+
+    const exported = try store.exportArchive(1, 3);
+    defer exported.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("workflow-archive-0000000000000001-0000000000000003.jsonl", exported.archive_name);
+    try std.testing.expectEqual(@as(usize, 3), exported.event_count);
+
+    const archive = try tmp.dir.readFileAlloc(std.testing.io, exported.archive_name, std.testing.allocator, std.Io.Limit.limited(16 * 1024));
+    defer std.testing.allocator.free(archive);
+    try std.testing.expectEqual(@as(usize, 3), std.mem.count(u8, archive, "\n"));
+
+    var archived_events = try parseWorkflowJsonLines(std.testing.allocator, archive);
+    defer archived_events.deinit();
+    var actual = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, archived_events.events);
+    defer actual.deinit();
+    try expectWorkflowReplayStatesEqual(&expected, &actual);
+}
+
 test "file journal refuses future schema versions without truncating" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

@@ -644,6 +644,18 @@ pub const WorkflowSnapshotPublication = struct {
     }
 };
 
+pub const WorkflowArchiveExport = struct {
+    archive_name: []const u8,
+    first_sequence: JournalSequence,
+    last_sequence: JournalSequence,
+    event_count: usize,
+    byte_count: usize,
+
+    pub fn deinit(self: *const WorkflowArchiveExport, allocator: Allocator) void {
+        allocator.free(self.archive_name);
+    }
+};
+
 pub const FileJournalStore = struct {
     allocator: Allocator,
     io: std.Io,
@@ -773,6 +785,34 @@ pub const FileJournalStore = struct {
             .checkpoint_name = checkpoint_name,
             .commit_name = commit_name,
             .archive_name = owned_archive_name,
+        };
+    }
+
+    pub fn exportArchive(self: *FileJournalStore, first_sequence: JournalSequence, last_sequence: JournalSequence) !WorkflowArchiveExport {
+        const archive_name = try archiveFileName(self.allocator, first_sequence, last_sequence);
+        errdefer self.allocator.free(archive_name);
+
+        var output = std.ArrayList(u8).empty;
+        defer output.deinit(self.allocator);
+
+        var event_count: usize = 0;
+        for (self.memory.events.items) |event| {
+            if (event.sequence < first_sequence or event.sequence > last_sequence) continue;
+            const row = try journal.formatWorkflowEventJson(self.allocator, event);
+            defer self.allocator.free(row);
+            try output.appendSlice(self.allocator, row);
+            try output.append(self.allocator, '\n');
+            event_count += 1;
+        }
+
+        try self.writeAtomicFile(archive_name, output.items);
+
+        return .{
+            .archive_name = archive_name,
+            .first_sequence = first_sequence,
+            .last_sequence = last_sequence,
+            .event_count = event_count,
+            .byte_count = output.items.len,
         };
     }
 
