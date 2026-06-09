@@ -17,12 +17,12 @@ Add `workflow/lifecycle.zig`:
 - helpers for current lifecycle status;
 - pending-work cancellation helpers.
 
-`WorkflowLifecycle.suspend(reason)` appends `workflow_suspended` when the
+`WorkflowLifecycle.suspendWorkflow(reason)` appends `workflow_suspended` when the
 workflow is running and returns `false` when it is already suspended or
 terminal.
 
-`WorkflowLifecycle.resume(reason)` appends `workflow_resumed` when the workflow
-is suspended and returns `false` when it is running or terminal.
+`WorkflowLifecycle.resumeWorkflow(reason)` appends `workflow_resumed` when the
+workflow is suspended and returns `false` when it is running or terminal.
 
 `WorkflowLifecycle.interrupt(reason)` appends terminal pending-work rows and
 then `workflow_interrupted` with an interruption detail.

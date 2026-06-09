@@ -316,6 +316,314 @@ test "workflow replay folds lifecycle events" {
     try std.testing.expectEqual(@as(u64, 4), state.last_sequence);
 }
 
+test "workflow lifecycle suspend and resume are durable and idempotent" {
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "lifecycle-workflow",
+        .status = "running",
+        .idempotency_key = "lifecycle-start",
+    } });
+
+    {
+        var lifecycle = fx.workflow.WorkflowLifecycle.init(std.testing.allocator, journal, 7, 8);
+        try std.testing.expect(try lifecycle.suspendWorkflow("operator"));
+        try std.testing.expect(!try lifecycle.suspendWorkflow("operator"));
+    }
+
+    var suspended_state = try journal.latestState(std.testing.allocator);
+    defer suspended_state.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowStatus.suspended, suspended_state.workflow_status);
+
+    {
+        var lifecycle = fx.workflow.WorkflowLifecycle.init(std.testing.allocator, journal, 7, 8);
+        try std.testing.expect(try lifecycle.resumeWorkflow("operator"));
+        try std.testing.expect(!try lifecycle.resumeWorkflow("operator"));
+    }
+
+    var running_state = try journal.latestState(std.testing.allocator);
+    defer running_state.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowStatus.running, running_state.workflow_status);
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 3), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_suspended, events.events[1].kind);
+    try std.testing.expectEqualStrings("operator", events.events[1].redacted_detail);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[2].kind);
+    try std.testing.expectEqualStrings("operator", events.events[2].redacted_detail);
+}
+
+test "workflow lifecycle interrupt is terminal and idempotent after restart" {
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "lifecycle-workflow",
+        .status = "running",
+        .idempotency_key = "interrupt-start",
+    } });
+
+    {
+        var lifecycle = fx.workflow.WorkflowLifecycle.init(std.testing.allocator, journal, 7, 8);
+        try std.testing.expect(try lifecycle.interrupt("operator"));
+    }
+    {
+        var lifecycle = fx.workflow.WorkflowLifecycle.init(std.testing.allocator, journal, 7, 8);
+        try std.testing.expect(!try lifecycle.interrupt("operator"));
+    }
+
+    var state = try journal.latestState(std.testing.allocator);
+    defer state.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowStatus.interrupted, state.workflow_status);
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 2), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_interrupted, events.events[1].kind);
+    try std.testing.expectEqualStrings("interrupted", events.events[1].status);
+    try std.testing.expectEqualStrings("exit.cause.interrupted:0;reason=operator", events.events[1].redacted_detail);
+}
+
+test "workflow lifecycle cancel is terminal and idempotent after restart" {
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "lifecycle-workflow",
+        .status = "running",
+        .idempotency_key = "cancel-start",
+    } });
+
+    {
+        var lifecycle = fx.workflow.WorkflowLifecycle.init(std.testing.allocator, journal, 7, 8);
+        try std.testing.expect(try lifecycle.cancel("operator"));
+    }
+    {
+        var lifecycle = fx.workflow.WorkflowLifecycle.init(std.testing.allocator, journal, 7, 8);
+        try std.testing.expect(!try lifecycle.cancel("operator"));
+    }
+
+    var state = try journal.latestState(std.testing.allocator);
+    defer state.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowStatus.cancelled, state.workflow_status);
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 2), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_cancelled, events.events[1].kind);
+    try std.testing.expectEqualStrings("cancelled", events.events[1].status);
+    try std.testing.expectEqualStrings("reason=operator", events.events[1].redacted_detail);
+}
+
+test "workflow lifecycle terminal controls ignore missing execution" {
+    {
+        var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+        defer journal_memory.deinit();
+        const journal = journal_memory.asJournalStore();
+
+        var lifecycle = fx.workflow.WorkflowLifecycle.init(std.testing.allocator, journal, 7, 8);
+        try std.testing.expect(!try lifecycle.interrupt("operator"));
+
+        var events = try journal.readAll(std.testing.allocator);
+        defer events.deinit();
+        try std.testing.expectEqual(@as(usize, 0), events.events.len);
+    }
+
+    {
+        var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+        defer journal_memory.deinit();
+        const journal = journal_memory.asJournalStore();
+
+        var lifecycle = fx.workflow.WorkflowLifecycle.init(std.testing.allocator, journal, 7, 8);
+        try std.testing.expect(!try lifecycle.cancel("operator"));
+
+        var events = try journal.readAll(std.testing.allocator);
+        defer events.deinit();
+        try std.testing.expectEqual(@as(usize, 0), events.events.len);
+    }
+}
+
+test "workflow lifecycle cancel terminates pending durable work" {
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "lifecycle-workflow",
+        .status = "running",
+        .idempotency_key = "pending-start",
+    } });
+    _ = try journal.append(.{ .event = .{
+        .sequence = 2,
+        .kind = .timer_scheduled,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .timer_id = 20,
+        .name = "wake",
+        .idempotency_key = "pending-timer",
+    } });
+    _ = try journal.append(.{ .event = .{
+        .sequence = 3,
+        .kind = .deferred_created,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .deferred_id = 30,
+        .name = "approval",
+        .idempotency_key = "pending-deferred-create",
+    } });
+    _ = try journal.append(.{ .event = .{
+        .sequence = 4,
+        .kind = .deferred_awaited,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .deferred_id = 30,
+        .name = "approval",
+        .idempotency_key = "pending-deferred-await",
+    } });
+    _ = try journal.append(.{ .event = .{
+        .sequence = 5,
+        .kind = .queue_offered,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .queue_id = 40,
+        .name = "email",
+        .idempotency_key = "pending-queue",
+    } });
+    _ = try journal.append(.{ .event = .{
+        .sequence = 6,
+        .kind = .activity_scheduled,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .activity_id = 10,
+        .attempt = 1,
+        .name = "charge",
+        .idempotency_key = "pending-activity",
+    } });
+
+    var lifecycle = fx.workflow.WorkflowLifecycle.init(std.testing.allocator, journal, 7, 8);
+    try std.testing.expect(try lifecycle.cancel("operator"));
+    try std.testing.expect(!try lifecycle.cancel("operator"));
+
+    var state = try journal.latestState(std.testing.allocator);
+    defer state.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowStatus.cancelled, state.workflow_status);
+    try std.testing.expectEqual(fx.workflow.TimerStatus.cancelled, state.timers.items[0].status);
+    try std.testing.expectEqual(fx.workflow.DeferredStatus.cancelled, state.deferreds.items[0].status);
+    try std.testing.expectEqual(fx.workflow.QueueStatus.failed, state.queues.items[0].status);
+    try std.testing.expectEqual(fx.workflow.ActivityStatus.failed, state.activities.items[0].status);
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 11), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.timer_cancelled, events.events[6].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.deferred_cancelled, events.events[7].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_failed, events.events[8].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.activity_failed, events.events[9].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_cancelled, events.events[10].kind);
+    try std.testing.expectEqualStrings("lifecycle.cancel:operator", events.events[6].redacted_detail);
+    try std.testing.expectEqualStrings("lifecycle.cancel:operator", events.events[7].redacted_detail);
+    try std.testing.expectEqualStrings("lifecycle.cancel:operator", events.events[8].redacted_detail);
+    try std.testing.expectEqualStrings("lifecycle.cancel:operator", events.events[9].redacted_detail);
+}
+
+test "workflow lifecycle controls replay after file journal reopen" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    {
+        var file_store = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer file_store.deinit();
+        const journal = file_store.asJournalStore();
+
+        _ = try journal.append(.{ .event = .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .name = "lifecycle-workflow",
+            .status = "running",
+            .idempotency_key = "file-lifecycle-start",
+        } });
+
+        var lifecycle = fx.workflow.WorkflowLifecycle.init(std.testing.allocator, journal, 7, 8);
+        try std.testing.expect(try lifecycle.suspendWorkflow("operator"));
+        try std.testing.expect(!try lifecycle.suspendWorkflow("operator"));
+
+        var state = try journal.latestState(std.testing.allocator);
+        defer state.deinit();
+        try std.testing.expectEqual(fx.workflow.WorkflowStatus.suspended, state.workflow_status);
+    }
+
+    {
+        var reopened = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer reopened.deinit();
+        const journal = reopened.asJournalStore();
+
+        var lifecycle = fx.workflow.WorkflowLifecycle.init(std.testing.allocator, journal, 7, 8);
+        try std.testing.expect(try lifecycle.resumeWorkflow("operator"));
+        try std.testing.expect(!try lifecycle.resumeWorkflow("operator"));
+
+        var state = try journal.latestState(std.testing.allocator);
+        defer state.deinit();
+        try std.testing.expectEqual(fx.workflow.WorkflowStatus.running, state.workflow_status);
+    }
+
+    {
+        var reopened = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer reopened.deinit();
+        const journal = reopened.asJournalStore();
+
+        var lifecycle = fx.workflow.WorkflowLifecycle.init(std.testing.allocator, journal, 7, 8);
+        try std.testing.expect(try lifecycle.cancel("operator"));
+        try std.testing.expect(!try lifecycle.cancel("operator"));
+
+        var state = try journal.latestState(std.testing.allocator);
+        defer state.deinit();
+        try std.testing.expectEqual(fx.workflow.WorkflowStatus.cancelled, state.workflow_status);
+    }
+
+    {
+        var reopened = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer reopened.deinit();
+        const journal = reopened.asJournalStore();
+
+        var lifecycle = fx.workflow.WorkflowLifecycle.init(std.testing.allocator, journal, 7, 8);
+        try std.testing.expect(!try lifecycle.cancel("operator"));
+
+        var events = try journal.readAll(std.testing.allocator);
+        defer events.deinit();
+        try std.testing.expectEqual(@as(usize, 4), events.events.len);
+        try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_started, events.events[0].kind);
+        try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_suspended, events.events[1].kind);
+        try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[2].kind);
+        try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_cancelled, events.events[3].kind);
+        try std.testing.expectEqualStrings("operator", events.events[1].redacted_detail);
+        try std.testing.expectEqualStrings("operator", events.events[2].redacted_detail);
+        try std.testing.expectEqualStrings("reason=operator", events.events[3].redacted_detail);
+    }
+}
+
 test "workflow replay rejects events before start and duplicate starts" {
     const before_start = [_]fx.workflow.WorkflowEvent{
         .{ .sequence = 1, .kind = .workflow_completed, .workflow_id = 7, .execution_id = 8 },

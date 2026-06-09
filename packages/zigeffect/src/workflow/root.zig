@@ -10,6 +10,7 @@ pub const deferred = @import("deferred.zig");
 pub const clock = @import("clock.zig");
 pub const signal = @import("signal.zig");
 pub const queue = @import("queue.zig");
+pub const lifecycle = @import("lifecycle.zig");
 
 pub const workflow_journal_event_schema = journal.workflow_journal_event_schema;
 pub const workflow_journal_event_schema_version = journal.workflow_journal_event_schema_version;
@@ -114,3 +115,6 @@ pub const QueueOfferResult = queue.QueueOfferResult;
 pub const DurableQueue = queue.DurableQueue;
 pub const Queue = queue.Queue;
 pub const queueItemId = queue.queueItemId;
+
+pub const LifecycleActionResult = lifecycle.LifecycleActionResult;
+pub const WorkflowLifecycle = lifecycle.WorkflowLifecycle;

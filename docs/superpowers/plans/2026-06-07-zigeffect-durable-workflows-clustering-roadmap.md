@@ -453,15 +453,15 @@ Goal: expose lifecycle controls that work across restarts.
 
 Deliverables:
 
-- [ ] Add suspend event and suspended state.
-- [ ] Add resume event and runnable state transition.
-- [ ] Add interrupt event and interruption cause.
-- [ ] Add cancel event and cancellation cause.
-- [ ] Define behavior for pending timers, deferreds, queues, and activities.
+- [x] Add suspend event and suspended state.
+- [x] Add resume event and runnable state transition.
+- [x] Add interrupt event and interruption cause.
+- [x] Add cancel event and cancellation cause.
+- [x] Define behavior for pending timers, deferreds, queues, and activities.
 
 Acceptance:
 
-- [ ] Tests cover each lifecycle action before and after restart.
+- [x] Tests cover each lifecycle action before and after restart.
 
 ## Milestone 18: Workflow Inspector And CLI Tools
 

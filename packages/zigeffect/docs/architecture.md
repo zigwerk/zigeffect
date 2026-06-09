@@ -221,6 +221,10 @@ Owns local durable workflow runtime surfaces:
 - `queue.zig`: typed durable queue definitions, stable queue item identity,
   idempotent offers, worker claims, concurrency limits, completion/failure,
   expired-claim retry, ack state, and workflow wake-up for queue terminals.
+- `lifecycle.zig`: external suspend, resume, interrupt, and cancel controls
+  over `JournalStore`, including durable lifecycle rows, idempotent terminal
+  transitions, and explicit terminal rows for pending timers, deferreds,
+  queues, and activities during interrupt or cancellation.
 - `engine.zig`: workflow engine registration, provider requirement validation,
   durable `workflow_started` appends, typed poll results, execution inspection,
   duplicate execution checks, and in-memory execution indexing.

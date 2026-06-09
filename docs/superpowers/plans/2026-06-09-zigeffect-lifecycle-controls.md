@@ -32,14 +32,14 @@
 - Modify `packages/zigeffect/src/workflow/root.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing suspend/resume tests**
+- [x] **Step 1: Write failing suspend/resume tests**
 
-Use a running workflow, call `WorkflowLifecycle.suspend("operator")`, assert a
+Use a running workflow, call `WorkflowLifecycle.suspendWorkflow("operator")`, assert a
 `workflow_suspended` row and replay suspended status. Reopen/fresh lifecycle,
 call suspend again and assert false/no duplicate. Resume after restart and
 assert `workflow_resumed` plus running status.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -49,12 +49,12 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until lifecycle exports exist.
 
-- [ ] **Step 3: Implement lifecycle shell/suspend/resume**
+- [x] **Step 3: Implement lifecycle shell/suspend/resume**
 
 Add `WorkflowLifecycle.init`, current status scanning, append helpers, suspend,
 resume, terminal/idempotency checks, and root exports.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -70,13 +70,13 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/lifecycle.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing terminal action tests**
+- [x] **Step 1: Write failing terminal action tests**
 
 Call `interrupt("operator")` and `cancel("operator")` on separate running
 workflows. Assert terminal workflow rows, redacted cause/reason detail, replay
 status, and no duplicate terminal row after restart.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -86,12 +86,12 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until terminal lifecycle APIs exist.
 
-- [ ] **Step 3: Implement interrupt/cancel**
+- [x] **Step 3: Implement interrupt/cancel**
 
 Append terminal lifecycle rows with deterministic idempotency keys and return
 false for already-terminal executions.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -107,14 +107,14 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/lifecycle.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing pending-work tests**
+- [x] **Step 1: Write failing pending-work tests**
 
 Build a journal with one pending timer, deferred, queue, and activity. Call
 `cancel("operator")` and assert `timer_cancelled`, `deferred_cancelled`,
 `queue_failed`, and `activity_failed` rows before `workflow_cancelled`. Repeat
 for interrupt detail shape where useful.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -124,13 +124,13 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until pending-work termination exists.
 
-- [ ] **Step 3: Implement pending-work termination**
+- [x] **Step 3: Implement pending-work termination**
 
 Scan current event history, identify latest nonterminal timer/deferred/queue and
 activity rows, append explicit terminal rows with lifecycle detail, and avoid
 duplicates on repeated terminal actions.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -145,13 +145,13 @@ Expected: PASS.
 **Files:**
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing file-store lifecycle test**
+- [x] **Step 1: Write failing file-store lifecycle test**
 
 Open a `FileJournalStore`, start and suspend a workflow, close/reopen, resume,
 close/reopen, cancel, and assert final replay status is cancelled with no
 duplicate lifecycle rows.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -162,12 +162,12 @@ cd packages/zigeffect && zig build test-raw --summary all
 Expected: FAIL until lifecycle controls are fully store-compatible; PASS is
 acceptable if earlier tasks already used only `JournalStore`.
 
-- [ ] **Step 3: Fix any store-compatibility gaps**
+- [x] **Step 3: Fix any store-compatibility gaps**
 
 Ensure lifecycle controls use only `JournalStore` append/read operations with
 strict sequence handling.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -185,11 +185,11 @@ Expected: PASS.
 - Add `docs/superpowers/specs/2026-06-09-zigeffect-lifecycle-controls-design.md`
 - Add `docs/superpowers/plans/2026-06-09-zigeffect-lifecycle-controls.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Document `workflow/lifecycle.zig` ownership.
 
-- [ ] **Step 2: Run full gate**
+- [x] **Step 2: Run full gate**
 
 Run:
 
@@ -205,7 +205,7 @@ rg -n 'T''BD|TO''DO|implement la''ter|fill in de''tails|appropriate error hand''
 Expected: compile/test commands PASS, format and diff checks exit 0, and the
 placeholder scan exits 1 with no matches.
 
-- [ ] **Step 3: Mark Milestone 17 complete**
+- [x] **Step 3: Mark Milestone 17 complete**
 
 After the full gate passes, mark all Milestone 17 deliverables and acceptance
 boxes complete in
