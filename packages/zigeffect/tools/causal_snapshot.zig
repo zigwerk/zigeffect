@@ -11,6 +11,8 @@ pub const replay_feasibility_schema = "zigeffect.causal.replay-feasibility.v1";
 pub const replay_feasibility_schema_version: u32 = 1;
 pub const deterministic_replay_schema = "zigeffect.causal.deterministic-replay.v1";
 pub const deterministic_replay_schema_version: u32 = 1;
+pub const scenario_fork_proposal_schema = "zigeffect.causal.scenario-fork-proposal.v1";
+pub const scenario_fork_proposal_schema_version: u32 = 1;
 const replay_feasibility_event_sample_limit: usize = 20;
 
 pub const SnapshotManifestOptions = struct {
@@ -39,6 +41,16 @@ pub const SnapshotManifestReferencePath = struct {
 
     pub fn deinit(self: SnapshotManifestReferencePath, allocator: std.mem.Allocator) void {
         allocator.free(self.path);
+    }
+};
+
+const ScenarioForkProposalPaths = struct {
+    json_path: []const u8,
+    text_path: []const u8,
+
+    fn deinit(self: ScenarioForkProposalPaths, allocator: std.mem.Allocator) void {
+        allocator.free(self.json_path);
+        allocator.free(self.text_path);
     }
 };
 
@@ -144,6 +156,34 @@ fn deterministicReplayArtifactPaths(
         .report_path = report_path,
         .json_path = json_path,
         .dot_path = dot_path,
+    };
+}
+
+fn scenarioForkProposalPaths(
+    allocator: std.mem.Allocator,
+    snapshot_name: []const u8,
+    scenario_slug: []const u8,
+    fork_name: []const u8,
+) !ScenarioForkProposalPaths {
+    try validateSnapshotName(snapshot_name);
+    _ = try causal_run.scenarioByName(scenario_slug);
+    try validateSnapshotName(fork_name);
+
+    const json_path = try std.fmt.allocPrint(
+        allocator,
+        "{s}/zigeffect-causal-fork-proposal-{s}-{s}-{s}.json",
+        .{ causal_run.artifact_dir, snapshot_name, scenario_slug, fork_name },
+    );
+    errdefer allocator.free(json_path);
+    const text_path = try std.fmt.allocPrint(
+        allocator,
+        "{s}/zigeffect-causal-fork-proposal-{s}-{s}-{s}.txt",
+        .{ causal_run.artifact_dir, snapshot_name, scenario_slug, fork_name },
+    );
+
+    return .{
+        .json_path = json_path,
+        .text_path = text_path,
     };
 }
 
@@ -262,6 +302,139 @@ pub fn formatDeterministicReplayText(
     try output.print(allocator, "- zig build causal-snapshot -- replay-feasibility {s}\n", .{manifest_path});
 
     return output.toOwnedSlice(allocator);
+}
+
+pub fn formatScenarioForkProposalJson(
+    allocator: std.mem.Allocator,
+    manifest_path: []const u8,
+    manifest_json: []const u8,
+    scenario: causal_run.Scenario,
+    fork_name: []const u8,
+) ![]const u8 {
+    try validateSnapshotName(fork_name);
+    var manifest_parsed = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, manifest_json, .{ .ignore_unknown_fields = true });
+    defer manifest_parsed.deinit();
+    const manifest = manifest_parsed.value;
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\"schema\":");
+    try appendJsonString(&output, allocator, scenario_fork_proposal_schema);
+    try output.print(allocator, ",\"schema_version\":{d}", .{scenario_fork_proposal_schema_version});
+    try output.appendSlice(allocator, ",\"mode\":\"registered_scenario_fork_proposal\"");
+    try output.appendSlice(allocator, ",\"proposal_status\":\"draft\"");
+    try output.appendSlice(allocator, ",\"approved\":false");
+    try output.appendSlice(allocator, ",\"executed\":false");
+    try output.appendSlice(allocator, ",\"fork_name\":");
+    try appendJsonString(&output, allocator, fork_name);
+    try output.appendSlice(allocator, ",\"source\":{\"manifest\":");
+    try appendJsonString(&output, allocator, manifest_path);
+    try output.appendSlice(allocator, ",\"snapshot\":");
+    try appendJsonString(&output, allocator, manifest.name);
+    try output.appendSlice(allocator, ",\"artifact\":");
+    try appendJsonString(&output, allocator, manifest.artifact.path);
+    try output.appendSlice(allocator, "},\"scenario\":{\"slug\":");
+    try appendJsonString(&output, allocator, scenario.slug);
+    try output.appendSlice(allocator, ",\"owner\":");
+    try appendJsonString(&output, allocator, @tagName(scenario.owner));
+    try output.appendSlice(allocator, ",\"expectation\":");
+    try appendJsonString(&output, allocator, @tagName(scenario.expectation));
+    try output.appendSlice(allocator, ",\"finding_policy\":");
+    try appendJsonString(&output, allocator, @tagName(scenario.finding_policy));
+    try output.appendSlice(allocator, "},\"allowed_commands\":[");
+    try appendScenarioForkAllowedCommandsJson(&output, allocator, manifest.name, scenario.slug);
+    try output.appendSlice(allocator, "],\"blocked_operations\":[");
+    try appendScenarioForkBlockedOperationsJson(&output, allocator);
+    try output.appendSlice(allocator, "],\"guardrails\":[");
+    try appendScenarioForkGuardrailsJson(&output, allocator);
+    try output.appendSlice(allocator, "],\"next_queries\":[");
+    try appendScenarioForkNextQueriesJson(&output, allocator, manifest.artifact.path);
+    try output.appendSlice(allocator, "]}");
+
+    return output.toOwnedSlice(allocator);
+}
+
+pub fn formatScenarioForkProposalText(
+    allocator: std.mem.Allocator,
+    manifest_path: []const u8,
+    manifest_json: []const u8,
+    scenario: causal_run.Scenario,
+    fork_name: []const u8,
+) ![]const u8 {
+    try validateSnapshotName(fork_name);
+    var manifest_parsed = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, manifest_json, .{ .ignore_unknown_fields = true });
+    defer manifest_parsed.deinit();
+    const manifest = manifest_parsed.value;
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "zigeffect causal scenario fork proposal\n");
+    try output.print(allocator, "schema: {s}\n", .{scenario_fork_proposal_schema});
+    try output.print(allocator, "schema version: {d}\n", .{scenario_fork_proposal_schema_version});
+    try output.appendSlice(allocator, "mode: registered_scenario_fork_proposal\n");
+    try output.appendSlice(allocator, "proposal status: draft\n");
+    try output.appendSlice(allocator, "approved: false\n");
+    try output.appendSlice(allocator, "executed: false\n");
+    try output.print(allocator, "fork: {s}\n", .{fork_name});
+    try output.print(allocator, "source manifest: {s}\n", .{manifest_path});
+    try output.print(allocator, "source snapshot: {s}\n", .{manifest.name});
+    try output.print(allocator, "source artifact: {s}\n", .{manifest.artifact.path});
+    try output.print(allocator, "scenario: {s}\n", .{scenario.slug});
+    try output.print(allocator, "scenario owner: {s}\n", .{@tagName(scenario.owner)});
+    try output.print(allocator, "scenario expectation: {s}\n", .{@tagName(scenario.expectation)});
+    try output.print(allocator, "finding policy: {s}\n", .{@tagName(scenario.finding_policy)});
+    try output.appendSlice(allocator, "allowed commands:\n");
+    try output.print(allocator, "- zig build causal-snapshot -- replay-scenario {s} {s}\n", .{ manifest.name, scenario.slug });
+    try output.print(allocator, "- zig build causal-snapshot -- replay-feasibility {s}\n", .{manifest.name});
+    try output.appendSlice(allocator, "blocked operations:\n");
+    try output.appendSlice(allocator, "- runtime memory forking\n");
+    try output.appendSlice(allocator, "- arbitrary causal event-log replay\n");
+    try output.appendSlice(allocator, "- source mutation\n");
+    try output.appendSlice(allocator, "- scenario registry mutation\n");
+    try output.appendSlice(allocator, "guardrails:\n");
+    try output.appendSlice(allocator, "- Proposal is advisory until reviewed.\n");
+    try output.appendSlice(allocator, "- Fork proposal does not execute commands.\n");
+    try output.appendSlice(allocator, "- Use replay output and compare reports before claiming behavior changed.\n");
+    try output.appendSlice(allocator, "next queries:\n");
+    try output.print(allocator, "- zig build causal-query -- --file {s} snapshot\n", .{manifest.artifact.path});
+
+    return output.toOwnedSlice(allocator);
+}
+
+fn appendScenarioForkAllowedCommandsJson(output: *std.ArrayList(u8), allocator: std.mem.Allocator, snapshot_name: []const u8, scenario_slug: []const u8) !void {
+    const replay_command = try std.fmt.allocPrint(allocator, "zig build causal-snapshot -- replay-scenario {s} {s}", .{ snapshot_name, scenario_slug });
+    defer allocator.free(replay_command);
+    const feasibility_command = try std.fmt.allocPrint(allocator, "zig build causal-snapshot -- replay-feasibility {s}", .{snapshot_name});
+    defer allocator.free(feasibility_command);
+    try appendJsonString(output, allocator, replay_command);
+    try output.append(allocator, ',');
+    try appendJsonString(output, allocator, feasibility_command);
+}
+
+fn appendScenarioForkBlockedOperationsJson(output: *std.ArrayList(u8), allocator: std.mem.Allocator) !void {
+    try appendJsonString(output, allocator, "runtime memory forking");
+    try output.append(allocator, ',');
+    try appendJsonString(output, allocator, "arbitrary causal event-log replay");
+    try output.append(allocator, ',');
+    try appendJsonString(output, allocator, "source mutation");
+    try output.append(allocator, ',');
+    try appendJsonString(output, allocator, "scenario registry mutation");
+}
+
+fn appendScenarioForkGuardrailsJson(output: *std.ArrayList(u8), allocator: std.mem.Allocator) !void {
+    try appendJsonString(output, allocator, "Proposal is advisory until reviewed.");
+    try output.append(allocator, ',');
+    try appendJsonString(output, allocator, "Fork proposal does not execute commands.");
+    try output.append(allocator, ',');
+    try appendJsonString(output, allocator, "Use replay output and compare reports before claiming behavior changed.");
+}
+
+fn appendScenarioForkNextQueriesJson(output: *std.ArrayList(u8), allocator: std.mem.Allocator, artifact_path: []const u8) !void {
+    const snapshot_query = try std.fmt.allocPrint(allocator, "zig build causal-query -- --file {s} snapshot", .{artifact_path});
+    defer allocator.free(snapshot_query);
+    try appendJsonString(output, allocator, snapshot_query);
 }
 
 pub fn formatReplayFeasibilityText(
@@ -888,7 +1061,7 @@ const ManifestFormat = enum {
 };
 
 fn usage() []const u8 {
-    return "usage: zig build causal-snapshot -- manifest <name> <artifact.json> [--format json|text] [--target <target>] [--phase <phase>] [--baseline <path>] [--compare-report <path>] [--query-report <path>] [--advice-report <path>]\n       zig build causal-snapshot -- capture <name> [scenario]\n       zig build causal-snapshot -- compare <left> <right>\n       zig build causal-snapshot -- replay-feasibility <snapshot>\n       zig build causal-snapshot -- replay-scenario <snapshot> <scenario>\n";
+    return "usage: zig build causal-snapshot -- manifest <name> <artifact.json> [--format json|text] [--target <target>] [--phase <phase>] [--baseline <path>] [--compare-report <path>] [--query-report <path>] [--advice-report <path>]\n       zig build causal-snapshot -- capture <name> [scenario]\n       zig build causal-snapshot -- compare <left> <right>\n       zig build causal-snapshot -- replay-feasibility <snapshot>\n       zig build causal-snapshot -- replay-scenario <snapshot> <scenario>\n       zig build causal-snapshot -- fork-proposal <snapshot> <scenario> <fork>\n";
 }
 
 fn failUsage(err: anyerror) noreturn {
@@ -1106,6 +1279,37 @@ pub fn main(init: std.process.Init) !void {
         );
         defer allocator.free(report);
         std.debug.print("{s}", .{report});
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "fork-proposal")) {
+        if (args.len != 5) failUsage(error.InvalidScenarioForkProposalArguments);
+        const manifest_ref = try resolveSnapshotManifestReference(allocator, args[2]);
+        defer manifest_ref.deinit(allocator);
+        const scenario = causal_run.scenarioByName(args[3]) catch |err| failUsage(err);
+        const fork_name = args[4];
+        try validateSnapshotName(fork_name);
+
+        const manifest_json = try std.Io.Dir.cwd().readFileAlloc(init.io, manifest_ref.path, allocator, .limited(1024 * 1024));
+        defer allocator.free(manifest_json);
+        var manifest = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, manifest_json, .{ .ignore_unknown_fields = true });
+        defer manifest.deinit();
+
+        const paths = try scenarioForkProposalPaths(allocator, manifest.value.name, scenario.slug, fork_name);
+        defer paths.deinit(allocator);
+        const json = try formatScenarioForkProposalJson(allocator, manifest_ref.path, manifest_json, scenario, fork_name);
+        defer allocator.free(json);
+        const text = try formatScenarioForkProposalText(allocator, manifest_ref.path, manifest_json, scenario, fork_name);
+        defer allocator.free(text);
+
+        try writeArtifact(init.io, paths.json_path, json);
+        try writeArtifact(init.io, paths.text_path, text);
+        std.debug.print("zigeffect causal scenario fork proposal written\njson: {s}\ntext: {s}\nreplay: zig build causal-snapshot -- replay-scenario {s} {s}\n", .{
+            paths.json_path,
+            paths.text_path,
+            manifest.value.name,
+            scenario.slug,
+        });
         return;
     }
 
