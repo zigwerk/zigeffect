@@ -585,15 +585,15 @@ Goal: add actor/entity identity and mailbox semantics without distribution.
 
 Deliverables:
 
-- [ ] Add `EntityType`, `EntityId`, `EntityAddress`, and `EntityRef`.
-- [ ] Add local mailbox storage.
-- [ ] Add ask, tell, reply, and interrupt envelopes.
-- [ ] Add entity lifecycle and idle shutdown.
-- [ ] Add entity-scoped services and finalizers.
+- [x] Add `EntityType`, `EntityId`, `EntityAddress`, and `EntityRef`.
+- [x] Add local mailbox storage.
+- [x] Add ask, tell, reply, and interrupt envelopes.
+- [x] Add entity lifecycle and idle shutdown.
+- [x] Add entity-scoped services and finalizers.
 
 Acceptance:
 
-- [ ] Local entities process ordered mailbox messages and recover failures
+- [x] Local entities process ordered mailbox messages and recover failures
   through supervision.
 
 ## Milestone 26: Message Envelope And Delivery Semantics

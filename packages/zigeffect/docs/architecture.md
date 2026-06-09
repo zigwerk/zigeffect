@@ -312,13 +312,24 @@ src/cluster/
 
 Owns Erlang-style distributed runtime surfaces:
 
-- `root.zig`: cluster namespace marker until actor/shard modules land.
+- `root.zig`: cluster namespace facade and ergonomic public aliases.
+- `identity.zig`: local entity type, id, address, and stable id derivation.
+- `mailbox.zig`: local in-memory entity envelopes, per-entity FIFO mailbox
+  storage, ask correlations, reply storage, and envelope ownership helpers.
+- `entity.zig`: local entity runtime, runtime-bound refs, entity scopes,
+  services, finalizers, idle shutdown, and supervisor-backed handler failure
+  recovery.
 
 Entity identity, actor references, message envelopes, durable message storage,
 shard ids, runner ids, runner storage, leases, rebalancing, transports,
 cluster workflow integration, and supervision across entities, shards, runners,
 and transports belong here. Cluster code should build on workflow and runtime
 contracts instead of making durable state depend on runner memory.
+
+The local entity runtime is single-process and in-memory. It gives cluster
+concepts a deterministic local execution model, but durable delivery,
+idempotent envelopes, shard routing, runner ownership, and transport are
+separate milestones.
 
 ```text
 tools/
