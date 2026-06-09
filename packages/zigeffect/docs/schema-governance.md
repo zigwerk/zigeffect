@@ -122,6 +122,15 @@ the local/CI causal operating-model deliverables, records deferred production
 gaps, and gives agents a stable recommendation before the roadmap marks M9
 delivered.
 
+- `zigeffect.causal.production-hardening-backlog.v1`
+
+The production-hardening backlog is a record-only operating-model artifact. It
+turns the M9 deferred production gaps into an ordered future branch queue with
+dependencies, constraints, non-goals, verification commands, and the next
+recommended production-hardening branch. It does not grant production mutation
+authority, add production telemetry, or change the NenDB-only durable adapter
+direction.
+
 ### Test Coverage
 
 - `zigeffect.causal.test-matrix.v1`

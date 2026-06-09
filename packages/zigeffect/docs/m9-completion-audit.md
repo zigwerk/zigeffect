@@ -65,6 +65,23 @@ The audit keeps these as explicit future hardening:
 No Cockroach adapter work is part of this audit. The current durable database
 direction remains NenDB adapter work only.
 
+## Production-Hardening Handoff
+
+After the M9 audit passes, run the production-hardening backlog report to
+choose the next branch:
+
+```sh
+cd packages/zigeffect
+zig build causal-production-hardening-backlog
+zig build causal-production-hardening-backlog -- --format json
+```
+
+That report uses schema
+`zigeffect.causal.production-hardening-backlog.v1`, keeps durable work on the
+NenDB adapter path, keeps workbench work on SolidJS inside
+`webui-dev/zig-webui`, and recommends
+`codex/zigeffect-causal-production-artifact-aggregation` as the next branch.
+
 ## Verification Suite
 
 Run the full suite before using the audit to mark M9 delivered:

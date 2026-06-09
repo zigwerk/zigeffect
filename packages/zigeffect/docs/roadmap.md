@@ -632,6 +632,12 @@ metrics, and traces.
   `zigeffect.causal.m9-completion-audit.v1` with deliverable checks,
   production-gap acknowledgement, verification commands, and the recommendation
   to deliver M9 with deferred production hardening.
+- Delivered: `causal-production-hardening-backlog` publishes
+  `zigeffect.causal.production-hardening-backlog.v1` with the ordered
+  production-hardening branch queue, NenDB-only durable direction, SolidJS plus
+  `webui-dev/zig-webui` workbench direction, non-goals, verification commands,
+  and the next branch
+  `codex/zigeffect-causal-production-artifact-aggregation`.
 - Still future: production-grade app-facing integrations, durable history
   hardening, and comparing arbitrary named audit-chain snapshots.
 - Still future: deeper runtime regression scenarios for partial config and

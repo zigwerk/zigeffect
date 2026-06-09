@@ -178,6 +178,23 @@ recommends `deliver-m9-with-deferred-production-hardening` only after the full
 verification suite passes. The full policy is in
 [docs/m9-completion-audit.md](docs/m9-completion-audit.md).
 
+Print the causal production-hardening backlog:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-hardening-backlog
+zig build causal-production-hardening-backlog -- --format json
+```
+
+The backlog uses schema
+`zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
+gaps into ordered future hardening branches, and recommends
+`codex/zigeffect-causal-production-artifact-aggregation` as the next branch.
+It keeps durable work on the NenDB adapter path, keeps the workbench direction
+as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
+authority. The full policy is in
+[docs/production-hardening-backlog.md](docs/production-hardening-backlog.md).
+
 Open the read-only SolidJS causal workbench for a saved artifact:
 
 ```bash

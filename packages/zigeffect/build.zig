@@ -722,6 +722,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_m9_completion_audit_tool_tests = b.addRunArtifact(causal_m9_completion_audit_tool_tests);
     test_step.dependOn(&run_causal_m9_completion_audit_tool_tests.step);
 
+    const causal_production_hardening_backlog_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_production_hardening_backlog.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_production_hardening_backlog_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-production-hardening-backlog",
+        .root_module = causal_production_hardening_backlog_tool_module,
+    });
+    const run_causal_production_hardening_backlog_tool = b.addRunArtifact(causal_production_hardening_backlog_tool);
+    if (b.args) |args| run_causal_production_hardening_backlog_tool.addArgs(args);
+    const causal_production_hardening_backlog_step = b.step("causal-production-hardening-backlog", "Print causal production-hardening backlog report");
+    causal_production_hardening_backlog_step.dependOn(&run_causal_production_hardening_backlog_tool.step);
+
+    const causal_production_hardening_backlog_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-production-hardening-backlog-tests",
+        .root_module = causal_production_hardening_backlog_tool_module,
+    });
+    const run_causal_production_hardening_backlog_tool_tests = b.addRunArtifact(causal_production_hardening_backlog_tool_tests);
+    test_step.dependOn(&run_causal_production_hardening_backlog_tool_tests.step);
+
     const causal_workbench_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_workbench.zig"),
         .target = target,

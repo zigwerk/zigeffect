@@ -418,6 +418,25 @@ the documented production gaps should move to future hardening. It does not add
 production dashboards, access control, durable production retention, mutation
 authority, rollout automation, or a Cockroach adapter.
 
+## Production Hardening Backlog
+
+Run the production-hardening backlog report after the M9 completion audit when
+choosing the next hardening branch:
+
+```sh
+cd packages/zigeffect
+zig build causal-production-hardening-backlog
+zig build causal-production-hardening-backlog -- --format json
+```
+
+The backlog records schema
+`zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
+production gaps into ordered future branches, and recommends
+`codex/zigeffect-causal-production-artifact-aggregation` as the next branch.
+It keeps durable production work on the NenDB adapter path, keeps workbench UI
+work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
+authority.
+
 ## Production Gaps
 
 The current operating model does not provide:
@@ -434,6 +453,6 @@ The current operating model does not provide:
 - wall-clock benchmark baselines or gates;
 - production capacity planning.
 
-Those belong to later M9 branches and future production hardening. The next
-operating-model branch should audit the completed M9 evidence before declaring
-the operating model complete.
+Those belong to future production hardening. Use
+`zig build causal-production-hardening-backlog` as the branch queue before
+starting one of those systems.
