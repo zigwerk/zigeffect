@@ -34,3 +34,29 @@ test "backend constructors expose async operation capabilities" {
     try std.testing.expect(clustered.can_interrupt);
     try std.testing.expect(clustered.can_durable_suspend);
 }
+
+test "deterministic unsupported async backend rejects suspend wake timer and interrupt" {
+    var state = fx.UnsupportedAsyncBackendState.init(fx.deterministicBackend());
+    const backend = state.backend();
+
+    try std.testing.expectEqual(fx.BackendKind.deterministic, backend.capabilities.kind);
+    try std.testing.expectError(error.UnsupportedBackendCapability, backend.suspendRuntime(.{
+        .suspension = .{ .kind = .timer, .id = 1, .label = "wake" },
+        .workflow_id = 7,
+        .execution_id = 8,
+        .reason = "sleep",
+    }));
+    try std.testing.expectError(error.UnsupportedBackendCapability, backend.wake(.{
+        .suspension_id = 1,
+        .reason = "timer fired",
+    }));
+    try std.testing.expectError(error.UnsupportedBackendCapability, backend.scheduleTimer(.{
+        .suspension = .{ .kind = .timer, .id = 1, .label = "wake" },
+        .due_time_ms = 250,
+        .now_ms = 100,
+    }));
+    try std.testing.expectError(error.UnsupportedBackendCapability, backend.interrupt(.{
+        .target_id = 99,
+        .reason = "operator",
+    }));
+}

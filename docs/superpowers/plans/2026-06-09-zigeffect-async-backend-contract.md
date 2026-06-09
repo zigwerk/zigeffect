@@ -175,7 +175,7 @@ test "deterministic unsupported async backend rejects suspend wake timer and int
     const backend = state.backend();
 
     try std.testing.expectEqual(fx.BackendKind.deterministic, backend.capabilities.kind);
-    try std.testing.expectError(error.UnsupportedBackendCapability, backend.suspend(.{
+    try std.testing.expectError(error.UnsupportedBackendCapability, backend.suspendRuntime(.{
         .suspension = .{ .kind = .timer, .id = 1, .label = "wake" },
         .workflow_id = 7,
         .execution_id = 8,
@@ -252,14 +252,14 @@ pub const AsyncBackend = struct {
     vtable: *const VTable,
 
     pub const VTable = struct {
-        suspend: *const fn (?*anyopaque, BackendSuspendRequest) AsyncBackendError!void,
+        suspend_runtime: *const fn (?*anyopaque, BackendSuspendRequest) AsyncBackendError!void,
         wake: *const fn (?*anyopaque, BackendWakeRequest) AsyncBackendError!void,
         schedule_timer: *const fn (?*anyopaque, BackendTimerRequest) AsyncBackendError!void,
         interrupt: *const fn (?*anyopaque, BackendInterruptRequest) AsyncBackendError!void,
     };
 
-    pub fn suspend(self: AsyncBackend, request: BackendSuspendRequest) AsyncBackendError!void {
-        return self.vtable.suspend(self.context, request);
+    pub fn suspendRuntime(self: AsyncBackend, request: BackendSuspendRequest) AsyncBackendError!void {
+        return self.vtable.suspend_runtime(self.context, request);
     }
 
     pub fn wake(self: AsyncBackend, request: BackendWakeRequest) AsyncBackendError!void {
@@ -312,7 +312,7 @@ fn unsupportedInterrupt(context: ?*anyopaque, request: BackendInterruptRequest) 
 }
 
 const unsupported_vtable: AsyncBackend.VTable = .{
-    .suspend = unsupportedSuspend,
+    .suspend_runtime = unsupportedSuspend,
     .wake = unsupportedWake,
     .schedule_timer = unsupportedScheduleTimer,
     .interrupt = unsupportedInterrupt,
