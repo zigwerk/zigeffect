@@ -327,6 +327,14 @@ pub const cloneEntityAddress = cluster.cloneEntityAddress;
 pub const deinitEntityAddress = cluster.deinitEntityAddress;
 pub const cloneEntityEnvelope = cluster.cloneEntityEnvelope;
 pub const deinitEntityEnvelope = cluster.deinitEntityEnvelope;
+pub const EntityStatus = cluster.EntityStatus;
+pub const EntityRuntimeError = cluster.EntityRuntimeError;
+pub const EntityRegistration = cluster.EntityRegistration;
+pub const EntityHandlerResult = cluster.EntityHandlerResult;
+pub const EntityScope = cluster.EntityScope;
+pub const LocalEntityRuntimeOptions = cluster.LocalEntityRuntimeOptions;
+pub const LocalEntityRuntime = cluster.LocalEntityRuntime;
+pub const EntityRef = cluster.EntityRef;
 
 pub const ServiceSet = dependency.service_sets.ServiceSet;
 pub const DependencyIssueKind = dependency.report.DependencyIssueKind;

@@ -86,3 +86,65 @@ test "local mailbox store keeps ask correlations and replies" {
     try std.testing.expectEqualStrings("answer", taken_reply.payload);
     try std.testing.expectError(error.ReplyNotFound, store.takeReply(ask.correlation_id.?));
 }
+
+test "local entity runtime registers entities refs services and finalizers" {
+    var runtime = fx.LocalEntityRuntime.init(std.testing.allocator, .{});
+    defer runtime.deinit();
+
+    const address = fx.entityAddress("counter", "one");
+    const ref = try runtime.registerEntity(.{
+        .address = address,
+        .name = "counter-one",
+        .idle_timeout_ms = 500,
+    }, 1_000);
+
+    try std.testing.expect(ref.address.eql(address));
+    try std.testing.expectEqual(fx.EntityStatus.running, try runtime.status(address));
+    try std.testing.expectError(error.DuplicateEntity, runtime.registerEntity(.{
+        .address = address,
+        .name = "dupe",
+    }, 1_100));
+
+    var value: u32 = 42;
+    const scope = try runtime.entityScope(address);
+    try scope.provideService("counter-state", &value);
+    try std.testing.expectError(error.DuplicateEntityService, scope.provideService("counter-state", &value));
+    const raw = (try scope.service("counter-state")).?;
+    const typed: *u32 = @ptrCast(@alignCast(raw));
+    try std.testing.expectEqual(@as(u32, 42), typed.*);
+}
+
+test "entity scope finalizers run in reverse order on shutdown" {
+    var runtime = fx.LocalEntityRuntime.init(std.testing.allocator, .{});
+    defer runtime.deinit();
+
+    const address = fx.entityAddress("counter", "one");
+    _ = try runtime.registerEntity(.{
+        .address = address,
+        .name = "counter-one",
+        .idle_timeout_ms = 0,
+    }, 1_000);
+
+    var releases = std.ArrayList(u8).empty;
+    defer releases.deinit(std.testing.allocator);
+
+    const Resource = struct {
+        releases: *std.ArrayList(u8),
+        marker: u8,
+    };
+    const release = struct {
+        fn run(resource: *Resource) void {
+            resource.releases.append(std.testing.allocator, resource.marker) catch unreachable;
+        }
+    }.run;
+
+    var first = Resource{ .releases = &releases, .marker = 'a' };
+    var second = Resource{ .releases = &releases, .marker = 'b' };
+    const scope = try runtime.entityScope(address);
+    try scope.addFinalizerFor(Resource, &first, release);
+    try scope.addFinalizerFor(Resource, &second, release);
+
+    runtime.shutdownIdle(1_001);
+    try std.testing.expectEqual(fx.EntityStatus.stopped, try runtime.status(address));
+    try std.testing.expectEqualStrings("ba", releases.items);
+}

@@ -2,7 +2,7 @@ pub const domain = "cluster";
 
 pub const identity = @import("identity.zig");
 pub const mailbox = @import("mailbox.zig");
-pub const entity = struct {};
+pub const entity = @import("entity.zig");
 
 pub const EntityType = identity.EntityType;
 pub const EntityId = identity.EntityId;
@@ -21,3 +21,11 @@ pub const cloneEntityAddress = mailbox.cloneEntityAddress;
 pub const deinitEntityAddress = mailbox.deinitEntityAddress;
 pub const cloneEntityEnvelope = mailbox.cloneEntityEnvelope;
 pub const deinitEntityEnvelope = mailbox.deinitEntityEnvelope;
+pub const EntityStatus = entity.EntityStatus;
+pub const EntityRuntimeError = entity.EntityRuntimeError;
+pub const EntityRegistration = entity.EntityRegistration;
+pub const EntityHandlerResult = entity.EntityHandlerResult;
+pub const EntityScope = entity.EntityScope;
+pub const LocalEntityRuntimeOptions = entity.LocalEntityRuntimeOptions;
+pub const LocalEntityRuntime = entity.LocalEntityRuntime;
+pub const EntityRef = entity.EntityRef;
