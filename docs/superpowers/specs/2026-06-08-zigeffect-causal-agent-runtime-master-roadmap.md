@@ -605,17 +605,17 @@ Status values:
 | M3 Production hardening | delivered | bounded store, broader redaction, sampling, taxonomy, schema/taxonomy compatibility fixtures, and artifact string-size limits delivered | move to M4 backend conformance |
 | M4 Backend adapters | delivered | backend boundary, conformance suite, JSONL sink, polished DOT backend, OTel bridge, graph-history adapter, NenDB storage writer contract, and async stream adapter exist | move to M5 snapshot manifests |
 | M5 Replay/snapshots | delivered | snapshot manifest schema/tool, named snapshot compare, replay-feasibility reports, deterministic registered-scenario replay, and safe scenario fork proposals exist | move to M6 read-only workbench |
-| M6 Workbench UI | active | SolidJS renderer, `causal-workbench-ui`, and `zig-webui` launcher exist on branch `codex/zigeffect-causal-workbench-readonly` | verify, merge, then build graph/remediation-chain views |
+| M6 Workbench UI | active | SolidJS renderer, `causal-workbench-ui`, `zig-webui` launcher, and graph cause-path/runtime-lane branch `codex/zigeffect-causal-workbench-graphs` exist | finish graph verification/docs, then build remediation-chain and multi-artifact views |
 | M7 App-facing runtime | planned | core causal vocabulary exists | design request/job adapters |
 | M8 App remediation gates | deferred | app-facing runtime not started | wait for M7 |
 | M9 Operating model | deferred | schema/versioning docs partial | consolidate after M4-M8 |
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-causal-workbench-readonly`
-   - Verify and merge the SolidJS + `zig-webui` single-artifact workbench.
-2. `codex/zigeffect-causal-workbench-graphs`
-   - Add richer relationship graph, remediation/audit-chain visualization, and multi-artifact comparison entry points.
+1. `codex/zigeffect-causal-workbench-graphs`
+   - Add richer relationship graph with cause paths, parent edges, runtime lanes, and mobile/browser verification.
+2. `codex/zigeffect-causal-workbench-remediation-chain`
+   - Add remediation/audit-chain visualization and multi-artifact comparison entry points.
 3. `codex/zigeffect-app-facing-causal-runtime`
    - Design request/job adapters and app-facing causal vocabulary after the workbench can inspect artifacts.
 

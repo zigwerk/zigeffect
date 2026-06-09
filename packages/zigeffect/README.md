@@ -148,9 +148,11 @@ zig build causal-workbench -- --server-only .zig-cache/causal-artifacts/zigeffec
 `causal-workbench` builds the SolidJS renderer with Bun/Vite, opens it through
 `zig-webui`, and exposes the selected artifact through a bounded read-only Zig
 bridge. The workbench has timeline, findings, relationship, query, metadata,
-and inspector views. It does not edit source, update the scenario registry,
-make policy decisions, or write remediation artifacts. When a native browser or
-WebView cannot be opened, the launcher falls back to a local WebUI server URL;
+and inspector views. The Graph tab derives cause paths, parent edges, and
+runtime lanes for runs, scopes, fibers, resources, and retries from the selected
+artifact. It does not edit source, update the scenario registry, make policy
+decisions, or write remediation artifacts. When a native browser or WebView
+cannot be opened, the launcher falls back to a local WebUI server URL;
 `--server-only` starts that local read-only server directly for agent/browser
 inspection.
 
