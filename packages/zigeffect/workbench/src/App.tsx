@@ -4,8 +4,12 @@ import {
   type GraphEdge,
   type GraphLane,
   type GraphLaneKind,
+  type GovernanceModel,
   type QueryCommand,
+  type RemediationChainModel,
+  type ChainSourceStep,
   causePathForEvent,
+  deriveGovernanceModel,
   deriveGraphModel,
   deriveWorkbenchModel,
   filterEvents,
@@ -14,12 +18,13 @@ import {
 } from "./causalArtifact";
 import { loadPayload, type WorkbenchSession } from "./workbenchBridge";
 
-type Tab = "timeline" | "findings" | "graph" | "queries" | "metadata";
+type Tab = "timeline" | "findings" | "graph" | "chain" | "queries" | "metadata";
 
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: "timeline", label: "Timeline" },
   { id: "findings", label: "Findings" },
   { id: "graph", label: "Graph" },
+  { id: "chain", label: "Chain" },
   { id: "queries", label: "Queries" },
   { id: "metadata", label: "Metadata" },
 ];
@@ -50,16 +55,18 @@ export function App() {
     }
 
     try {
+      const artifactPath = loaded.session?.artifact_path ?? "sample-artifact.json";
+      const raw = parseArtifactJson(loaded.artifactJson);
       return {
-        model: deriveWorkbenchModel(parseArtifactJson(loaded.artifactJson), {
-          artifactPath: loaded.session?.artifact_path ?? "sample-artifact.json",
-        }),
+        model: deriveWorkbenchModel(raw, { artifactPath }),
+        governance: deriveGovernanceModel(raw, { artifactPath }),
         session: loaded.session,
         error: null,
       };
     } catch (error) {
       return {
         model: null,
+        governance: null,
         session: loaded.session,
         error: error instanceof Error ? error.message : "failed to parse artifact",
       };
@@ -67,6 +74,7 @@ export function App() {
   });
 
   const model = createMemo(() => parsed()?.model ?? null);
+  const governance = createMemo(() => parsed()?.governance ?? null);
   const visibleEvents = createMemo(() => {
     const current = model();
     if (!current) {
@@ -197,6 +205,13 @@ export function App() {
                       onSelect={setSelectedId}
                     />
                   </Match>
+                  <Match when={activeTab() === "chain"}>
+                    <ChainView
+                      governance={governance()}
+                      copiedCommand={copiedCommand()}
+                      onCopy={copyCommand}
+                    />
+                  </Match>
                   <Match when={activeTab() === "queries"}>
                     <Queries
                       artifactPath={current().artifactPath}
@@ -225,6 +240,191 @@ export function App() {
         )}
       </Show>
     </main>
+  );
+}
+
+function ChainView(props: {
+  governance: GovernanceModel | null;
+  copiedCommand: string | null;
+  onCopy: (command: string) => void;
+}) {
+  return (
+    <div class="view-stack">
+      <div class="view-heading">
+        <h2>Chain</h2>
+        <span>{props.governance?.kind ?? "no governance artifact"}</span>
+      </div>
+
+      <Show when={props.governance} fallback={<EmptyState label="Loaded artifact has no remediation chain" />}>
+        {(governance) => (
+          <Show when={governance().chain} fallback={<GovernanceSummary governance={governance()} />}>
+            {(chain) => (
+              <>
+                <ChainStatus chain={chain()} />
+                <div class="chain-grid">
+                  <ChainSources
+                    steps={chain().sourceSteps}
+                    copiedCommand={props.copiedCommand}
+                    onCopy={props.onCopy}
+                  />
+                  <ChainVerification
+                    chain={chain()}
+                    copiedCommand={props.copiedCommand}
+                    onCopy={props.onCopy}
+                  />
+                </div>
+                <ChainClassifications chain={chain()} />
+                <ChainGuardrails chain={chain()} />
+                <div class="warning-list">
+                  <For each={[...governance().warnings, ...chain().warnings]} fallback={<EmptyState label="No chain warnings" compact />}>
+                    {(warning) => <span>{warning}</span>}
+                  </For>
+                </div>
+              </>
+            )}
+          </Show>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+function GovernanceSummary(props: { governance: GovernanceModel }) {
+  return (
+    <>
+      <div class="chain-status">
+        <Metric label="schema" value={props.governance.schema} />
+        <Metric label="kind" value={props.governance.kind} />
+        <Metric label="target" value={props.governance.target} />
+        <Metric label="applied" value={String(props.governance.applied ?? "unknown")} />
+        <Metric label="authority" value={props.governance.mutationAuthority ?? "none"} tone="ok" />
+      </div>
+      <div class="chain-panel">
+        <h3>{props.governance.summary}</h3>
+        <EmptyState label="This governance artifact has no audit-chain source graph" compact />
+      </div>
+    </>
+  );
+}
+
+function ChainStatus(props: { chain: RemediationChainModel }) {
+  return (
+    <div class="chain-status">
+      <Metric label="target" value={props.chain.target} />
+      <Metric label="assessment" value={props.chain.assessment} tone={props.chain.assessment === "regressed" ? "warn" : "ok"} />
+      <Metric label="approval" value={props.chain.approvalStatus} />
+      <Metric label="applied" value={String(props.chain.applied ?? "unknown")} tone={props.chain.applied ? "warn" : "ok"} />
+      <Metric label="delta" value={props.chain.findingDelta} />
+    </div>
+  );
+}
+
+function ChainSources(props: {
+  steps: ChainSourceStep[];
+  copiedCommand: string | null;
+  onCopy: (command: string) => void;
+}) {
+  return (
+    <section class="chain-panel">
+      <h3>Source artifacts</h3>
+      <div class="chain-source-list">
+        <For each={props.steps} fallback={<EmptyState label="No source artifact paths" compact />}>
+          {(step) => (
+            <ChainSourceRow
+              step={step}
+              copiedCommand={props.copiedCommand}
+              onCopy={props.onCopy}
+            />
+          )}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function ChainSourceRow(props: {
+  step: ChainSourceStep;
+  copiedCommand: string | null;
+  onCopy: (command: string) => void;
+}) {
+  return (
+    <div class="chain-source-row">
+      <span>{props.step.label}</span>
+      <code>{props.step.path}</code>
+      <Show when={props.step.workbenchCommand} fallback={<small>text artifact</small>}>
+        {(command) => (
+          <button type="button" onClick={() => props.onCopy(command())}>
+            {props.copiedCommand === command() ? "Copied" : "Copy"}
+          </button>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+function ChainVerification(props: {
+  chain: RemediationChainModel;
+  copiedCommand: string | null;
+  onCopy: (command: string) => void;
+}) {
+  const commands = createMemo<QueryCommand[]>(() => props.chain.verificationCommands.map((command, index) => ({
+    label: `verify ${index + 1}`,
+    command,
+  })));
+
+  return (
+    <section class="chain-panel">
+      <h3>Verification</h3>
+      <CommandList
+        commands={commands()}
+        copiedCommand={props.copiedCommand}
+        onCopy={props.onCopy}
+        compact
+      />
+    </section>
+  );
+}
+
+function ChainClassifications(props: { chain: RemediationChainModel }) {
+  const groups = createMemo(() => [
+    { label: "disappeared", ids: props.chain.classifications.disappeared },
+    { label: "persisting", ids: props.chain.classifications.persisting },
+    { label: "appeared", ids: props.chain.classifications.appeared },
+    { label: "missing", ids: props.chain.classifications.missing },
+  ]);
+
+  return (
+    <section class="chain-panel">
+      <div class="lane-section-head">
+        <h3>Event classification</h3>
+        <span>{props.chain.classifications.eventIds.length} cited ids</span>
+      </div>
+      <div class="chain-classification-grid">
+        <For each={groups()}>
+          {(group) => (
+            <div class="chain-id-list">
+              <span>{group.label}</span>
+              <For each={group.ids} fallback={<small>none</small>}>
+                {(id) => <strong>#{id}</strong>}
+              </For>
+            </div>
+          )}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function ChainGuardrails(props: { chain: RemediationChainModel }) {
+  return (
+    <section class="chain-panel">
+      <h3>Guardrails</h3>
+      <div class="guardrail-list">
+        <For each={props.chain.guardrails} fallback={<EmptyState label="No guardrails recorded" compact />}>
+          {(guardrail) => <span>{guardrail}</span>}
+        </For>
+      </div>
+    </section>
   );
 }
 
