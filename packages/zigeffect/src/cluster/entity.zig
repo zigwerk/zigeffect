@@ -334,9 +334,24 @@ pub const LocalEntityRuntime = struct {
     }
 
     fn handleEntityFailure(self: *LocalEntityRuntime, index: usize, err: anyerror, now_ms: u64) !void {
-        _ = now_ms;
-        self.entities.items[index].status = .failed;
-        return err;
+        var instance = &self.entities.items[index];
+        const decision = try self.supervisor.reportChildExit(
+            instance.supervisor_child_id,
+            .{ .failure = @errorName(err) },
+            now_ms,
+        );
+
+        instance.scope.close(.{ .failure = @errorName(err) });
+        instance.scope.deinit();
+        instance.scope = EntityScope.init(self.allocator);
+
+        if (decision.escalated) {
+            instance.status = .escalated;
+        } else if (decision.restarted_children > 0) {
+            instance.status = .running;
+        } else {
+            instance.status = .failed;
+        }
     }
 
     fn findEntityIndex(self: *const LocalEntityRuntime, address: EntityAddress) ?usize {

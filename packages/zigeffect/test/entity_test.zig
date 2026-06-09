@@ -232,3 +232,50 @@ test "idle shutdown only stops entities with empty expired mailboxes" {
     try std.testing.expectEqual(fx.EntityStatus.stopped, try runtime.status(idle));
     try std.testing.expectEqual(fx.EntityStatus.running, try runtime.status(busy));
 }
+
+test "handler failure restarts entity through supervisor" {
+    var runtime = fx.LocalEntityRuntime.init(std.testing.allocator, .{
+        .restart_intensity = .{ .max_restarts = 2, .within_ms = 1_000 },
+    });
+    defer runtime.deinit();
+
+    const address = fx.entityAddress("counter", "one");
+    const ref = try runtime.registerEntity(.{ .address = address, .name = "counter-one" }, 1_000);
+    const queued = try ref.tell("text", "boom", "failure");
+    defer fx.deinitEntityEnvelope(std.testing.allocator, queued);
+
+    const Handler = struct {
+        pub fn handle(_: *fx.EntityScope, _: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            return error.Boom;
+        }
+    };
+
+    try std.testing.expectError(error.Boom, runtime.processNext(address, Handler, 1_100));
+    try std.testing.expectEqual(fx.EntityStatus.running, try runtime.status(address));
+    try std.testing.expectEqual(@as(usize, 1), try runtime.restartCount(address));
+}
+
+test "repeated handler failure escalates entity through supervisor intensity" {
+    var runtime = fx.LocalEntityRuntime.init(std.testing.allocator, .{
+        .restart_intensity = .{ .max_restarts = 1, .within_ms = 1_000 },
+    });
+    defer runtime.deinit();
+
+    const address = fx.entityAddress("counter", "one");
+    const ref = try runtime.registerEntity(.{ .address = address, .name = "counter-one" }, 1_000);
+    const first = try ref.tell("text", "boom-1", "failure");
+    defer fx.deinitEntityEnvelope(std.testing.allocator, first);
+    const second = try ref.tell("text", "boom-2", "failure");
+    defer fx.deinitEntityEnvelope(std.testing.allocator, second);
+
+    const Handler = struct {
+        pub fn handle(_: *fx.EntityScope, _: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            return error.Boom;
+        }
+    };
+
+    try std.testing.expectError(error.Boom, runtime.processNext(address, Handler, 1_100));
+    try std.testing.expectError(error.Boom, runtime.processNext(address, Handler, 1_200));
+    try std.testing.expectEqual(fx.EntityStatus.escalated, try runtime.status(address));
+    try std.testing.expectEqual(@as(usize, 1), try runtime.restartCount(address));
+}
