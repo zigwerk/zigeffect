@@ -189,8 +189,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-artifact-access-control` as the next branch after
-deployment runbooks.
+`codex/zigeffect-causal-unified-spine-contract` as the next branch after
+artifact access control.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in
@@ -240,9 +240,25 @@ The contract uses schema
 `zigeffect.causal.production-deployment-runbooks.v1`, consumes the production
 artifact aggregation and durable retention contracts, and defines manual deploy,
 rollback, causal verification, and incident-response gates without deployment
-automation or production mutation authority. The next branch is
-`codex/zigeffect-causal-artifact-access-control`. The full policy is in
+automation or production mutation authority. Its immediate consumer is artifact
+access control. The full policy is in
 [docs/production-deployment-runbooks.md](docs/production-deployment-runbooks.md).
+
+Print the causal artifact access-control contract:
+
+```bash
+cd packages/zigeffect
+zig build causal-artifact-access-control
+zig build causal-artifact-access-control -- --format json
+```
+
+The contract uses schema `zigeffect.causal.artifact-access-control.v1`,
+consumes the aggregation, durable-retention, and deployment-runbook contracts,
+and defines visibility classes, roles, permissions, access decisions, denied
+fixtures, and audit record fields without live RBAC enforcement or production
+mutation authority. The next branch is
+`codex/zigeffect-causal-unified-spine-contract`. The full policy is in
+[docs/artifact-access-control.md](docs/artifact-access-control.md).
 
 Open the read-only SolidJS causal workbench for a saved artifact:
 

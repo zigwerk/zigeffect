@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-artifact-access-control";
-pub const recommended_next_branch = "codex/zigeffect-causal-artifact-access-control";
+pub const recommendation = "start-unified-causal-spine-contract";
+pub const recommended_next_branch = "codex/zigeffect-causal-unified-spine-contract";
 
 const OutputFormat = enum { text, json };
 
@@ -26,7 +26,8 @@ const BacklogItem = struct {
 const global_constraints: []const []const u8 = &.{
     "durable storage direction: NenDB adapter only",
     "workbench direction: SolidJS inside webui-dev/zig-webui",
-    "visual graph debugging starts with @dschz/solid-g6 plus @antv/g6; solid-flow remains optional editor research",
+    "visual graph adapter starts with @dschz/solid-g6 over @antv/g6; solid-flow remains optional editor research",
+    "human workbench and agent query interface share one causal truth model but expose separate ergonomics",
     "mutation authority remains none until a reviewed authority branch grants it",
     "report is deterministic and must not inspect live systems, clocks, networks, or generated artifacts",
 };
@@ -113,9 +114,9 @@ const backlog_items: []const BacklogItem = &.{
         .title = "Artifact Access Control",
         .gap_id = "rbac-access-control",
         .priority = "P2",
-        .status = "planned",
-        .summary = "Define access-control rules for artifact bundles and workbench views before production sharing.",
-        .depends_on = &.{ "production-artifact-aggregation", "durable-production-retention" },
+        .status = "delivered",
+        .summary = "Defines record-only access-control rules, visibility classes, permissions, audit records, and denied-view fixtures for artifact bundles and workbench views before production sharing.",
+        .depends_on = &.{ "production-artifact-aggregation", "durable-production-retention", "production-deployment-runbooks" },
         .deliverables = &.{
             "artifact visibility model",
             "role and permission matrix",
@@ -123,11 +124,107 @@ const backlog_items: []const BacklogItem = &.{
             "negative tests for denied artifact views",
         },
         .evidence_sources = &.{
+            "packages/zigeffect/tools/causal_artifact_access_control.zig",
+            "packages/zigeffect/docs/artifact-access-control.md",
             "packages/zigeffect/docs/operations.md",
-            "packages/zigeffect/docs/m9-completion-audit.md",
+            "packages/zigeffect/docs/production-deployment-runbooks.md",
         },
         .branch = "codex/zigeffect-causal-artifact-access-control",
         .agent_guidance = "Keep this as policy and tests until a reviewed production host exists.",
+    },
+    .{
+        .id = "unified-causal-spine-contract",
+        .title = "Unified Causal Spine Contract",
+        .gap_id = "dual-interface-causal-spine",
+        .priority = "P2",
+        .status = "planned",
+        .summary = "Define one stable causal truth model for runtime internals, app semantic events, human workbench views, agent queries, and durable NenDB graph records.",
+        .depends_on = &.{ "production-artifact-aggregation", "durable-production-retention", "artifact-access-control" },
+        .deliverables = &.{
+            "canonical runtime id fields",
+            "canonical app semantic id fields",
+            "relationship taxonomy",
+            "redaction sampling retention projection boundary",
+            "derived index contract",
+        },
+        .evidence_sources = &.{
+            "packages/zigeffect/docs/agent-observable-runtime.md",
+            "packages/zigeffect/docs/schema-governance.md",
+            "packages/zigeffect/docs/production-hardening-backlog.md",
+        },
+        .branch = "codex/zigeffect-causal-unified-spine-contract",
+        .agent_guidance = "Make CausalStore append-only and keep policy plus derived indexes between the store and every human, agent, backend, or UI projection.",
+    },
+    .{
+        .id = "deep-runtime-internals",
+        .title = "Deep Runtime Internals",
+        .gap_id = "runtime-internal-causal-depth",
+        .priority = "P2",
+        .status = "planned",
+        .summary = "Emit deeper zigeffect runtime facts for layers, services, scopes, fibers, resources, finalizers, retries, defects, interruptions, and cause chains.",
+        .depends_on = &.{"unified-causal-spine-contract"},
+        .deliverables = &.{
+            "layer and service graph events",
+            "scope and finalizer lifecycle events",
+            "fiber fork join interrupt lifecycle events",
+            "resource ownership events",
+            "runtime topology fixture",
+        },
+        .evidence_sources = &.{
+            "packages/zigeffect/src/runtime",
+            "packages/zigeffect/src/core/scope.zig",
+            "packages/zigeffect/src/core/fiber.zig",
+            "packages/zigeffect/docs/agent-observable-runtime.md",
+        },
+        .branch = "codex/zigeffect-causal-deep-runtime-internals",
+        .agent_guidance = "Prefer typed runtime facts and stable ids over verbose event labels; do not record raw payloads or secrets.",
+    },
+    .{
+        .id = "app-semantic-trace-api",
+        .title = "App Semantic Trace API",
+        .gap_id = "app-semantic-lineage",
+        .priority = "P2",
+        .status = "planned",
+        .summary = "Expose an app-facing semantic trace API for data movement, service calls, domain actions, policy decisions, artifacts, and responses.",
+        .depends_on = &.{"unified-causal-spine-contract"},
+        .deliverables = &.{
+            "data_read data_transformed data_written events",
+            "function_boundary and service_call events",
+            "domain_action policy_decision artifact_emitted response_sent events",
+            "data_subject_ref and schema_ref guidance",
+            "Worker request and background job fixtures",
+        },
+        .evidence_sources = &.{
+            "packages/zigeffect/docs/agent-observable-runtime.md",
+            "packages/zigeffect/docs/operations.md",
+            "packages/zigeffect/docs/agent-guide.md",
+        },
+        .branch = "codex/zigeffect-causal-app-semantic-trace-api",
+        .agent_guidance = "Record semantic references and lineage, not raw request bodies, headers, prompts, credentials, or PII.",
+    },
+    .{
+        .id = "agent-query-interface",
+        .title = "Agent Query Interface",
+        .gap_id = "machine-native-causal-queries",
+        .priority = "P2",
+        .status = "planned",
+        .summary = "Expose compact bounded agent queries over the unified spine while preserving evidence ids, redaction state, truncation state, confidence, and next-query hints.",
+        .depends_on = &.{ "unified-causal-spine-contract", "deep-runtime-internals", "app-semantic-trace-api" },
+        .deliverables = &.{
+            "summarize_run query",
+            "find_failures query",
+            "explain_event query",
+            "trace_cause and trace_data queries",
+            "compare_runs list_findings and next_queries queries",
+            "bounded response schema",
+        },
+        .evidence_sources = &.{
+            "packages/zigeffect/tools/causal_query.zig",
+            "packages/zigeffect/docs/agent-observable-runtime.md",
+            "packages/zigeffect/docs/schema-governance.md",
+        },
+        .branch = "codex/zigeffect-causal-agent-query-interface",
+        .agent_guidance = "Agents need concise schema-stable evidence slices, not human-oriented visual graphs.",
     },
     .{
         .id = "encryption-at-rest-policy",
@@ -177,12 +274,15 @@ const backlog_items: []const BacklogItem = &.{
         .gap_id = "live-dashboards-streaming-workbench",
         .priority = "P3",
         .status = "planned",
-        .summary = "Extend the read-only SolidJS plus zig-webui workbench toward bounded live artifact streams and production dashboard views.",
-        .depends_on = &.{ "production-artifact-aggregation", "durable-production-retention", "artifact-access-control" },
+        .summary = "Extend the read-only SolidJS plus zig-webui workbench toward bounded live artifact streams, production dashboard views, and the first visual graph adapter.",
+        .depends_on = &.{ "production-artifact-aggregation", "durable-production-retention", "artifact-access-control", "unified-causal-spine-contract" },
         .deliverables = &.{
             "streaming artifact protocol",
             "read-only dashboard view",
             "bounded live-update fixture",
+            "Solid G6 graph adapter boundary",
+            "Visual Graph tab backed by the causal graph model",
+            "dagre force and radial layout fixture",
             "SolidJS workbench verification",
         },
         .evidence_sources = &.{
@@ -191,7 +291,7 @@ const backlog_items: []const BacklogItem = &.{
             "packages/zigeffect/docs/performance-budget.md",
         },
         .branch = "codex/zigeffect-causal-live-dashboard-streaming-workbench",
-        .agent_guidance = "Stay on SolidJS inside webui-dev/zig-webui and keep the bridge read-only.",
+        .agent_guidance = "Start with @dschz/solid-g6 as the Solid adapter, keep the causal graph model as source of truth, and add direct @antv/g6 usage only for missing engine APIs.",
     },
     .{
         .id = "workbench-graph-visual-debugging",
@@ -199,12 +299,16 @@ const backlog_items: []const BacklogItem = &.{
         .gap_id = "solid-workbench-graph-visual-debugging",
         .priority = "P3",
         .status = "planned",
-        .summary = "Add a dedicated read-only graph visualization layer for causal traces, runtime topology, scopes, fibers, causes, retries, and resource ownership after live streaming is stable.",
-        .depends_on = &.{"live-dashboard-streaming-workbench"},
+        .summary = "Deepen the read-only graph visualization layer for causal traces, runtime topology, scopes, fibers, causes, retries, resource ownership, and app data lineage after live streaming is stable.",
+        .depends_on = &.{ "live-dashboard-streaming-workbench", "deep-runtime-internals", "app-semantic-trace-api" },
         .deliverables = &.{
             "graph visualization dependency decision record",
             "SolidJS G6 adapter boundary",
-            "cause-chain, scope-tree, fiber-lane, and resource-ownership fixtures",
+            "dagre or hierarchical cause-chain layout",
+            "force runtime topology layout",
+            "radial scope fiber and resource ownership layout",
+            "cause-chain, scope-tree, fiber-lane, resource-ownership, and data-lineage fixtures",
+            "graph timeline and finding selection sync",
             "browser screenshot and canvas-render verification",
             "solid-flow applicability decision for later editable remediation planning",
         },
@@ -215,7 +319,30 @@ const backlog_items: []const BacklogItem = &.{
             "package.json",
         },
         .branch = "codex/zigeffect-causal-workbench-graph-visual-debugging",
-        .agent_guidance = "Prefer @dschz/solid-g6 and @antv/g6 for read-only graph exploration; treat solid-flow as optional later editor research and keep the WebUI bridge read-only.",
+        .agent_guidance = "Use the Solid G6 adapter for read-only exploration; treat solid-flow as optional later editor research and keep the WebUI bridge read-only.",
+    },
+    .{
+        .id = "human-agent-feedback-loop",
+        .title = "Human And Agent Feedback Loop",
+        .gap_id = "causal-self-improving-feedback-loop",
+        .priority = "P3",
+        .status = "planned",
+        .summary = "Connect the human workbench and agent query interface into a self-improving development loop for zigeffect and apps built on it.",
+        .depends_on = &.{ "agent-query-interface", "workbench-graph-visual-debugging", "durable-production-retention" },
+        .deliverables = &.{
+            "failure to query workflow",
+            "before after trace comparison workflow",
+            "regression clustering records",
+            "guarded remediation proposal handoff",
+            "durable history learning handoff",
+        },
+        .evidence_sources = &.{
+            "docs/superpowers/specs/2026-06-08-zigeffect-causal-agent-runtime-master-roadmap.md",
+            "packages/zigeffect/docs/agent-observable-runtime.md",
+            "packages/zigeffect/docs/operations.md",
+        },
+        .branch = "codex/zigeffect-causal-human-agent-feedback-loop",
+        .agent_guidance = "Close the loop with evidence and guarded proposals; do not grant autonomous mutation authority.",
     },
     .{
         .id = "rollout-automation-guardrails",
@@ -266,7 +393,7 @@ const backlog_items: []const BacklogItem = &.{
         .priority = "P5",
         .status = "planned",
         .summary = "Build capacity planning from real aggregation, retention, benchmark, dashboard, graph visualization, and integration evidence.",
-        .depends_on = &.{ "production-artifact-aggregation", "durable-production-retention", "wall-clock-benchmark-baselines", "live-dashboard-streaming-workbench", "workbench-graph-visual-debugging" },
+        .depends_on = &.{ "production-artifact-aggregation", "durable-production-retention", "wall-clock-benchmark-baselines", "live-dashboard-streaming-workbench", "workbench-graph-visual-debugging", "agent-query-interface", "human-agent-feedback-loop" },
         .deliverables = &.{
             "capacity model",
             "load-test fixture plan",
@@ -287,10 +414,15 @@ const dependency_order: []const []const u8 = &.{
     "durable-production-retention",
     "production-deployment-runbooks",
     "artifact-access-control",
+    "unified-causal-spine-contract",
+    "deep-runtime-internals",
+    "app-semantic-trace-api",
+    "agent-query-interface",
     "encryption-at-rest-policy",
     "alerting-integrations",
     "live-dashboard-streaming-workbench",
     "workbench-graph-visual-debugging",
+    "human-agent-feedback-loop",
     "rollout-automation-guardrails",
     "wall-clock-benchmark-baselines",
     "production-capacity-planning",
@@ -298,6 +430,8 @@ const dependency_order: []const []const u8 = &.{
 
 const verification_commands: []const []const u8 = &.{
     "cd packages/zigeffect",
+    "zig build causal-artifact-access-control",
+    "zig build causal-artifact-access-control -- --format json",
     "zig build causal-production-deployment-runbooks",
     "zig build causal-production-deployment-runbooks -- --format json",
     "zig build causal-durable-production-retention",
@@ -560,11 +694,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-artifact-access-control",
+        "start-unified-causal-spine-contract",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-artifact-access-control",
+        "codex/zigeffect-causal-unified-spine-contract",
         recommended_next_branch,
     );
 }
@@ -573,15 +707,22 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItem("production-artifact-aggregation");
     try expectBacklogItem("durable-production-retention");
     try expectBacklogItem("production-deployment-runbooks");
+    try expectBacklogItem("artifact-access-control");
+    try expectBacklogItem("unified-causal-spine-contract");
+    try expectBacklogItem("deep-runtime-internals");
+    try expectBacklogItem("app-semantic-trace-api");
+    try expectBacklogItem("agent-query-interface");
     try expectBacklogItem("live-dashboard-streaming-workbench");
     try expectBacklogItem("workbench-graph-visual-debugging");
+    try expectBacklogItem("human-agent-feedback-loop");
     try expectBacklogItem("production-capacity-planning");
 }
 
 test "production hardening backlog preserves user constraints" {
     try expectConstraint("durable storage direction: NenDB adapter only");
     try expectConstraint("workbench direction: SolidJS inside webui-dev/zig-webui");
-    try expectConstraint("visual graph debugging starts with @dschz/solid-g6 plus @antv/g6; solid-flow remains optional editor research");
+    try expectConstraint("visual graph adapter starts with @dschz/solid-g6 over @antv/g6; solid-flow remains optional editor research");
+    try expectConstraint("human workbench and agent query interface share one causal truth model but expose separate ergonomics");
     try expectNonGoal("Cockroach adapter work");
     try expectNonGoal("React workbench support");
     try expectNonGoal("production mutation authority");
@@ -593,10 +734,13 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-artifact-access-control") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-unified-spine-contract") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "artifact-access-control") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "unified-causal-spine-contract") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "agent-query-interface") != null);
 }
 
 test "production hardening backlog JSON is agent-readable" {
@@ -605,9 +749,10 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-artifact-access-control\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-unified-spine-contract\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);
 }
 
 test "production hardening backlog parses supported formats" {

@@ -103,10 +103,11 @@ replay, workbench UI, and policy-controlled remediation rather than inventing
 the core event shape.
 
 The production-hardening surface now includes deterministic contracts for
-artifact aggregation, NenDB-only durable retention, and manual production
-deployment runbooks. Agents can use those contracts to reason about deploy,
-rollback, causal verification, and incident-response readiness without
-assuming zigeffect can mutate production systems.
+artifact aggregation, NenDB-only durable retention, manual production
+deployment runbooks, and record-only artifact access control. Agents can use
+those contracts to reason about deploy, rollback, causal verification,
+incident-response readiness, visibility, and denied-view audit posture without
+assuming zigeffect can mutate production systems or enforce live RBAC.
 
 ## Two Agent Audiences
 
@@ -551,6 +552,65 @@ A local tool or MCP-style server can expose:
 This is where the idea becomes agent-native: the runtime becomes something an
 agent can ask about directly.
 
+### Dual-Interface Causal Spine
+
+The runtime should now evolve around one causal truth model with two consumer
+surfaces:
+
+- humans use the SolidJS `zig-webui` workbench to read, view, manage, and
+  understand what happened;
+- agents use a compact query interface that returns bounded graph slices,
+  evidence ids, redaction state, truncation state, confidence, diffs, and
+  recommended next queries.
+
+Both surfaces consume the same spine. They should not share the same ergonomics.
+The workbench can be rich, visual, and interactive. The agent interface should
+be concise, schema-stable, loss-aware, and easy to cite in remediation records.
+
+The spine should preserve these stable ids:
+
+- runtime ids: `run_id`, `event_id`, `parent_event_id`, `cause_id`,
+  `fiber_id`, `scope_id`, `layer_id`, `service_key`, and `resource_id`;
+- app semantic ids: `artifact_id`, `domain_entity_ref`, `data_subject_ref`,
+  and `schema_ref`.
+
+It should also normalize relationship types:
+
+- `caused_by`
+- `parent_of`
+- `requires`
+- `provides`
+- `reads`
+- `writes`
+- `transforms`
+- `emits`
+- `owns`
+- `finalizes`
+
+The store remains append-only. Redaction, sampling, retention, and derived
+indexes sit between `CausalStore` and every consumer:
+
+```mermaid
+flowchart TD
+  Runtime["Runtime internals"] --> Spine["Unified causal event spine"]
+  App["App semantic events"] --> Spine
+  Spine --> Policy["Redaction / sampling / retention"]
+  Policy --> Index["Derived indexes"]
+  Index --> Human["SolidJS zig-webui workbench"]
+  Index --> Agent["Agent query interface"]
+```
+
+The first expanded agent query surface should include:
+
+- `summarize_run(run_id)`
+- `find_failures(run_id)`
+- `explain_event(event_id)`
+- `trace_cause(event_id)`
+- `trace_data(data_subject_ref)`
+- `compare_runs(left_run_id, right_run_id)`
+- `list_findings(run_id)`
+- `next_queries(context)`
+
 ### Causal Workbench
 
 A future UI could visualize:
@@ -566,6 +626,19 @@ A future UI could visualize:
 
 This is not needed for the first implementation, but it is a strong demo and
 developer-product direction.
+
+The graph visualization path should start in the SolidJS `zig-webui` workbench
+with `@dschz/solid-g6` as the adapter over the current causal graph model. Use
+direct `@antv/g6` APIs only when the Solid adapter needs lower-level engine
+capabilities. The initial layout modes should be:
+
+- dagre or hierarchical for cause chains and parent-child event traces;
+- force for runtime topology and service dependency exploration;
+- radial for scope, fiber, and resource ownership.
+
+`solid-flow` remains a later option for editable planning or remediation
+surfaces. It should not be the default dependency for read-only causal
+dashboarding.
 
 ### OpenTelemetry Bridge
 

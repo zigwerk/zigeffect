@@ -25,10 +25,11 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-artifact-access-control` means the aggregation
-bundle contract, the NenDB-only durable-retention contract, and the manual
-production deployment runbooks now exist. The next branch should be
-`codex/zigeffect-causal-artifact-access-control`.
+The recommendation `start-unified-causal-spine-contract` means the aggregation
+bundle contract, the NenDB-only durable-retention contract, manual production
+deployment runbooks, and record-only artifact access-control contract now
+exist. The next branch should be
+`codex/zigeffect-causal-unified-spine-contract`.
 
 ## Dependency Order
 
@@ -37,14 +38,19 @@ The backlog currently orders future production-hardening branches as:
 1. `production-artifact-aggregation` delivered
 2. `durable-production-retention` delivered
 3. `production-deployment-runbooks` delivered
-4. `artifact-access-control`
-5. `encryption-at-rest-policy`
-6. `alerting-integrations`
-7. `live-dashboard-streaming-workbench`
-8. `workbench-graph-visual-debugging`
-9. `rollout-automation-guardrails`
-10. `wall-clock-benchmark-baselines`
-11. `production-capacity-planning`
+4. `artifact-access-control` delivered
+5. `unified-causal-spine-contract`
+6. `deep-runtime-internals`
+7. `app-semantic-trace-api`
+8. `agent-query-interface`
+9. `encryption-at-rest-policy`
+10. `alerting-integrations`
+11. `live-dashboard-streaming-workbench`
+12. `workbench-graph-visual-debugging`
+13. `human-agent-feedback-loop`
+14. `rollout-automation-guardrails`
+15. `wall-clock-benchmark-baselines`
+16. `production-capacity-planning`
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior.
@@ -65,15 +71,43 @@ define manual deploy, rollback, causal verification, and incident-response
 gates without adding deployment automation, rollback automation, alerting, or
 production mutation authority.
 
+Artifact access control is documented in
+[artifact-access-control.md](artifact-access-control.md). It defines visibility
+classes, role labels, permissions, decisions, denied-view fixtures, and audit
+record fields without live RBAC enforcement, identity providers, workbench
+mutation, or production mutation authority.
+
 Workbench work remains SolidJS inside `webui-dev/zig-webui`. React remains a
 non-goal unless a later adapter proves a concrete need.
 
-After the live dashboard and streaming workbench branch, add a dedicated
-read-only graph visual debugging branch. That branch should evaluate
-`@dschz/solid-g6` with `@antv/g6` as the primary SolidJS graph layer for causal
-trace, scope, fiber, cause, retry, and resource-ownership views. Treat
-`solid-flow` as optional later editor research for editable remediation planning,
-not as a default dashboard dependency.
+The next intelligence layer is a dual-interface causal spine. Humans and
+agents consume the same evidence model, but they need different surfaces. The
+SolidJS `zig-webui` workbench is the human control room for reading, viewing,
+managing, and understanding what happened. The agent interface is a compact
+query surface for bounded graph slices, evidence ids, diffs, redaction state,
+truncation state, confidence, and recommended next queries.
+
+The unified spine contract should define stable runtime ids (`run_id`,
+`event_id`, `parent_event_id`, `cause_id`, `fiber_id`, `scope_id`, `layer_id`,
+`service_key`, and `resource_id`), app semantic ids (`artifact_id`,
+`domain_entity_ref`, `data_subject_ref`, and `schema_ref`), and relationship
+types (`caused_by`, `parent_of`, `requires`, `provides`, `reads`, `writes`,
+`transforms`, `emits`, `owns`, and `finalizes`). Runtime internals and app
+semantics should emit into that spine before UI, agent, and durable-store
+projections consume it.
+
+The live dashboard and streaming workbench branch should add the first graph
+adapter boundary. Start with `@dschz/solid-g6` as the SolidJS integration layer.
+Keep the zigeffect causal graph model as the source of truth. Add direct
+`@antv/g6` usage only when the Solid adapter does not expose the required
+engine API cleanly. The first UI should be a read-only upgraded `Graph` tab or
+new `Visual Graph` tab.
+
+The dedicated graph visual debugging branch should deepen that adapter with
+layout modes: dagre or hierarchical for cause chains, force for runtime
+topology, and radial for scope, fiber, and resource ownership. Treat
+`solid-flow` as optional later editor research for editable remediation
+planning, not as a default dashboard dependency.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -86,6 +120,8 @@ the next branch:
 
 ```sh
 cd packages/zigeffect
+zig build causal-artifact-access-control
+zig build causal-artifact-access-control -- --format json
 zig build causal-production-deployment-runbooks
 zig build causal-production-deployment-runbooks -- --format json
 zig build causal-durable-production-retention

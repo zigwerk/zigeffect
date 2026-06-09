@@ -161,6 +161,15 @@ verification, and incident-response gates. It does not deploy services, roll
 back services, page humans, automate rollouts, or grant production mutation
 authority.
 
+- `zigeffect.causal.artifact-access-control.v1`
+
+The artifact-access-control report is a record-only production hardening
+contract. It consumes aggregation, durable-retention, and deployment-runbook
+contracts, then defines visibility classes, role labels, permissions, access
+decisions, denied-view fixtures, and access audit record fields. It does not
+authenticate users, enforce live RBAC, modify the workbench, or grant mutation
+authority.
+
 ### Test Coverage
 
 - `zigeffect.causal.test-matrix.v1`

@@ -637,29 +637,93 @@ Status values:
 | M6 Workbench UI | delivered | SolidJS renderer, `causal-workbench-ui`, `zig-webui` launcher, graph cause-path/runtime-lane branch, and remediation-chain branch `codex/zigeffect-causal-workbench-remediation-chain` exist | move to M7 app-facing runtime |
 | M7 App-facing runtime | delivered | `CausalAppTrace`, Worker-shaped app request example, app incident classifier, and app-specific advice/diagnosis mappings exist | move to M8 app remediation audit |
 | M8 App remediation gates | delivered | app remediation audit artifacts, app policy gate decisions, app human-review boundary artifacts, draft app patch proposal artifacts, app application readiness artifacts, guarded app application records, and detailed SolidJS/zig-webui workbench rendering exist | move to M9 production operating model |
-| M9 Operating model | delivered | completion audit, schema governance, operations docs, performance budget report, release guidance, production-hardening backlog report, production artifact aggregation contract, durable production retention contract, and production deployment runbooks exist | start artifact access control |
+| M9 Operating model | delivered | completion audit, schema governance, operations docs, performance budget report, release guidance, production-hardening backlog report, production artifact aggregation contract, durable production retention contract, production deployment runbooks, and artifact access-control contract exist | start unified causal spine |
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-causal-artifact-access-control`
-   - Consume the production artifact aggregation, durable production retention,
-     and deployment runbook contracts, then define artifact visibility,
-     permission, and access-audit rules before production sharing.
+1. `codex/zigeffect-causal-unified-spine-contract`
+   - Define the shared causal truth model that runtime internals, app semantic
+     events, human workbench views, agent queries, and durable NenDB records all
+     consume. This branch owns stable ids, relationship vocabulary, policy and
+     derived-index boundaries, and projection invariants.
 
-Follow-on production-hardening queue:
+Follow-on causal production and intelligence queue:
 
 1. `codex/zigeffect-causal-encryption-at-rest-policy`
-2. `codex/zigeffect-causal-alerting-integrations`
-3. `codex/zigeffect-causal-live-dashboard-streaming-workbench`
-4. `codex/zigeffect-causal-workbench-graph-visual-debugging`
-   - After streaming is stable, add read-only graph visual debugging for causal
-     traces, runtime topology, scopes, fibers, causes, retries, and resource
-     ownership. Prefer `@dschz/solid-g6` with `@antv/g6` as the first SolidJS
-     graph layer; keep `solid-flow` as optional later research for editable
-     remediation planning surfaces.
-5. `codex/zigeffect-causal-rollout-automation-guardrails`
-6. `codex/zigeffect-causal-wall-clock-benchmark-baselines`
-7. `codex/zigeffect-causal-production-capacity-planning`
+2. `codex/zigeffect-causal-deep-runtime-internals`
+   - Emit deeper runtime facts for layers, services, scopes, fibers, resource
+     lifetimes, retries, finalizers, defects, interruptions, and cause chains
+     through the unified causal spine.
+3. `codex/zigeffect-causal-app-semantic-trace-api`
+   - Add the app-facing semantic trace layer for `data_read`,
+     `function_boundary`, `data_transformed`, `service_call`, `data_written`,
+     `domain_action`, `policy_decision`, `artifact_emitted`, and
+     `response_sent` without recording raw payloads.
+4. `codex/zigeffect-causal-agent-query-interface`
+   - Expose compact machine-native queries over the same spine:
+     `summarize_run`, `find_failures`, `explain_event`, `trace_cause`,
+     `trace_data`, `compare_runs`, `list_findings`, and `next_queries`.
+5. `codex/zigeffect-causal-alerting-integrations`
+6. `codex/zigeffect-causal-live-dashboard-streaming-workbench`
+   - Add the read-only live workbench stream and the first visual graph adapter.
+     Start with `@dschz/solid-g6` as the SolidJS integration layer, keep the
+     zigeffect causal graph model as source of truth, and add direct
+     `@antv/g6` usage only where the adapter needs engine APIs.
+7. `codex/zigeffect-causal-workbench-graph-visual-debugging`
+   - Deepen read-only graph visual debugging for causal traces, runtime
+     topology, scopes, fibers, causes, retries, resource ownership, and semantic
+     app data lineage. Required layout modes are dagre or hierarchical for
+     cause chains, force for runtime topology, and radial for scope, fiber, and
+     resource ownership. Keep `solid-flow` as optional later research for
+     editable remediation planning surfaces, not as a default dashboard
+     dependency.
+8. `codex/zigeffect-causal-human-agent-feedback-loop`
+   - Connect the human WebUI and the agent query interface into a self-improving
+     development loop: failure-to-query, before/after trace comparison,
+     regression clustering, guarded proposal records, and durable history
+     handoff.
+9. `codex/zigeffect-causal-rollout-automation-guardrails`
+10. `codex/zigeffect-causal-wall-clock-benchmark-baselines`
+11. `codex/zigeffect-causal-production-capacity-planning`
+
+## Dual-Interface Causal Spine Expansion
+
+The next roadmap horizon is a dual-interface causal spine. Humans and agents
+consume the same evidence model, but they should not consume the same surface.
+The SolidJS `zig-webui` workbench is the human control room for reading,
+viewing, managing, and understanding what happened. The agent query interface is
+the compact machine surface for bounded graph slices, evidence ids, confidence,
+redaction state, truncation state, and recommended next queries.
+
+The shared spine owns these stable identity fields:
+
+- runtime ids: `run_id`, `event_id`, `parent_event_id`, `cause_id`,
+  `fiber_id`, `scope_id`, `layer_id`, `service_key`, and `resource_id`;
+- app ids: `artifact_id`, `domain_entity_ref`, `data_subject_ref`, and
+  `schema_ref`;
+- relationship types: `caused_by`, `parent_of`, `requires`, `provides`,
+  `reads`, `writes`, `transforms`, `emits`, `owns`, and `finalizes`.
+
+The store boundary remains append-only and policy-first:
+
+```mermaid
+flowchart TD
+  Runtime["Runtime internals"] --> Spine["Unified causal event spine"]
+  App["App semantic events"] --> Spine
+  Spine --> Policy["Redaction / sampling / retention"]
+  Policy --> Index["Derived indexes"]
+  Index --> Human["SolidJS zig-webui workbench"]
+  Index --> Agent["Agent query interface"]
+  Human --> HumanViews["Timeline / graph / lanes / findings / runbooks"]
+  Agent --> AgentViews["Bounded slices / evidence ids / diffs / next queries"]
+```
+
+The human workbench should eventually expose timeline, cause graph,
+layer/service graph, fiber lanes, scope/resource ownership, data lineage,
+findings, redaction/retention status, replay comparison, and runbook state. The
+agent interface should expose deterministic queries with bounded responses and
+stable schemas. The workbench may be rich and interactive; the agent interface
+must be concise, loss-aware, and easy to cite.
 
 ## Risks And Controls
 

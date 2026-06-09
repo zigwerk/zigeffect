@@ -103,6 +103,8 @@ zig build causal-m9-completion-audit -- --format json
 zig build causal-production-hardening-backlog
 zig build causal-production-deployment-runbooks
 zig build causal-production-deployment-runbooks -- --format json
+zig build causal-artifact-access-control
+zig build causal-artifact-access-control -- --format json
 zig build causal-workbench -- <artifact.json>
 zig build causal-workbench -- --server-only <artifact.json>
 zig build causal-workbench-ui
@@ -435,8 +437,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and recommends
-`codex/zigeffect-causal-artifact-access-control` as the next branch after
-deployment runbooks.
+`codex/zigeffect-causal-unified-spine-contract` as the next branch after
+artifact access control.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -506,8 +508,29 @@ post-action verification commands.
 Deployment and rollback execution stay outside zigeffect authority. This
 contract does not deploy services, roll back services, page humans, open live
 production telemetry, add Cockroach scope, or grant production mutation
-authority. The next branch is
-`codex/zigeffect-causal-artifact-access-control`.
+authority. Its immediate consumer is artifact access control.
+
+## Artifact Access Control
+
+Run the artifact access-control contract after deployment runbooks:
+
+```sh
+cd packages/zigeffect
+zig build causal-artifact-access-control
+zig build causal-artifact-access-control -- --format json
+```
+
+The contract records schema `zigeffect.causal.artifact-access-control.v1`,
+consumes the aggregation, durable-retention, and deployment-runbook contracts,
+and defines visibility classes, role labels, permissions, access decisions,
+denied-view fixtures, and access audit record fields. Roles are policy labels,
+not authenticated identities. Decisions are records, not live RBAC
+enforcement.
+
+This contract does not call identity providers, encrypt or decrypt artifacts,
+modify the SolidJS workbench, deploy services, roll back services, or grant
+mutation authority. The next branch is
+`codex/zigeffect-causal-unified-spine-contract`.
 
 ## Production Gaps
 
@@ -516,7 +539,7 @@ The current operating model does not provide:
 - distributed artifact aggregation;
 - durable production retention beyond local files and CI uploads;
 - alerting, paging, Slack, Linear, Jira, or SIEM integrations;
-- RBAC or access control over artifact bundles;
+- live RBAC enforcement over artifact bundles;
 - encryption-at-rest policy;
 - live dashboards or streaming workbench;
 - automated source/config mutation authority;

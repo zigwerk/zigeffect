@@ -130,5 +130,6 @@ bun run zig:test
 git diff --check
 ```
 
-The next production-hardening branch after this contract is
-`codex/zigeffect-causal-artifact-access-control`.
+The immediate production-hardening consumer after this contract is artifact
+access control. Use `zig build causal-production-hardening-backlog` for the
+current next branch.

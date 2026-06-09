@@ -637,7 +637,8 @@ metrics, and traces.
   production-hardening branch queue, NenDB-only durable direction, SolidJS plus
   `webui-dev/zig-webui` workbench direction, the post-streaming
   `workbench-graph-visual-debugging` milestone, non-goals, verification
-  commands, and the next branch `codex/zigeffect-causal-artifact-access-control`.
+  commands, and the next branch
+  `codex/zigeffect-causal-unified-spine-contract`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
@@ -651,16 +652,36 @@ metrics, and traces.
   rollback, causal verification, and incident-response gates. It consumes the
   aggregation and durable-retention contracts, keeps deploy/rollback execution
   outside zigeffect authority, and hands off to artifact access control.
+- Delivered: `causal-artifact-access-control` publishes
+  `zigeffect.causal.artifact-access-control.v1` with visibility classes, role
+  labels, permissions, access decisions, denied-view fixtures, and access audit
+  fields. It consumes the aggregation, durable-retention, and deployment-runbook
+  contracts while keeping live RBAC enforcement and mutation authority out of
+  scope.
 - Still future: production-grade app-facing integrations, durable history
   hardening, and comparing arbitrary named audit-chain snapshots.
 - Still future: deeper runtime regression scenarios for partial config and
   cause coverage.
+- Next intelligence track: build a unified causal spine that serves both deep
+  runtime internals and app-level semantic traces. Runtime events should carry
+  stable run, event, cause, fiber, scope, layer, service, and resource ids.
+  App events should carry artifact, domain entity, data subject, and schema
+  references instead of raw payloads.
+- Add a compact agent query interface over that spine with bounded responses
+  for run summaries, failures, event explanations, cause traces, data lineage,
+  run comparisons, findings, and recommended next queries. This interface is
+  separate from the human WebUI even though both consume the same causal truth
+  model.
 - Extend the SolidJS `zig-webui` causal workbench when future UI branches need
   richer effect-run, scope-tree, fiber-tree, layer-graph, retry-timeline,
   resource-ownership, and cause-tree views.
-- After live dashboard streaming, prefer `@dschz/solid-g6` plus `@antv/g6` for
-  read-only graph visual debugging in the SolidJS workbench. Keep `solid-flow`
-  as optional later research for editable remediation planning surfaces.
+- In the live dashboard streaming branch, start the graph layer with
+  `@dschz/solid-g6` as the SolidJS adapter over the current causal graph model.
+  Use direct `@antv/g6` APIs only when the adapter needs engine access. The
+  first visual graph should be read-only and support dagre or hierarchical
+  cause chains, force runtime topology, and radial scope/fiber/resource
+  ownership. Keep `solid-flow` as optional later research for editable
+  remediation planning surfaces.
 - Keep remediation controlled: agents may propose retries, graph restarts,
   provider replacement, config-layer replacement, fiber interruption, or
   deterministic replay, but arbitrary runtime memory mutation is out of scope.

@@ -810,6 +810,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_production_deployment_runbooks_tool_tests = b.addRunArtifact(causal_production_deployment_runbooks_tool_tests);
     test_step.dependOn(&run_causal_production_deployment_runbooks_tool_tests.step);
 
+    const causal_artifact_access_control_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_artifact_access_control.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_artifact_access_control_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-artifact-access-control",
+        .root_module = causal_artifact_access_control_tool_module,
+    });
+    const run_causal_artifact_access_control_tool = b.addRunArtifact(causal_artifact_access_control_tool);
+    if (b.args) |args| run_causal_artifact_access_control_tool.addArgs(args);
+    const causal_artifact_access_control_step = b.step("causal-artifact-access-control", "Print causal artifact access-control report");
+    causal_artifact_access_control_step.dependOn(&run_causal_artifact_access_control_tool.step);
+
+    const causal_artifact_access_control_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-artifact-access-control-tests",
+        .root_module = causal_artifact_access_control_tool_module,
+    });
+    const run_causal_artifact_access_control_tool_tests = b.addRunArtifact(causal_artifact_access_control_tool_tests);
+    test_step.dependOn(&run_causal_artifact_access_control_tool_tests.step);
+
     const causal_workbench_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_workbench.zig"),
         .target = target,
