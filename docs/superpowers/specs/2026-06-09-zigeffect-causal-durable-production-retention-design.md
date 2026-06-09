@@ -201,8 +201,13 @@ The contract defines backup and recovery expectations:
 
 ### Governance
 
-Register `zigeffect.causal.durable-production-retention.v1` in schema
-governance with compatibility `record-only`.
+Register both retention schemas in schema governance:
+
+- `zigeffect.causal.nendb-retention-report.v1` as a record-only backend export
+  report emitted by `CausalNendbStorageBackendState.retentionReport`;
+- `zigeffect.causal.durable-production-retention.v1` as the record-only
+  production-hardening contract emitted by
+  `causal-durable-production-retention`.
 
 Update the production hardening backlog:
 

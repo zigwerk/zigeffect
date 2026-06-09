@@ -881,6 +881,13 @@ dependency; a future wrapper can adapt `nendb.EmbeddedDB.addNode`, `addEdge`,
 and `flush` once the upstream package can be pinned cleanly. Its focused gate is
 `zig build causal-nendb-storage-backend`.
 
+The same adapter exposes `CausalNendbRetentionPolicy` and
+`CausalNendbRetentionReport` for record-only retention evaluation. The report
+uses schema `zigeffect.causal.nendb-retention-report.v1` and records retained
+event bounds, TTL policy, compaction threshold posture, and backup/recovery
+requirements without deleting, compacting, restoring, or mutating durable
+state.
+
 The concrete `async_stream` adapter is `CausalAsyncStreamBackendState`. It
 queues cloned stored events in order, optionally calls a caller-provided
 `CausalAsyncStreamSink`, and exposes `peekSnapshot`, `drain`, `clear`, and

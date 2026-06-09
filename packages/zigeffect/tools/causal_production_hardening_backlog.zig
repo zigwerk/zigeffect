@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-durable-production-retention";
-pub const recommended_next_branch = "codex/zigeffect-causal-durable-production-retention";
+pub const recommendation = "start-production-deployment-runbooks";
+pub const recommended_next_branch = "codex/zigeffect-causal-production-deployment-runbooks";
 
 const OutputFormat = enum { text, json };
 
@@ -26,6 +26,7 @@ const BacklogItem = struct {
 const global_constraints: []const []const u8 = &.{
     "durable storage direction: NenDB adapter only",
     "workbench direction: SolidJS inside webui-dev/zig-webui",
+    "visual graph debugging starts with @dschz/solid-g6 plus @antv/g6; solid-flow remains optional editor research",
     "mutation authority remains none until a reviewed authority branch grants it",
     "report is deterministic and must not inspect live systems, clocks, networks, or generated artifacts",
 };
@@ -67,8 +68,8 @@ const backlog_items: []const BacklogItem = &.{
         .title = "Durable Production Retention",
         .gap_id = "durable-production-retention",
         .priority = "P1",
-        .status = "planned",
-        .summary = "Design NenDB-backed retention policy, TTL, compaction, and recovery boundaries for aggregated causal artifacts.",
+        .status = "delivered",
+        .summary = "Defines NenDB-backed durable retention policy, TTL, compaction, backup, recovery, and verification fixture contracts for aggregated causal artifacts.",
         .depends_on = &.{"production-artifact-aggregation"},
         .deliverables = &.{
             "NenDB adapter retention contract",
@@ -82,7 +83,7 @@ const backlog_items: []const BacklogItem = &.{
             "packages/zigeffect/docs/m9-completion-audit.md",
         },
         .branch = "codex/zigeffect-causal-durable-production-retention",
-        .agent_guidance = "Use NenDB adapter work only; do not add Cockroach adapter scope.",
+        .agent_guidance = "Use causal-durable-production-retention before deployment runbooks; durable writes remain NenDB adapter work only.",
     },
     .{
         .id = "production-deployment-runbooks",
@@ -191,6 +192,30 @@ const backlog_items: []const BacklogItem = &.{
         .agent_guidance = "Stay on SolidJS inside webui-dev/zig-webui and keep the bridge read-only.",
     },
     .{
+        .id = "workbench-graph-visual-debugging",
+        .title = "Workbench Graph Visual Debugging",
+        .gap_id = "solid-workbench-graph-visual-debugging",
+        .priority = "P3",
+        .status = "planned",
+        .summary = "Add a dedicated read-only graph visualization layer for causal traces, runtime topology, scopes, fibers, causes, retries, and resource ownership after live streaming is stable.",
+        .depends_on = &.{"live-dashboard-streaming-workbench"},
+        .deliverables = &.{
+            "graph visualization dependency decision record",
+            "SolidJS G6 adapter boundary",
+            "cause-chain, scope-tree, fiber-lane, and resource-ownership fixtures",
+            "browser screenshot and canvas-render verification",
+            "solid-flow applicability decision for later editable remediation planning",
+        },
+        .evidence_sources = &.{
+            "packages/zigeffect/workbench/src/App.tsx",
+            "packages/zigeffect/workbench/src/causalArtifact.ts",
+            "packages/zigeffect/workbench/src/styles.css",
+            "package.json",
+        },
+        .branch = "codex/zigeffect-causal-workbench-graph-visual-debugging",
+        .agent_guidance = "Prefer @dschz/solid-g6 and @antv/g6 for read-only graph exploration; treat solid-flow as optional later editor research and keep the WebUI bridge read-only.",
+    },
+    .{
         .id = "rollout-automation-guardrails",
         .title = "Rollout Automation Guardrails",
         .gap_id = "gradual-rollout-automation",
@@ -238,13 +263,13 @@ const backlog_items: []const BacklogItem = &.{
         .gap_id = "production-capacity-planning",
         .priority = "P5",
         .status = "planned",
-        .summary = "Build capacity planning from real aggregation, retention, benchmark, dashboard, and integration evidence.",
-        .depends_on = &.{ "production-artifact-aggregation", "durable-production-retention", "wall-clock-benchmark-baselines", "live-dashboard-streaming-workbench" },
+        .summary = "Build capacity planning from real aggregation, retention, benchmark, dashboard, graph visualization, and integration evidence.",
+        .depends_on = &.{ "production-artifact-aggregation", "durable-production-retention", "wall-clock-benchmark-baselines", "live-dashboard-streaming-workbench", "workbench-graph-visual-debugging" },
         .deliverables = &.{
             "capacity model",
             "load-test fixture plan",
             "storage growth assumptions",
-            "workbench concurrency assumptions",
+            "workbench dashboard and graph concurrency assumptions",
         },
         .evidence_sources = &.{
             "packages/zigeffect/docs/m9-completion-audit.md",
@@ -263,6 +288,7 @@ const dependency_order: []const []const u8 = &.{
     "encryption-at-rest-policy",
     "alerting-integrations",
     "live-dashboard-streaming-workbench",
+    "workbench-graph-visual-debugging",
     "rollout-automation-guardrails",
     "wall-clock-benchmark-baselines",
     "production-capacity-planning",
@@ -270,6 +296,8 @@ const dependency_order: []const []const u8 = &.{
 
 const verification_commands: []const []const u8 = &.{
     "cd packages/zigeffect",
+    "zig build causal-durable-production-retention",
+    "zig build causal-durable-production-retention -- --format json",
     "zig build causal-production-artifact-aggregation",
     "zig build causal-production-artifact-aggregation -- --format json",
     "zig build causal-production-hardening-backlog",
@@ -528,11 +556,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-durable-production-retention",
+        "start-production-deployment-runbooks",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-durable-production-retention",
+        "codex/zigeffect-causal-production-deployment-runbooks",
         recommended_next_branch,
     );
 }
@@ -541,12 +569,14 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItem("production-artifact-aggregation");
     try expectBacklogItem("durable-production-retention");
     try expectBacklogItem("live-dashboard-streaming-workbench");
+    try expectBacklogItem("workbench-graph-visual-debugging");
     try expectBacklogItem("production-capacity-planning");
 }
 
 test "production hardening backlog preserves user constraints" {
     try expectConstraint("durable storage direction: NenDB adapter only");
     try expectConstraint("workbench direction: SolidJS inside webui-dev/zig-webui");
+    try expectConstraint("visual graph debugging starts with @dschz/solid-g6 plus @antv/g6; solid-flow remains optional editor research");
     try expectNonGoal("Cockroach adapter work");
     try expectNonGoal("React workbench support");
     try expectNonGoal("production mutation authority");
@@ -558,7 +588,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-durable-production-retention") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-production-deployment-runbooks") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
 }
@@ -569,7 +599,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-durable-production-retention\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-production-deployment-runbooks\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
 }

@@ -766,6 +766,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_production_artifact_aggregation_tool_tests = b.addRunArtifact(causal_production_artifact_aggregation_tool_tests);
     test_step.dependOn(&run_causal_production_artifact_aggregation_tool_tests.step);
 
+    const causal_durable_production_retention_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_durable_production_retention.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_durable_production_retention_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-durable-production-retention",
+        .root_module = causal_durable_production_retention_tool_module,
+    });
+    const run_causal_durable_production_retention_tool = b.addRunArtifact(causal_durable_production_retention_tool);
+    if (b.args) |args| run_causal_durable_production_retention_tool.addArgs(args);
+    const causal_durable_production_retention_step = b.step("causal-durable-production-retention", "Print causal durable production retention contract");
+    causal_durable_production_retention_step.dependOn(&run_causal_durable_production_retention_tool.step);
+
+    const causal_durable_production_retention_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-durable-production-retention-tests",
+        .root_module = causal_durable_production_retention_tool_module,
+    });
+    const run_causal_durable_production_retention_tool_tests = b.addRunArtifact(causal_durable_production_retention_tool_tests);
+    test_step.dependOn(&run_causal_durable_production_retention_tool_tests.step);
+
     const causal_workbench_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_workbench.zig"),
         .target = target,

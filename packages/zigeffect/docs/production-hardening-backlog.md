@@ -25,26 +25,26 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-durable-production-retention` means the aggregation
-bundle and source-provenance contract now exists, and the next branch should be
-`codex/zigeffect-causal-durable-production-retention`. Durable retention must
-consume the aggregation contract before writing retained records. That durable
-work remains NenDB adapter work only.
+The recommendation `start-production-deployment-runbooks` means both the
+aggregation bundle contract and the NenDB-only durable-retention contract now
+exist. The next branch should be
+`codex/zigeffect-causal-production-deployment-runbooks`.
 
 ## Dependency Order
 
 The backlog currently orders future production-hardening branches as:
 
 1. `production-artifact-aggregation` delivered
-2. `durable-production-retention`
+2. `durable-production-retention` delivered
 3. `production-deployment-runbooks`
 4. `artifact-access-control`
 5. `encryption-at-rest-policy`
 6. `alerting-integrations`
 7. `live-dashboard-streaming-workbench`
-8. `rollout-automation-guardrails`
-9. `wall-clock-benchmark-baselines`
-10. `production-capacity-planning`
+8. `workbench-graph-visual-debugging`
+9. `rollout-automation-guardrails`
+10. `wall-clock-benchmark-baselines`
+11. `production-capacity-planning`
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior.
@@ -54,8 +54,20 @@ boundaries ahead of production behavior.
 Durable database work is NenDB adapter work only. Do not use this backlog to add
 Cockroach adapter scope to zigeffect causal production hardening.
 
+Durable retention is documented in
+[durable-production-retention.md](durable-production-retention.md). It defines
+TTL, compaction, backup, recovery, and verification fixture contracts without
+adding live ingestion or production mutation authority.
+
 Workbench work remains SolidJS inside `webui-dev/zig-webui`. React remains a
 non-goal unless a later adapter proves a concrete need.
+
+After the live dashboard and streaming workbench branch, add a dedicated
+read-only graph visual debugging branch. That branch should evaluate
+`@dschz/solid-g6` with `@antv/g6` as the primary SolidJS graph layer for causal
+trace, scope, fiber, cause, retry, and resource-ownership views. Treat
+`solid-flow` as optional later editor research for editable remediation planning,
+not as a default dashboard dependency.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -68,6 +80,8 @@ the next branch:
 
 ```sh
 cd packages/zigeffect
+zig build causal-durable-production-retention
+zig build causal-durable-production-retention -- --format json
 zig build causal-production-artifact-aggregation
 zig build causal-production-artifact-aggregation -- --format json
 zig build causal-production-hardening-backlog

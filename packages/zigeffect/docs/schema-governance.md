@@ -75,10 +75,12 @@ mapping, or agent handoff, also update [operations.md](operations.md).
 - `zigeffect.causal.otel_record.v1`
 - `zigeffect.causal.nendb_node.v1`
 - `zigeffect.causal.nendb_edge.v1`
+- `zigeffect.causal.nendb-retention-report.v1`
 
 Backend export schemas are sink contracts. They are guarded by backend
 conformance, adapter, bounded-history, and redaction tests rather than by core
-causal query compatibility.
+causal query compatibility. The NenDB retention report is record-only evidence
+derived from adapter-owned history and policy, not a durable mutation command.
 
 ### App Runtime
 
@@ -141,6 +143,14 @@ fields, privacy review gates, and a deterministic local/CI sample bundle for
 future durable retention, access control, workbench, integration, benchmark,
 and capacity planning branches. It does not ingest live production telemetry or
 write durable storage.
+
+- `zigeffect.causal.durable-production-retention.v1`
+
+The durable-production-retention report is a record-only production hardening
+contract. It consumes the production artifact aggregation schema and defines
+the NenDB-only TTL, compaction, backup, recovery, retained-bundle fixture, and
+verification expectations. It does not ingest live telemetry, enforce TTL from
+wall-clock time, restore production data, or grant mutation authority.
 
 ### Test Coverage
 

@@ -432,7 +432,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and recommends
-`codex/zigeffect-causal-durable-production-retention` as the next branch.
+`codex/zigeffect-causal-production-deployment-runbooks` as the next branch
+after durable retention.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -454,6 +455,30 @@ bundle semantics, source provenance fields, privacy review gates, and a
 deterministic local/CI multi-source fixture. It is not live ingestion, durable
 storage, dashboarding, alerting, access control, encryption, rollout
 automation, or mutation authority.
+
+## Durable Production Retention
+
+Run the durable production retention contract after artifact aggregation and
+before production deployment runbooks:
+
+```sh
+cd packages/zigeffect
+zig build causal-durable-production-retention
+zig build causal-durable-production-retention -- --format json
+```
+
+The contract records schema
+`zigeffect.causal.durable-production-retention.v1`, consumes
+`zigeffect.causal.production-artifact-aggregation.v1`, and defines the
+NenDB-only retention policy for reviewed aggregation bundles. It names TTL,
+compaction, backup, recovery, privacy gates, retained source fixtures, and the
+next branch `codex/zigeffect-causal-production-deployment-runbooks`.
+
+TTL remains policy-only here because causal events do not carry wall-clock
+capture timestamps and deterministic tools do not inspect clocks. Recovery
+evidence must prove queryable causal lineage after restore. This contract does
+not scan artifacts, write durable production state, restore data, open
+dashboards, add Cockroach scope, or grant mutation authority.
 
 ## Production Gaps
 

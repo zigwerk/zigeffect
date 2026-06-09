@@ -7,6 +7,8 @@ pub const causal_nendb_node_schema = "zigeffect.causal.nendb_node.v1";
 pub const causal_nendb_node_schema_version: u32 = 1;
 pub const causal_nendb_edge_schema = "zigeffect.causal.nendb_edge.v1";
 pub const causal_nendb_edge_schema_version: u32 = 1;
+pub const causal_nendb_retention_report_schema = "zigeffect.causal.nendb-retention-report.v1";
+pub const causal_nendb_retention_report_schema_version: u32 = 1;
 
 pub const CausalNendbNode = struct {
     id: u64,
@@ -36,6 +38,30 @@ pub const CausalNendbGraphWriter = struct {
 
 pub const CausalNendbStorageBackendOptions = struct {
     max_events: ?usize = null,
+};
+
+pub const CausalNendbRetentionPolicy = struct {
+    max_events: ?usize = null,
+    ttl_days: ?u32 = null,
+    compaction_trigger_events: ?usize = null,
+    compact_to_events: ?usize = null,
+    backup_required: bool = false,
+    recovery_required: bool = false,
+};
+
+pub const CausalNendbRetentionReport = struct {
+    schema: []const u8 = causal_nendb_retention_report_schema,
+    schema_version: u32 = causal_nendb_retention_report_schema_version,
+    retained_events: usize = 0,
+    max_events: ?usize = null,
+    ttl_days: ?u32 = null,
+    compaction_trigger_events: ?usize = null,
+    compact_to_events: ?usize = null,
+    compaction_required: bool = false,
+    backup_required: bool = false,
+    recovery_required: bool = false,
+    oldest_retained_event_id: ?u64 = null,
+    newest_retained_event_id: ?u64 = null,
 };
 
 pub const CausalNendbStorageBackendError = error{
@@ -93,6 +119,25 @@ pub const CausalNendbStorageBackendState = struct {
 
     pub fn flushedCount(self: *const CausalNendbStorageBackendState) u64 {
         return self.flushed_count;
+    }
+
+    pub fn retentionReport(
+        self: *const CausalNendbStorageBackendState,
+        policy: CausalNendbRetentionPolicy,
+    ) CausalNendbRetentionReport {
+        const retained_events = self.events.items.len;
+        return .{
+            .retained_events = retained_events,
+            .max_events = policy.max_events,
+            .ttl_days = policy.ttl_days,
+            .compaction_trigger_events = policy.compaction_trigger_events,
+            .compact_to_events = policy.compact_to_events,
+            .compaction_required = isCompactionRequired(retained_events, policy.compaction_trigger_events),
+            .backup_required = policy.backup_required,
+            .recovery_required = policy.recovery_required,
+            .oldest_retained_event_id = self.oldestRetainedEventId(),
+            .newest_retained_event_id = self.newestRetainedEventId(),
+        };
     }
 
     pub fn flush(self: *CausalNendbStorageBackendState) anyerror!void {
@@ -165,6 +210,16 @@ pub const CausalNendbStorageBackendState = struct {
             if (event.id == event_id) return event;
         }
         return null;
+    }
+
+    fn oldestRetainedEventId(self: *const CausalNendbStorageBackendState) ?u64 {
+        if (self.events.items.len == 0) return null;
+        return self.events.items[0].id;
+    }
+
+    fn newestRetainedEventId(self: *const CausalNendbStorageBackendState) ?u64 {
+        if (self.events.items.len == 0) return null;
+        return self.events.items[self.events.items.len - 1].id;
     }
 
     fn appendCauseChain(
@@ -300,6 +355,11 @@ fn stableHash32(value: []const u8) u32 {
         hash *%= 16777619;
     }
     return hash;
+}
+
+fn isCompactionRequired(retained_events: usize, trigger: ?usize) bool {
+    const threshold = trigger orelse return false;
+    return retained_events > threshold;
 }
 
 fn cloneSlice(allocator: Allocator, value: []const u8) Allocator.Error![]const u8 {

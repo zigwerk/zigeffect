@@ -637,14 +637,31 @@ Status values:
 | M6 Workbench UI | delivered | SolidJS renderer, `causal-workbench-ui`, `zig-webui` launcher, graph cause-path/runtime-lane branch, and remediation-chain branch `codex/zigeffect-causal-workbench-remediation-chain` exist | move to M7 app-facing runtime |
 | M7 App-facing runtime | delivered | `CausalAppTrace`, Worker-shaped app request example, app incident classifier, and app-specific advice/diagnosis mappings exist | move to M8 app remediation audit |
 | M8 App remediation gates | delivered | app remediation audit artifacts, app policy gate decisions, app human-review boundary artifacts, draft app patch proposal artifacts, app application readiness artifacts, guarded app application records, and detailed SolidJS/zig-webui workbench rendering exist | move to M9 production operating model |
-| M9 Operating model | delivered | completion audit, schema governance, operations docs, performance budget report, release guidance, production-hardening backlog report, and production artifact aggregation contract exist | start durable production retention |
+| M9 Operating model | delivered | completion audit, schema governance, operations docs, performance budget report, release guidance, production-hardening backlog report, production artifact aggregation contract, and durable production retention contract exist | start production deployment runbooks |
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-causal-durable-production-retention`
-   - Consume the production artifact aggregation bundle contract and design
-     NenDB-backed durable retention policy, TTL, compaction, and recovery
-     boundaries for retained causal artifact bundles.
+1. `codex/zigeffect-causal-production-deployment-runbooks`
+   - Consume the production artifact aggregation and durable production
+     retention contracts, then write reviewed deploy, rollback, verification,
+     and incident-response runbooks without granting deployment mutation
+     authority.
+
+Follow-on production-hardening queue:
+
+1. `codex/zigeffect-causal-artifact-access-control`
+2. `codex/zigeffect-causal-encryption-at-rest-policy`
+3. `codex/zigeffect-causal-alerting-integrations`
+4. `codex/zigeffect-causal-live-dashboard-streaming-workbench`
+5. `codex/zigeffect-causal-workbench-graph-visual-debugging`
+   - After streaming is stable, add read-only graph visual debugging for causal
+     traces, runtime topology, scopes, fibers, causes, retries, and resource
+     ownership. Prefer `@dschz/solid-g6` with `@antv/g6` as the first SolidJS
+     graph layer; keep `solid-flow` as optional later research for editable
+     remediation planning surfaces.
+6. `codex/zigeffect-causal-rollout-automation-guardrails`
+7. `codex/zigeffect-causal-wall-clock-benchmark-baselines`
+8. `codex/zigeffect-causal-production-capacity-planning`
 
 ## Risks And Controls
 

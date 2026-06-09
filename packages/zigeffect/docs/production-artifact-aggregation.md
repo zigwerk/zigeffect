@@ -24,9 +24,9 @@ artifacts, ingest production telemetry, write durable records, open dashboards,
 page humans, enforce access control, encrypt data, deploy changes, or grant
 mutation authority.
 
-Use the report before implementing durable production retention. Durable
-retention must consume the bundle contract instead of inventing its own source
-shape.
+Use the report before durable production retention. The
+`causal-durable-production-retention` report consumes this bundle contract
+instead of inventing its own source shape.
 
 ## Bundle Contract
 
@@ -93,6 +93,11 @@ shape without depending on generated files.
 Durable follow-up work remains NenDB adapter work only. This contract does not
 add a Cockroach adapter.
 
+Durable retention is documented in
+[durable-production-retention.md](durable-production-retention.md). It defines
+the NenDB-only TTL, compaction, backup, recovery, and retained-bundle fixture
+contract that consumes this aggregation shape.
+
 Workbench follow-up work remains SolidJS inside `webui-dev/zig-webui`. This
 contract does not add React workbench support.
 
@@ -107,6 +112,7 @@ Run:
 cd packages/zigeffect
 zig build causal-production-artifact-aggregation
 zig build causal-production-artifact-aggregation -- --format json
+zig build causal-durable-production-retention
 zig build causal-production-hardening-backlog
 zig build causal-schema-governance
 zig build examples

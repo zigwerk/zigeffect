@@ -24,7 +24,8 @@
 - Modify `packages/zigeffect/build.zig`
   - Wires `zig build causal-durable-production-retention` and tool tests.
 - Modify `packages/zigeffect/tools/causal_schema_governance.zig`
-  - Registers `zigeffect.causal.durable-production-retention.v1`.
+  - Registers `zigeffect.causal.nendb-retention-report.v1` and
+    `zigeffect.causal.durable-production-retention.v1`.
 - Modify `packages/zigeffect/tools/causal_production_hardening_backlog.zig`
   - Marks durable production retention delivered and points to deployment
     runbooks.
@@ -419,6 +420,16 @@ Add entry:
 
 ```zig
 .{
+    .schema = "zigeffect.causal.nendb-retention-report.v1",
+    .version = 1,
+    .category = "backend-export",
+    .status = "current",
+    .emitted_by = &.{"CausalNenDbStorageBackend.retentionReport"},
+    .consumed_by = &.{ "causal-durable-production-retention", "NenDB adapter tests", "agents" },
+    .compatibility = &.{"record-only"},
+    .governance_requirements = &.{ "NenDB retention tests", "durable retention docs", "schema governance entry" },
+},
+.{
     .schema = "zigeffect.causal.durable-production-retention.v1",
     .version = 1,
     .category = "production-hardening",
@@ -430,7 +441,8 @@ Add entry:
 },
 ```
 
-Update schema count from 35 to 36 and add text/JSON assertions.
+Update schema count from 35 to 37 and add text/JSON assertions for both new
+schemas.
 
 - [ ] **Step 2: Update production backlog constants and item state**
 
@@ -463,7 +475,7 @@ zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 ```
 
-Expected: governance reports schema count 36 and backlog reports next branch
+Expected: governance reports schema count 37 and backlog reports next branch
 `codex/zigeffect-causal-production-deployment-runbooks`.
 
 ## Task 6: Write Durable Retention Docs

@@ -635,12 +635,18 @@ metrics, and traces.
 - Delivered: `causal-production-hardening-backlog` publishes
   `zigeffect.causal.production-hardening-backlog.v1` with the ordered
   production-hardening branch queue, NenDB-only durable direction, SolidJS plus
-  `webui-dev/zig-webui` workbench direction, non-goals, verification commands,
-  and the next branch `codex/zigeffect-causal-durable-production-retention`.
+  `webui-dev/zig-webui` workbench direction, the post-streaming
+  `workbench-graph-visual-debugging` milestone, non-goals, verification
+  commands, and the next branch
+  `codex/zigeffect-causal-production-deployment-runbooks`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
   multi-source fixture, and durable-retention handoff.
+- Delivered: `causal-durable-production-retention` publishes
+  `zigeffect.causal.durable-production-retention.v1` with the NenDB-only
+  retention policy, TTL and compaction thresholds, backup and recovery
+  expectations, retained-bundle fixture, and deployment-runbooks handoff.
 - Still future: production-grade app-facing integrations, durable history
   hardening, and comparing arbitrary named audit-chain snapshots.
 - Still future: deeper runtime regression scenarios for partial config and
@@ -648,6 +654,9 @@ metrics, and traces.
 - Extend the SolidJS `zig-webui` causal workbench when future UI branches need
   richer effect-run, scope-tree, fiber-tree, layer-graph, retry-timeline,
   resource-ownership, and cause-tree views.
+- After live dashboard streaming, prefer `@dschz/solid-g6` plus `@antv/g6` for
+  read-only graph visual debugging in the SolidJS workbench. Keep `solid-flow`
+  as optional later research for editable remediation planning surfaces.
 - Keep remediation controlled: agents may propose retries, graph restarts,
   provider replacement, config-layer replacement, fiber interruption, or
   deterministic replay, but arbitrary runtime memory mutation is out of scope.

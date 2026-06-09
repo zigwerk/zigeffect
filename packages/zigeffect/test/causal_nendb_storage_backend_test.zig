@@ -261,3 +261,48 @@ test "nendb storage backend flush invokes optional writer hook" {
     try std.testing.expectEqual(@as(u64, 1), fake.flush_count);
     try std.testing.expectEqual(@as(u64, 1), backend_state.flushedCount());
 }
+
+test "nendb storage retention report derives policy and event bounds" {
+    var fake = FakeNendbWriter.init(std.testing.allocator);
+    defer fake.deinit();
+    var backend_state = fx.CausalNendbStorageBackendState.init(std.testing.allocator, fake.writer(), .{});
+    defer backend_state.deinit();
+
+    var store = fx.CausalStore.init(std.testing.allocator);
+    store.attachBackend(backend_state.backend());
+    defer store.deinit();
+
+    const root = try store.record(.{
+        .kind = .run_started,
+        .run_id = 7,
+        .label = "retained-root",
+    });
+    const child = try store.record(.{
+        .kind = .effect_completed,
+        .run_id = 7,
+        .parent_id = root,
+        .label = "retained-child",
+    });
+
+    const report = backend_state.retentionReport(.{
+        .max_events = 16,
+        .ttl_days = 14,
+        .compaction_trigger_events = 1,
+        .compact_to_events = 1,
+        .backup_required = true,
+        .recovery_required = true,
+    });
+
+    try std.testing.expectEqualStrings(fx.causal_nendb_retention_report_schema, report.schema);
+    try std.testing.expectEqual(@as(u32, 1), report.schema_version);
+    try std.testing.expectEqual(@as(usize, 2), report.retained_events);
+    try std.testing.expectEqual(@as(?usize, 16), report.max_events);
+    try std.testing.expectEqual(@as(?u32, 14), report.ttl_days);
+    try std.testing.expectEqual(@as(?usize, 1), report.compaction_trigger_events);
+    try std.testing.expectEqual(@as(?usize, 1), report.compact_to_events);
+    try std.testing.expectEqual(true, report.compaction_required);
+    try std.testing.expectEqual(true, report.backup_required);
+    try std.testing.expectEqual(true, report.recovery_required);
+    try std.testing.expectEqual(@as(?u64, root), report.oldest_retained_event_id);
+    try std.testing.expectEqual(@as(?u64, child), report.newest_retained_event_id);
+}

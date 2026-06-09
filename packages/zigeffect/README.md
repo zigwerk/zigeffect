@@ -189,7 +189,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-durable-production-retention` as the next branch.
+`codex/zigeffect-causal-production-deployment-runbooks` as the next branch
+after durable retention.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in
@@ -210,6 +211,22 @@ deterministic multi-source fixture for future durable retention. It does not
 ingest production telemetry, write durable storage, open dashboards, or grant
 mutation authority. The full policy is in
 [docs/production-artifact-aggregation.md](docs/production-artifact-aggregation.md).
+
+Print the causal durable production retention contract:
+
+```bash
+cd packages/zigeffect
+zig build causal-durable-production-retention
+zig build causal-durable-production-retention -- --format json
+```
+
+The contract uses schema
+`zigeffect.causal.durable-production-retention.v1`, consumes the artifact
+aggregation contract, and defines the NenDB-only TTL, compaction, backup,
+recovery, and retained-bundle fixture policy before deployment runbooks. It
+does not ingest live telemetry, restore production data, add Cockroach scope,
+or grant mutation authority. The full policy is in
+[docs/durable-production-retention.md](docs/durable-production-retention.md).
 
 Open the read-only SolidJS causal workbench for a saved artifact:
 
