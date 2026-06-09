@@ -53,15 +53,123 @@ pub const MessageSubmitResult = struct {
     }
 };
 
+const StoredMessage = struct {
+    envelope: MessageEnvelope,
+    status: MessageDeliveryStatus = .pending,
+};
+
 pub const MessageDeliveryTracker = struct {
     allocator: Allocator,
+    messages: std.ArrayList(StoredMessage) = .empty,
+    replies: std.ArrayList(MessageEnvelope) = .empty,
 
     pub fn init(allocator: Allocator) MessageDeliveryTracker {
         return .{ .allocator = allocator };
     }
 
     pub fn deinit(self: *MessageDeliveryTracker) void {
-        _ = self;
+        for (self.messages.items) |stored| {
+            deinitMessageEnvelope(self.allocator, stored.envelope);
+        }
+        self.messages.deinit(self.allocator);
+        for (self.replies.items) |reply| {
+            deinitMessageEnvelope(self.allocator, reply);
+        }
+        self.replies.deinit(self.allocator);
+    }
+
+    pub fn submit(self: *MessageDeliveryTracker, envelope: MessageEnvelope) Allocator.Error!MessageSubmitResult {
+        if (self.findDuplicate(envelope)) |stored| {
+            return .{
+                .envelope = try cloneMessageEnvelope(self.allocator, stored.envelope),
+                .duplicate = true,
+            };
+        }
+
+        const owned = try self.prepareEnvelope(envelope);
+        errdefer deinitMessageEnvelope(self.allocator, owned);
+        const returned = try cloneMessageEnvelope(self.allocator, owned);
+        errdefer deinitMessageEnvelope(self.allocator, returned);
+        try self.messages.append(self.allocator, .{ .envelope = owned });
+        return .{ .envelope = returned };
+    }
+
+    pub fn claimNext(self: *MessageDeliveryTracker, address: EntityAddress) (Allocator.Error || MessageDeliveryError)!MessageEnvelope {
+        for (self.messages.items) |*stored| {
+            if (!stored.envelope.address.eql(address)) continue;
+            if (stored.status == .acknowledged) continue;
+            stored.status = .claimed;
+            stored.envelope.attempt += 1;
+            return cloneMessageEnvelope(self.allocator, stored.envelope);
+        }
+        return error.MessageNotFound;
+    }
+
+    pub fn ack(self: *MessageDeliveryTracker, message_id: MessageId) MessageDeliveryError!void {
+        for (self.messages.items) |*stored| {
+            if (stored.envelope.id == message_id) {
+                stored.status = .acknowledged;
+                return;
+            }
+        }
+        return error.MessageNotFound;
+    }
+
+    pub fn storeReply(self: *MessageDeliveryTracker, reply: MessageEnvelope) (Allocator.Error || MessageDeliveryError)!MessageEnvelope {
+        const correlation_id = reply.correlation_id orelse return error.MissingRequest;
+        if (self.findRequestByCorrelation(correlation_id) == null) return error.MissingRequest;
+        if (self.findReplyByCorrelation(correlation_id) != null) return error.DuplicateReply;
+
+        const owned = try self.prepareEnvelope(reply);
+        errdefer deinitMessageEnvelope(self.allocator, owned);
+        const returned = try cloneMessageEnvelope(self.allocator, owned);
+        errdefer deinitMessageEnvelope(self.allocator, returned);
+        try self.replies.append(self.allocator, owned);
+        return returned;
+    }
+
+    pub fn pendingCount(self: *const MessageDeliveryTracker, address: EntityAddress) usize {
+        var count: usize = 0;
+        for (self.messages.items) |stored| {
+            if (!stored.envelope.address.eql(address)) continue;
+            if (stored.status == .acknowledged) continue;
+            count += 1;
+        }
+        return count;
+    }
+
+    fn findDuplicate(self: *const MessageDeliveryTracker, envelope: MessageEnvelope) ?StoredMessage {
+        for (self.messages.items) |stored| {
+            if (stored.envelope.kind != envelope.kind) continue;
+            if (!stored.envelope.address.eql(envelope.address)) continue;
+            if (!std.mem.eql(u8, stored.envelope.idempotency_key, envelope.idempotency_key)) continue;
+            return stored;
+        }
+        return null;
+    }
+
+    fn findRequestByCorrelation(self: *const MessageDeliveryTracker, correlation_id: MessageCorrelationId) ?StoredMessage {
+        for (self.messages.items) |stored| {
+            if (stored.envelope.kind != .request) continue;
+            if (stored.envelope.correlation_id == correlation_id) return stored;
+        }
+        return null;
+    }
+
+    fn findReplyByCorrelation(self: *const MessageDeliveryTracker, correlation_id: MessageCorrelationId) ?MessageEnvelope {
+        for (self.replies.items) |reply| {
+            if (reply.correlation_id == correlation_id) return reply;
+        }
+        return null;
+    }
+
+    fn prepareEnvelope(self: *MessageDeliveryTracker, envelope: MessageEnvelope) Allocator.Error!MessageEnvelope {
+        var owned = try cloneMessageEnvelope(self.allocator, envelope);
+        owned.id = if (owned.id == 0) computedMessageId(owned) else owned.id;
+        if (owned.kind == .request and owned.correlation_id == null) {
+            owned.correlation_id = messageCorrelationId(owned.id);
+        }
+        return owned;
     }
 };
 
@@ -81,6 +189,17 @@ pub fn messageId(address: EntityAddress, kind: MessageEnvelopeKind, idempotency_
 
 pub fn messageCorrelationId(message_id: MessageId) MessageCorrelationId {
     return message_id;
+}
+
+fn computedMessageId(envelope: MessageEnvelope) MessageId {
+    var key_buf: [20]u8 = undefined;
+    const key = if (envelope.idempotency_key.len > 0)
+        envelope.idempotency_key
+    else if (envelope.correlation_id) |correlation_id|
+        std.fmt.bufPrint(&key_buf, "{d}", .{correlation_id}) catch unreachable
+    else
+        "";
+    return messageId(envelope.address, envelope.kind, key);
 }
 
 pub fn cloneMessageEnvelope(allocator: Allocator, envelope: MessageEnvelope) Allocator.Error!MessageEnvelope {
@@ -112,7 +231,7 @@ pub fn deinitMessageEnvelope(allocator: Allocator, envelope: MessageEnvelope) vo
 pub fn formatMessageDiagnostic(allocator: Allocator, envelope: MessageEnvelope) Allocator.Error![]const u8 {
     return std.fmt.allocPrint(
         allocator,
-        "zigeffect message\nid: {d}\nkind: {s}\nentity: {s}/{d}\ncorrelation: {?d}\nattempt: {d}\ntype: {s}\ndetail: {s}",
+        "zigeffect message\nid: {d}\nkind: {s}\nentity: {s}/{d}\ncorrelation: {?d}\nattempt: {d}\nchunk: {d}/{d}\ntype: {s}\ndetail: {s}",
         .{
             envelope.id,
             @tagName(envelope.kind),
@@ -120,6 +239,8 @@ pub fn formatMessageDiagnostic(allocator: Allocator, envelope: MessageEnvelope) 
             envelope.address.id,
             envelope.correlation_id,
             envelope.attempt,
+            envelope.chunk_index orelse 0,
+            envelope.chunk_count orelse 0,
             envelope.payload_type_name,
             envelope.redacted_detail,
         },
