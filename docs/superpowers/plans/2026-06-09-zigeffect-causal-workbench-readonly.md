@@ -12,7 +12,9 @@ application hosted by `zig-webui`.
 `packages/zigeffect/workbench` and owns the UI/model. The Zig host lives under
 `packages/zigeffect/tools`, reads exactly one selected artifact with a bounded
 limit, exposes it to the renderer through read-only WebUI bindings, and opens
-the built app with `zig build causal-workbench -- <artifact.json>`.
+the built app with `zig build causal-workbench -- <artifact.json>`. The launcher
+also supports `--server-only` for deterministic local browser inspection and
+falls back to a local WebUI server URL if native window launch is unavailable.
 
 **Tech Stack:** Bun, Vite, SolidJS, TypeScript, Zig 0.16, `webui-dev/zig-webui`,
 existing zigeffect causal artifacts. No Cockroach work. Future durable indexing
@@ -202,6 +204,9 @@ feat(zigeffect): add solid causal workbench renderer
 Tests should cover:
 
 - `usage()` includes `zig build causal-workbench -- <artifact.json>`;
+- `usage()` includes `zig build causal-workbench -- --server-only <artifact.json>`;
+- launch argument parsing accepts normal window mode and explicit server-only
+  mode;
 - stable `default_workbench_root`;
 - stable `default_index_path`;
 - `workbench_schema = "zigeffect.causal.workbench-session.v1"`;
@@ -282,6 +287,8 @@ Implement:
 - root folder set to `workbench/dist`;
 - window size and title;
 - `index.html` launch;
+- local WebUI server fallback if native window launch fails;
+- explicit `--server-only` mode for agent/browser smoke testing;
 - no writeback operations.
 
 - [ ] **Step 3: Wire build steps**
@@ -302,9 +309,13 @@ Run:
 cd packages/zigeffect
 zig build causal-test
 zig build causal-workbench -- .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json
+zig build causal-workbench -- --server-only .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json
 ```
 
-Expected: the workbench opens in a WebUI browser/WebView window.
+Expected: the workbench opens in a WebUI browser/WebView window when available.
+In environments where native launch is unavailable, the command prints a local
+WebUI server URL. `--server-only` always starts the local read-only server and
+prints the URL for deterministic agent/browser inspection.
 
 - [ ] **Step 5: Commit**
 
@@ -334,6 +345,7 @@ Document:
 cd packages/zigeffect
 zig build causal-test
 zig build causal-workbench -- .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json
+zig build causal-workbench -- --server-only .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json
 ```
 
 - [ ] **Step 2: Document safety boundary**

@@ -18,12 +18,46 @@ fn failUsage() noreturn {
     std.process.exit(1);
 }
 
+fn printLastWebuiError(prefix: []const u8) void {
+    const info = webui.getLastError();
+    if (info.msg.len == 0) return;
+
+    std.debug.print("{s}: webui error {d}: {s}\n", .{ prefix, info.num, info.msg });
+}
+
+fn startServer(window: *webui) !void {
+    const url = try window.startServer("index.html");
+    std.debug.print("zigeffect causal workbench server: {s}\n", .{url});
+}
+
+fn configureWindow(window: *webui) !void {
+    _ = try window.binding("zigeffect_load_artifact", loadArtifact);
+    _ = try window.binding("zigeffect_load_session", loadSession);
+    try window.setRootFolder(workbench_session.default_workbench_root);
+    window.setSize(1280, 860);
+}
+
+fn launch(window: *webui, mode: workbench_session.LaunchMode) !void {
+    switch (mode) {
+        .server_only => try startServer(window),
+        .window => window.show("index.html") catch |err| switch (err) {
+            error.ShowError => {
+                printLastWebuiError("causal workbench window launch failed; serving read-only UI instead");
+                var server_window = webui.newWindow();
+                try configureWindow(&server_window);
+                try startServer(&server_window);
+            },
+            else => return err,
+        },
+    }
+}
+
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
     const args = try init.minimal.args.toSlice(init.arena.allocator());
-    if (args.len != 2) failUsage();
+    const launch_options = workbench_session.parseLaunchArgs(args) orelse failUsage();
 
-    const artifact_path = args[1];
+    const artifact_path = launch_options.artifact_path;
     const artifact_json = workbench_session.readArtifactBounded(
         init.io,
         allocator,
@@ -52,12 +86,11 @@ pub fn main(init: std.process.Init) !void {
     session_payload = try allocator.dupeZ(u8, session_json);
     defer allocator.free(session_payload);
 
+    webui.setConfig(.multi_client, true);
+
     var window = webui.newWindow();
-    _ = try window.binding("zigeffect_load_artifact", loadArtifact);
-    _ = try window.binding("zigeffect_load_session", loadSession);
-    try window.setRootFolder(workbench_session.default_workbench_root);
-    window.setSize(1280, 860);
-    try window.show("index.html");
+    try configureWindow(&window);
+    try launch(&window, launch_options.mode);
 
     webui.wait();
     webui.clean();

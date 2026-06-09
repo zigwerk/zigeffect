@@ -142,13 +142,17 @@ Open the read-only SolidJS causal workbench for a saved artifact:
 cd packages/zigeffect
 zig build causal-test
 zig build causal-workbench -- .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json
+zig build causal-workbench -- --server-only .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json
 ```
 
 `causal-workbench` builds the SolidJS renderer with Bun/Vite, opens it through
 `zig-webui`, and exposes the selected artifact through a bounded read-only Zig
 bridge. The workbench has timeline, findings, relationship, query, metadata,
 and inspector views. It does not edit source, update the scenario registry,
-make policy decisions, or write remediation artifacts.
+make policy decisions, or write remediation artifacts. When a native browser or
+WebView cannot be opened, the launcher falls back to a local WebUI server URL;
+`--server-only` starts that local read-only server directly for agent/browser
+inspection.
 
 Print the causal artifact retention manifest for agents and CI:
 

@@ -8,13 +8,46 @@ pub const supported_causal_schema = "zigeffect.causal.v1";
 pub const supported_causal_schema_version: u32 = 1;
 pub const supported_event_taxonomy_version: u32 = 1;
 
+pub const LaunchMode = enum {
+    window,
+    server_only,
+};
+
+pub const LaunchOptions = struct {
+    mode: LaunchMode,
+    artifact_path: [:0]const u8,
+};
+
 pub const SessionOptions = struct {
     artifact_path: []const u8,
     artifact_bytes: usize,
 };
 
 pub fn usage() []const u8 {
-    return "usage: zig build causal-workbench -- <artifact.json>\n";
+    return
+        \\usage:
+        \\  zig build causal-workbench -- <artifact.json>
+        \\  zig build causal-workbench -- --server-only <artifact.json>
+        \\
+    ;
+}
+
+pub fn parseLaunchArgs(args: []const [:0]const u8) ?LaunchOptions {
+    if (args.len == 2) {
+        return .{
+            .mode = .window,
+            .artifact_path = args[1],
+        };
+    }
+
+    if (args.len == 3 and std.mem.eql(u8, args[1], "--server-only")) {
+        return .{
+            .mode = .server_only,
+            .artifact_path = args[2],
+        };
+    }
+
+    return null;
 }
 
 pub fn formatSessionJson(allocator: std.mem.Allocator, options: SessionOptions) ![]u8 {
@@ -75,6 +108,33 @@ fn appendJsonString(allocator: std.mem.Allocator, output: *std.ArrayList(u8), va
 
 test "workbench usage names the launcher command" {
     try std.testing.expect(std.mem.indexOf(u8, usage(), "zig build causal-workbench -- <artifact.json>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, usage(), "--server-only") != null);
+}
+
+test "launch args default to window mode" {
+    const args = [_][:0]const u8{ "zigeffect-causal-workbench", "artifact.json" };
+    const options = parseLaunchArgs(&args).?;
+
+    try std.testing.expectEqual(LaunchMode.window, options.mode);
+    try std.testing.expectEqualStrings("artifact.json", options.artifact_path);
+}
+
+test "launch args accept explicit server-only mode" {
+    const args = [_][:0]const u8{ "zigeffect-causal-workbench", "--server-only", "artifact.json" };
+    const options = parseLaunchArgs(&args).?;
+
+    try std.testing.expectEqual(LaunchMode.server_only, options.mode);
+    try std.testing.expectEqualStrings("artifact.json", options.artifact_path);
+}
+
+test "launch args reject unknown shapes" {
+    const missing = [_][:0]const u8{"zigeffect-causal-workbench"};
+    const unknown_flag = [_][:0]const u8{ "zigeffect-causal-workbench", "--browser", "artifact.json" };
+    const too_many = [_][:0]const u8{ "zigeffect-causal-workbench", "--server-only", "artifact.json", "extra.json" };
+
+    try std.testing.expect(parseLaunchArgs(&missing) == null);
+    try std.testing.expect(parseLaunchArgs(&unknown_flag) == null);
+    try std.testing.expect(parseLaunchArgs(&too_many) == null);
 }
 
 test "workbench constants are stable" {

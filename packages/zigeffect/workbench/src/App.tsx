@@ -7,26 +7,9 @@ import {
   parseArtifactJson,
   queryCommandsForEvent,
 } from "./causalArtifact";
+import { loadPayload, type WorkbenchSession } from "./workbenchBridge";
 
 type Tab = "timeline" | "findings" | "graph" | "queries" | "metadata";
-
-type WorkbenchSession = {
-  schema?: string;
-  artifact_path?: string;
-  artifact_bytes?: number;
-  read_only?: boolean;
-  warnings?: string[];
-};
-
-type LoadedPayload = {
-  artifactJson: string;
-  session: WorkbenchSession | null;
-};
-
-type BridgeWindow = Window & {
-  zigeffect_load_artifact?: () => string | Promise<string>;
-  zigeffect_load_session?: () => string | Promise<string>;
-};
 
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: "timeline", label: "Timeline" },
@@ -501,62 +484,4 @@ function groupedValues(events: CausalEvent[], key: "scopeId" | "fiberId") {
     key: groupKey,
     events: groupEvents,
   }));
-}
-
-async function loadPayload(): Promise<LoadedPayload> {
-  await ensureWebuiScript();
-
-  const bridge = window as BridgeWindow;
-  const session = await loadSession(bridge);
-
-  if (typeof bridge.zigeffect_load_artifact === "function") {
-    return {
-      artifactJson: await Promise.resolve(bridge.zigeffect_load_artifact()),
-      session,
-    };
-  }
-
-  const response = await fetch("./sample-artifact.json");
-  return {
-    artifactJson: await response.text(),
-    session: {
-      schema: "zigeffect.causal.workbench-session.v1",
-      artifact_path: "sample-artifact.json",
-      read_only: true,
-      warnings: ["development sample artifact"],
-    },
-  };
-}
-
-async function loadSession(bridge: BridgeWindow): Promise<WorkbenchSession | null> {
-  if (typeof bridge.zigeffect_load_session !== "function") {
-    return null;
-  }
-
-  try {
-    const sessionJson = await Promise.resolve(bridge.zigeffect_load_session());
-    return JSON.parse(sessionJson) as WorkbenchSession;
-  } catch {
-    return {
-      schema: "zigeffect.causal.workbench-session.v1",
-      read_only: true,
-      warnings: ["workbench session bridge returned invalid JSON"],
-    };
-  }
-}
-
-async function ensureWebuiScript(): Promise<void> {
-  const existing = document.querySelector<HTMLScriptElement>('script[data-zigeffect-webui="true"]');
-  if (existing) {
-    return;
-  }
-
-  await new Promise<void>((resolve) => {
-    const script = document.createElement("script");
-    script.src = "/webui.js";
-    script.dataset.zigeffectWebui = "true";
-    script.onload = () => resolve();
-    script.onerror = () => resolve();
-    document.head.append(script);
-  });
 }

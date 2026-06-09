@@ -44,10 +44,13 @@ local Zig host.
   ```sh
   cd packages/zigeffect
   zig build causal-workbench -- .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json
+  zig build causal-workbench -- --server-only .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json
   ```
 
 - Build a SolidJS app under `packages/zigeffect/workbench`.
 - Launch the built app through `zig-webui`.
+- Support a deterministic `--server-only` mode for agent/browser inspection,
+  and fall back to a local WebUI server URL if native window launch fails.
 - Load one selected causal artifact through a Zig-owned read-only bridge.
 - Render a real first-screen application, not a landing page.
 - Provide views for:
@@ -133,19 +136,21 @@ normal Zig tests. It will provide:
 
 `causal_workbench.zig` will import WebUI and the pure session module. It will:
 
-1. accept exactly one artifact path;
+1. accept one artifact path, plus optional `--server-only`;
 2. read the artifact with the session module's bounded limit;
 3. allocate null-terminated payload strings for WebUI responses;
 4. create a WebUI window;
 5. bind read-only functions such as `zigeffect_load_artifact` and
    `zigeffect_load_session`;
 6. set the root folder to `workbench/dist`;
-7. show `index.html`;
+7. show `index.html` or start a local WebUI server for `--server-only`;
 8. wait for the window to close;
 9. never write artifacts, source files, registry entries, or policy decisions.
 
 The WebUI host should use the browser/WebView runtime only as a GUI. It must not
-turn the workbench into a networked service or an action executor.
+turn the workbench into a networked action service or executor. The server-only
+path is local, read-only, and exists to make smoke tests and agent inspection
+deterministic.
 
 ## Solid Renderer
 
@@ -290,12 +295,13 @@ bun run zigeffect:workbench:typecheck
 bun run zigeffect:workbench:build
 cd packages/zigeffect && zig build test-raw --summary none
 cd packages/zigeffect && zig build causal-workbench -- .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json
+cd packages/zigeffect && zig build causal-workbench -- --server-only .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json
 ```
 
 Manual/browser verification should cover:
 
 - generate a dogfood artifact with `zig build causal-test`;
-- launch the WebUI workbench;
+- launch the WebUI workbench in normal mode and server-only mode;
 - verify the page is nonblank;
 - verify tabs render;
 - verify events appear;
