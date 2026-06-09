@@ -104,10 +104,12 @@ the core event shape.
 
 The production-hardening surface now includes deterministic contracts for
 artifact aggregation, NenDB-only durable retention, manual production
-deployment runbooks, and record-only artifact access control. Agents can use
-those contracts to reason about deploy, rollback, causal verification,
-incident-response readiness, visibility, and denied-view audit posture without
-assuming zigeffect can mutate production systems or enforce live RBAC.
+deployment runbooks, record-only artifact access control, and the unified
+causal spine. Agents can use those contracts to reason about deploy, rollback,
+causal verification, incident-response readiness, visibility, denied-view audit
+posture, shared ids, relationship vocabulary, projection boundaries, and next
+runtime work without assuming zigeffect can mutate production systems or
+enforce live RBAC.
 
 ## Two Agent Audiences
 
@@ -554,7 +556,16 @@ agent can ask about directly.
 
 ### Dual-Interface Causal Spine
 
-The runtime should now evolve around one causal truth model with two consumer
+The unified spine contract now exists as
+`zigeffect.causal.unified-spine-contract.v1` and is printed by:
+
+```sh
+cd packages/zigeffect
+zig build causal-unified-spine-contract
+zig build causal-unified-spine-contract -- --format json
+```
+
+The runtime should evolve around this one causal truth model with two consumer
 surfaces:
 
 - humans use the SolidJS `zig-webui` workbench to read, view, manage, and
@@ -567,14 +578,14 @@ Both surfaces consume the same spine. They should not share the same ergonomics.
 The workbench can be rich, visual, and interactive. The agent interface should
 be concise, schema-stable, loss-aware, and easy to cite in remediation records.
 
-The spine should preserve these stable ids:
+The spine preserves these stable ids:
 
 - runtime ids: `run_id`, `event_id`, `parent_event_id`, `cause_id`,
   `fiber_id`, `scope_id`, `layer_id`, `service_key`, and `resource_id`;
 - app semantic ids: `artifact_id`, `domain_entity_ref`, `data_subject_ref`,
   and `schema_ref`.
 
-It should also normalize relationship types:
+It also normalizes relationship types:
 
 - `caused_by`
 - `parent_of`
@@ -588,7 +599,8 @@ It should also normalize relationship types:
 - `finalizes`
 
 The store remains append-only. Redaction, sampling, retention, and derived
-indexes sit between `CausalStore` and every consumer:
+indexes sit between `CausalStore` and every consumer. NenDB records are durable
+projections, not source-of-truth events:
 
 ```mermaid
 flowchart TD

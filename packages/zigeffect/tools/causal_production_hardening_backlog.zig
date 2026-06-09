@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-unified-causal-spine-contract";
-pub const recommended_next_branch = "codex/zigeffect-causal-unified-spine-contract";
+pub const recommendation = "start-deep-runtime-internals";
+pub const recommended_next_branch = "codex/zigeffect-causal-deep-runtime-internals";
 
 const OutputFormat = enum { text, json };
 
@@ -137,7 +137,7 @@ const backlog_items: []const BacklogItem = &.{
         .title = "Unified Causal Spine Contract",
         .gap_id = "dual-interface-causal-spine",
         .priority = "P2",
-        .status = "planned",
+        .status = "delivered",
         .summary = "Define one stable causal truth model for runtime internals, app semantic events, human workbench views, agent queries, and durable NenDB graph records.",
         .depends_on = &.{ "production-artifact-aggregation", "durable-production-retention", "artifact-access-control" },
         .deliverables = &.{
@@ -148,6 +148,8 @@ const backlog_items: []const BacklogItem = &.{
             "derived index contract",
         },
         .evidence_sources = &.{
+            "packages/zigeffect/tools/causal_unified_spine_contract.zig",
+            "packages/zigeffect/docs/unified-spine-contract.md",
             "packages/zigeffect/docs/agent-observable-runtime.md",
             "packages/zigeffect/docs/schema-governance.md",
             "packages/zigeffect/docs/production-hardening-backlog.md",
@@ -432,6 +434,8 @@ const verification_commands: []const []const u8 = &.{
     "cd packages/zigeffect",
     "zig build causal-artifact-access-control",
     "zig build causal-artifact-access-control -- --format json",
+    "zig build causal-unified-spine-contract",
+    "zig build causal-unified-spine-contract -- --format json",
     "zig build causal-production-deployment-runbooks",
     "zig build causal-production-deployment-runbooks -- --format json",
     "zig build causal-durable-production-retention",
@@ -694,11 +698,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-unified-causal-spine-contract",
+        "start-deep-runtime-internals",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-unified-spine-contract",
+        "codex/zigeffect-causal-deep-runtime-internals",
         recommended_next_branch,
     );
 }
@@ -734,7 +738,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-unified-spine-contract") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-deep-runtime-internals") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -749,7 +753,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-unified-spine-contract\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-deep-runtime-internals\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);

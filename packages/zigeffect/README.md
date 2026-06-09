@@ -189,8 +189,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-unified-spine-contract` as the next branch after
-artifact access control.
+`codex/zigeffect-causal-deep-runtime-internals` as the next branch after the
+unified causal spine contract.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in
@@ -256,9 +256,27 @@ The contract uses schema `zigeffect.causal.artifact-access-control.v1`,
 consumes the aggregation, durable-retention, and deployment-runbook contracts,
 and defines visibility classes, roles, permissions, access decisions, denied
 fixtures, and audit record fields without live RBAC enforcement or production
-mutation authority. The next branch is
-`codex/zigeffect-causal-unified-spine-contract`. The full policy is in
+mutation authority. This contract handed off to
+`codex/zigeffect-causal-unified-spine-contract`; use the production-hardening
+backlog for the current next branch. The full policy is in
 [docs/artifact-access-control.md](docs/artifact-access-control.md).
+
+Print the causal unified spine contract:
+
+```bash
+cd packages/zigeffect
+zig build causal-unified-spine-contract
+zig build causal-unified-spine-contract -- --format json
+```
+
+The contract uses schema `zigeffect.causal.unified-spine-contract.v1` and
+defines the canonical runtime ids, app semantic ids, relationship taxonomy,
+policy boundary, derived index families, and projection contracts shared by
+deep runtime internals, app semantic tracing, agent queries, the SolidJS
+`zig-webui` workbench, and NenDB adapter projection. It hands off to
+`codex/zigeffect-causal-deep-runtime-internals` without changing live runtime
+emission or granting mutation authority. The full policy is in
+[docs/unified-spine-contract.md](docs/unified-spine-contract.md).
 
 Open the read-only SolidJS causal workbench for a saved artifact:
 

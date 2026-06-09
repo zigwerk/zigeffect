@@ -637,32 +637,24 @@ Status values:
 | M6 Workbench UI | delivered | SolidJS renderer, `causal-workbench-ui`, `zig-webui` launcher, graph cause-path/runtime-lane branch, and remediation-chain branch `codex/zigeffect-causal-workbench-remediation-chain` exist | move to M7 app-facing runtime |
 | M7 App-facing runtime | delivered | `CausalAppTrace`, Worker-shaped app request example, app incident classifier, and app-specific advice/diagnosis mappings exist | move to M8 app remediation audit |
 | M8 App remediation gates | delivered | app remediation audit artifacts, app policy gate decisions, app human-review boundary artifacts, draft app patch proposal artifacts, app application readiness artifacts, guarded app application records, and detailed SolidJS/zig-webui workbench rendering exist | move to M9 production operating model |
-| M9 Operating model | delivered | completion audit, schema governance, operations docs, performance budget report, release guidance, production-hardening backlog report, production artifact aggregation contract, durable production retention contract, production deployment runbooks, and artifact access-control contract exist | start unified causal spine |
+| M9 Operating model | delivered | completion audit, schema governance, operations docs, performance budget report, release guidance, production-hardening backlog report, production artifact aggregation contract, durable production retention contract, production deployment runbooks, artifact access-control contract, and unified causal spine contract exist | start deep runtime internals |
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-causal-unified-spine-contract`
-   - Define the shared causal truth model that runtime internals, app semantic
-     events, human workbench views, agent queries, and durable NenDB records all
-     consume. This branch owns stable ids, relationship vocabulary, policy and
-     derived-index boundaries, and projection invariants.
-
-Follow-on causal production and intelligence queue:
-
-1. `codex/zigeffect-causal-encryption-at-rest-policy`
-2. `codex/zigeffect-causal-deep-runtime-internals`
+1. `codex/zigeffect-causal-deep-runtime-internals`
    - Emit deeper runtime facts for layers, services, scopes, fibers, resource
      lifetimes, retries, finalizers, defects, interruptions, and cause chains
      through the unified causal spine.
-3. `codex/zigeffect-causal-app-semantic-trace-api`
+2. `codex/zigeffect-causal-app-semantic-trace-api`
    - Add the app-facing semantic trace layer for `data_read`,
      `function_boundary`, `data_transformed`, `service_call`, `data_written`,
      `domain_action`, `policy_decision`, `artifact_emitted`, and
      `response_sent` without recording raw payloads.
-4. `codex/zigeffect-causal-agent-query-interface`
+3. `codex/zigeffect-causal-agent-query-interface`
    - Expose compact machine-native queries over the same spine:
      `summarize_run`, `find_failures`, `explain_event`, `trace_cause`,
      `trace_data`, `compare_runs`, `list_findings`, and `next_queries`.
+4. `codex/zigeffect-causal-encryption-at-rest-policy`
 5. `codex/zigeffect-causal-alerting-integrations`
 6. `codex/zigeffect-causal-live-dashboard-streaming-workbench`
    - Add the read-only live workbench stream and the first visual graph adapter.
@@ -688,12 +680,14 @@ Follow-on causal production and intelligence queue:
 
 ## Dual-Interface Causal Spine Expansion
 
-The next roadmap horizon is a dual-interface causal spine. Humans and agents
-consume the same evidence model, but they should not consume the same surface.
-The SolidJS `zig-webui` workbench is the human control room for reading,
-viewing, managing, and understanding what happened. The agent query interface is
-the compact machine surface for bounded graph slices, evidence ids, confidence,
-redaction state, truncation state, and recommended next queries.
+The dual-interface causal spine now has a concrete contract:
+`zigeffect.causal.unified-spine-contract.v1`, emitted by
+`zig build causal-unified-spine-contract`. Humans and agents consume the same
+evidence model, but they should not consume the same surface. The SolidJS
+`zig-webui` workbench is the human control room for reading, viewing, managing,
+and understanding what happened. The agent query interface is the compact
+machine surface for bounded graph slices, evidence ids, confidence, redaction
+state, truncation state, and recommended next queries.
 
 The shared spine owns these stable identity fields:
 

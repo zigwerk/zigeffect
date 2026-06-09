@@ -638,7 +638,7 @@ metrics, and traces.
   `webui-dev/zig-webui` workbench direction, the post-streaming
   `workbench-graph-visual-debugging` milestone, non-goals, verification
   commands, and the next branch
-  `codex/zigeffect-causal-unified-spine-contract`.
+  `codex/zigeffect-causal-deep-runtime-internals`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
@@ -658,15 +658,19 @@ metrics, and traces.
   fields. It consumes the aggregation, durable-retention, and deployment-runbook
   contracts while keeping live RBAC enforcement and mutation authority out of
   scope.
+- Delivered: `causal-unified-spine-contract` publishes
+  `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
+  semantic ids, relationship taxonomy, policy stages, derived index families,
+  consumer contracts, and fixture mappings. It is the handoff into
+  `codex/zigeffect-causal-deep-runtime-internals`.
 - Still future: production-grade app-facing integrations, durable history
   hardening, and comparing arbitrary named audit-chain snapshots.
 - Still future: deeper runtime regression scenarios for partial config and
   cause coverage.
-- Next intelligence track: build a unified causal spine that serves both deep
-  runtime internals and app-level semantic traces. Runtime events should carry
-  stable run, event, cause, fiber, scope, layer, service, and resource ids.
-  App events should carry artifact, domain entity, data subject, and schema
-  references instead of raw payloads.
+- Next intelligence track: emit deeper runtime facts through the unified causal
+  spine. Runtime events should carry stable run, event, cause, fiber, scope,
+  layer, service, and resource ids. App events should carry artifact, domain
+  entity, data subject, and schema references instead of raw payloads.
 - Add a compact agent query interface over that spine with bounded responses
   for run summaries, failures, event explanations, cause traces, data lineage,
   run comparisons, findings, and recommended next queries. This interface is

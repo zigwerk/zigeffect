@@ -105,6 +105,8 @@ zig build causal-production-deployment-runbooks
 zig build causal-production-deployment-runbooks -- --format json
 zig build causal-artifact-access-control
 zig build causal-artifact-access-control -- --format json
+zig build causal-unified-spine-contract
+zig build causal-unified-spine-contract -- --format json
 zig build causal-workbench -- <artifact.json>
 zig build causal-workbench -- --server-only <artifact.json>
 zig build causal-workbench-ui
@@ -437,8 +439,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and recommends
-`codex/zigeffect-causal-unified-spine-contract` as the next branch after
-artifact access control.
+`codex/zigeffect-causal-deep-runtime-internals` as the next branch after the
+unified causal spine contract.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -529,8 +531,31 @@ enforcement.
 
 This contract does not call identity providers, encrypt or decrypt artifacts,
 modify the SolidJS workbench, deploy services, roll back services, or grant
-mutation authority. The next branch is
-`codex/zigeffect-causal-unified-spine-contract`.
+mutation authority. This contract handed off to
+`codex/zigeffect-causal-unified-spine-contract`; use
+`causal-production-hardening-backlog` for the current next branch.
+
+## Unified Causal Spine Contract
+
+Run the unified causal spine contract after artifact access control and before
+deep runtime internals:
+
+```sh
+cd packages/zigeffect
+zig build causal-unified-spine-contract
+zig build causal-unified-spine-contract -- --format json
+```
+
+The contract records schema `zigeffect.causal.unified-spine-contract.v1`,
+consumes the current runtime, app-runtime, access-control, and NenDB projection
+contracts, and defines canonical runtime ids, app semantic ids, relationship
+types, policy stages, derived index families, consumer contracts, and fixture
+mappings.
+
+This contract is the handoff into
+`codex/zigeffect-causal-deep-runtime-internals`. It does not change live
+runtime emission, implement app trace APIs, write NenDB, add Cockroach scope,
+switch the workbench to React, or grant mutation authority.
 
 ## Production Gaps
 

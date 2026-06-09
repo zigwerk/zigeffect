@@ -832,6 +832,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_artifact_access_control_tool_tests = b.addRunArtifact(causal_artifact_access_control_tool_tests);
     test_step.dependOn(&run_causal_artifact_access_control_tool_tests.step);
 
+    const causal_unified_spine_contract_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_unified_spine_contract.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_unified_spine_contract_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-unified-spine-contract",
+        .root_module = causal_unified_spine_contract_tool_module,
+    });
+    const run_causal_unified_spine_contract_tool = b.addRunArtifact(causal_unified_spine_contract_tool);
+    if (b.args) |args| run_causal_unified_spine_contract_tool.addArgs(args);
+    const causal_unified_spine_contract_step = b.step("causal-unified-spine-contract", "Print causal unified spine contract");
+    causal_unified_spine_contract_step.dependOn(&run_causal_unified_spine_contract_tool.step);
+
+    const causal_unified_spine_contract_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-unified-spine-contract-tests",
+        .root_module = causal_unified_spine_contract_tool_module,
+    });
+    const run_causal_unified_spine_contract_tool_tests = b.addRunArtifact(causal_unified_spine_contract_tool_tests);
+    test_step.dependOn(&run_causal_unified_spine_contract_tool_tests.step);
+
     const causal_workbench_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_workbench.zig"),
         .target = target,

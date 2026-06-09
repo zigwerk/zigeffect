@@ -135,4 +135,5 @@ bun run zig:test
 git diff --check
 ```
 
-The next branch is `codex/zigeffect-causal-unified-spine-contract`.
+This contract handed off to `codex/zigeffect-causal-unified-spine-contract`.
+Use `causal-production-hardening-backlog` for the current next branch.

@@ -25,11 +25,11 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-unified-causal-spine-contract` means the aggregation
-bundle contract, the NenDB-only durable-retention contract, manual production
-deployment runbooks, and record-only artifact access-control contract now
-exist. The next branch should be
-`codex/zigeffect-causal-unified-spine-contract`.
+The recommendation `start-deep-runtime-internals` means the aggregation bundle
+contract, the NenDB-only durable-retention contract, manual production
+deployment runbooks, record-only artifact access-control contract, and unified
+causal spine contract now exist. The next branch should be
+`codex/zigeffect-causal-deep-runtime-internals`.
 
 ## Dependency Order
 
@@ -39,7 +39,7 @@ The backlog currently orders future production-hardening branches as:
 2. `durable-production-retention` delivered
 3. `production-deployment-runbooks` delivered
 4. `artifact-access-control` delivered
-5. `unified-causal-spine-contract`
+5. `unified-causal-spine-contract` delivered
 6. `deep-runtime-internals`
 7. `app-semantic-trace-api`
 8. `agent-query-interface`
@@ -80,21 +80,22 @@ mutation, or production mutation authority.
 Workbench work remains SolidJS inside `webui-dev/zig-webui`. React remains a
 non-goal unless a later adapter proves a concrete need.
 
-The next intelligence layer is a dual-interface causal spine. Humans and
-agents consume the same evidence model, but they need different surfaces. The
-SolidJS `zig-webui` workbench is the human control room for reading, viewing,
-managing, and understanding what happened. The agent interface is a compact
-query surface for bounded graph slices, evidence ids, diffs, redaction state,
-truncation state, confidence, and recommended next queries.
-
-The unified spine contract should define stable runtime ids (`run_id`,
-`event_id`, `parent_event_id`, `cause_id`, `fiber_id`, `scope_id`, `layer_id`,
-`service_key`, and `resource_id`), app semantic ids (`artifact_id`,
-`domain_entity_ref`, `data_subject_ref`, and `schema_ref`), and relationship
-types (`caused_by`, `parent_of`, `requires`, `provides`, `reads`, `writes`,
-`transforms`, `emits`, `owns`, and `finalizes`). Runtime internals and app
-semantics should emit into that spine before UI, agent, and durable-store
+The unified causal spine is documented in
+[unified-spine-contract.md](unified-spine-contract.md). It defines stable
+runtime ids (`run_id`, `event_id`, `parent_event_id`, `cause_id`, `fiber_id`,
+`scope_id`, `layer_id`, `service_key`, and `resource_id`), app semantic ids
+(`artifact_id`, `domain_entity_ref`, `data_subject_ref`, and `schema_ref`), and
+relationship types (`caused_by`, `parent_of`, `requires`, `provides`, `reads`,
+`writes`, `transforms`, `emits`, `owns`, and `finalizes`). Runtime internals and
+app semantics should emit into that spine before UI, agent, and durable-store
 projections consume it.
+
+Humans and agents consume the same evidence model, but they need different
+surfaces. The SolidJS `zig-webui` workbench is the human control room for
+reading, viewing, managing, and understanding what happened. The agent
+interface is a compact query surface for bounded graph slices, evidence ids,
+diffs, redaction state, truncation state, confidence, and recommended next
+queries.
 
 The live dashboard and streaming workbench branch should add the first graph
 adapter boundary. Start with `@dschz/solid-g6` as the SolidJS integration layer.
@@ -122,6 +123,8 @@ the next branch:
 cd packages/zigeffect
 zig build causal-artifact-access-control
 zig build causal-artifact-access-control -- --format json
+zig build causal-unified-spine-contract
+zig build causal-unified-spine-contract -- --format json
 zig build causal-production-deployment-runbooks
 zig build causal-production-deployment-runbooks -- --format json
 zig build causal-durable-production-retention

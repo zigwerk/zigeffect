@@ -47,6 +47,8 @@ mapping, or agent handoff, also update [operations.md](operations.md).
 - `sink-contract`: emitted for downstream backend/export systems.
 - `record-only`: records review/application state without mutating source.
 - `viewer-session`: read-only local workbench/session operating state.
+- `spine-contract`: defines shared identity and relationship vocabulary without
+  changing source event emission.
 
 ## New Schema Checklist
 
@@ -169,6 +171,16 @@ contracts, then defines visibility classes, role labels, permissions, access
 decisions, denied-view fixtures, and access audit record fields. It does not
 authenticate users, enforce live RBAC, modify the workbench, or grant mutation
 authority.
+
+- `zigeffect.causal.unified-spine-contract.v1`
+
+The unified-spine-contract report is a record-only production hardening
+contract. It defines the canonical runtime ids, app semantic ids, relationship
+taxonomy, policy boundary, derived index families, and projection rules shared
+by deep runtime internals, app semantic traces, agent queries, the SolidJS
+`zig-webui` workbench, and NenDB adapter projections. It does not change live
+runtime emission, implement app trace APIs, write durable storage, or grant
+mutation authority.
 
 ### Test Coverage
 
