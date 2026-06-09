@@ -3,6 +3,35 @@ const fx = @import("zigeffect");
 const causal = @import("support/causal_assertions.zig");
 const fixtures = @import("support/fixtures.zig");
 
+test "runtime suspension names durable wait boundary" {
+    const suspension = fx.Suspension{
+        .kind = .timer,
+        .id = 42,
+        .label = "wake-up",
+    };
+    const decision = fx.RuntimeDecision{ .suspended = suspension };
+
+    switch (decision) {
+        .suspended => |value| {
+            try std.testing.expectEqual(fx.SuspensionKind.timer, value.kind);
+            try std.testing.expectEqual(@as(u64, 42), value.id);
+            try std.testing.expectEqualStrings("wake-up", value.label);
+        },
+        else => return error.Empty,
+    }
+}
+
+test "cancellation is cooperative and reason preserving" {
+    var cancellation = fx.Cancellation.init();
+    try std.testing.expect(!cancellation.isRequested());
+    try std.testing.expect(cancellation.reason() == null);
+
+    cancellation.request("workflow interrupted");
+
+    try std.testing.expect(cancellation.isRequested());
+    try std.testing.expectEqualStrings("workflow interrupted", cancellation.reason().?);
+}
+
 test "runtime automatically closes scoped resources after success" {
     var env = try fx.TestEnv.init(std.testing.allocator);
     defer env.deinit();

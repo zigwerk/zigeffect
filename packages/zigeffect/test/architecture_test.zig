@@ -28,6 +28,26 @@ test "runtime backend boundary exposes deterministic capabilities" {
     try std.testing.expect(!backend.can_interrupt_blocking_io);
     try std.testing.expect(!backend.can_supervise);
     try std.testing.expect(!backend.can_parallel);
+    try std.testing.expect(!backend.can_persist);
+    try std.testing.expect(!backend.can_distribute);
+
+    const durable = fx.durableLocalBackend();
+    try std.testing.expectEqual(fx.BackendKind.durable_local, durable.kind);
+    try std.testing.expect(durable.can_suspend);
+    try std.testing.expect(durable.can_persist);
+    try std.testing.expect(!durable.can_distribute);
+
+    const async_backend = fx.asyncLocalBackend();
+    try std.testing.expectEqual(fx.BackendKind.async_local, async_backend.kind);
+    try std.testing.expect(async_backend.can_suspend);
+    try std.testing.expect(async_backend.can_interrupt_blocking_io);
+    try std.testing.expect(async_backend.can_parallel);
+
+    const clustered = fx.clusteredBackend();
+    try std.testing.expectEqual(fx.BackendKind.clustered, clustered.kind);
+    try std.testing.expect(clustered.can_suspend);
+    try std.testing.expect(clustered.can_persist);
+    try std.testing.expect(clustered.can_distribute);
 
     var env = try fx.TestEnv.init(std.testing.allocator);
     defer env.deinit();
