@@ -8,6 +8,7 @@ const traits_mod = @import("../traits/root.zig");
 const deferred_mod = @import("deferred.zig");
 const durable_clock_mod = @import("clock.zig");
 const journal_mod = @import("journal.zig");
+const queue_mod = @import("queue.zig");
 const signal_mod = @import("signal.zig");
 const store_mod = @import("store.zig");
 
@@ -22,10 +23,12 @@ pub const Schedule = schedule_mod.Schedule;
 pub const Suspension = control_mod.Suspension;
 pub const TimerSleepResult = durable_clock_mod.TimerSleepResult;
 pub const SignalWaitResult = signal_mod.SignalWaitResult;
+pub const QueueAwaitResult = queue_mod.QueueAwaitResult;
 pub const WorkflowId = journal_mod.WorkflowId;
 pub const ExecutionId = journal_mod.ExecutionId;
 pub const ActivityId = journal_mod.ActivityId;
 pub const TimerId = journal_mod.TimerId;
+pub const QueueId = journal_mod.QueueId;
 pub const CompensationId = journal_mod.CompensationId;
 pub const JournalSequence = journal_mod.JournalSequence;
 pub const WorkflowStepCause = result_mod.Cause(anyerror);
@@ -279,6 +282,50 @@ pub const WorkflowContext = struct {
         } };
     }
 
+    pub fn queue(
+        self: *WorkflowContext,
+        comptime QueueType: type,
+        payload_codec: anytype,
+        result_codec: anytype,
+        payload: QueueType.PayloadType,
+    ) !QueueAwaitResult(QueueType.SuccessType, QueueType.FailureType) {
+        const item_id = try QueueType.deriveItemId(self.allocator, payload);
+        var events = try self.journal_store.readAll(self.allocator);
+        defer events.deinit();
+
+        if (queueCompletedEvent(events.events, self.workflow_id, self.execution_id, item_id)) |event| {
+            if (!queueAcked(events.events, self.workflow_id, self.execution_id, item_id)) {
+                try self.appendQueueEvent(.queue_acked, item_id, QueueType.name, "acked", "");
+            }
+            return .{ .completed = try result_codec.decodeValue(self.allocator, event.redacted_detail) };
+        }
+
+        if (queueFailedEvent(events.events, self.workflow_id, self.execution_id, item_id)) |event| {
+            if (!queueAcked(events.events, self.workflow_id, self.execution_id, item_id)) {
+                try self.appendQueueEvent(.queue_acked, item_id, QueueType.name, "acked", "");
+            }
+            const failure = activityFailureFromDetail(QueueType.FailureType, event.redacted_detail) orelse
+                return error.RecordedActivityFailureParseFailed;
+            return .{ .failed = failure };
+        }
+
+        if (!queueOffered(events.events, self.workflow_id, self.execution_id, item_id)) {
+            const encoded = try payload_codec.encodeValue(self.allocator, payload);
+            defer self.allocator.free(encoded);
+            try self.appendQueueEvent(.queue_offered, item_id, QueueType.name, "offered", encoded);
+        }
+
+        if (!queueSuspensionExists(events.events, self.workflow_id, self.execution_id, item_id)) {
+            try self.appendQueueEvent(.workflow_suspended, item_id, QueueType.name, "waiting", "queue");
+        }
+
+        return .{ .suspended = .{
+            .kind = .queue,
+            .id = item_id,
+            .label = QueueType.name,
+        } };
+    }
+
     fn recordedStepU64(self: *const WorkflowContext, label: []const u8) !?u64 {
         for (self.replay_events.events) |event| {
             if (event.kind == .step_completed and
@@ -450,6 +497,32 @@ pub const WorkflowContext = struct {
                 .workflow_id = self.workflow_id,
                 .execution_id = self.execution_id,
                 .timer_id = id,
+                .name = name,
+                .status = status,
+                .redacted_detail = redacted_detail,
+                .idempotency_key = idempotency_key,
+            },
+        });
+        self.next_sequence += 1;
+    }
+
+    fn appendQueueEvent(
+        self: *WorkflowContext,
+        kind: journal_mod.WorkflowEventKind,
+        id: QueueId,
+        name: []const u8,
+        status: []const u8,
+        redacted_detail: []const u8,
+    ) !void {
+        const idempotency_key = try queueEventIdempotencyKey(self.allocator, kind, id, self.next_sequence);
+        defer self.allocator.free(idempotency_key);
+        _ = try self.journal_store.append(.{
+            .event = .{
+                .sequence = self.next_sequence,
+                .kind = kind,
+                .workflow_id = self.workflow_id,
+                .execution_id = self.execution_id,
+                .queue_id = id,
                 .name = name,
                 .status = status,
                 .redacted_detail = redacted_detail,
@@ -814,6 +887,25 @@ fn timerFireAtDetail(allocator: Allocator, fire_at_ms: u64) Allocator.Error![]co
     return std.fmt.allocPrint(allocator, "fire_at_ms={d}", .{fire_at_ms});
 }
 
+fn queueEventIdempotencyKey(
+    allocator: Allocator,
+    kind: journal_mod.WorkflowEventKind,
+    id: QueueId,
+    sequence: JournalSequence,
+) Allocator.Error![]const u8 {
+    if (kind == .queue_offered) {
+        return std.fmt.allocPrint(allocator, "queue:{d}:offered", .{id});
+    }
+    if (kind == .queue_acked) {
+        return std.fmt.allocPrint(allocator, "queue:{d}:acked", .{id});
+    }
+    return std.fmt.allocPrint(
+        allocator,
+        "queue:{d}:{s}:{d}",
+        .{ id, journal_mod.workflowEventKindName(kind), sequence },
+    );
+}
+
 fn signalEventIdempotencyKey(
     allocator: Allocator,
     kind: journal_mod.WorkflowEventKind,
@@ -904,6 +996,109 @@ fn signalSuspensionExists(
             .workflow_suspended => {
                 if (std.mem.eql(u8, event.name, name) and
                     std.mem.eql(u8, event.redacted_detail, "signal"))
+                {
+                    suspended = true;
+                }
+            },
+            .workflow_resumed => suspended = false,
+            else => {},
+        }
+    }
+    return suspended;
+}
+
+fn queueOffered(
+    events: []const journal_mod.WorkflowEvent,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    id: QueueId,
+) bool {
+    for (events) |event| {
+        if (event.workflow_id == workflow_id and
+            event.execution_id == execution_id and
+            event.kind == .queue_offered and
+            event.queue_id != null and
+            event.queue_id.? == id)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn queueCompletedEvent(
+    events: []const journal_mod.WorkflowEvent,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    id: QueueId,
+) ?journal_mod.WorkflowEvent {
+    var completed: ?journal_mod.WorkflowEvent = null;
+    for (events) |event| {
+        if (event.workflow_id == workflow_id and
+            event.execution_id == execution_id and
+            event.kind == .queue_completed and
+            event.queue_id != null and
+            event.queue_id.? == id)
+        {
+            completed = event;
+        }
+    }
+    return completed;
+}
+
+fn queueFailedEvent(
+    events: []const journal_mod.WorkflowEvent,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    id: QueueId,
+) ?journal_mod.WorkflowEvent {
+    var failed: ?journal_mod.WorkflowEvent = null;
+    for (events) |event| {
+        if (event.workflow_id == workflow_id and
+            event.execution_id == execution_id and
+            event.kind == .queue_failed and
+            event.queue_id != null and
+            event.queue_id.? == id)
+        {
+            failed = event;
+        }
+    }
+    return failed;
+}
+
+fn queueAcked(
+    events: []const journal_mod.WorkflowEvent,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    id: QueueId,
+) bool {
+    for (events) |event| {
+        if (event.workflow_id == workflow_id and
+            event.execution_id == execution_id and
+            event.kind == .queue_acked and
+            event.queue_id != null and
+            event.queue_id.? == id)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn queueSuspensionExists(
+    events: []const journal_mod.WorkflowEvent,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    id: QueueId,
+) bool {
+    var suspended = false;
+    for (events) |event| {
+        if (event.workflow_id != workflow_id or event.execution_id != execution_id) continue;
+        switch (event.kind) {
+            .workflow_suspended => {
+                if (event.queue_id != null and
+                    event.queue_id.? == id and
+                    std.mem.eql(u8, event.redacted_detail, "queue"))
                 {
                     suspended = true;
                 }

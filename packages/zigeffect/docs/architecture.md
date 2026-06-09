@@ -208,7 +208,8 @@ Owns local durable workflow runtime surfaces:
   delays, timeout terminal events, durable compensation registration and
   reverse-order execution, durable deferred awaits, durable `sleep` and
   `sleepUntil` suspension, durable `waitForSignal` suspension and consumption,
-  causal schedule mapping, and `Exit`/`Cause` failure journaling.
+  durable queue offer/await/ack through `queue`, causal schedule mapping, and
+  `Exit`/`Cause` failure journaling.
 - `deferred.zig`: durable deferred await result type, stable deferred identity,
   and external complete, fail, and cancel APIs.
 - `clock.zig`: stable timer identity, durable sleep result type, due timer
@@ -217,6 +218,9 @@ Owns local durable workflow runtime surfaces:
 - `signal.zig`: named signal definitions, stable signal identity, durable wait
   result type, external signal append API, idempotency keys, and suspended
   workflow wake-up for signal receipt.
+- `queue.zig`: typed durable queue definitions, stable queue item identity,
+  idempotent offers, worker claims, concurrency limits, completion/failure,
+  expired-claim retry, ack state, and workflow wake-up for queue terminals.
 - `engine.zig`: workflow engine registration, provider requirement validation,
   durable `workflow_started` appends, typed poll results, execution inspection,
   duplicate execution checks, and in-memory execution indexing.

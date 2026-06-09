@@ -43,6 +43,7 @@ pub const QueueStatus = enum {
     claimed,
     completed,
     failed,
+    retry_ready,
     acked,
 };
 
@@ -185,6 +186,7 @@ pub const WorkflowReplayState = struct {
             .queue_claimed => try self.updateQueue(event, .claimed),
             .queue_completed => try self.updateQueue(event, .completed),
             .queue_failed => try self.updateQueue(event, .failed),
+            .queue_retry_scheduled => try self.updateQueue(event, .retry_ready),
             .queue_acked => try self.updateQueue(event, .acked),
             .compensation_registered => try self.applyCompensationRegistered(event),
             .compensation_started => try self.updateCompensation(event, .running),

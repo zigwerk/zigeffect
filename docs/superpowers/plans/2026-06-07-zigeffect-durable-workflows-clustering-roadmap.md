@@ -435,17 +435,17 @@ Goal: build persisted producer/worker coordination on top of the journal store.
 
 Deliverables:
 
-- [ ] Add `DurableQueue`.
-- [ ] Add offer, claim, complete, fail, retry, and ack events.
-- [ ] Add worker concurrency limits.
-- [ ] Add queue item idempotency keys.
-- [ ] Add queue processing from workflows.
+- [x] Add `DurableQueue`.
+- [x] Add offer, claim, complete, fail, retry, and ack events.
+- [x] Add worker concurrency limits.
+- [x] Add queue item idempotency keys.
+- [x] Add queue processing from workflows.
 
 Acceptance:
 
-- [ ] Queue items survive restart.
-- [ ] Claim timeout and retry are tested.
-- [ ] Workflow can await queue item completion.
+- [x] Queue items survive restart.
+- [x] Claim timeout and retry are tested.
+- [x] Workflow can await queue item completion.
 
 ## Milestone 17: Suspend, Resume, Interrupt, And Cancel
 

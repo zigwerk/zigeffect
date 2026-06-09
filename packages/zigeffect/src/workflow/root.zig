@@ -9,6 +9,7 @@ pub const context = @import("context.zig");
 pub const deferred = @import("deferred.zig");
 pub const clock = @import("clock.zig");
 pub const signal = @import("signal.zig");
+pub const queue = @import("queue.zig");
 
 pub const workflow_journal_event_schema = journal.workflow_journal_event_schema;
 pub const workflow_journal_event_schema_version = journal.workflow_journal_event_schema_version;
@@ -105,3 +106,11 @@ pub const SignalWaitResult = signal.SignalWaitResult;
 pub const DurableSignal = signal.DurableSignal;
 pub const Signal = signal.Signal;
 pub const signalId = signal.signalId;
+
+pub const QueueMetadata = queue.QueueMetadata;
+pub const QueueClaim = queue.QueueClaim;
+pub const QueueAwaitResult = queue.QueueAwaitResult;
+pub const QueueOfferResult = queue.QueueOfferResult;
+pub const DurableQueue = queue.DurableQueue;
+pub const Queue = queue.Queue;
+pub const queueItemId = queue.queueItemId;

@@ -95,6 +95,7 @@ test "workflow event kind names are stable" {
         .{ fx.workflow.WorkflowEventKind.queue_claimed, "queue_claimed" },
         .{ fx.workflow.WorkflowEventKind.queue_completed, "queue_completed" },
         .{ fx.workflow.WorkflowEventKind.queue_failed, "queue_failed" },
+        .{ fx.workflow.WorkflowEventKind.queue_retry_scheduled, "queue_retry_scheduled" },
         .{ fx.workflow.WorkflowEventKind.queue_acked, "queue_acked" },
         .{ fx.workflow.WorkflowEventKind.step_started, "step_started" },
         .{ fx.workflow.WorkflowEventKind.step_completed, "step_completed" },
@@ -257,6 +258,47 @@ test "workflow signal definitions expose metadata and timeout" {
     try std.testing.expectEqual(@as(?u64, 250), timed_metadata.timeout_ms);
 }
 
+test "workflow queue definitions expose metadata and item ids" {
+    const Payload = struct {
+        account_id: u64,
+    };
+    const SendEmail = fx.workflow
+        .Queue("email", Payload, u64, error{DeliveryFailed})
+        .withIdempotencyKey(struct {
+            fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "email:{d}", .{payload.account_id});
+            }
+        }.key)
+        .withClaimTimeoutMs(250)
+        .withMaxConcurrency(2);
+
+    try std.testing.expect(SendEmail.PayloadType == Payload);
+    try std.testing.expect(SendEmail.SuccessType == u64);
+    try std.testing.expect(SendEmail.FailureType == error{DeliveryFailed});
+    try std.testing.expect(@hasDecl(fx.workflow, "DurableQueue"));
+    try std.testing.expect(@hasDecl(fx.workflow, "QueueAwaitResult"));
+    try std.testing.expect(@hasDecl(fx.workflow, "QueueClaim"));
+
+    const metadata = SendEmail.metadata();
+    try std.testing.expectEqualStrings("email", metadata.name);
+    try std.testing.expectEqualStrings(@typeName(Payload), metadata.payload_type_name);
+    try std.testing.expectEqualStrings(@typeName(u64), metadata.success_type_name);
+    try std.testing.expectEqualStrings(@typeName(error{DeliveryFailed}), metadata.failure_type_name);
+    try std.testing.expect(metadata.has_idempotency_key);
+    try std.testing.expectEqual(@as(?u64, 250), metadata.claim_timeout_ms);
+    try std.testing.expectEqual(@as(usize, 2), metadata.max_concurrency);
+
+    const payload = Payload{ .account_id = 42 };
+    const key = try SendEmail.idempotencyKey(std.testing.allocator, payload);
+    defer std.testing.allocator.free(key);
+    try std.testing.expectEqualStrings("email:42", key);
+
+    try std.testing.expectEqual(
+        fx.workflow.queueItemId("email", "email:42"),
+        try SendEmail.deriveItemId(std.testing.allocator, payload),
+    );
+}
+
 test "workflow replay folds lifecycle events" {
     const events = [_]fx.workflow.WorkflowEvent{
         .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8, .name = "approval" },
@@ -358,6 +400,23 @@ test "workflow replay folds activity timer deferred and queue rows" {
     try std.testing.expectEqual(fx.workflow.QueueStatus.acked, state.queues.items[0].status);
     try std.testing.expectEqual(@as(u64, 12), state.queues.items[0].last_sequence);
     try std.testing.expectEqualStrings("mailbox", state.queues.items[0].name);
+}
+
+test "workflow replay folds queue retry rows" {
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8 },
+        .{ .sequence = 2, .kind = .queue_offered, .workflow_id = 7, .execution_id = 8, .queue_id = 40, .name = "mailbox" },
+        .{ .sequence = 3, .kind = .queue_claimed, .workflow_id = 7, .execution_id = 8, .queue_id = 40 },
+        .{ .sequence = 4, .kind = .queue_retry_scheduled, .workflow_id = 7, .execution_id = 8, .queue_id = 40 },
+    };
+
+    var state = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &events);
+    defer state.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), state.queues.items.len);
+    try std.testing.expectEqual(@as(u64, 40), state.queues.items[0].id);
+    try std.testing.expectEqual(fx.workflow.QueueStatus.retry_ready, state.queues.items[0].status);
+    try std.testing.expectEqual(@as(u64, 4), state.queues.items[0].last_sequence);
 }
 
 test "workflow replay folds retry-ready activity failures" {
@@ -2462,6 +2521,431 @@ test "durable signal wait receives after file journal reopen" {
         defer state.deinit();
         try std.testing.expectEqual(fx.workflow.WorkflowStatus.running, state.workflow_status);
     }
+}
+
+test "durable queue offers idempotently and survives file reopen" {
+    const Payload = struct {
+        account_id: u64,
+    };
+    const Email = fx.workflow
+        .Queue("email", Payload, u64, error{DeliveryFailed})
+        .withIdempotencyKey(struct {
+        fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+            return std.fmt.allocPrint(allocator, "email:{d}", .{payload.account_id});
+        }
+    }.key);
+    const payload_codec = fx.Codec(Payload){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{payload.account_id});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !Payload {
+                return .{ .account_id = try std.fmt.parseInt(u64, bytes, 10) };
+            }
+        }.decode,
+    };
+    const payload = Payload{ .account_id = 42 };
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "queue-workflow",
+        .status = "running",
+        .idempotency_key = "queue-offer",
+    } });
+
+    var durable_queue = fx.workflow.DurableQueue.init(std.testing.allocator, journal, 7, 8);
+    const first = try durable_queue.offer(Email, payload_codec, payload);
+    try std.testing.expect(first.offered);
+    try std.testing.expectEqual(fx.workflow.queueItemId("email", "email:42"), first.item_id);
+
+    const duplicate = try durable_queue.offer(Email, payload_codec, payload);
+    try std.testing.expect(!duplicate.offered);
+    try std.testing.expectEqual(first.item_id, duplicate.item_id);
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 2), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_offered, events.events[1].kind);
+    try std.testing.expectEqual(first.item_id, events.events[1].queue_id.?);
+    try std.testing.expectEqualStrings("email", events.events[1].name);
+    try std.testing.expectEqualStrings("42", events.events[1].redacted_detail);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    {
+        var file_store = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer file_store.deinit();
+        const file_journal = file_store.asJournalStore();
+        _ = try file_journal.append(.{ .event = .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .name = "queue-workflow",
+            .status = "running",
+            .idempotency_key = "queue-file",
+        } });
+        var file_queue = fx.workflow.DurableQueue.init(std.testing.allocator, file_journal, 7, 8);
+        const file_offer = try file_queue.offer(Email, payload_codec, payload);
+        try std.testing.expect(file_offer.offered);
+    }
+
+    {
+        var reopened = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer reopened.deinit();
+        const file_journal = reopened.asJournalStore();
+        var file_events = try file_journal.readAll(std.testing.allocator);
+        defer file_events.deinit();
+        try std.testing.expectEqual(@as(usize, 2), file_events.events.len);
+        try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_offered, file_events.events[1].kind);
+        try std.testing.expectEqualStrings("42", file_events.events[1].redacted_detail);
+    }
+}
+
+test "durable queue claims oldest item and respects max concurrency" {
+    const Payload = struct {
+        account_id: u64,
+    };
+    const Email = fx.workflow
+        .Queue("email", Payload, u64, error{DeliveryFailed})
+        .withIdempotencyKey(struct {
+            fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "email:{d}", .{payload.account_id});
+            }
+        }.key)
+        .withMaxConcurrency(1);
+    const payload_codec = fx.Codec(Payload){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{payload.account_id});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !Payload {
+                return .{ .account_id = try std.fmt.parseInt(u64, bytes, 10) };
+            }
+        }.decode,
+    };
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "queue-workflow",
+        .status = "running",
+        .idempotency_key = "queue-claim",
+    } });
+
+    var durable_queue = fx.workflow.DurableQueue.init(std.testing.allocator, journal, 7, 8);
+    const first_offer = try durable_queue.offer(Email, payload_codec, .{ .account_id = 42 });
+    const second_offer = try durable_queue.offer(Email, payload_codec, .{ .account_id = 43 });
+
+    const first_claim = (try durable_queue.claim(Email, payload_codec, "worker-a")).?;
+    try std.testing.expectEqual(first_offer.item_id, first_claim.item_id);
+    try std.testing.expectEqual(@as(u64, 42), first_claim.payload.account_id);
+    try std.testing.expectEqual(@as(u32, 1), first_claim.attempt);
+    try std.testing.expectEqualStrings("email", first_claim.name);
+
+    try std.testing.expectEqual(@as(?fx.workflow.QueueClaim(Payload), null), try durable_queue.claim(Email, payload_codec, "worker-b"));
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 4), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_claimed, events.events[3].kind);
+    try std.testing.expectEqual(first_offer.item_id, events.events[3].queue_id.?);
+    try std.testing.expectEqualStrings("worker=worker-a claim_deadline_ms=null attempt=1", events.events[3].redacted_detail);
+    try std.testing.expect(first_offer.item_id != second_offer.item_id);
+}
+
+test "workflow context queue await completes and acks once" {
+    const Payload = struct {
+        account_id: u64,
+    };
+    const Email = fx.workflow
+        .Queue("email", Payload, u64, error{DeliveryFailed})
+        .withIdempotencyKey(struct {
+        fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+            return std.fmt.allocPrint(allocator, "email:{d}", .{payload.account_id});
+        }
+    }.key);
+    const payload_codec = fx.Codec(Payload){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{payload.account_id});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !Payload {
+                return .{ .account_id = try std.fmt.parseInt(u64, bytes, 10) };
+            }
+        }.decode,
+    };
+    const result_codec = fx.Codec(u64){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, value: u64) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{value});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !u64 {
+                return std.fmt.parseInt(u64, bytes, 10);
+            }
+        }.decode,
+    };
+    const payload = Payload{ .account_id = 42 };
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "queue-workflow",
+        .status = "running",
+        .idempotency_key = "queue-await",
+    } });
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const result = try context.queue(Email, payload_codec, result_codec, payload);
+        switch (result) {
+            .suspended => |suspension| {
+                try std.testing.expectEqual(fx.SuspensionKind.queue, suspension.kind);
+                try std.testing.expectEqual(try Email.deriveItemId(std.testing.allocator, payload), suspension.id);
+                try std.testing.expectEqualStrings("email", suspension.label);
+            },
+            else => return error.ExpectedQueueSuspension,
+        }
+    }
+
+    const item_id = try Email.deriveItemId(std.testing.allocator, payload);
+    var durable_queue = fx.workflow.DurableQueue.init(std.testing.allocator, journal, 7, 8);
+    try durable_queue.complete(Email, item_id, result_codec, 99);
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const result = try context.queue(Email, payload_codec, result_codec, payload);
+        switch (result) {
+            .completed => |value| try std.testing.expectEqual(@as(u64, 99), value),
+            else => return error.ExpectedCompletedQueue,
+        }
+    }
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const result = try context.queue(Email, payload_codec, result_codec, payload);
+        switch (result) {
+            .completed => |value| try std.testing.expectEqual(@as(u64, 99), value),
+            else => return error.ExpectedCompletedQueue,
+        }
+    }
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 6), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_offered, events.events[1].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_suspended, events.events[2].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_completed, events.events[3].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[4].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_acked, events.events[5].kind);
+}
+
+test "workflow context queue await replays typed failure and acks once" {
+    const Payload = struct {
+        account_id: u64,
+    };
+    const Email = fx.workflow
+        .Queue("email", Payload, u64, error{DeliveryFailed})
+        .withIdempotencyKey(struct {
+        fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+            return std.fmt.allocPrint(allocator, "email:{d}", .{payload.account_id});
+        }
+    }.key);
+    const payload_codec = fx.Codec(Payload){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{payload.account_id});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !Payload {
+                return .{ .account_id = try std.fmt.parseInt(u64, bytes, 10) };
+            }
+        }.decode,
+    };
+    const result_codec = fx.Codec(u64){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, value: u64) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{value});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !u64 {
+                return std.fmt.parseInt(u64, bytes, 10);
+            }
+        }.decode,
+    };
+    const payload = Payload{ .account_id = 42 };
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "queue-workflow",
+        .status = "running",
+        .idempotency_key = "queue-fail",
+    } });
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const result = try context.queue(Email, payload_codec, result_codec, payload);
+        switch (result) {
+            .suspended => {},
+            else => return error.ExpectedQueueSuspension,
+        }
+    }
+
+    const item_id = try Email.deriveItemId(std.testing.allocator, payload);
+    var durable_queue = fx.workflow.DurableQueue.init(std.testing.allocator, journal, 7, 8);
+    try durable_queue.fail(Email, item_id, error.DeliveryFailed);
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const result = try context.queue(Email, payload_codec, result_codec, payload);
+        switch (result) {
+            .failed => |err| try std.testing.expectEqual(error.DeliveryFailed, err),
+            else => return error.ExpectedFailedQueue,
+        }
+    }
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const result = try context.queue(Email, payload_codec, result_codec, payload);
+        switch (result) {
+            .failed => |err| try std.testing.expectEqual(error.DeliveryFailed, err),
+            else => return error.ExpectedFailedQueue,
+        }
+    }
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 6), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_failed, events.events[3].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[4].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_acked, events.events[5].kind);
+}
+
+test "durable queue retries expired claims and reclaims with incremented attempt" {
+    const Payload = struct {
+        account_id: u64,
+    };
+    const Email = fx.workflow
+        .Queue("email", Payload, u64, error{DeliveryFailed})
+        .withIdempotencyKey(struct {
+            fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "email:{d}", .{payload.account_id});
+            }
+        }.key)
+        .withClaimTimeoutMs(250)
+        .withMaxConcurrency(1);
+    const payload_codec = fx.Codec(Payload){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{payload.account_id});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !Payload {
+                return .{ .account_id = try std.fmt.parseInt(u64, bytes, 10) };
+            }
+        }.decode,
+    };
+    var clock = fx.FakeClock.fake(1_000);
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "queue-workflow",
+        .status = "running",
+        .idempotency_key = "queue-retry",
+    } });
+
+    var durable_queue = fx.workflow.DurableQueue.initWithClock(std.testing.allocator, journal, 7, 8, &clock);
+    const offer = try durable_queue.offer(Email, payload_codec, .{ .account_id = 42 });
+    const first_claim = (try durable_queue.claim(Email, payload_codec, "worker-a")).?;
+    try std.testing.expectEqual(offer.item_id, first_claim.item_id);
+    try std.testing.expectEqual(@as(u32, 1), first_claim.attempt);
+
+    try std.testing.expectEqual(@as(usize, 0), try durable_queue.retryExpiredClaims(Email));
+    clock.sleep(249);
+    try std.testing.expectEqual(@as(usize, 0), try durable_queue.retryExpiredClaims(Email));
+    clock.sleep(1);
+    try std.testing.expectEqual(@as(usize, 1), try durable_queue.retryExpiredClaims(Email));
+
+    const second_claim = (try durable_queue.claim(Email, payload_codec, "worker-b")).?;
+    try std.testing.expectEqual(offer.item_id, second_claim.item_id);
+    try std.testing.expectEqual(@as(u32, 2), second_claim.attempt);
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 5), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_claimed, events.events[2].kind);
+    try std.testing.expectEqualStrings("worker=worker-a claim_deadline_ms=1250 attempt=1", events.events[2].redacted_detail);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_retry_scheduled, events.events[3].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_claimed, events.events[4].kind);
+    try std.testing.expectEqualStrings("worker=worker-b claim_deadline_ms=1500 attempt=2", events.events[4].redacted_detail);
 }
 
 test "workflow context sleep schedules a durable timer and replays pending suspension" {

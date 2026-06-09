@@ -41,13 +41,13 @@
 - Modify `packages/zigeffect/src/workflow/root.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing event/definition tests**
+- [x] **Step 1: Write failing event/definition tests**
 
 Add tests for `queue_retry_scheduled` event kind formatting, retry folding to
 `QueueStatus.retry_ready`, stable `queueItemId`, `Queue(...).metadata()`,
 `withClaimTimeoutMs`, `withMaxConcurrency`, and `withIdempotencyKey`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -57,12 +57,12 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until queue retry and queue definition exports exist.
 
-- [ ] **Step 3: Implement event/model shell**
+- [x] **Step 3: Implement event/model shell**
 
 Add `queue_retry_scheduled`, `QueueStatus.retry_ready`, queue definition
 metadata, item id derivation, wait/claim result types, and `DurableQueue.init`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -78,13 +78,13 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/queue.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing offer tests**
+- [x] **Step 1: Write failing offer tests**
 
 Offer a queue item with a typed idempotency key and payload codec. Assert
 `queue_offered`, payload detail, stable queue id, duplicate offer returns false,
 and the offered row survives `FileJournalStore` reopen.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -94,13 +94,13 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until `DurableQueue.offer` exists.
 
-- [ ] **Step 3: Implement offer**
+- [x] **Step 3: Implement offer**
 
 Encode payloads, require typed idempotency keys, derive item ids, append
 `queue_offered` with deterministic idempotency, convert duplicate append keys
 to false, and return the queue item id.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -116,13 +116,13 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/queue.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing claim/concurrency tests**
+- [x] **Step 1: Write failing claim/concurrency tests**
 
 Offer two items to a queue with max concurrency 1. Assert the first claim
 returns the oldest payload and appends `queue_claimed`; a second concurrent
 claim returns null until the first item completes or retries.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -132,13 +132,13 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until claim and active-claim counting exist.
 
-- [ ] **Step 3: Implement claim**
+- [x] **Step 3: Implement claim**
 
 Scan current journal state, count active claimed items, decode the oldest
 offered/retry-ready item, append `queue_claimed` with worker and deadline
 metadata, and return `QueueClaim(Payload)`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -155,7 +155,7 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/context.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing completion/await tests**
+- [x] **Step 1: Write failing completion/await tests**
 
 Use `WorkflowContext.queue(QueueType, payload_codec, result_codec, payload)`.
 Assert missing completion offers/suspends, `DurableQueue.complete` appends
@@ -163,7 +163,7 @@ Assert missing completion offers/suspends, `DurableQueue.complete` appends
 appends `queue_acked`, and a later replay returns the same success without
 duplicate ack. Add a failure path that returns typed failure and acks.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -173,13 +173,13 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until complete/fail/ack and workflow await exist.
 
-- [ ] **Step 3: Implement complete/fail/ack and workflow await**
+- [x] **Step 3: Implement complete/fail/ack and workflow await**
 
 Append terminal rows, wake suspended workflows, replay completion/failure
 details, append ack once, and keep queue suspension idempotent before terminal
 completion.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -195,13 +195,13 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/queue.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing retry tests**
+- [x] **Step 1: Write failing retry tests**
 
 Use a fake clock and a queue with `withClaimTimeoutMs(250)`. Claim an item at
 `1_000`, assert no retry at `1_249`, append `queue_retry_scheduled` at `1_250`,
 and assert the item can be claimed again with an incremented attempt.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -211,12 +211,12 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL until retry scanning exists.
 
-- [ ] **Step 3: Implement expired-claim retry**
+- [x] **Step 3: Implement expired-claim retry**
 
 Parse claim deadlines, skip terminal items, append retry rows once per expired
 claim, and treat retry-ready items as claimable.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -234,11 +234,11 @@ Expected: PASS.
 - Add `docs/superpowers/specs/2026-06-09-zigeffect-durable-queue-design.md`
 - Add `docs/superpowers/plans/2026-06-09-zigeffect-durable-queue.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Document `workflow/queue.zig` and `WorkflowContext.queue` ownership.
 
-- [ ] **Step 2: Run full gate**
+- [x] **Step 2: Run full gate**
 
 Run:
 
@@ -254,7 +254,7 @@ rg -n 'T''BD|TO''DO|implement la''ter|fill in de''tails|appropriate error hand''
 Expected: compile/test commands PASS, format and diff checks exit 0, and the
 placeholder scan exits 1 with no matches.
 
-- [ ] **Step 3: Mark Milestone 16 complete**
+- [x] **Step 3: Mark Milestone 16 complete**
 
 After the full gate passes, mark all Milestone 16 deliverables and acceptance
 boxes complete in
