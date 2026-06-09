@@ -118,7 +118,20 @@ pub const InMemoryRunnerStorage = struct {
 
     pub fn acquire(self: *InMemoryRunnerStorage, request: RunnerLeaseAcquire) (Allocator.Error || RunnerStorageError)!ShardLease {
         const expires_at_ms = try leaseExpiresAt(request.now_ms, request.ttl_ms);
-        if (self.findLeaseIndex(request.shard_id) != null) return error.LeaseConflict;
+        if (self.findLeaseIndex(request.shard_id)) |index| {
+            const current = self.leases_list.items[index];
+            if (!leaseExpired(current, request.now_ms)) return error.LeaseConflict;
+            const replacement: ShardLease = .{
+                .shard_id = request.shard_id,
+                .owner = request.owner,
+                .acquired_at_ms = request.now_ms,
+                .refreshed_at_ms = request.now_ms,
+                .expires_at_ms = expires_at_ms,
+                .version = current.version + 1,
+            };
+            self.leases_list.items[index] = replacement;
+            return replacement;
+        }
 
         try self.leases_list.ensureUnusedCapacity(self.allocator, 1);
         const lease_record: ShardLease = .{
@@ -134,21 +147,43 @@ pub const InMemoryRunnerStorage = struct {
     }
 
     pub fn refresh(self: *InMemoryRunnerStorage, request: RunnerLeaseRefresh) (Allocator.Error || RunnerStorageError)!ShardLease {
-        _ = self;
-        _ = request;
-        return error.LeaseNotFound;
+        const expires_at_ms = try leaseExpiresAt(request.now_ms, request.ttl_ms);
+        const index = self.findLeaseIndex(request.shard_id) orelse return error.LeaseNotFound;
+        const current = self.leases_list.items[index];
+        if (!current.owner.eql(request.owner)) return error.LeaseNotOwned;
+        if (leaseExpired(current, request.now_ms)) return error.LeaseExpired;
+
+        const refreshed: ShardLease = .{
+            .shard_id = current.shard_id,
+            .owner = current.owner,
+            .acquired_at_ms = current.acquired_at_ms,
+            .refreshed_at_ms = request.now_ms,
+            .expires_at_ms = expires_at_ms,
+            .version = current.version + 1,
+        };
+        self.leases_list.items[index] = refreshed;
+        return refreshed;
     }
 
     pub fn release(self: *InMemoryRunnerStorage, request: RunnerLeaseRelease) RunnerStorageError!void {
-        _ = self;
-        _ = request;
-        return error.LeaseNotFound;
+        const index = self.findLeaseIndex(request.shard_id) orelse return error.LeaseNotFound;
+        const current = self.leases_list.items[index];
+        if (!current.owner.eql(request.owner)) return error.LeaseNotOwned;
+        _ = self.leases_list.orderedRemove(index);
     }
 
     pub fn releaseAll(self: *InMemoryRunnerStorage, owner: RunnerAddress) usize {
-        _ = self;
-        _ = owner;
-        return 0;
+        var released: usize = 0;
+        var index: usize = 0;
+        while (index < self.leases_list.items.len) {
+            if (self.leases_list.items[index].owner.eql(owner)) {
+                _ = self.leases_list.orderedRemove(index);
+                released += 1;
+            } else {
+                index += 1;
+            }
+        }
+        return released;
     }
 
     pub fn lease(self: *const InMemoryRunnerStorage, shard_id: ShardId) ?ShardLease {
@@ -181,6 +216,10 @@ pub const FileRunnerStorage = struct {};
 fn leaseExpiresAt(now_ms: u64, ttl_ms: RunnerLeaseTtlMs) RunnerStorageError!u64 {
     if (ttl_ms == 0) return error.InvalidLeaseTtl;
     return std.math.add(u64, now_ms, ttl_ms) catch error.InvalidLeaseTtl;
+}
+
+fn leaseExpired(lease_record: ShardLease, now_ms: u64) bool {
+    return lease_record.expires_at_ms <= now_ms;
 }
 
 fn inMemoryAcquire(context: *anyopaque, request: RunnerLeaseAcquire) anyerror!ShardLease {
