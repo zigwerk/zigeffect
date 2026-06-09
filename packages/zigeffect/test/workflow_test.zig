@@ -2169,6 +2169,45 @@ test "workflow engine rejects duplicate executions and missing providers" {
     }
 }
 
+test "workflow engine stores backend capabilities and checks requirements" {
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+
+    var engine = fx.workflow.WorkflowEngine.initWithBackend(
+        std.testing.allocator,
+        journal_memory.asJournalStore(),
+        fx.durableLocalBackend(),
+    );
+    defer engine.deinit();
+
+    try std.testing.expectEqual(fx.BackendKind.durable_local, engine.backendCapabilities().kind);
+    try engine.requireBackendFeature(.{
+        .feature = .timer,
+        .operation = "workflow.sleep",
+        .workflow_name = "approval",
+    });
+}
+
+test "workflow engine formats backend requirement diagnostics" {
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+
+    var engine = fx.workflow.WorkflowEngine.init(std.testing.allocator, journal_memory.asJournalStore());
+    defer engine.deinit();
+
+    const requirement = fx.workflow.WorkflowBackendRequirement{
+        .feature = .timer,
+        .operation = "workflow.sleep",
+        .workflow_name = "approval",
+    };
+
+    try std.testing.expectError(error.UnsupportedBackendCapability, engine.requireBackendFeature(requirement));
+    const diagnostic = try engine.formatBackendRequirementDiagnostic(std.testing.allocator, requirement);
+    defer std.testing.allocator.free(diagnostic);
+    try std.testing.expect(std.mem.indexOf(u8, diagnostic, "backend=deterministic") != null);
+    try std.testing.expect(std.mem.indexOf(u8, diagnostic, "workflow=approval") != null);
+}
+
 test "workflow context replays recorded u64 step without rerunning function" {
     const Step = struct {
         var calls: u64 = 0;

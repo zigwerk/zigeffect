@@ -107,6 +107,7 @@ pub const WorkflowExecutionList = engine.WorkflowExecutionList;
 pub const WorkflowExecutionStatus = engine.WorkflowExecutionStatus;
 pub const WorkflowEngineError = engine.WorkflowEngineError;
 pub const WorkflowResult = engine.WorkflowResult;
+pub const WorkflowBackendRequirement = engine.WorkflowBackendRequirement;
 pub const workflowId = engine.workflowId;
 pub const executionId = engine.executionId;
 

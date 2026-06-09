@@ -1,10 +1,15 @@
 const std = @import("std");
 const dep_services = @import("../dependency/services.zig");
+const backend_mod = @import("../runtime/backend.zig");
+const backend_diagnostics = @import("../runtime/backend_diagnostics.zig");
 const journal_mod = @import("journal.zig");
 const store_mod = @import("store.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const ServiceSet = dep_services.ServiceSet;
+pub const BackendCapabilities = backend_mod.BackendCapabilities;
+pub const deterministicBackend = backend_mod.deterministicBackend;
+pub const WorkflowBackendRequirement = backend_diagnostics.BackendCapabilityRequirement;
 pub const JournalStore = store_mod.JournalStore;
 pub const WorkflowId = journal_mod.WorkflowId;
 pub const ExecutionId = journal_mod.ExecutionId;
@@ -23,6 +28,7 @@ pub const WorkflowEngineError = error{
     WorkflowNotRegistered,
     DuplicateWorkflowExecution,
     MissingServiceRequirement,
+    UnsupportedBackendCapability,
 };
 
 pub const WorkflowExecution = struct {
@@ -60,6 +66,7 @@ pub const WorkflowEngine = struct {
     allocator: Allocator,
     journal_store: JournalStore,
     provider_services: ServiceSet,
+    backend: BackendCapabilities = deterministicBackend(),
     registrations: std.ArrayList(WorkflowRegistration) = .empty,
     executions: std.ArrayList(WorkflowExecution) = .empty,
 
@@ -69,6 +76,12 @@ pub const WorkflowEngine = struct {
             .journal_store = journal_store,
             .provider_services = ServiceSet.init(allocator),
         };
+    }
+
+    pub fn initWithBackend(allocator: Allocator, journal_store: JournalStore, backend: BackendCapabilities) WorkflowEngine {
+        var engine = WorkflowEngine.init(allocator, journal_store);
+        engine.backend = backend;
+        return engine;
     }
 
     pub fn initWithProviders(allocator: Allocator, journal_store: JournalStore, comptime providers: anytype) Allocator.Error!WorkflowEngine {
@@ -82,6 +95,18 @@ pub const WorkflowEngine = struct {
         self.executions.deinit(self.allocator);
         self.registrations.deinit(self.allocator);
         self.provider_services.deinit();
+    }
+
+    pub fn backendCapabilities(self: *const WorkflowEngine) BackendCapabilities {
+        return self.backend;
+    }
+
+    pub fn requireBackendFeature(self: *const WorkflowEngine, requirement: WorkflowBackendRequirement) WorkflowEngineError!void {
+        try backend_diagnostics.requireBackendFeature(self.backend, requirement);
+    }
+
+    pub fn formatBackendRequirementDiagnostic(self: *const WorkflowEngine, allocator: Allocator, requirement: WorkflowBackendRequirement) Allocator.Error![]const u8 {
+        return backend_diagnostics.formatBackendCapabilityDiagnostic(allocator, self.backend, requirement);
     }
 
     pub fn register(self: *WorkflowEngine, comptime WorkflowType: type) (Allocator.Error || WorkflowEngineError)!void {
