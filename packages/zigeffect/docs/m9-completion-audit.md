@@ -79,8 +79,9 @@ zig build causal-production-hardening-backlog -- --format json
 That report uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, keeps durable work on the
 NenDB adapter path, keeps workbench work on SolidJS inside
-`webui-dev/zig-webui`, and recommends
-`codex/zigeffect-causal-production-artifact-aggregation` as the next branch.
+`webui-dev/zig-webui`, and now recommends
+`codex/zigeffect-causal-durable-production-retention` after the production
+artifact aggregation contract branch.
 
 ## Verification Suite
 

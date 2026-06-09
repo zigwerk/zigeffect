@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-production-artifact-aggregation";
-pub const recommended_next_branch = "codex/zigeffect-causal-production-artifact-aggregation";
+pub const recommendation = "start-durable-production-retention";
+pub const recommended_next_branch = "codex/zigeffect-causal-durable-production-retention";
 
 const OutputFormat = enum { text, json };
 
@@ -46,8 +46,8 @@ const backlog_items: []const BacklogItem = &.{
         .title = "Production Artifact Aggregation Contract",
         .gap_id = "distributed-artifact-aggregation",
         .priority = "P0",
-        .status = "planned",
-        .summary = "Define artifact bundle, source provenance, privacy review, and aggregation contracts before durable stores or dashboards consume production evidence.",
+        .status = "delivered",
+        .summary = "Defines artifact bundle, source provenance, privacy review, and aggregation contracts before durable stores or dashboards consume production evidence.",
         .depends_on = &.{"m9-completion-audit"},
         .deliverables = &.{
             "aggregation bundle schema",
@@ -60,7 +60,7 @@ const backlog_items: []const BacklogItem = &.{
             "packages/zigeffect/docs/operations.md",
         },
         .branch = "codex/zigeffect-causal-production-artifact-aggregation",
-        .agent_guidance = "Start here; do not write production stores or grant mutation authority.",
+        .agent_guidance = "Use causal-production-artifact-aggregation before durable retention; do not write production stores or grant mutation authority.",
     },
     .{
         .id = "durable-production-retention",
@@ -270,6 +270,8 @@ const dependency_order: []const []const u8 = &.{
 
 const verification_commands: []const []const u8 = &.{
     "cd packages/zigeffect",
+    "zig build causal-production-artifact-aggregation",
+    "zig build causal-production-artifact-aggregation -- --format json",
     "zig build causal-production-hardening-backlog",
     "zig build causal-production-hardening-backlog -- --format json",
     "zig build causal-schema-governance",
@@ -526,11 +528,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-production-artifact-aggregation",
+        "start-durable-production-retention",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-production-artifact-aggregation",
+        "codex/zigeffect-causal-durable-production-retention",
         recommended_next_branch,
     );
 }
@@ -556,7 +558,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-production-artifact-aggregation") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-durable-production-retention") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
 }
@@ -567,7 +569,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-production-artifact-aggregation\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-durable-production-retention\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
 }

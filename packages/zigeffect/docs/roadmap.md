@@ -636,8 +636,11 @@ metrics, and traces.
   `zigeffect.causal.production-hardening-backlog.v1` with the ordered
   production-hardening branch queue, NenDB-only durable direction, SolidJS plus
   `webui-dev/zig-webui` workbench direction, non-goals, verification commands,
-  and the next branch
-  `codex/zigeffect-causal-production-artifact-aggregation`.
+  and the next branch `codex/zigeffect-causal-durable-production-retention`.
+- Delivered: `causal-production-artifact-aggregation` publishes
+  `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
+  bundle contract, source provenance fields, privacy review gates, deterministic
+  multi-source fixture, and durable-retention handoff.
 - Still future: production-grade app-facing integrations, durable history
   hardening, and comparing arbitrary named audit-chain snapshots.
 - Still future: deeper runtime regression scenarios for partial config and

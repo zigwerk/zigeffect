@@ -25,17 +25,17 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-artifact-aggregation` means the next
-branch should be `codex/zigeffect-causal-production-artifact-aggregation`.
-Artifact aggregation comes first because durable retention, access control,
-dashboards, integrations, rollout evidence, wall-clock baselines, and capacity
-planning all need a stable bundle, source, and provenance contract.
+The recommendation `start-durable-production-retention` means the aggregation
+bundle and source-provenance contract now exists, and the next branch should be
+`codex/zigeffect-causal-durable-production-retention`. Durable retention must
+consume the aggregation contract before writing retained records. That durable
+work remains NenDB adapter work only.
 
 ## Dependency Order
 
 The backlog currently orders future production-hardening branches as:
 
-1. `production-artifact-aggregation`
+1. `production-artifact-aggregation` delivered
 2. `durable-production-retention`
 3. `production-deployment-runbooks`
 4. `artifact-access-control`
@@ -68,6 +68,8 @@ the next branch:
 
 ```sh
 cd packages/zigeffect
+zig build causal-production-artifact-aggregation
+zig build causal-production-artifact-aggregation -- --format json
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

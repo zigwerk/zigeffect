@@ -131,6 +131,17 @@ recommended production-hardening branch. It does not grant production mutation
 authority, add production telemetry, or change the NenDB-only durable adapter
 direction.
 
+### Production Hardening
+
+- `zigeffect.causal.production-artifact-aggregation.v1`
+
+The production-artifact-aggregation report is a record-only production
+hardening contract. It defines aggregation bundle semantics, source provenance
+fields, privacy review gates, and a deterministic local/CI sample bundle for
+future durable retention, access control, workbench, integration, benchmark,
+and capacity planning branches. It does not ingest live production telemetry or
+write durable storage.
+
 ### Test Coverage
 
 - `zigeffect.causal.test-matrix.v1`
