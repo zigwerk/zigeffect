@@ -601,7 +601,7 @@ Status values:
 | M2 Pervasive causal tests | delivered | `causal-test-matrix`, coverage domains, `causal-readiness`, and shared causal assertions exist on branch `codex/zigeffect-causal-test-matrix` | move to M3 hardening |
 | M3 Production hardening | delivered | bounded store, broader redaction, sampling, taxonomy, schema/taxonomy compatibility fixtures, and artifact string-size limits delivered | move to M4 backend conformance |
 | M4 Backend adapters | delivered | backend boundary, conformance suite, JSONL sink, polished DOT backend, OTel bridge, graph-history adapter, NenDB storage writer contract, and async stream adapter exist | move to M5 snapshot manifests |
-| M5 Replay/snapshots | in progress | snapshot manifest schema/tool, named snapshot compare, replay-feasibility reports, and deterministic registered-scenario replay exist; compare and audit-chain tools already exist | add safe scenario fork proposals or move to M6 workbench after M5 closeout |
+| M5 Replay/snapshots | delivered | snapshot manifest schema/tool, named snapshot compare, replay-feasibility reports, deterministic registered-scenario replay, and safe scenario fork proposals exist | move to M6 read-only workbench |
 | M6 Workbench UI | planned | JSON/text/DOT artifacts exist | build read-only artifact viewer |
 | M7 App-facing runtime | planned | core causal vocabulary exists | design request/job adapters |
 | M8 App remediation gates | deferred | app-facing runtime not started | wait for M7 |
@@ -609,10 +609,10 @@ Status values:
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-causal-scenario-fork-proposals`
-   - Add safe fork proposal artifacts for supported scenario reruns without runtime memory mutation.
-2. `codex/zigeffect-causal-workbench-readonly`
+1. `codex/zigeffect-causal-workbench-readonly`
    - Build the read-only local artifact viewer once the M5 replay/forking boundary is closed.
+2. `codex/zigeffect-app-facing-causal-runtime`
+   - Design request/job adapters and app-facing causal vocabulary after the workbench can inspect artifacts.
 
 ## Risks And Controls
 

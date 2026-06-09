@@ -56,6 +56,7 @@ zig build causal-snapshot -- manifest <name> <artifact.json> --format text
 zig build causal-snapshot -- compare <left> <right>
 zig build causal-snapshot -- replay-feasibility <snapshot>
 zig build causal-snapshot -- replay-scenario <snapshot> <scenario>
+zig build causal-snapshot -- fork-proposal <snapshot> <scenario> <fork>
 ```
 
 Snapshot compare reads existing snapshot manifests and their referenced causal
@@ -74,6 +75,7 @@ baseline artifacts through `causal-run`:
 ```sh
 zig build causal-run -- missing-service-compile-fail
 zig build causal-snapshot -- capture missing-service-baseline missing-service-compile-fail
+zig build causal-snapshot -- fork-proposal missing-service-baseline missing-service-compile-fail missing-service-fork
 zig build causal-snapshot -- replay-scenario missing-service-baseline missing-service-compile-fail
 ```
 
@@ -82,6 +84,12 @@ The replay report uses schema `zigeffect.causal.deterministic-replay.v1`, mode
 evidence that a registered scenario was rerun and compared, not as evidence that
 causal JSON can reconstruct services, closures, resources, fibers, clocks,
 scheduler state, external IO, or runtime memory.
+
+Fork proposals use schema `zigeffect.causal.scenario-fork-proposal.v1`. They are
+draft review artifacts with `approved=false` and `executed=false`; they list
+allowed replay/feasibility commands and blocked operations. They do not execute
+commands, fork runtime memory, replay arbitrary event logs, mutate source, or
+update the scenario registry.
 
 Run the two-phase causal development loop:
 

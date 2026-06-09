@@ -413,6 +413,7 @@ Name an existing causal JSON artifact with a snapshot manifest:
 ```bash
 zig build causal-run -- missing-service-compile-fail
 zig build causal-snapshot -- capture missing-service-baseline missing-service-compile-fail
+zig build causal-snapshot -- fork-proposal missing-service-baseline missing-service-compile-fail missing-service-fork
 zig build causal-snapshot -- replay-scenario missing-service-baseline missing-service-compile-fail
 zig build causal-snapshot -- capture baseline
 zig build causal-snapshot -- manifest baseline .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json --format text
@@ -430,6 +431,13 @@ compares the baseline artifact with the replay artifact, and prints
 `zigeffect.causal.deterministic-replay.v1`. It does not execute arbitrary
 causal event logs or reconstruct services, closures, resources, fibers, clocks,
 scheduler state, external IO, or runtime memory.
+
+`causal-snapshot fork-proposal` writes
+`zigeffect.causal.scenario-fork-proposal.v1` JSON/text artifacts for a named
+snapshot, registered scenario, and proposed fork name. The artifact is a draft:
+`approved=false`, `executed=false`, and it lists allowed replay/feasibility
+commands plus blocked operations such as runtime memory forking, arbitrary
+event-log replay, source mutation, and scenario registry mutation.
 
 `causal-snapshot compare` accepts snapshot names or manifest JSON paths. It
 reads each manifest's referenced causal JSON artifact, prints snapshot-level

@@ -976,6 +976,13 @@ false`. This keeps the feature useful for deterministic agent development
 without implying closure, service, resource, fiber, clock, scheduler, external
 IO, or runtime-memory reconstruction.
 
+`zig build causal-snapshot -- fork-proposal <snapshot> <scenario> <fork>` closes
+the first M5 forking boundary as a proposal artifact, not a runtime fork. It
+writes `zigeffect.causal.scenario-fork-proposal.v1` JSON/text files with
+`approved=false` and `executed=false`, names allowed replay/feasibility commands,
+and blocks runtime memory forking, arbitrary event-log replay, source mutation,
+and scenario registry mutation.
+
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around
 those pieces. The no-scenario form captures before/after dogfood evidence and
