@@ -285,16 +285,16 @@ Goal: isolate side effects behind durable activity records.
 
 Deliverables:
 
-- [ ] Add `Activity(Name, Payload, Success, Failure, Env)`.
-- [ ] Add activity idempotency keys.
-- [ ] Add retry schedule attachment.
-- [ ] Add timeout metadata.
-- [ ] Add compensation metadata.
-- [ ] Add compile diagnostics for invalid activity functions.
+- [x] Add `Activity(Name, Payload, Success, Failure, Env)`.
+- [x] Add activity idempotency keys.
+- [x] Add retry schedule attachment.
+- [x] Add timeout metadata.
+- [x] Add compensation metadata.
+- [x] Add compile diagnostics for invalid activity functions.
 
 Acceptance:
 
-- [ ] Activity definitions can be formatted, inspected, and requirement-checked.
+- [x] Activity definitions can be formatted, inspected, and requirement-checked.
 
 ## Milestone 8: WorkflowEngine Core
 

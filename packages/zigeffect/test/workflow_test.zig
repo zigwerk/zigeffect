@@ -745,3 +745,61 @@ test "workflow definition exposes metadata requirements and execution ids" {
     try std.testing.expectEqual(execution_id, same_execution_id);
     try std.testing.expect(execution_id != different_execution_id);
 }
+
+test "activity definition exposes metadata formatting requirements and retry policy" {
+    const Payload = struct {
+        invoice_id: u64,
+        cents: u64,
+    };
+    const Success = struct {
+        charge_id: []const u8,
+    };
+    const Failure = error{Declined};
+    const Helpers = struct {
+        fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+            return std.fmt.allocPrint(allocator, "invoice:{d}:{d}", .{ payload.invoice_id, payload.cents });
+        }
+    };
+
+    const ChargeCard = fx.workflow
+        .Activity("charge-card", Payload, Success, Failure, fx.TestServices)
+        .withIdempotencyKey(Helpers.key)
+        .withRetrySchedule(fx.Schedule.fixed(.{ .max_retries = 3, .delay_ms = 25 }).withLabel("charge-retry"))
+        .withTimeoutMs(30_000)
+        .withCompensation("refund-charge")
+        .requires(.{fx.Logger});
+
+    try std.testing.expect(ChargeCard.PayloadType == Payload);
+    try std.testing.expect(ChargeCard.SuccessType == Success);
+    try std.testing.expect(ChargeCard.FailureType == Failure);
+    try std.testing.expect(ChargeCard.EnvType == fx.TestServices);
+    try std.testing.expectEqual(@as(usize, 1), ChargeCard.RequiredServices.len);
+
+    const metadata = ChargeCard.metadata();
+    try std.testing.expectEqualStrings("charge-card", metadata.name);
+    try std.testing.expect(metadata.has_idempotency_key);
+    try std.testing.expect(metadata.has_retry_schedule);
+    try std.testing.expectEqualStrings("charge-retry", metadata.retry_schedule_label);
+    try std.testing.expectEqual(@as(?u64, 30_000), metadata.timeout_ms);
+    try std.testing.expectEqualStrings("refund-charge", metadata.compensation_name);
+    try std.testing.expectEqual(@as(usize, 1), metadata.requirement_count);
+
+    var retry = ChargeCard.retrySchedule().?;
+    try std.testing.expectEqualStrings("charge-retry", retry.labelOrKind());
+
+    var required = try ChargeCard.requiredServices(std.testing.allocator);
+    defer required.deinit();
+    try std.testing.expect(required.contains(@typeName(fx.Logger)));
+
+    const payload = Payload{ .invoice_id = 77, .cents = 1299 };
+    const key = try ChargeCard.idempotencyKey(std.testing.allocator, payload);
+    defer std.testing.allocator.free(key);
+    try std.testing.expectEqualStrings("invoice:77:1299", key);
+
+    const formatted = try ChargeCard.format(std.testing.allocator);
+    defer std.testing.allocator.free(formatted);
+    try std.testing.expect(std.mem.indexOf(u8, formatted, "activity: charge-card") != null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted, "retry: charge-retry") != null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted, "timeout_ms: 30000") != null);
+    try std.testing.expect(std.mem.indexOf(u8, formatted, "compensation: refund-charge") != null);
+}

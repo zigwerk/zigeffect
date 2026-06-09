@@ -3,6 +3,7 @@ pub const journal = @import("journal.zig");
 pub const replay = @import("replay.zig");
 pub const store = @import("store.zig");
 pub const definition = @import("definition.zig");
+pub const activity = @import("activity.zig");
 
 pub const workflow_journal_event_schema = journal.workflow_journal_event_schema;
 pub const workflow_journal_event_schema_version = journal.workflow_journal_event_schema_version;
@@ -61,3 +62,7 @@ pub const FileJournalStore = store.FileJournalStore;
 pub const WorkflowMetadata = definition.WorkflowMetadata;
 pub const WorkflowDefinitionError = definition.WorkflowDefinitionError;
 pub const Workflow = definition.Workflow;
+
+pub const ActivityMetadata = activity.ActivityMetadata;
+pub const ActivityDefinitionError = activity.ActivityDefinitionError;
+pub const Activity = activity.Activity;

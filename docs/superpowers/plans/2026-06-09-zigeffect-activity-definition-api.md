@@ -36,13 +36,13 @@
 - Modify `packages/zigeffect/test/workflow_test.zig`
 - Modify `packages/zigeffect/test/architecture_test.zig`
 
-- [ ] **Step 1: Write failing valid activity tests**
+- [x] **Step 1: Write failing valid activity tests**
 
 Add tests for `Activity`, `.withIdempotencyKey`, `.withRetrySchedule`,
 `.withTimeoutMs`, `.withCompensation`, `.requires`, `metadata`,
 `requiredServices`, `idempotencyKey`, `retrySchedule`, and `format`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -52,13 +52,13 @@ bun run zigeffect:test
 
 Expected: FAIL until `workflow/activity.zig` exists.
 
-- [ ] **Step 3: Implement activity module**
+- [x] **Step 3: Implement activity module**
 
 Add `ActivityMetadata`, `Activity`, callback validation,
 `idempotencyKey`, `retrySchedule`, `.requires`, `.withRetrySchedule`,
 `.withTimeoutMs`, `.withCompensation`, `requiredServices`, and `format`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -74,7 +74,7 @@ Expected: PASS.
 - Add `packages/zigeffect/test/compile_fail/invalid_activity_idempotency_key.zig`
 - Modify `packages/zigeffect/test/layer_test.zig`
 
-- [ ] **Step 1: Write failing compile-fail fixture**
+- [x] **Step 1: Write failing compile-fail fixture**
 
 Add a fixture using an idempotency callback with the wrong shape, then assert
 the compile output contains:
@@ -83,7 +83,7 @@ the compile output contains:
 zigeffect invalid activity idempotency key callback
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -93,12 +93,12 @@ bun run zigeffect:test
 
 Expected: FAIL until callback validation emits the diagnostic.
 
-- [ ] **Step 3: Implement diagnostics**
+- [x] **Step 3: Implement diagnostics**
 
 Use `@typeInfo` validation and `@compileError` messages for invalid callback
 shape.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -116,16 +116,16 @@ Expected: PASS.
 - Add `docs/superpowers/specs/2026-06-09-zigeffect-activity-definition-api-design.md`
 - Add `docs/superpowers/plans/2026-06-09-zigeffect-activity-definition-api.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Document `activity.zig` under `src/workflow/`.
 
-- [ ] **Step 2: Mark Milestone 7 complete**
+- [x] **Step 2: Mark Milestone 7 complete**
 
 Mark all Milestone 7 deliverables and acceptance boxes in the roadmap after
 the full gate passes.
 
-- [ ] **Step 3: Run full gate**
+- [x] **Step 3: Run full gate**
 
 Run:
 
@@ -138,7 +138,7 @@ git diff --check
 
 Expected: all commands PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/zigeffect/src/workflow/activity.zig packages/zigeffect/src/workflow/root.zig packages/zigeffect/test/workflow_test.zig packages/zigeffect/test/architecture_test.zig packages/zigeffect/test/layer_test.zig packages/zigeffect/test/compile_fail/invalid_activity_idempotency_key.zig packages/zigeffect/docs/architecture.md docs/superpowers/specs/2026-06-09-zigeffect-activity-definition-api-design.md docs/superpowers/plans/2026-06-09-zigeffect-activity-definition-api.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md
@@ -147,11 +147,11 @@ git commit -m "feat(zigeffect): add activity definition API"
 
 ## Self-Review Checklist
 
-- [ ] Definitions are type-level and do not execute activity functions.
-- [ ] Idempotency keys are caller-owned and deinitialized by tests.
-- [ ] Retry schedule, timeout, and compensation are metadata only.
-- [ ] Requirement declarations use existing service tuple validation.
-- [ ] `format` emits an inspectable summary without allocating hidden state.
-- [ ] Compile-fail diagnostic covers invalid callback shape.
-- [ ] No activity runner, workflow engine, journal write, or payload codec is added.
-- [ ] Full verification passes before Milestone 7 is marked complete.
+- [x] Definitions are type-level and do not execute activity functions.
+- [x] Idempotency keys are caller-owned and deinitialized by tests.
+- [x] Retry schedule, timeout, and compensation are metadata only.
+- [x] Requirement declarations use existing service tuple validation.
+- [x] `format` emits an inspectable summary without allocating hidden state.
+- [x] Compile-fail diagnostic covers invalid callback shape.
+- [x] No activity runner, workflow engine, journal write, or payload codec is added.
+- [x] Full verification passes before Milestone 7 is marked complete.
