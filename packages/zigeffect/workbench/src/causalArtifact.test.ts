@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   type CausalEvent,
   causePathForEvent,
+  deriveAppRemediationModel,
   deriveGovernanceModel,
   deriveWorkbenchModel,
   deriveGraphModel,
@@ -156,6 +157,108 @@ const sampleAuditChain = {
   claim_guardrails: ["Do not claim remediation without verification."],
   proposal_guardrails: ["This proposal does not apply source changes."],
   chain_guardrails: ["Chain comparison is evidence, not authorization to edit source."],
+};
+
+const sampleAppAudit = {
+  schema: "zigeffect.causal.app-remediation-audit.v1",
+  schema_version: 1,
+  mode: "local",
+  target: "yachdee-platform",
+  source: {
+    app_artifact: ".zig-cache/causal-artifacts/app.json",
+    advice: ".zig-cache/causal-artifacts/app-advice.txt",
+  },
+  approval_status: "pending",
+  applied: false,
+  mutation_authority: "none",
+  incident_count: 2,
+  incidents: [
+    {
+      action: "fix-app-config",
+      event_id: 2,
+      event_kind: "assertion_recorded",
+      label: "YACHDEE_ENV",
+      subsystem: "app_config",
+      fix_category: "config-or-secret-binding",
+      policy_gate: "config-only",
+      query_commands: ["zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 2"],
+    },
+    {
+      action: "wire-app-requirement",
+      event_id: 3,
+      event_kind: "assertion_recorded",
+      label: "HealthService",
+      subsystem: "app_service_layer",
+      fix_category: "service-provider-or-layer",
+      policy_gate: "source-only",
+      query_commands: ["zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 3"],
+    },
+  ],
+  policy_gates: ["config-only", "source-only"],
+  verification_commands: ["zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 2"],
+  claim_guardrails: ["Do not claim an app fix without rerunning the app request/job scenario."],
+};
+
+const sampleAppPolicy = {
+  schema: "zigeffect.causal.app-policy-decision.v1",
+  schema_version: 1,
+  mode: "local",
+  target: "yachdee-platform",
+  decision: "approve",
+  approval_status: "approve",
+  mutation_authority: "none",
+  applied: false,
+  source: {
+    app_remediation_audit: ".zig-cache/causal-artifacts/app-audit.json",
+    app_artifact: ".zig-cache/causal-artifacts/app.json",
+  },
+  policy_gates: ["config-only", "source-only"],
+  gate_results: [
+    {
+      gate: "config-only",
+      status: "allow-proposal",
+      detail: "configuration proposal may be drafted without exposing secrets",
+    },
+    {
+      gate: "source-only",
+      status: "allow-proposal",
+      detail: "source-only app patch proposal may be drafted",
+    },
+  ],
+  event_ids: [2, 3],
+  required_verification_commands: ["zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 2"],
+  guardrails: ["Policy approval is advisory and does not apply app source, config, migrations, operations, or rollback actions."],
+};
+
+const sampleAppProposal = {
+  schema: "zigeffect.causal.app-patch-proposal.v1",
+  schema_version: 1,
+  mode: "local",
+  target: "yachdee-platform",
+  proposal_status: "draft",
+  approval_status: "pending",
+  approved: false,
+  applied: false,
+  mutation_authority: "none",
+  summary: "Wire HealthService and document config binding",
+  change: "Add provider layer and document YACHDEE_ENV.",
+  source: {
+    policy: ".zig-cache/causal-artifacts/app-policy.json",
+    app_remediation_audit: ".zig-cache/causal-artifacts/app-audit.json",
+    app_artifact: ".zig-cache/causal-artifacts/app.json",
+  },
+  policy_gates: ["config-only", "source-only"],
+  citations: {
+    source_files: ["apps/platform/src/worker.ts"],
+    config_keys: ["YACHDEE_ENV"],
+    migration_files: [],
+    runbooks: ["docs/runbooks/yachdee-config.md"],
+    rollback_plans: ["docs/runbooks/yachdee-rollback.md"],
+  },
+  event_ids: [2, 3],
+  required_verification_commands: ["zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 2"],
+  claim_guardrails: ["Do not claim an app fix without rerunning the app request/job scenario."],
+  proposal_guardrails: ["Config citations name keys or bindings only; never include secret values."],
 };
 
 test("parseArtifactJson parses causal artifacts", () => {
@@ -358,6 +461,27 @@ test("deriveGovernanceModel detects app remediation audit artifacts", () => {
   expect(governance?.mutationAuthority).toBe("none");
 });
 
+test("deriveAppRemediationModel reads app audit incidents and gates", () => {
+  const app = deriveAppRemediationModel(sampleAppAudit, { artifactPath: "app-audit.json" });
+
+  expect(app?.kind).toBe("app-remediation-audit");
+  expect(app?.target).toBe("yachdee-platform");
+  expect(app?.incidents.map((incident) => incident.eventId)).toEqual(["2", "3"]);
+  expect(app?.incidents[0]?.policyGate).toBe("config-only");
+  expect(app?.policyGates).toEqual(["config-only", "source-only"]);
+  expect(app?.verificationCommands).toEqual(["zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 2"]);
+  expect(app?.guardrails).toContain("Do not claim an app fix without rerunning the app request/job scenario.");
+  expect(app?.sourceSteps.map((step) => step.label)).toEqual(["App artifact", "Advice"]);
+  expect(app?.sourceSteps[0]?.workbenchCommand).toBe("zig build causal-workbench -- .zig-cache/causal-artifacts/app.json");
+});
+
+test("deriveGovernanceModel attaches app remediation details", () => {
+  const governance = deriveGovernanceModel(sampleAppAudit, { artifactPath: "app-audit.json" });
+
+  expect(governance?.app?.incidents.length).toBe(2);
+  expect(governance?.app?.sourceSteps[0]?.workbenchCommand).toBe("zig build causal-workbench -- .zig-cache/causal-artifacts/app.json");
+});
+
 test("deriveGovernanceModel detects app policy decision artifacts", () => {
   const governance = deriveGovernanceModel({
     schema: "zigeffect.causal.app-policy-decision.v1",
@@ -372,6 +496,20 @@ test("deriveGovernanceModel detects app policy decision artifacts", () => {
   expect(governance?.summary).toContain("needs-human-review app policy decision");
   expect(governance?.applied).toBe(false);
   expect(governance?.mutationAuthority).toBe("none");
+});
+
+test("deriveAppRemediationModel reads app policy gate decisions", () => {
+  const app = deriveAppRemediationModel(sampleAppPolicy, { artifactPath: "app-policy.json" });
+
+  expect(app?.kind).toBe("app-policy-decision");
+  expect(app?.decision).toBe("approve");
+  expect(app?.gateResults.map((gate) => `${gate.gate}:${gate.status}`)).toEqual([
+    "config-only:allow-proposal",
+    "source-only:allow-proposal",
+  ]);
+  expect(app?.sourceSteps.map((step) => step.label)).toEqual(["App remediation audit", "App artifact"]);
+  expect(app?.verificationCommands).toContain("zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 2");
+  expect(app?.guardrails).toContain("Policy approval is advisory and does not apply app source, config, migrations, operations, or rollback actions.");
 });
 
 test("deriveGovernanceModel detects app patch proposal artifacts", () => {
@@ -389,6 +527,33 @@ test("deriveGovernanceModel detects app patch proposal artifacts", () => {
   expect(governance?.summary).toContain("draft app patch proposal");
   expect(governance?.applied).toBe(false);
   expect(governance?.mutationAuthority).toBe("none");
+});
+
+test("deriveAppRemediationModel reads app patch proposal citations and guardrails", () => {
+  const app = deriveAppRemediationModel(sampleAppProposal, { artifactPath: "app-proposal.json" });
+
+  expect(app?.kind).toBe("app-patch-proposal");
+  expect(app?.proposalStatus).toBe("draft");
+  expect(app?.citations.map((group) => `${group.label}:${group.values.length}`)).toEqual([
+    "Source files:1",
+    "Config keys:1",
+    "Migration files:0",
+    "Runbooks:1",
+    "Rollback plans:1",
+  ]);
+  expect(app?.sourceSteps.map((step) => step.label)).toEqual(["App policy decision", "App remediation audit", "App artifact"]);
+  expect(app?.guardrails).toContain("Config citations name keys or bindings only; never include secret values.");
+});
+
+test("deriveAppRemediationModel tolerates partial app artifacts", () => {
+  const app = deriveAppRemediationModel({
+    schema: "zigeffect.causal.app-remediation-audit.v1",
+    source: {},
+  }, { artifactPath: "partial-app-audit.json" });
+
+  expect(app?.target).toBe("unknown");
+  expect(app?.incidents).toEqual([]);
+  expect(app?.warnings).toContain("artifact schema_version is missing");
 });
 
 test("deriveRemediationChainModel tolerates partial chain artifacts", () => {

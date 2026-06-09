@@ -1,0 +1,37 @@
+{
+  "schema": "zigeffect.causal.app-patch-proposal.v1",
+  "schema_version": 1,
+  "mode": "local",
+  "target": "yachdee-platform",
+  "proposal_status": "draft",
+  "approval_status": "pending",
+  "approved": false,
+  "applied": false,
+  "mutation_authority": "none",
+  "summary": "Wire HealthService and document config binding",
+  "change": "Add provider layer and document YACHDEE_ENV.",
+  "source": {
+    "policy": ".zig-cache/causal-artifacts/app-policy.json",
+    "app_remediation_audit": ".zig-cache/causal-artifacts/app-audit.json",
+    "app_artifact": ".zig-cache/causal-artifacts/app.json"
+  },
+  "policy_gates": ["config-only", "source-only"],
+  "citations": {
+    "source_files": ["apps/platform/src/worker.ts"],
+    "config_keys": ["YACHDEE_ENV"],
+    "migration_files": [],
+    "runbooks": ["docs/runbooks/yachdee-config.md"],
+    "rollback_plans": ["docs/runbooks/yachdee-rollback.md"]
+  },
+  "event_ids": [2, 3],
+  "required_verification_commands": [
+    "zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 2"
+  ],
+  "claim_guardrails": [
+    "Do not claim an app fix without rerunning the app request/job scenario."
+  ],
+  "proposal_guardrails": [
+    "This proposal does not edit app source, config, migrations, operations, or rollback plans.",
+    "Config citations name keys or bindings only; never include secret values."
+  ]
+}

@@ -93,7 +93,12 @@ function currentSearch(): string {
 
 function sampleNameFromSearch(search: string): string {
   const params = new URLSearchParams(search);
-  return params.get("sample") === "chain" ? "sample-chain-artifact.json" : "sample-artifact.json";
+  const sample = params.get("sample");
+  if (sample === "chain") return "sample-chain-artifact.json";
+  if (sample === "app-audit") return "sample-app-remediation-audit.json";
+  if (sample === "app-policy") return "sample-app-policy-decision.json";
+  if (sample === "app-proposal") return "sample-app-patch-proposal.json";
+  return "sample-artifact.json";
 }
 
 async function loadSampleArtifact(sampleName: string): Promise<string> {

@@ -1,6 +1,10 @@
 import { For, Match, Show, Switch, createMemo, createResource, createSignal } from "solid-js";
 import {
   type CausalEvent,
+  type AppCitationGroup,
+  type AppGateResultModel,
+  type AppIncidentModel,
+  type AppRemediationModel,
   type GraphEdge,
   type GraphLane,
   type GraphLaneKind,
@@ -208,8 +212,10 @@ export function App() {
                   <Match when={activeTab() === "chain"}>
                     <ChainView
                       governance={governance()}
+                      events={current().events}
                       copiedCommand={copiedCommand()}
                       onCopy={copyCommand}
+                      onSelectEvent={setSelectedId}
                     />
                   </Match>
                   <Match when={activeTab() === "queries"}>
@@ -245,8 +251,10 @@ export function App() {
 
 function ChainView(props: {
   governance: GovernanceModel | null;
+  events: CausalEvent[];
   copiedCommand: string | null;
   onCopy: (command: string) => void;
+  onSelectEvent: (id: string) => void;
 }) {
   return (
     <div class="view-stack">
@@ -257,30 +265,45 @@ function ChainView(props: {
 
       <Show when={props.governance} fallback={<EmptyState label="Loaded artifact has no remediation chain" />}>
         {(governance) => (
-          <Show when={governance().chain} fallback={<GovernanceSummary governance={governance()} />}>
-            {(chain) => (
-              <>
-                <ChainStatus chain={chain()} />
-                <div class="chain-grid">
-                  <ChainSources
-                    steps={chain().sourceSteps}
-                    copiedCommand={props.copiedCommand}
-                    onCopy={props.onCopy}
-                  />
-                  <ChainVerification
-                    chain={chain()}
-                    copiedCommand={props.copiedCommand}
-                    onCopy={props.onCopy}
-                  />
-                </div>
-                <ChainClassifications chain={chain()} />
-                <ChainGuardrails chain={chain()} />
-                <div class="warning-list">
-                  <For each={[...governance().warnings, ...chain().warnings]} fallback={<EmptyState label="No chain warnings" compact />}>
-                    {(warning) => <span>{warning}</span>}
-                  </For>
-                </div>
-              </>
+          <Show
+            when={governance().app}
+            fallback={(
+              <Show when={governance().chain} fallback={<GovernanceSummary governance={governance()} />}>
+                {(chain) => (
+                  <>
+                    <ChainStatus chain={chain()} />
+                    <div class="chain-grid">
+                      <ChainSources
+                        steps={chain().sourceSteps}
+                        copiedCommand={props.copiedCommand}
+                        onCopy={props.onCopy}
+                      />
+                      <ChainVerification
+                        chain={chain()}
+                        copiedCommand={props.copiedCommand}
+                        onCopy={props.onCopy}
+                      />
+                    </div>
+                    <ChainClassifications chain={chain()} />
+                    <ChainGuardrails chain={chain()} />
+                    <div class="warning-list">
+                      <For each={[...governance().warnings, ...chain().warnings]} fallback={<EmptyState label="No chain warnings" compact />}>
+                        {(warning) => <span>{warning}</span>}
+                      </For>
+                    </div>
+                  </>
+                )}
+              </Show>
+            )}
+          >
+            {(app) => (
+              <AppRemediationView
+                app={app()}
+                events={props.events}
+                copiedCommand={props.copiedCommand}
+                onCopy={props.onCopy}
+                onSelectEvent={props.onSelectEvent}
+              />
             )}
           </Show>
         )}
@@ -426,6 +449,202 @@ function ChainGuardrails(props: { chain: RemediationChainModel }) {
       </div>
     </section>
   );
+}
+
+function AppRemediationView(props: {
+  app: AppRemediationModel;
+  events: CausalEvent[];
+  copiedCommand: string | null;
+  onCopy: (command: string) => void;
+  onSelectEvent: (id: string) => void;
+}) {
+  return (
+    <>
+      <AppRemediationStatus app={props.app} />
+      <div class="app-remediation-grid">
+        <ChainSources
+          steps={props.app.sourceSteps}
+          copiedCommand={props.copiedCommand}
+          onCopy={props.onCopy}
+        />
+        <AppPolicyGates gates={props.app.policyGates} results={props.app.gateResults} />
+      </div>
+      <AppIncidents
+        incidents={props.app.incidents}
+        events={props.events}
+        copiedCommand={props.copiedCommand}
+        onCopy={props.onCopy}
+        onSelectEvent={props.onSelectEvent}
+      />
+      <div class="app-remediation-grid">
+        <AppCitations citations={props.app.citations} />
+        <AppVerification
+          commands={props.app.verificationCommands}
+          copiedCommand={props.copiedCommand}
+          onCopy={props.onCopy}
+        />
+      </div>
+      <AppGuardrails guardrails={props.app.guardrails} />
+      <div class="warning-list">
+        <For each={props.app.warnings} fallback={<EmptyState label="No app remediation warnings" compact />}>
+          {(warning) => <span>{warning}</span>}
+        </For>
+      </div>
+    </>
+  );
+}
+
+function AppRemediationStatus(props: { app: AppRemediationModel }) {
+  const posture = props.app.kind === "app-patch-proposal" ? props.app.proposalStatus : props.app.decision;
+  return (
+    <div class="chain-status app-status">
+      <Metric label="target" value={props.app.target} />
+      <Metric label="kind" value={props.app.kind} />
+      <Metric label="posture" value={posture === "unknown" ? props.app.approvalStatus : posture} />
+      <Metric label="approval" value={props.app.approvalStatus} />
+      <Metric label="applied" value={String(props.app.applied ?? "unknown")} tone={props.app.applied ? "warn" : "ok"} />
+      <Metric label="authority" value={props.app.mutationAuthority ?? "none"} tone={props.app.mutationAuthority === "none" ? "ok" : "warn"} />
+    </div>
+  );
+}
+
+function AppPolicyGates(props: { gates: string[]; results: AppGateResultModel[] }) {
+  return (
+    <section class="chain-panel">
+      <div class="lane-section-head">
+        <h3>Policy gates</h3>
+        <span>{props.gates.length || props.results.length}</span>
+      </div>
+      <div class="gate-chip-list">
+        <For each={props.gates} fallback={<EmptyState label="No policy gates" compact />}>
+          {(gate) => <span class={`gate-chip ${gateToneClass(gate)}`}>{gate}</span>}
+        </For>
+      </div>
+      <div class="gate-result-list">
+        <For each={props.results} fallback={<EmptyState label="No gate result details" compact />}>
+          {(result) => (
+            <div class="gate-result-row">
+              <span class={`gate-chip ${gateToneClass(result.status || result.gate)}`}>{result.status}</span>
+              <strong>{result.gate}</strong>
+              <p>{result.detail || "No detail recorded"}</p>
+            </div>
+          )}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function AppIncidents(props: {
+  incidents: AppIncidentModel[];
+  events: CausalEvent[];
+  copiedCommand: string | null;
+  onCopy: (command: string) => void;
+  onSelectEvent: (id: string) => void;
+}) {
+  const eventIds = createMemo(() => new Set(props.events.map((event) => event.idText)));
+
+  return (
+    <section class="chain-panel app-remediation-full">
+      <div class="lane-section-head">
+        <h3>App incidents</h3>
+        <span>{props.incidents.length}</span>
+      </div>
+      <div class="app-incident-list">
+        <For each={props.incidents} fallback={<EmptyState label="No app incidents recorded" compact />}>
+          {(incident) => (
+            <div class="app-incident-row">
+              <Show
+                when={eventIds().has(incident.eventId)}
+                fallback={<span class="app-event-chip">#{incident.eventId}</span>}
+              >
+                <button type="button" class="app-event-button" onClick={() => props.onSelectEvent(incident.eventId)}>
+                  #{incident.eventId}
+                </button>
+              </Show>
+              <div>
+                <strong>{incident.action}</strong>
+                <span>{incident.label}</span>
+              </div>
+              <span class={`gate-chip ${gateToneClass(incident.policyGate)}`}>{incident.policyGate}</span>
+              <small>{incident.subsystem}</small>
+              <small>{incident.fixCategory}</small>
+              <CommandList
+                commands={incident.queryCommands.map((command, index) => ({
+                  label: `query ${index + 1}`,
+                  command,
+                }))}
+                copiedCommand={props.copiedCommand}
+                onCopy={props.onCopy}
+                compact
+              />
+            </div>
+          )}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function AppCitations(props: { citations: AppCitationGroup[] }) {
+  return (
+    <section class="chain-panel">
+      <h3>Citations</h3>
+      <div class="citation-grid">
+        <For each={props.citations} fallback={<EmptyState label="No citation groups" compact />}>
+          {(group) => (
+            <div class="citation-group">
+              <span>{group.label}</span>
+              <For each={group.values} fallback={<small>none</small>}>
+                {(value) => <code>{value}</code>}
+              </For>
+            </div>
+          )}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function AppVerification(props: {
+  commands: string[];
+  copiedCommand: string | null;
+  onCopy: (command: string) => void;
+}) {
+  const commands = createMemo<QueryCommand[]>(() => props.commands.map((command, index) => ({
+    label: `verify ${index + 1}`,
+    command,
+  })));
+
+  return (
+    <section class="chain-panel">
+      <h3>Verification</h3>
+      <CommandList commands={commands()} copiedCommand={props.copiedCommand} onCopy={props.onCopy} compact />
+    </section>
+  );
+}
+
+function AppGuardrails(props: { guardrails: string[] }) {
+  return (
+    <section class="chain-panel app-remediation-full">
+      <h3>Guardrails</h3>
+      <div class="guardrail-list">
+        <For each={props.guardrails} fallback={<EmptyState label="No app guardrails recorded" compact />}>
+          {(guardrail) => <span>{guardrail}</span>}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function gateToneClass(value: string): string {
+  if (value.includes("block") || value.includes("reject") || value.includes("unknown")) {
+    return "blocked";
+  }
+  if (value.includes("migration") || value.includes("operational") || value.includes("rollback") || value.includes("human")) {
+    return "review";
+  }
+  return "allow";
 }
 
 function Metric(props: { label: string; value: string; tone?: "ok" | "warn" }) {

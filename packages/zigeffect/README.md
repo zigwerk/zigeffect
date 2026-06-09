@@ -154,7 +154,10 @@ runtime lanes for runs, scopes, fibers, resources, and retries from the selected
 artifact. The Chain tab also recognizes remediation/governance artifacts such as
 `zigeffect.causal.audit-chain.v1`, showing source artifact paths, evidence id
 classifications, verification commands, and guardrails while remaining
-read-only. It does not edit source, update the scenario registry, make policy
+read-only. It also renders app remediation audit, app policy decision, and app
+patch proposal artifacts with app incident rows, policy gate results, proposal
+citations, verification commands, guardrails, and copyable source workbench
+commands. It does not edit source, update the scenario registry, make policy
 decisions, or write remediation artifacts. When a native browser or WebView
 cannot be opened, the launcher falls back to a local WebUI server URL;
 `--server-only` starts that local read-only server directly for agent/browser

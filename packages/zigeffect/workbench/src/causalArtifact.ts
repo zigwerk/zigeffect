@@ -111,6 +111,58 @@ export type RemediationChainModel = {
   warnings: string[];
 };
 
+export type AppRemediationArtifactKind =
+  | "app-remediation-audit"
+  | "app-policy-decision"
+  | "app-patch-proposal";
+
+export type AppIncidentModel = {
+  action: string;
+  eventId: string;
+  eventKind: string;
+  label: string;
+  subsystem: string;
+  fixCategory: string;
+  policyGate: string;
+  queryCommands: string[];
+};
+
+export type AppGateResultModel = {
+  gate: string;
+  status: string;
+  detail: string;
+};
+
+export type AppCitationGroup = {
+  label: string;
+  values: string[];
+};
+
+export type AppRemediationModel = {
+  artifactPath: string;
+  schema: string;
+  schemaVersion: string;
+  kind: AppRemediationArtifactKind;
+  mode: string;
+  target: string;
+  summary: string;
+  decision: string;
+  proposalStatus: string;
+  approvalStatus: string;
+  approved: boolean | null;
+  applied: boolean | null;
+  mutationAuthority: string | null;
+  sourceSteps: ChainSourceStep[];
+  incidents: AppIncidentModel[];
+  policyGates: string[];
+  gateResults: AppGateResultModel[];
+  citations: AppCitationGroup[];
+  eventIds: string[];
+  verificationCommands: string[];
+  guardrails: string[];
+  warnings: string[];
+};
+
 export type GovernanceModel = {
   artifactPath: string;
   schema: string;
@@ -121,6 +173,7 @@ export type GovernanceModel = {
   applied: boolean | null;
   mutationAuthority: string | null;
   chain: RemediationChainModel | null;
+  app: AppRemediationModel | null;
   warnings: string[];
 };
 
@@ -375,6 +428,58 @@ export function deriveRemediationChainModel(raw: unknown, options: WorkbenchOpti
   };
 }
 
+export function deriveAppRemediationModel(raw: unknown, options: WorkbenchOptions): AppRemediationModel | null {
+  const artifact = isRecord(raw) ? raw : {};
+  const schema = textValue(artifact.schema, "unknown");
+  const kind = governanceKindForSchema(schema);
+  if (kind !== "app-remediation-audit" && kind !== "app-policy-decision" && kind !== "app-patch-proposal") {
+    return null;
+  }
+
+  const warnings: string[] = [];
+  const schemaVersion = textValue(artifact.schema_version, "unknown");
+  if (schemaVersion === "unknown") {
+    warnings.push("artifact schema_version is missing");
+  }
+
+  const source = isRecord(artifact.source) ? artifact.source : {};
+  if (!isRecord(artifact.source)) {
+    warnings.push("artifact source object is missing");
+  }
+
+  return {
+    artifactPath: options.artifactPath,
+    schema,
+    schemaVersion,
+    kind,
+    mode: textValue(artifact.mode, "unknown"),
+    target: textValue(artifact.target, "unknown"),
+    summary: appSummary(kind, artifact),
+    decision: textValue(artifact.decision, "unknown"),
+    proposalStatus: textValue(artifact.proposal_status, "unknown"),
+    approvalStatus: textValue(artifact.approval_status, "unknown"),
+    approved: booleanValue(artifact.approved),
+    applied: booleanValue(artifact.applied),
+    mutationAuthority: nullableTextValue(artifact.mutation_authority),
+    sourceSteps: appSourceSteps(kind, source),
+    incidents: appIncidents(artifact.incidents),
+    policyGates: stringList(artifact.policy_gates),
+    gateResults: appGateResults(artifact.gate_results),
+    citations: appCitationGroups(artifact.citations),
+    eventIds: eventIdList(artifact.event_ids),
+    verificationCommands: uniqueInOrder([
+      ...stringList(artifact.verification_commands),
+      ...stringList(artifact.required_verification_commands),
+    ]),
+    guardrails: uniqueInOrder([
+      ...stringList(artifact.claim_guardrails),
+      ...stringList(artifact.guardrails),
+      ...stringList(artifact.proposal_guardrails),
+    ]),
+    warnings,
+  };
+}
+
 export function deriveGovernanceModel(raw: unknown, options: WorkbenchOptions): GovernanceModel | null {
   const artifact = isRecord(raw) ? raw : {};
   const schema = textValue(artifact.schema, "unknown");
@@ -384,9 +489,10 @@ export function deriveGovernanceModel(raw: unknown, options: WorkbenchOptions): 
   }
 
   const chain = deriveRemediationChainModel(raw, options);
+  const app = deriveAppRemediationModel(raw, options);
   const schemaVersion = textValue(artifact.schema_version, "unknown");
   const target = textValue(artifact.target, "unknown");
-  const warnings = chain?.warnings ?? (schemaVersion === "unknown" ? ["artifact schema_version is missing"] : []);
+  const warnings = chain?.warnings ?? app?.warnings ?? (schemaVersion === "unknown" ? ["artifact schema_version is missing"] : []);
   const incidentCount = numericValue(artifact.incident_count);
   const decision = textValue(artifact.decision, "unknown");
   const proposalStatus = textValue(artifact.proposal_status, "unknown");
@@ -410,6 +516,7 @@ export function deriveGovernanceModel(raw: unknown, options: WorkbenchOptions): 
     applied: booleanValue(artifact.applied),
     mutationAuthority: nullableTextValue(artifact.mutation_authority),
     chain,
+    app,
     warnings,
   };
 }
@@ -625,6 +732,83 @@ function chainSourceSteps(source: UnknownRecord): ChainSourceStep[] {
       workbenchCommand: workbenchCommandForPath(path),
     }];
   });
+}
+
+function appSummary(kind: AppRemediationArtifactKind, artifact: UnknownRecord): string {
+  const target = textValue(artifact.target, "unknown");
+  if (kind === "app-remediation-audit") {
+    const incidentCount = numericValue(artifact.incident_count);
+    return incidentCount === null ? `app remediation audit for ${target}` : `${incidentCount} app incidents for ${target}`;
+  }
+  if (kind === "app-policy-decision") {
+    return `${textValue(artifact.decision, "unknown")} app policy decision for ${target}`;
+  }
+  return `${textValue(artifact.proposal_status, "unknown")} app patch proposal for ${target}`;
+}
+
+function appSourceSteps(kind: AppRemediationArtifactKind, source: UnknownRecord): ChainSourceStep[] {
+  const definitions: Array<[string, string]> = kind === "app-remediation-audit"
+    ? [["app_artifact", "App artifact"], ["advice", "Advice"]]
+    : kind === "app-policy-decision"
+      ? [["app_remediation_audit", "App remediation audit"], ["app_artifact", "App artifact"]]
+      : [["policy", "App policy decision"], ["app_remediation_audit", "App remediation audit"], ["app_artifact", "App artifact"]];
+
+  return definitions
+    .map(([field, label]) => appSourceStep(field, label, source))
+    .filter((step): step is ChainSourceStep => step !== null);
+}
+
+function appSourceStep(field: string, label: string, source: UnknownRecord): ChainSourceStep | null {
+  const path = textValue(source[field], "");
+  if (!path) {
+    return null;
+  }
+  return {
+    kind: "proposal",
+    label,
+    path,
+    workbenchCommand: workbenchCommandForPath(path),
+  };
+}
+
+function appIncidents(value: unknown): AppIncidentModel[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isRecord).map((incident) => ({
+    action: textValue(incident.action, "unknown"),
+    eventId: idValue(incident.event_id) ?? "unknown",
+    eventKind: textValue(incident.event_kind, "unknown"),
+    label: textValue(incident.label, "unknown"),
+    subsystem: textValue(incident.subsystem, "unknown"),
+    fixCategory: textValue(incident.fix_category, "unknown"),
+    policyGate: textValue(incident.policy_gate, "unknown"),
+    queryCommands: stringList(incident.query_commands),
+  }));
+}
+
+function appGateResults(value: unknown): AppGateResultModel[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isRecord).map((gate) => ({
+    gate: textValue(gate.gate, "unknown"),
+    status: textValue(gate.status, "unknown"),
+    detail: textValue(gate.detail, ""),
+  }));
+}
+
+function appCitationGroups(value: unknown): AppCitationGroup[] {
+  const citations = isRecord(value) ? value : {};
+  return [
+    { label: "Source files", values: stringList(citations.source_files) },
+    { label: "Config keys", values: stringList(citations.config_keys) },
+    { label: "Migration files", values: stringList(citations.migration_files) },
+    { label: "Runbooks", values: stringList(citations.runbooks) },
+    { label: "Rollback plans", values: stringList(citations.rollback_plans) },
+  ];
 }
 
 function workbenchCommandForPath(path: string): string | null {

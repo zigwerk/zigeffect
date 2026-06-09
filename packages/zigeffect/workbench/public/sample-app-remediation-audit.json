@@ -1,0 +1,48 @@
+{
+  "schema": "zigeffect.causal.app-remediation-audit.v1",
+  "schema_version": 1,
+  "mode": "local",
+  "target": "yachdee-platform",
+  "source": {
+    "app_artifact": ".zig-cache/causal-artifacts/app.json",
+    "advice": ".zig-cache/causal-artifacts/app-advice.txt"
+  },
+  "approval_status": "pending",
+  "applied": false,
+  "mutation_authority": "none",
+  "incident_count": 2,
+  "incidents": [
+    {
+      "action": "fix-app-config",
+      "event_id": 2,
+      "event_kind": "assertion_recorded",
+      "label": "YACHDEE_ENV",
+      "subsystem": "app_config",
+      "fix_category": "config-or-secret-binding",
+      "policy_gate": "config-only",
+      "query_commands": [
+        "zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 2"
+      ]
+    },
+    {
+      "action": "wire-app-requirement",
+      "event_id": 3,
+      "event_kind": "assertion_recorded",
+      "label": "HealthService",
+      "subsystem": "app_service_layer",
+      "fix_category": "service-provider-or-layer",
+      "policy_gate": "source-only",
+      "query_commands": [
+        "zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 3"
+      ]
+    }
+  ],
+  "policy_gates": ["config-only", "source-only"],
+  "verification_commands": [
+    "zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 2"
+  ],
+  "claim_guardrails": [
+    "Do not claim an app fix without rerunning the app request/job scenario.",
+    "Do not expose secret values while fixing config or binding incidents."
+  ]
+}

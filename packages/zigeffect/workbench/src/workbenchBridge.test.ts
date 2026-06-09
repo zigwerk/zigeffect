@@ -48,6 +48,25 @@ test("loadPayloadFromBridge can load the chain development sample", async () => 
   expect(payload.session?.artifact_path).toBe("sample-chain-artifact.json");
 });
 
+test("loadPayloadFromBridge can load app remediation development samples", async () => {
+  const samples: Array<[string, string]> = [
+    ["?sample=app-audit", "sample-app-remediation-audit.json"],
+    ["?sample=app-policy", "sample-app-policy-decision.json"],
+    ["?sample=app-proposal", "sample-app-patch-proposal.json"],
+  ];
+
+  for (const [search, expected] of samples) {
+    const payload = await loadPayloadFromBridge(
+      {},
+      async (sampleName) => JSON.stringify({ schema: sampleName }),
+      search,
+    );
+
+    expect(payload.artifactJson).toBe(JSON.stringify({ schema: expected }));
+    expect(payload.session?.artifact_path).toBe(expected);
+  }
+});
+
 test("workbench HTML loads the WebUI bridge before the Solid bundle", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const webuiScript = html.indexOf('src="/webui.js"');

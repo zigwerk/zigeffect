@@ -625,6 +625,13 @@ and read-only: no source edits, registry edits, policy decisions, or
 remediation writes happen through the UI. Use copied `causal-query` commands as
 explicit follow-up evidence, not as implied approval.
 
+For app remediation artifacts, open the audit, policy decision, or patch
+proposal JSON directly in the same workbench. The Chain tab renders app
+incidents, policy gates, gate results, proposal citations, verification
+commands, guardrails, and source artifact paths. Copy the shown commands for
+follow-up inspection; do not treat the workbench as approval to edit source,
+change config, run migrations, or apply rollback actions.
+
 For app-facing request and job traces, use the M7 adapter rather than inventing
 new app log schemas. Start with a bounded store, record semantic app lifecycle
 facts, export normal causal JSON, then inspect the artifact through the same

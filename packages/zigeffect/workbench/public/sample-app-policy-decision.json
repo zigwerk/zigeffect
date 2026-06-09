@@ -1,0 +1,39 @@
+{
+  "schema": "zigeffect.causal.app-policy-decision.v1",
+  "schema_version": 1,
+  "mode": "local",
+  "target": "yachdee-platform",
+  "decision": "approve",
+  "approval_status": "approve",
+  "evaluated_by": "local-app-policy-engine",
+  "policy": "local-app-remediation-policy-v1",
+  "reason": "app audit is eligible for proposal drafting",
+  "reason_codes": ["app-gates-proposal-eligible"],
+  "mutation_authority": "none",
+  "applied": false,
+  "source": {
+    "app_remediation_audit": ".zig-cache/causal-artifacts/app-audit.json",
+    "app_artifact": ".zig-cache/causal-artifacts/app.json"
+  },
+  "policy_gates": ["config-only", "source-only"],
+  "gate_results": [
+    {
+      "gate": "config-only",
+      "status": "allow-proposal",
+      "detail": "configuration proposal may be drafted without exposing secrets"
+    },
+    {
+      "gate": "source-only",
+      "status": "allow-proposal",
+      "detail": "source-only app patch proposal may be drafted"
+    }
+  ],
+  "event_ids": [2, 3],
+  "required_verification_commands": [
+    "zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 2"
+  ],
+  "guardrails": [
+    "Policy approval is advisory and does not apply app source, config, migrations, operations, or rollback actions.",
+    "Mutation authority remains none; app changes require a later reviewed proposal and application artifact."
+  ]
+}
