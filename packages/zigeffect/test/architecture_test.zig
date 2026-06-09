@@ -46,6 +46,7 @@ test "root facade exposes data match pattern and trait namespaces" {
     try std.testing.expect(fx.BigDecimal == fx.data.BigDecimal);
     try std.testing.expect(fx.DateTime == fx.data.DateTime);
     try std.testing.expect(fx.Redacted([]const u8) == fx.data.Redacted([]const u8));
+    try std.testing.expect(fx.Codec(u8) == fx.traits.Codec(u8));
     try std.testing.expect(@hasDecl(fx, "traits"));
     try std.testing.expect(@hasDecl(fx, "match"));
     try std.testing.expect(@hasDecl(fx, "pattern"));

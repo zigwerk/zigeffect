@@ -215,6 +215,7 @@ pub const testing = struct {
 pub const ScopeError = core.scope.ScopeError;
 pub const FinalizerRegistrationError = core.scope.FinalizerRegistrationError;
 pub const DependencyError = dependency.service_sets.DependencyError;
+pub const CodecError = traits.CodecError;
 pub const FiberId = runtime.fiber.FiberId;
 pub const FiberStatus = runtime.fiber.FiberStatus;
 pub const FiberPrimitiveError = runtime.coordination.FiberPrimitiveError;
@@ -259,6 +260,8 @@ pub const Scope = core.scope.Scope;
 
 pub const Clock = services.clock.Clock;
 pub const FakeClock = services.clock.FakeClock;
+
+pub const Codec = traits.Codec;
 
 pub const Effect = effect.Effect;
 pub const EffectLayer = layer.definitions.EffectLayer;
