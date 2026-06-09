@@ -148,3 +148,69 @@ test "entity scope finalizers run in reverse order on shutdown" {
     try std.testing.expectEqual(fx.EntityStatus.stopped, try runtime.status(address));
     try std.testing.expectEqualStrings("ba", releases.items);
 }
+
+test "entity refs tell ask reply and process ordered messages" {
+    var runtime = fx.LocalEntityRuntime.init(std.testing.allocator, .{});
+    defer runtime.deinit();
+
+    const address = fx.entityAddress("counter", "one");
+    const ref = try runtime.registerEntity(.{ .address = address, .name = "counter-one" }, 1_000);
+
+    const tell = try ref.tell("text", "inc", "first command");
+    defer fx.deinitEntityEnvelope(std.testing.allocator, tell);
+    var ask = try ref.ask("text", "get", "read current value");
+    defer ask.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 2), runtime.pendingCount(address));
+
+    var seen = std.ArrayList([]const u8).empty;
+    defer seen.deinit(std.testing.allocator);
+    const scope = try runtime.entityScope(address);
+    try scope.provideService("seen", &seen);
+
+    const Handler = struct {
+        pub fn handle(entity_scope: *fx.EntityScope, envelope: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            const raw = (try entity_scope.service("seen")).?;
+            const seen_messages: *std.ArrayList([]const u8) = @ptrCast(@alignCast(raw));
+            try seen_messages.append(std.testing.allocator, envelope.payload);
+            if (envelope.kind == .ask) return .{ .reply = "value=1" };
+            return .noreply;
+        }
+    };
+
+    var first = try runtime.processNext(address, Handler, 1_100);
+    defer first.deinit(std.testing.allocator);
+    var second = try runtime.processNext(address, Handler, 1_200);
+    defer second.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("inc", seen.items[0]);
+    try std.testing.expectEqualStrings("get", seen.items[1]);
+    try std.testing.expect(!first.replied);
+    try std.testing.expect(second.replied);
+
+    const reply = try runtime.takeReply(ask.correlation_id);
+    defer fx.deinitEntityEnvelope(std.testing.allocator, reply);
+    try std.testing.expectEqual(fx.EntityEnvelopeKind.reply, reply.kind);
+    try std.testing.expectEqualStrings("value=1", reply.payload);
+}
+
+test "interrupt envelope marks entity interrupted and closes scope" {
+    var runtime = fx.LocalEntityRuntime.init(std.testing.allocator, .{});
+    defer runtime.deinit();
+
+    const address = fx.entityAddress("counter", "one");
+    const ref = try runtime.registerEntity(.{ .address = address, .name = "counter-one" }, 1_000);
+
+    const interrupt = try ref.interrupt("shutdown");
+    defer fx.deinitEntityEnvelope(std.testing.allocator, interrupt);
+
+    const Handler = struct {
+        pub fn handle(_: *fx.EntityScope, _: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            return .noreply;
+        }
+    };
+
+    var result = try runtime.processNext(address, Handler, 1_100);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(fx.EntityEnvelopeKind.interrupt, result.envelope.kind);
+    try std.testing.expectEqual(fx.EntityStatus.interrupted, try runtime.status(address));
+}

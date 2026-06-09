@@ -46,6 +46,18 @@ pub const EntityHandlerResult = union(enum) {
     stop,
 };
 
+pub const EntityProcessResult = struct {
+    address: EntityAddress,
+    envelope: EntityEnvelope,
+    status: EntityStatus,
+    replied: bool = false,
+    supervisor_decision: ?SupervisorDecision = null,
+
+    pub fn deinit(self: *EntityProcessResult, allocator: Allocator) void {
+        mailbox_mod.deinitEntityEnvelope(allocator, self.envelope);
+    }
+};
+
 const ServiceEntry = struct {
     name: []const u8,
     value: ?*anyopaque,
@@ -127,6 +139,37 @@ pub const LocalEntityRuntimeOptions = struct {
 pub const EntityRef = struct {
     address: EntityAddress,
     runtime: *LocalEntityRuntime,
+
+    pub fn tell(self: EntityRef, payload_type_name: []const u8, payload: []const u8, redacted_detail: []const u8) Allocator.Error!EntityEnvelope {
+        return self.runtime.mailbox.offer(.{
+            .kind = .tell,
+            .address = self.address,
+            .payload_type_name = payload_type_name,
+            .payload = payload,
+            .redacted_detail = redacted_detail,
+        });
+    }
+
+    pub fn ask(self: EntityRef, payload_type_name: []const u8, payload: []const u8, redacted_detail: []const u8) Allocator.Error!EntityAsk {
+        const envelope = try self.runtime.mailbox.offer(.{
+            .kind = .ask,
+            .address = self.address,
+            .payload_type_name = payload_type_name,
+            .payload = payload,
+            .redacted_detail = redacted_detail,
+        });
+        return .{ .envelope = envelope, .correlation_id = envelope.correlation_id.? };
+    }
+
+    pub fn interrupt(self: EntityRef, reason: []const u8) Allocator.Error!EntityEnvelope {
+        return self.runtime.mailbox.offer(.{
+            .kind = .interrupt,
+            .address = self.address,
+            .payload_type_name = "interrupt",
+            .payload = reason,
+            .redacted_detail = reason,
+        });
+    }
 };
 
 pub const LocalEntityRuntime = struct {
@@ -223,6 +266,62 @@ pub const LocalEntityRuntime = struct {
         return &self.entities.items[index].scope;
     }
 
+    pub fn processNext(self: *LocalEntityRuntime, address: EntityAddress, handler: anytype, now_ms: u64) anyerror!EntityProcessResult {
+        const index = self.findEntityIndex(address) orelse return error.EntityNotFound;
+        var instance = &self.entities.items[index];
+        if (instance.status != .running and instance.status != .idle) return error.EntityNotRunning;
+
+        const envelope = try self.mailbox.take(address);
+        errdefer mailbox_mod.deinitEntityEnvelope(self.allocator, envelope);
+        instance.last_active_ms = now_ms;
+
+        if (envelope.kind == .interrupt) {
+            instance.status = .interrupted;
+            instance.scope.close(.{ .interrupted = 0 });
+            return .{ .address = address, .envelope = envelope, .status = instance.status };
+        }
+
+        if (envelope.kind == .reply) {
+            return .{ .address = address, .envelope = envelope, .status = instance.status };
+        }
+
+        const outcome = handler.handle(&instance.scope, envelope) catch |err| {
+            try self.handleEntityFailure(index, err, now_ms);
+            return err;
+        };
+
+        var replied = false;
+        switch (outcome) {
+            .noreply => {},
+            .reply => |payload| if (envelope.kind == .ask) {
+                const reply = try self.mailbox.storeReply(.{
+                    .kind = .reply,
+                    .address = address,
+                    .correlation_id = envelope.correlation_id,
+                    .payload_type_name = envelope.payload_type_name,
+                    .payload = payload,
+                });
+                mailbox_mod.deinitEntityEnvelope(self.allocator, reply);
+                replied = true;
+            },
+            .stop => {
+                instance.status = .stopped;
+                instance.scope.close(.success);
+            },
+        }
+
+        return .{
+            .address = address,
+            .envelope = envelope,
+            .status = instance.status,
+            .replied = replied,
+        };
+    }
+
+    pub fn takeReply(self: *LocalEntityRuntime, correlation_id: EntityCorrelationId) (Allocator.Error || EntityMailboxError)!EntityEnvelope {
+        return self.mailbox.takeReply(correlation_id);
+    }
+
     pub fn shutdownIdle(self: *LocalEntityRuntime, now_ms: u64) void {
         for (self.entities.items) |*instance| {
             if (instance.status != .running and instance.status != .idle) continue;
@@ -231,6 +330,12 @@ pub const LocalEntityRuntime = struct {
             instance.status = .stopped;
             instance.scope.close(.success);
         }
+    }
+
+    fn handleEntityFailure(self: *LocalEntityRuntime, index: usize, err: anyerror, now_ms: u64) !void {
+        _ = now_ms;
+        self.entities.items[index].status = .failed;
+        return err;
     }
 
     fn findEntityIndex(self: *const LocalEntityRuntime, address: EntityAddress) ?usize {

@@ -331,6 +331,7 @@ pub const EntityStatus = cluster.EntityStatus;
 pub const EntityRuntimeError = cluster.EntityRuntimeError;
 pub const EntityRegistration = cluster.EntityRegistration;
 pub const EntityHandlerResult = cluster.EntityHandlerResult;
+pub const EntityProcessResult = cluster.EntityProcessResult;
 pub const EntityScope = cluster.EntityScope;
 pub const LocalEntityRuntimeOptions = cluster.LocalEntityRuntimeOptions;
 pub const LocalEntityRuntime = cluster.LocalEntityRuntime;

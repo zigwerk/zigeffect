@@ -25,6 +25,7 @@ pub const EntityStatus = entity.EntityStatus;
 pub const EntityRuntimeError = entity.EntityRuntimeError;
 pub const EntityRegistration = entity.EntityRegistration;
 pub const EntityHandlerResult = entity.EntityHandlerResult;
+pub const EntityProcessResult = entity.EntityProcessResult;
 pub const EntityScope = entity.EntityScope;
 pub const LocalEntityRuntimeOptions = entity.LocalEntityRuntimeOptions;
 pub const LocalEntityRuntime = entity.LocalEntityRuntime;
