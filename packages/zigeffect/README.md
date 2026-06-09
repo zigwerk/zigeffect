@@ -95,6 +95,7 @@ Docs:
 - [Module Pattern](docs/module-pattern.md)
 - [Agent-Observable Causal Runtime](docs/agent-observable-runtime.md)
 - [Causal Scenario Registry](docs/causal-scenarios.md)
+- [Causal Operations](docs/operations.md)
 - [Readiness Example](examples/readiness.zig)
 - [Causal Readiness Example](examples/causal_readiness.zig)
 - [Causal App Request Example](examples/causal_app_request.zig)
@@ -329,6 +330,12 @@ The manifest lists stable upload globs for
 scenario, and dev-loop artifact paths. Use text artifacts for quick human
 triage, JSON artifacts for `causal-query`, compare, and advice tooling, and DOT
 artifacts for graph visualization. Do not upload the rest of `.zig-cache`.
+
+For the full local/CI operating contract, use
+[docs/operations.md](docs/operations.md). It defines artifact retention,
+failure handoff order, redaction review, review gates, guarded application
+records, workbench operation, backend adapter expectations, and production
+gaps.
 
 Repository CI uses `.github/workflows/zigeffect-causal.yml` to print this
 manifest, generate dogfood artifacts, run examples, run the causal package-test

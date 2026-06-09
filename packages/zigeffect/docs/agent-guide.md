@@ -338,6 +338,11 @@ head artifact has a matching baseline, handoff also writes a `*-ci-compare.txt`
 report and the advice report marks actions as `status=persisting` or
 `status=new`.
 
+Use [operations.md](operations.md) as the first-read operating contract for
+handoffs. It defines which artifacts may be shared, which file to read first,
+when `applied=true` may be recorded, and which production behaviors are still
+out of scope.
+
 Causal JSON artifacts are self-identifying:
 
 ```json

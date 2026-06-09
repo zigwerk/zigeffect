@@ -451,6 +451,11 @@ compiles and tests examples, runs the causal package-test gate, writes a compact
 `zigeffect-causal-ci-handoff.txt` report plus generated `*-advice.txt` reports
 on failure, and uploads only the causal artifact globs when the job fails.
 
+The current production operating model is documented in
+[operations.md](operations.md). It is local/CI, record-only, and explicit about
+artifact sharing, review gates, workbench operation, backend sink contracts,
+and production gaps.
+
 The causal JSON artifact is versioned at the root:
 
 ```json

@@ -306,6 +306,10 @@ local commands for advice and query follow-up. On pull requests, paired
 artifacts also include a base JSON path, generated compare report, and
 baseline-aware advice that marks actions as `status=persisting` or `status=new`.
 
+For handoff, retention, redaction review, guarded application, and CI first-read
+order, use [operations.md](operations.md). This scenario guide remains the
+registry and invariant reference.
+
 ## Invariants
 
 - `resource-finalized-after-acquire`

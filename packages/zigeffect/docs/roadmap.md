@@ -620,6 +620,10 @@ metrics, and traces.
 - Delivered: `zig build causal-schema-governance` prints the authoritative
   causal artifact schema/version matrix with compatibility posture, producer,
   consumer, migration policy, and new-schema checklist.
+- Delivered: `docs/operations.md` is the local/CI causal runtime operations
+  manual for artifact retention, CI handoff, redaction review, review gates,
+  guarded application records, workbench operation, backend adapter
+  expectations, schema governance, and scenario governance.
 - Still future: production-grade app-facing integrations, durable history
   hardening, and comparing arbitrary named audit-chain snapshots.
 - Still future: deeper runtime regression scenarios for partial config and

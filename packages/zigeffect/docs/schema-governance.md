@@ -16,6 +16,9 @@ The default text report is for humans. The JSON report uses schema
 `zigeffect.causal.schema-governance.v1` and is the machine-readable matrix for
 agents and CI checks.
 
+When a schema change affects retained artifacts, CI upload behavior, workbench
+mapping, or agent handoff, also update [operations.md](operations.md).
+
 ## Versioning Policy
 
 - `schema` names the artifact family.
