@@ -595,9 +595,13 @@ metrics, and traces.
 - Delivered: `zig build causal-app-remediation-audit -- local --artifact
   <causal-json> --target <app-target>` writes pending, non-mutating app
   remediation audit artifacts with advisory app policy gates and query commands.
+- Delivered: `zig build causal-app-policy-decision -- local --audit
+  <app-remediation-audit-json>` evaluates source, config, migration,
+  operational-human, and rollback app gates while preserving
+  `mutation_authority=none` and `applied=false`.
 - Still future: production-grade app-facing integrations, durable history
-  hardening, enforced app remediation policy gates, app patch proposals, and
-  comparing arbitrary named audit-chain snapshots.
+  hardening, app patch proposals, and comparing arbitrary named audit-chain
+  snapshots.
 - Still future: deeper runtime regression scenarios for partial config and
   cause coverage.
 - Leave room for a future causal workbench that visualizes effect runs, scope

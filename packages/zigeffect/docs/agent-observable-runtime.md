@@ -1015,6 +1015,13 @@ The artifact cites app incident event ids, app query commands, claim guardrails,
 and advisory gates such as `config-only` and `source-only` without applying
 source, config, migration, or operational changes.
 
+`zig build causal-app-policy-decision -- local --audit
+<app-remediation-audit-json>` evaluates those gates into
+`zigeffect.causal.app-policy-decision.v1`. Source/config-only gates can proceed
+to proposal drafting; migration, operational-human, and rollback gates force
+human review. The policy artifact is advisory and still records
+`mutation_authority=none` plus `applied=false`.
+
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around
 those pieces. The no-scenario form captures before/after dogfood evidence and

@@ -225,6 +225,18 @@ The audit uses schema `zigeffect.causal.app-remediation-audit.v1`, preserves
 `approval_status=pending`, `applied=false`, and `mutation_authority=none`, and
 names advisory app policy gates such as `config-only` and `source-only`.
 
+Evaluate those app gates before drafting a proposal:
+
+```bash
+cd packages/zigeffect
+zig build causal-app-policy-decision -- local --audit <app-remediation-audit-json>
+```
+
+The policy report uses schema `zigeffect.causal.app-policy-decision.v1`. It
+distinguishes `source-only`, `config-only`, `migration-required`,
+`operational-human-required`, and `rollback-required`, but remains advisory:
+every report keeps `mutation_authority=none` and `applied=false`.
+
 Print the causal artifact retention manifest for agents and CI:
 
 ```bash

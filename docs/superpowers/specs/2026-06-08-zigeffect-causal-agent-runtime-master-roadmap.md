@@ -446,6 +446,9 @@ Current foundation branch:
 - `codex/zigeffect-app-remediation-audit` adds pending, non-mutating app
   remediation audit artifacts with app incident event ids, query commands, and
   advisory app policy gates.
+- `codex/zigeffect-app-policy-gates` adds advisory app policy decision
+  artifacts that evaluate source, config, migration, operational-human, and
+  rollback gates without granting mutation authority.
 
 Exit criteria:
 
@@ -622,20 +625,20 @@ Status values:
 | M5 Replay/snapshots | delivered | snapshot manifest schema/tool, named snapshot compare, replay-feasibility reports, deterministic registered-scenario replay, and safe scenario fork proposals exist | move to M6 read-only workbench |
 | M6 Workbench UI | delivered | SolidJS renderer, `causal-workbench-ui`, `zig-webui` launcher, graph cause-path/runtime-lane branch, and remediation-chain branch `codex/zigeffect-causal-workbench-remediation-chain` exist | move to M7 app-facing runtime |
 | M7 App-facing runtime | delivered | `CausalAppTrace`, Worker-shaped app request example, app incident classifier, and app-specific advice/diagnosis mappings exist | move to M8 app remediation audit |
-| M8 App remediation gates | active | app remediation audit artifacts exist; enforced policy gates and app patch proposals remain | move to app policy gates |
+| M8 App remediation gates | active | app remediation audit artifacts and app policy gate decisions exist; app patch proposals remain | move to app patch proposals |
 | M9 Operating model | deferred | schema/versioning docs partial | consolidate after M4-M8 |
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-app-remediation-audit`
-   - Deliver pending, non-mutating app remediation audit artifacts from app
-     causal JSON.
-2. `codex/zigeffect-app-policy-gates`
-   - Add source/config/migration/operational policy gates for app remediation
-     proposals.
-3. `codex/zigeffect-app-patch-proposal`
+1. `codex/zigeffect-app-policy-gates`
+   - Deliver advisory app policy gate decisions for source/config/migration/
+     operational/rollback remediation gates.
+2. `codex/zigeffect-app-patch-proposal`
    - Add app patch proposal artifacts that cite source files, config,
      migrations, or operational runbooks after policy review.
+3. `codex/zigeffect-app-remediation-workbench`
+   - Render app audit and app policy gate details directly in the SolidJS
+     workbench.
 
 ## Risks And Controls
 

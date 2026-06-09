@@ -674,6 +674,20 @@ The command writes `*-app-remediation-audit.json` and
 policy gates, and claim guardrails. Treat this as the app review boundary; it
 does not approve, apply, patch, edit config, or run migrations.
 
+Then evaluate the app policy gates:
+
+```sh
+zig build causal-app-policy-decision -- local --audit <app-remediation-audit-json>
+```
+
+The command writes `*-app-policy-decision.json` and
+`*-app-policy-decision.txt` with schema
+`zigeffect.causal.app-policy-decision.v1`. `source-only` and `config-only`
+gates can approve proposal drafting; `migration-required`,
+`operational-human-required`, and `rollback-required` require human review.
+Every app policy decision remains advisory with `mutation_authority=none` and
+`applied=false`.
+
 For normal core-runtime development, prefer the coordinated session command:
 
 ```sh

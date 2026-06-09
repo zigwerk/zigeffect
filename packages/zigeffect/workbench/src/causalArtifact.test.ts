@@ -358,6 +358,22 @@ test("deriveGovernanceModel detects app remediation audit artifacts", () => {
   expect(governance?.mutationAuthority).toBe("none");
 });
 
+test("deriveGovernanceModel detects app policy decision artifacts", () => {
+  const governance = deriveGovernanceModel({
+    schema: "zigeffect.causal.app-policy-decision.v1",
+    schema_version: 1,
+    target: "yachdee-platform",
+    decision: "needs-human-review",
+    applied: false,
+    mutation_authority: "none",
+  }, { artifactPath: "app-policy.json" });
+
+  expect(governance?.kind).toBe("app-policy-decision");
+  expect(governance?.summary).toContain("needs-human-review app policy decision");
+  expect(governance?.applied).toBe(false);
+  expect(governance?.mutationAuthority).toBe("none");
+});
+
 test("deriveRemediationChainModel tolerates partial chain artifacts", () => {
   const chain = deriveRemediationChainModel({
     schema: "zigeffect.causal.audit-chain.v1",
