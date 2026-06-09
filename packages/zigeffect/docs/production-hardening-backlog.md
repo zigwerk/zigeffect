@@ -53,7 +53,10 @@ The backlog currently orders future production-hardening branches as:
 16. `production-capacity-planning`
 
 The ordering is intentionally conservative. It keeps contracts and review
-boundaries ahead of production behavior.
+boundaries ahead of production behavior. The `agent-query-interface` item is
+split: runtime bounded JSON queries can ship after deep runtime internals,
+while app semantic `trace_data` and cross-run comparison stay future work until
+the app semantic trace API exists.
 
 ## Authority Boundaries
 

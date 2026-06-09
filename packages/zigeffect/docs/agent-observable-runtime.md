@@ -1029,6 +1029,22 @@ and legacy event-only artifacts remain readable. The companion
 `zig build causal-query -- <query> [argument]` command makes the saved JSON
 artifact executable for the same next-query names shown in the text report.
 
+`causal-query` also has a bounded agent JSON mode for tools that need
+schema-stable evidence instead of human text:
+
+```sh
+zig build causal-query -- --agent --file <artifact.json> explain_event 3
+zig build causal-query -- --agent --limit 16 --file <artifact.json> summarize_run 1
+zig build causal-query -- --agent --file <artifact.json> find_failures 1
+```
+
+Agent mode emits `zigeffect.causal.agent-query.v1` with selected events,
+derived runtime relationships, `bounded`/`truncated` flags, a compact
+confidence signal, artifact policy metadata, compatibility warnings,
+limitations, and recommended next queries. The first version is the runtime-only
+query boundary; app semantic `trace_data` and cross-artifact run comparison
+remain future work.
+
 The companion `zig build causal-check` command runs the same dogfood scenario in
 fail-on-findings mode. It writes artifacts first, then exits nonzero when
 findings exist. This is the first development-agent gate; real failing-test
