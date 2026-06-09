@@ -13,6 +13,7 @@ pub const queue = @import("queue.zig");
 pub const lifecycle = @import("lifecycle.zig");
 pub const inspect = @import("inspect.zig");
 pub const causal = @import("causal.zig");
+pub const scheduler = @import("scheduler.zig");
 
 pub const workflow_journal_event_schema = journal.workflow_journal_event_schema;
 pub const workflow_journal_event_schema_version = journal.workflow_journal_event_schema_version;
@@ -139,6 +140,17 @@ pub const QueueOfferResult = queue.QueueOfferResult;
 pub const DurableQueue = queue.DurableQueue;
 pub const Queue = queue.Queue;
 pub const queueItemId = queue.queueItemId;
+
+pub const SchedulerWorkKind = scheduler.SchedulerWorkKind;
+pub const RunnableWorkflowStep = scheduler.RunnableWorkflowStep;
+pub const QueueWorkerStep = scheduler.QueueWorkerStep;
+pub const WorkflowSchedulerBudget = scheduler.WorkflowSchedulerBudget;
+pub const WorkflowSchedulerTickResult = scheduler.WorkflowSchedulerTickResult;
+pub const RegisteredWorkflowWorker = scheduler.RegisteredWorkflowWorker;
+pub const TimerWatch = scheduler.TimerWatch;
+pub const RegisteredQueueWorker = scheduler.RegisteredQueueWorker;
+pub const QueueWorker = scheduler.QueueWorker;
+pub const WorkflowScheduler = scheduler.WorkflowScheduler;
 
 pub const LifecycleActionResult = lifecycle.LifecycleActionResult;
 pub const WorkflowLifecycle = lifecycle.WorkflowLifecycle;
