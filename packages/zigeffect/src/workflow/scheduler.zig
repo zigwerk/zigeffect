@@ -209,6 +209,8 @@ pub const WorkflowScheduler = struct {
     clock: *Clock,
     workflow_workers: std.ArrayList(RegisteredWorkflowWorker) = .empty,
     workflow_cursor: usize = 0,
+    timer_watches: std.ArrayList(TimerWatch) = .empty,
+    timer_cursor: usize = 0,
 
     pub fn init(allocator: Allocator, journal_store: JournalStore, clock: *Clock) WorkflowScheduler {
         return .{
@@ -219,6 +221,7 @@ pub const WorkflowScheduler = struct {
     }
 
     pub fn deinit(self: *WorkflowScheduler) void {
+        self.timer_watches.deinit(self.allocator);
         self.workflow_workers.deinit(self.allocator);
     }
 
@@ -226,9 +229,14 @@ pub const WorkflowScheduler = struct {
         try self.workflow_workers.append(self.allocator, worker);
     }
 
+    pub fn registerTimerWatch(self: *WorkflowScheduler, watch: TimerWatch) Allocator.Error!void {
+        try self.timer_watches.append(self.allocator, watch);
+    }
+
     pub fn tick(self: *WorkflowScheduler, budget: WorkflowSchedulerBudget) anyerror!WorkflowSchedulerTickResult {
         var result = WorkflowSchedulerTickResult{ .iterations = 1 };
         try self.pollWorkflowWorkers(budget.max_workflow_polls, &result);
+        try self.fireDueTimers(budget.max_timers, &result);
         return result;
     }
 
@@ -249,6 +257,22 @@ pub const WorkflowScheduler = struct {
                 .completed => result.workflow_completions += 1,
                 .failed => result.workflow_failures += 1,
             }
+        }
+    }
+
+    fn fireDueTimers(self: *WorkflowScheduler, max_watches: usize, result: *WorkflowSchedulerTickResult) anyerror!void {
+        const len = self.timer_watches.items.len;
+        if (len == 0 or max_watches == 0) return;
+
+        const visits = @min(max_watches, len);
+        var count: usize = 0;
+        const now_ms = self.clock.nowMs();
+        while (count < visits) : (count += 1) {
+            const index = self.timer_cursor % len;
+            self.timer_cursor = (index + 1) % len;
+            const watch = self.timer_watches.items[index];
+            var durable_clock = DurableClock.init(self.allocator, self.journal_store, watch.workflow_id, watch.execution_id);
+            result.timers_fired += try durable_clock.fireDueTimers(now_ms);
         }
     }
 };

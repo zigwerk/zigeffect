@@ -97,3 +97,50 @@ test "workflow scheduler polls runnable workflow workers fairly" {
     try std.testing.expectEqual(@as(u64, 3), visits.items[2]);
     try std.testing.expectEqual(@as(u64, 1), visits.items[3]);
 }
+
+test "workflow scheduler fires due timers from registered watches" {
+    var clock = fx.FakeClock.fake(1_000);
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "timer-workflow",
+        .status = "running",
+        .idempotency_key = "scheduler-timer",
+    } });
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+            .clock = &clock,
+        });
+        defer context.deinit();
+        const result = try context.sleep("wake", 250);
+        switch (result) {
+            .suspended => {},
+            else => return error.ExpectedTimerSuspension,
+        }
+    }
+
+    var scheduler = fx.workflow.WorkflowScheduler.init(std.testing.allocator, journal, &clock);
+    defer scheduler.deinit();
+    try scheduler.registerTimerWatch(.{ .workflow_id = 7, .execution_id = 8 });
+
+    const early = try scheduler.tick(.{ .max_workflow_polls = 0, .max_timers = 1, .max_queue_retries = 0, .max_queue_claims = 0 });
+    try std.testing.expectEqual(@as(usize, 0), early.timers_fired);
+
+    clock.sleep(250);
+    const due = try scheduler.tick(.{ .max_workflow_polls = 0, .max_timers = 1, .max_queue_retries = 0, .max_queue_claims = 0 });
+    try std.testing.expectEqual(@as(usize, 1), due.timers_fired);
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.timer_fired, events.events[3].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[4].kind);
+}
