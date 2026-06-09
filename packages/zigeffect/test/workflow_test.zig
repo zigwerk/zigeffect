@@ -119,6 +119,66 @@ fn workflowInspectorFixtureEvents() [7]fx.workflow.WorkflowEvent {
     };
 }
 
+fn workflowCausalFixtureEvents() [5]fx.workflow.WorkflowEvent {
+    return .{
+        .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .name = "causal-workflow",
+            .status = "running",
+            .idempotency_key = "causal-start",
+        },
+        .{
+            .sequence = 2,
+            .kind = .workflow_suspended,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .parent_sequence = 1,
+            .name = "wake",
+            .status = "waiting",
+            .redacted_detail = "timer",
+            .idempotency_key = "causal-suspend",
+        },
+        .{
+            .sequence = 3,
+            .kind = .workflow_resumed,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .parent_sequence = 2,
+            .name = "wake",
+            .status = "running",
+            .redacted_detail = "timer_fired",
+            .idempotency_key = "causal-resume",
+        },
+        .{
+            .sequence = 4,
+            .kind = .activity_retry_scheduled,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .parent_sequence = 3,
+            .activity_id = 50,
+            .attempt = 2,
+            .name = "charge",
+            .status = "retry",
+            .redacted_detail = "attempt=1;delay_ms=250;reason=retry",
+            .idempotency_key = "causal-retry",
+        },
+        .{
+            .sequence = 5,
+            .kind = .workflow_failed,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .parent_sequence = 4,
+            .name = "causal-workflow",
+            .status = "failed",
+            .redacted_detail = "exit.cause.failure:Boom",
+            .idempotency_key = "causal-failed",
+        },
+    };
+}
+
 test "workflow journal schema constants are stable" {
     try std.testing.expectEqualStrings("zigeffect.workflow.journal-event.v1", fx.workflow.workflow_journal_event_schema);
     try std.testing.expectEqual(@as(u32, 1), fx.workflow.workflow_journal_event_schema_version);
@@ -792,63 +852,7 @@ test "workflow inspector formats event inspection reports" {
 }
 
 test "workflow causal mapping links journal events to causal ids" {
-    const events = [_]fx.workflow.WorkflowEvent{
-        .{
-            .sequence = 1,
-            .kind = .workflow_started,
-            .workflow_id = 7,
-            .execution_id = 8,
-            .name = "causal-workflow",
-            .status = "running",
-            .idempotency_key = "causal-start",
-        },
-        .{
-            .sequence = 2,
-            .kind = .workflow_suspended,
-            .workflow_id = 7,
-            .execution_id = 8,
-            .parent_sequence = 1,
-            .name = "wake",
-            .status = "waiting",
-            .redacted_detail = "timer",
-            .idempotency_key = "causal-suspend",
-        },
-        .{
-            .sequence = 3,
-            .kind = .workflow_resumed,
-            .workflow_id = 7,
-            .execution_id = 8,
-            .parent_sequence = 2,
-            .name = "wake",
-            .status = "running",
-            .redacted_detail = "timer_fired",
-            .idempotency_key = "causal-resume",
-        },
-        .{
-            .sequence = 4,
-            .kind = .activity_retry_scheduled,
-            .workflow_id = 7,
-            .execution_id = 8,
-            .parent_sequence = 3,
-            .activity_id = 50,
-            .attempt = 2,
-            .name = "charge",
-            .status = "retry",
-            .redacted_detail = "attempt=1;delay_ms=250;reason=retry",
-            .idempotency_key = "causal-retry",
-        },
-        .{
-            .sequence = 5,
-            .kind = .workflow_failed,
-            .workflow_id = 7,
-            .execution_id = 8,
-            .parent_sequence = 4,
-            .name = "causal-workflow",
-            .status = "failed",
-            .redacted_detail = "exit.cause.failure:Boom",
-            .idempotency_key = "causal-failed",
-        },
-    };
+    const events = workflowCausalFixtureEvents();
 
     var mapped = try fx.workflow.mapWorkflowEventsToCausal(std.testing.allocator, &events);
     defer mapped.deinit();
@@ -874,6 +878,33 @@ test "workflow causal mapping links journal events to causal ids" {
 
     try std.testing.expectEqualStrings("workflow.workflow_failed", mapped.events[4].type_name);
     try std.testing.expectEqualStrings("exit.cause.failure:Boom", mapped.events[4].redacted_detail);
+}
+
+test "workflow causal report explains failure retry suspend and resume" {
+    const events = workflowCausalFixtureEvents();
+
+    const report = try fx.workflow.formatWorkflowCausalReport(std.testing.allocator, &events);
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect causal report") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "workflow.workflow_failed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "workflow.activity_retry_scheduled") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "workflow.workflow_suspended") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "workflow.workflow_resumed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "workflow findings: 4") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "workflow_failure") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "workflow_retry_scheduled") != null);
+}
+
+test "workflow causal dot renders workflow history" {
+    const events = workflowCausalFixtureEvents();
+
+    const dot = try fx.workflow.formatWorkflowCausalDot(std.testing.allocator, &events);
+    defer std.testing.allocator.free(dot);
+
+    try std.testing.expect(std.mem.indexOf(u8, dot, "digraph zigeffect_causal") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dot, "workflow.workflow_failed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dot, "event_1 -> event_2 [label=\"parent\"]") != null);
 }
 
 test "workflow replay rejects events before start and duplicate starts" {

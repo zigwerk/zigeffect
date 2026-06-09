@@ -95,7 +95,7 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/causal.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing report and DOT tests**
+- [x] **Step 1: Write failing report and DOT tests**
 
 Add tests for:
 
@@ -107,7 +107,7 @@ The report test asserts text contains `workflow_failed`,
 DOT test asserts `digraph zigeffect_causal`, `workflow.workflow_failed`, and a
 parent edge from the workflow start to a later workflow row.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -117,7 +117,7 @@ cd packages/zigeffect && zig build test-raw --summary all
 
 Expected: FAIL because workflow causal report and DOT helpers do not exist.
 
-- [ ] **Step 3: Implement report, JSON, findings, and DOT helpers**
+- [x] **Step 3: Implement report, JSON, findings, and DOT helpers**
 
 Add:
 
@@ -131,7 +131,7 @@ pub fn formatWorkflowCausalDot(allocator: Allocator, events: []const journal_mod
 The report helper calls `formatCausalReport`. The JSON helper calls
 `formatCausalJson`. The DOT helper calls `formatCausalDot`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 

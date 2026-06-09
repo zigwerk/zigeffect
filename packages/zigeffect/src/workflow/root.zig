@@ -142,3 +142,11 @@ pub const formatInspectReportJson = inspect.formatInspectReportJson;
 
 pub const mapWorkflowEventToCausal = causal.mapWorkflowEventToCausal;
 pub const mapWorkflowEventsToCausal = causal.mapWorkflowEventsToCausal;
+pub const WorkflowCausalFindingKind = causal.WorkflowCausalFindingKind;
+pub const WorkflowCausalFinding = causal.WorkflowCausalFinding;
+pub const WorkflowCausalFindings = causal.WorkflowCausalFindings;
+pub const buildWorkflowCausalStore = causal.buildWorkflowCausalStore;
+pub const collectWorkflowCausalFindings = causal.collectWorkflowCausalFindings;
+pub const formatWorkflowCausalReport = causal.formatWorkflowCausalReport;
+pub const formatWorkflowCausalJson = causal.formatWorkflowCausalJson;
+pub const formatWorkflowCausalDot = causal.formatWorkflowCausalDot;
