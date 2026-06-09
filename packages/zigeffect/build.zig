@@ -4,6 +4,13 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const zig_webui = b.dependency("zig_webui", .{
+        .target = target,
+        .optimize = optimize,
+        .enable_tls = false,
+        .is_static = true,
+    });
+
     const zigeffect = b.addModule("zigeffect", .{
         .root_source_file = b.path("src/zigeffect.zig"),
         .target = target,
@@ -531,6 +538,30 @@ pub fn build(b: *std.Build) void {
     const run_causal_workbench_session_tool_tests = b.addRunArtifact(causal_workbench_session_tool_tests);
     test_step.dependOn(&run_causal_workbench_session_tool_tests.step);
 
+    const causal_workbench_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_workbench.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_workbench_tool_module.addImport("causal_workbench_session", causal_workbench_session_tool_module);
+    causal_workbench_tool_module.addImport("webui", zig_webui.module("webui"));
+
+    const causal_workbench_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-workbench",
+        .root_module = causal_workbench_tool_module,
+    });
+
+    const run_causal_workbench_ui_build = b.addSystemCommand(&.{ "bun", "run", "zigeffect:workbench:build" });
+    run_causal_workbench_ui_build.setCwd(.{ .cwd_relative = "../.." });
+    const causal_workbench_ui_step = b.step("causal-workbench-ui", "Build the Solid causal workbench UI");
+    causal_workbench_ui_step.dependOn(&run_causal_workbench_ui_build.step);
+
+    const run_causal_workbench_tool = b.addRunArtifact(causal_workbench_tool);
+    run_causal_workbench_tool.step.dependOn(&run_causal_workbench_ui_build.step);
+    if (b.args) |args| run_causal_workbench_tool.addArgs(args);
+    const causal_workbench_step = b.step("causal-workbench", "Open the read-only Solid causal workbench through zig-webui");
+    causal_workbench_step.dependOn(&run_causal_workbench_tool.step);
+
     const causal_verdict_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_verdict.zig"),
         .target = target,
@@ -918,6 +949,7 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&causal_artifacts_tool.step);
     examples_step.dependOn(&run_causal_artifacts_tool_tests.step);
     examples_step.dependOn(&run_causal_workbench_session_tool_tests.step);
+    examples_step.dependOn(&causal_workbench_tool.step);
     examples_step.dependOn(&run_causal_verdict_tool_tests.step);
     examples_step.dependOn(&causal_dev_agent_tool.step);
     examples_step.dependOn(&run_causal_dev_agent_tool_tests.step);
