@@ -320,6 +320,9 @@ Update `deinit`:
 Add `addChild`, `startAll`, `childStatus`, `childRestartCount`,
 `shutdownPlan`, and private `findChildIndex`.
 
+`addChild` must return `(Allocator.Error || SupervisorError)!void` because it
+can fail with `error.DuplicateChild` as well as allocation errors.
+
 Shutdown sorting comparator:
 
 ```zig

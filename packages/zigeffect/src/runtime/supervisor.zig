@@ -83,15 +83,87 @@ pub const SupervisorShutdownPlan = struct {
     }
 };
 
+const ChildState = struct {
+    spec: SupervisorChildSpec,
+    status: SupervisorChildStatus = .idle,
+    restart_count: usize = 0,
+    registration_index: usize = 0,
+
+    fn snapshot(self: ChildState) SupervisorChildSnapshot {
+        return .{
+            .spec = self.spec,
+            .status = self.status,
+            .restart_count = self.restart_count,
+        };
+    }
+};
+
 pub const Supervisor = struct {
     allocator: Allocator,
     options: SupervisorOptions,
+    children: std.ArrayList(ChildState) = .empty,
 
     pub fn init(allocator: Allocator, options: SupervisorOptions) Supervisor {
         return .{ .allocator = allocator, .options = options };
     }
 
     pub fn deinit(self: *Supervisor) void {
-        _ = self;
+        self.children.deinit(self.allocator);
+    }
+
+    pub fn addChild(self: *Supervisor, spec: SupervisorChildSpec) (Allocator.Error || SupervisorError)!void {
+        if (self.findChildIndex(spec.id) != null) return error.DuplicateChild;
+        try self.children.append(self.allocator, .{
+            .spec = spec,
+            .registration_index = self.children.items.len,
+        });
+    }
+
+    pub fn startAll(self: *Supervisor, now_ms: u64) Allocator.Error!void {
+        _ = now_ms;
+        for (self.children.items) |*child| {
+            child.status = .running;
+        }
+    }
+
+    pub fn childStatus(self: *const Supervisor, child_id: SupervisorChildId) SupervisorError!SupervisorChildStatus {
+        const index = self.findChildIndex(child_id) orelse return error.ChildNotFound;
+        return self.children.items[index].status;
+    }
+
+    pub fn childRestartCount(self: *const Supervisor, child_id: SupervisorChildId) SupervisorError!usize {
+        const index = self.findChildIndex(child_id) orelse return error.ChildNotFound;
+        return self.children.items[index].restart_count;
+    }
+
+    pub fn shutdownPlan(self: *Supervisor, allocator: Allocator) Allocator.Error!SupervisorShutdownPlan {
+        const ordered = try allocator.alloc(ChildState, self.children.items.len);
+        defer allocator.free(ordered);
+        @memcpy(ordered, self.children.items);
+        std.mem.sort(ChildState, ordered, {}, shutdownBefore);
+
+        const snapshots = try allocator.alloc(SupervisorChildSnapshot, ordered.len);
+        errdefer allocator.free(snapshots);
+        for (ordered, 0..) |child, index| {
+            snapshots[index] = child.snapshot();
+        }
+        return .{
+            .allocator = allocator,
+            .children = snapshots,
+        };
+    }
+
+    fn findChildIndex(self: *const Supervisor, child_id: SupervisorChildId) ?usize {
+        for (self.children.items, 0..) |child, index| {
+            if (child.spec.id == child_id) return index;
+        }
+        return null;
     }
 };
+
+fn shutdownBefore(_: void, left: ChildState, right: ChildState) bool {
+    if (left.spec.shutdown_order != right.spec.shutdown_order) {
+        return left.spec.shutdown_order > right.spec.shutdown_order;
+    }
+    return left.registration_index > right.registration_index;
+}

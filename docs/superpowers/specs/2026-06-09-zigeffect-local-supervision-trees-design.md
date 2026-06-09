@@ -171,7 +171,7 @@ pub const Supervisor = struct {
     pub fn deinit(self: *Supervisor) void;
 
     pub fn attachCausalStore(self: *Supervisor, store: *CausalStore, run_id: u64) void;
-    pub fn addChild(self: *Supervisor, spec: SupervisorChildSpec) Allocator.Error!void;
+    pub fn addChild(self: *Supervisor, spec: SupervisorChildSpec) (Allocator.Error || SupervisorError)!void;
     pub fn startAll(self: *Supervisor, now_ms: u64) Allocator.Error!void;
     pub fn reportChildExit(
         self: *Supervisor,
