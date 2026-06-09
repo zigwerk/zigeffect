@@ -235,14 +235,16 @@ Owns local durable workflow runtime surfaces:
   durable `workflow_started` appends, typed poll results, execution inspection,
   duplicate execution checks, and in-memory execution indexing.
 - `journal.zig`: workflow journal id aliases, event kinds, event envelope,
-  schema constants, event clone/free helpers, JSON parser, and JSON/text
-  formatters.
+  schema constants, version-aware compatibility classification, current-row
+  migration registry, unknown-event policy, event clone/free helpers, JSON
+  parser, and JSON/text formatters.
 - `replay.zig`: workflow replay status, state rows, malformed history errors,
   and deterministic event-folding logic.
 - `store.zig`: journal store contract, append/read batches, optimistic
   sequence checks, idempotency-key duplicate detection, in-memory store,
   append-only file store, segment naming, lock guard, partial-write recovery,
-  corruption reports, fsync policy, and checkpoint JSON.
+  future-schema downgrade failure before mutation, corruption reports, fsync
+  policy, and checkpoint JSON.
 
 Workflow definitions, activity definitions, journal events, replay state,
 journal stores, durable timers, durable deferreds, durable queues, durable

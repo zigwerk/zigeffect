@@ -502,15 +502,15 @@ Goal: make durable histories survive runtime upgrades.
 
 Deliverables:
 
-- [ ] Add schema version headers.
-- [ ] Add migration registry.
-- [ ] Add unknown event handling policy.
-- [ ] Add downgrade/read-only failure mode.
-- [ ] Add golden fixtures for v1 histories.
+- [x] Add schema version headers.
+- [x] Add migration registry.
+- [x] Add unknown event handling policy.
+- [x] Add downgrade/read-only failure mode.
+- [x] Add golden fixtures for v1 histories.
 
 Acceptance:
 
-- [ ] Older fixture histories replay under the new reader.
+- [x] Older fixture histories replay under the new reader.
 
 ## Milestone 21: Storage Compaction, Snapshots, And Retention
 

@@ -237,13 +237,13 @@ Expected: PASS.
 - Modify `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`
 - Modify `docs/superpowers/plans/2026-06-09-zigeffect-workflow-journal-schema-migration.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Document that `workflow/journal.zig` owns version-aware row compatibility and
 that `workflow/store.zig` treats future versions as newer-runtime failures
 rather than corrupt journals.
 
-- [ ] **Step 2: Run full gate**
+- [x] **Step 2: Run full gate**
 
 Run:
 
@@ -261,13 +261,13 @@ Expected: compile/test commands PASS, the workflow replay command prints a
 completed v1 golden workflow, format and diff checks exit 0, and the placeholder
 scan exits 1 with no matches.
 
-- [ ] **Step 3: Mark Milestone 20 complete**
+- [x] **Step 3: Mark Milestone 20 complete**
 
 After the full gate passes, mark all Milestone 20 deliverables and acceptance
 boxes complete in
 `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 
