@@ -329,6 +329,9 @@ Owns Erlang-style distributed runtime surfaces:
 - `runner.zig`: stable runner and machine identity, startup registration,
   heartbeat history, in-memory health events, and local runner health
   inspection reports.
+- `runner_storage.zig`: runner storage contract, shard lease metadata,
+  in-memory lease table, file-backed per-shard lease files, and local atomic
+  acquire/refresh/release operations.
 
 Entity identity, actor references, message envelopes, durable message storage,
 shard ids, runner ids, runner storage, leases, rebalancing, transports,

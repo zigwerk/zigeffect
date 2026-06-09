@@ -29,7 +29,7 @@
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 - Modify: `packages/zigeffect/test/all_test.zig`
 
-- [ ] **Step 1: Write failing public export and basic acquire tests**
+- [x] **Step 1: Write failing public export and basic acquire tests**
 
 Create `packages/zigeffect/test/runner_storage_test.zig`:
 
@@ -81,7 +81,7 @@ Add this import to `packages/zigeffect/test/all_test.zig`:
     _ = @import("runner_storage_test.zig");
 ```
 
-- [ ] **Step 2: Run the red test**
+- [x] **Step 2: Run the red test**
 
 Run:
 
@@ -92,7 +92,7 @@ bun run zigeffect:test
 Expected: FAIL with missing declarations for `RunnerStorage`,
 `InMemoryRunnerStorage`, or lease types.
 
-- [ ] **Step 3: Implement contract, lease types, and minimal in-memory acquire**
+- [x] **Step 3: Implement contract, lease types, and minimal in-memory acquire**
 
 Add `runner_storage.zig` with:
 
@@ -106,7 +106,7 @@ The first implementation may return `LeaseConflict` for any existing
 non-expired lease and may leave refresh/release methods as declarations that
 return `LeaseNotFound` until Task 2 drives them.
 
-- [ ] **Step 4: Run green tests and hygiene checks**
+- [x] **Step 4: Run green tests and hygiene checks**
 
 Run:
 
@@ -118,7 +118,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Commit storage contract and in-memory acquire**
+- [x] **Step 5: Commit storage contract and in-memory acquire**
 
 ```bash
 git add packages/zigeffect/src/cluster/runner_storage.zig packages/zigeffect/src/cluster/root.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/test/runner_storage_test.zig packages/zigeffect/test/all_test.zig
@@ -131,7 +131,7 @@ git commit -m "feat(zigeffect): add runner storage contract"
 - Modify: `packages/zigeffect/test/runner_storage_test.zig`
 - Modify: `packages/zigeffect/src/cluster/runner_storage.zig`
 
-- [ ] **Step 1: Add failing in-memory conflict, refresh, release, and release-all tests**
+- [x] **Step 1: Add failing in-memory conflict, refresh, release, and release-all tests**
 
 Append these tests to `packages/zigeffect/test/runner_storage_test.zig`:
 
@@ -226,7 +226,7 @@ test "in-memory runner storage rejects expired refreshes and releases all owned 
 }
 ```
 
-- [ ] **Step 2: Run the red in-memory semantics tests**
+- [x] **Step 2: Run the red in-memory semantics tests**
 
 Run:
 
@@ -236,7 +236,7 @@ bun run zigeffect:test
 
 Expected: FAIL on missing or incomplete refresh/release/release-all behavior.
 
-- [ ] **Step 3: Implement complete in-memory lease semantics**
+- [x] **Step 3: Implement complete in-memory lease semantics**
 
 Implement:
 
@@ -265,7 +265,7 @@ pub fn release(self: *InMemoryRunnerStorage, request: RunnerLeaseRelease) Runner
 pub fn releaseAll(self: *InMemoryRunnerStorage, owner: RunnerAddress) usize
 ```
 
-- [ ] **Step 4: Run green tests and hygiene checks**
+- [x] **Step 4: Run green tests and hygiene checks**
 
 Run:
 
@@ -277,7 +277,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Commit in-memory lease semantics**
+- [x] **Step 5: Commit in-memory lease semantics**
 
 ```bash
 git add packages/zigeffect/src/cluster/runner_storage.zig packages/zigeffect/test/runner_storage_test.zig
@@ -290,7 +290,7 @@ git commit -m "feat(zigeffect): implement in-memory runner leases"
 - Modify: `packages/zigeffect/test/runner_storage_test.zig`
 - Modify: `packages/zigeffect/src/cluster/runner_storage.zig`
 
-- [ ] **Step 1: Add failing file-backed acquire tests**
+- [x] **Step 1: Add failing file-backed acquire tests**
 
 Append these tests to `packages/zigeffect/test/runner_storage_test.zig`:
 
@@ -365,7 +365,7 @@ test "file runner storage replaces expired persisted leases" {
 }
 ```
 
-- [ ] **Step 2: Run the red file acquire tests**
+- [x] **Step 2: Run the red file acquire tests**
 
 Run:
 
@@ -376,7 +376,7 @@ bun run zigeffect:test
 Expected: FAIL on missing `FileRunnerStorage`, JSON helpers, or file acquire
 behavior.
 
-- [ ] **Step 3: Implement file-backed JSON and atomic acquire**
+- [x] **Step 3: Implement file-backed JSON and atomic acquire**
 
 Implement:
 
@@ -418,7 +418,7 @@ the file already exists, it must parse the current lease, return
 `LeaseConflict` if it is still active, or delete and retry exclusive creation
 if it is expired.
 
-- [ ] **Step 4: Run green tests and hygiene checks**
+- [x] **Step 4: Run green tests and hygiene checks**
 
 Run:
 
@@ -430,7 +430,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Commit file-backed atomic acquire**
+- [x] **Step 5: Commit file-backed atomic acquire**
 
 ```bash
 git add packages/zigeffect/src/cluster/runner_storage.zig packages/zigeffect/test/runner_storage_test.zig
@@ -443,7 +443,7 @@ git commit -m "feat(zigeffect): add file runner lease acquire"
 - Modify: `packages/zigeffect/test/runner_storage_test.zig`
 - Modify: `packages/zigeffect/src/cluster/runner_storage.zig`
 
-- [ ] **Step 1: Add failing file-backed refresh and release tests**
+- [x] **Step 1: Add failing file-backed refresh and release tests**
 
 Append these tests to `packages/zigeffect/test/runner_storage_test.zig`:
 
@@ -526,7 +526,7 @@ test "file runner storage release-all removes only owner leases and lists curren
 }
 ```
 
-- [ ] **Step 2: Run the red file refresh/release tests**
+- [x] **Step 2: Run the red file refresh/release tests**
 
 Run:
 
@@ -536,7 +536,7 @@ bun run zigeffect:test
 
 Expected: FAIL on missing or incomplete file refresh/release/list behavior.
 
-- [ ] **Step 3: Implement file-backed refresh, release, release-all, and list**
+- [x] **Step 3: Implement file-backed refresh, release, release-all, and list**
 
 Implement:
 
@@ -552,7 +552,7 @@ use `dir.iterate()` plus prefix/suffix checks for `releaseAll`, `leases`, and
 `reset`. File-backed operations must read the authoritative JSON file each time
 so two `FileRunnerStorage` instances in the same process observe one another.
 
-- [ ] **Step 4: Run green tests and hygiene checks**
+- [x] **Step 4: Run green tests and hygiene checks**
 
 Run:
 
@@ -564,7 +564,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Commit file-backed refresh and release**
+- [x] **Step 5: Commit file-backed refresh and release**
 
 ```bash
 git add packages/zigeffect/src/cluster/runner_storage.zig packages/zigeffect/test/runner_storage_test.zig
@@ -578,7 +578,7 @@ git commit -m "feat(zigeffect): refresh and release file runner leases"
 - Modify: `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`
 - Modify: `docs/superpowers/plans/2026-06-09-zigeffect-runner-storage.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Add this bullet in the `src/cluster/` section:
 
@@ -588,12 +588,12 @@ Add this bullet in the `src/cluster/` section:
   acquire/refresh/release operations.
 ```
 
-- [ ] **Step 2: Mark Milestone 29 complete in the roadmap**
+- [x] **Step 2: Mark Milestone 29 complete in the roadmap**
 
 Change every Milestone 29 deliverable and acceptance checkbox from `[ ]` to
 `[x]`.
 
-- [ ] **Step 3: Run the full Milestone 29 verification gate**
+- [x] **Step 3: Run the full Milestone 29 verification gate**
 
 Run:
 
@@ -609,7 +609,7 @@ rg -n 'TO''DO|TB''D|implement'' later|fill'' in' packages/zigeffect/src/cluster 
 Expected: the build/test/format/diff commands exit 0. The `rg` placeholder scan
 exits 1 with no matches.
 
-- [ ] **Step 4: Commit docs and roadmap**
+- [x] **Step 4: Commit docs and roadmap**
 
 ```bash
 git add packages/zigeffect/docs/architecture.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md docs/superpowers/plans/2026-06-09-zigeffect-runner-storage.md

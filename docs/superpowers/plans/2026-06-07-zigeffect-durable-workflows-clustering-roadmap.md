@@ -650,15 +650,15 @@ Goal: persist runner and shard ownership metadata.
 
 Deliverables:
 
-- [ ] Add `RunnerStorage` contract.
-- [ ] Implement in-memory runner storage.
-- [ ] Implement file-backed runner storage.
-- [ ] Add acquire, refresh, release, and release-all operations.
-- [ ] Add lease conflict errors.
+- [x] Add `RunnerStorage` contract.
+- [x] Implement in-memory runner storage.
+- [x] Implement file-backed runner storage.
+- [x] Add acquire, refresh, release, and release-all operations.
+- [x] Add lease conflict errors.
 
 Acceptance:
 
-- [ ] Lease acquisition is atomic for the file-backed local model.
+- [x] Lease acquisition is atomic for the file-backed local model.
 
 ## Milestone 30: Shard Leasing
 
