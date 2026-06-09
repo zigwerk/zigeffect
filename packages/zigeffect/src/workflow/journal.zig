@@ -84,7 +84,33 @@ pub const WorkflowEvent = struct {
     name: []const u8 = "",
     status: []const u8 = "",
     redacted_detail: []const u8 = "",
+    idempotency_key: []const u8 = "",
 };
+
+fn cloneSlice(allocator: std.mem.Allocator, value: []const u8) std.mem.Allocator.Error![]const u8 {
+    if (value.len == 0) return "";
+    return allocator.dupe(u8, value);
+}
+
+pub fn cloneWorkflowEvent(allocator: std.mem.Allocator, event: WorkflowEvent) std.mem.Allocator.Error!WorkflowEvent {
+    var owned = event;
+    owned.name = try cloneSlice(allocator, event.name);
+    errdefer if (owned.name.len > 0) allocator.free(owned.name);
+    owned.status = try cloneSlice(allocator, event.status);
+    errdefer if (owned.status.len > 0) allocator.free(owned.status);
+    owned.redacted_detail = try cloneSlice(allocator, event.redacted_detail);
+    errdefer if (owned.redacted_detail.len > 0) allocator.free(owned.redacted_detail);
+    owned.idempotency_key = try cloneSlice(allocator, event.idempotency_key);
+    errdefer if (owned.idempotency_key.len > 0) allocator.free(owned.idempotency_key);
+    return owned;
+}
+
+pub fn deinitWorkflowEventStrings(allocator: std.mem.Allocator, event: WorkflowEvent) void {
+    if (event.name.len > 0) allocator.free(event.name);
+    if (event.status.len > 0) allocator.free(event.status);
+    if (event.redacted_detail.len > 0) allocator.free(event.redacted_detail);
+    if (event.idempotency_key.len > 0) allocator.free(event.idempotency_key);
+}
 
 fn appendJsonString(output: *std.ArrayList(u8), allocator: std.mem.Allocator, value: []const u8) !void {
     try output.append(allocator, '"');
@@ -145,6 +171,8 @@ pub fn formatWorkflowEventJson(allocator: std.mem.Allocator, event: WorkflowEven
     try appendJsonString(&output, allocator, event.status);
     try output.appendSlice(allocator, ",\"redacted_detail\":");
     try appendJsonString(&output, allocator, event.redacted_detail);
+    try output.appendSlice(allocator, ",\"idempotency_key\":");
+    try appendJsonString(&output, allocator, event.idempotency_key);
     try output.append(allocator, '}');
 
     return output.toOwnedSlice(allocator);
@@ -169,6 +197,7 @@ pub fn formatWorkflowEventText(allocator: std.mem.Allocator, event: WorkflowEven
     try output.print(allocator, "name: {s}\n", .{event.name});
     try output.print(allocator, "status: {s}\n", .{event.status});
     try output.print(allocator, "redacted_detail: {s}\n", .{event.redacted_detail});
+    try output.print(allocator, "idempotency_key: {s}\n", .{event.idempotency_key});
 
     return output.toOwnedSlice(allocator);
 }

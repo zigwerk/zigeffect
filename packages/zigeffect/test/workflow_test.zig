@@ -61,6 +61,7 @@ test "workflow event json includes schema metadata and optional ids" {
         .name = "charge-card",
         .status = "success",
         .redacted_detail = "ok",
+        .idempotency_key = "event-1",
     };
 
     const json = try fx.workflow.formatWorkflowEventJson(std.testing.allocator, event);
@@ -77,6 +78,7 @@ test "workflow event json includes schema metadata and optional ids" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"name\":\"charge-card\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"status\":\"success\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"redacted_detail\":\"ok\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"idempotency_key\":\"event-1\"") != null);
 }
 
 test "workflow event text is readable for agents and CLIs" {
@@ -88,6 +90,7 @@ test "workflow event text is readable for agents and CLIs" {
         .timer_id = 10,
         .name = "wake-up",
         .status = "scheduled",
+        .idempotency_key = "timer-2",
     };
 
     const text = try fx.workflow.formatWorkflowEventText(std.testing.allocator, event);
@@ -97,6 +100,7 @@ test "workflow event text is readable for agents and CLIs" {
     try std.testing.expect(std.mem.indexOf(u8, text, "kind: timer_scheduled") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "timer_id: 10") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "name: wake-up") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "idempotency_key: timer-2") != null);
 }
 
 test "workflow replay folds lifecycle events" {
@@ -240,4 +244,160 @@ test "workflow replay rejects malformed resource histories" {
         .{ .sequence = 2, .kind = .queue_acked, .workflow_id = 7, .execution_id = 8, .queue_id = 40 },
     };
     try std.testing.expectError(error.UnknownQueue, fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &unknown_queue));
+}
+
+test "in-memory workflow journal store appends and reads ordered events" {
+    var memory_store = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer memory_store.deinit();
+
+    var journal_store = memory_store.asJournalStore();
+    try std.testing.expect(@TypeOf(journal_store) == fx.workflow.JournalStore);
+
+    const first_sequence = try journal_store.append(.{
+        .event = .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .idempotency_key = "start",
+        },
+    });
+    try std.testing.expectEqual(@as(u64, 1), first_sequence);
+
+    const second_sequence = try journal_store.append(.{
+        .expected_next_sequence = 2,
+        .event = .{
+            .sequence = 2,
+            .kind = .timer_scheduled,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .timer_id = 20,
+            .name = "wake-up",
+            .idempotency_key = "timer",
+        },
+    });
+    try std.testing.expectEqual(@as(u64, 2), second_sequence);
+
+    var all = try journal_store.readAll(std.testing.allocator);
+    defer all.deinit();
+    try std.testing.expectEqual(@as(usize, 2), all.events.len);
+    try std.testing.expectEqual(@as(u64, 1), all.events[0].sequence);
+    try std.testing.expectEqual(@as(u64, 2), all.events[1].sequence);
+    try std.testing.expectEqualStrings("timer", all.events[1].idempotency_key);
+
+    var from_second = try journal_store.readFromSequence(std.testing.allocator, 2);
+    defer from_second.deinit();
+    try std.testing.expectEqual(@as(usize, 1), from_second.events.len);
+    try std.testing.expectEqual(@as(u64, 2), from_second.events[0].sequence);
+    try std.testing.expectEqualStrings("wake-up", from_second.events[0].name);
+}
+
+test "in-memory workflow journal store rejects duplicate keys and sequence conflicts" {
+    var store = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    _ = try store.append(.{
+        .event = .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .idempotency_key = "start",
+        },
+    });
+
+    try std.testing.expectError(error.DuplicateEvent, store.append(.{
+        .event = .{
+            .sequence = 2,
+            .kind = .workflow_suspended,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .idempotency_key = "start",
+        },
+    }));
+
+    try std.testing.expectError(error.SequenceConflict, store.append(.{
+        .event = .{
+            .sequence = 3,
+            .kind = .workflow_suspended,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .idempotency_key = "suspend",
+        },
+    }));
+
+    try std.testing.expectError(error.SequenceConflict, store.append(.{
+        .expected_next_sequence = 3,
+        .event = .{
+            .sequence = 2,
+            .kind = .workflow_suspended,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .idempotency_key = "suspend",
+        },
+    }));
+}
+
+test "in-memory workflow journal store replays latest state and resets" {
+    var store = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    _ = try store.append(.{
+        .event = .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .idempotency_key = "start",
+        },
+    });
+    _ = try store.append(.{
+        .event = .{
+            .sequence = 2,
+            .kind = .activity_scheduled,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .activity_id = 10,
+            .name = "charge",
+            .idempotency_key = "activity-scheduled",
+        },
+    });
+    _ = try store.append(.{
+        .event = .{
+            .sequence = 3,
+            .kind = .activity_completed,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .activity_id = 10,
+            .idempotency_key = "activity-completed",
+        },
+    });
+
+    var state = try store.latestState(std.testing.allocator);
+    defer state.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowStatus.running, state.workflow_status);
+    try std.testing.expectEqual(@as(usize, 1), state.activities.items.len);
+    try std.testing.expectEqual(fx.workflow.ActivityStatus.completed, state.activities.items[0].status);
+    try std.testing.expectEqualStrings("charge", state.activities.items[0].name);
+
+    store.reset();
+
+    var empty_events = try store.readAll(std.testing.allocator);
+    defer empty_events.deinit();
+    try std.testing.expectEqual(@as(usize, 0), empty_events.events.len);
+
+    var empty_state = try store.latestState(std.testing.allocator);
+    defer empty_state.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowStatus.pending, empty_state.workflow_status);
+
+    const restarted_sequence = try store.append(.{
+        .event = .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 9,
+            .execution_id = 10,
+            .idempotency_key = "restart",
+        },
+    });
+    try std.testing.expectEqual(@as(u64, 1), restarted_sequence);
 }

@@ -197,9 +197,11 @@ Owns local durable workflow runtime surfaces:
 
 - `root.zig`: workflow namespace facade and ergonomic public aliases.
 - `journal.zig`: workflow journal id aliases, event kinds, event envelope,
-  schema constants, and one-way JSON/text formatters.
+  schema constants, event clone/free helpers, and one-way JSON/text formatters.
 - `replay.zig`: workflow replay status, state rows, malformed history errors,
   and deterministic event-folding logic.
+- `store.zig`: journal store contract, append/read batches, optimistic
+  sequence checks, idempotency-key duplicate detection, and in-memory store.
 
 Workflow definitions, activity definitions, journal events, replay state,
 journal stores, durable timers, durable deferreds, durable queues, signals,

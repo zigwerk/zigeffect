@@ -1,6 +1,7 @@
 pub const domain = "workflow";
 pub const journal = @import("journal.zig");
 pub const replay = @import("replay.zig");
+pub const store = @import("store.zig");
 
 pub const workflow_journal_event_schema = journal.workflow_journal_event_schema;
 pub const workflow_journal_event_schema_version = journal.workflow_journal_event_schema_version;
@@ -16,6 +17,8 @@ pub const WorkflowEvent = journal.WorkflowEvent;
 pub const workflowEventKindName = journal.workflowEventKindName;
 pub const formatWorkflowEventJson = journal.formatWorkflowEventJson;
 pub const formatWorkflowEventText = journal.formatWorkflowEventText;
+pub const cloneWorkflowEvent = journal.cloneWorkflowEvent;
+pub const deinitWorkflowEventStrings = journal.deinitWorkflowEventStrings;
 
 pub const WorkflowStatus = replay.WorkflowStatus;
 pub const ActivityStatus = replay.ActivityStatus;
@@ -28,3 +31,12 @@ pub const TimerState = replay.TimerState;
 pub const DeferredState = replay.DeferredState;
 pub const QueueState = replay.QueueState;
 pub const WorkflowReplayState = replay.WorkflowReplayState;
+
+pub const JournalStore = store.JournalStore;
+pub const JournalAppend = store.JournalAppend;
+pub const JournalEventBatch = store.JournalEventBatch;
+pub const JournalStoreError = store.JournalStoreError;
+pub const JournalStoreAppendError = store.JournalStoreAppendError;
+pub const JournalStoreReadError = store.JournalStoreReadError;
+pub const JournalStoreReplayError = store.JournalStoreReplayError;
+pub const InMemoryJournalStore = store.InMemoryJournalStore;

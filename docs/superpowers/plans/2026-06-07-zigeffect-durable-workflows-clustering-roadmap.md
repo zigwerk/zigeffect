@@ -234,15 +234,15 @@ Goal: build the first storage implementation for tests and model checks.
 
 Deliverables:
 
-- [ ] Add `JournalStore` contract.
-- [ ] Implement append, read all, read from sequence, latest state, and reset.
-- [ ] Implement in-memory store.
-- [ ] Add optimistic sequence checks.
-- [ ] Add event idempotency keys.
+- [x] Add `JournalStore` contract.
+- [x] Implement append, read all, read from sequence, latest state, and reset.
+- [x] Implement in-memory store.
+- [x] Add optimistic sequence checks.
+- [x] Add event idempotency keys.
 
 Acceptance:
 
-- [ ] Tests prove append ordering, duplicate rejection, sequence conflict, and
+- [x] Tests prove append ordering, duplicate rejection, sequence conflict, and
   replay from memory.
 
 ## Milestone 5: File Append-Only Journal Store

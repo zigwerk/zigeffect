@@ -36,12 +36,12 @@
 - Modify `packages/zigeffect/src/workflow/journal.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing idempotency formatting tests**
+- [x] **Step 1: Write failing idempotency formatting tests**
 
 Extend the existing JSON/text formatter tests to set
 `idempotency_key = "event-1"` and assert the key appears in both formats.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -51,13 +51,13 @@ bun run zigeffect:test
 
 Expected: FAIL until `WorkflowEvent` and formatters expose the field.
 
-- [ ] **Step 3: Implement event key and clone helpers**
+- [x] **Step 3: Implement event key and clone helpers**
 
 Add `idempotency_key` to `WorkflowEvent`, include it in JSON/text formatters,
 and add allocator-explicit `cloneWorkflowEvent` /
 `deinitWorkflowEventStrings` helpers.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -75,7 +75,7 @@ Expected: PASS.
 - Create `packages/zigeffect/src/workflow/store.zig`
 - Modify `packages/zigeffect/src/workflow/root.zig`
 
-- [ ] **Step 1: Write failing store tests**
+- [x] **Step 1: Write failing store tests**
 
 Add tests for:
 
@@ -88,7 +88,7 @@ Add tests for:
 - `reset` clearing the store and allowing reuse;
 - `JournalStore` vtable access through `asJournalStore`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -98,14 +98,14 @@ bun run zigeffect:test
 
 Expected: FAIL until the store module exists.
 
-- [ ] **Step 3: Implement store contract and memory store**
+- [x] **Step 3: Implement store contract and memory store**
 
 Add `JournalStore`, `JournalAppend`, `JournalEventBatch`,
 `JournalStoreError`, and `InMemoryJournalStore`. Store appends clone events,
 read methods return cloned batches, `latestState` folds a temporary batch, and
 `reset` frees stored event strings.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -121,18 +121,18 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/replay.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Add coverage through latest-state replay**
+- [x] **Step 1: Add coverage through latest-state replay**
 
 The store `latestState` test must deinitialize its temporary read batch inside
 the store and still return row names that remain valid until replay state
 deinit.
 
-- [ ] **Step 2: Implement owned row names**
+- [x] **Step 2: Implement owned row names**
 
 Clone row names when rows are created or updated, free them in replay-state
 deinit, and keep updates allocation-safe.
 
-- [ ] **Step 3: Verify green**
+- [x] **Step 3: Verify green**
 
 Run:
 
@@ -150,17 +150,17 @@ Expected: PASS with leak checks clean.
 - Add `docs/superpowers/specs/2026-06-09-zigeffect-in-memory-journal-store-design.md`
 - Add `docs/superpowers/plans/2026-06-09-zigeffect-in-memory-journal-store.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Add `store.zig` to the `src/workflow/` section as the owner of the journal
 store contract and in-memory store.
 
-- [ ] **Step 2: Mark Milestone 4 complete**
+- [x] **Step 2: Mark Milestone 4 complete**
 
 Mark all Milestone 4 deliverables and acceptance boxes in the durable workflows
 and clustering roadmap after verification.
 
-- [ ] **Step 3: Run full gate**
+- [x] **Step 3: Run full gate**
 
 Run:
 
@@ -173,7 +173,7 @@ git diff --check
 
 Expected: all commands PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/zigeffect/src/workflow/journal.zig packages/zigeffect/src/workflow/replay.zig packages/zigeffect/src/workflow/store.zig packages/zigeffect/src/workflow/root.zig packages/zigeffect/test/workflow_test.zig packages/zigeffect/test/architecture_test.zig packages/zigeffect/docs/architecture.md docs/superpowers/specs/2026-06-09-zigeffect-in-memory-journal-store-design.md docs/superpowers/plans/2026-06-09-zigeffect-in-memory-journal-store.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md
@@ -182,9 +182,9 @@ git commit -m "feat(zigeffect): add in-memory workflow journal store"
 
 ## Self-Review Checklist
 
-- [ ] Append-only ordering is enforced by sequence number.
-- [ ] Non-empty idempotency keys are unique.
-- [ ] Read batches own their cloned event strings.
-- [ ] Replay states returned by `latestState` do not borrow from a freed batch.
-- [ ] No file store, workflow engine, parser, or compaction logic is added.
-- [ ] Full verification passes before Milestone 4 is marked complete.
+- [x] Append-only ordering is enforced by sequence number.
+- [x] Non-empty idempotency keys are unique.
+- [x] Read batches own their cloned event strings.
+- [x] Replay states returned by `latestState` do not borrow from a freed batch.
+- [x] No file store, workflow engine, parser, or compaction logic is added.
+- [x] Full verification passes before Milestone 4 is marked complete.

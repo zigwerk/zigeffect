@@ -106,9 +106,21 @@ pub const WorkflowReplayState = struct {
     }
 
     pub fn deinit(self: *WorkflowReplayState) void {
+        for (self.queues.items) |queue| {
+            self.freeName(queue.name);
+        }
         self.queues.deinit(self.allocator);
+        for (self.deferreds.items) |deferred| {
+            self.freeName(deferred.name);
+        }
         self.deferreds.deinit(self.allocator);
+        for (self.timers.items) |timer| {
+            self.freeName(timer.name);
+        }
         self.timers.deinit(self.allocator);
+        for (self.activities.items) |activity| {
+            self.freeName(activity.name);
+        }
         self.activities.deinit(self.allocator);
     }
 
@@ -185,84 +197,107 @@ pub const WorkflowReplayState = struct {
     fn applyActivityScheduled(self: *WorkflowReplayState, event: WorkflowEvent) (std.mem.Allocator.Error || ReplayError)!void {
         const id = try requireActivityId(event);
         if (self.findActivityIndex(id) != null) return error.DuplicateActivity;
+        const name = try self.cloneName(event.name);
+        errdefer self.freeName(name);
         try self.activities.append(self.allocator, .{
             .id = id,
             .status = .scheduled,
             .last_sequence = event.sequence,
-            .name = event.name,
+            .name = name,
         });
     }
 
-    fn updateActivity(self: *WorkflowReplayState, event: WorkflowEvent, status: ActivityStatus) ReplayError!void {
+    fn updateActivity(self: *WorkflowReplayState, event: WorkflowEvent, status: ActivityStatus) (std.mem.Allocator.Error || ReplayError)!void {
         const id = try requireActivityId(event);
         const index = self.findActivityIndex(id) orelse return error.UnknownActivity;
-        self.activities.items[index].status = status;
-        self.activities.items[index].last_sequence = event.sequence;
-        self.maybeUpdateActivityName(index, event.name);
+        const name_update = try self.prepareNameUpdate(event.name);
+        errdefer if (name_update) |name| self.freeName(name);
+        const activity = &self.activities.items[index];
+        activity.status = status;
+        activity.last_sequence = event.sequence;
+        self.commitNameUpdate(&activity.name, name_update);
     }
 
     fn applyTimerScheduled(self: *WorkflowReplayState, event: WorkflowEvent) (std.mem.Allocator.Error || ReplayError)!void {
         const id = try requireTimerId(event);
         if (self.findTimerIndex(id) != null) return error.DuplicateTimer;
+        const name = try self.cloneName(event.name);
+        errdefer self.freeName(name);
         try self.timers.append(self.allocator, .{
             .id = id,
             .status = .scheduled,
             .last_sequence = event.sequence,
-            .name = event.name,
+            .name = name,
         });
     }
 
-    fn updateTimer(self: *WorkflowReplayState, event: WorkflowEvent, status: TimerStatus) ReplayError!void {
+    fn updateTimer(self: *WorkflowReplayState, event: WorkflowEvent, status: TimerStatus) (std.mem.Allocator.Error || ReplayError)!void {
         const id = try requireTimerId(event);
         const index = self.findTimerIndex(id) orelse return error.UnknownTimer;
-        self.timers.items[index].status = status;
-        self.timers.items[index].last_sequence = event.sequence;
-        self.maybeUpdateTimerName(index, event.name);
+        const name_update = try self.prepareNameUpdate(event.name);
+        errdefer if (name_update) |name| self.freeName(name);
+        const timer = &self.timers.items[index];
+        timer.status = status;
+        timer.last_sequence = event.sequence;
+        self.commitNameUpdate(&timer.name, name_update);
     }
 
     fn applyDeferredCreated(self: *WorkflowReplayState, event: WorkflowEvent) (std.mem.Allocator.Error || ReplayError)!void {
         const id = try requireDeferredId(event);
         if (self.findDeferredIndex(id) != null) return error.DuplicateDeferred;
+        const name = try self.cloneName(event.name);
+        errdefer self.freeName(name);
         try self.deferreds.append(self.allocator, .{
             .id = id,
             .status = .pending,
             .last_sequence = event.sequence,
-            .name = event.name,
+            .name = name,
         });
     }
 
-    fn touchDeferred(self: *WorkflowReplayState, event: WorkflowEvent) ReplayError!void {
+    fn touchDeferred(self: *WorkflowReplayState, event: WorkflowEvent) (std.mem.Allocator.Error || ReplayError)!void {
         const id = try requireDeferredId(event);
         const index = self.findDeferredIndex(id) orelse return error.UnknownDeferred;
-        self.deferreds.items[index].last_sequence = event.sequence;
-        self.maybeUpdateDeferredName(index, event.name);
+        const name_update = try self.prepareNameUpdate(event.name);
+        errdefer if (name_update) |name| self.freeName(name);
+        const deferred = &self.deferreds.items[index];
+        deferred.last_sequence = event.sequence;
+        self.commitNameUpdate(&deferred.name, name_update);
     }
 
-    fn updateDeferred(self: *WorkflowReplayState, event: WorkflowEvent, status: DeferredStatus) ReplayError!void {
+    fn updateDeferred(self: *WorkflowReplayState, event: WorkflowEvent, status: DeferredStatus) (std.mem.Allocator.Error || ReplayError)!void {
         const id = try requireDeferredId(event);
         const index = self.findDeferredIndex(id) orelse return error.UnknownDeferred;
-        self.deferreds.items[index].status = status;
-        self.deferreds.items[index].last_sequence = event.sequence;
-        self.maybeUpdateDeferredName(index, event.name);
+        const name_update = try self.prepareNameUpdate(event.name);
+        errdefer if (name_update) |name| self.freeName(name);
+        const deferred = &self.deferreds.items[index];
+        deferred.status = status;
+        deferred.last_sequence = event.sequence;
+        self.commitNameUpdate(&deferred.name, name_update);
     }
 
     fn applyQueueOffered(self: *WorkflowReplayState, event: WorkflowEvent) (std.mem.Allocator.Error || ReplayError)!void {
         const id = try requireQueueId(event);
         if (self.findQueueIndex(id) != null) return error.DuplicateQueue;
+        const name = try self.cloneName(event.name);
+        errdefer self.freeName(name);
         try self.queues.append(self.allocator, .{
             .id = id,
             .status = .offered,
             .last_sequence = event.sequence,
-            .name = event.name,
+            .name = name,
         });
     }
 
-    fn updateQueue(self: *WorkflowReplayState, event: WorkflowEvent, status: QueueStatus) ReplayError!void {
+    fn updateQueue(self: *WorkflowReplayState, event: WorkflowEvent, status: QueueStatus) (std.mem.Allocator.Error || ReplayError)!void {
         const id = try requireQueueId(event);
         const index = self.findQueueIndex(id) orelse return error.UnknownQueue;
-        self.queues.items[index].status = status;
-        self.queues.items[index].last_sequence = event.sequence;
-        self.maybeUpdateQueueName(index, event.name);
+        const name_update = try self.prepareNameUpdate(event.name);
+        errdefer if (name_update) |name| self.freeName(name);
+        const queue = &self.queues.items[index];
+        queue.status = status;
+        queue.last_sequence = event.sequence;
+        self.commitNameUpdate(&queue.name, name_update);
     }
 
     fn findActivityIndex(self: *const WorkflowReplayState, id: journal.ActivityId) ?usize {
@@ -293,20 +328,25 @@ pub const WorkflowReplayState = struct {
         return null;
     }
 
-    fn maybeUpdateActivityName(self: *WorkflowReplayState, index: usize, name: []const u8) void {
-        if (name.len != 0) self.activities.items[index].name = name;
+    fn cloneName(self: *WorkflowReplayState, name: []const u8) std.mem.Allocator.Error![]const u8 {
+        if (name.len == 0) return "";
+        return self.allocator.dupe(u8, name);
     }
 
-    fn maybeUpdateTimerName(self: *WorkflowReplayState, index: usize, name: []const u8) void {
-        if (name.len != 0) self.timers.items[index].name = name;
+    fn freeName(self: *WorkflowReplayState, name: []const u8) void {
+        if (name.len != 0) self.allocator.free(name);
     }
 
-    fn maybeUpdateDeferredName(self: *WorkflowReplayState, index: usize, name: []const u8) void {
-        if (name.len != 0) self.deferreds.items[index].name = name;
+    fn prepareNameUpdate(self: *WorkflowReplayState, name: []const u8) std.mem.Allocator.Error!?[]const u8 {
+        if (name.len == 0) return null;
+        return try self.cloneName(name);
     }
 
-    fn maybeUpdateQueueName(self: *WorkflowReplayState, index: usize, name: []const u8) void {
-        if (name.len != 0) self.queues.items[index].name = name;
+    fn commitNameUpdate(self: *WorkflowReplayState, current: *[]const u8, name_update: ?[]const u8) void {
+        if (name_update) |name| {
+            self.freeName(current.*);
+            current.* = name;
+        }
     }
 };
 

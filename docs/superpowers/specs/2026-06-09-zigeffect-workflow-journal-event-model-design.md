@@ -47,11 +47,14 @@ Every formatted event includes:
 - `queue_id`;
 - `name`;
 - `status`;
-- `redacted_detail`.
+- `redacted_detail`;
+- `idempotency_key`.
 
 `redacted_detail` is the only detail field in this milestone. Callers must pass
 already-redacted durable details. Workflow-specific redaction policies can layer
 on top of this envelope when activity payload codecs and journal stores land.
+`idempotency_key` is empty by default and is used by journal stores to reject
+duplicate appends when callers provide a non-empty key.
 
 ## Event Kinds
 
@@ -101,7 +104,7 @@ Tests cover:
 
 - every event kind has a stable string name;
 - JSON formatting includes schema, schema version, ids, kind, name, status,
-  and redacted detail;
+  redacted detail, and idempotency key;
 - optional ids format as either numbers or `null`;
 - text formatting names the same event facts;
 - architecture tests prove the workflow namespace exposes the journal module.
