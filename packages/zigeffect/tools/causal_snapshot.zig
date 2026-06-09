@@ -1415,6 +1415,66 @@ test "deterministic replay report marks command expectation mismatch" {
     try std.testing.expect(std.mem.indexOf(u8, report, "verdict: command_failed") != null);
 }
 
+test "scenario fork proposal paths include snapshot scenario and fork" {
+    const paths = try scenarioForkProposalPaths(std.testing.allocator, "missing-service-baseline", "missing-service-compile-fail", "missing-service-fork");
+    defer paths.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-fork-proposal-missing-service-baseline-missing-service-compile-fail-missing-service-fork.json",
+        paths.json_path,
+    );
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-fork-proposal-missing-service-baseline-missing-service-compile-fail-missing-service-fork.txt",
+        paths.text_path,
+    );
+}
+
+test "scenario fork proposal json is draft non executing evidence" {
+    const scenario = try causal_run.scenarioByName("missing-service-compile-fail");
+    const json = try formatScenarioForkProposalJson(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-missing-service-baseline.json",
+        baseline_manifest_json,
+        scenario,
+        "missing-service-fork",
+    );
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.scenario-fork-proposal.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"mode\":\"registered_scenario_fork_proposal\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"proposal_status\":\"draft\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"approved\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"executed\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"fork_name\":\"missing-service-fork\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"scenario\":{\"slug\":\"missing-service-compile-fail\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "replay-scenario baseline missing-service-compile-fail") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "runtime memory forking") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "arbitrary causal event-log replay") != null);
+}
+
+test "scenario fork proposal text states review boundary" {
+    const scenario = try causal_run.scenarioByName("missing-service-compile-fail");
+    const text = try formatScenarioForkProposalText(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-missing-service-baseline.json",
+        baseline_manifest_json,
+        scenario,
+        "missing-service-fork",
+    );
+    defer std.testing.allocator.free(text);
+
+    try std.testing.expect(std.mem.indexOf(u8, text, "zigeffect causal scenario fork proposal") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "mode: registered_scenario_fork_proposal") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "approved: false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "executed: false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "blocked operations:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "Fork proposal does not execute commands.") != null);
+}
+
+test "causal snapshot usage lists fork proposal command" {
+    try std.testing.expect(std.mem.indexOf(u8, usage(), "fork-proposal <snapshot> <scenario> <fork>") != null);
+}
+
 test "causal snapshot usage lists replay scenario command" {
     try std.testing.expect(std.mem.indexOf(u8, usage(), "replay-scenario <snapshot> <scenario>") != null);
 }
