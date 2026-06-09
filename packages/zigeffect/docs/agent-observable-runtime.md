@@ -1007,6 +1007,14 @@ new event kinds. Advice and diagnosis tools use the same mapping posture to
 prefer app-specific remediation prompts for config, requirement, response,
 retry, resource, and fiber incidents.
 
+`zig build causal-app-remediation-audit -- local --artifact <causal-json>
+--target <app-target>` starts the app remediation-control lane. It writes
+`zigeffect.causal.app-remediation-audit.v1` JSON/text artifacts with
+`approval_status=pending`, `applied=false`, and `mutation_authority=none`.
+The artifact cites app incident event ids, app query commands, claim guardrails,
+and advisory gates such as `config-only` and `source-only` without applying
+source, config, migration, or operational changes.
+
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around
 those pieces. The no-scenario form captures before/after dogfood evidence and
@@ -1066,9 +1074,10 @@ The first M7 request-path reference exists in
 `examples/causal_app_request.zig`: it models a Worker-compatible app request
 that returns a response plus owned causal JSON for caller-managed persistence.
 App incident mapping now classifies app config, requirement, response, retry,
-resource, and fiber failures over standard causal events. Future examples should
-add richer resource leaks, retries, and fiber interruption paths so agents can
-compare multiple failure shapes.
+resource, and fiber failures over standard causal events. App remediation audit
+artifacts now record pending app remediation evidence before policy gates or
+patch proposals. Future examples should add richer resource leaks, retries, and
+fiber interruption paths so agents can compare multiple failure shapes.
 
 ### Phase 6: Engine Improvement Harness
 

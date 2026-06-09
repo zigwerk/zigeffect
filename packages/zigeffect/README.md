@@ -214,6 +214,17 @@ event taxonomy. `causal-advice` and `causal-diagnosis` also prefer app-specific
 actions such as `fix-app-config`, `wire-app-requirement`, and
 `inspect-app-response-failure` for clearly app-owned evidence.
 
+Record a non-mutating app remediation audit from a saved app artifact:
+
+```bash
+cd packages/zigeffect
+zig build causal-app-remediation-audit -- local --artifact <causal-json> --target <app-target>
+```
+
+The audit uses schema `zigeffect.causal.app-remediation-audit.v1`, preserves
+`approval_status=pending`, `applied=false`, and `mutation_authority=none`, and
+names advisory app policy gates such as `config-only` and `source-only`.
+
 Print the causal artifact retention manifest for agents and CI:
 
 ```bash

@@ -661,6 +661,19 @@ app actions like `fix-app-config`, `wire-app-requirement`, and
 `inspect-app-response-failure`; `causal-diagnosis` maps those actions to app
 subsystems and fix categories.
 
+To record app remediation evidence before proposing source, config, migration,
+or operational changes, run:
+
+```sh
+zig build causal-app-remediation-audit -- local --artifact <causal-json> --target <app-target>
+```
+
+The command writes `*-app-remediation-audit.json` and
+`*-app-remediation-audit.txt` with `approval_status=pending`, `applied=false`,
+`mutation_authority=none`, app incident event ids, query commands, advisory
+policy gates, and claim guardrails. Treat this as the app review boundary; it
+does not approve, apply, patch, edit config, or run migrations.
+
 For normal core-runtime development, prefer the coordinated session command:
 
 ```sh

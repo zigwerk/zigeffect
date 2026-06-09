@@ -443,6 +443,9 @@ Current foundation branch:
   for caller-managed persistence.
 - `codex/zigeffect-app-incident-mapping` adds typed app incident classification
   plus app-specific advice and diagnosis mappings over existing causal events.
+- `codex/zigeffect-app-remediation-audit` adds pending, non-mutating app
+  remediation audit artifacts with app incident event ids, query commands, and
+  advisory app policy gates.
 
 Exit criteria:
 
@@ -619,19 +622,20 @@ Status values:
 | M5 Replay/snapshots | delivered | snapshot manifest schema/tool, named snapshot compare, replay-feasibility reports, deterministic registered-scenario replay, and safe scenario fork proposals exist | move to M6 read-only workbench |
 | M6 Workbench UI | delivered | SolidJS renderer, `causal-workbench-ui`, `zig-webui` launcher, graph cause-path/runtime-lane branch, and remediation-chain branch `codex/zigeffect-causal-workbench-remediation-chain` exist | move to M7 app-facing runtime |
 | M7 App-facing runtime | delivered | `CausalAppTrace`, Worker-shaped app request example, app incident classifier, and app-specific advice/diagnosis mappings exist | move to M8 app remediation audit |
-| M8 App remediation gates | active | app incident mapping exists; remediation artifacts not started | design app remediation audit |
+| M8 App remediation gates | active | app remediation audit artifacts exist; enforced policy gates and app patch proposals remain | move to app policy gates |
 | M9 Operating model | deferred | schema/versioning docs partial | consolidate after M4-M8 |
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-app-incident-mapping`
-   - Deliver typed app incident categories and app-aware advice/diagnosis
-     affordances over existing causal artifacts.
-2. `codex/zigeffect-app-remediation-audit`
-   - Start M8 app remediation audit artifacts after app incident mapping exists.
-3. `codex/zigeffect-app-policy-gates`
+1. `codex/zigeffect-app-remediation-audit`
+   - Deliver pending, non-mutating app remediation audit artifacts from app
+     causal JSON.
+2. `codex/zigeffect-app-policy-gates`
    - Add source/config/migration/operational policy gates for app remediation
      proposals.
+3. `codex/zigeffect-app-patch-proposal`
+   - Add app patch proposal artifacts that cite source files, config,
+     migrations, or operational runbooks after policy review.
 
 ## Risks And Controls
 

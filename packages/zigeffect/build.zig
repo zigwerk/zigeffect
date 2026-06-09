@@ -420,6 +420,20 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_advice_tool_tests = b.addRunArtifact(causal_advice_tool_tests);
 
+    const causal_app_remediation_audit_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_app_remediation_audit.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_app_remediation_audit_tool_module.addImport("causal_advice", causal_advice_tool_module);
+    causal_app_remediation_audit_tool_module.addImport("causal_artifact", causal_artifact_tool_module);
+
+    const causal_app_remediation_audit_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-app-remediation-audit-tests",
+        .root_module = causal_app_remediation_audit_tool_module,
+    });
+    const run_causal_app_remediation_audit_tool_tests = b.addRunArtifact(causal_app_remediation_audit_tool_tests);
+
     const causal_compare_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_compare.zig"),
         .target = target,
@@ -825,6 +839,15 @@ pub fn build(b: *std.Build) void {
     const causal_remediation_audit_step = b.step("causal-remediation-audit", "Write a pending causal remediation audit from local dev-loop reports");
     causal_remediation_audit_step.dependOn(&run_causal_remediation_audit_tool.step);
 
+    const causal_app_remediation_audit_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-app-remediation-audit",
+        .root_module = causal_app_remediation_audit_tool_module,
+    });
+    const run_causal_app_remediation_audit_tool = b.addRunArtifact(causal_app_remediation_audit_tool);
+    if (b.args) |args| run_causal_app_remediation_audit_tool.addArgs(args);
+    const causal_app_remediation_audit_step = b.step("causal-app-remediation-audit", "Write a pending app remediation audit from an app causal artifact");
+    causal_app_remediation_audit_step.dependOn(&run_causal_app_remediation_audit_tool.step);
+
     const causal_remediation_decision_tool = b.addExecutable(.{
         .name = "zigeffect-causal-remediation-decision",
         .root_module = causal_remediation_decision_tool_module,
@@ -1000,6 +1023,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_remediation_plan_tool_tests.step);
     examples_step.dependOn(&causal_remediation_audit_tool.step);
     examples_step.dependOn(&run_causal_remediation_audit_tool_tests.step);
+    examples_step.dependOn(&causal_app_remediation_audit_tool.step);
+    examples_step.dependOn(&run_causal_app_remediation_audit_tool_tests.step);
     examples_step.dependOn(&causal_remediation_decision_tool.step);
     examples_step.dependOn(&run_causal_remediation_decision_tool_tests.step);
     examples_step.dependOn(&causal_patch_proposal_tool.step);

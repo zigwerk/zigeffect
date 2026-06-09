@@ -592,9 +592,12 @@ metrics, and traces.
 - Delivered: app incident mapping classifies app config, requirement, response,
   retry, resource, finalizer, and fiber incidents, and app-specific
   advice/diagnosis mappings name the affected app subsystem.
+- Delivered: `zig build causal-app-remediation-audit -- local --artifact
+  <causal-json> --target <app-target>` writes pending, non-mutating app
+  remediation audit artifacts with advisory app policy gates and query commands.
 - Still future: production-grade app-facing integrations, durable history
-  hardening, app remediation policy gates, and comparing arbitrary named
-  audit-chain snapshots.
+  hardening, enforced app remediation policy gates, app patch proposals, and
+  comparing arbitrary named audit-chain snapshots.
 - Still future: deeper runtime regression scenarios for partial config and
   cause coverage.
 - Leave room for a future causal workbench that visualizes effect runs, scope

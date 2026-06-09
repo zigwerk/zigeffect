@@ -65,6 +65,7 @@ export type GraphModel = {
 export type GovernanceArtifactKind =
   | "audit-chain"
   | "remediation-audit"
+  | "app-remediation-audit"
   | "remediation-decision"
   | "patch-proposal"
   | "registry-readiness"
@@ -384,6 +385,12 @@ export function deriveGovernanceModel(raw: unknown, options: WorkbenchOptions): 
   const schemaVersion = textValue(artifact.schema_version, "unknown");
   const target = textValue(artifact.target, "unknown");
   const warnings = chain?.warnings ?? (schemaVersion === "unknown" ? ["artifact schema_version is missing"] : []);
+  const incidentCount = numericValue(artifact.incident_count);
+  const summary = kind === "app-remediation-audit" && incidentCount !== null
+    ? `${incidentCount} app incidents for ${target}`
+    : chain
+      ? `${chain.assessment} audit chain for ${target}`
+      : `${kind} for ${target}`;
 
   return {
     artifactPath: options.artifactPath,
@@ -391,7 +398,7 @@ export function deriveGovernanceModel(raw: unknown, options: WorkbenchOptions): 
     schemaVersion,
     kind,
     target,
-    summary: chain ? `${chain.assessment} audit chain for ${target}` : `${kind} for ${target}`,
+    summary,
     applied: booleanValue(artifact.applied),
     mutationAuthority: nullableTextValue(artifact.mutation_authority),
     chain,
@@ -575,6 +582,8 @@ function governanceKindForSchema(schema: string): GovernanceArtifactKind | null 
       return "audit-chain";
     case "zigeffect.causal.remediation-audit.v1":
       return "remediation-audit";
+    case "zigeffect.causal.app-remediation-audit.v1":
+      return "app-remediation-audit";
     case "zigeffect.causal.remediation-decision.v1":
       return "remediation-decision";
     case "zigeffect.causal.patch-proposal.v1":
