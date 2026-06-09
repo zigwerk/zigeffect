@@ -21,4 +21,5 @@ comptime {
     _ = @import("data_test.zig");
     _ = @import("match_test.zig");
     _ = @import("pattern_test.zig");
+    _ = @import("workflow_test.zig");
 }

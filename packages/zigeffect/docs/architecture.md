@@ -196,6 +196,8 @@ src/workflow/
 Owns local durable workflow runtime surfaces:
 
 - `root.zig`: workflow namespace marker until the journal/event modules land.
+- `journal.zig`: workflow journal id aliases, event kinds, event envelope,
+  schema constants, and one-way JSON/text formatters.
 
 Workflow definitions, activity definitions, journal events, replay state,
 journal stores, durable timers, durable deferreds, durable queues, signals,

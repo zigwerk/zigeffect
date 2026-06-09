@@ -30,6 +30,29 @@ The journal module owns:
 optional target ids. This keeps the event model simple until replay and stores
 need stronger constructors.
 
+## Event Envelope Fields
+
+Every formatted event includes:
+
+- `schema`;
+- `schema_version`;
+- `sequence`;
+- `kind`;
+- `workflow_id`;
+- `execution_id`;
+- `parent_sequence`;
+- `activity_id`;
+- `timer_id`;
+- `deferred_id`;
+- `queue_id`;
+- `name`;
+- `status`;
+- `redacted_detail`.
+
+`redacted_detail` is the only detail field in this milestone. Callers must pass
+already-redacted durable details. Workflow-specific redaction policies can layer
+on top of this envelope when activity payload codecs and journal stores land.
+
 ## Event Kinds
 
 The first taxonomy covers:

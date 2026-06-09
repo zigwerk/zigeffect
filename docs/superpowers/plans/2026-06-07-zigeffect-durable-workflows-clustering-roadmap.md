@@ -193,19 +193,19 @@ Goal: define the durable event vocabulary before storage or execution.
 
 Deliverables:
 
-- [ ] Add `WorkflowEventKind`.
-- [ ] Add stable event structs for workflow lifecycle, activity lifecycle,
+- [x] Add `WorkflowEventKind`.
+- [x] Add stable event structs for workflow lifecycle, activity lifecycle,
   timers, durable deferreds, durable queues, signals, interrupts, resume,
   suspension, and completion.
-- [ ] Define `WorkflowId`, `ExecutionId`, `ActivityId`, `TimerId`,
+- [x] Define `WorkflowId`, `ExecutionId`, `ActivityId`, `TimerId`,
   `DeferredId`, `QueueId`, and `JournalSequence`.
-- [ ] Define schema name and schema version constants.
-- [ ] Add JSON/text formatting helpers for journal events.
+- [x] Define schema name and schema version constants.
+- [x] Add JSON/text formatting helpers for journal events.
 
 Acceptance:
 
-- [ ] Unit tests cover every event kind formatting path.
-- [ ] Schema docs include all event fields and redaction rules.
+- [x] Unit tests cover every event kind formatting path.
+- [x] Schema docs include all event fields and redaction rules.
 
 ## Milestone 3: Journal Fold And Replay State
 
