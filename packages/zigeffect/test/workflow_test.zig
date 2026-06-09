@@ -12,6 +12,7 @@ fn expectWorkflowReplayStatesEqual(expected: *const fx.workflow.WorkflowReplaySt
         try std.testing.expectEqual(expected_row.id, actual_row.id);
         try std.testing.expectEqual(expected_row.status, actual_row.status);
         try std.testing.expectEqual(expected_row.last_sequence, actual_row.last_sequence);
+        try std.testing.expectEqual(expected_row.attempt, actual_row.attempt);
         try std.testing.expectEqualStrings(expected_row.name, actual_row.name);
     }
 
@@ -100,6 +101,7 @@ test "workflow event json includes schema metadata and optional ids" {
         .workflow_id = 7,
         .execution_id = 8,
         .activity_id = 9,
+        .attempt = 2,
         .name = "charge-card",
         .status = "success",
         .redacted_detail = "ok",
@@ -116,6 +118,7 @@ test "workflow event json includes schema metadata and optional ids" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"workflow_id\":7") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"execution_id\":8") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"activity_id\":9") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"attempt\":2") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"timer_id\":null") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"name\":\"charge-card\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"status\":\"success\"") != null);
@@ -130,6 +133,7 @@ test "workflow event text is readable for agents and CLIs" {
         .workflow_id = 7,
         .execution_id = 8,
         .timer_id = 10,
+        .attempt = 2,
         .name = "wake-up",
         .status = "scheduled",
         .idempotency_key = "timer-2",
@@ -141,6 +145,7 @@ test "workflow event text is readable for agents and CLIs" {
     try std.testing.expect(std.mem.indexOf(u8, text, "zigeffect workflow journal event") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "kind: timer_scheduled") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "timer_id: 10") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "attempt: 2") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "name: wake-up") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "idempotency_key: timer-2") != null);
 }
@@ -153,6 +158,7 @@ test "workflow event json parses back into an owned event" {
         .execution_id = 8,
         .parent_sequence = 2,
         .queue_id = 40,
+        .attempt = 3,
         .name = "mailbox \"primary\"",
         .status = "claimed\nready",
         .redacted_detail = "safe\tpayload",
@@ -171,6 +177,7 @@ test "workflow event json parses back into an owned event" {
     try std.testing.expectEqual(event.execution_id, parsed.execution_id);
     try std.testing.expectEqual(event.parent_sequence, parsed.parent_sequence);
     try std.testing.expectEqual(event.queue_id, parsed.queue_id);
+    try std.testing.expectEqual(event.attempt, parsed.attempt);
     try std.testing.expectEqual(@as(?u64, null), parsed.activity_id);
     try std.testing.expectEqualStrings(event.name, parsed.name);
     try std.testing.expectEqualStrings(event.status, parsed.status);
@@ -239,9 +246,9 @@ test "workflow replay rejects terminal and lifecycle transition violations" {
 test "workflow replay folds activity timer deferred and queue rows" {
     const events = [_]fx.workflow.WorkflowEvent{
         .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8 },
-        .{ .sequence = 2, .kind = .activity_scheduled, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .name = "charge" },
-        .{ .sequence = 3, .kind = .activity_started, .workflow_id = 7, .execution_id = 8, .activity_id = 10 },
-        .{ .sequence = 4, .kind = .activity_completed, .workflow_id = 7, .execution_id = 8, .activity_id = 10 },
+        .{ .sequence = 2, .kind = .activity_scheduled, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .attempt = 1, .name = "charge" },
+        .{ .sequence = 3, .kind = .activity_started, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .attempt = 1 },
+        .{ .sequence = 4, .kind = .activity_completed, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .attempt = 1 },
         .{ .sequence = 5, .kind = .timer_scheduled, .workflow_id = 7, .execution_id = 8, .timer_id = 20, .name = "wake-up" },
         .{ .sequence = 6, .kind = .timer_fired, .workflow_id = 7, .execution_id = 8, .timer_id = 20 },
         .{ .sequence = 7, .kind = .deferred_created, .workflow_id = 7, .execution_id = 8, .deferred_id = 30, .name = "approval" },
@@ -259,6 +266,7 @@ test "workflow replay folds activity timer deferred and queue rows" {
     try std.testing.expectEqual(@as(u64, 10), state.activities.items[0].id);
     try std.testing.expectEqual(fx.workflow.ActivityStatus.completed, state.activities.items[0].status);
     try std.testing.expectEqual(@as(u64, 4), state.activities.items[0].last_sequence);
+    try std.testing.expectEqual(@as(u32, 1), state.activities.items[0].attempt);
     try std.testing.expectEqualStrings("charge", state.activities.items[0].name);
 
     try std.testing.expectEqual(@as(usize, 1), state.timers.items.len);
@@ -671,8 +679,8 @@ test "file workflow journal store fsync policy is observable after appends" {
 test "workflow checkpoint json round-trips replay-equivalent state" {
     const events = [_]fx.workflow.WorkflowEvent{
         .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8 },
-        .{ .sequence = 2, .kind = .activity_scheduled, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .name = "charge" },
-        .{ .sequence = 3, .kind = .activity_completed, .workflow_id = 7, .execution_id = 8, .activity_id = 10 },
+        .{ .sequence = 2, .kind = .activity_scheduled, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .attempt = 1, .name = "charge" },
+        .{ .sequence = 3, .kind = .activity_completed, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .attempt = 1 },
         .{ .sequence = 4, .kind = .timer_scheduled, .workflow_id = 7, .execution_id = 8, .timer_id = 20, .name = "wake-up" },
         .{ .sequence = 5, .kind = .timer_fired, .workflow_id = 7, .execution_id = 8, .timer_id = 20 },
         .{ .sequence = 6, .kind = .deferred_created, .workflow_id = 7, .execution_id = 8, .deferred_id = 30, .name = "approval" },
@@ -689,12 +697,14 @@ test "workflow checkpoint json round-trips replay-equivalent state" {
 
     try std.testing.expect(std.mem.indexOf(u8, checkpoint_json, "\"schema\":\"zigeffect.workflow.checkpoint.v1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, checkpoint_json, "\"activity_id\":10") != null);
+    try std.testing.expect(std.mem.indexOf(u8, checkpoint_json, "\"attempt\":1") != null);
     try std.testing.expect(std.mem.indexOf(u8, checkpoint_json, "\"queue_id\":40") != null);
 
     var parsed = try fx.workflow.parseWorkflowCheckpointJson(std.testing.allocator, checkpoint_json);
     defer parsed.deinit();
 
     try expectWorkflowReplayStatesEqual(&state, &parsed);
+    try std.testing.expectEqual(@as(u32, 1), parsed.activities.items[0].attempt);
 }
 
 test "workflow definition exposes metadata requirements and execution ids" {
@@ -1013,4 +1023,173 @@ test "workflow context records failed u64 steps with typed error names" {
     try std.testing.expectEqualStrings("boom", events.events[2].name);
     try std.testing.expectEqualStrings("failed", events.events[2].status);
     try std.testing.expectEqualStrings("exit.cause.failure:Boom", events.events[2].redacted_detail);
+}
+
+test "workflow context records and replays successful u64 activities" {
+    const Payload = struct {
+        account_id: u64,
+    };
+    const Charge = fx.workflow.Activity("charge", Payload, u64, error{Declined}, void).withIdempotencyKey(struct {
+        fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+            return std.fmt.allocPrint(allocator, "charge:{d}", .{payload.account_id});
+        }
+    }.key);
+    const codec = fx.Codec(u64){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, value: u64) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{value});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !u64 {
+                return std.fmt.parseInt(u64, bytes, 10);
+            }
+        }.decode,
+    };
+    const Runner = struct {
+        var calls: u64 = 0;
+
+        fn run(payload: Payload) error{Declined}!u64 {
+            calls += 1;
+            return payload.account_id + 99;
+        }
+    };
+    Runner.calls = 0;
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{
+        .event = .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .name = "activity-workflow",
+            .status = "running",
+            .idempotency_key = "activity-success",
+        },
+    });
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const value = try context.activity(Charge, .{ .account_id = 5 }, codec, Runner.run);
+        try std.testing.expectEqual(@as(u64, 104), value);
+        try std.testing.expectEqual(@as(u64, 1), Runner.calls);
+    }
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const value = try context.activity(Charge, .{ .account_id = 5 }, codec, Runner.run);
+        try std.testing.expectEqual(@as(u64, 104), value);
+        try std.testing.expectEqual(@as(u64, 1), Runner.calls);
+    }
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 4), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.activity_scheduled, events.events[1].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.activity_started, events.events[2].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.activity_completed, events.events[3].kind);
+    try std.testing.expectEqual(@as(u32, 1), events.events[1].attempt);
+    try std.testing.expectEqual(@as(u32, 1), events.events[2].attempt);
+    try std.testing.expectEqual(@as(u32, 1), events.events[3].attempt);
+    try std.testing.expectEqualStrings("104", events.events[3].redacted_detail);
+
+    const activity_id = events.events[1].activity_id orelse return error.MissingActivityId;
+    try std.testing.expectEqual(activity_id, events.events[2].activity_id.?);
+    try std.testing.expectEqual(activity_id, events.events[3].activity_id.?);
+    try std.testing.expect(!std.mem.eql(u8, events.events[1].idempotency_key, events.events[2].idempotency_key));
+    try std.testing.expect(!std.mem.eql(u8, events.events[2].idempotency_key, events.events[3].idempotency_key));
+}
+
+test "workflow context records and replays failed u64 activities" {
+    const Payload = struct {
+        account_id: u64,
+    };
+    const Charge = fx.workflow.Activity("charge", Payload, u64, error{Declined}, void).withIdempotencyKey(struct {
+        fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+            return std.fmt.allocPrint(allocator, "charge:{d}", .{payload.account_id});
+        }
+    }.key);
+    const codec = fx.Codec(u64){
+        .encode = struct {
+            fn encode(allocator: std.mem.Allocator, value: u64) ![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{value});
+            }
+        }.encode,
+        .decode = struct {
+            fn decode(_: std.mem.Allocator, bytes: []const u8) !u64 {
+                return std.fmt.parseInt(u64, bytes, 10);
+            }
+        }.decode,
+    };
+    const Runner = struct {
+        var calls: u64 = 0;
+
+        fn run(_: Payload) error{Declined}!u64 {
+            calls += 1;
+            return error.Declined;
+        }
+    };
+    Runner.calls = 0;
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{
+        .event = .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .name = "activity-workflow",
+            .status = "running",
+            .idempotency_key = "activity-failure",
+        },
+    });
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        try std.testing.expectError(error.Declined, context.activity(Charge, .{ .account_id = 9 }, codec, Runner.run));
+        try std.testing.expectEqual(@as(u64, 1), Runner.calls);
+    }
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        try std.testing.expectError(error.Declined, context.activity(Charge, .{ .account_id = 9 }, codec, Runner.run));
+        try std.testing.expectEqual(@as(u64, 1), Runner.calls);
+    }
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 4), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.activity_scheduled, events.events[1].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.activity_started, events.events[2].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.activity_failed, events.events[3].kind);
+    try std.testing.expectEqual(@as(u32, 1), events.events[3].attempt);
+    try std.testing.expectEqualStrings("failed", events.events[3].status);
+    try std.testing.expectEqualStrings("exit.cause.failure:Declined", events.events[3].redacted_detail);
 }

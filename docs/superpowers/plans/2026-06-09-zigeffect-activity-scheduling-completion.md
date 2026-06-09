@@ -37,7 +37,7 @@
 - Modify `packages/zigeffect/src/workflow/store.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing attempt serialization tests**
+- [x] **Step 1: Write failing attempt serialization tests**
 
 Add assertions to the existing workflow event JSON/text tests:
 
@@ -71,7 +71,7 @@ try std.testing.expect(std.mem.indexOf(u8, checkpoint_json, "\"attempt\":1") != 
 try std.testing.expectEqual(@as(u32, 1), parsed.activities.items[0].attempt);
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -81,7 +81,7 @@ bun run zigeffect:test
 
 Expected: FAIL with missing `attempt` field/member errors.
 
-- [ ] **Step 3: Implement journal attempt field**
+- [x] **Step 3: Implement journal attempt field**
 
 In `WorkflowEvent`, add:
 
@@ -99,7 +99,7 @@ Set `.attempt = parsed.value.attempt` in `parseWorkflowEventJson`, append
 `"attempt"` in `formatWorkflowEventJson`, and append `attempt: {d}` in
 `formatWorkflowEventText`.
 
-- [ ] **Step 4: Implement replay and checkpoint attempt preservation**
+- [x] **Step 4: Implement replay and checkpoint attempt preservation**
 
 In `ActivityState`, add:
 
@@ -119,7 +119,7 @@ attempt: u32 = 0,
 Write `"attempt":{d}` in `appendActivityCheckpointRows` and read `.attempt =
 row.attempt` in `parseWorkflowCheckpointJson`.
 
-- [ ] **Step 5: Verify green**
+- [x] **Step 5: Verify green**
 
 Run:
 
@@ -136,7 +136,7 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/root.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing activity success replay test**
+- [x] **Step 1: Write failing activity success replay test**
 
 Add this test shape to `workflow_test.zig`:
 
@@ -202,7 +202,7 @@ test "workflow context records and replays successful u64 activities" {
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -212,7 +212,7 @@ bun run zigeffect:test
 
 Expected: FAIL because `WorkflowContext.activity` does not exist.
 
-- [ ] **Step 3: Implement activity identity and success replay**
+- [x] **Step 3: Implement activity identity and success replay**
 
 In `context.zig`, import `traits/root.zig` and expose:
 
@@ -268,7 +268,7 @@ Add helpers `ActivityReplay`, `recordedActivity`, `appendActivityEvent`, and
 
 Expose `activityId` from `workflow/root.zig`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -284,7 +284,7 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/context.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing activity failure replay test**
+- [x] **Step 1: Write failing activity failure replay test**
 
 Add a test where `Runner.run` returns `error.Declined`. The first call should
 record `activity_failed`, return `error.Declined`, and increment calls to `1`.
@@ -299,7 +299,7 @@ try std.testing.expectEqualStrings("failed", events.events[3].status);
 try std.testing.expectEqualStrings("exit.cause.failure:Declined", events.events[3].redacted_detail);
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -309,7 +309,7 @@ bun run zigeffect:test
 
 Expected: FAIL because failed activities are not yet recorded or replayed.
 
-- [ ] **Step 3: Implement typed activity failure detail and replay**
+- [x] **Step 3: Implement typed activity failure detail and replay**
 
 In `WorkflowContext.activity`, wrap the runner call:
 
@@ -342,7 +342,7 @@ fn errorFromName(comptime ErrorSet: type, name: []const u8) ?ErrorSet {
 `recordedActivity` should parse `exit.cause.failure:` details and return the
 matching `ActivityType.FailureType` error when present.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -360,12 +360,12 @@ Expected: PASS.
 - Add `docs/superpowers/specs/2026-06-09-zigeffect-activity-scheduling-completion-design.md`
 - Add `docs/superpowers/plans/2026-06-09-zigeffect-activity-scheduling-completion.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Update the `src/workflow/` section so `context.zig` mentions durable activity
 scheduling, result codecs, attempt counters, and replayed terminal outcomes.
 
-- [ ] **Step 2: Run full gate**
+- [x] **Step 2: Run full gate**
 
 Run:
 
@@ -380,13 +380,13 @@ rg -n 'T''BD|TO''DO|implement la''ter|fill in de''tails|appropriate error hand''
 Expected: compile/test commands PASS, `git diff --check` exits 0, and the
 placeholder scan exits 1 with no matches.
 
-- [ ] **Step 3: Mark Milestone 10 complete**
+- [x] **Step 3: Mark Milestone 10 complete**
 
 After the full gate passes, mark all Milestone 10 deliverables and acceptance
 boxes complete in
 `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/zigeffect/src/workflow/context.zig packages/zigeffect/src/workflow/journal.zig packages/zigeffect/src/workflow/replay.zig packages/zigeffect/src/workflow/root.zig packages/zigeffect/src/workflow/store.zig packages/zigeffect/test/workflow_test.zig packages/zigeffect/docs/architecture.md docs/superpowers/specs/2026-06-09-zigeffect-activity-scheduling-completion-design.md docs/superpowers/plans/2026-06-09-zigeffect-activity-scheduling-completion.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md
@@ -395,9 +395,9 @@ git commit -m "feat(zigeffect): add durable activity scheduling"
 
 ## Self-Review Checklist
 
-- [ ] Attempts are first-class fields, not string-only metadata.
-- [ ] Completed activity replay decodes through `Codec`.
-- [ ] Failed activity replay returns the declared activity error-set value.
-- [ ] Replaying terminal activity outcomes does not invoke the runner.
-- [ ] Lifecycle rows use deterministic sequence assignment.
-- [ ] No retries, timers, compensation, workers, or clustering are added in this milestone.
+- [x] Attempts are first-class fields, not string-only metadata.
+- [x] Completed activity replay decodes through `Codec`.
+- [x] Failed activity replay returns the declared activity error-set value.
+- [x] Replaying terminal activity outcomes does not invoke the runner.
+- [x] Lifecycle rows use deterministic sequence assignment.
+- [x] No retries, timers, compensation, workers, or clustering are added in this milestone.

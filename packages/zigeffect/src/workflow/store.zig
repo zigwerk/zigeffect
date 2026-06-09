@@ -99,7 +99,7 @@ fn appendActivityCheckpointRows(output: *std.ArrayList(u8), allocator: Allocator
     try output.appendSlice(allocator, "\"activities\":[");
     for (rows, 0..) |row, index| {
         if (index != 0) try output.append(allocator, ',');
-        try output.print(allocator, "{{\"activity_id\":{d},\"status\":", .{row.id});
+        try output.print(allocator, "{{\"activity_id\":{d},\"attempt\":{d},\"status\":", .{ row.id, row.attempt });
         try appendJsonString(output, allocator, @tagName(row.status));
         try output.print(allocator, ",\"last_sequence\":{d},\"name\":", .{row.last_sequence});
         try appendJsonString(output, allocator, row.name);
@@ -186,6 +186,7 @@ pub const WorkflowCheckpointParseError = error{
 
 const ActivityCheckpointRow = struct {
     activity_id: journal.ActivityId,
+    attempt: u32 = 0,
     status: []const u8,
     last_sequence: JournalSequence,
     name: []const u8 = "",
@@ -264,6 +265,7 @@ pub fn parseWorkflowCheckpointJson(allocator: Allocator, checkpoint_json: []cons
                 .id = row.activity_id,
                 .status = status,
                 .last_sequence = row.last_sequence,
+                .attempt = row.attempt,
                 .name = name,
             });
         }

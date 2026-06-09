@@ -81,3 +81,4 @@ pub const executionId = engine.executionId;
 pub const WorkflowContext = context.WorkflowContext;
 pub const WorkflowContextOptions = context.WorkflowContextOptions;
 pub const WorkflowContextError = context.WorkflowContextError;
+pub const activityId = context.activityId;

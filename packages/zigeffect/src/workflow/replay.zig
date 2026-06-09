@@ -66,6 +66,7 @@ pub const ActivityState = struct {
     id: journal.ActivityId,
     status: ActivityStatus,
     last_sequence: JournalSequence,
+    attempt: u32 = 0,
     name: []const u8 = "",
 };
 
@@ -203,6 +204,7 @@ pub const WorkflowReplayState = struct {
             .id = id,
             .status = .scheduled,
             .last_sequence = event.sequence,
+            .attempt = event.attempt,
             .name = name,
         });
     }
@@ -215,6 +217,7 @@ pub const WorkflowReplayState = struct {
         const activity = &self.activities.items[index];
         activity.status = status;
         activity.last_sequence = event.sequence;
+        if (event.attempt != 0) activity.attempt = event.attempt;
         self.commitNameUpdate(&activity.name, name_update);
     }
 

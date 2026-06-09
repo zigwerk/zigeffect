@@ -336,17 +336,17 @@ Goal: let workflows call side-effecting activities durably.
 
 Deliverables:
 
-- [ ] Add `WorkflowContext.activity`.
-- [ ] Append `ActivityScheduled`, `ActivityStarted`, `ActivityCompleted`, and
+- [x] Add `WorkflowContext.activity`.
+- [x] Append `ActivityScheduled`, `ActivityStarted`, `ActivityCompleted`, and
   `ActivityFailed`.
-- [ ] Add activity attempt counters.
-- [ ] Add activity result serialization boundary.
-- [ ] Add idempotent completion by activity id.
+- [x] Add activity attempt counters.
+- [x] Add activity result serialization boundary.
+- [x] Add idempotent completion by activity id.
 
 Acceptance:
 
-- [ ] Activity success and failure replay correctly.
-- [ ] Re-running after crash does not duplicate completed activity effects.
+- [x] Activity success and failure replay correctly.
+- [x] Re-running after crash does not duplicate completed activity effects.
 
 ## Milestone 11: Activity Retry And Timeout Semantics
 

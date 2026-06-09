@@ -97,6 +97,7 @@ pub const WorkflowEvent = struct {
     timer_id: ?TimerId = null,
     deferred_id: ?DeferredId = null,
     queue_id: ?QueueId = null,
+    attempt: u32 = 0,
     name: []const u8 = "",
     status: []const u8 = "",
     redacted_detail: []const u8 = "",
@@ -140,6 +141,7 @@ const WorkflowEventJsonRow = struct {
     timer_id: ?TimerId = null,
     deferred_id: ?DeferredId = null,
     queue_id: ?QueueId = null,
+    attempt: u32 = 0,
     name: []const u8 = "",
     status: []const u8 = "",
     redacted_detail: []const u8 = "",
@@ -168,6 +170,7 @@ pub fn parseWorkflowEventJson(allocator: std.mem.Allocator, row_json: []const u8
         .timer_id = parsed.value.timer_id,
         .deferred_id = parsed.value.deferred_id,
         .queue_id = parsed.value.queue_id,
+        .attempt = parsed.value.attempt,
         .name = parsed.value.name,
         .status = parsed.value.status,
         .redacted_detail = parsed.value.redacted_detail,
@@ -228,6 +231,7 @@ pub fn formatWorkflowEventJson(allocator: std.mem.Allocator, event: WorkflowEven
     try appendOptionalJsonU64(&output, allocator, event.deferred_id);
     try output.appendSlice(allocator, ",\"queue_id\":");
     try appendOptionalJsonU64(&output, allocator, event.queue_id);
+    try output.print(allocator, ",\"attempt\":{d}", .{event.attempt});
     try output.appendSlice(allocator, ",\"name\":");
     try appendJsonString(&output, allocator, event.name);
     try output.appendSlice(allocator, ",\"status\":");
@@ -257,6 +261,7 @@ pub fn formatWorkflowEventText(allocator: std.mem.Allocator, event: WorkflowEven
     try appendOptionalTextU64(&output, allocator, "timer_id", event.timer_id);
     try appendOptionalTextU64(&output, allocator, "deferred_id", event.deferred_id);
     try appendOptionalTextU64(&output, allocator, "queue_id", event.queue_id);
+    try output.print(allocator, "attempt: {d}\n", .{event.attempt});
     try output.print(allocator, "name: {s}\n", .{event.name});
     try output.print(allocator, "status: {s}\n", .{event.status});
     try output.print(allocator, "redacted_detail: {s}\n", .{event.redacted_detail});
