@@ -319,6 +319,10 @@ Owns Erlang-style distributed runtime surfaces:
 - `entity.zig`: local entity runtime, runtime-bound refs, entity scopes,
   services, finalizers, idle shutdown, and supervisor-backed handler failure
   recovery.
+- `envelope.zig`: durable cluster message protocol with message ids,
+  idempotency keys, request/reply/ack/interrupt/chunk-reply envelopes,
+  at-least-once delivery tracking, duplicate reply detection, and redacted
+  diagnostics.
 
 Entity identity, actor references, message envelopes, durable message storage,
 shard ids, runner ids, runner storage, leases, rebalancing, transports,
@@ -327,9 +331,8 @@ and transports belong here. Cluster code should build on workflow and runtime
 contracts instead of making durable state depend on runner memory.
 
 The local entity runtime is single-process and in-memory. It gives cluster
-concepts a deterministic local execution model, but durable delivery,
-idempotent envelopes, shard routing, runner ownership, and transport are
-separate milestones.
+concepts a deterministic local execution model, but durable message storage,
+shard routing, runner ownership, and transport are separate milestones.
 
 ```text
 tools/

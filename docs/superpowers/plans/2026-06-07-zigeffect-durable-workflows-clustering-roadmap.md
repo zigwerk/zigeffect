@@ -602,15 +602,15 @@ Goal: define the durable protocol shared by local and cluster messaging.
 
 Deliverables:
 
-- [ ] Add envelope ids and idempotency keys.
-- [ ] Add request, reply, ack, interrupt, and chunk reply envelopes.
-- [ ] Add at-least-once delivery semantics.
-- [ ] Add duplicate reply handling.
-- [ ] Add redaction for message diagnostics.
+- [x] Add envelope ids and idempotency keys.
+- [x] Add request, reply, ack, interrupt, and chunk reply envelopes.
+- [x] Add at-least-once delivery semantics.
+- [x] Add duplicate reply handling.
+- [x] Add redaction for message diagnostics.
 
 Acceptance:
 
-- [ ] Message protocol tests cover duplicates, missing replies, and retries.
+- [x] Message protocol tests cover duplicates, missing replies, and retries.
 
 ## Milestone 27: Shard Identity And Routing
 
