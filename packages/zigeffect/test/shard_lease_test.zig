@@ -175,6 +175,69 @@ test "shard lease manager gracefully hands off owned shards" {
     try std.testing.expectError(error.ShardNotOwned, source.handoffShard(9, target_owner, 1_200));
 }
 
+test "shard lease recovery refuses live runners" {
+    var storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asRunnerStorage();
+    const live = fx.runnerAddress("machine-a", "runner-a");
+    const survivor = fx.runnerAddress("machine-b", "runner-b");
+
+    var registry = fx.LocalRunnerRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+    _ = try registry.registerRunner(.{ .address = live, .name = "live", .started_at_ms = 1_000 });
+    _ = try registry.recordHeartbeat(.{ .address = live, .sequence = 1, .observed_at_ms = 1_100 });
+    const inspector = try fx.LocalRunnerHealthInspector.init(.{ .degraded_after_ms = 100, .unhealthy_after_ms = 500 });
+
+    var manager = try fx.LocalShardLeaseManager.init(
+        std.testing.allocator,
+        storage,
+        survivor,
+        .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    );
+    defer manager.deinit();
+
+    try std.testing.expectError(error.RunnerStillAlive, manager.recoverDeadRunner(&registry, &inspector, live, 1_150));
+}
+
+test "shard lease recovery releases dead runner leases for survivor reacquisition" {
+    var storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asRunnerStorage();
+    const dead = fx.runnerAddress("machine-a", "runner-a");
+    const survivor = fx.runnerAddress("machine-b", "runner-b");
+    var causal = fx.CausalStore.init(std.testing.allocator);
+    defer causal.deinit();
+
+    var registry = fx.LocalRunnerRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+    _ = try registry.registerRunner(.{ .address = dead, .name = "dead", .started_at_ms = 1_000 });
+    _ = try registry.recordHeartbeat(.{ .address = dead, .sequence = 1, .observed_at_ms = 1_050 });
+    const inspector = try fx.LocalRunnerHealthInspector.init(.{ .degraded_after_ms = 100, .unhealthy_after_ms = 300 });
+
+    _ = try storage.acquire(.{ .shard_id = 12, .owner = dead, .now_ms = 1_050, .ttl_ms = 10_000 });
+
+    var survivor_manager = try fx.LocalShardLeaseManager.init(
+        std.testing.allocator,
+        storage,
+        survivor,
+        .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    );
+    defer survivor_manager.deinit();
+    survivor_manager.attachCausalStore(&causal, 902);
+
+    const recovery = try survivor_manager.recoverDeadRunner(&registry, &inspector, dead, 1_400);
+    try std.testing.expectEqual(@as(usize, 1), recovery.released);
+    try std.testing.expect((try storage.lease(12)) == null);
+
+    const reacquired = try survivor_manager.acquireShard(12, 1_401);
+    try std.testing.expect(reacquired.owner.eql(survivor));
+
+    var snapshot = try causal.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expect(snapshotHasKind(snapshot, .cluster_shard_recovery_started));
+    try std.testing.expect(snapshotHasKind(snapshot, .cluster_shard_recovery_completed));
+}
+
 fn snapshotHasKind(snapshot: fx.CausalSnapshot, kind: fx.CausalEventKind) bool {
     for (snapshot.events) |event| {
         if (event.kind == kind) return true;

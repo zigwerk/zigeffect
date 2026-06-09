@@ -165,6 +165,30 @@ pub const LocalShardLeaseManager = struct {
         };
     }
 
+    pub fn recoverDeadRunner(
+        self: *LocalShardLeaseManager,
+        registry: *runner.LocalRunnerRegistry,
+        inspector: *const runner.LocalRunnerHealthInspector,
+        dead_runner: RunnerAddress,
+        now_ms: u64,
+    ) !ShardLeaseRecoveryReport {
+        const snapshot = try inspector.inspectRunner(registry, dead_runner, now_ms);
+        switch (snapshot.state) {
+            .unhealthy, .stopped => {},
+            .starting, .healthy, .degraded => return error.RunnerStillAlive,
+        }
+
+        try self.recordRecoveryCausal(.cluster_shard_recovery_started, dead_runner, now_ms, 0, "recovery_started");
+        const released = try self.storage.releaseAll(dead_runner);
+        try self.recordRecoveryCausal(.cluster_shard_recovery_completed, dead_runner, now_ms, released, "recovery_completed");
+        return .{
+            .dead_runner = dead_runner,
+            .recovered_by = self.owner,
+            .released = released,
+            .at_ms = now_ms,
+        };
+    }
+
     pub fn ownsShard(self: *const LocalShardLeaseManager, shard_id: ShardId) bool {
         return self.findOwnedIndex(shard_id) != null;
     }
@@ -240,6 +264,24 @@ pub const LocalShardLeaseManager = struct {
             .label = label,
             .type_name = "cluster.shard_lease",
             .status = "handoff_started",
+            .redacted_detail = detail,
+        });
+    }
+
+    fn recordRecoveryCausal(self: *LocalShardLeaseManager, kind: causal_mod.CausalEventKind, dead_runner: RunnerAddress, now_ms: u64, released: usize, status: []const u8) Allocator.Error!void {
+        const store = self.causal_store orelse return;
+        const detail = try std.fmt.allocPrint(
+            self.allocator,
+            "dead_machine_id={d} dead_runner_id={d} recovered_by_machine_id={d} recovered_by_runner_id={d} released={d} at_ms={d}",
+            .{ dead_runner.machine_id, dead_runner.runner_id, self.owner.machine_id, self.owner.runner_id, released, now_ms },
+        );
+        defer self.allocator.free(detail);
+        _ = try store.record(.{
+            .kind = kind,
+            .run_id = self.causal_run_id,
+            .label = "runner-recovery",
+            .type_name = "cluster.shard_lease",
+            .status = status,
             .redacted_detail = detail,
         });
     }
