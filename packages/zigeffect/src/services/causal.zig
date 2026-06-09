@@ -9,6 +9,18 @@ pub const causal_event_taxonomy_version: u32 = 1;
 pub const causal_redaction_marker = "<redacted>";
 pub const causal_truncation_marker = "<truncated>";
 
+pub const CausalExtensionDomain = enum {
+    workflow,
+    cluster,
+};
+
+pub fn causalExtensionDomainName(domain: CausalExtensionDomain) []const u8 {
+    return switch (domain) {
+        .workflow => "workflow",
+        .cluster => "cluster",
+    };
+}
+
 pub const CausalSamplingPolicy = struct {
     log_every_n: ?usize = null,
     metric_every_n: ?usize = null,

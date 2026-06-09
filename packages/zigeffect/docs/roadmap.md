@@ -30,6 +30,9 @@ What is real today:
   contract.
 - Deterministic fiber lifecycle semantics exist for `fork`, `join`,
   `interrupt`, scoped leases, and coordination primitives.
+- Durable workflow and cluster prerequisites now have explicit contracts for
+  codecs, deterministic id generation, suspension/cancellation vocabulary,
+  expanded backend capability labels, and causal extension domains.
 - Tests cover these paths.
 
 Current boundary decisions:
@@ -161,6 +164,8 @@ Every deeper engine change should preserve these rules:
 - Queue shutdown and scoped semaphore permit cleanup.
 - Deterministic queue producer/consumer workflow coverage under fibers.
 - Explicit deterministic backend capability boundary for future async runtimes.
+- Durable-local, async-local, and clustered backend capability labels are named
+  without changing the deterministic runtime implementation.
 
 ### Layers And DI
 

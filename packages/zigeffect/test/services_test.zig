@@ -53,6 +53,11 @@ test "test environment exposes id generator service through context" {
     try std.testing.expectEqual(@as(u64, 2), ids.next());
 }
 
+test "causal extension domains reserve workflow and cluster names" {
+    try std.testing.expectEqualStrings("workflow", fx.causalExtensionDomainName(.workflow));
+    try std.testing.expectEqualStrings("cluster", fx.causalExtensionDomainName(.cluster));
+}
+
 test "logger config metrics tracing and memory fs support bootstrap helpers" {
     var env = try fx.TestEnv.init(std.testing.allocator);
     defer env.deinit();

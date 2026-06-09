@@ -150,25 +150,25 @@ without pulling workflow behavior into the deep core.
 
 Deliverables:
 
-- [ ] Add a small `Codec` or serialization contract for durable payloads,
+- [x] Add a small `Codec` or serialization contract for durable payloads,
   activity results, typed failures, messages, snapshots, and journal events.
-- [ ] Add an `IdGenerator` service for workflow ids, activity ids, timer ids,
+- [x] Add an `IdGenerator` service for workflow ids, activity ids, timer ids,
   deferred ids, queue ids, runner ids, shard ids, and message ids.
-- [ ] Define a controlled suspension outcome or runtime decision vocabulary so
+- [x] Define a controlled suspension outcome or runtime decision vocabulary so
   durable workflow code can say "waiting" without pretending the effect has
   succeeded or failed.
-- [ ] Add cancellation/interruption context that workflows, activities, timers,
+- [x] Add cancellation/interruption context that workflows, activities, timers,
   deferreds, queues, and compensation can observe cooperatively.
-- [ ] Expand `BackendCapabilities` enough to distinguish deterministic,
+- [x] Expand `BackendCapabilities` enough to distinguish deterministic,
   durable-local, async-local, and cluster-capable execution.
-- [ ] Add causal taxonomy extension points for workflow and cluster events.
+- [x] Add causal taxonomy extension points for workflow and cluster events.
 
 Acceptance:
 
-- [ ] Core prerequisite docs explain which pieces are deep core and which remain
+- [x] Core prerequisite docs explain which pieces are deep core and which remain
   in the workflow layer.
-- [ ] Existing deterministic runtime behavior remains unchanged.
-- [ ] `bun run zigeffect:test` passes.
+- [x] Existing deterministic runtime behavior remains unchanged.
+- [x] `bun run zigeffect:test` passes.
 
 ## Milestone 1: Durable Runtime Domain Layout
 

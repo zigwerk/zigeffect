@@ -85,9 +85,11 @@ Owns execution runtimes and deterministic concurrency primitives:
 - `fiber.zig`: `Fiber`, `FiberRuntime`, deterministic lifecycle semantics.
 - `coordination.zig`: `Deferred`, `Queue`, `Semaphore`.
 - `backend.zig`: backend capability contract and deterministic backend marker.
+- `control.zig`: shared suspension and cooperative cancellation vocabulary.
 
-Runtime/scope/fiber cohesion, coordination backpressure, scoped permits, and
-future backend boundaries belong here.
+Runtime/scope/fiber cohesion, coordination backpressure, scoped permits,
+controlled suspension vocabulary, cooperative cancellation, and future backend
+boundaries belong here.
 
 ```text
 src/layer/
@@ -116,10 +118,11 @@ Owns built-in services:
 - `metrics.zig`
 - `tracing.zig`
 - `memory_file_system.zig`
+- `id_generator.zig`
 
-Production config, logger, metrics, tracing, and filesystem service contracts
-belong here. Keep these services layered on the core instead of adding
-observability complexity to `Effect` or `Runtime`.
+Production config, logger, metrics, tracing, filesystem, and id generation
+service contracts belong here. Keep these services layered on the core instead
+of adding observability or durable runtime complexity to `Effect` or `Runtime`.
 
 ```text
 src/traits/
@@ -132,9 +135,11 @@ Owns small typeclass-ish contracts used by data and pattern helpers:
 - `order.zig`
 - `show.zig`
 - `redaction.zig`
+- `codec.zig`
 
-Equality, hashing, ordering, formatting, and redaction marker behavior belong
-here when they need to compose across data structures.
+Equality, hashing, ordering, formatting, redaction marker behavior, and
+allocator-explicit encoding/decoding contracts belong here when they need to
+compose across data structures, durable payloads, snapshots, or messages.
 
 ```text
 src/data/
