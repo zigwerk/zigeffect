@@ -1,7 +1,12 @@
 import { For, Match, Show, Switch, createMemo, createResource, createSignal } from "solid-js";
 import {
   type CausalEvent,
+  type GraphEdge,
+  type GraphLane,
+  type GraphLaneKind,
   type QueryCommand,
+  causePathForEvent,
+  deriveGraphModel,
   deriveWorkbenchModel,
   filterEvents,
   parseArtifactJson,
@@ -18,6 +23,16 @@ const tabs: Array<{ id: Tab; label: string }> = [
   { id: "queries", label: "Queries" },
   { id: "metadata", label: "Metadata" },
 ];
+
+const laneKinds: GraphLaneKind[] = ["run", "scope", "fiber", "resource", "retry"];
+
+const laneLabels: Record<GraphLaneKind, string> = {
+  run: "Runs",
+  scope: "Scopes",
+  fiber: "Fibers",
+  resource: "Resources",
+  retry: "Retries",
+};
 
 export function App() {
   const [payload] = createResource(loadPayload);
@@ -175,7 +190,12 @@ export function App() {
                     <Findings events={current().events} findings={current().findings} onSelect={setSelectedId} />
                   </Match>
                   <Match when={activeTab() === "graph"}>
-                    <Graph events={current().events} onSelect={setSelectedId} />
+                    <Graph
+                      events={current().events}
+                      findings={current().findings}
+                      selected={selectedEvent()}
+                      onSelect={setSelectedId}
+                    />
                   </Match>
                   <Match when={activeTab() === "queries"}>
                     <Queries
@@ -278,55 +298,210 @@ function Findings(props: {
   );
 }
 
-function Graph(props: { events: CausalEvent[]; onSelect: (id: string) => void }) {
-  const scopes = createMemo(() => groupedValues(props.events, "scopeId"));
-  const fibers = createMemo(() => groupedValues(props.events, "fiberId"));
+function Graph(props: {
+  events: CausalEvent[];
+  findings: ReturnType<typeof deriveWorkbenchModel>["findings"];
+  selected: CausalEvent | null;
+  onSelect: (id: string) => void;
+}) {
+  const graph = createMemo(() => deriveGraphModel(props.events, props.findings));
+  const causePath = createMemo(() => (
+    props.selected ? causePathForEvent(props.events, props.selected.idText) : []
+  ));
+  const lanesByKind = createMemo(() => laneKinds.map((kind) => ({
+    kind,
+    label: laneLabels[kind],
+    lanes: graph().lanes.filter((lane) => lane.kind === kind),
+  })));
 
   return (
     <div class="view-stack">
       <div class="view-heading">
         <h2>Graph</h2>
-        <span>{props.events.length} linked events</span>
+        <span>{props.events.length} events</span>
       </div>
+
+      <div class="graph-summary">
+        <Metric label="roots" value={String(graph().roots.length)} />
+        <Metric label="edges" value={String(graph().parentEdges.length)} />
+        <Metric label="lanes" value={String(graph().lanes.length)} />
+        <Metric
+          label="unhealthy"
+          value={String(graph().unhealthyLanes.length)}
+          tone={graph().unhealthyLanes.length ? "warn" : "ok"}
+        />
+        <Metric label="orphans" value={String(graph().orphans.length)} tone={graph().orphans.length ? "warn" : "ok"} />
+      </div>
+
+      <CausePath path={causePath()} selected={props.selected} onSelect={props.onSelect} />
+
+      <div class="lane-board">
+        <For each={lanesByKind()}>
+          {(group) => (
+            <LaneSection
+              label={group.label}
+              lanes={group.lanes}
+              selected={props.selected}
+              onSelect={props.onSelect}
+            />
+          )}
+        </For>
+      </div>
+
       <div class="graph-grid">
-        <div class="relationship-list">
-          <h3>Parent chain</h3>
-          <For each={props.events}>
-            {(event) => (
-              <button type="button" class="relationship-row" onClick={() => props.onSelect(event.idText)}>
-                <span>#{event.parentId ?? "root"} -&gt; #{event.idText}</span>
-                <strong>{event.kind}</strong>
-              </button>
-            )}
-          </For>
-        </div>
-        <GroupList title="Scopes" groups={scopes()} onSelect={props.onSelect} />
-        <GroupList title="Fibers" groups={fibers()} onSelect={props.onSelect} />
+        <EdgeList
+          edges={graph().parentEdges}
+          events={props.events}
+          selected={props.selected}
+          onSelect={props.onSelect}
+        />
+        <OrphanList events={graph().orphans} selected={props.selected} onSelect={props.onSelect} />
       </div>
     </div>
   );
 }
 
-function GroupList(props: {
-  title: string;
-  groups: Array<{ key: string; events: CausalEvent[] }>;
+function CausePath(props: {
+  path: CausalEvent[];
+  selected: CausalEvent | null;
   onSelect: (id: string) => void;
 }) {
   return (
+    <div class="cause-path">
+      <div class="cause-path-heading">
+        <h3>Cause path</h3>
+        <span>{props.selected ? `selected #${props.selected.idText}` : "no selection"}</span>
+      </div>
+      <div class="cause-path-strip">
+        <For each={props.path} fallback={<EmptyState label="No cause path" compact />}>
+          {(event) => (
+            <button
+              type="button"
+              classList={{ "cause-chip": true, selected: props.selected?.idText === event.idText }}
+              onClick={() => props.onSelect(event.idText)}
+            >
+              <span>#{event.idText}</span>
+              <strong>{event.kind}</strong>
+            </button>
+          )}
+        </For>
+      </div>
+    </div>
+  );
+}
+
+function LaneSection(props: {
+  label: string;
+  lanes: GraphLane[];
+  selected: CausalEvent | null;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <section class="lane-section">
+      <div class="lane-section-head">
+        <h3>{props.label}</h3>
+        <span>{props.lanes.length}</span>
+      </div>
+      <div class="lane-card-list">
+        <For each={props.lanes} fallback={<EmptyState label="No lanes" compact />}>
+          {(lane) => (
+            <LaneCard lane={lane} selected={props.selected} onSelect={props.onSelect} />
+          )}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function LaneCard(props: {
+  lane: GraphLane;
+  selected: CausalEvent | null;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <article classList={{
+      "lane-card": true,
+      failure: props.lane.status === "failure",
+      warning: props.lane.status === "warning",
+      ok: props.lane.status === "ok",
+    }}>
+      <div class="lane-card-head">
+        <div>
+          <span>{props.lane.status}</span>
+          <strong>{props.lane.label}</strong>
+        </div>
+        <small>{props.lane.events.length} events</small>
+      </div>
+      <Show when={props.lane.findingEventIds.length > 0}>
+        <span class="lane-finding-pill">{props.lane.findingEventIds.length} findings</span>
+      </Show>
+      <div class="lane-events">
+        <For each={props.lane.events}>
+          {(event) => (
+            <button
+              type="button"
+              classList={{ selected: props.selected?.idText === event.idText }}
+              onClick={() => props.onSelect(event.idText)}
+            >
+              <span>#{event.idText}</span>
+              <strong>{event.kind}</strong>
+              <small>{event.status}</small>
+            </button>
+          )}
+        </For>
+      </div>
+    </article>
+  );
+}
+
+function EdgeList(props: {
+  edges: GraphEdge[];
+  events: CausalEvent[];
+  selected: CausalEvent | null;
+  onSelect: (id: string) => void;
+}) {
+  const eventById = createMemo(() => new Map(props.events.map((event) => [event.idText, event])));
+
+  return (
     <div class="relationship-list">
-      <h3>{props.title}</h3>
-      <For each={props.groups} fallback={<EmptyState label="No grouped events" compact />}>
-        {(group) => (
-          <div class="group-block">
-            <strong>{group.key}</strong>
-            <For each={group.events}>
-              {(event) => (
-                <button type="button" onClick={() => props.onSelect(event.idText)}>
-                  #{event.idText} {event.kind}
-                </button>
-              )}
-            </For>
-          </div>
+      <h3>Parent edges</h3>
+      <For each={props.edges} fallback={<EmptyState label="No parent edges" compact />}>
+        {(edge) => {
+          const child = () => eventById().get(edge.to) ?? null;
+          return (
+            <button
+              type="button"
+              classList={{ "relationship-row": true, selected: props.selected?.idText === edge.to }}
+              onClick={() => props.onSelect(edge.to)}
+            >
+              <span>#{edge.from} -&gt; #{edge.to}</span>
+              <strong>{child()?.kind ?? "unknown"}</strong>
+            </button>
+          );
+        }}
+      </For>
+    </div>
+  );
+}
+
+function OrphanList(props: {
+  events: CausalEvent[];
+  selected: CausalEvent | null;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div class="orphan-list">
+      <h3>Orphans</h3>
+      <For each={props.events} fallback={<EmptyState label="No orphaned events" compact />}>
+        {(event) => (
+          <button
+            type="button"
+            classList={{ "orphan-row": true, selected: props.selected?.idText === event.idText }}
+            onClick={() => props.onSelect(event.idText)}
+          >
+            <span>missing parent #{event.parentId}</span>
+            <strong>#{event.idText} {event.kind}</strong>
+          </button>
         )}
       </For>
     </div>
@@ -467,21 +642,4 @@ function Meta(props: { label: string; value: string }) {
 
 function EmptyState(props: { label: string; compact?: boolean }) {
   return <div classList={{ "empty-state": true, compact: props.compact }}>{props.label}</div>;
-}
-
-function groupedValues(events: CausalEvent[], key: "scopeId" | "fiberId") {
-  const groups = new Map<string, CausalEvent[]>();
-  for (const event of events) {
-    const value = event[key];
-    if (!value) {
-      continue;
-    }
-    const existing = groups.get(value) ?? [];
-    existing.push(event);
-    groups.set(value, existing);
-  }
-  return Array.from(groups, ([groupKey, groupEvents]) => ({
-    key: groupKey,
-    events: groupEvents,
-  }));
 }

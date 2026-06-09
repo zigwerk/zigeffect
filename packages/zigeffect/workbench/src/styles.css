@@ -162,6 +162,9 @@ h3 {
 .event-row,
 .finding-row,
 .relationship-row,
+.orphan-row,
+.cause-chip,
+.lane-events button,
 .group-block button,
 .command-row button {
   border: 1px solid #d6ddd2;
@@ -272,6 +275,9 @@ h3 {
 .event-row:hover,
 .finding-row:hover,
 .relationship-row:hover,
+.orphan-row:hover,
+.cause-chip:hover,
+.lane-events button:hover,
 .group-block button:hover,
 .command-row button:hover {
   border-color: #8db7ad;
@@ -380,26 +386,215 @@ h3 {
   font-weight: 700;
 }
 
-.graph-grid {
+.graph-summary {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(180px, 0.8fr) minmax(180px, 0.8fr);
-  gap: 12px;
+  grid-template-columns: repeat(5, minmax(92px, 1fr));
+  gap: 8px;
 }
 
-.relationship-list {
+.cause-path {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #d9dfd4;
+}
+
+.cause-path-heading,
+.lane-section-head {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cause-path-heading span,
+.lane-section-head span {
+  color: #66736e;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.cause-path-strip {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cause-chip {
+  min-width: 0;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  color: #35413e;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.cause-chip span {
+  color: #2c6356;
+  font-weight: 850;
+}
+
+.cause-chip strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cause-chip.selected,
+.lane-events button.selected,
+.relationship-row.selected,
+.orphan-row.selected {
+  border-color: #2b7d6b;
+  background: #eef8f3;
+}
+
+.lane-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+}
+
+.lane-section {
   min-width: 0;
   display: grid;
   align-content: start;
   gap: 8px;
 }
 
-.relationship-list h3 {
+.lane-card-list {
+  display: grid;
+  gap: 8px;
+}
+
+.lane-card {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid #d6ddd2;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.lane-card.warning {
+  border-color: #d8b05d;
+  background: #fffaf0;
+}
+
+.lane-card.failure {
+  border-color: #d99376;
+  background: #fff5f0;
+}
+
+.lane-card-head {
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lane-card-head div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.lane-card-head span {
+  color: #66736e;
+  font-size: 0.7rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.lane-card-head strong {
+  color: #17211f;
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
+.lane-card-head small {
+  flex: 0 0 auto;
+  color: #66736e;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.lane-finding-pill {
+  min-height: 24px;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #fff1db;
+  color: #7a4319;
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.lane-events {
+  display: grid;
+  gap: 5px;
+}
+
+.lane-events button {
+  min-width: 0;
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) minmax(54px, auto);
+  gap: 6px;
+  align-items: center;
+  padding: 5px 7px;
+  color: #35413e;
+  text-align: left;
+}
+
+.lane-events button span {
+  color: #2c6356;
+  font-weight: 850;
+}
+
+.lane-events button strong {
+  min-width: 0;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.lane-events button small {
+  color: #66736e;
+  font-size: 0.7rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.graph-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(220px, 0.7fr);
+  gap: 14px;
+}
+
+.relationship-list,
+.orphan-list {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.relationship-list h3,
+.orphan-list h3 {
   min-height: 30px;
   display: flex;
   align-items: center;
 }
 
-.relationship-row {
+.relationship-row,
+.orphan-row {
   min-height: 48px;
   display: grid;
   gap: 4px;
@@ -407,9 +602,14 @@ h3 {
   text-align: left;
 }
 
-.relationship-row span {
+.relationship-row span,
+.orphan-row span {
   color: #66736e;
   font-size: 0.78rem;
+}
+
+.orphan-row strong {
+  overflow-wrap: anywhere;
 }
 
 .group-block {
@@ -592,6 +792,15 @@ dd {
   .event-row,
   .command-row,
   .command-list.compact .command-row {
+    grid-template-columns: 1fr;
+  }
+
+  .graph-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lane-board,
+  .graph-grid {
     grid-template-columns: 1fr;
   }
 
