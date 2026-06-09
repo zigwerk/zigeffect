@@ -605,6 +605,68 @@ test "causal query helpers filter resources fibers requirements and retries" {
     try std.testing.expectEqualStrings("retry-config", retries.events[0].label);
 }
 
+test "causal store preserves deep runtime identity fields" {
+    var store = fx.CausalStore.initWithOptions(std.testing.allocator, .{
+        .max_event_string_bytes = 48,
+    });
+    defer store.deinit();
+
+    const run_id = store.nextRunId();
+    const layer_id = store.nextLayerId();
+    const resource_id = store.nextResourceId();
+    const schedule_id = store.nextScheduleId();
+    const parent = try store.record(.{
+        .kind = .run_started,
+        .run_id = run_id,
+        .label = "deep-runtime-parent",
+    });
+    const child = try store.record(.{
+        .kind = .service_required,
+        .run_id = run_id,
+        .cause_event_id = parent,
+        .layer_id = layer_id,
+        .service_key = "token=raw-secret stable-service-key-stable-service-key",
+        .resource_id = resource_id,
+        .schedule_id = schedule_id,
+        .status = "missing",
+    });
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), snapshot.events.len);
+    try std.testing.expectEqual(@as(?u64, layer_id), snapshot.events[1].layer_id);
+    try std.testing.expectEqual(@as(?u64, resource_id), snapshot.events[1].resource_id);
+    try std.testing.expectEqual(@as(?u64, parent), snapshot.events[1].cause_event_id);
+    try std.testing.expectEqual(@as(?u64, schedule_id), snapshot.events[1].schedule_id);
+    try std.testing.expect(std.mem.indexOf(u8, snapshot.events[1].service_key, fx.causal_redaction_marker) != null);
+    try std.testing.expect(std.mem.indexOf(u8, snapshot.events[1].service_key, fx.causal_truncation_marker) != null);
+    try std.testing.expect(std.mem.indexOf(u8, snapshot.events[1].service_key, "raw-secret") == null);
+
+    var cause = try store.cause(std.testing.allocator, child);
+    defer cause.deinit();
+    try std.testing.expectEqual(@as(usize, 2), cause.events.len);
+    try std.testing.expectEqual(parent, cause.events[0].id);
+    try std.testing.expectEqual(child, cause.events[1].id);
+
+    var lineage = try store.lineage(std.testing.allocator, parent);
+    defer lineage.deinit();
+    try std.testing.expectEqual(@as(usize, 2), lineage.events.len);
+    try std.testing.expectEqual(parent, lineage.events[0].id);
+    try std.testing.expectEqual(child, lineage.events[1].id);
+
+    const json = try fx.formatCausalJson(std.testing.allocator, &store);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"schema\": \"zigeffect.causal.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"event_taxonomy_version\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"layer_id\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"service_key\": \"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"resource_id\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"cause_event_id\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"schedule_id\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "raw-secret") == null);
+}
+
 test "causal findings surface missing cleanup pending fibers finalizer failures exhausted retries and missing services" {
     var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();

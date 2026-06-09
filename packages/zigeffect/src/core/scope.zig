@@ -14,6 +14,8 @@ pub const Scope = struct {
         state: ?*anyopaque,
         run: *const fn (?*anyopaque, FinalizerExit) ?[]const u8,
         resource_type: []const u8 = "",
+        resource_id: ?u64 = null,
+        acquired_event_id: ?u64 = null,
     };
 
     allocator: Allocator,
@@ -81,12 +83,15 @@ pub const Scope = struct {
         };
     }
 
-    fn recordResourceAcquired(self: *Scope, resource_type: []const u8) void {
-        if (resource_type.len == 0) return;
-        _ = self.recordCausal(.{
+    fn recordResourceAcquired(self: *Scope, finalizer: *Finalizer) void {
+        if (finalizer.resource_type.len == 0) return;
+        const store = self.causal_store orelse return;
+        finalizer.resource_id = finalizer.resource_id orelse store.nextResourceId();
+        finalizer.acquired_event_id = self.recordCausal(.{
             .kind = .resource_acquired,
             .parent_id = self.causal_opened_event_id,
-            .type_name = resource_type,
+            .resource_id = finalizer.resource_id,
+            .type_name = finalizer.resource_type,
             .status = "success",
         });
     }
@@ -95,7 +100,9 @@ pub const Scope = struct {
         if (finalizer.resource_type.len == 0) return;
         _ = self.recordCausal(.{
             .kind = .resource_finalized,
-            .parent_id = self.causal_opened_event_id,
+            .parent_id = finalizer.acquired_event_id orelse self.causal_opened_event_id,
+            .resource_id = finalizer.resource_id,
+            .cause_event_id = if (failure == null) null else finalizer.acquired_event_id,
             .type_name = finalizer.resource_type,
             .status = if (failure == null) "success" else "failure",
             .redacted_detail = failure orelse "",
@@ -175,7 +182,7 @@ pub const Scope = struct {
             .run = Runner.run,
             .resource_type = @typeName(Resource),
         });
-        self.recordResourceAcquired(@typeName(Resource));
+        self.recordResourceAcquired(&self.finalizers.items[self.finalizers.items.len - 1]);
     }
 
     pub fn addFinalizerFallibleFor(
@@ -198,7 +205,7 @@ pub const Scope = struct {
             .run = Runner.run,
             .resource_type = @typeName(Resource),
         });
-        self.recordResourceAcquired(@typeName(Resource));
+        self.recordResourceAcquired(&self.finalizers.items[self.finalizers.items.len - 1]);
     }
 
     pub fn addFinalizerExit(
@@ -256,7 +263,7 @@ pub const Scope = struct {
             .run = Runner.run,
             .resource_type = @typeName(Resource),
         });
-        self.recordResourceAcquired(@typeName(Resource));
+        self.recordResourceAcquired(&self.finalizers.items[self.finalizers.items.len - 1]);
     }
 
     pub fn addFinalizerExitFallibleFor(
@@ -278,7 +285,7 @@ pub const Scope = struct {
             .run = Runner.run,
             .resource_type = @typeName(Resource),
         });
-        self.recordResourceAcquired(@typeName(Resource));
+        self.recordResourceAcquired(&self.finalizers.items[self.finalizers.items.len - 1]);
     }
 
     pub fn close(self: *Scope) void {

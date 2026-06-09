@@ -55,6 +55,11 @@ test "mapCausalEventToOtelRecord maps complete trace context to span event" {
         .parent_id = 9,
         .fiber_id = 10,
         .scope_id = 11,
+        .layer_id = 12,
+        .service_key = "VesselService",
+        .resource_id = 13,
+        .cause_event_id = 14,
+        .schedule_id = 15,
         .trace_id = 1,
         .span_id = 2,
         .label = "load-vessel",
@@ -80,6 +85,11 @@ test "mapCausalEventToOtelRecord maps complete trace context to span event" {
     try expectU64Attribute(&record, "zigeffect.causal.parent_event_id", 9);
     try expectU64Attribute(&record, "zigeffect.causal.fiber_id", 10);
     try expectU64Attribute(&record, "zigeffect.causal.scope_id", 11);
+    try expectU64Attribute(&record, "zigeffect.causal.layer_id", 12);
+    try expectStringAttribute(&record, "zigeffect.causal.service_key", "VesselService");
+    try expectU64Attribute(&record, "zigeffect.causal.resource_id", 13);
+    try expectU64Attribute(&record, "zigeffect.causal.cause_event_id", 14);
+    try expectU64Attribute(&record, "zigeffect.causal.schedule_id", 15);
     try expectU64Attribute(&record, "zigeffect.causal.trace_id", 1);
     try expectU64Attribute(&record, "zigeffect.causal.span_id", 2);
     try expectStringAttribute(&record, "zigeffect.causal.label", "load-vessel");

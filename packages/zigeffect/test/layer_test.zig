@@ -260,7 +260,7 @@ test "layer graph emits service and layer causal events during startup" {
         .type_name = @typeName(fx.Logger),
         .status = "provided",
     });
-    _ = try causal.expectEvent(snapshot, .{
+    const required = try causal.expectEvent(snapshot, .{
         .kind = .service_required,
         .label = @typeName(fixtures.GraphConfigEnv),
         .type_name = @typeName(fx.Logger),
@@ -279,6 +279,10 @@ test "layer graph emits service and layer causal events during startup" {
     try std.testing.expectEqual(started.run_id.?, completed.run_id.?);
     try std.testing.expectEqual(@as(?u64, 707), started.trace_id);
     try std.testing.expectEqual(@as(?u64, 808), completed.span_id);
+    try std.testing.expect(started.layer_id != null);
+    try std.testing.expectEqual(started.layer_id, completed.layer_id);
+    try std.testing.expectEqual(started.layer_id, required.layer_id);
+    try std.testing.expectEqualStrings(@typeName(fx.Logger), required.service_key);
 }
 test "layer graph emits service replacement causal events" {
     var base_config_env = fixtures.GraphConfigEnv{ .config = fx.Config.init(std.testing.allocator) };

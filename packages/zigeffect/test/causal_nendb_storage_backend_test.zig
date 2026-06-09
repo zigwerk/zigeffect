@@ -65,6 +65,11 @@ test "map causal event to deterministic nendb node and parent edge" {
         .parent_id = 9,
         .fiber_id = 10,
         .scope_id = 11,
+        .layer_id = 12,
+        .service_key = "VesselService",
+        .resource_id = 13,
+        .cause_event_id = 14,
+        .schedule_id = 15,
         .trace_id = 12,
         .span_id = 13,
         .label = "load-vessel",
@@ -80,6 +85,11 @@ test "map causal event to deterministic nendb node and parent edge" {
     try std.testing.expect(std.mem.indexOf(u8, write.node.properties, "\"kind\":\"effect_started\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, write.node.properties, "\"event_id\":42") != null);
     try std.testing.expect(std.mem.indexOf(u8, write.node.properties, "\"run_id\":7") != null);
+    try std.testing.expect(std.mem.indexOf(u8, write.node.properties, "\"layer_id\":12") != null);
+    try std.testing.expect(std.mem.indexOf(u8, write.node.properties, "\"service_key\":\"VesselService\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, write.node.properties, "\"resource_id\":13") != null);
+    try std.testing.expect(std.mem.indexOf(u8, write.node.properties, "\"cause_event_id\":14") != null);
+    try std.testing.expect(std.mem.indexOf(u8, write.node.properties, "\"schedule_id\":15") != null);
     try std.testing.expect(std.mem.indexOf(u8, write.node.properties, "\"label\":\"load-vessel\"") != null);
     try std.testing.expect(write.parent_edge != null);
     try std.testing.expectEqual(@as(u64, 9), write.parent_edge.?.from);

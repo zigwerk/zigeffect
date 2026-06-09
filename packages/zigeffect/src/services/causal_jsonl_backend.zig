@@ -115,6 +115,16 @@ pub fn formatCausalJsonLine(allocator: Allocator, event: causal.CausalEvent) All
     try appendOptionalJsonU64(&output, allocator, event.fiber_id);
     try output.appendSlice(allocator, ",\"scope_id\":");
     try appendOptionalJsonU64(&output, allocator, event.scope_id);
+    try output.appendSlice(allocator, ",\"layer_id\":");
+    try appendOptionalJsonU64(&output, allocator, event.layer_id);
+    try output.appendSlice(allocator, ",\"service_key\":");
+    try appendJsonString(&output, allocator, event.service_key);
+    try output.appendSlice(allocator, ",\"resource_id\":");
+    try appendOptionalJsonU64(&output, allocator, event.resource_id);
+    try output.appendSlice(allocator, ",\"cause_event_id\":");
+    try appendOptionalJsonU64(&output, allocator, event.cause_event_id);
+    try output.appendSlice(allocator, ",\"schedule_id\":");
+    try appendOptionalJsonU64(&output, allocator, event.schedule_id);
     try output.appendSlice(allocator, ",\"trace_id\":");
     try appendOptionalJsonU64(&output, allocator, event.trace_id);
     try output.appendSlice(allocator, ",\"span_id\":");

@@ -373,6 +373,8 @@ fn cloneEvent(allocator: Allocator, event: causal.CausalEvent) Allocator.Error!c
     errdefer if (owned.label.len > 0) allocator.free(owned.label);
     owned.type_name = try cloneSlice(allocator, event.type_name);
     errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
+    owned.service_key = try cloneSlice(allocator, event.service_key);
+    errdefer if (owned.service_key.len > 0) allocator.free(owned.service_key);
     owned.status = try cloneSlice(allocator, event.status);
     errdefer if (owned.status.len > 0) allocator.free(owned.status);
     owned.redacted_detail = try cloneSlice(allocator, event.redacted_detail);
@@ -383,6 +385,7 @@ fn cloneEvent(allocator: Allocator, event: causal.CausalEvent) Allocator.Error!c
 fn deinitEventStrings(allocator: Allocator, event: causal.CausalEvent) void {
     if (event.label.len > 0) allocator.free(event.label);
     if (event.type_name.len > 0) allocator.free(event.type_name);
+    if (event.service_key.len > 0) allocator.free(event.service_key);
     if (event.status.len > 0) allocator.free(event.status);
     if (event.redacted_detail.len > 0) allocator.free(event.redacted_detail);
 }
@@ -455,6 +458,16 @@ fn appendNodeCommonProperties(output: *std.ArrayList(u8), allocator: Allocator, 
     try appendOptionalJsonU64(output, allocator, event.fiber_id);
     try output.appendSlice(allocator, ",\"scope_id\":");
     try appendOptionalJsonU64(output, allocator, event.scope_id);
+    try output.appendSlice(allocator, ",\"layer_id\":");
+    try appendOptionalJsonU64(output, allocator, event.layer_id);
+    try output.appendSlice(allocator, ",\"service_key\":");
+    try appendJsonString(output, allocator, event.service_key);
+    try output.appendSlice(allocator, ",\"resource_id\":");
+    try appendOptionalJsonU64(output, allocator, event.resource_id);
+    try output.appendSlice(allocator, ",\"cause_event_id\":");
+    try appendOptionalJsonU64(output, allocator, event.cause_event_id);
+    try output.appendSlice(allocator, ",\"schedule_id\":");
+    try appendOptionalJsonU64(output, allocator, event.schedule_id);
     try output.appendSlice(allocator, ",\"trace_id\":");
     try appendOptionalJsonU64(output, allocator, event.trace_id);
     try output.appendSlice(allocator, ",\"span_id\":");

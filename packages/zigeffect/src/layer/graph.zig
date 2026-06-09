@@ -244,6 +244,7 @@ pub fn LayerGraphRuntime(comptime Layers: type) type {
         span_id: ?u64 = null,
         causal_store: ?*CausalStore = null,
         causal_run_id: ?u64 = null,
+        causal_layer_ids: [tupleFieldCount(Layers)]?u64 = [_]?u64{null} ** tupleFieldCount(Layers),
 
         pub fn init(allocator: Allocator, layers: Layers) Self {
             return .{
@@ -316,6 +317,14 @@ pub fn LayerGraphRuntime(comptime Layers: type) type {
             return self.causal_run_id;
         }
 
+        fn ensureCausalLayerId(self: *Self, comptime index: usize) ?u64 {
+            const store = self.causal_store orelse return null;
+            if (self.causal_layer_ids[index] == null) {
+                self.causal_layer_ids[index] = store.nextLayerId();
+            }
+            return self.causal_layer_ids[index];
+        }
+
         fn recordCausal(self: *Self, event: CausalEvent) ?u64 {
             const store = self.causal_store orelse return null;
             var owned = event;
@@ -344,16 +353,19 @@ pub fn LayerGraphRuntime(comptime Layers: type) type {
                 all_provided.mergeFrom(&provided) catch return;
             }
 
-            inline for (LayerFields) |field| {
+            inline for (LayerFields, 0..) |field, index| {
                 const layer = @field(self.layers, field.name);
                 const name = layerGraphNodeName(field.type);
+                const layer_id = self.ensureCausalLayerId(index);
 
                 var provided = layer.providedServices(self.allocator) catch return;
                 defer provided.deinit();
                 for (provided.names.items) |service| {
                     _ = self.recordCausal(.{
                         .kind = .service_provided,
+                        .layer_id = layer_id,
                         .label = name,
+                        .service_key = service,
                         .type_name = service,
                         .status = "provided",
                     });
@@ -364,7 +376,9 @@ pub fn LayerGraphRuntime(comptime Layers: type) type {
                 for (required.names.items) |service| {
                     _ = self.recordCausal(.{
                         .kind = .service_required,
+                        .layer_id = layer_id,
                         .label = name,
+                        .service_key = service,
                         .type_name = service,
                         .status = if (all_provided.contains(service)) "satisfied" else "missing",
                     });
@@ -374,16 +388,19 @@ pub fn LayerGraphRuntime(comptime Layers: type) type {
             var owners = std.StringHashMap([]const u8).init(self.allocator);
             defer owners.deinit();
 
-            inline for (LayerFields) |field| {
+            inline for (LayerFields, 0..) |field, index| {
                 const layer = @field(self.layers, field.name);
                 const name = layerGraphNodeName(field.type);
+                const layer_id = self.ensureCausalLayerId(index);
 
                 var replaced = layer.replacedServices(self.allocator) catch return;
                 defer replaced.deinit();
                 for (replaced.names.items) |service| {
                     _ = self.recordCausal(.{
                         .kind = .service_replaced,
+                        .layer_id = layer_id,
                         .label = name,
+                        .service_key = service,
                         .type_name = service,
                         .status = "replaced",
                         .redacted_detail = owners.get(service) orelse "unknown",
@@ -438,8 +455,10 @@ pub fn LayerGraphRuntime(comptime Layers: type) type {
                         const ready = try layerRequirementsSatisfied(self.allocator, layer, &provided);
                         if (ready) {
                             const layer_name = layerGraphNodeName(field.type);
+                            const layer_id = self.ensureCausalLayerId(index);
                             const started = self.recordCausal(.{
                                 .kind = .layer_started,
+                                .layer_id = layer_id,
                                 .label = layer_name,
                                 .status = "starting",
                             });
@@ -447,6 +466,7 @@ pub fn LayerGraphRuntime(comptime Layers: type) type {
                                 _ = self.recordCausal(.{
                                     .kind = .exit_recorded,
                                     .parent_id = started,
+                                    .layer_id = layer_id,
                                     .label = layer_name,
                                     .type_name = @errorName(err),
                                     .status = "failure",
@@ -460,6 +480,7 @@ pub fn LayerGraphRuntime(comptime Layers: type) type {
                             _ = self.recordCausal(.{
                                 .kind = .layer_completed,
                                 .parent_id = started,
+                                .layer_id = layer_id,
                                 .label = layer_name,
                                 .status = "success",
                             });

@@ -65,6 +65,7 @@ fn FiberState(comptime Success: type, comptime Failure: type, comptime Env: type
         causal_forked_event_id: ?u64 = null,
         causal_trace_id: ?u64 = null,
         causal_span_id: ?u64 = null,
+        causal_joined_recorded: bool = false,
 
         pub fn init(
             allocator: Allocator,
@@ -157,11 +158,14 @@ fn FiberState(comptime Success: type, comptime Failure: type, comptime Env: type
             _ = self.recordCausal(.{
                 .kind = .fiber_interrupted,
                 .parent_id = self.causal_forked_event_id,
+                .cause_event_id = self.causal_forked_event_id,
                 .status = "interrupted",
             });
         }
 
         fn recordJoined(self: *Self, exit: Exit(Success, Failure)) void {
+            if (self.causal_joined_recorded) return;
+            self.causal_joined_recorded = true;
             _ = self.recordCausal(.{
                 .kind = .fiber_joined,
                 .parent_id = self.causal_forked_event_id,

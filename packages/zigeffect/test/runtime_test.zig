@@ -364,6 +364,9 @@ test "runtime causal events show resource acquisition and finalization" {
     try std.testing.expectEqualStrings(@typeName(fixtures.TrackedResource), snapshot.events[2].type_name);
     try std.testing.expectEqualStrings(@typeName(fixtures.TrackedResource), snapshot.events[3].type_name);
     try std.testing.expectEqualStrings("success", snapshot.events[3].status);
+    try std.testing.expect(snapshot.events[2].resource_id != null);
+    try std.testing.expectEqual(snapshot.events[2].resource_id, snapshot.events[3].resource_id);
+    try std.testing.expectEqual(snapshot.events[2].id, snapshot.events[3].parent_id.?);
     try std.testing.expectEqual(snapshot.events[1].scope_id.?, snapshot.events[2].scope_id.?);
     try std.testing.expectEqual(snapshot.events[1].scope_id.?, snapshot.events[3].scope_id.?);
 }
@@ -405,5 +408,9 @@ test "runtime causal events record finalizer failure evidence" {
     try std.testing.expectEqualStrings(@typeName(fixtures.TrackedResource), snapshot.events[3].type_name);
     try std.testing.expectEqualStrings("failure", snapshot.events[3].status);
     try std.testing.expectEqualStrings("CloseFailed", snapshot.events[3].redacted_detail);
+    try std.testing.expect(snapshot.events[2].resource_id != null);
+    try std.testing.expectEqual(snapshot.events[2].resource_id, snapshot.events[3].resource_id);
+    try std.testing.expectEqual(snapshot.events[2].id, snapshot.events[3].parent_id.?);
+    try std.testing.expectEqual(snapshot.events[2].id, snapshot.events[3].cause_event_id.?);
     try std.testing.expectEqualStrings("cause", snapshot.events[5].status);
 }

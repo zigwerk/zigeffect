@@ -112,6 +112,11 @@ pub const CausalEvent = struct {
     parent_id: ?u64 = null,
     fiber_id: ?u64 = null,
     scope_id: ?u64 = null,
+    layer_id: ?u64 = null,
+    service_key: []const u8 = "",
+    resource_id: ?u64 = null,
+    cause_event_id: ?u64 = null,
+    schedule_id: ?u64 = null,
     trace_id: ?u64 = null,
     span_id: ?u64 = null,
     label: []const u8 = "",
@@ -472,6 +477,8 @@ fn cloneEventForStore(
     errdefer if (owned.label.len > 0) allocator.free(owned.label);
     owned.type_name = try redactAndBoundCausalText(allocator, event.type_name, max_event_string_bytes, truncated_field_count);
     errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
+    owned.service_key = try redactAndBoundCausalText(allocator, event.service_key, max_event_string_bytes, truncated_field_count);
+    errdefer if (owned.service_key.len > 0) allocator.free(owned.service_key);
     owned.status = try redactAndBoundCausalText(allocator, event.status, max_event_string_bytes, truncated_field_count);
     errdefer if (owned.status.len > 0) allocator.free(owned.status);
     owned.redacted_detail = try redactAndBoundCausalText(allocator, event.redacted_detail, max_event_string_bytes, truncated_field_count);
@@ -485,6 +492,8 @@ fn cloneEvent(allocator: Allocator, event: CausalEvent) Allocator.Error!CausalEv
     errdefer if (owned.label.len > 0) allocator.free(owned.label);
     owned.type_name = try redactCausalText(allocator, event.type_name);
     errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
+    owned.service_key = try redactCausalText(allocator, event.service_key);
+    errdefer if (owned.service_key.len > 0) allocator.free(owned.service_key);
     owned.status = try redactCausalText(allocator, event.status);
     errdefer if (owned.status.len > 0) allocator.free(owned.status);
     owned.redacted_detail = try redactCausalText(allocator, event.redacted_detail);
@@ -495,6 +504,7 @@ fn cloneEvent(allocator: Allocator, event: CausalEvent) Allocator.Error!CausalEv
 fn deinitEventStrings(allocator: Allocator, event: CausalEvent) void {
     if (event.label.len > 0) allocator.free(event.label);
     if (event.type_name.len > 0) allocator.free(event.type_name);
+    if (event.service_key.len > 0) allocator.free(event.service_key);
     if (event.status.len > 0) allocator.free(event.status);
     if (event.redacted_detail.len > 0) allocator.free(event.redacted_detail);
 }
@@ -577,6 +587,9 @@ pub const CausalStore = struct {
     next_event_id: u64 = 1,
     next_run_id_value: u64 = 1,
     next_scope_id_value: u64 = 1,
+    next_layer_id_value: u64 = 1,
+    next_resource_id_value: u64 = 1,
+    next_schedule_id_value: u64 = 1,
     events: std.ArrayList(CausalEvent) = .empty,
     backend: ?CausalBackend = null,
     backend_failure_count: u64 = 0,
@@ -656,6 +669,24 @@ pub const CausalStore = struct {
         return id;
     }
 
+    pub fn nextLayerId(self: *CausalStore) u64 {
+        const id = self.next_layer_id_value;
+        self.next_layer_id_value += 1;
+        return id;
+    }
+
+    pub fn nextResourceId(self: *CausalStore) u64 {
+        const id = self.next_resource_id_value;
+        self.next_resource_id_value += 1;
+        return id;
+    }
+
+    pub fn nextScheduleId(self: *CausalStore) u64 {
+        const id = self.next_schedule_id_value;
+        self.next_schedule_id_value += 1;
+        return id;
+    }
+
     pub fn record(self: *CausalStore, event: CausalEvent) Allocator.Error!u64 {
         const event_id = self.next_event_id;
         if (!self.shouldRecordBySampling(event.kind)) {
@@ -712,7 +743,7 @@ pub const CausalStore = struct {
         }
 
         for (self.events.items) |event| {
-            if (event.id == event_id or event.parent_id == event_id) {
+            if (event.id == event_id or event.parent_id == event_id or event.cause_event_id == event_id) {
                 {
                     const cloned = try cloneEvent(allocator, event);
                     errdefer deinitEventStrings(allocator, cloned);
@@ -839,8 +870,8 @@ pub const CausalStore = struct {
 
     fn appendCauseChain(self: *const CausalStore, allocator: Allocator, output: *std.ArrayList(CausalEvent), event_id: u64) Allocator.Error!void {
         const event = self.findEvent(event_id) orelse return;
-        if (event.parent_id) |parent_id| {
-            try self.appendCauseChain(allocator, output, parent_id);
+        if (event.cause_event_id orelse event.parent_id) |cause_id| {
+            try self.appendCauseChain(allocator, output, cause_id);
         }
         try appendClonedEvent(allocator, output, event);
     }
@@ -869,6 +900,14 @@ pub const CausalStore = struct {
     }
 
     fn hasFinalizedResource(self: *const CausalStore, acquired: CausalEvent) bool {
+        if (acquired.resource_id) |resource_id| {
+            for (self.events.items) |event| {
+                if (event.kind != .resource_finalized) continue;
+                if (event.resource_id == resource_id) return true;
+            }
+            return false;
+        }
+
         for (self.events.items) |event| {
             if (event.kind != .resource_finalized) continue;
             if (event.scope_id != acquired.scope_id) continue;
@@ -1227,6 +1266,16 @@ pub fn formatCausalJson(allocator: Allocator, store: *const CausalStore) Allocat
         try appendOptionalJsonU64(&output, allocator, event.fiber_id);
         try output.appendSlice(allocator, ",\n      \"scope_id\": ");
         try appendOptionalJsonU64(&output, allocator, event.scope_id);
+        try output.appendSlice(allocator, ",\n      \"layer_id\": ");
+        try appendOptionalJsonU64(&output, allocator, event.layer_id);
+        try output.appendSlice(allocator, ",\n      \"service_key\": ");
+        try appendJsonString(&output, allocator, event.service_key);
+        try output.appendSlice(allocator, ",\n      \"resource_id\": ");
+        try appendOptionalJsonU64(&output, allocator, event.resource_id);
+        try output.appendSlice(allocator, ",\n      \"cause_event_id\": ");
+        try appendOptionalJsonU64(&output, allocator, event.cause_event_id);
+        try output.appendSlice(allocator, ",\n      \"schedule_id\": ");
+        try appendOptionalJsonU64(&output, allocator, event.schedule_id);
         try output.appendSlice(allocator, ",\n      \"trace_id\": ");
         try appendOptionalJsonU64(&output, allocator, event.trace_id);
         try output.appendSlice(allocator, ",\n      \"span_id\": ");
@@ -1316,8 +1365,18 @@ fn appendDotEventTooltip(output: *std.ArrayList(u8), allocator: Allocator, event
     try appendDotOptionalU64Tooltip(output, allocator, "run", event.run_id, &wrote);
     try appendDotOptionalU64Tooltip(output, allocator, "scope", event.scope_id, &wrote);
     try appendDotOptionalU64Tooltip(output, allocator, "fiber", event.fiber_id, &wrote);
+    try appendDotOptionalU64Tooltip(output, allocator, "layer", event.layer_id, &wrote);
+    try appendDotOptionalU64Tooltip(output, allocator, "resource", event.resource_id, &wrote);
+    try appendDotOptionalU64Tooltip(output, allocator, "cause", event.cause_event_id, &wrote);
+    try appendDotOptionalU64Tooltip(output, allocator, "schedule", event.schedule_id, &wrote);
     try appendDotOptionalU64Tooltip(output, allocator, "trace", event.trace_id, &wrote);
     try appendDotOptionalU64Tooltip(output, allocator, "span", event.span_id, &wrote);
+    if (event.service_key.len > 0) {
+        if (wrote) try output.append(allocator, ' ');
+        try output.appendSlice(allocator, "service=");
+        try appendDotEscaped(output, allocator, event.service_key);
+        wrote = true;
+    }
     if (event.type_name.len > 0) {
         if (wrote) try output.append(allocator, ' ');
         try output.appendSlice(allocator, "type=");
@@ -1340,6 +1399,11 @@ pub fn appendCausalDotEvent(output: *std.ArrayList(u8), allocator: Allocator, ev
     );
     if (event.parent_id) |parent_id| {
         try output.print(allocator, "  event_{d} -> event_{d} [label=\"parent\"];\n", .{ parent_id, event.id });
+    }
+    if (event.cause_event_id) |cause_event_id| {
+        if (event.parent_id == null or event.parent_id.? != cause_event_id) {
+            try output.print(allocator, "  event_{d} -> event_{d} [label=\"cause\"];\n", .{ cause_event_id, event.id });
+        }
     }
 }
 

@@ -207,6 +207,11 @@ pub fn mapCausalEventToOtelRecord(allocator: Allocator, event: causal.CausalEven
     try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.parent_event_id", event.parent_id);
     try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.fiber_id", event.fiber_id);
     try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.scope_id", event.scope_id);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.layer_id", event.layer_id);
+    try appendOptionalStringAttribute(allocator, &attributes, "zigeffect.causal.service_key", event.service_key);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.resource_id", event.resource_id);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.cause_event_id", event.cause_event_id);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.schedule_id", event.schedule_id);
     try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.trace_id", event.trace_id);
     try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.span_id", event.span_id);
     try appendOptionalStringAttribute(allocator, &attributes, "zigeffect.causal.label", event.label);

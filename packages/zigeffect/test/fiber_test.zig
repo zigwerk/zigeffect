@@ -140,6 +140,15 @@ test "fiber runtime emits causal events when forked and joined" {
     try std.testing.expectEqual(@as(?u64, 303), snapshot.events[0].trace_id);
     try std.testing.expectEqual(@as(?u64, 404), snapshot.events[2].span_id);
     try std.testing.expectEqualStrings("success", snapshot.events[4].status);
+
+    const second_exit = runtime.join(fiber);
+    switch (second_exit) {
+        .success => |value| try std.testing.expectEqual(@as(u32, 7), value),
+        else => return error.Empty,
+    }
+    var second_snapshot = try store.snapshot(std.testing.allocator);
+    defer second_snapshot.deinit();
+    try std.testing.expectEqual(snapshot.events.len, second_snapshot.events.len);
 }
 test "fiber runtime emits causal events when interrupted" {
     var env = try fx.TestEnv.init(std.testing.allocator);
