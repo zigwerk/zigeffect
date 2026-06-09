@@ -60,3 +60,84 @@ test "supervisor shutdown plan uses order and reverse registration tie break" {
     try std.testing.expectEqual(@as(u64, 1), plan.children[2].spec.id);
     try std.testing.expectEqual(@as(u64, 4), plan.children[3].spec.id);
 }
+
+test "supervisor one-for-one restarts only failed child" {
+    var supervisor = fx.Supervisor.init(std.testing.allocator, .{
+        .id = 10,
+        .name = "root",
+        .strategy = .one_for_one,
+    });
+    defer supervisor.deinit();
+
+    try supervisor.addChild(.{ .id = 1, .name = "first", .kind = .fiber });
+    try supervisor.addChild(.{ .id = 2, .name = "second", .kind = .workflow_worker });
+    try supervisor.addChild(.{ .id = 3, .name = "third", .kind = .queue_worker });
+    try supervisor.startAll(1_000);
+
+    const decision = try supervisor.reportChildExit(2, .{ .failure = "boom" }, 1_100);
+    try std.testing.expectEqual(@as(u64, 10), decision.supervisor_id);
+    try std.testing.expectEqual(@as(u64, 2), decision.child_id);
+    try std.testing.expectEqual(fx.SupervisorStrategy.one_for_one, decision.strategy);
+    try std.testing.expectEqual(@as(usize, 1), decision.restarted_children);
+    try std.testing.expectEqual(@as(usize, 0), decision.stopped_children);
+    try std.testing.expect(!decision.escalated);
+
+    try std.testing.expectEqual(@as(usize, 0), try supervisor.childRestartCount(1));
+    try std.testing.expectEqual(@as(usize, 1), try supervisor.childRestartCount(2));
+    try std.testing.expectEqual(@as(usize, 0), try supervisor.childRestartCount(3));
+    try std.testing.expectEqual(fx.SupervisorChildStatus.running, try supervisor.childStatus(1));
+    try std.testing.expectEqual(fx.SupervisorChildStatus.running, try supervisor.childStatus(2));
+    try std.testing.expectEqual(fx.SupervisorChildStatus.running, try supervisor.childStatus(3));
+}
+
+test "supervisor one-for-all restarts every restartable child" {
+    var supervisor = fx.Supervisor.init(std.testing.allocator, .{
+        .id = 10,
+        .name = "root",
+        .strategy = .one_for_all,
+    });
+    defer supervisor.deinit();
+
+    try supervisor.addChild(.{ .id = 1, .name = "first", .kind = .fiber });
+    try supervisor.addChild(.{ .id = 2, .name = "second", .kind = .workflow_worker });
+    try supervisor.addChild(.{ .id = 3, .name = "third", .kind = .queue_worker });
+    try supervisor.startAll(1_000);
+
+    const decision = try supervisor.reportChildExit(2, .{ .failure = "boom" }, 1_100);
+    try std.testing.expectEqual(@as(usize, 3), decision.restarted_children);
+    try std.testing.expectEqual(@as(usize, 0), decision.stopped_children);
+    try std.testing.expect(!decision.escalated);
+
+    try std.testing.expectEqual(@as(usize, 1), try supervisor.childRestartCount(1));
+    try std.testing.expectEqual(@as(usize, 1), try supervisor.childRestartCount(2));
+    try std.testing.expectEqual(@as(usize, 1), try supervisor.childRestartCount(3));
+    try std.testing.expectEqual(fx.SupervisorChildStatus.running, try supervisor.childStatus(1));
+    try std.testing.expectEqual(fx.SupervisorChildStatus.running, try supervisor.childStatus(2));
+    try std.testing.expectEqual(fx.SupervisorChildStatus.running, try supervisor.childStatus(3));
+}
+
+test "supervisor rest-for-one restarts failed child and later children" {
+    var supervisor = fx.Supervisor.init(std.testing.allocator, .{
+        .id = 10,
+        .name = "root",
+        .strategy = .rest_for_one,
+    });
+    defer supervisor.deinit();
+
+    try supervisor.addChild(.{ .id = 1, .name = "first", .kind = .fiber });
+    try supervisor.addChild(.{ .id = 2, .name = "second", .kind = .workflow_worker });
+    try supervisor.addChild(.{ .id = 3, .name = "third", .kind = .queue_worker });
+    try supervisor.startAll(1_000);
+
+    const decision = try supervisor.reportChildExit(2, .{ .failure = "boom" }, 1_100);
+    try std.testing.expectEqual(@as(usize, 2), decision.restarted_children);
+    try std.testing.expectEqual(@as(usize, 0), decision.stopped_children);
+    try std.testing.expect(!decision.escalated);
+
+    try std.testing.expectEqual(@as(usize, 0), try supervisor.childRestartCount(1));
+    try std.testing.expectEqual(@as(usize, 1), try supervisor.childRestartCount(2));
+    try std.testing.expectEqual(@as(usize, 1), try supervisor.childRestartCount(3));
+    try std.testing.expectEqual(fx.SupervisorChildStatus.running, try supervisor.childStatus(1));
+    try std.testing.expectEqual(fx.SupervisorChildStatus.running, try supervisor.childStatus(2));
+    try std.testing.expectEqual(fx.SupervisorChildStatus.running, try supervisor.childStatus(3));
+}

@@ -153,6 +153,44 @@ pub const Supervisor = struct {
         };
     }
 
+    pub fn reportChildExit(
+        self: *Supervisor,
+        child_id: SupervisorChildId,
+        exit: SupervisorChildExit,
+        now_ms: u64,
+    ) (Allocator.Error || SupervisorError)!SupervisorDecision {
+        _ = now_ms;
+
+        const failed_index = self.findChildIndex(child_id) orelse return error.ChildNotFound;
+        var decision = SupervisorDecision{
+            .supervisor_id = self.options.id,
+            .child_id = child_id,
+            .strategy = self.options.strategy,
+            .exit = exit,
+        };
+
+        if (!restartAllowed(self.children.items[failed_index].spec.restart_mode, exit)) {
+            markStoppedOrFailed(&self.children.items[failed_index], exit);
+            decision.stopped_children = 1;
+            return decision;
+        }
+
+        for (self.children.items, 0..) |*child, candidate_index| {
+            if (!strategyAffects(self.options.strategy, failed_index, candidate_index)) continue;
+
+            if (restartAllowed(child.spec.restart_mode, exit)) {
+                child.status = .running;
+                child.restart_count += 1;
+                decision.restarted_children += 1;
+            } else {
+                markStoppedOrFailed(child, exit);
+                decision.stopped_children += 1;
+            }
+        }
+
+        return decision;
+    }
+
     fn findChildIndex(self: *const Supervisor, child_id: SupervisorChildId) ?usize {
         for (self.children.items, 0..) |child, index| {
             if (child.spec.id == child_id) return index;
@@ -166,4 +204,34 @@ fn shutdownBefore(_: void, left: ChildState, right: ChildState) bool {
         return left.spec.shutdown_order > right.spec.shutdown_order;
     }
     return left.registration_index > right.registration_index;
+}
+
+fn exitIsSuccess(exit: SupervisorChildExit) bool {
+    return switch (exit) {
+        .success => true,
+        .failure, .defect, .interrupted => false,
+    };
+}
+
+fn restartAllowed(mode: SupervisorRestartMode, exit: SupervisorChildExit) bool {
+    return switch (mode) {
+        .permanent => true,
+        .transient => !exitIsSuccess(exit),
+        .temporary => false,
+    };
+}
+
+fn strategyAffects(strategy: SupervisorStrategy, failed_index: usize, candidate_index: usize) bool {
+    return switch (strategy) {
+        .one_for_one => candidate_index == failed_index,
+        .one_for_all => true,
+        .rest_for_one => candidate_index >= failed_index,
+    };
+}
+
+fn markStoppedOrFailed(child: *ChildState, exit: SupervisorChildExit) void {
+    child.status = switch (exit) {
+        .success, .interrupted => .stopped,
+        .failure, .defect => .failed,
+    };
 }
