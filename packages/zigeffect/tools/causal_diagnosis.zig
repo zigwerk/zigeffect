@@ -184,6 +184,54 @@ fn deinitAdviceAction(allocator: std.mem.Allocator, action: AdviceAction) void {
 }
 
 fn mapAction(action: []const u8) ActionMapping {
+    if (std.mem.eql(u8, action, "fix-app-config")) {
+        return .{
+            .subsystem = "app_config",
+            .fix_category = "config-or-secret-binding",
+            .diagnosis = "an app request is missing required configuration or runtime binding evidence",
+            .patch_prompt = "inspect app configuration, Worker bindings, and secret names; add or document the missing binding without exposing secret values",
+        };
+    }
+    if (std.mem.eql(u8, action, "wire-app-requirement")) {
+        return .{
+            .subsystem = "app_service_layer",
+            .fix_category = "service-provider-or-layer",
+            .diagnosis = "an app service requirement is missing a provider or layer binding",
+            .patch_prompt = "inspect app service construction and layer wiring; add the provider or adjust the requirement if the dependency is optional",
+        };
+    }
+    if (std.mem.eql(u8, action, "inspect-app-response-failure")) {
+        return .{
+            .subsystem = "app_request_path",
+            .fix_category = "response-or-handler-failure",
+            .diagnosis = "an app request recorded a failed response",
+            .patch_prompt = "inspect the cited handler path and response construction; preserve route templates and causal event ids in the fix notes",
+        };
+    }
+    if (std.mem.eql(u8, action, "inspect-app-retry-exhaustion")) {
+        return .{
+            .subsystem = "app_dependency",
+            .fix_category = "retry-policy-or-upstream",
+            .diagnosis = "an app dependency retry policy exhausted its budget",
+            .patch_prompt = "inspect upstream dependency health, retry policy, timeout budget, and failure specificity before changing retry counts",
+        };
+    }
+    if (std.mem.eql(u8, action, "close-app-resource")) {
+        return .{
+            .subsystem = "app_resource_scope",
+            .fix_category = "resource-finalizer",
+            .diagnosis = "an app resource acquisition lacks matching finalization evidence",
+            .patch_prompt = "inspect app resource scope ownership and finalizers; add a release path or move acquisition into an existing scope",
+        };
+    }
+    if (std.mem.eql(u8, action, "resolve-app-fiber")) {
+        return .{
+            .subsystem = "app_fiber_runtime",
+            .fix_category = "structured-concurrency",
+            .diagnosis = "an app fiber remains active in captured request evidence",
+            .patch_prompt = "inspect app fork, join, interruption, and request-scope closure order before changing fiber behavior",
+        };
+    }
     if (std.mem.eql(u8, action, "provide-missing-service")) {
         return .{
             .subsystem = "service_resolution",
@@ -546,6 +594,24 @@ test "action mapping names subsystem and fix category" {
     try std.testing.expectEqualStrings("service_resolution", mapped.subsystem);
     try std.testing.expectEqualStrings("code-or-layer-provider", mapped.fix_category);
     try std.testing.expect(std.mem.indexOf(u8, mapped.diagnosis, "required service") != null);
+}
+
+test "action mapping names app incident subsystems" {
+    const config = mapAction("fix-app-config");
+    const requirement = mapAction("wire-app-requirement");
+    const response = mapAction("inspect-app-response-failure");
+    const retry = mapAction("inspect-app-retry-exhaustion");
+    const resource = mapAction("close-app-resource");
+    const fiber = mapAction("resolve-app-fiber");
+
+    try std.testing.expectEqualStrings("app_config", config.subsystem);
+    try std.testing.expectEqualStrings("config-or-secret-binding", config.fix_category);
+    try std.testing.expect(std.mem.indexOf(u8, config.patch_prompt, "binding") != null);
+    try std.testing.expectEqualStrings("app_service_layer", requirement.subsystem);
+    try std.testing.expectEqualStrings("app_request_path", response.subsystem);
+    try std.testing.expectEqualStrings("app_dependency", retry.subsystem);
+    try std.testing.expectEqualStrings("app_resource_scope", resource.subsystem);
+    try std.testing.expectEqualStrings("app_fiber_runtime", fiber.subsystem);
 }
 
 test "unknown action mapping remains inspectable" {

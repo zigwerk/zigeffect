@@ -653,6 +653,14 @@ models a Worker-compatible request path that returns the HTTP response shape and
 owned causal JSON without file writes, process APIs, or Bun dependencies.
 Compile and test it with `zig build causal-app-request-example`.
 
+When an app artifact is clearly app-owned, prefer app incident categories over
+generic assertion labels. `deriveCausalAppIncidents` classifies missing config,
+missing requirements, failed responses, retry exhaustion, resource leaks,
+finalizer failures, and unresolved fibers. `causal-advice` mirrors that with
+app actions like `fix-app-config`, `wire-app-requirement`, and
+`inspect-app-response-failure`; `causal-diagnosis` maps those actions to app
+subsystems and fix categories.
+
 For normal core-runtime development, prefer the coordinated session command:
 
 ```sh

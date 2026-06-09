@@ -106,6 +106,23 @@ const advice_delta_after_json =
     \\}
 ;
 
+const app_incident_json =
+    \\{
+    \\  "schema": "zigeffect.causal.v1",
+    \\  "schema_version": 1,
+    \\  "event_taxonomy_version": 1,
+    \\  "events": [
+    \\    {"id":1,"kind":"run_started","run_id":1,"parent_id":null,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"app.request GET /health","type_name":"zigeffect.app.request","status":"started","redacted_detail":""},
+    \\    {"id":2,"kind":"assertion_recorded","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"YACHDEE_ENV","type_name":"MissingConfig","status":"failure","redacted_detail":"app.config.required"},
+    \\    {"id":3,"kind":"assertion_recorded","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"HealthService","type_name":"MissingService","status":"failure","redacted_detail":"app.requirement.required"},
+    \\    {"id":4,"kind":"span_recorded","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"app.response","type_name":"zigeffect.app.response","status":"500","redacted_detail":"body=missing_environment"},
+    \\    {"id":5,"kind":"resource_acquired","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":9,"trace_id":null,"span_id":null,"label":"app database","type_name":"app database","status":"success","redacted_detail":""},
+    \\    {"id":6,"kind":"schedule_decision","run_id":1,"parent_id":1,"fiber_id":null,"scope_id":null,"trace_id":null,"span_id":null,"label":"upstream call","type_name":"zigeffect.app.retry","status":"exhausted","redacted_detail":"attempt=3/3"},
+    \\    {"id":7,"kind":"fiber_started","run_id":1,"parent_id":1,"fiber_id":77,"scope_id":null,"trace_id":null,"span_id":null,"label":"app child fiber","type_name":"app child fiber","status":"started","redacted_detail":""}
+    \\  ]
+    \\}
+;
+
 pub fn buildAdviceReport(allocator: std.mem.Allocator, json: []const u8, artifact_path: []const u8) ![]const u8 {
     var parsed = try std.json.parseFromSlice(Artifact, allocator, json, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
@@ -282,7 +299,31 @@ fn appendAdviceAction(
     event: Event,
 ) std.mem.Allocator.Error!void {
     try appendActionHeader(allocator, output, action, status, event);
-    if (std.mem.eql(u8, action, "provide-missing-service")) {
+    if (std.mem.eql(u8, action, "fix-app-config")) {
+        try output.appendSlice(allocator, "  why: app request is missing required configuration\n");
+        try appendEventQuery(allocator, output, artifact_path, "cause", event.id);
+        try appendEventQuery(allocator, output, artifact_path, "lineage", event.id);
+    } else if (std.mem.eql(u8, action, "wire-app-requirement")) {
+        try output.appendSlice(allocator, "  why: app service requirement is missing a provider or binding\n");
+        try appendEventQuery(allocator, output, artifact_path, "cause", event.id);
+        if (event.run_id) |run_id| try appendU64Query(allocator, output, artifact_path, "requirements", run_id);
+    } else if (std.mem.eql(u8, action, "inspect-app-response-failure")) {
+        try output.appendSlice(allocator, "  why: app request recorded a failed response\n");
+        try appendEventQuery(allocator, output, artifact_path, "cause", event.id);
+        try appendEventQuery(allocator, output, artifact_path, "lineage", event.id);
+    } else if (std.mem.eql(u8, action, "inspect-app-retry-exhaustion")) {
+        try output.appendSlice(allocator, "  why: app dependency retry exhausted its budget\n");
+        try appendEventQuery(allocator, output, artifact_path, "cause", event.id);
+        if (event.run_id) |run_id| try appendU64Query(allocator, output, artifact_path, "retries", run_id);
+    } else if (std.mem.eql(u8, action, "close-app-resource")) {
+        try output.appendSlice(allocator, "  why: app resource acquisition has no matching finalization event\n");
+        try appendEventQuery(allocator, output, artifact_path, "cause", event.id);
+        if (event.scope_id) |scope_id| try appendU64Query(allocator, output, artifact_path, "resources", scope_id);
+    } else if (std.mem.eql(u8, action, "resolve-app-fiber")) {
+        try output.appendSlice(allocator, "  why: app fiber remains active in causal evidence\n");
+        try appendEventQuery(allocator, output, artifact_path, "cause", event.id);
+        try appendTextQuery(allocator, output, artifact_path, "fibers", event.status);
+    } else if (std.mem.eql(u8, action, "provide-missing-service")) {
         try output.appendSlice(allocator, "  why: service requirement is missing a provider\n");
         try appendEventQuery(allocator, output, artifact_path, "cause", event.id);
         if (event.run_id) |run_id| try appendU64Query(allocator, output, artifact_path, "requirements", run_id);
@@ -310,6 +351,12 @@ fn appendAdviceAction(
 }
 
 fn actionNameForEvent(events: []const Event, event: Event) ?[]const u8 {
+    if (isAppConfigFailure(event)) return "fix-app-config";
+    if (isAppRequirementFailure(event)) return "wire-app-requirement";
+    if (isAppResponseFailure(event)) return "inspect-app-response-failure";
+    if (isAppRetryExhaustion(event)) return "inspect-app-retry-exhaustion";
+    if (isAppResourceAcquired(event) and !hasFinalizedResource(events, event)) return "close-app-resource";
+    if (isAppFiberPending(event)) return "resolve-app-fiber";
     if (std.mem.eql(u8, event.kind, "service_required") and std.mem.eql(u8, event.status, "missing")) {
         return "provide-missing-service";
     }
@@ -329,6 +376,46 @@ fn actionNameForEvent(events: []const Event, event: Event) ?[]const u8 {
         return "inspect-finalizer-failure";
     }
     return null;
+}
+
+fn isAppConfigFailure(event: Event) bool {
+    return std.mem.eql(u8, event.kind, "assertion_recorded") and
+        std.mem.eql(u8, event.status, "failure") and
+        (std.mem.eql(u8, event.redacted_detail, "app.config.required") or
+            std.mem.eql(u8, event.label, "YACHDEE_ENV"));
+}
+
+fn isAppRequirementFailure(event: Event) bool {
+    return std.mem.eql(u8, event.kind, "assertion_recorded") and
+        std.mem.eql(u8, event.status, "failure") and
+        std.mem.eql(u8, event.redacted_detail, "app.requirement.required");
+}
+
+fn isAppResponseFailure(event: Event) bool {
+    return std.mem.eql(u8, event.kind, "span_recorded") and
+        std.mem.eql(u8, event.type_name, "zigeffect.app.response") and
+        std.mem.startsWith(u8, event.status, "5");
+}
+
+fn isAppRetryExhaustion(event: Event) bool {
+    return std.mem.eql(u8, event.kind, "schedule_decision") and
+        std.mem.eql(u8, event.type_name, "zigeffect.app.retry") and
+        std.mem.eql(u8, event.status, "exhausted");
+}
+
+fn isAppResourceAcquired(event: Event) bool {
+    return std.mem.eql(u8, event.kind, "resource_acquired") and isAppTypeName(event.type_name);
+}
+
+fn isAppFiberPending(event: Event) bool {
+    return (std.mem.eql(u8, event.kind, "fiber_forked") or std.mem.eql(u8, event.kind, "fiber_started")) and
+        (std.mem.eql(u8, event.status, "pending") or std.mem.eql(u8, event.status, "running") or std.mem.eql(u8, event.status, "started")) and
+        isAppTypeName(event.type_name);
+}
+
+fn isAppTypeName(type_name: []const u8) bool {
+    return std.mem.startsWith(u8, type_name, "zigeffect.app.") or
+        std.mem.startsWith(u8, type_name, "app ");
 }
 
 fn collectActionSignatures(allocator: std.mem.Allocator, events: []const Event) std.mem.Allocator.Error!std.ArrayList([]const u8) {
@@ -458,6 +545,22 @@ test "advice report captures command assertion failures" {
 
     try std.testing.expect(std.mem.indexOf(u8, report, "action inspect-command-failure status=observed event=3 kind=assertion_recorded label=package-tests-failure-fixture") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "run: zig build causal-query -- --file .zig-cache/causal-artifacts/package.json lineage 3") != null);
+}
+
+test "advice report emits app-specific incident actions" {
+    const report = try buildAdviceReport(std.testing.allocator, app_incident_json, ".zig-cache/causal-artifacts/app.json");
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "action fix-app-config status=observed event=2 kind=assertion_recorded label=YACHDEE_ENV") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "action wire-app-requirement status=observed event=3 kind=assertion_recorded label=HealthService") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "action inspect-app-response-failure status=observed event=4 kind=span_recorded label=app.response") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "action close-app-resource status=observed event=5 kind=resource_acquired label=app database") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "action inspect-app-retry-exhaustion status=observed event=6 kind=schedule_decision label=upstream call") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "action resolve-app-fiber status=observed event=7 kind=fiber_started label=app child fiber") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "app request recorded a failed response") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "app dependency retry exhausted its budget") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "app resource acquisition has no matching finalization event") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "app fiber remains active in causal evidence") != null);
 }
 
 test "before-aware advice marks persisting and new actions" {

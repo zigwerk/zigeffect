@@ -589,6 +589,9 @@ metrics, and traces.
 - Delivered: `CausalAppTrace` and `examples/causal_app_request.zig` show how a
   Worker-shaped app request can emit bounded, redacted, workbench-compatible
   causal JSON without request-path filesystem, process, or Bun APIs.
+- Delivered: app incident mapping classifies app config, requirement, response,
+  retry, resource, finalizer, and fiber incidents, and app-specific
+  advice/diagnosis mappings name the affected app subsystem.
 - Still future: production-grade app-facing integrations, durable history
   hardening, app remediation policy gates, and comparing arbitrary named
   audit-chain snapshots.

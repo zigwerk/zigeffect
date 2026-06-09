@@ -1001,6 +1001,12 @@ jobs should use `defaultJobCausalStoreOptions`. Both defaults bound memory and
 event string length, and both export standard `zigeffect.causal.v1` JSON for
 the existing query, advice, diagnosis, and SolidJS workbench tools.
 
+`deriveCausalAppIncidents` is the first app incident mapping layer. It derives
+typed app incident categories from existing event fields and does not introduce
+new event kinds. Advice and diagnosis tools use the same mapping posture to
+prefer app-specific remediation prompts for config, requirement, response,
+retry, resource, and fiber incidents.
+
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around
 those pieces. The no-scenario form captures before/after dogfood evidence and
@@ -1059,8 +1065,10 @@ Initial app diagnostic coverage exists in `examples/causal_readiness.zig`.
 The first M7 request-path reference exists in
 `examples/causal_app_request.zig`: it models a Worker-compatible app request
 that returns a response plus owned causal JSON for caller-managed persistence.
-Future examples should add resource leaks, retries, and fiber interruption paths
-so agents can compare multiple failure shapes.
+App incident mapping now classifies app config, requirement, response, retry,
+resource, and fiber failures over standard causal events. Future examples should
+add richer resource leaks, retries, and fiber interruption paths so agents can
+compare multiple failure shapes.
 
 ### Phase 6: Engine Improvement Harness
 

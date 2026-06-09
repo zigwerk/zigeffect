@@ -129,3 +129,82 @@ test "app background job trace uses job defaults and distinct lifecycle labels" 
     try std.testing.expect(hasEvent(snapshot, .fiber_joined, "rollup fiber", "success"));
     try std.testing.expect(hasEvent(snapshot, .run_completed, "app.job daily-rollup", "success"));
 }
+
+test "deriveCausalAppIncidents classifies app config requirement and response failures" {
+    var store = fx.CausalStore.initWithOptions(std.testing.allocator, fx.defaultRequestCausalStoreOptions());
+    defer store.deinit();
+
+    var trace = try fx.CausalAppTrace.startRequest(&store, .{
+        .method = "GET",
+        .route = "/health",
+        .runtime = "worker",
+    });
+    try trace.recordConfigFailure("YACHDEE_ENV", "MissingConfig");
+    try trace.recordRequirementFailure("HealthService", "MissingService");
+    _ = try store.record(.{
+        .kind = .span_recorded,
+        .run_id = trace.run_id,
+        .parent_id = trace.root_event_id,
+        .label = "app.response",
+        .type_name = "zigeffect.app.response",
+        .status = "500",
+        .redacted_detail = "body=missing_environment",
+    });
+    try trace.complete(.failure);
+
+    var incidents = try fx.deriveCausalAppIncidents(std.testing.allocator, &store);
+    defer incidents.deinit();
+
+    try std.testing.expectEqual(@as(usize, 3), incidents.items.len);
+    try std.testing.expectEqual(fx.CausalAppIncidentKind.missing_config, incidents.items[0].kind);
+    try std.testing.expectEqual(fx.CausalAppIncidentKind.missing_requirement, incidents.items[1].kind);
+    try std.testing.expectEqual(fx.CausalAppIncidentKind.failed_response, incidents.items[2].kind);
+    try std.testing.expectEqualStrings("YACHDEE_ENV", incidents.items[0].label);
+    try std.testing.expectEqualStrings("HealthService", incidents.items[1].label);
+}
+
+test "deriveCausalAppIncidents classifies retry resource and fiber app incidents" {
+    var store = fx.CausalStore.initWithOptions(std.testing.allocator, fx.defaultRequestCausalStoreOptions());
+    defer store.deinit();
+
+    var trace = try fx.CausalAppTrace.startRequest(&store, .{
+        .method = "POST",
+        .route = "/api/jobs",
+        .runtime = "worker",
+    });
+    const scope_id = try trace.openScope("app request scope");
+    try trace.recordResourceAcquired("app database", scope_id);
+    try trace.recordRetryAttempt("upstream call", 3, 3, "exhausted");
+    try trace.recordFiberStatus("app child fiber", 77, .started);
+    try trace.complete(.failure);
+
+    var incidents = try fx.deriveCausalAppIncidents(std.testing.allocator, &store);
+    defer incidents.deinit();
+
+    try std.testing.expectEqual(@as(usize, 3), incidents.items.len);
+    try std.testing.expectEqual(fx.CausalAppIncidentKind.resource_leak, incidents.items[0].kind);
+    try std.testing.expectEqual(fx.CausalAppIncidentKind.retry_exhausted, incidents.items[1].kind);
+    try std.testing.expectEqual(fx.CausalAppIncidentKind.fiber_unresolved, incidents.items[2].kind);
+}
+
+test "deriveCausalAppIncidents classifies app finalizer failures without double-counting resources" {
+    var store = fx.CausalStore.initWithOptions(std.testing.allocator, fx.defaultRequestCausalStoreOptions());
+    defer store.deinit();
+
+    var trace = try fx.CausalAppTrace.startRequest(&store, .{
+        .method = "POST",
+        .route = "/api/cleanup",
+        .runtime = "worker",
+    });
+    const scope_id = try trace.openScope("app cleanup scope");
+    try trace.recordResourceAcquired("app database", scope_id);
+    try trace.recordResourceFinalized("app database", scope_id, "failure");
+    try trace.complete(.failure);
+
+    var incidents = try fx.deriveCausalAppIncidents(std.testing.allocator, &store);
+    defer incidents.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), incidents.items.len);
+    try std.testing.expectEqual(fx.CausalAppIncidentKind.finalizer_failure, incidents.items[0].kind);
+    try std.testing.expectEqualStrings("app database", incidents.items[0].label);
+}

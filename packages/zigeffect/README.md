@@ -201,6 +201,19 @@ shape when a Worker app wants to put app incidents into R2, Durable Objects,
 D1, logs, or another app-owned sink before opening the artifact in the
 workbench.
 
+Classify app incidents before drafting app fixes:
+
+```zig
+var incidents = try fx.deriveCausalAppIncidents(allocator, &store);
+defer incidents.deinit();
+```
+
+The classifier maps app config, requirement, failed response, retry, resource,
+and fiber evidence to `CausalAppIncidentKind` values without changing the core
+event taxonomy. `causal-advice` and `causal-diagnosis` also prefer app-specific
+actions such as `fix-app-config`, `wire-app-requirement`, and
+`inspect-app-response-failure` for clearly app-owned evidence.
+
 Print the causal artifact retention manifest for agents and CI:
 
 ```bash
