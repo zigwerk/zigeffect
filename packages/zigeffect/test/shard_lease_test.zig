@@ -117,6 +117,64 @@ test "shard lease manager refreshes only due owned leases" {
     try std.testing.expect(snapshotHasKind(snapshot, .cluster_shard_lease_refreshed));
 }
 
+test "shard lease manager reacquires expired owned leases" {
+    var storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asRunnerStorage();
+    const owner = fx.runnerAddress("machine-a", "runner-a");
+
+    var manager = try fx.LocalShardLeaseManager.init(
+        std.testing.allocator,
+        storage,
+        owner,
+        .{ .ttl_ms = 100, .refresh_interval_ms = 25 },
+    );
+    defer manager.deinit();
+
+    _ = try manager.acquireShard(8, 1_000);
+    const report = try manager.refreshOwnedLeases(1_100);
+    try std.testing.expectEqual(@as(usize, 1), report.expired);
+    try std.testing.expectEqual(@as(usize, 1), report.reacquired);
+    const stored = (try storage.lease(8)).?;
+    try std.testing.expect(stored.owner.eql(owner));
+    try std.testing.expectEqual(@as(u64, 1_200), stored.expires_at_ms);
+    try std.testing.expectEqual(@as(u64, 2), stored.version);
+}
+
+test "shard lease manager gracefully hands off owned shards" {
+    var storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asRunnerStorage();
+    const source_owner = fx.runnerAddress("machine-a", "runner-a");
+    const target_owner = fx.runnerAddress("machine-b", "runner-b");
+
+    var source = try fx.LocalShardLeaseManager.init(
+        std.testing.allocator,
+        storage,
+        source_owner,
+        .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    );
+    defer source.deinit();
+    var target = try fx.LocalShardLeaseManager.init(
+        std.testing.allocator,
+        storage,
+        target_owner,
+        .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    );
+    defer target.deinit();
+
+    _ = try source.acquireShard(9, 1_000);
+    const handoff = try source.handoffShard(9, target_owner, 1_100);
+    try std.testing.expectEqual(@as(fx.ShardId, 9), handoff.shard_id);
+    try std.testing.expect(!source.ownsShard(9));
+    try std.testing.expect((try storage.lease(9)) == null);
+
+    const target_lease = try target.acquireShard(9, 1_101);
+    try std.testing.expect(target_lease.owner.eql(target_owner));
+    try std.testing.expect(target.ownsShard(9));
+    try std.testing.expectError(error.ShardNotOwned, source.handoffShard(9, target_owner, 1_200));
+}
+
 fn snapshotHasKind(snapshot: fx.CausalSnapshot, kind: fx.CausalEventKind) bool {
     for (snapshot.events) |event| {
         if (event.kind == kind) return true;

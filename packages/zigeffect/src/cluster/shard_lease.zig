@@ -140,6 +140,31 @@ pub const LocalShardLeaseManager = struct {
         return report;
     }
 
+    pub fn releaseShard(self: *LocalShardLeaseManager, shard_id: ShardId, now_ms: u64) !void {
+        const index = self.findOwnedIndex(shard_id) orelse return error.ShardNotOwned;
+        const lease = self.owned_leases.items[index];
+        try self.storage.release(.{
+            .shard_id = shard_id,
+            .owner = self.owner,
+        });
+        _ = self.owned_leases.orderedRemove(index);
+        try self.recordLeaseCausal(.cluster_shard_lease_released, lease, "released");
+        _ = now_ms;
+    }
+
+    pub fn handoffShard(self: *LocalShardLeaseManager, shard_id: ShardId, target: RunnerAddress, now_ms: u64) !ShardHandoffReport {
+        const index = self.findOwnedIndex(shard_id) orelse return error.ShardNotOwned;
+        const lease = self.owned_leases.items[index];
+        try self.recordHandoffCausal(lease, target, now_ms);
+        try self.releaseShard(shard_id, now_ms);
+        return .{
+            .shard_id = shard_id,
+            .from = self.owner,
+            .to = target,
+            .released_at_ms = now_ms,
+        };
+    }
+
     pub fn ownsShard(self: *const LocalShardLeaseManager, shard_id: ShardId) bool {
         return self.findOwnedIndex(shard_id) != null;
     }
@@ -195,6 +220,26 @@ pub const LocalShardLeaseManager = struct {
             .label = label,
             .type_name = "cluster.shard_lease",
             .status = status,
+            .redacted_detail = detail,
+        });
+    }
+
+    fn recordHandoffCausal(self: *LocalShardLeaseManager, lease: ShardLease, target: RunnerAddress, now_ms: u64) Allocator.Error!void {
+        const store = self.causal_store orelse return;
+        const label = try std.fmt.allocPrint(self.allocator, "shard-{d}", .{lease.shard_id});
+        defer self.allocator.free(label);
+        const detail = try std.fmt.allocPrint(
+            self.allocator,
+            "shard_id={d} from_machine_id={d} from_runner_id={d} to_machine_id={d} to_runner_id={d} at_ms={d}",
+            .{ lease.shard_id, self.owner.machine_id, self.owner.runner_id, target.machine_id, target.runner_id, now_ms },
+        );
+        defer self.allocator.free(detail);
+        _ = try store.record(.{
+            .kind = .cluster_shard_handoff_started,
+            .run_id = self.causal_run_id,
+            .label = label,
+            .type_name = "cluster.shard_lease",
+            .status = "handoff_started",
             .redacted_detail = detail,
         });
     }
