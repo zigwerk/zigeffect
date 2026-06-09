@@ -99,6 +99,7 @@ function sampleNameFromSearch(search: string): string {
   if (sample === "app-policy") return "sample-app-policy-decision.json";
   if (sample === "app-proposal") return "sample-app-patch-proposal.json";
   if (sample === "app-review") return "sample-app-human-review.json";
+  if (sample === "app-readiness") return "sample-app-application-readiness.json";
   return "sample-artifact.json";
 }
 

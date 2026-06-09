@@ -1041,6 +1041,16 @@ migration files, runbooks, and rollback plans, but keeps `approved=false`,
 `mutation_authority=none`. It is evidence for review, not permission to mutate
 source, config, data, deployment state, or rollback plans.
 
+`zig build causal-app-application-readiness -- local --proposal
+<app-patch-proposal-json> approve --reason <reason> --verified <command>`
+records `zigeffect.causal.app-application-readiness.v1` evidence before a real
+app change is attempted. Readiness re-checks draft proposal state, source
+links, app policy gates, citations, high-risk human-review links, and recorded
+verification commands. `readiness_status=ready` and
+`ready_for_application=true` mean the proposal is ready to attempt, not that it
+was applied. The artifact still records `mutation_authority=none` and
+`applied=false`.
+
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around
 those pieces. The no-scenario form captures before/after dogfood evidence and

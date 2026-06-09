@@ -292,6 +292,44 @@ const sampleAppReview = {
   review_guardrails: ["Human review approves proposal drafting only; it does not apply app source, config, migrations, operations, rollback plans, or deployment state."],
 };
 
+const sampleAppReadiness = {
+  schema: "zigeffect.causal.app-application-readiness.v1",
+  schema_version: 1,
+  mode: "local",
+  target: "yachdee-platform",
+  decision: "approve",
+  readiness_status: "ready",
+  ready_for_application: true,
+  reviewed_by: "local-reviewer",
+  policy: "manual-app-application-readiness",
+  reason: "reviewed proposal citations and verification evidence",
+  applied: false,
+  mutation_authority: "none",
+  summary: "Wire HealthService and document config binding",
+  change: "Add provider layer and document YACHDEE_ENV.",
+  source: {
+    proposal: ".zig-cache/causal-artifacts/yachdee-platform-app-patch-proposal.json",
+    policy: ".zig-cache/causal-artifacts/yachdee-platform-app-policy-decision.json",
+    app_remediation_audit: ".zig-cache/causal-artifacts/yachdee-platform-app-remediation-audit.json",
+    app_artifact: ".zig-cache/causal-artifacts/app.json",
+    human_review: ".zig-cache/causal-artifacts/yachdee-platform-app-human-review.json",
+  },
+  policy_gates: ["source-only", "config-only"],
+  citations: {
+    source_files: ["apps/platform/src/worker.ts"],
+    config_keys: ["YACHDEE_API_BASE_URL"],
+    migration_files: [],
+    runbooks: [],
+    rollback_plans: [],
+  },
+  event_ids: [2],
+  checks: [{ name: "proposal-state", status: "pass", detail: "proposal is draft" }],
+  required_verification_commands: ["zig build causal-query -- --file app.json cause 2"],
+  verified_commands: ["zig build causal-query -- --file app.json cause 2"],
+  application_steps: ["Apply the reviewed change outside this readiness command."],
+  readiness_guardrails: ["Readiness does not edit app source."],
+};
+
 test("parseArtifactJson parses causal artifacts", () => {
   const parsed = parseArtifactJson(sampleArtifact);
 
@@ -603,6 +641,34 @@ test("deriveAppRemediationModel reads app human review citations and verificatio
   expect(app?.sourceSteps.map((step) => step.label)).toEqual(["App policy decision", "App remediation audit", "App artifact"]);
   expect(app?.verificationCommands).toContain("zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 4");
   expect(app?.guardrails).toContain("Human review approves proposal drafting only; it does not apply app source, config, migrations, operations, rollback plans, or deployment state.");
+});
+
+test("deriveGovernanceModel detects app application readiness artifacts", () => {
+  const governance = deriveGovernanceModel(sampleAppReadiness, { artifactPath: "app-readiness.json" });
+
+  expect(governance?.kind).toBe("app-application-readiness");
+  expect(governance?.summary).toContain("ready app application readiness");
+  expect(governance?.applied).toBe(false);
+  expect(governance?.mutationAuthority).toBe("none");
+});
+
+test("deriveAppRemediationModel reads app application readiness checks and steps", () => {
+  const app = deriveAppRemediationModel(sampleAppReadiness, { artifactPath: "app-readiness.json" });
+
+  expect(app?.kind).toBe("app-application-readiness");
+  expect(app?.readinessStatus).toBe("ready");
+  expect(app?.readyForApplication).toBe(true);
+  expect(app?.checks.map((check) => `${check.name}:${check.status}`)).toEqual(["proposal-state:pass"]);
+  expect(app?.sourceSteps.map((step) => step.label)).toEqual([
+    "App patch proposal",
+    "App policy decision",
+    "App human review",
+    "App remediation audit",
+    "App artifact",
+  ]);
+  expect(app?.verificationCommands).toContain("zig build causal-query -- --file app.json cause 2");
+  expect(app?.applicationSteps).toContain("Apply the reviewed change outside this readiness command.");
+  expect(app?.guardrails).toContain("Readiness does not edit app source.");
 });
 
 test("deriveAppRemediationModel tolerates partial app artifacts", () => {

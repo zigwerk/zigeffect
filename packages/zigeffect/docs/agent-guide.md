@@ -625,12 +625,13 @@ and read-only: no source edits, registry edits, policy decisions, or
 remediation writes happen through the UI. Use copied `causal-query` commands as
 explicit follow-up evidence, not as implied approval.
 
-For app remediation artifacts, open the audit, policy decision, or patch
-proposal JSON directly in the same workbench. The Chain tab renders app
-incidents, policy gates, gate results, proposal citations, verification
-commands, guardrails, and source artifact paths. Copy the shown commands for
-follow-up inspection; do not treat the workbench as approval to edit source,
-change config, run migrations, or apply rollback actions.
+For app remediation artifacts, open the audit, policy decision, human review,
+patch proposal, or application readiness JSON directly in the same workbench.
+The Chain tab renders app incidents, policy gates, gate results, proposal
+citations, readiness checks, verification commands, guardrails, and source
+artifact paths. Copy the shown commands for follow-up inspection; do not treat
+the workbench as approval to edit source, change config, run migrations, or
+apply rollback actions.
 
 For app-facing request and job traces, use the M7 adapter rather than inventing
 new app log schemas. Start with a bounded store, record semantic app lifecycle
@@ -723,6 +724,22 @@ The command writes `*-app-patch-proposal.json` and
 `applied=false`, and `mutation_authority=none`. Use repeated `--file`,
 `--config`, `--migration`, `--runbook`, and `--rollback` flags to cite paths or
 binding names. Never place secret values in config citations.
+
+Before attempting the real app change, record app application readiness:
+
+```sh
+zig build causal-app-application-readiness -- local --proposal <app-patch-proposal-json> approve --reason <reason> --verified <command>
+```
+
+The command writes `*-app-application-readiness.json` and
+`*-app-application-readiness.txt` with schema
+`zigeffect.causal.app-application-readiness.v1`. It re-checks draft proposal
+state, policy gates, source/config/migration/runbook/rollback citations,
+high-risk human-review links, and recorded verification commands.
+`readiness_status=ready` and `ready_for_application=true` mean the proposal is
+ready to attempt, not applied. It keeps `applied=false` and
+`mutation_authority=none`; only a later guarded app application artifact may
+record `applied=true`.
 
 For normal core-runtime development, prefer the coordinated session command:
 

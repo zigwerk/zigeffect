@@ -54,6 +54,7 @@ test("loadPayloadFromBridge can load app remediation development samples", async
     ["?sample=app-policy", "sample-app-policy-decision.json"],
     ["?sample=app-proposal", "sample-app-patch-proposal.json"],
     ["?sample=app-review", "sample-app-human-review.json"],
+    ["?sample=app-readiness", "sample-app-application-readiness.json"],
   ];
 
   for (const [search, expected] of samples) {

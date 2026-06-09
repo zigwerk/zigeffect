@@ -154,12 +154,13 @@ runtime lanes for runs, scopes, fibers, resources, and retries from the selected
 artifact. The Chain tab also recognizes remediation/governance artifacts such as
 `zigeffect.causal.audit-chain.v1`, showing source artifact paths, evidence id
 classifications, verification commands, and guardrails while remaining
-read-only. It also renders app remediation audit, app policy decision, and app
-patch proposal artifacts with app incident rows, policy gate results, proposal
-citations, verification commands, guardrails, and copyable source workbench
-commands. It does not edit source, update the scenario registry, make policy
-decisions, or write remediation artifacts. When a native browser or WebView
-cannot be opened, the launcher falls back to a local WebUI server URL;
+read-only. It also renders app remediation audit, app policy decision, app
+human review, app patch proposal, and app application readiness artifacts with
+app incident rows, policy gate results, proposal citations, readiness checks,
+verification commands, guardrails, and copyable source workbench commands. It
+does not edit source, update the scenario registry, make policy decisions, or
+write remediation artifacts. When a native browser or WebView cannot be opened,
+the launcher falls back to a local WebUI server URL;
 `--server-only` starts that local read-only server directly for agent/browser
 inspection.
 
@@ -268,6 +269,22 @@ without applying any of them. It always records `proposal_status=draft`,
 `approval_status=pending`, `approved=false`, `applied=false`, and
 `mutation_authority=none`; config citations name keys only and must not include
 secret values.
+
+Review app application readiness before attempting the real change:
+
+```bash
+cd packages/zigeffect
+zig build causal-app-application-readiness -- local --proposal <app-patch-proposal-json> approve --reason <reason> --verified <command>
+```
+
+The readiness report uses schema
+`zigeffect.causal.app-application-readiness.v1` and writes
+`*-app-application-readiness.json` plus
+`*-app-application-readiness.txt`. It re-checks draft proposal state, source
+links, policy gates, citations, high-risk human-review links, and recorded
+verification commands. `readiness_status=ready` means the proposal is ready to
+attempt, not that it was applied. Every readiness report preserves
+`applied=false` and `mutation_authority=none`.
 
 Print the causal artifact retention manifest for agents and CI:
 

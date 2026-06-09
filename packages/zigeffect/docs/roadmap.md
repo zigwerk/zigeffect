@@ -599,14 +599,22 @@ metrics, and traces.
   <app-remediation-audit-json>` evaluates source, config, migration,
   operational-human, and rollback app gates while preserving
   `mutation_authority=none` and `applied=false`.
+- Delivered: `zig build causal-app-human-review -- local --policy
+  <app-policy-decision-json>` records high-risk human-review evidence for
+  migration, operational, and rollback-required app work while preserving
+  `mutation_authority=none` and `applied=false`.
 - Delivered: `zig build causal-app-patch-proposal -- local --policy
   <app-policy-decision-json> --summary <summary> --change <description>`
   writes draft, non-mutating app proposal artifacts that cite source files,
   config keys, migrations, runbooks, and rollback plans while preserving
   `mutation_authority=none` and `applied=false`.
-- Still future: production-grade app-facing integrations, durable history
-  hardening, detailed app-remediation workbench rendering, and comparing
-  arbitrary named audit-chain snapshots.
+- Delivered: `zig build causal-app-application-readiness -- local --proposal
+  <app-patch-proposal-json> approve --reason <reason>` writes non-mutating app
+  readiness artifacts that re-check proposal evidence before an application
+  attempt while preserving `mutation_authority=none` and `applied=false`.
+- Still future: the guarded app application boundary, production-grade
+  app-facing integrations, durable history hardening, and comparing arbitrary
+  named audit-chain snapshots.
 - Still future: deeper runtime regression scenarios for partial config and
   cause coverage.
 - Leave room for a future causal workbench that visualizes effect runs, scope

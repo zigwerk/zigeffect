@@ -4,6 +4,7 @@ import {
   type AppCitationGroup,
   type AppGateResultModel,
   type AppIncidentModel,
+  type AppReadinessCheckModel,
   type AppRemediationModel,
   type GraphEdge,
   type GraphLane,
@@ -484,6 +485,12 @@ function AppRemediationView(props: {
           onCopy={props.onCopy}
         />
       </div>
+      <Show when={props.app.checks.length || props.app.applicationSteps.length}>
+        <div class="app-remediation-grid">
+          <AppReadinessChecks checks={props.app.checks} />
+          <AppApplicationSteps steps={props.app.applicationSteps} />
+        </div>
+      </Show>
       <AppGuardrails guardrails={props.app.guardrails} />
       <div class="warning-list">
         <For each={props.app.warnings} fallback={<EmptyState label="No app remediation warnings" compact />}>
@@ -495,12 +502,19 @@ function AppRemediationView(props: {
 }
 
 function AppRemediationStatus(props: { app: AppRemediationModel }) {
-  const posture = props.app.kind === "app-patch-proposal" ? props.app.proposalStatus : props.app.decision;
+  const posture = props.app.kind === "app-application-readiness"
+    ? props.app.readinessStatus
+    : props.app.kind === "app-patch-proposal"
+      ? props.app.proposalStatus
+      : props.app.decision;
   return (
     <div class="chain-status app-status">
       <Metric label="target" value={props.app.target} />
       <Metric label="kind" value={props.app.kind} />
       <Metric label="posture" value={posture === "unknown" ? props.app.approvalStatus : posture} />
+      <Show when={props.app.readyForApplication !== null}>
+        <Metric label="ready" value={String(props.app.readyForApplication)} tone={props.app.readyForApplication ? "ok" : "warn"} />
+      </Show>
       <Metric label="approval" value={props.app.approvalStatus} />
       <Metric label="applied" value={String(props.app.applied ?? "unknown")} tone={props.app.applied ? "warn" : "ok"} />
       <Metric label="authority" value={props.app.mutationAuthority ?? "none"} tone={props.app.mutationAuthority === "none" ? "ok" : "warn"} />
@@ -620,6 +634,41 @@ function AppVerification(props: {
     <section class="chain-panel">
       <h3>Verification</h3>
       <CommandList commands={commands()} copiedCommand={props.copiedCommand} onCopy={props.onCopy} compact />
+    </section>
+  );
+}
+
+function AppReadinessChecks(props: { checks: AppReadinessCheckModel[] }) {
+  return (
+    <section class="chain-panel">
+      <div class="lane-section-head">
+        <h3>Readiness checks</h3>
+        <span>{props.checks.length}</span>
+      </div>
+      <div class="gate-result-list">
+        <For each={props.checks} fallback={<EmptyState label="No readiness checks" compact />}>
+          {(check) => (
+            <div class="gate-result-row">
+              <span class={`gate-chip ${gateToneClass(check.status)}`}>{check.status}</span>
+              <strong>{check.name}</strong>
+              <p>{check.detail || "No detail recorded"}</p>
+            </div>
+          )}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function AppApplicationSteps(props: { steps: string[] }) {
+  return (
+    <section class="chain-panel">
+      <h3>Application steps</h3>
+      <div class="guardrail-list">
+        <For each={props.steps} fallback={<EmptyState label="No application steps recorded" compact />}>
+          {(step) => <span>{step}</span>}
+        </For>
+      </div>
     </section>
   );
 }
