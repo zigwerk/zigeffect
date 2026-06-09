@@ -1,0 +1,86 @@
+{
+  "schema": "zigeffect.causal.app-application.v1",
+  "schema_version": 1,
+  "source_readiness": ".zig-cache/causal-artifacts/yachdee-platform-app-application-readiness.json",
+  "source_proposal": ".zig-cache/causal-artifacts/yachdee-platform-app-patch-proposal.json",
+  "mode": "record-applied",
+  "application_status": "applied",
+  "applied": true,
+  "mutation_authority": "record-only",
+  "applied_by": "local-reviewer",
+  "policy": "manual-app-application",
+  "reason": "source and config change landed",
+  "readiness_status": "ready",
+  "ready_for_application": true,
+  "target": "yachdee-platform",
+  "summary": "Wire HealthService and document config binding",
+  "change": "Add provider layer and document YACHDEE_ENV.",
+  "source": {
+    "readiness": ".zig-cache/causal-artifacts/yachdee-platform-app-application-readiness.json",
+    "proposal": ".zig-cache/causal-artifacts/yachdee-platform-app-patch-proposal.json",
+    "policy": ".zig-cache/causal-artifacts/yachdee-platform-app-policy-decision.json",
+    "app_remediation_audit": ".zig-cache/causal-artifacts/yachdee-platform-app-remediation-audit.json",
+    "app_artifact": ".zig-cache/causal-artifacts/app.json",
+    "human_review": ".zig-cache/causal-artifacts/yachdee-platform-app-human-review.json"
+  },
+  "policy_gates": ["source-only", "config-only"],
+  "citations": {
+    "source_files": ["apps/platform/src/worker.ts"],
+    "config_keys": ["YACHDEE_API_BASE_URL"],
+    "migration_files": [],
+    "runbooks": [],
+    "rollback_plans": []
+  },
+  "event_ids": [2],
+  "checks": [
+    {
+      "name": "readiness-schema",
+      "status": "pass",
+      "detail": "app application readiness schema is supported"
+    },
+    {
+      "name": "readiness-ready",
+      "status": "pass",
+      "detail": "readiness is ready for app application"
+    },
+    {
+      "name": "decision-approved",
+      "status": "pass",
+      "detail": "readiness decision approved application"
+    },
+    {
+      "name": "change-evidence-present",
+      "status": "pass",
+      "detail": "caller recorded evidence for every policy-gate change category"
+    },
+    {
+      "name": "before-after-evidence-present",
+      "status": "pass",
+      "detail": "caller recorded before and after evidence"
+    },
+    {
+      "name": "post-verification-recorded",
+      "status": "pass",
+      "detail": "caller recorded required post-application verification commands"
+    }
+  ],
+  "required_verification_commands": ["zig build causal-query -- --file app.json cause 2"],
+  "verified_commands": ["zig build causal-query -- --file app.json cause 2"],
+  "change_evidence": {
+    "source_changes": ["apps/platform/src/worker.ts"],
+    "config_changes": ["YACHDEE_API_BASE_URL"],
+    "migration_changes": [],
+    "operation_changes": [],
+    "rollback_changes": []
+  },
+  "before_evidence": [".zig-cache/causal-artifacts/yachdee-platform-before-app.json"],
+  "after_evidence": [".zig-cache/causal-artifacts/yachdee-platform-after-app.json"],
+  "application_steps": [
+    "Keep this application artifact with the reviewed change evidence.",
+    "Do not rerun application unless source, external state, or verification evidence changes."
+  ],
+  "guardrails": [
+    "applied=true means reviewed changes and before/after verification evidence passed every application check.",
+    "This command records application state; it does not silently mutate source or external systems."
+  ]
+}

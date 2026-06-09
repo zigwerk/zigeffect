@@ -612,9 +612,13 @@ metrics, and traces.
   <app-patch-proposal-json> approve --reason <reason>` writes non-mutating app
   readiness artifacts that re-check proposal evidence before an application
   attempt while preserving `mutation_authority=none` and `applied=false`.
-- Still future: the guarded app application boundary, production-grade
-  app-facing integrations, durable history hardening, and comparing arbitrary
-  named audit-chain snapshots.
+- Delivered: `zig build causal-app-apply -- --from-readiness
+  <app-application-readiness-json> plan|record-applied --reason <reason>`
+  writes guarded app application artifacts. `applied=true` is possible only
+  after ready readiness, category-specific change evidence, before/after
+  evidence, and post-application verification evidence are recorded.
+- Still future: production-grade app-facing integrations, durable history
+  hardening, and comparing arbitrary named audit-chain snapshots.
 - Still future: deeper runtime regression scenarios for partial config and
   cause coverage.
 - Leave room for a future causal workbench that visualizes effect runs, scope

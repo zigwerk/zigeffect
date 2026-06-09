@@ -70,6 +70,7 @@ export type GovernanceArtifactKind =
   | "app-human-review"
   | "app-patch-proposal"
   | "app-application-readiness"
+  | "app-application"
   | "remediation-decision"
   | "patch-proposal"
   | "registry-readiness"
@@ -118,7 +119,8 @@ export type AppRemediationArtifactKind =
   | "app-policy-decision"
   | "app-human-review"
   | "app-patch-proposal"
-  | "app-application-readiness";
+  | "app-application-readiness"
+  | "app-application";
 
 export type AppIncidentModel = {
   action: string;
@@ -157,6 +159,7 @@ export type AppRemediationModel = {
   target: string;
   summary: string;
   decision: string;
+  applicationStatus: string;
   proposalStatus: string;
   readinessStatus: string;
   approvalStatus: string;
@@ -169,6 +172,9 @@ export type AppRemediationModel = {
   policyGates: string[];
   gateResults: AppGateResultModel[];
   citations: AppCitationGroup[];
+  changeEvidence: AppCitationGroup[];
+  beforeEvidence: string[];
+  afterEvidence: string[];
   checks: AppReadinessCheckModel[];
   eventIds: string[];
   verificationCommands: string[];
@@ -451,7 +457,8 @@ export function deriveAppRemediationModel(raw: unknown, options: WorkbenchOption
     kind !== "app-policy-decision" &&
     kind !== "app-human-review" &&
     kind !== "app-patch-proposal" &&
-    kind !== "app-application-readiness"
+    kind !== "app-application-readiness" &&
+    kind !== "app-application"
   ) {
     return null;
   }
@@ -476,6 +483,7 @@ export function deriveAppRemediationModel(raw: unknown, options: WorkbenchOption
     target: textValue(artifact.target, "unknown"),
     summary: appSummary(kind, artifact),
     decision: textValue(artifact.decision, "unknown"),
+    applicationStatus: textValue(artifact.application_status, "unknown"),
     proposalStatus: textValue(artifact.proposal_status, textValue(artifact.review_status, textValue(artifact.readiness_status, "unknown"))),
     readinessStatus: textValue(artifact.readiness_status, "unknown"),
     approvalStatus: textValue(artifact.approval_status, "unknown"),
@@ -488,6 +496,9 @@ export function deriveAppRemediationModel(raw: unknown, options: WorkbenchOption
     policyGates: stringList(artifact.policy_gates),
     gateResults: appGateResults(artifact.gate_results),
     citations: appCitationGroups(artifact.citations),
+    changeEvidence: appChangeEvidenceGroups(artifact.change_evidence),
+    beforeEvidence: stringList(artifact.before_evidence),
+    afterEvidence: stringList(artifact.after_evidence),
     checks: appReadinessChecks(artifact.checks),
     eventIds: eventIdList(artifact.event_ids),
     verificationCommands: uniqueInOrder([
@@ -534,6 +545,8 @@ export function deriveGovernanceModel(raw: unknown, options: WorkbenchOptions): 
       ? `${reviewStatus} app human review for ${target}`
     : kind === "app-patch-proposal"
       ? `${proposalStatus} app patch proposal for ${target}`
+    : kind === "app-application"
+      ? `${textValue(artifact.application_status, "unknown")} app application for ${target}`
     : kind === "app-application-readiness"
       ? `${readinessStatus} app application readiness for ${target}`
     : chain
@@ -741,6 +754,8 @@ function governanceKindForSchema(schema: string): GovernanceArtifactKind | null 
       return "app-patch-proposal";
     case "zigeffect.causal.app-application-readiness.v1":
       return "app-application-readiness";
+    case "zigeffect.causal.app-application.v1":
+      return "app-application";
     case "zigeffect.causal.remediation-decision.v1":
       return "remediation-decision";
     case "zigeffect.causal.patch-proposal.v1":
@@ -784,6 +799,9 @@ function appSummary(kind: AppRemediationArtifactKind, artifact: UnknownRecord): 
   if (kind === "app-human-review") {
     return `${textValue(artifact.review_status, "unknown")} app human review for ${target}`;
   }
+  if (kind === "app-application") {
+    return `${textValue(artifact.application_status, "unknown")} app application for ${target}`;
+  }
   if (kind === "app-application-readiness") {
     return `${textValue(artifact.readiness_status, "unknown")} app application readiness for ${target}`;
   }
@@ -799,6 +817,8 @@ function appSourceSteps(kind: AppRemediationArtifactKind, source: UnknownRecord)
       ? [["policy", "App policy decision"], ["app_remediation_audit", "App remediation audit"], ["app_artifact", "App artifact"]]
     : kind === "app-application-readiness"
       ? [["proposal", "App patch proposal"], ["policy", "App policy decision"], ["human_review", "App human review"], ["app_remediation_audit", "App remediation audit"], ["app_artifact", "App artifact"]]
+    : kind === "app-application"
+      ? [["readiness", "App application readiness"], ["proposal", "App patch proposal"], ["policy", "App policy decision"], ["human_review", "App human review"], ["app_remediation_audit", "App remediation audit"], ["app_artifact", "App artifact"]]
       : [["policy", "App policy decision"], ["human_review", "App human review"], ["app_remediation_audit", "App remediation audit"], ["app_artifact", "App artifact"]];
 
   return definitions
@@ -868,6 +888,17 @@ function appCitationGroups(value: unknown): AppCitationGroup[] {
     { label: "Migration files", values: stringList(citations.migration_files) },
     { label: "Runbooks", values: stringList(citations.runbooks) },
     { label: "Rollback plans", values: stringList(citations.rollback_plans) },
+  ];
+}
+
+function appChangeEvidenceGroups(value: unknown): AppCitationGroup[] {
+  const evidence = isRecord(value) ? value : {};
+  return [
+    { label: "Source changes", values: stringList(evidence.source_changes) },
+    { label: "Config changes", values: stringList(evidence.config_changes) },
+    { label: "Migration changes", values: stringList(evidence.migration_changes) },
+    { label: "Operation changes", values: stringList(evidence.operation_changes) },
+    { label: "Rollback changes", values: stringList(evidence.rollback_changes) },
   ];
 }
 

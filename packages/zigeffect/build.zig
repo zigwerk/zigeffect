@@ -482,6 +482,18 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_app_application_readiness_tool_tests = b.addRunArtifact(causal_app_application_readiness_tool_tests);
 
+    const causal_app_apply_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_app_apply.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_app_apply_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-app-apply-tests",
+        .root_module = causal_app_apply_tool_module,
+    });
+    const run_causal_app_apply_tool_tests = b.addRunArtifact(causal_app_apply_tool_tests);
+
     const causal_compare_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_compare.zig"),
         .target = target,
@@ -551,6 +563,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_causal_app_human_review_tool_tests.step);
     test_step.dependOn(&run_causal_app_patch_proposal_tool_tests.step);
     test_step.dependOn(&run_causal_app_application_readiness_tool_tests.step);
+    test_step.dependOn(&run_causal_app_apply_tool_tests.step);
     const causal_dev_test_step = b.step("causal-dev-test", "Run zigeffect tests with causal failure capture");
     causal_dev_test_step.dependOn(&run_causal_package_test_tool.step);
 
@@ -935,6 +948,15 @@ pub fn build(b: *std.Build) void {
     const causal_app_application_readiness_step = b.step("causal-app-application-readiness", "Write non-mutating app application readiness evidence from an app patch proposal");
     causal_app_application_readiness_step.dependOn(&run_causal_app_application_readiness_tool.step);
 
+    const causal_app_apply_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-app-apply",
+        .root_module = causal_app_apply_tool_module,
+    });
+    const run_causal_app_apply_tool = b.addRunArtifact(causal_app_apply_tool);
+    if (b.args) |args| run_causal_app_apply_tool.addArgs(args);
+    const causal_app_apply_step = b.step("causal-app-apply", "Record guarded app application evidence from app readiness");
+    causal_app_apply_step.dependOn(&run_causal_app_apply_tool.step);
+
     const causal_remediation_decision_tool = b.addExecutable(.{
         .name = "zigeffect-causal-remediation-decision",
         .root_module = causal_remediation_decision_tool_module,
@@ -1120,6 +1142,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_app_patch_proposal_tool_tests.step);
     examples_step.dependOn(&causal_app_application_readiness_tool.step);
     examples_step.dependOn(&run_causal_app_application_readiness_tool_tests.step);
+    examples_step.dependOn(&causal_app_apply_tool.step);
+    examples_step.dependOn(&run_causal_app_apply_tool_tests.step);
     examples_step.dependOn(&causal_remediation_decision_tool.step);
     examples_step.dependOn(&run_causal_remediation_decision_tool_tests.step);
     examples_step.dependOn(&causal_patch_proposal_tool.step);

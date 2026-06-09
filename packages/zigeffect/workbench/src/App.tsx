@@ -485,6 +485,12 @@ function AppRemediationView(props: {
           onCopy={props.onCopy}
         />
       </div>
+      <Show when={props.app.kind === "app-application"}>
+        <div class="app-remediation-grid">
+          <AppEvidenceGroups title="Change evidence" groups={props.app.changeEvidence} />
+          <AppBeforeAfterEvidence before={props.app.beforeEvidence} after={props.app.afterEvidence} />
+        </div>
+      </Show>
       <Show when={props.app.checks.length || props.app.applicationSteps.length}>
         <div class="app-remediation-grid">
           <AppReadinessChecks checks={props.app.checks} />
@@ -502,7 +508,9 @@ function AppRemediationView(props: {
 }
 
 function AppRemediationStatus(props: { app: AppRemediationModel }) {
-  const posture = props.app.kind === "app-application-readiness"
+  const posture = props.app.kind === "app-application"
+    ? props.app.applicationStatus
+    : props.app.kind === "app-application-readiness"
     ? props.app.readinessStatus
     : props.app.kind === "app-patch-proposal"
       ? props.app.proposalStatus
@@ -615,6 +623,48 @@ function AppCitations(props: { citations: AppCitationGroup[] }) {
             </div>
           )}
         </For>
+      </div>
+    </section>
+  );
+}
+
+function AppEvidenceGroups(props: { title: string; groups: AppCitationGroup[] }) {
+  return (
+    <section class="chain-panel">
+      <h3>{props.title}</h3>
+      <div class="citation-grid">
+        <For each={props.groups} fallback={<EmptyState label="No evidence groups" compact />}>
+          {(group) => (
+            <div class="citation-group">
+              <span>{group.label}</span>
+              <For each={group.values} fallback={<small>none</small>}>
+                {(value) => <code>{value}</code>}
+              </For>
+            </div>
+          )}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function AppBeforeAfterEvidence(props: { before: string[]; after: string[] }) {
+  return (
+    <section class="chain-panel">
+      <h3>Before and after</h3>
+      <div class="citation-grid">
+        <div class="citation-group">
+          <span>Before</span>
+          <For each={props.before} fallback={<small>none</small>}>
+            {(value) => <code>{value}</code>}
+          </For>
+        </div>
+        <div class="citation-group">
+          <span>After</span>
+          <For each={props.after} fallback={<small>none</small>}>
+            {(value) => <code>{value}</code>}
+          </For>
+        </div>
       </div>
     </section>
   );

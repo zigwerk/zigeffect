@@ -741,6 +741,22 @@ ready to attempt, not applied. It keeps `applied=false` and
 `mutation_authority=none`; only a later guarded app application artifact may
 record `applied=true`.
 
+After the real reviewed source, config, migration, operation, or rollback
+change has been applied outside zigeffect, record the app application boundary:
+
+```sh
+zig build causal-app-apply -- --from-readiness <app-application-readiness-json> plan --reason <reason>
+zig build causal-app-apply -- --from-readiness <app-application-readiness-json> record-applied --reason <reason> --verified-command <command> --source-change <path> --before <evidence> --after <evidence>
+```
+
+Agents must treat app readiness as permission to attempt application, not proof
+of application. Capture before and after app evidence, run the required
+post-application verification, and use `record-applied` only after every
+required evidence category is recorded. `causal-app-apply` writes
+`zigeffect.causal.app-application.v1` artifacts; it records application state
+but does not mutate source, config, migrations, operations, rollback plans, or
+external systems.
+
 For normal core-runtime development, prefer the coordinated session command:
 
 ```sh

@@ -1051,6 +1051,16 @@ verification commands. `readiness_status=ready` and
 was applied. The artifact still records `mutation_authority=none` and
 `applied=false`.
 
+`zig build causal-app-apply -- --from-readiness
+<app-application-readiness-json> plan|record-applied --reason <reason>`
+records `zigeffect.causal.app-application.v1` evidence after readiness. Plan
+mode preserves `applied=false`. Record-applied mode can write `applied=true`
+only after ready readiness, an approved decision, category-specific change
+evidence, before/after evidence, and required post-application verification
+are recorded. It is a record-only boundary; source, config, migrations,
+operations, rollback plans, deployments, queues, databases, and external state
+are still changed outside the command.
+
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around
 those pieces. The no-scenario form captures before/after dogfood evidence and

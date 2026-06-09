@@ -330,6 +330,59 @@ const sampleAppReadiness = {
   readiness_guardrails: ["Readiness does not edit app source."],
 };
 
+const sampleAppApplication = {
+  schema: "zigeffect.causal.app-application.v1",
+  schema_version: 1,
+  source_readiness: ".zig-cache/causal-artifacts/yachdee-platform-app-application-readiness.json",
+  source_proposal: ".zig-cache/causal-artifacts/yachdee-platform-app-patch-proposal.json",
+  mode: "record-applied",
+  application_status: "applied",
+  applied: true,
+  mutation_authority: "record-only",
+  applied_by: "local-reviewer",
+  policy: "manual-app-application",
+  reason: "source and config change landed",
+  readiness_status: "ready",
+  ready_for_application: true,
+  target: "yachdee-platform",
+  summary: "Wire HealthService and document config binding",
+  change: "Add provider layer and document YACHDEE_ENV.",
+  source: {
+    readiness: ".zig-cache/causal-artifacts/yachdee-platform-app-application-readiness.json",
+    proposal: ".zig-cache/causal-artifacts/yachdee-platform-app-patch-proposal.json",
+    policy: ".zig-cache/causal-artifacts/yachdee-platform-app-policy-decision.json",
+    app_remediation_audit: ".zig-cache/causal-artifacts/yachdee-platform-app-remediation-audit.json",
+    app_artifact: ".zig-cache/causal-artifacts/app.json",
+    human_review: ".zig-cache/causal-artifacts/yachdee-platform-app-human-review.json",
+  },
+  policy_gates: ["source-only", "config-only"],
+  citations: {
+    source_files: ["apps/platform/src/worker.ts"],
+    config_keys: ["YACHDEE_API_BASE_URL"],
+    migration_files: [],
+    runbooks: [],
+    rollback_plans: [],
+  },
+  event_ids: [2],
+  checks: [
+    { name: "readiness-ready", status: "pass", detail: "readiness is ready for app application" },
+    { name: "change-evidence-present", status: "pass", detail: "caller recorded evidence for every policy-gate change category" },
+  ],
+  required_verification_commands: ["zig build causal-query -- --file app.json cause 2"],
+  verified_commands: ["zig build causal-query -- --file app.json cause 2"],
+  change_evidence: {
+    source_changes: ["apps/platform/src/worker.ts"],
+    config_changes: ["YACHDEE_API_BASE_URL"],
+    migration_changes: [],
+    operation_changes: [],
+    rollback_changes: [],
+  },
+  before_evidence: [".zig-cache/causal-artifacts/yachdee-platform-before-app.json"],
+  after_evidence: [".zig-cache/causal-artifacts/yachdee-platform-after-app.json"],
+  application_steps: ["Keep this application artifact with the reviewed change evidence."],
+  guardrails: ["This command records application state; it does not silently mutate source or external systems."],
+};
+
 test("parseArtifactJson parses causal artifacts", () => {
   const parsed = parseArtifactJson(sampleArtifact);
 
@@ -669,6 +722,41 @@ test("deriveAppRemediationModel reads app application readiness checks and steps
   expect(app?.verificationCommands).toContain("zig build causal-query -- --file app.json cause 2");
   expect(app?.applicationSteps).toContain("Apply the reviewed change outside this readiness command.");
   expect(app?.guardrails).toContain("Readiness does not edit app source.");
+});
+
+test("deriveGovernanceModel detects app application artifacts", () => {
+  const governance = deriveGovernanceModel(sampleAppApplication, { artifactPath: "app-application.json" });
+
+  expect(governance?.kind).toBe("app-application");
+  expect(governance?.summary).toContain("applied app application");
+  expect(governance?.applied).toBe(true);
+  expect(governance?.mutationAuthority).toBe("record-only");
+});
+
+test("deriveAppRemediationModel reads app application evidence", () => {
+  const app = deriveAppRemediationModel(sampleAppApplication, { artifactPath: "app-application.json" });
+
+  expect(app?.kind).toBe("app-application");
+  expect(app?.applicationStatus).toBe("applied");
+  expect(app?.readinessStatus).toBe("ready");
+  expect(app?.readyForApplication).toBe(true);
+  expect(app?.changeEvidence.map((group) => `${group.label}:${group.values.length}`)).toEqual([
+    "Source changes:1",
+    "Config changes:1",
+    "Migration changes:0",
+    "Operation changes:0",
+    "Rollback changes:0",
+  ]);
+  expect(app?.beforeEvidence).toEqual([".zig-cache/causal-artifacts/yachdee-platform-before-app.json"]);
+  expect(app?.afterEvidence).toEqual([".zig-cache/causal-artifacts/yachdee-platform-after-app.json"]);
+  expect(app?.sourceSteps.map((step) => step.label)).toEqual([
+    "App application readiness",
+    "App patch proposal",
+    "App policy decision",
+    "App human review",
+    "App remediation audit",
+    "App artifact",
+  ]);
 });
 
 test("deriveAppRemediationModel tolerates partial app artifacts", () => {

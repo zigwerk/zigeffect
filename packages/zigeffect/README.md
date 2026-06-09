@@ -155,12 +155,13 @@ artifact. The Chain tab also recognizes remediation/governance artifacts such as
 `zigeffect.causal.audit-chain.v1`, showing source artifact paths, evidence id
 classifications, verification commands, and guardrails while remaining
 read-only. It also renders app remediation audit, app policy decision, app
-human review, app patch proposal, and app application readiness artifacts with
-app incident rows, policy gate results, proposal citations, readiness checks,
-verification commands, guardrails, and copyable source workbench commands. It
-does not edit source, update the scenario registry, make policy decisions, or
-write remediation artifacts. When a native browser or WebView cannot be opened,
-the launcher falls back to a local WebUI server URL;
+human review, app patch proposal, app application readiness, and app
+application artifacts with app incident rows, policy gate results, proposal
+citations, readiness/application checks, change evidence, before/after
+evidence, verification commands, guardrails, and copyable source workbench
+commands. It does not edit source, update the scenario registry, make policy
+decisions, or write remediation artifacts. When a native browser or WebView
+cannot be opened, the launcher falls back to a local WebUI server URL;
 `--server-only` starts that local read-only server directly for agent/browser
 inspection.
 
@@ -285,6 +286,23 @@ links, policy gates, citations, high-risk human-review links, and recorded
 verification commands. `readiness_status=ready` means the proposal is ready to
 attempt, not that it was applied. Every readiness report preserves
 `applied=false` and `mutation_authority=none`.
+
+Record guarded app application after the real reviewed change has been made:
+
+```bash
+cd packages/zigeffect
+zig build causal-app-apply -- --from-readiness <app-application-readiness-json> plan --reason <reason>
+zig build causal-app-apply -- --from-readiness <app-application-readiness-json> record-applied --reason <reason> --verified-command <command> --source-change <path> --before <evidence> --after <evidence>
+```
+
+The application report uses schema `zigeffect.causal.app-application.v1` and
+writes `*-app-application.json` plus `*-app-application.txt`. Plan mode keeps
+`applied=false`. Record-applied mode writes `applied=true` only when readiness
+is ready, the decision is approved, required change evidence exists,
+before/after evidence exists, and required post-application verification is
+recorded. The command records application state; it does not edit source,
+config, migrations, operations, rollback plans, deployments, queues,
+databases, or external systems.
 
 Print the causal artifact retention manifest for agents and CI:
 
