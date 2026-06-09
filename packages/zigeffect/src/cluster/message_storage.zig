@@ -166,28 +166,66 @@ pub const InMemoryMessageStorage = struct {
         return .{ .envelope = returned };
     }
 
-    pub fn claim(self: *InMemoryMessageStorage, request: MessageStorageClaim) MessageStorageError!MessageEnvelope {
-        _ = self;
-        _ = request;
-        return error.MessageNotFound;
+    pub fn claim(self: *InMemoryMessageStorage, request: MessageStorageClaim) (Allocator.Error || MessageStorageError)!MessageEnvelope {
+        const index = self.findMessageIndex(request.message_id) orelse return error.MessageNotFound;
+        var record = &self.messages.items[index];
+        if (record.shard_id != request.shard_id) return error.MessageNotFound;
+        if (!messageIsUnprocessed(record.status)) return error.MessageNotFound;
+        record.status = .claimed;
+        record.envelope.attempt += 1;
+        record.updated_at_ms = request.now_ms;
+        return envelope_mod.cloneMessageEnvelope(self.allocator, record.envelope);
     }
 
     pub fn ack(self: *InMemoryMessageStorage, request: MessageStorageAck) MessageStorageError!void {
-        _ = self;
-        _ = request;
-        return error.MessageNotFound;
+        const index = self.findMessageIndex(request.message_id) orelse return error.MessageNotFound;
+        self.messages.items[index].status = .acknowledged;
+        self.messages.items[index].updated_at_ms = request.now_ms;
     }
 
-    pub fn storeReply(self: *InMemoryMessageStorage, request: MessageStorageReply) MessageStorageError!MessageEnvelope {
-        _ = self;
-        _ = request;
-        return error.MissingRequest;
+    pub fn storeReply(self: *InMemoryMessageStorage, request: MessageStorageReply) (Allocator.Error || MessageStorageError)!MessageEnvelope {
+        const correlation_id = request.envelope.correlation_id orelse return error.MissingRequest;
+        const request_index = self.findRequestIndexByCorrelation(correlation_id) orelse return error.MissingRequest;
+        if (self.findReplyIndexByCorrelation(correlation_id) != null) return error.DuplicateReply;
+
+        const owned = try prepareEnvelope(self.allocator, request.envelope);
+        errdefer envelope_mod.deinitMessageEnvelope(self.allocator, owned);
+        const returned = try envelope_mod.cloneMessageEnvelope(self.allocator, owned);
+        errdefer envelope_mod.deinitMessageEnvelope(self.allocator, returned);
+        try self.replies.append(self.allocator, .{
+            .shard_id = request.shard_id,
+            .envelope = owned,
+            .stored_at_ms = request.now_ms,
+        });
+        self.messages.items[request_index].status = .replied;
+        self.messages.items[request_index].updated_at_ms = request.now_ms;
+        return returned;
     }
 
     pub fn reply(self: *InMemoryMessageStorage, correlation_id: MessageCorrelationId, allocator: Allocator) Allocator.Error!?MessageEnvelope {
-        _ = self;
-        _ = correlation_id;
-        _ = allocator;
+        const index = self.findReplyIndexByCorrelation(correlation_id) orelse return null;
+        return try envelope_mod.cloneMessageEnvelope(allocator, self.replies.items[index].envelope);
+    }
+
+    fn findMessageIndex(self: *const InMemoryMessageStorage, message_id_value: MessageId) ?usize {
+        for (self.messages.items, 0..) |record, index| {
+            if (record.envelope.id == message_id_value) return index;
+        }
+        return null;
+    }
+
+    fn findRequestIndexByCorrelation(self: *const InMemoryMessageStorage, correlation_id: MessageCorrelationId) ?usize {
+        for (self.messages.items, 0..) |record, index| {
+            if (record.envelope.kind != .request) continue;
+            if (record.envelope.correlation_id == correlation_id) return index;
+        }
+        return null;
+    }
+
+    fn findReplyIndexByCorrelation(self: *const InMemoryMessageStorage, correlation_id: MessageCorrelationId) ?usize {
+        for (self.replies.items, 0..) |reply_record, index| {
+            if (reply_record.envelope.correlation_id == correlation_id) return index;
+        }
         return null;
     }
 
