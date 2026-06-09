@@ -211,6 +211,8 @@ pub const WorkflowScheduler = struct {
     workflow_cursor: usize = 0,
     timer_watches: std.ArrayList(TimerWatch) = .empty,
     timer_cursor: usize = 0,
+    queue_workers: std.ArrayList(RegisteredQueueWorker) = .empty,
+    queue_cursor: usize = 0,
 
     pub fn init(allocator: Allocator, journal_store: JournalStore, clock: *Clock) WorkflowScheduler {
         return .{
@@ -221,6 +223,7 @@ pub const WorkflowScheduler = struct {
     }
 
     pub fn deinit(self: *WorkflowScheduler) void {
+        self.queue_workers.deinit(self.allocator);
         self.timer_watches.deinit(self.allocator);
         self.workflow_workers.deinit(self.allocator);
     }
@@ -233,10 +236,16 @@ pub const WorkflowScheduler = struct {
         try self.timer_watches.append(self.allocator, watch);
     }
 
+    pub fn registerQueueWorker(self: *WorkflowScheduler, worker: RegisteredQueueWorker) Allocator.Error!void {
+        try self.queue_workers.append(self.allocator, worker);
+    }
+
     pub fn tick(self: *WorkflowScheduler, budget: WorkflowSchedulerBudget) anyerror!WorkflowSchedulerTickResult {
         var result = WorkflowSchedulerTickResult{ .iterations = 1 };
         try self.pollWorkflowWorkers(budget.max_workflow_polls, &result);
         try self.fireDueTimers(budget.max_timers, &result);
+        try self.retryExpiredQueueClaims(budget.max_queue_retries, &result);
+        try self.processQueueClaims(budget.max_queue_claims, &result);
         return result;
     }
 
@@ -273,6 +282,39 @@ pub const WorkflowScheduler = struct {
             const watch = self.timer_watches.items[index];
             var durable_clock = DurableClock.init(self.allocator, self.journal_store, watch.workflow_id, watch.execution_id);
             result.timers_fired += try durable_clock.fireDueTimers(now_ms);
+        }
+    }
+
+    fn retryExpiredQueueClaims(self: *WorkflowScheduler, max_workers: usize, result: *WorkflowSchedulerTickResult) anyerror!void {
+        if (max_workers == 0) return;
+        const visits = @min(max_workers, self.queue_workers.items.len);
+        var count: usize = 0;
+        while (count < visits) : (count += 1) {
+            result.queue_retries += try self.queue_workers.items[count].retryExpired();
+        }
+    }
+
+    fn processQueueClaims(self: *WorkflowScheduler, max_workers: usize, result: *WorkflowSchedulerTickResult) anyerror!void {
+        const len = self.queue_workers.items.len;
+        if (len == 0 or max_workers == 0) return;
+
+        const visits = @min(max_workers, len);
+        var count: usize = 0;
+        while (count < visits) : (count += 1) {
+            const index = self.queue_cursor % len;
+            self.queue_cursor = (index + 1) % len;
+            const step = try self.queue_workers.items[index].processOne();
+            switch (step) {
+                .idle => {},
+                .completed => {
+                    result.queue_claims += 1;
+                    result.queue_completions += 1;
+                },
+                .failed => {
+                    result.queue_claims += 1;
+                    result.queue_failures += 1;
+                },
+            }
         }
     }
 };
