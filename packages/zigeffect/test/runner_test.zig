@@ -97,3 +97,75 @@ test "runner heartbeat records are monotonic and transition to healthy" {
         .observed_at_ms = 1_300,
     }));
 }
+
+test "runner health inspector persists degraded and unhealthy transitions" {
+    var registry = fx.LocalRunnerRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    const address = fx.runnerAddress("machine-a", "runner-a");
+    _ = try registry.registerRunner(.{ .address = address, .name = "runner-a", .started_at_ms = 1_000 });
+    _ = try registry.recordHeartbeat(.{ .address = address, .sequence = 1, .observed_at_ms = 1_050 });
+
+    const inspector = try fx.LocalRunnerHealthInspector.init(.{
+        .degraded_after_ms = 100,
+        .unhealthy_after_ms = 300,
+    });
+
+    const healthy = try inspector.inspectRunner(&registry, address, 1_120);
+    try std.testing.expectEqual(fx.RunnerHealthState.healthy, healthy.state);
+    try std.testing.expectEqual(@as(usize, 2), try registry.healthEventCount(address));
+
+    const degraded = try inspector.inspectRunner(&registry, address, 1_150);
+    try std.testing.expectEqual(fx.RunnerHealthState.degraded, degraded.state);
+    var event = (try registry.lastHealthEvent(address)).?;
+    try std.testing.expectEqual(fx.RunnerHealthReason.heartbeat_late, event.reason);
+
+    const unhealthy = try inspector.inspectRunner(&registry, address, 1_350);
+    try std.testing.expectEqual(fx.RunnerHealthState.unhealthy, unhealthy.state);
+    event = (try registry.lastHealthEvent(address)).?;
+    try std.testing.expectEqual(fx.RunnerHealthReason.heartbeat_expired, event.reason);
+    try std.testing.expectEqual(@as(usize, 4), try registry.healthEventCount(address));
+
+    _ = try inspector.inspectRunner(&registry, address, 1_360);
+    try std.testing.expectEqual(@as(usize, 4), try registry.healthEventCount(address));
+}
+
+test "stopped runner remains stopped during health inspection" {
+    var registry = fx.LocalRunnerRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    const address = fx.runnerAddress("machine-a", "runner-a");
+    _ = try registry.registerRunner(.{ .address = address, .name = "runner-a", .started_at_ms = 1_000 });
+    try registry.markStopped(address, 1_100);
+
+    const inspector = try fx.LocalRunnerHealthInspector.init(.{
+        .degraded_after_ms = 100,
+        .unhealthy_after_ms = 300,
+    });
+    const snapshot = try inspector.inspectRunner(&registry, address, 2_000);
+    try std.testing.expectEqual(fx.RunnerHealthState.stopped, snapshot.state);
+    try std.testing.expectEqual(fx.RunnerHealthReason.runner_stopped, (try registry.lastHealthEvent(address)).?.reason);
+}
+
+test "runner health inspector reports all current runners" {
+    var registry = fx.LocalRunnerRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    const first = fx.runnerAddress("machine-a", "runner-a");
+    const second = fx.runnerAddress("machine-a", "runner-b");
+    _ = try registry.registerRunner(.{ .address = first, .name = "runner-a", .started_at_ms = 1_000 });
+    _ = try registry.registerRunner(.{ .address = second, .name = "runner-b", .started_at_ms = 1_000 });
+    _ = try registry.recordHeartbeat(.{ .address = first, .sequence = 1, .observed_at_ms = 1_050 });
+
+    const inspector = try fx.LocalRunnerHealthInspector.init(.{
+        .degraded_after_ms = 100,
+        .unhealthy_after_ms = 300,
+    });
+    var report = try inspector.inspectAll(std.testing.allocator, &registry, 1_400);
+    defer report.deinit();
+
+    try std.testing.expectEqual(@as(u64, 1_400), report.generated_at_ms);
+    try std.testing.expectEqual(@as(usize, 2), report.snapshots.len);
+    try std.testing.expectEqual(fx.RunnerHealthState.unhealthy, report.snapshots[0].state);
+    try std.testing.expectEqual(fx.RunnerHealthState.unhealthy, report.snapshots[1].state);
+}

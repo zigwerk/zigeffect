@@ -166,6 +166,11 @@ pub const LocalRunnerRegistry = struct {
         return if (self.records.items[index].last_heartbeat_index) |heartbeat_index| self.heartbeats.items[heartbeat_index] else null;
     }
 
+    pub fn markStopped(self: *LocalRunnerRegistry, address: RunnerAddress, at_ms: u64) (Allocator.Error || RunnerRegistryError)!void {
+        const index = self.findRecordIndex(address) orelse return error.RunnerNotFound;
+        try self.transitionByIndex(index, .stopped, .runner_stopped, at_ms);
+    }
+
     pub fn snapshot(self: *const LocalRunnerRegistry, address: RunnerAddress, now_ms: u64) RunnerRegistryError!RunnerHealthSnapshot {
         const index = self.findRecordIndex(address) orelse return error.RunnerNotFound;
         const record = self.records.items[index];
@@ -209,6 +214,21 @@ pub const LocalRunnerRegistry = struct {
         }
         return null;
     }
+
+    fn transitionByIndex(self: *LocalRunnerRegistry, index: usize, next_state: RunnerHealthState, reason: RunnerHealthReason, at_ms: u64) Allocator.Error!void {
+        const previous_state = self.records.items[index].state;
+        if (previous_state == next_state) return;
+        try self.events.ensureUnusedCapacity(self.allocator, 1);
+        const address = self.records.items[index].registration.address;
+        self.records.items[index].state = next_state;
+        self.events.appendAssumeCapacity(.{
+            .address = address,
+            .previous_state = previous_state,
+            .next_state = next_state,
+            .reason = reason,
+            .at_ms = at_ms,
+        });
+    }
 };
 
 pub const LocalRunnerHealthInspector = struct {
@@ -217,6 +237,54 @@ pub const LocalRunnerHealthInspector = struct {
     pub fn init(options: RunnerHealthInspectorOptions) RunnerRegistryError!LocalRunnerHealthInspector {
         if (options.degraded_after_ms > options.unhealthy_after_ms) return error.InvalidHealthThresholds;
         return .{ .options = options };
+    }
+
+    pub fn inspectRunner(self: *const LocalRunnerHealthInspector, registry: *LocalRunnerRegistry, address: RunnerAddress, now_ms: u64) (Allocator.Error || RunnerRegistryError)!RunnerHealthSnapshot {
+        const index = registry.findRecordIndex(address) orelse return error.RunnerNotFound;
+        const record = registry.records.items[index];
+        if (record.state == .stopped) return try registry.snapshot(address, now_ms);
+
+        const target = self.targetState(registry, record, now_ms);
+        if (target.reason) |reason| {
+            try registry.transitionByIndex(index, target.state, reason, now_ms);
+        }
+        return try registry.snapshot(address, now_ms);
+    }
+
+    pub fn inspectAll(self: *const LocalRunnerHealthInspector, allocator: Allocator, registry: *LocalRunnerRegistry, now_ms: u64) (Allocator.Error || RunnerRegistryError)!RunnerHealthReport {
+        const snapshots = try allocator.alloc(RunnerHealthSnapshot, registry.records.items.len);
+        errdefer allocator.free(snapshots);
+        for (registry.records.items, 0..) |record, index| {
+            snapshots[index] = try self.inspectRunner(registry, record.registration.address, now_ms);
+        }
+        return .{
+            .allocator = allocator,
+            .generated_at_ms = now_ms,
+            .snapshots = snapshots,
+        };
+    }
+
+    fn targetState(self: *const LocalRunnerHealthInspector, registry: *const LocalRunnerRegistry, record: RunnerRecord, now_ms: u64) struct {
+        state: RunnerHealthState,
+        reason: ?RunnerHealthReason,
+    } {
+        if (record.last_heartbeat_index) |heartbeat_index| {
+            const heartbeat = registry.heartbeats.items[heartbeat_index];
+            const age_ms = elapsedMs(now_ms, heartbeat.observed_at_ms);
+            if (age_ms >= self.options.unhealthy_after_ms) {
+                return .{ .state = .unhealthy, .reason = if (record.state == .unhealthy) null else .heartbeat_expired };
+            }
+            if (age_ms >= self.options.degraded_after_ms) {
+                return .{ .state = .degraded, .reason = if (record.state == .degraded) null else .heartbeat_late };
+            }
+            return .{ .state = .healthy, .reason = if (record.state == .healthy) null else .heartbeat_recorded };
+        }
+
+        const startup_age_ms = elapsedMs(now_ms, record.registration.started_at_ms);
+        if (startup_age_ms >= self.options.unhealthy_after_ms) {
+            return .{ .state = .unhealthy, .reason = if (record.state == .unhealthy) null else .heartbeat_expired };
+        }
+        return .{ .state = .starting, .reason = null };
     }
 };
 

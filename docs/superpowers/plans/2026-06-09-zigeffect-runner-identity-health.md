@@ -403,7 +403,7 @@ git commit -m "feat(zigeffect): record runner heartbeats"
 - Modify: `packages/zigeffect/test/runner_test.zig`
 - Modify: `packages/zigeffect/src/cluster/runner.zig`
 
-- [ ] **Step 1: Add failing inspector and report tests**
+- [x] **Step 1: Add failing inspector and report tests**
 
 Append these tests:
 
@@ -481,7 +481,7 @@ test "runner health inspector reports all current runners" {
 }
 ```
 
-- [ ] **Step 2: Run the red inspector test**
+- [x] **Step 2: Run the red inspector test**
 
 Run:
 
@@ -492,14 +492,14 @@ bun run zigeffect:test
 Expected: FAIL with missing methods such as `inspectRunner`, `markStopped`, or
 `inspectAll`.
 
-- [ ] **Step 3: Implement health inspection and reports**
+- [x] **Step 3: Implement health inspection and reports**
 
 Add `markStopped`, `LocalRunnerHealthInspector.inspectRunner`,
 `LocalRunnerHealthInspector.inspectAll`, `RunnerHealthReport.deinit`, and a
 private state-transition helper. Inspection must persist only actual state
 changes and must leave stopped runners stopped.
 
-- [ ] **Step 4: Run the green inspector test**
+- [x] **Step 4: Run the green inspector test**
 
 Run:
 
@@ -511,7 +511,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Commit health inspector**
+- [x] **Step 5: Commit health inspector**
 
 ```bash
 git add packages/zigeffect/src/cluster/runner.zig packages/zigeffect/test/runner_test.zig
