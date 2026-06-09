@@ -86,11 +86,22 @@ Owns execution runtimes and deterministic concurrency primitives:
 - `fiber.zig`: `Fiber`, `FiberRuntime`, deterministic lifecycle semantics.
 - `coordination.zig`: `Deferred`, `Queue`, `Semaphore`.
 - `backend.zig`: backend capability contract and deterministic backend marker.
+- `async_backend.zig`: async backend vtable shape for suspend, wake, timers,
+  and interrupts.
+- `backend_diagnostics.zig`: backend capability requirements and formatted
+  diagnostics for unsupported runtime features.
 - `control.zig`: shared suspension and cooperative cancellation vocabulary.
 
 Runtime/scope/fiber cohesion, coordination backpressure, scoped permits,
 controlled suspension vocabulary, cooperative cancellation, and future backend
 boundaries belong here.
+
+Runtime backend capabilities include operation-specific async workflow flags for
+wake, timer scheduling, interruption, and durable suspension. The async backend
+vtable names the future suspend, wake, timer, and interrupt operations without
+implementing real async I/O yet. Backend diagnostics format missing capability
+errors so workflow code can fail clearly before a deterministic backend attempts
+async-only behavior.
 
 ```text
 src/layer/
@@ -232,8 +243,9 @@ Owns local durable workflow runtime surfaces:
   store construction, workflow failure/retry/suspend/resume findings, and
   reuse of shared causal report, JSON, and DOT rendering for durable histories.
 - `engine.zig`: workflow engine registration, provider requirement validation,
-  durable `workflow_started` appends, typed poll results, execution inspection,
-  duplicate execution checks, and in-memory execution indexing.
+  backend requirement checks, durable `workflow_started` appends, typed poll
+  results, execution inspection, duplicate execution checks, and in-memory
+  execution indexing.
 - `journal.zig`: workflow journal id aliases, event kinds, event envelope,
   schema constants, version-aware compatibility classification, current-row
   migration registry, unknown-event policy, event clone/free helpers, JSON

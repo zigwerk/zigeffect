@@ -535,17 +535,17 @@ Goal: prepare the runtime for real suspension without changing workflow APIs.
 
 Deliverables:
 
-- [ ] Expand `BackendKind` and `BackendCapabilities`.
-- [ ] Add async backend trait shape for suspend, wake, timer, and interrupt.
-- [ ] Add deterministic backend conformance tests.
-- [ ] Add workflow engine backend requirements.
-- [ ] Add diagnostics when a workflow feature requires unavailable backend
+- [x] Expand `BackendKind` and `BackendCapabilities`.
+- [x] Add async backend trait shape for suspend, wake, timer, and interrupt.
+- [x] Add deterministic backend conformance tests.
+- [x] Add workflow engine backend requirements.
+- [x] Add diagnostics when a workflow feature requires unavailable backend
   capabilities.
 
 Acceptance:
 
-- [ ] Deterministic backend remains green.
-- [ ] Unsupported async-only behavior fails with clear diagnostics.
+- [x] Deterministic backend remains green.
+- [x] Unsupported async-only behavior fails with clear diagnostics.
 
 ## Milestone 23: Cooperative Local Scheduler
 
