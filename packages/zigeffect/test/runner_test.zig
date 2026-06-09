@@ -32,3 +32,32 @@ test "runner ids are stable machine-sensitive and process-sensitive" {
     const address = fx.runnerAddress("dev-machine", "process-a");
     try std.testing.expect(address.eql(.{ .machine_id = machine, .runner_id = runner }));
 }
+
+test "local runner registry persists startup registration and event" {
+    var registry = fx.LocalRunnerRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    const address = fx.runnerAddress("machine-a", "runner-a");
+    const snapshot = try registry.registerRunner(.{
+        .address = address,
+        .name = "runner-a",
+        .started_at_ms = 1_000,
+    });
+
+    try std.testing.expectEqual(@as(usize, 1), registry.runnerCount());
+    try std.testing.expectEqual(fx.RunnerHealthState.starting, snapshot.state);
+    try std.testing.expectEqualStrings("runner-a", snapshot.name);
+    try std.testing.expectEqual(@as(usize, 1), try registry.healthEventCount(address));
+
+    const event = (try registry.lastHealthEvent(address)).?;
+    try std.testing.expectEqual(@as(?fx.RunnerHealthState, null), event.previous_state);
+    try std.testing.expectEqual(fx.RunnerHealthState.starting, event.next_state);
+    try std.testing.expectEqual(fx.RunnerHealthReason.startup_registered, event.reason);
+    try std.testing.expectEqual(@as(u64, 1_000), event.at_ms);
+
+    try std.testing.expectError(error.DuplicateRunner, registry.registerRunner(.{
+        .address = address,
+        .name = "duplicate",
+        .started_at_ms = 1_100,
+    }));
+}

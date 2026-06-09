@@ -240,7 +240,7 @@ git commit -m "feat(zigeffect): add runner identity surface"
 - Modify: `packages/zigeffect/test/runner_test.zig`
 - Modify: `packages/zigeffect/src/cluster/runner.zig`
 
-- [ ] **Step 1: Add failing registration tests**
+- [x] **Step 1: Add failing registration tests**
 
 Append these tests:
 
@@ -275,7 +275,7 @@ test "local runner registry persists startup registration and event" {
 }
 ```
 
-- [ ] **Step 2: Run the red registration test**
+- [x] **Step 2: Run the red registration test**
 
 Run:
 
@@ -286,14 +286,14 @@ bun run zigeffect:test
 Expected: FAIL with missing methods such as `registerRunner`, `runnerCount`,
 `healthEventCount`, or `lastHealthEvent`.
 
-- [ ] **Step 3: Implement registration storage and health event access**
+- [x] **Step 3: Implement registration storage and health event access**
 
 Extend `LocalRunnerRegistry` with `records` and `events` arrays, an internal
 `RunnerRecord`, `registerRunner`, `runnerCount`, `state`, `snapshot`,
 `healthEventCount`, `lastHealthEvent`, and helper methods for finding records.
 Registration must clone runner names and free them in `deinit`.
 
-- [ ] **Step 4: Run the green registration test**
+- [x] **Step 4: Run the green registration test**
 
 Run:
 
@@ -305,7 +305,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Commit registration storage**
+- [x] **Step 5: Commit registration storage**
 
 ```bash
 git add packages/zigeffect/src/cluster/runner.zig packages/zigeffect/test/runner_test.zig
