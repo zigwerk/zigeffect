@@ -55,6 +55,7 @@ pub const DeferredState = replay.DeferredState;
 pub const QueueState = replay.QueueState;
 pub const CompensationState = replay.CompensationState;
 pub const WorkflowReplayState = replay.WorkflowReplayState;
+pub const workflowStatusIsTerminal = replay.workflowStatusIsTerminal;
 
 pub const JournalStore = store.JournalStore;
 pub const JournalAppend = store.JournalAppend;

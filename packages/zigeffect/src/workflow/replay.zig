@@ -158,6 +158,74 @@ pub const WorkflowReplayState = struct {
         return state;
     }
 
+    pub fn clone(self: *const WorkflowReplayState, allocator: std.mem.Allocator) std.mem.Allocator.Error!WorkflowReplayState {
+        var copied = WorkflowReplayState.init(allocator);
+        errdefer copied.deinit();
+
+        copied.workflow_status = self.workflow_status;
+        copied.workflow_id = self.workflow_id;
+        copied.execution_id = self.execution_id;
+        copied.last_sequence = self.last_sequence;
+
+        for (self.activities.items) |row| {
+            const name = try copied.cloneName(row.name);
+            errdefer copied.freeName(name);
+            try copied.activities.append(allocator, .{
+                .id = row.id,
+                .status = row.status,
+                .last_sequence = row.last_sequence,
+                .attempt = row.attempt,
+                .name = name,
+            });
+        }
+
+        for (self.timers.items) |row| {
+            const name = try copied.cloneName(row.name);
+            errdefer copied.freeName(name);
+            try copied.timers.append(allocator, .{
+                .id = row.id,
+                .status = row.status,
+                .last_sequence = row.last_sequence,
+                .name = name,
+            });
+        }
+
+        for (self.deferreds.items) |row| {
+            const name = try copied.cloneName(row.name);
+            errdefer copied.freeName(name);
+            try copied.deferreds.append(allocator, .{
+                .id = row.id,
+                .status = row.status,
+                .last_sequence = row.last_sequence,
+                .name = name,
+            });
+        }
+
+        for (self.queues.items) |row| {
+            const name = try copied.cloneName(row.name);
+            errdefer copied.freeName(name);
+            try copied.queues.append(allocator, .{
+                .id = row.id,
+                .status = row.status,
+                .last_sequence = row.last_sequence,
+                .name = name,
+            });
+        }
+
+        for (self.compensations.items) |row| {
+            const name = try copied.cloneName(row.name);
+            errdefer copied.freeName(name);
+            try copied.compensations.append(allocator, .{
+                .id = row.id,
+                .status = row.status,
+                .last_sequence = row.last_sequence,
+                .name = name,
+            });
+        }
+
+        return copied;
+    }
+
     pub fn apply(self: *WorkflowReplayState, event: WorkflowEvent) (std.mem.Allocator.Error || ReplayError)!void {
         try self.ensureCanApply(event);
         switch (event.kind) {
@@ -426,6 +494,10 @@ fn isTerminal(status: WorkflowStatus) bool {
         .suspended,
         => false,
     };
+}
+
+pub fn workflowStatusIsTerminal(status: WorkflowStatus) bool {
+    return isTerminal(status);
 }
 
 fn requireActivityId(event: WorkflowEvent) ReplayError!journal.ActivityId {

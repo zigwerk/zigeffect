@@ -566,6 +566,35 @@ test "workflow replay folds lifecycle events" {
     try std.testing.expectEqual(@as(u64, 4), state.last_sequence);
 }
 
+test "workflow replay state clone owns copied names" {
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8, .name = "clone-workflow" },
+        .{ .sequence = 2, .kind = .activity_scheduled, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .attempt = 1, .name = "charge" },
+        .{ .sequence = 3, .kind = .timer_scheduled, .workflow_id = 7, .execution_id = 8, .timer_id = 20, .name = "wake" },
+    };
+
+    var state = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &events);
+    defer state.deinit();
+
+    var cloned = try state.clone(std.testing.allocator);
+    defer cloned.deinit();
+
+    try expectWorkflowReplayStatesEqual(&state, &cloned);
+    try std.testing.expect(cloned.activities.items[0].name.ptr != state.activities.items[0].name.ptr);
+    try std.testing.expect(cloned.timers.items[0].name.ptr != state.timers.items[0].name.ptr);
+}
+
+test "workflow terminal status helper identifies retention-safe states" {
+    try std.testing.expect(!fx.workflow.workflowStatusIsTerminal(.pending));
+    try std.testing.expect(!fx.workflow.workflowStatusIsTerminal(.running));
+    try std.testing.expect(!fx.workflow.workflowStatusIsTerminal(.suspended));
+    try std.testing.expect(fx.workflow.workflowStatusIsTerminal(.completed));
+    try std.testing.expect(fx.workflow.workflowStatusIsTerminal(.failed));
+    try std.testing.expect(fx.workflow.workflowStatusIsTerminal(.interrupted));
+    try std.testing.expect(fx.workflow.workflowStatusIsTerminal(.cancelled));
+    try std.testing.expect(fx.workflow.workflowStatusIsTerminal(.defect));
+}
+
 test "workflow lifecycle suspend and resume are durable and idempotent" {
     var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
     defer journal_memory.deinit();
