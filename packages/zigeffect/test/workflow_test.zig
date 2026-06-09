@@ -1629,6 +1629,87 @@ test "file workflow journal archive export writes replayable json lines" {
     try expectWorkflowReplayStatesEqual(&expected, &actual);
 }
 
+test "file workflow journal compacts completed workflow after archive and snapshot commit" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8, .idempotency_key = "start" },
+        .{ .sequence = 2, .kind = .activity_scheduled, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .name = "charge", .idempotency_key = "activity" },
+        .{ .sequence = 3, .kind = .activity_completed, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .idempotency_key = "activity-done" },
+        .{ .sequence = 4, .kind = .workflow_completed, .workflow_id = 7, .execution_id = 8, .idempotency_key = "complete" },
+    };
+    var expected = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &events);
+    defer expected.deinit();
+
+    {
+        var store = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer store.deinit();
+        for (events) |event| _ = try store.append(.{ .event = event });
+
+        const result = try store.compactCompleted(.{ .export_archive = true });
+        defer result.deinit(std.testing.allocator);
+        try std.testing.expect(result.compacted);
+        try std.testing.expectEqual(@as(u64, 4), result.last_sequence.?);
+        try std.testing.expectEqual(@as(usize, 4), result.archived_event_count);
+
+        var state = try store.latestState(std.testing.allocator);
+        defer state.deinit();
+        try expectWorkflowReplayStatesEqual(&expected, &state);
+    }
+
+    const segment_name = try fx.workflow.segmentFileName(std.testing.allocator, 1);
+    defer std.testing.allocator.free(segment_name);
+    const compacted_segment = try tmp.dir.readFileAlloc(std.testing.io, segment_name, std.testing.allocator, std.Io.Limit.limited(16 * 1024));
+    defer std.testing.allocator.free(compacted_segment);
+    try std.testing.expectEqual(@as(usize, 0), compacted_segment.len);
+
+    var reopened = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer reopened.deinit();
+    var actual = try reopened.latestState(std.testing.allocator);
+    defer actual.deinit();
+    try expectWorkflowReplayStatesEqual(&expected, &actual);
+}
+
+test "file workflow journal compaction leaves running workflow untouched" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var store = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer store.deinit();
+    _ = try store.append(.{ .event = .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8, .idempotency_key = "start" } });
+
+    const result = try store.compactCompleted(.{ .export_archive = true });
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(!result.compacted);
+}
+
+test "file workflow journal crash after snapshot commit replays without losing acknowledged rows" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8, .idempotency_key = "start" },
+        .{ .sequence = 2, .kind = .workflow_completed, .workflow_id = 7, .execution_id = 8, .idempotency_key = "complete" },
+    };
+    var expected = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &events);
+    defer expected.deinit();
+
+    {
+        var store = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer store.deinit();
+        for (events) |event| _ = try store.append(.{ .event = event });
+        const publication = try store.writeReplaySnapshot(null);
+        defer publication.deinit(std.testing.allocator);
+    }
+
+    var reopened = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer reopened.deinit();
+    var actual = try reopened.latestState(std.testing.allocator);
+    defer actual.deinit();
+    try expectWorkflowReplayStatesEqual(&expected, &actual);
+}
+
 test "file journal refuses future schema versions without truncating" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

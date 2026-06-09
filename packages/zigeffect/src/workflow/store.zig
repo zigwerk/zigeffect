@@ -656,6 +656,25 @@ pub const WorkflowArchiveExport = struct {
     }
 };
 
+pub const WorkflowCompactionOptions = struct {
+    export_archive: bool = true,
+};
+
+pub const WorkflowCompactionResult = struct {
+    compacted: bool,
+    last_sequence: ?JournalSequence = null,
+    checkpoint_name: ?[]const u8 = null,
+    commit_name: ?[]const u8 = null,
+    archive_name: ?[]const u8 = null,
+    archived_event_count: usize = 0,
+
+    pub fn deinit(self: *const WorkflowCompactionResult, allocator: Allocator) void {
+        if (self.checkpoint_name) |name| allocator.free(name);
+        if (self.commit_name) |name| allocator.free(name);
+        if (self.archive_name) |name| allocator.free(name);
+    }
+};
+
 pub const FileJournalStore = struct {
     allocator: Allocator,
     io: std.Io,
@@ -816,6 +835,52 @@ pub const FileJournalStore = struct {
         };
     }
 
+    pub fn compactCompleted(self: *FileJournalStore, options: WorkflowCompactionOptions) !WorkflowCompactionResult {
+        var state = try self.latestState(self.allocator);
+        defer state.deinit();
+
+        if (!replay.workflowStatusIsTerminal(state.workflow_status)) {
+            return .{ .compacted = false };
+        }
+
+        var exported_archive: ?WorkflowArchiveExport = null;
+        errdefer if (exported_archive) |*exported| exported.deinit(self.allocator);
+        var archived_event_count: usize = 0;
+        if (options.export_archive) {
+            const first_sequence = self.archiveFirstSequence();
+            exported_archive = try self.exportArchive(first_sequence, state.last_sequence);
+            archived_event_count = exported_archive.?.event_count;
+        }
+
+        const archive_name_for_commit = if (exported_archive) |exported| exported.archive_name else null;
+        var publication = try self.writeReplaySnapshot(archive_name_for_commit);
+        errdefer publication.deinit(self.allocator);
+
+        if (exported_archive) |*exported| {
+            exported.deinit(self.allocator);
+            exported_archive = null;
+        }
+
+        try self.truncateActiveSegment();
+
+        var base_state = try state.clone(self.allocator);
+        errdefer base_state.deinit();
+        if (self.base_state) |*old_state| {
+            old_state.deinit();
+        }
+        self.base_state = base_state;
+        self.memory.resetFromSequence(state.last_sequence);
+
+        return .{
+            .compacted = true,
+            .last_sequence = state.last_sequence,
+            .checkpoint_name = publication.checkpoint_name,
+            .commit_name = publication.commit_name,
+            .archive_name = publication.archive_name,
+            .archived_event_count = archived_event_count,
+        };
+    }
+
     pub fn syncCount(self: *const FileJournalStore) u64 {
         return self.sync_count;
     }
@@ -901,6 +966,19 @@ pub const FileJournalStore = struct {
         defer file.deinit(self.io);
         try file.file.writeStreamingAll(self.io, content);
         try file.replace(self.io);
+    }
+
+    fn truncateActiveSegment(self: *FileJournalStore) !void {
+        const file = try self.dir.createFile(self.io, self.segment_name, .{ .truncate = true });
+        file.close(self.io);
+    }
+
+    fn archiveFirstSequence(self: *const FileJournalStore) JournalSequence {
+        if (self.base_state) |state| {
+            if (state.last_sequence == std.math.maxInt(JournalSequence)) return state.last_sequence;
+            return state.last_sequence + 1;
+        }
+        return self.options.segment_first_sequence;
     }
 
     fn baseSequence(self: *const FileJournalStore) JournalSequence {

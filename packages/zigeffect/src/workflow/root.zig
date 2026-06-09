@@ -87,6 +87,8 @@ pub const InMemoryJournalStore = store.InMemoryJournalStore;
 pub const FileJournalStoreOptions = store.FileJournalStoreOptions;
 pub const WorkflowSnapshotPublication = store.WorkflowSnapshotPublication;
 pub const WorkflowArchiveExport = store.WorkflowArchiveExport;
+pub const WorkflowCompactionOptions = store.WorkflowCompactionOptions;
+pub const WorkflowCompactionResult = store.WorkflowCompactionResult;
 pub const FileJournalStore = store.FileJournalStore;
 
 pub const WorkflowMetadata = definition.WorkflowMetadata;
