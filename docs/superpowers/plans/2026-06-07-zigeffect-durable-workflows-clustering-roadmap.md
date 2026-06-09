@@ -469,16 +469,16 @@ Goal: make local durable runtime state understandable to humans and agents.
 
 Deliverables:
 
-- [ ] Add `zig build workflow-journal-inspect`.
-- [ ] Add `zig build workflow-replay`.
-- [ ] Add `zig build workflow-list`.
-- [ ] Add formatted state, pending timers, pending deferreds, pending queues,
+- [x] Add `zig build workflow-journal-inspect`.
+- [x] Add `zig build workflow-replay`.
+- [x] Add `zig build workflow-list`.
+- [x] Add formatted state, pending timers, pending deferreds, pending queues,
   and last failure reports.
-- [ ] Add JSON report format for agent consumption.
+- [x] Add JSON report format for agent consumption.
 
 Acceptance:
 
-- [ ] CLI tools operate on memory fixture files and real file journals.
+- [x] CLI tools operate on memory fixture files and real file journals.
 
 ## Milestone 19: Causal Runtime Integration
 

@@ -210,3 +210,42 @@ test "workflow tool fixture loader parses json lines" {
     try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_completed, events.events[1].kind);
     try std.testing.expectEqualStrings("fixture-workflow", events.events[0].name);
 }
+
+test "workflow tool loader reads file journal directories" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    {
+        var file_store = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer file_store.deinit();
+        const journal = file_store.asJournalStore();
+        _ = try journal.append(.{ .event = .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .name = "file-workflow",
+            .status = "running",
+            .idempotency_key = "file-start",
+        } });
+        _ = try journal.append(.{ .event = .{
+            .sequence = 2,
+            .kind = .workflow_completed,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .status = "completed",
+            .idempotency_key = "file-completed",
+        } });
+    }
+
+    const journal_dir = try std.fmt.allocPrint(std.testing.allocator, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    defer std.testing.allocator.free(journal_dir);
+
+    var events = try loadEvents(std.testing.allocator, std.testing.io, .{ .journal_dir = journal_dir });
+    defer events.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_started, events.events[0].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_completed, events.events[1].kind);
+    try std.testing.expectEqualStrings("file-workflow", events.events[0].name);
+}

@@ -225,6 +225,9 @@ Owns local durable workflow runtime surfaces:
   over `JournalStore`, including durable lifecycle rows, idempotent terminal
   transitions, and explicit terminal rows for pending timers, deferreds,
   queues, and activities during interrupt or cancellation.
+- `inspect.zig`: workflow journal execution grouping, replay report building,
+  pending-work summaries, last-failure extraction, and stable text/JSON report
+  formatting for humans and agents.
 - `engine.zig`: workflow engine registration, provider requirement validation,
   durable `workflow_started` appends, typed poll results, execution inspection,
   duplicate execution checks, and in-memory execution indexing.
@@ -258,6 +261,23 @@ shard ids, runner ids, runner storage, leases, rebalancing, transports,
 cluster workflow integration, and supervision across entities, shards, runners,
 and transports belong here. Cluster code should build on workflow and runtime
 contracts instead of making durable state depend on runner memory.
+
+```text
+tools/
+```
+
+Owns local developer and agent CLI entrypoints:
+
+- `workflow_tool_support.zig`: shared workflow CLI argument parsing and
+  fixture/file-journal event loading.
+- `workflow_list.zig`: `zig build workflow-list` execution summary command.
+- `workflow_replay.zig`: `zig build workflow-replay` selected execution replay
+  command.
+- `workflow_journal_inspect.zig`: `zig build workflow-journal-inspect` selected
+  execution event inspection command.
+
+Workflow tools should stay thin and delegate durable state interpretation to
+`src/workflow/inspect.zig`.
 
 ```text
 src/testing/

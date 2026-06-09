@@ -346,6 +346,75 @@ pub fn build(b: *std.Build) void {
     });
     const run_workflow_tool_support_tests = b.addRunArtifact(workflow_tool_support_tests);
 
+    const workflow_list_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/workflow_list.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    workflow_list_tool_module.addImport("zigeffect", zigeffect);
+    workflow_list_tool_module.addImport("workflow_tool_support", workflow_tool_support_module);
+
+    const workflow_list_tool = b.addExecutable(.{
+        .name = "zigeffect-workflow-list",
+        .root_module = workflow_list_tool_module,
+    });
+    const run_workflow_list_tool = b.addRunArtifact(workflow_list_tool);
+    if (b.args) |args| run_workflow_list_tool.addArgs(args);
+    const workflow_list_step = b.step("workflow-list", "List durable workflow executions from a workflow journal");
+    workflow_list_step.dependOn(&run_workflow_list_tool.step);
+
+    const workflow_list_tool_tests = b.addTest(.{
+        .name = "zigeffect-workflow-list-tests",
+        .root_module = workflow_list_tool_module,
+    });
+    const run_workflow_list_tool_tests = b.addRunArtifact(workflow_list_tool_tests);
+
+    const workflow_replay_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/workflow_replay.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    workflow_replay_tool_module.addImport("zigeffect", zigeffect);
+    workflow_replay_tool_module.addImport("workflow_tool_support", workflow_tool_support_module);
+
+    const workflow_replay_tool = b.addExecutable(.{
+        .name = "zigeffect-workflow-replay",
+        .root_module = workflow_replay_tool_module,
+    });
+    const run_workflow_replay_tool = b.addRunArtifact(workflow_replay_tool);
+    if (b.args) |args| run_workflow_replay_tool.addArgs(args);
+    const workflow_replay_step = b.step("workflow-replay", "Replay durable workflow state from a workflow journal");
+    workflow_replay_step.dependOn(&run_workflow_replay_tool.step);
+
+    const workflow_replay_tool_tests = b.addTest(.{
+        .name = "zigeffect-workflow-replay-tests",
+        .root_module = workflow_replay_tool_module,
+    });
+    const run_workflow_replay_tool_tests = b.addRunArtifact(workflow_replay_tool_tests);
+
+    const workflow_journal_inspect_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/workflow_journal_inspect.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    workflow_journal_inspect_tool_module.addImport("zigeffect", zigeffect);
+    workflow_journal_inspect_tool_module.addImport("workflow_tool_support", workflow_tool_support_module);
+
+    const workflow_journal_inspect_tool = b.addExecutable(.{
+        .name = "zigeffect-workflow-journal-inspect",
+        .root_module = workflow_journal_inspect_tool_module,
+    });
+    const run_workflow_journal_inspect_tool = b.addRunArtifact(workflow_journal_inspect_tool);
+    if (b.args) |args| run_workflow_journal_inspect_tool.addArgs(args);
+    const workflow_journal_inspect_step = b.step("workflow-journal-inspect", "Inspect durable workflow journal events");
+    workflow_journal_inspect_step.dependOn(&run_workflow_journal_inspect_tool.step);
+
+    const workflow_journal_inspect_tool_tests = b.addTest(.{
+        .name = "zigeffect-workflow-journal-inspect-tests",
+        .root_module = workflow_journal_inspect_tool_module,
+    });
+    const run_workflow_journal_inspect_tool_tests = b.addRunArtifact(workflow_journal_inspect_tool_tests);
+
     const causal_query_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_query.zig"),
         .target = target,
@@ -904,6 +973,12 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_test_tool_tests.step);
     examples_step.dependOn(&run_causal_artifact_tool_tests.step);
     examples_step.dependOn(&run_workflow_tool_support_tests.step);
+    examples_step.dependOn(&workflow_list_tool.step);
+    examples_step.dependOn(&run_workflow_list_tool_tests.step);
+    examples_step.dependOn(&workflow_replay_tool.step);
+    examples_step.dependOn(&run_workflow_replay_tool_tests.step);
+    examples_step.dependOn(&workflow_journal_inspect_tool.step);
+    examples_step.dependOn(&run_workflow_journal_inspect_tool_tests.step);
     examples_step.dependOn(&causal_query_tool.step);
     examples_step.dependOn(&run_causal_query_tool_tests.step);
     examples_step.dependOn(&causal_advice_tool.step);
