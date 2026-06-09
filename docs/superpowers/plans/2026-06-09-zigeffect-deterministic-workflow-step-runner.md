@@ -33,11 +33,11 @@
 - Modify `packages/zigeffect/src/workflow/journal.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing step event name tests**
+- [x] **Step 1: Write failing step event name tests**
 
 Assert `step_started`, `step_completed`, and `step_failed` have stable names.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -47,11 +47,11 @@ bun run zigeffect:test
 
 Expected: FAIL until event kinds exist.
 
-- [ ] **Step 3: Implement event kinds**
+- [x] **Step 3: Implement event kinds**
 
 Add the three event kinds and name mappings.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -69,13 +69,13 @@ Expected: PASS.
 - Modify `packages/zigeffect/test/workflow_test.zig`
 - Modify `packages/zigeffect/test/architecture_test.zig`
 
-- [ ] **Step 1: Write failing step replay tests**
+- [x] **Step 1: Write failing step replay tests**
 
 Add tests proving first run records `step_started` and `step_completed`, replay
 returns the recorded value without calling the function again, and failed steps
 append `step_failed`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -85,13 +85,13 @@ bun run zigeffect:test
 
 Expected: FAIL until `WorkflowContext` exists.
 
-- [ ] **Step 3: Implement context and stepU64**
+- [x] **Step 3: Implement context and stepU64**
 
 Initialize replay history from the journal, compute next sequence, find
 recorded step completions by label, append step events, parse u64 results, and
-record typed error names on failure.
+record typed error names through `Exit.cause.failure` details on failure.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -109,15 +109,15 @@ Expected: PASS.
 - Add `docs/superpowers/specs/2026-06-09-zigeffect-deterministic-workflow-step-runner-design.md`
 - Add `docs/superpowers/plans/2026-06-09-zigeffect-deterministic-workflow-step-runner.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Document `context.zig` under `src/workflow/`.
 
-- [ ] **Step 2: Mark Milestone 9 complete**
+- [x] **Step 2: Mark Milestone 9 complete**
 
 Mark all Milestone 9 deliverables and acceptance boxes after the full gate.
 
-- [ ] **Step 3: Run full gate**
+- [x] **Step 3: Run full gate**
 
 Run:
 
@@ -130,7 +130,7 @@ git diff --check
 
 Expected: all commands PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/zigeffect/src/workflow/context.zig packages/zigeffect/src/workflow/journal.zig packages/zigeffect/src/workflow/root.zig packages/zigeffect/test/workflow_test.zig packages/zigeffect/test/architecture_test.zig packages/zigeffect/docs/architecture.md docs/superpowers/specs/2026-06-09-zigeffect-deterministic-workflow-step-runner-design.md docs/superpowers/plans/2026-06-09-zigeffect-deterministic-workflow-step-runner.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md
@@ -139,8 +139,8 @@ git commit -m "feat(zigeffect): add deterministic workflow step runner"
 
 ## Self-Review Checklist
 
-- [ ] Replay returns recorded values without re-running step functions.
-- [ ] Step events use deterministic sequence assignment.
-- [ ] Failed steps record typed error names.
-- [ ] No activity execution, generic codecs, engine integration, timers, or queues are added.
-- [ ] Full verification passes before Milestone 9 is marked complete.
+- [x] Replay returns recorded values without re-running step functions.
+- [x] Step events use deterministic sequence assignment.
+- [x] Failed steps record typed error names through `Exit` and `Cause`.
+- [x] No activity execution, generic codecs, engine integration, timers, or queues are added.
+- [x] Full verification passes before Milestone 9 is marked complete.

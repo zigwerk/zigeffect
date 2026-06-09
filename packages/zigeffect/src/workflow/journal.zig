@@ -36,6 +36,9 @@ pub const WorkflowEventKind = enum {
     queue_completed,
     queue_failed,
     queue_acked,
+    step_started,
+    step_completed,
+    step_failed,
     signal_received,
     signal_consumed,
 };
@@ -66,6 +69,9 @@ pub fn workflowEventKindName(kind: WorkflowEventKind) []const u8 {
         .queue_completed => "queue_completed",
         .queue_failed => "queue_failed",
         .queue_acked => "queue_acked",
+        .step_started => "step_started",
+        .step_completed => "step_completed",
+        .step_failed => "step_failed",
         .signal_received => "signal_received",
         .signal_consumed => "signal_consumed",
     };

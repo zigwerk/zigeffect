@@ -319,16 +319,16 @@ Goal: run pure workflow steps through replay-aware execution.
 
 Deliverables:
 
-- [ ] Add a workflow context service available only inside workflow runs.
-- [ ] Add step labels and deterministic sequence assignment.
-- [ ] Ensure replay returns recorded step outcomes instead of re-running
+- [x] Add a workflow context service available only inside workflow runs.
+- [x] Add step labels and deterministic sequence assignment.
+- [x] Ensure replay returns recorded step outcomes instead of re-running
   completed side effects.
-- [ ] Record defects and typed failures through `Exit` and `Cause`.
+- [x] Record defects and typed failures through `Exit` and `Cause`.
 
 Acceptance:
 
-- [ ] A workflow run followed by replay emits no duplicate activity execution.
-- [ ] Tests prove pure steps and recorded steps converge to the same result.
+- [x] A workflow run followed by replay emits no duplicate activity execution.
+- [x] Tests prove pure steps and recorded steps converge to the same result.
 
 ## Milestone 10: Activity Scheduling And Completion
 

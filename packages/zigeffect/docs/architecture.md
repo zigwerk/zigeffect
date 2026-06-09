@@ -202,6 +202,8 @@ Owns local durable workflow runtime surfaces:
 - `activity.zig`: typed activity definitions, metadata, idempotency key
   callback validation, retry schedule attachment, timeout metadata,
   compensation metadata, formatting, and service requirements.
+- `context.zig`: replay-aware workflow context, deterministic step sequence
+  assignment, recorded step lookup, and step outcome journaling.
 - `engine.zig`: workflow engine registration, provider requirement validation,
   durable `workflow_started` appends, typed poll results, execution inspection,
   duplicate execution checks, and in-memory execution indexing.

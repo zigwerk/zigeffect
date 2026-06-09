@@ -43,8 +43,8 @@ On `stepU64(label, run_fn)`:
 - if replay history already contains `step_completed` for `label`, parse and
   return the recorded `redacted_detail` value without calling `run_fn`;
 - otherwise append `step_started`, call `run_fn`, then append `step_completed`;
-- if `run_fn` returns an error, append `step_failed` with the error name and
-  return the typed error.
+- if `run_fn` returns an error, append `step_failed` with an
+  `Exit.cause.failure:<error-name>` detail and return the typed error.
 
 Sequence numbers are assigned from the latest event in the journal plus one.
 
@@ -60,7 +60,8 @@ Sequence numbers are assigned from the latest event in the journal plus one.
 
 - A first run records step events.
 - A replay returns the recorded result without calling the step function again.
-- Failed steps append `step_failed` with the typed error name.
+- Failed steps append `step_failed` with the typed error represented through
+  `Exit` and `Cause`.
 - `bun run zigeffect:test` passes.
 - `cd packages/zigeffect && zig build examples` passes.
 - `bun run zig:test` passes.

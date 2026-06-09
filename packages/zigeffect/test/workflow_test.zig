@@ -81,6 +81,9 @@ test "workflow event kind names are stable" {
         .{ fx.workflow.WorkflowEventKind.queue_completed, "queue_completed" },
         .{ fx.workflow.WorkflowEventKind.queue_failed, "queue_failed" },
         .{ fx.workflow.WorkflowEventKind.queue_acked, "queue_acked" },
+        .{ fx.workflow.WorkflowEventKind.step_started, "step_started" },
+        .{ fx.workflow.WorkflowEventKind.step_completed, "step_completed" },
+        .{ fx.workflow.WorkflowEventKind.step_failed, "step_failed" },
         .{ fx.workflow.WorkflowEventKind.signal_received, "signal_received" },
         .{ fx.workflow.WorkflowEventKind.signal_consumed, "signal_consumed" },
     };
@@ -905,4 +908,109 @@ test "workflow engine rejects duplicate executions and missing providers" {
         defer events.deinit();
         try std.testing.expectEqual(@as(usize, 1), events.events.len);
     }
+}
+
+test "workflow context replays recorded u64 step without rerunning function" {
+    const Step = struct {
+        var calls: u64 = 0;
+
+        fn run() !u64 {
+            calls += 1;
+            return 42;
+        }
+    };
+    Step.calls = 0;
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{
+        .event = .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .name = "stepper",
+            .status = "running",
+            .idempotency_key = "stepper:1",
+        },
+    });
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const value = try context.stepU64("compute", Step.run);
+        try std.testing.expectEqual(@as(u64, 42), value);
+        try std.testing.expectEqual(@as(u64, 1), Step.calls);
+    }
+
+    {
+        var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+        });
+        defer context.deinit();
+
+        const value = try context.stepU64("compute", Step.run);
+        try std.testing.expectEqual(@as(u64, 42), value);
+        try std.testing.expectEqual(@as(u64, 1), Step.calls);
+    }
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 3), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.step_started, events.events[1].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.step_completed, events.events[2].kind);
+    try std.testing.expectEqualStrings("compute", events.events[2].name);
+    try std.testing.expectEqualStrings("42", events.events[2].redacted_detail);
+}
+
+test "workflow context records failed u64 steps with typed error names" {
+    const Step = struct {
+        var calls: u64 = 0;
+
+        fn fail() error{Boom}!u64 {
+            calls += 1;
+            return error.Boom;
+        }
+    };
+    Step.calls = 0;
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{
+        .event = .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .name = "stepper",
+            .status = "running",
+            .idempotency_key = "stepper:2",
+        },
+    });
+
+    var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+        .workflow_id = 7,
+        .execution_id = 8,
+    });
+    defer context.deinit();
+
+    try std.testing.expectError(error.Boom, context.stepU64("boom", Step.fail));
+    try std.testing.expectEqual(@as(u64, 1), Step.calls);
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 3), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.step_failed, events.events[2].kind);
+    try std.testing.expectEqualStrings("boom", events.events[2].name);
+    try std.testing.expectEqualStrings("failed", events.events[2].status);
+    try std.testing.expectEqualStrings("exit.cause.failure:Boom", events.events[2].redacted_detail);
 }

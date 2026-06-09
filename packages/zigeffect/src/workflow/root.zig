@@ -5,6 +5,7 @@ pub const store = @import("store.zig");
 pub const definition = @import("definition.zig");
 pub const activity = @import("activity.zig");
 pub const engine = @import("engine.zig");
+pub const context = @import("context.zig");
 
 pub const workflow_journal_event_schema = journal.workflow_journal_event_schema;
 pub const workflow_journal_event_schema_version = journal.workflow_journal_event_schema_version;
@@ -76,3 +77,7 @@ pub const WorkflowEngineError = engine.WorkflowEngineError;
 pub const WorkflowResult = engine.WorkflowResult;
 pub const workflowId = engine.workflowId;
 pub const executionId = engine.executionId;
+
+pub const WorkflowContext = context.WorkflowContext;
+pub const WorkflowContextOptions = context.WorkflowContextOptions;
+pub const WorkflowContextError = context.WorkflowContextError;
