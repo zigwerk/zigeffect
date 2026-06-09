@@ -548,6 +548,7 @@ Recommended branches:
 codex/zigeffect-causal-operations-docs
 codex/zigeffect-causal-performance-budget
 codex/zigeffect-causal-m9-completion-audit
+codex/zigeffect-causal-production-hardening-backlog
 ```
 
 ## Dependency Graph
@@ -636,14 +637,15 @@ Status values:
 | M6 Workbench UI | delivered | SolidJS renderer, `causal-workbench-ui`, `zig-webui` launcher, graph cause-path/runtime-lane branch, and remediation-chain branch `codex/zigeffect-causal-workbench-remediation-chain` exist | move to M7 app-facing runtime |
 | M7 App-facing runtime | delivered | `CausalAppTrace`, Worker-shaped app request example, app incident classifier, and app-specific advice/diagnosis mappings exist | move to M8 app remediation audit |
 | M8 App remediation gates | delivered | app remediation audit artifacts, app policy gate decisions, app human-review boundary artifacts, draft app patch proposal artifacts, app application readiness artifacts, guarded app application records, and detailed SolidJS/zig-webui workbench rendering exist | move to M9 production operating model |
-| M9 Operating model | active | schema governance, operations docs, performance budget report, and release guidance exist | move to production-readiness completion audit |
+| M9 Operating model | delivered | completion audit, schema governance, operations docs, performance budget report, and release guidance exist | future production-hardening backlog triage |
 
 ## Immediate Branch Queue
 
-1. `codex/zigeffect-causal-m9-completion-audit`
-   - Audit schema governance, operations docs, performance budget, release
-     guidance, verification commands, and remaining production gaps before
-     declaring the operating model complete.
+1. `codex/zigeffect-causal-production-hardening-backlog`
+   - Decompose deferred production gaps such as artifact aggregation, durable
+     production retention, access control, deployment runbooks, alerting,
+     rollout automation, wall-clock benchmark baselines, and capacity planning
+     into future production-hardening branches.
 
 ## Risks And Controls
 

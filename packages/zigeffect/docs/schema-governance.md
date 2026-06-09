@@ -115,6 +115,13 @@ names deterministic overhead budgets, release-review checks, and verification
 commands for causal runtime changes. It is not a wall-clock benchmark, mutation
 surface, production dashboard, or capacity plan.
 
+- `zigeffect.causal.m9-completion-audit.v1`
+
+The M9 completion audit is a record-only operating-model artifact. It proves
+the local/CI causal operating-model deliverables, records deferred production
+gaps, and gives agents a stable recommendation before the roadmap marks M9
+delivered.
+
 ### Test Coverage
 
 - `zigeffect.causal.test-matrix.v1`

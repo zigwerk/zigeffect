@@ -164,6 +164,20 @@ current retention, string-bound, sampling, workbench, artifact-retention,
 backend-sink, and release-note budgets. The full policy is in
 [docs/performance-budget.md](docs/performance-budget.md).
 
+Print the M9 operating-model completion audit:
+
+```bash
+cd packages/zigeffect
+zig build causal-m9-completion-audit
+zig build causal-m9-completion-audit -- --format json
+```
+
+The audit uses schema `zigeffect.causal.m9-completion-audit.v1`, records the
+evidence for M9 deliverables, lists deferred production-hardening gaps, and
+recommends `deliver-m9-with-deferred-production-hardening` only after the full
+verification suite passes. The full policy is in
+[docs/m9-completion-audit.md](docs/m9-completion-audit.md).
+
 Open the read-only SolidJS causal workbench for a saved artifact:
 
 ```bash

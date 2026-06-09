@@ -98,6 +98,8 @@ Schema, workbench, and backend checks:
 zig build causal-schema-governance
 zig build causal-performance-budget
 zig build causal-performance-budget -- --format json
+zig build causal-m9-completion-audit
+zig build causal-m9-completion-audit -- --format json
 zig build causal-workbench -- <artifact.json>
 zig build causal-workbench -- --server-only <artifact.json>
 zig build causal-workbench-ui
@@ -395,6 +397,26 @@ CI artifact retention, backend sink failure posture, and the SolidJS inside
 Add release notes whenever a causal runtime change alters retention, string
 bounds, sampling, backend emission, artifact schemas, workbench bounds or
 bridge behavior, CI upload globs, or CI retention.
+
+## M9 Completion Audit
+
+Run the M9 completion audit before marking the causal operating model delivered:
+
+```sh
+cd packages/zigeffect
+zig build causal-m9-completion-audit
+zig build causal-m9-completion-audit -- --format json
+```
+
+The audit records the schema governance, operations docs, performance budget,
+release guidance, CI workflow, artifact manifest, test matrix, workbench
+direction, and production-gap register that prove the local/CI operating model.
+
+The recommendation `deliver-m9-with-deferred-production-hardening` means the
+M0-M9 causal self-improvement roadmap is complete for local/CI operation and
+the documented production gaps should move to future hardening. It does not add
+production dashboards, access control, durable production retention, mutation
+authority, rollout automation, or a Cockroach adapter.
 
 ## Production Gaps
 

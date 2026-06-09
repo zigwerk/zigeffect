@@ -700,6 +700,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_performance_budget_tool_tests = b.addRunArtifact(causal_performance_budget_tool_tests);
     test_step.dependOn(&run_causal_performance_budget_tool_tests.step);
 
+    const causal_m9_completion_audit_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_m9_completion_audit.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_m9_completion_audit_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-m9-completion-audit",
+        .root_module = causal_m9_completion_audit_tool_module,
+    });
+    const run_causal_m9_completion_audit_tool = b.addRunArtifact(causal_m9_completion_audit_tool);
+    if (b.args) |args| run_causal_m9_completion_audit_tool.addArgs(args);
+    const causal_m9_completion_audit_step = b.step("causal-m9-completion-audit", "Print causal M9 operating-model completion audit");
+    causal_m9_completion_audit_step.dependOn(&run_causal_m9_completion_audit_tool.step);
+
+    const causal_m9_completion_audit_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-m9-completion-audit-tests",
+        .root_module = causal_m9_completion_audit_tool_module,
+    });
+    const run_causal_m9_completion_audit_tool_tests = b.addRunArtifact(causal_m9_completion_audit_tool_tests);
+    test_step.dependOn(&run_causal_m9_completion_audit_tool_tests.step);
+
     const causal_workbench_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_workbench.zig"),
         .target = target,

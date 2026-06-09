@@ -628,6 +628,10 @@ metrics, and traces.
   `zigeffect.causal.performance-budget.v1` with deterministic overhead budgets,
   SolidJS plus `webui-dev/zig-webui` workbench posture, and release-review
   guidance for causal runtime changes.
+- Delivered: `causal-m9-completion-audit` publishes
+  `zigeffect.causal.m9-completion-audit.v1` with deliverable checks,
+  production-gap acknowledgement, verification commands, and the recommendation
+  to deliver M9 with deferred production hardening.
 - Still future: production-grade app-facing integrations, durable history
   hardening, and comparing arbitrary named audit-chain snapshots.
 - Still future: deeper runtime regression scenarios for partial config and
