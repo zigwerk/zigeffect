@@ -225,7 +225,7 @@ Expected: PASS.
 **Files:**
 - Create `packages/zigeffect/tools/workflow_tool_support.zig`
 
-- [ ] **Step 1: Write failing support tests**
+- [x] **Step 1: Write failing support tests**
 
 Add inline tests in `workflow_tool_support.zig`:
 
@@ -236,18 +236,18 @@ Add inline tests in `workflow_tool_support.zig`:
 Use a temporary fixture containing two workflow event JSON rows generated with
 `fx.workflow.formatWorkflowEventJson`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
 ```bash
-cd packages/zigeffect && zig build test-raw --summary all
+cd packages/zigeffect && zig build examples --summary all
 ```
 
 Expected: FAIL after the tool module is wired into `build.zig` tests, because
 support code does not exist yet.
 
-- [ ] **Step 3: Implement support module**
+- [x] **Step 3: Implement support module**
 
 Add:
 
@@ -277,12 +277,12 @@ pub fn loadEvents(allocator: std.mem.Allocator, io: std.Io, input: WorkflowToolI
 `loadEvents` reads fixtures line-by-line with `parseWorkflowEventJson` and opens
 real journal directories with `FileJournalStore.open`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
 ```bash
-cd packages/zigeffect && zig build test-raw --summary all
+cd packages/zigeffect && zig build examples --summary all
 ```
 
 Expected: PASS.

@@ -333,6 +333,19 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_artifact_tool_tests = b.addRunArtifact(causal_artifact_tool_tests);
 
+    const workflow_tool_support_module = b.createModule(.{
+        .root_source_file = b.path("tools/workflow_tool_support.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    workflow_tool_support_module.addImport("zigeffect", zigeffect);
+
+    const workflow_tool_support_tests = b.addTest(.{
+        .name = "zigeffect-workflow-tool-support-tests",
+        .root_module = workflow_tool_support_module,
+    });
+    const run_workflow_tool_support_tests = b.addRunArtifact(workflow_tool_support_tests);
+
     const causal_query_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_query.zig"),
         .target = target,
@@ -890,6 +903,7 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&causal_test_tool.step);
     examples_step.dependOn(&run_causal_test_tool_tests.step);
     examples_step.dependOn(&run_causal_artifact_tool_tests.step);
+    examples_step.dependOn(&run_workflow_tool_support_tests.step);
     examples_step.dependOn(&causal_query_tool.step);
     examples_step.dependOn(&run_causal_query_tool_tests.step);
     examples_step.dependOn(&causal_advice_tool.step);
