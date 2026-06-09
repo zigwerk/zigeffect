@@ -803,3 +803,106 @@ test "activity definition exposes metadata formatting requirements and retry pol
     try std.testing.expect(std.mem.indexOf(u8, formatted, "timeout_ms: 30000") != null);
     try std.testing.expect(std.mem.indexOf(u8, formatted, "compensation: refund-charge") != null);
 }
+
+test "workflow engine registers starts polls inspects and lists execution" {
+    const Payload = struct {
+        request_id: u64,
+    };
+    const Success = struct {
+        accepted: bool,
+    };
+    const Failure = error{Rejected};
+    const Helpers = struct {
+        fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+            return std.fmt.allocPrint(allocator, "request:{d}", .{payload.request_id});
+        }
+    };
+    const NoopWorkflow = fx.workflow
+        .Workflow("noop", Payload, Success, Failure, fx.TestServices)
+        .withIdempotencyKey(Helpers.key)
+        .requires(.{fx.Logger});
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    var journal = journal_memory.asJournalStore();
+
+    var engine = try fx.workflow.WorkflowEngine.initWithProviders(std.testing.allocator, journal, .{fx.Logger});
+    defer engine.deinit();
+
+    try engine.register(NoopWorkflow);
+    const execution = try engine.execute(NoopWorkflow, .{ .request_id = 42 });
+    try std.testing.expectEqual(fx.workflow.WorkflowExecutionStatus.running, execution.status);
+    try std.testing.expectEqualStrings("noop", execution.workflow_name);
+
+    const result = try engine.poll(NoopWorkflow, execution.execution_id);
+    switch (result) {
+        .running => |running| try std.testing.expectEqual(execution.execution_id, running.execution_id),
+        else => return error.ExpectedRunningWorkflow,
+    }
+
+    const inspected = engine.inspect(execution.execution_id) orelse return error.ExpectedWorkflowExecution;
+    try std.testing.expectEqual(execution.workflow_id, inspected.workflow_id);
+    try std.testing.expectEqual(execution.execution_id, inspected.execution_id);
+
+    var listed = try engine.list(std.testing.allocator);
+    defer listed.deinit();
+    try std.testing.expectEqual(@as(usize, 1), listed.executions.len);
+    try std.testing.expectEqual(execution.execution_id, listed.executions[0].execution_id);
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 1), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_started, events.events[0].kind);
+    try std.testing.expectEqual(execution.workflow_id, events.events[0].workflow_id);
+    try std.testing.expectEqual(execution.execution_id, events.events[0].execution_id);
+    try std.testing.expectEqualStrings("noop", events.events[0].name);
+    try std.testing.expectEqualStrings("running", events.events[0].status);
+    try std.testing.expectEqualStrings("request:42", events.events[0].idempotency_key);
+}
+
+test "workflow engine rejects duplicate executions and missing providers" {
+    const Payload = struct {
+        request_id: u64,
+    };
+    const Success = void;
+    const Failure = error{Rejected};
+    const Helpers = struct {
+        fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+            return std.fmt.allocPrint(allocator, "request:{d}", .{payload.request_id});
+        }
+    };
+    const RequiredWorkflow = fx.workflow
+        .Workflow("requires-logger", Payload, Success, Failure, fx.TestServices)
+        .withIdempotencyKey(Helpers.key)
+        .requires(.{fx.Logger});
+
+    {
+        var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+        defer journal_memory.deinit();
+        const journal = journal_memory.asJournalStore();
+
+        var engine = fx.workflow.WorkflowEngine.init(std.testing.allocator, journal);
+        defer engine.deinit();
+        try std.testing.expectError(error.MissingServiceRequirement, engine.register(RequiredWorkflow));
+    }
+
+    {
+        var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+        defer journal_memory.deinit();
+        const journal = journal_memory.asJournalStore();
+
+        var engine = try fx.workflow.WorkflowEngine.initWithProviders(std.testing.allocator, journal, .{fx.Logger});
+        defer engine.deinit();
+
+        try engine.register(RequiredWorkflow);
+        _ = try engine.execute(RequiredWorkflow, .{ .request_id = 42 });
+        try std.testing.expectError(
+            error.DuplicateWorkflowExecution,
+            engine.execute(RequiredWorkflow, .{ .request_id = 42 }),
+        );
+
+        var events = try journal.readAll(std.testing.allocator);
+        defer events.deinit();
+        try std.testing.expectEqual(@as(usize, 1), events.events.len);
+    }
+}

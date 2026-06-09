@@ -33,7 +33,7 @@
 - Create `packages/zigeffect/src/workflow/engine.zig`
 - Modify `packages/zigeffect/src/workflow/root.zig`
 
-- [ ] **Step 1: Write failing engine tests**
+- [x] **Step 1: Write failing engine tests**
 
 Add tests proving:
 
@@ -44,7 +44,7 @@ Add tests proving:
 - `inspect` returns execution metadata;
 - `list` returns the started execution.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -54,12 +54,12 @@ bun run zigeffect:test
 
 Expected: FAIL until engine APIs exist.
 
-- [ ] **Step 3: Implement engine core**
+- [x] **Step 3: Implement engine core**
 
 Add engine types, registration, provider validation, execution start, journal
 sequence calculation, workflow id hashing, poll, inspect, list, and deinit.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -75,13 +75,13 @@ Expected: PASS.
 - Modify `packages/zigeffect/test/workflow_test.zig`
 - Modify `packages/zigeffect/src/workflow/engine.zig`
 
-- [ ] **Step 1: Write failing duplicate/dependency tests**
+- [x] **Step 1: Write failing duplicate/dependency tests**
 
 Add tests proving duplicate execution ids return
 `DuplicateWorkflowExecution` and missing provider requirements return
 `MissingServiceRequirement`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -91,12 +91,12 @@ bun run zigeffect:test
 
 Expected: FAIL until explicit errors exist.
 
-- [ ] **Step 3: Implement explicit errors**
+- [x] **Step 3: Implement explicit errors**
 
 Ensure duplicate checks happen before journal append and registration validates
 requirements against provider services.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -114,16 +114,16 @@ Expected: PASS.
 - Add `docs/superpowers/specs/2026-06-09-zigeffect-workflow-engine-core-design.md`
 - Add `docs/superpowers/plans/2026-06-09-zigeffect-workflow-engine-core.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Document `engine.zig` under `src/workflow/`.
 
-- [ ] **Step 2: Mark Milestone 8 complete**
+- [x] **Step 2: Mark Milestone 8 complete**
 
 Mark all Milestone 8 deliverables and acceptance boxes after the full gate
 passes.
 
-- [ ] **Step 3: Run full gate**
+- [x] **Step 3: Run full gate**
 
 Run:
 
@@ -136,7 +136,7 @@ git diff --check
 
 Expected: all commands PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/zigeffect/src/workflow/engine.zig packages/zigeffect/src/workflow/root.zig packages/zigeffect/test/workflow_test.zig packages/zigeffect/test/architecture_test.zig packages/zigeffect/docs/architecture.md docs/superpowers/specs/2026-06-09-zigeffect-workflow-engine-core-design.md docs/superpowers/plans/2026-06-09-zigeffect-workflow-engine-core.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md
@@ -145,10 +145,10 @@ git commit -m "feat(zigeffect): add workflow engine core"
 
 ## Self-Review Checklist
 
-- [ ] Engine does not execute workflow bodies.
-- [ ] `workflow_started` is appended before an execution is recorded.
-- [ ] Duplicate execution ids are rejected before append.
-- [ ] Registration checks provider requirements.
-- [ ] `WorkflowResult` is typed by workflow success/failure.
-- [ ] No step runner, activity runner, completion, recovery, or clustering is added.
-- [ ] Full verification passes before Milestone 8 is marked complete.
+- [x] Engine does not execute workflow bodies.
+- [x] `workflow_started` is appended before an execution is recorded.
+- [x] Duplicate execution ids are rejected before append.
+- [x] Registration checks provider requirements.
+- [x] `WorkflowResult` is typed by workflow success/failure.
+- [x] No step runner, activity runner, completion, recovery, or clustering is added.
+- [x] Full verification passes before Milestone 8 is marked complete.

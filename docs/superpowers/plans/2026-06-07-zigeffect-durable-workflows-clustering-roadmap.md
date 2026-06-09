@@ -302,16 +302,16 @@ Goal: register workflows and create durable executions.
 
 Deliverables:
 
-- [ ] Add `WorkflowEngine`.
-- [ ] Add register, execute, poll, inspect, and list APIs.
-- [ ] Append `WorkflowStarted` and initial state events.
-- [ ] Return typed `WorkflowResult`.
-- [ ] Integrate dependency validation with runtime providers.
+- [x] Add `WorkflowEngine`.
+- [x] Add register, execute, poll, inspect, and list APIs.
+- [x] Append `WorkflowStarted` and initial state events.
+- [x] Return typed `WorkflowResult`.
+- [x] Integrate dependency validation with runtime providers.
 
 Acceptance:
 
-- [ ] In-memory engine can start and poll a no-op workflow.
-- [ ] Duplicate execution id behavior is explicit and tested.
+- [x] In-memory engine can start and poll a no-op workflow.
+- [x] Duplicate execution id behavior is explicit and tested.
 
 ## Milestone 9: Deterministic Workflow Step Runner
 
