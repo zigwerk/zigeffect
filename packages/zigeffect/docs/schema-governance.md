@@ -106,6 +106,15 @@ operating state, not remediation authority. The preferred UI path is SolidJS
 with `webui-dev/zig-webui`; React should be introduced only for a specific
 future integration that cannot fit that path.
 
+### Operating Model
+
+- `zigeffect.causal.performance-budget.v1`
+
+The performance-budget report is a record-only operating-model artifact. It
+names deterministic overhead budgets, release-review checks, and verification
+commands for causal runtime changes. It is not a wall-clock benchmark, mutation
+surface, production dashboard, or capacity plan.
+
 ### Test Coverage
 
 - `zigeffect.causal.test-matrix.v1`

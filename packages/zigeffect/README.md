@@ -151,6 +151,19 @@ producer, consumer, compatibility posture, and schema-change checklist. Treat it
 as the first stop before adding or changing causal artifact fields. The full
 policy is in [docs/schema-governance.md](docs/schema-governance.md).
 
+Print the deterministic causal performance budget and release-review checklist:
+
+```bash
+cd packages/zigeffect
+zig build causal-performance-budget
+zig build causal-performance-budget -- --format json
+```
+
+The report uses schema `zigeffect.causal.performance-budget.v1` and lists the
+current retention, string-bound, sampling, workbench, artifact-retention,
+backend-sink, and release-note budgets. The full policy is in
+[docs/performance-budget.md](docs/performance-budget.md).
+
 Open the read-only SolidJS causal workbench for a saved artifact:
 
 ```bash

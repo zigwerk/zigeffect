@@ -624,6 +624,10 @@ metrics, and traces.
   manual for artifact retention, CI handoff, redaction review, review gates,
   guarded application records, workbench operation, backend adapter
   expectations, schema governance, and scenario governance.
+- Delivered: `causal-performance-budget` publishes
+  `zigeffect.causal.performance-budget.v1` with deterministic overhead budgets,
+  SolidJS plus `webui-dev/zig-webui` workbench posture, and release-review
+  guidance for causal runtime changes.
 - Still future: production-grade app-facing integrations, durable history
   hardening, and comparing arbitrary named audit-chain snapshots.
 - Still future: deeper runtime regression scenarios for partial config and

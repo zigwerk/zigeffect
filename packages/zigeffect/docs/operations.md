@@ -96,6 +96,8 @@ Schema, workbench, and backend checks:
 
 ```sh
 zig build causal-schema-governance
+zig build causal-performance-budget
+zig build causal-performance-budget -- --format json
 zig build causal-workbench -- <artifact.json>
 zig build causal-workbench -- --server-only <artifact.json>
 zig build causal-workbench-ui
@@ -374,6 +376,26 @@ producers, consumers, compatibility posture, migration policy, and new-schema
 checklist. When a schema change affects retained artifacts, CI upload behavior,
 workbench mapping, or agent handoff, update this operations manual too.
 
+## Performance Budget And Release Review
+
+Run the performance budget report before changing causal overhead surfaces:
+
+```sh
+cd packages/zigeffect
+zig build causal-performance-budget
+zig build causal-performance-budget -- --format json
+```
+
+The report is deterministic. It checks stable constants such as app request
+retention, app background-job retention, app event string bounds, and the
+workbench artifact read limit. It also records documented budgets for sampling,
+CI artifact retention, backend sink failure posture, and the SolidJS inside
+`webui-dev/zig-webui` workbench direction.
+
+Add release notes whenever a causal runtime change alters retention, string
+bounds, sampling, backend emission, artifact schemas, workbench bounds or
+bridge behavior, CI upload globs, or CI retention.
+
 ## Production Gaps
 
 The current operating model does not provide:
@@ -387,8 +409,9 @@ The current operating model does not provide:
 - live dashboards or streaming workbench;
 - automated source/config mutation authority;
 - gradual rollout, canary, or circuit-breaker automation;
-- performance budgets, benchmarks, or capacity planning.
+- wall-clock benchmark baselines or gates;
+- production capacity planning.
 
 Those belong to later M9 branches and future production hardening. The next
-operating-model branch should define measurable causal instrumentation
-performance budgets and release-note guidance.
+operating-model branch should audit the completed M9 evidence before declaring
+the operating model complete.

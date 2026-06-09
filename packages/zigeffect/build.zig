@@ -676,6 +676,30 @@ pub fn build(b: *std.Build) void {
     const run_causal_workbench_session_tool_tests = b.addRunArtifact(causal_workbench_session_tool_tests);
     test_step.dependOn(&run_causal_workbench_session_tool_tests.step);
 
+    const causal_performance_budget_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_performance_budget.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_performance_budget_tool_module.addImport("zigeffect", zigeffect);
+    causal_performance_budget_tool_module.addImport("causal_workbench_session", causal_workbench_session_tool_module);
+
+    const causal_performance_budget_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-performance-budget",
+        .root_module = causal_performance_budget_tool_module,
+    });
+    const run_causal_performance_budget_tool = b.addRunArtifact(causal_performance_budget_tool);
+    if (b.args) |args| run_causal_performance_budget_tool.addArgs(args);
+    const causal_performance_budget_step = b.step("causal-performance-budget", "Print causal instrumentation performance budget report");
+    causal_performance_budget_step.dependOn(&run_causal_performance_budget_tool.step);
+
+    const causal_performance_budget_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-performance-budget-tests",
+        .root_module = causal_performance_budget_tool_module,
+    });
+    const run_causal_performance_budget_tool_tests = b.addRunArtifact(causal_performance_budget_tool_tests);
+    test_step.dependOn(&run_causal_performance_budget_tool_tests.step);
+
     const causal_workbench_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_workbench.zig"),
         .target = target,
