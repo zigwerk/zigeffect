@@ -216,7 +216,7 @@ test "needs human review policy produces approved non-mutating review artifact" 
 Run:
 
 ```sh
-cd packages/zigeffect && zig build causal-app-human-review
+cd packages/zigeffect && zig build test
 ```
 
 Expected: fails because `usage`, `parseOptions`, `ReviewDecision`,
@@ -519,11 +519,11 @@ error.PolicyMutationAuthorityNotNone
 Run:
 
 ```sh
-cd packages/zigeffect && zig build causal-app-human-review
 cd packages/zigeffect && zig build test
 ```
 
-Expected: both pass.
+Expected: passes, including the new `zigeffect-causal-app-human-review-tests`
+module.
 
 - [ ] **Step 6: Commit Task 1-2**
 
@@ -681,7 +681,7 @@ const mismatched_human_review_json =
 Run:
 
 ```sh
-cd packages/zigeffect && zig build causal-app-patch-proposal
+cd packages/zigeffect && zig build test
 ```
 
 Expected: fails because `--review` and review validation are not implemented.
@@ -819,11 +819,11 @@ only when review evidence was used.
 Run:
 
 ```sh
-cd packages/zigeffect && zig build causal-app-patch-proposal
 cd packages/zigeffect && zig build test
 ```
 
-Expected: both pass.
+Expected: passes, including the extended
+`zigeffect-causal-app-patch-proposal-tests` module.
 
 - [ ] **Step 7: Commit Task 3**
 
@@ -1049,16 +1049,7 @@ git commit -m "docs(zigeffect): document app human review boundary"
 **Files:**
 - No new files unless verification exposes a defect.
 
-- [ ] **Step 1: Run focused Zig gates**
-
-```sh
-cd packages/zigeffect && zig build causal-app-human-review
-cd packages/zigeffect && zig build causal-app-patch-proposal
-```
-
-Expected: both pass.
-
-- [ ] **Step 2: Run package Zig gates**
+- [ ] **Step 1: Run package Zig gates**
 
 ```sh
 cd packages/zigeffect && zig build examples
@@ -1067,7 +1058,7 @@ cd packages/zigeffect && zig build test
 
 Expected: both pass.
 
-- [ ] **Step 3: Run workbench gates**
+- [ ] **Step 2: Run workbench gates**
 
 ```sh
 bun run zigeffect:workbench:test
@@ -1077,7 +1068,7 @@ bun run zigeffect:workbench:build
 
 Expected: all pass.
 
-- [ ] **Step 4: Run repo gates**
+- [ ] **Step 3: Run repo gates**
 
 ```sh
 bun run check
@@ -1087,7 +1078,7 @@ git diff --check
 
 Expected: all pass.
 
-- [ ] **Step 5: Confirm scoped status**
+- [ ] **Step 4: Confirm scoped status**
 
 ```sh
 git status --short --branch

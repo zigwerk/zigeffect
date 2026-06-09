@@ -356,8 +356,6 @@ Workbench tests should prove:
 Required verification before completion:
 
 ```sh
-cd packages/zigeffect && zig build causal-app-human-review
-cd packages/zigeffect && zig build causal-app-patch-proposal
 cd packages/zigeffect && zig build examples
 cd packages/zigeffect && zig build test
 bun run zigeffect:workbench:test
