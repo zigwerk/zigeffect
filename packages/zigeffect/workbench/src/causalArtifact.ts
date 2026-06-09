@@ -1,0 +1,390 @@
+export type UnknownRecord = Record<string, unknown>;
+
+export type CausalEvent = {
+  idText: string;
+  numericId: number | null;
+  kind: string;
+  status: string;
+  label: string;
+  typeName: string;
+  redactedDetail: string;
+  runId: string | null;
+  parentId: string | null;
+  fiberId: string | null;
+  scopeId: string | null;
+  traceId: string | null;
+  spanId: string | null;
+  raw: UnknownRecord;
+};
+
+export type CausalFinding = {
+  kind:
+    | "service_requirement_without_provider"
+    | "resource_acquired_without_finalization"
+    | "fiber_pending_after_scope_close"
+    | "retry_budget_exhausted"
+    | "finalizer_failure"
+    | "assertion_failure";
+  eventId: string;
+  title: string;
+  summary: string;
+  event: CausalEvent;
+};
+
+export type QueryCommand = {
+  label: string;
+  command: string;
+};
+
+export type WorkbenchModel = {
+  artifactPath: string;
+  schema: string;
+  schemaVersion: string;
+  taxonomyVersion: string;
+  events: CausalEvent[];
+  findings: CausalFinding[];
+  kinds: string[];
+  statuses: string[];
+  warnings: string[];
+  safeToShare: "artifact-redacted" | "unknown";
+};
+
+export type WorkbenchOptions = {
+  artifactPath: string;
+};
+
+export type EventFilter = {
+  text?: string;
+  kind?: string;
+  status?: string;
+};
+
+const fiberLifecycleKinds = new Set([
+  "fiber_forked",
+  "fiber_started",
+  "fiber_joined",
+  "fiber_interrupted",
+]);
+
+const pendingFiberStatuses = new Set(["pending", "running"]);
+
+export function parseArtifactJson(json: string): unknown {
+  const parsed = JSON.parse(json) as unknown;
+  if (!isRecord(parsed)) {
+    throw new Error("causal artifact must be a JSON object");
+  }
+  return parsed;
+}
+
+export function deriveWorkbenchModel(raw: unknown, options: WorkbenchOptions): WorkbenchModel {
+  const artifact = isRecord(raw) ? raw : {};
+  const warnings: string[] = [];
+  const schema = textValue(artifact.schema, "unknown");
+  const schemaVersion = textValue(artifact.schema_version, "unknown");
+  const taxonomyVersion = textValue(artifact.event_taxonomy_version, "unknown");
+
+  if (schema === "unknown") {
+    warnings.push("artifact schema is missing");
+  }
+  if (schemaVersion === "unknown") {
+    warnings.push("artifact schema_version is missing");
+  }
+  if (taxonomyVersion === "unknown") {
+    warnings.push("artifact event_taxonomy_version is missing");
+  }
+
+  const rawEvents = Array.isArray(artifact.events) ? artifact.events : [];
+  if (!Array.isArray(artifact.events)) {
+    warnings.push("artifact events array is missing");
+  }
+
+  const events = rawEvents
+    .filter(isRecord)
+    .map((event, index) => normalizeEvent(event, index))
+    .sort(compareEvents);
+
+  return {
+    artifactPath: options.artifactPath,
+    schema,
+    schemaVersion,
+    taxonomyVersion,
+    events,
+    findings: deriveFindings(events),
+    kinds: uniqueSorted(events.map((event) => event.kind)),
+    statuses: uniqueSorted(events.map((event) => event.status)),
+    warnings,
+    safeToShare: events.some((event) => event.redactedDetail.length > 0) ? "artifact-redacted" : "unknown",
+  };
+}
+
+export function filterEvents(events: CausalEvent[], filter: EventFilter): CausalEvent[] {
+  const text = filter.text?.trim().toLowerCase() ?? "";
+  const kind = filter.kind?.trim();
+  const status = filter.status?.trim();
+
+  return events.filter((event) => {
+    if (kind && event.kind !== kind) {
+      return false;
+    }
+    if (status && event.status !== status) {
+      return false;
+    }
+    if (!text) {
+      return true;
+    }
+    return searchableEventText(event).includes(text);
+  });
+}
+
+export function queryCommandsForEvent(event: CausalEvent, artifactPath: string): QueryCommand[] {
+  const prefix = `zig build causal-query -- --file ${artifactPath}`;
+  const commands: QueryCommand[] = [
+    { label: "Cause", command: `${prefix} cause ${event.idText}` },
+    { label: "Lineage", command: `${prefix} lineage ${event.idText}` },
+  ];
+
+  if (event.scopeId) {
+    commands.push({ label: "Resources", command: `${prefix} resources ${event.scopeId}` });
+  }
+
+  if (fiberLifecycleKinds.has(event.kind) && pendingFiberStatuses.has(event.status)) {
+    commands.push({ label: "Pending fibers", command: `${prefix} fibers ${event.status}` });
+  }
+
+  if (event.runId) {
+    commands.push({ label: "Requirements", command: `${prefix} requirements ${event.runId}` });
+  }
+
+  if (event.kind === "schedule_decision" && event.runId) {
+    commands.push({ label: "Retries", command: `${prefix} retries ${event.runId}` });
+  }
+
+  return commands;
+}
+
+function deriveFindings(events: CausalEvent[]): CausalFinding[] {
+  const findings: CausalFinding[] = [];
+
+  for (const event of events) {
+    switch (event.kind) {
+      case "resource_acquired":
+        if (!hasFinalizedResource(events, event)) {
+          findings.push(finding(
+            "resource_acquired_without_finalization",
+            event,
+            "Resource acquired without finalization",
+            "An acquired resource has no matching finalization event in this artifact.",
+          ));
+        }
+        break;
+      case "scope_closed":
+        findings.push(...pendingFiberFindings(events, event));
+        break;
+      case "resource_finalized":
+        if (event.status === "failure") {
+          findings.push(finding(
+            "finalizer_failure",
+            event,
+            "Finalizer failure",
+            "A resource finalizer failed and remains causal evidence.",
+          ));
+        }
+        break;
+      case "schedule_decision":
+        if (event.status === "exhausted") {
+          findings.push(finding(
+            "retry_budget_exhausted",
+            event,
+            "Retry budget exhausted",
+            "A schedule decision exhausted its retry budget.",
+          ));
+        }
+        break;
+      case "service_required":
+        if (event.status === "missing") {
+          findings.push(finding(
+            "service_requirement_without_provider",
+            event,
+            "Missing service provider",
+            "A required service was missing from the environment.",
+          ));
+        }
+        break;
+      case "assertion_recorded":
+        if (event.status === "failure") {
+          findings.push(finding(
+            "assertion_failure",
+            event,
+            "Assertion failure",
+            "A test or development assertion was recorded as failed.",
+          ));
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  return findings;
+}
+
+function pendingFiberFindings(events: CausalEvent[], closed: CausalEvent): CausalFinding[] {
+  if (!closed.scopeId) {
+    return [];
+  }
+
+  return events
+    .filter((event) => event.scopeId === closed.scopeId)
+    .filter((event) => event.fiberId !== null)
+    .filter((event) => event.kind === "fiber_forked" || event.kind === "fiber_started")
+    .filter((event) => pendingFiberStatuses.has(event.status))
+    .filter((event) => !fiberCompletedAfter(events, event.fiberId, closed.numericId))
+    .map((event) => finding(
+      "fiber_pending_after_scope_close",
+      event,
+      "Pending fiber after scope close",
+      "A scoped fiber was still pending or running when its owning scope closed.",
+    ));
+}
+
+function hasFinalizedResource(events: CausalEvent[], acquired: CausalEvent): boolean {
+  return events.some((event) => (
+    event.kind === "resource_finalized" &&
+    event.scopeId === acquired.scopeId &&
+    event.typeName === acquired.typeName
+  ));
+}
+
+function fiberCompletedAfter(
+  events: CausalEvent[],
+  fiberId: string | null,
+  closedNumericId: number | null,
+): boolean {
+  if (!fiberId || closedNumericId === null) {
+    return false;
+  }
+
+  return events.some((event) => (
+    event.numericId !== null &&
+    event.numericId >= closedNumericId &&
+    event.fiberId === fiberId &&
+    (event.kind === "fiber_joined" || event.kind === "fiber_interrupted")
+  ));
+}
+
+function finding(
+  kind: CausalFinding["kind"],
+  event: CausalEvent,
+  title: string,
+  summary: string,
+): CausalFinding {
+  return {
+    kind,
+    eventId: event.idText,
+    title,
+    summary,
+    event,
+  };
+}
+
+function normalizeEvent(raw: UnknownRecord, index: number): CausalEvent {
+  const idText = idValue(raw.id) ?? `event-${index + 1}`;
+
+  return {
+    idText,
+    numericId: numericValue(raw.id),
+    kind: textValue(raw.kind, "unknown"),
+    status: textValue(raw.status, "unknown"),
+    label: textValue(raw.label, ""),
+    typeName: textValue(raw.type_name, ""),
+    redactedDetail: textValue(raw.redacted_detail, ""),
+    runId: nullableIdValue(raw.run_id),
+    parentId: nullableIdValue(raw.parent_id),
+    fiberId: nullableIdValue(raw.fiber_id),
+    scopeId: nullableIdValue(raw.scope_id),
+    traceId: nullableIdValue(raw.trace_id),
+    spanId: nullableIdValue(raw.span_id),
+    raw,
+  };
+}
+
+function compareEvents(left: CausalEvent, right: CausalEvent): number {
+  if (left.numericId !== null && right.numericId !== null) {
+    return left.numericId - right.numericId;
+  }
+  if (left.numericId !== null) {
+    return -1;
+  }
+  if (right.numericId !== null) {
+    return 1;
+  }
+  return left.idText.localeCompare(right.idText);
+}
+
+function searchableEventText(event: CausalEvent): string {
+  return [
+    event.idText,
+    event.kind,
+    event.status,
+    event.label,
+    event.typeName,
+    event.redactedDetail,
+    event.runId,
+    event.parentId,
+    event.fiberId,
+    event.scopeId,
+    event.traceId,
+    event.spanId,
+  ]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return Array.from(new Set(values.filter((value) => value.length > 0))).sort((left, right) =>
+    left.localeCompare(right),
+  );
+}
+
+function textValue(value: unknown, fallback: string): string {
+  if (typeof value === "string") {
+    return value.length > 0 ? value : fallback;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value === "boolean") {
+    return String(value);
+  }
+  return fallback;
+}
+
+function idValue(value: unknown): string | null {
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
+function nullableIdValue(value: unknown): string | null {
+  return idValue(value);
+}
+
+function numericValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
