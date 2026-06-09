@@ -62,6 +62,13 @@ pub const CausalEventKind = enum {
     supervisor_restart_decided,
     supervisor_escalated,
     supervisor_shutdown_ordered,
+    cluster_shard_lease_acquired,
+    cluster_shard_lease_refreshed,
+    cluster_shard_lease_released,
+    cluster_shard_lease_conflict,
+    cluster_shard_handoff_started,
+    cluster_shard_recovery_started,
+    cluster_shard_recovery_completed,
 };
 
 pub const CausalEventTaxonomy = struct {
@@ -92,6 +99,13 @@ pub fn causalEventTaxonomy(kind: CausalEventKind) CausalEventTaxonomy {
         .supervisor_restart_decided,
         .supervisor_escalated,
         .supervisor_shutdown_ordered,
+        .cluster_shard_lease_acquired,
+        .cluster_shard_lease_refreshed,
+        .cluster_shard_lease_released,
+        .cluster_shard_lease_conflict,
+        .cluster_shard_handoff_started,
+        .cluster_shard_recovery_started,
+        .cluster_shard_recovery_completed,
         => .{
             .structural = true,
             .finding_evidence = true,

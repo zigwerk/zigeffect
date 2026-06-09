@@ -1,4 +1,5 @@
 const std = @import("std");
+const causal_mod = @import("../services/causal.zig");
 const runner = @import("runner.zig");
 const runner_storage = @import("runner_storage.zig");
 
@@ -49,6 +50,8 @@ pub const LocalShardLeaseManager = struct {
     owner: RunnerAddress,
     options: ShardLeaseManagerOptions,
     owned_leases: std.ArrayList(ShardLease) = .empty,
+    causal_store: ?*causal_mod.CausalStore = null,
+    causal_run_id: ?u64 = null,
 
     pub fn init(allocator: Allocator, storage: RunnerStorage, owner: RunnerAddress, options: ShardLeaseManagerOptions) ShardLeaseManagerError!LocalShardLeaseManager {
         try validateOptions(options);
@@ -62,6 +65,138 @@ pub const LocalShardLeaseManager = struct {
 
     pub fn deinit(self: *LocalShardLeaseManager) void {
         self.owned_leases.deinit(self.allocator);
+    }
+
+    pub fn attachCausalStore(self: *LocalShardLeaseManager, store: *causal_mod.CausalStore, run_id: u64) void {
+        self.causal_store = store;
+        self.causal_run_id = run_id;
+    }
+
+    pub fn acquireShard(self: *LocalShardLeaseManager, shard_id: ShardId, now_ms: u64) !ShardLease {
+        if (self.findOwnedIndex(shard_id) != null) return error.ShardAlreadyOwned;
+        const lease = self.storage.acquire(.{
+            .shard_id = shard_id,
+            .owner = self.owner,
+            .now_ms = now_ms,
+            .ttl_ms = self.options.ttl_ms,
+        }) catch |err| switch (err) {
+            error.LeaseConflict => {
+                try self.recordConflict(shard_id, now_ms);
+                return err;
+            },
+            else => return err,
+        };
+        try self.owned_leases.append(self.allocator, lease);
+        try self.recordLeaseCausal(.cluster_shard_lease_acquired, lease, "acquired");
+        return lease;
+    }
+
+    pub fn refreshOwnedLeases(self: *LocalShardLeaseManager, now_ms: u64) !ShardLeaseRefreshReport {
+        var report = ShardLeaseRefreshReport{};
+        var index: usize = 0;
+        while (index < self.owned_leases.items.len) {
+            const current = self.owned_leases.items[index];
+            if (!shardLeaseRefreshDue(current, self.options, now_ms)) {
+                index += 1;
+                continue;
+            }
+
+            const refreshed = self.storage.refresh(.{
+                .shard_id = current.shard_id,
+                .owner = self.owner,
+                .now_ms = now_ms,
+                .ttl_ms = self.options.ttl_ms,
+            }) catch |err| switch (err) {
+                error.LeaseExpired => {
+                    report.expired += 1;
+                    const reacquired = self.storage.acquire(.{
+                        .shard_id = current.shard_id,
+                        .owner = self.owner,
+                        .now_ms = now_ms,
+                        .ttl_ms = self.options.ttl_ms,
+                    }) catch |acquire_err| switch (acquire_err) {
+                        error.LeaseConflict => {
+                            _ = self.owned_leases.orderedRemove(index);
+                            report.conflicts += 1;
+                            try self.recordConflict(current.shard_id, now_ms);
+                            continue;
+                        },
+                        else => return acquire_err,
+                    };
+                    self.owned_leases.items[index] = reacquired;
+                    report.reacquired += 1;
+                    try self.recordLeaseCausal(.cluster_shard_lease_acquired, reacquired, "acquired");
+                    index += 1;
+                    continue;
+                },
+                else => return err,
+            };
+
+            self.owned_leases.items[index] = refreshed;
+            report.refreshed += 1;
+            try self.recordLeaseCausal(.cluster_shard_lease_refreshed, refreshed, "refreshed");
+            index += 1;
+        }
+        return report;
+    }
+
+    pub fn ownsShard(self: *const LocalShardLeaseManager, shard_id: ShardId) bool {
+        return self.findOwnedIndex(shard_id) != null;
+    }
+
+    pub fn ownedLeases(self: *const LocalShardLeaseManager, allocator: Allocator) Allocator.Error!RunnerLeaseBatch {
+        const copied = try allocator.dupe(ShardLease, self.owned_leases.items);
+        return .{
+            .allocator = allocator,
+            .leases = copied,
+        };
+    }
+
+    fn findOwnedIndex(self: *const LocalShardLeaseManager, shard_id: ShardId) ?usize {
+        for (self.owned_leases.items, 0..) |lease, index| {
+            if (lease.shard_id == shard_id) return index;
+        }
+        return null;
+    }
+
+    fn recordConflict(self: *LocalShardLeaseManager, shard_id: ShardId, now_ms: u64) Allocator.Error!void {
+        const store = self.causal_store orelse return;
+        const label = try std.fmt.allocPrint(self.allocator, "shard-{d}", .{shard_id});
+        defer self.allocator.free(label);
+        const detail = try std.fmt.allocPrint(
+            self.allocator,
+            "shard_id={d} owner_machine_id={d} owner_runner_id={d} at_ms={d}",
+            .{ shard_id, self.owner.machine_id, self.owner.runner_id, now_ms },
+        );
+        defer self.allocator.free(detail);
+        _ = try store.record(.{
+            .kind = .cluster_shard_lease_conflict,
+            .run_id = self.causal_run_id,
+            .label = label,
+            .type_name = "cluster.shard_lease",
+            .status = "conflict",
+            .redacted_detail = detail,
+        });
+    }
+
+    fn recordLeaseCausal(self: *LocalShardLeaseManager, kind: causal_mod.CausalEventKind, lease: ShardLease, status: []const u8) Allocator.Error!void {
+        const store = self.causal_store orelse return;
+        const label = try std.fmt.allocPrint(self.allocator, "shard-{d}", .{lease.shard_id});
+        defer self.allocator.free(label);
+        const detail = try std.fmt.allocPrint(
+            self.allocator,
+            "shard_id={d} owner_machine_id={d} owner_runner_id={d} version={d} expires_at_ms={d}",
+            .{ lease.shard_id, lease.owner.machine_id, lease.owner.runner_id, lease.version, lease.expires_at_ms },
+        );
+        defer self.allocator.free(detail);
+        _ = try store.record(.{
+            .kind = kind,
+            .run_id = self.causal_run_id,
+            .label = label,
+            .type_name = "cluster.shard_lease",
+            .status = status,
+            .redacted_detail = detail,
+        });
     }
 };
 
