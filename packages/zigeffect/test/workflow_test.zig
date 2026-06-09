@@ -196,6 +196,32 @@ fn replaceFirstOwned(
     return output.toOwnedSlice(allocator);
 }
 
+fn parseWorkflowJsonLines(
+    allocator: std.mem.Allocator,
+    content: []const u8,
+) !fx.workflow.JournalEventBatch {
+    var output = std.ArrayList(fx.workflow.WorkflowEvent).empty;
+    errdefer {
+        for (output.items) |event| fx.workflow.deinitWorkflowEventStrings(allocator, event);
+        output.deinit(allocator);
+    }
+
+    var line_start: usize = 0;
+    while (line_start <= content.len) {
+        const newline_index = std.mem.indexOfScalarPos(u8, content, line_start, '\n') orelse content.len;
+        const line = std.mem.trim(u8, content[line_start..newline_index], "\r");
+        if (line.len != 0) {
+            const event = try fx.workflow.parseWorkflowEventJson(allocator, line);
+            errdefer fx.workflow.deinitWorkflowEventStrings(allocator, event);
+            try output.append(allocator, event);
+        }
+        if (newline_index == content.len) break;
+        line_start = newline_index + 1;
+    }
+
+    return .{ .allocator = allocator, .events = try output.toOwnedSlice(allocator) };
+}
+
 test "workflow journal schema constants are stable" {
     try std.testing.expectEqualStrings("zigeffect.workflow.journal-event.v1", fx.workflow.workflow_journal_event_schema);
     try std.testing.expectEqual(@as(u32, 1), fx.workflow.workflow_journal_event_schema_version);
@@ -404,6 +430,30 @@ test "workflow journal migration registry parses current v1 rows" {
     try std.testing.expectError(error.FutureWorkflowEventSchemaVersion, fx.workflow.parseWorkflowEventJson(std.testing.allocator, future_json));
     try std.testing.expectError(error.MissingWorkflowEventMigration, fx.workflow.parseWorkflowEventJson(std.testing.allocator, version_zero_json));
     try std.testing.expectError(error.UnknownWorkflowEventKind, fx.workflow.parseWorkflowEventJson(std.testing.allocator, unknown_kind_json));
+}
+
+test "workflow v1 golden fixture replays under versioned reader" {
+    const content = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "test/fixtures/workflow-journal-v1-golden.jsonl",
+        std.testing.allocator,
+        std.Io.Limit.limited(16 * 1024),
+    );
+    defer std.testing.allocator.free(content);
+
+    var events = try parseWorkflowJsonLines(std.testing.allocator, content);
+    defer events.deinit();
+
+    var state = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, events.events);
+    defer state.deinit();
+
+    try std.testing.expectEqual(fx.workflow.WorkflowStatus.completed, state.workflow_status);
+    try std.testing.expectEqual(@as(?u64, 11), state.workflow_id);
+    try std.testing.expectEqual(@as(?u64, 12), state.execution_id);
+    try std.testing.expectEqual(@as(u64, 4), state.last_sequence);
+    try std.testing.expectEqual(@as(usize, 1), state.activities.items.len);
+    try std.testing.expectEqual(fx.workflow.ActivityStatus.completed, state.activities.items[0].status);
+    try std.testing.expectEqualStrings("charge", state.activities.items[0].name);
 }
 
 test "workflow compensation ids are stable by label" {

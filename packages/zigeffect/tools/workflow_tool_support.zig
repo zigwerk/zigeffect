@@ -211,6 +211,23 @@ test "workflow tool fixture loader parses json lines" {
     try std.testing.expectEqualStrings("fixture-workflow", events.events[0].name);
 }
 
+test "workflow tool fixture loader accepts v1 golden histories" {
+    var cwd = std.Io.Dir.cwd();
+    var events = try loadFixtureEvents(
+        std.testing.allocator,
+        std.testing.io,
+        &cwd,
+        "test/fixtures/workflow-journal-v1-golden.jsonl",
+    );
+    defer events.deinit();
+
+    try std.testing.expectEqual(@as(usize, 4), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_started, events.events[0].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.activity_scheduled, events.events[1].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.activity_completed, events.events[2].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_completed, events.events[3].kind);
+}
+
 test "workflow tool loader reads file journal directories" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

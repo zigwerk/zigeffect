@@ -180,27 +180,28 @@ Expected: PASS.
 - Modify `packages/zigeffect/test/workflow_test.zig`
 - Modify `packages/zigeffect/tools/workflow_tool_support.zig`
 
-- [ ] **Step 1: Add failing golden fixture tests**
+- [x] **Step 1: Add failing golden fixture tests**
 
-Create the fixture with three rows:
+Create the fixture with four rows:
 
 ```jsonl
 {"schema":"zigeffect.workflow.journal-event.v1","schema_version":1,"sequence":1,"kind":"workflow_started","workflow_id":11,"execution_id":12,"parent_sequence":null,"activity_id":null,"timer_id":null,"deferred_id":null,"queue_id":null,"compensation_id":null,"attempt":0,"name":"v1-golden","status":"running","redacted_detail":"","idempotency_key":"v1-golden-start"}
-{"schema":"zigeffect.workflow.journal-event.v1","schema_version":1,"sequence":2,"kind":"activity_completed","workflow_id":11,"execution_id":12,"parent_sequence":1,"activity_id":21,"timer_id":null,"deferred_id":null,"queue_id":null,"compensation_id":null,"attempt":1,"name":"charge","status":"completed","redacted_detail":"","idempotency_key":"v1-golden-activity"}
-{"schema":"zigeffect.workflow.journal-event.v1","schema_version":1,"sequence":3,"kind":"workflow_completed","workflow_id":11,"execution_id":12,"parent_sequence":2,"activity_id":null,"timer_id":null,"deferred_id":null,"queue_id":null,"compensation_id":null,"attempt":0,"name":"v1-golden","status":"completed","redacted_detail":"","idempotency_key":"v1-golden-complete"}
+{"schema":"zigeffect.workflow.journal-event.v1","schema_version":1,"sequence":2,"kind":"activity_scheduled","workflow_id":11,"execution_id":12,"parent_sequence":1,"activity_id":21,"timer_id":null,"deferred_id":null,"queue_id":null,"compensation_id":null,"attempt":1,"name":"charge","status":"scheduled","redacted_detail":"","idempotency_key":"v1-golden-activity-scheduled"}
+{"schema":"zigeffect.workflow.journal-event.v1","schema_version":1,"sequence":3,"kind":"activity_completed","workflow_id":11,"execution_id":12,"parent_sequence":2,"activity_id":21,"timer_id":null,"deferred_id":null,"queue_id":null,"compensation_id":null,"attempt":1,"name":"charge","status":"completed","redacted_detail":"","idempotency_key":"v1-golden-activity-completed"}
+{"schema":"zigeffect.workflow.journal-event.v1","schema_version":1,"sequence":4,"kind":"workflow_completed","workflow_id":11,"execution_id":12,"parent_sequence":3,"activity_id":null,"timer_id":null,"deferred_id":null,"queue_id":null,"compensation_id":null,"attempt":0,"name":"v1-golden","status":"completed","redacted_detail":"","idempotency_key":"v1-golden-complete"}
 ```
 
 Add `workflow v1 golden fixture replays under versioned reader` in
 `workflow_test.zig`. Load the fixture with `std.Io.Dir.cwd().readFileAlloc`,
 parse each row with `fx.workflow.parseWorkflowEventJson`, fold with
 `WorkflowReplayState.fold`, and assert status `completed`, workflow id `11`,
-execution id `12`, last sequence `3`, and one completed activity.
+execution id `12`, last sequence `4`, and one completed activity.
 
 Add `workflow tool fixture loader accepts v1 golden histories` in
 `workflow_tool_support.zig`, using `loadFixtureEvents` with the fixture path and
-asserting three events.
+asserting four events.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -212,13 +213,13 @@ cd packages/zigeffect && zig build examples --summary all
 Expected: FAIL before the fixture exists and before helper expectations are
 implemented.
 
-- [ ] **Step 3: Implement fixture support**
+- [x] **Step 3: Implement fixture support**
 
 Add the fixture exactly as shown. Add the tests and, if needed, a small local
 test helper in `workflow_test.zig` to parse JSONL rows into a
 `std.ArrayList(fx.workflow.WorkflowEvent)` and deinitialize owned strings.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
