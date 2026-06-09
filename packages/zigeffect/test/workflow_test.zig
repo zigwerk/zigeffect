@@ -1443,6 +1443,49 @@ test "file workflow journal store recovers partial trailing row" {
     try std.testing.expect(std.mem.indexOf(u8, recovered_segment, partial) == null);
 }
 
+test "file journal refuses future schema versions without truncating" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const segment_name = try fx.workflow.segmentFileName(std.testing.allocator, 1);
+    defer std.testing.allocator.free(segment_name);
+
+    const started_json = try fx.workflow.formatWorkflowEventJson(std.testing.allocator, .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "future-runtime",
+        .status = "running",
+        .idempotency_key = "future-start",
+    });
+    defer std.testing.allocator.free(started_json);
+    const future_json = try replaceFirstOwned(std.testing.allocator, started_json, "\"schema_version\":1", "\"schema_version\":2");
+    defer std.testing.allocator.free(future_json);
+
+    {
+        const file = try tmp.dir.createFile(std.testing.io, segment_name, .{ .read = true });
+        defer file.close(std.testing.io);
+        try file.writeStreamingAll(std.testing.io, future_json);
+        try file.writeStreamingAll(std.testing.io, "\n");
+    }
+
+    try std.testing.expectError(
+        error.JournalRequiresNewerRuntime,
+        fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{}),
+    );
+
+    const recovered_segment = try tmp.dir.readFileAlloc(
+        std.testing.io,
+        segment_name,
+        std.testing.allocator,
+        std.Io.Limit.limited(16 * 1024),
+    );
+    defer std.testing.allocator.free(recovered_segment);
+    try std.testing.expect(std.mem.indexOf(u8, recovered_segment, "\"schema_version\":2") != null);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, recovered_segment, "\n"));
+}
+
 test "file workflow journal store reports complete-row corruption" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

@@ -20,6 +20,7 @@ pub const JournalStoreError = error{
 pub const FileJournalStoreError = error{
     JournalStoreLocked,
     CorruptJournal,
+    JournalRequiresNewerRuntime,
 };
 
 pub const JournalStoreAppendError = anyerror;
@@ -657,6 +658,9 @@ pub const FileJournalStore = struct {
             const line = content[line_start..newline_index];
             if (line.len != 0) {
                 const event = journal.parseWorkflowEventJson(self.allocator, line) catch |err| {
+                    if (err == error.FutureWorkflowEventSchemaVersion) {
+                        return error.JournalRequiresNewerRuntime;
+                    }
                     self.recordCorruption(line_start, corruptionReasonFromError(err));
                     return error.CorruptJournal;
                 };

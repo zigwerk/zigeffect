@@ -128,7 +128,7 @@ Expected: PASS.
 - Modify `packages/zigeffect/src/workflow/store.zig`
 - Modify `packages/zigeffect/test/workflow_test.zig`
 
-- [ ] **Step 1: Write failing file-store test**
+- [x] **Step 1: Write failing file-store test**
 
 Add `file journal refuses future schema versions without truncating`. Create a
 temporary directory, write `workflow-0000000000000001.jsonl` with a complete
@@ -143,7 +143,7 @@ try std.testing.expectError(
 
 Read the file back and assert it still contains `"schema_version":2`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -154,7 +154,7 @@ cd packages/zigeffect && zig build test-raw --summary all
 Expected: FAIL because future-version rows currently surface as corrupt journal
 errors.
 
-- [ ] **Step 3: Implement downgrade-safe recovery**
+- [x] **Step 3: Implement downgrade-safe recovery**
 
 Add `JournalRequiresNewerRuntime` to `FileJournalStoreError`. In
 `FileJournalStore.recover`, catch `error.FutureWorkflowEventSchemaVersion`
@@ -163,7 +163,7 @@ separately and return `error.JournalRequiresNewerRuntime` without calling
 unknown kind, sequence conflict, and duplicate event on the existing corruption
 path.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
