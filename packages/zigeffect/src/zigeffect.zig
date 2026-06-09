@@ -406,6 +406,17 @@ pub const messageCorrelationId = cluster.messageCorrelationId;
 pub const cloneMessageEnvelope = cluster.cloneMessageEnvelope;
 pub const deinitMessageEnvelope = cluster.deinitMessageEnvelope;
 pub const formatMessageDiagnostic = cluster.formatMessageDiagnostic;
+pub const MessageStorageError = cluster.MessageStorageError;
+pub const StoredMessageRecord = cluster.StoredMessageRecord;
+pub const StoredReplyRecord = cluster.StoredReplyRecord;
+pub const MessageStorageSubmit = cluster.MessageStorageSubmit;
+pub const MessageStorageClaim = cluster.MessageStorageClaim;
+pub const MessageStorageAck = cluster.MessageStorageAck;
+pub const MessageStorageReply = cluster.MessageStorageReply;
+pub const MessageRecordBatch = cluster.MessageRecordBatch;
+pub const MessageStorage = cluster.MessageStorage;
+pub const InMemoryMessageStorage = cluster.InMemoryMessageStorage;
+pub const FileMessageStorage = cluster.FileMessageStorage;
 
 pub const ServiceSet = dependency.service_sets.ServiceSet;
 pub const DependencyIssueKind = dependency.report.DependencyIssueKind;
