@@ -76,7 +76,7 @@ test "local async backend exposes snapshot and idempotent wake lifecycle" {
 
 ## Task 2: Implement Local Async Backend
 
-- [ ] Extend `AsyncBackendError` with concrete local backend errors:
+- [x] Extend `AsyncBackendError` with concrete local backend errors:
 
 ```zig
 pub const AsyncBackendError = error{
@@ -86,10 +86,10 @@ pub const AsyncBackendError = error{
 };
 ```
 
-- [ ] Add `AsyncWaitKind`, `AsyncWaitStatus`, `AsyncIoWaitKind`, `AsyncIoInterest`, `BackendIoWaitRequest`, `BackendIoCompleteRequest`, `BackendWakeEvent`, and `AsyncBackendSnapshot`.
-- [ ] Extend `AsyncBackend.VTable` with `register_io_wait`, `complete_io`, `poll_wake`, and `snapshot`.
-- [ ] Update `UnsupportedAsyncBackendState` so unsupported operations reject all async behavior and `snapshot()` returns zero counts.
-- [ ] Implement `LocalAsyncBackendState` with owned wait records:
+- [x] Add `AsyncWaitKind`, `AsyncWaitStatus`, `AsyncIoWaitKind`, `AsyncIoInterest`, `BackendIoWaitRequest`, `BackendIoCompleteRequest`, `BackendWakeEvent`, and `AsyncBackendSnapshot`.
+- [x] Extend `AsyncBackend.VTable` with `register_io_wait`, `complete_io`, `poll_wake`, and `snapshot`.
+- [x] Update `UnsupportedAsyncBackendState` so unsupported operations reject all async behavior and `snapshot()` returns zero counts.
+- [x] Implement `LocalAsyncBackendState` with owned wait records:
 
 ```zig
 pub const LocalAsyncBackendOptions = struct {
@@ -114,10 +114,10 @@ pub const LocalAsyncBackendState = struct {
 };
 ```
 
-- [ ] Make duplicate suspend, timer, IO wait, wake, and interrupt calls idempotent by suspension id.
-- [ ] Run `cd packages/zigeffect && zig build test-raw`.
-- [ ] Confirm backend-only tests pass while runtime/workflow/cluster red tests still fail.
-- [ ] Commit with `feat(zigeffect): add local async backend`.
+- [x] Make duplicate suspend, timer, IO wait, wake, and interrupt calls idempotent by suspension id.
+- [x] Run `cd packages/zigeffect && zig build test-raw`.
+- [x] Confirm backend-only declarations compile while runtime/workflow/cluster red tests still fail.
+- [x] Commit with `feat(zigeffect): add local async backend`.
 
 ## Task 3: Wire Runtime, Fiber Runtime, Context, And Scope Cleanup
 
