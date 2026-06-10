@@ -23,6 +23,9 @@ pub const ShardLeaseManagerError = error{
 pub const ShardLeaseManagerOptions = struct {
     ttl_ms: RunnerLeaseTtlMs,
     refresh_interval_ms: u64,
+    renewal_jitter_ms: u64 = 0,
+    renewal_deadline_ms: u64 = 0,
+    clock_skew_tolerance_ms: u64 = 0,
 };
 
 pub const ShardLeaseRefreshReport = struct {
@@ -43,6 +46,52 @@ pub const ShardHandoffReport = struct {
     shard_id: ShardId,
     from: RunnerAddress,
     to: RunnerAddress,
+    released_at_ms: u64,
+};
+
+pub const ShardLeaseAuditStatus = enum {
+    valid,
+    refresh_due,
+    renewal_deadline_missed,
+    expired,
+    missing,
+    stale_owner,
+    stale_epoch,
+};
+
+pub const ShardLeaseAuditEntry = struct {
+    shard_id: ShardId,
+    local_owner: RunnerAddress,
+    local_epoch: runner_storage.ShardLeaseEpoch,
+    current_owner: ?RunnerAddress = null,
+    current_epoch: ?runner_storage.ShardLeaseEpoch = null,
+    expires_at_ms: u64 = 0,
+    status: ShardLeaseAuditStatus,
+};
+
+pub const ShardLeaseAuditReport = struct {
+    allocator: ?Allocator = null,
+    entries: []ShardLeaseAuditEntry = &.{},
+    scanned: usize = 0,
+    valid: usize = 0,
+    refresh_due: usize = 0,
+    renewal_deadline_missed: usize = 0,
+    expired: usize = 0,
+    missing: usize = 0,
+    stale_owner: usize = 0,
+    stale_epoch: usize = 0,
+
+    pub fn deinit(self: *ShardLeaseAuditReport) void {
+        const report_allocator = self.allocator orelse return;
+        report_allocator.free(self.entries);
+        self.* = .{};
+    }
+};
+
+pub const ShardLeaseForceReleaseReport = struct {
+    shard_id: ShardId,
+    released_owner: RunnerAddress,
+    released_epoch: runner_storage.ShardLeaseEpoch,
     released_at_ms: u64,
 };
 
@@ -295,15 +344,37 @@ pub const LocalShardLeaseManager = struct {
 };
 
 pub fn shardLeaseNextRefreshAt(lease: ShardLease, options: ShardLeaseManagerOptions) u64 {
-    return lease.refreshed_at_ms +| options.refresh_interval_ms;
+    return lease.refreshed_at_ms +| options.refresh_interval_ms +| shardLeaseRenewalJitterMs(lease, options);
 }
 
 pub fn shardLeaseRefreshDue(lease: ShardLease, options: ShardLeaseManagerOptions, now_ms: u64) bool {
     return now_ms >= shardLeaseNextRefreshAt(lease, options);
 }
 
+pub fn shardLeaseRenewalJitterMs(lease: ShardLease, options: ShardLeaseManagerOptions) u64 {
+    if (options.renewal_jitter_ms == 0) return 0;
+    const width = options.renewal_jitter_ms +| 1;
+    return (lease.shard_id ^ lease.epoch) % width;
+}
+
+pub fn shardLeaseRenewalDeadlineAt(lease: ShardLease, options: ShardLeaseManagerOptions) u64 {
+    return lease.refreshed_at_ms +| effectiveRenewalDeadlineMs(options);
+}
+
+pub fn shardLeaseExpiredForRecovery(lease: ShardLease, options: ShardLeaseManagerOptions, now_ms: u64) bool {
+    return lease.expires_at_ms +| options.clock_skew_tolerance_ms <= now_ms;
+}
+
 fn validateOptions(options: ShardLeaseManagerOptions) ShardLeaseManagerError!void {
     if (options.ttl_ms == 0) return error.InvalidLeaseOptions;
     if (options.refresh_interval_ms == 0) return error.InvalidLeaseOptions;
     if (options.refresh_interval_ms >= options.ttl_ms) return error.InvalidLeaseOptions;
+    const deadline = effectiveRenewalDeadlineMs(options);
+    if (deadline > options.ttl_ms) return error.InvalidLeaseOptions;
+    if (deadline <= options.refresh_interval_ms) return error.InvalidLeaseOptions;
+    if (options.refresh_interval_ms +| options.renewal_jitter_ms >= deadline) return error.InvalidLeaseOptions;
+}
+
+fn effectiveRenewalDeadlineMs(options: ShardLeaseManagerOptions) u64 {
+    return if (options.renewal_deadline_ms == 0) options.ttl_ms else options.renewal_deadline_ms;
 }
