@@ -295,8 +295,19 @@ pub const ClusterRuntime = struct {
                 report.failed += 1;
                 report.entity_failures += 1;
                 const decision = (try self.local_runtime.lastSupervisorDecision(record.envelope.address)) orelse return err;
+                const is_workflow_worker = std.mem.eql(
+                    u8,
+                    record.envelope.address.entity_type.name,
+                    self.supervision_policy.workflow_entity_type_name,
+                );
+                if (is_workflow_worker) {
+                    report.workflow_worker_failures += 1;
+                }
                 if (decision.restarted_children > 0) {
                     report.entity_restarts += 1;
+                    if (is_workflow_worker) {
+                        report.workflow_worker_restarts += 1;
+                    }
                 }
                 if (decision.escalated) {
                     report.entity_escalations += 1;

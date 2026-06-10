@@ -8,6 +8,7 @@ const runner = @import("runner.zig");
 const runner_storage = @import("runner_storage.zig");
 const routing = @import("routing.zig");
 const shard_lease = @import("shard_lease.zig");
+const supervision = @import("supervision.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const ClusterRuntime = cluster_runtime.ClusterRuntime;
@@ -29,6 +30,9 @@ pub const RunnerStorage = runner_storage.RunnerStorage;
 pub const ShardCount = routing.ShardCount;
 pub const ShardId = routing.ShardId;
 pub const ShardLeaseManagerOptions = shard_lease.ShardLeaseManagerOptions;
+pub const ClusterRunnerRestartPolicy = supervision.ClusterRunnerRestartPolicy;
+pub const ClusterRunnerRestartState = supervision.ClusterRunnerRestartState;
+pub const ClusterSupervisionReport = supervision.ClusterSupervisionReport;
 
 pub const LocalClusterError = error{
     InvalidShardCount,
@@ -130,6 +134,7 @@ pub const LocalClusterRunnerOptions = struct {
     runner_count: usize,
     lease_options: ShardLeaseManagerOptions,
     entity_runtime_options: LocalEntityRuntimeOptions = .{},
+    runner_restart_policy: ClusterRunnerRestartPolicy = .{},
 };
 
 pub const LocalClusterRunnerReport = struct {
@@ -152,6 +157,7 @@ pub const LocalClusterRunner = struct {
     lease_manager: *shard_lease.LocalShardLeaseManager,
     runtime: ClusterRuntime,
     router: LocalClusterRouter,
+    runner_restart_state: ClusterRunnerRestartState,
     shard_count: ShardCount,
     runner_index: usize,
     runner_count: usize,
@@ -184,6 +190,7 @@ pub const LocalClusterRunner = struct {
             .lease_manager = lease_manager,
             .runtime = runtime,
             .router = LocalClusterRouter.init(allocator, options.message_storage, .{ .shard_count = options.shard_count }),
+            .runner_restart_state = ClusterRunnerRestartState.init(allocator, options.runner_restart_policy),
             .shard_count = options.shard_count,
             .runner_index = options.runner_index,
             .runner_count = options.runner_count,
@@ -193,6 +200,7 @@ pub const LocalClusterRunner = struct {
     pub fn deinit(self: *LocalClusterRunner) void {
         self.runtime.deinit();
         self.lease_manager.deinit();
+        self.runner_restart_state.deinit();
         self.allocator.destroy(self.lease_manager);
     }
 
@@ -235,6 +243,12 @@ pub const LocalClusterRunner = struct {
             .failed = processed.failed,
             .skipped = processed.skipped,
         };
+    }
+
+    pub fn tickSupervised(self: *LocalClusterRunner, handler: anytype, now_ms: u64) !ClusterSupervisionReport {
+        _ = try self.lease_manager.refreshOwnedLeases(now_ms);
+        _ = try self.runtime.loadOwnedShards();
+        return self.runtime.processOwnedShardsSupervised(handler, now_ms);
     }
 
     pub fn shutdown(self: *LocalClusterRunner, now_ms: u64) !cluster_runtime.ClusterShutdownReport {

@@ -199,6 +199,91 @@ test "supervised entity escalation releases shard for another runner" {
     try std.testing.expect((try message_storage.unprocessedById(submitted.envelope.id, std.testing.allocator)) == null);
 }
 
+test "supervised workflow entity failure is reported as workflow worker restart" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    var runner = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = fx.runnerAddress("machine-supervision", "runner-workflow"),
+        .runner_storage = runner_storage_state.asRunnerStorage(),
+        .message_storage = message_storage,
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 1,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+        .entity_runtime_options = .{ .restart_intensity = .{ .max_restarts = 2, .within_ms = 1_000 } },
+    });
+    defer runner.deinit();
+    _ = try runner.runtime.acquireShard(0, 1_000);
+
+    const workflow_id = fx.workflow.workflowId("approval");
+    const execution_id = try executionIdForWorkflowShard(0, 8);
+    var registry = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+    _ = try registry.registerExecution(&runner, journal_store, workflow_id, execution_id, 1_000);
+
+    var submitted = try message_storage.submit(.{
+        .shard_id = 0,
+        .envelope = .{
+            .kind = .request,
+            .address = fx.clusterWorkflowExecutionAddress(execution_id),
+            .idempotency_key = "bad-workflow-command",
+            .payload_type_name = fx.cluster_workflow_command_payload_type,
+            .payload = "{bad-json",
+            .redacted_detail = "bad-workflow-command",
+        },
+    });
+    defer submitted.deinit(std.testing.allocator);
+
+    const report = try runner.runtime.processShardSupervised(0, fx.ClusterWorkflowEntityHandler, 1_100);
+    try std.testing.expectEqual(@as(usize, 1), report.workflow_worker_failures);
+    try std.testing.expectEqual(@as(usize, 1), report.workflow_worker_restarts);
+    try std.testing.expectEqual(@as(usize, 1), report.entity_restarts);
+}
+
+test "local cluster runner supervised tick aggregates supervision report" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+
+    var runner = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = fx.runnerAddress("machine-supervision", "runner-tick"),
+        .runner_storage = runner_storage_state.asRunnerStorage(),
+        .message_storage = message_storage_state.asMessageStorage(),
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 1,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+        .entity_runtime_options = .{ .restart_intensity = .{ .max_restarts = 2, .within_ms = 1_000 } },
+        .runner_restart_policy = .{ .max_restarts = 2, .within_ms = 1_000 },
+    });
+    defer runner.deinit();
+    _ = try runner.runtime.acquireShard(0, 1_000);
+
+    const address = try addressForShard(0, 8);
+    const ref = try runner.registerEntity(.{ .address = address, .name = "tick-counter" }, 1_000);
+    var submitted = try ref.tell("text", "boom", "tick-failure");
+    defer submitted.deinit(std.testing.allocator);
+
+    const Handler = struct {
+        pub fn handle(_: *fx.EntityScope, _: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            return error.Boom;
+        }
+    };
+
+    const report = try runner.tickSupervised(Handler, 1_100);
+    try std.testing.expectEqual(@as(usize, 1), report.entity_failures);
+    try std.testing.expectEqual(@as(usize, 1), report.entity_restarts);
+    try std.testing.expectEqual(@as(usize, 0), report.runner_escalations);
+}
+
 fn addressForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.EntityAddress {
     var id: u64 = 1;
     while (id < 100_000) : (id += 1) {
@@ -208,4 +293,13 @@ fn addressForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.EntityA
         if (try fx.shardIdForAddress(address, shard_count) == shard_id) return address;
     }
     return error.EntityShardNotFound;
+}
+
+fn executionIdForWorkflowShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.workflow.ExecutionId {
+    var id: fx.workflow.ExecutionId = 1;
+    while (id < 100_000) : (id += 1) {
+        const address = fx.clusterWorkflowExecutionAddress(id);
+        if (try fx.shardIdForAddress(address, shard_count) == shard_id) return id;
+    }
+    return error.ExecutionShardNotFound;
 }
