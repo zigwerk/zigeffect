@@ -115,11 +115,51 @@ test "cluster runtime records message entity and failure causal events" {
     try expectClusterEvent(snapshot, .cluster_entity_failed);
 }
 
+test "cluster causal report counts cluster events by domain" {
+    var causal = fx.CausalStore.init(std.testing.allocator);
+    defer causal.deinit();
+    _ = try causal.record(.{ .kind = .cluster_runner_registered, .label = "runner-a" });
+    _ = try causal.record(.{ .kind = .cluster_message_submitted, .label = "message-1" });
+    _ = try causal.record(.{ .kind = .cluster_entity_failed, .label = "entity-1", .status = "failure" });
+
+    const report = try fx.clusterCausalReport(&causal);
+    try std.testing.expectEqual(@as(usize, 3), report.cluster_events);
+    try std.testing.expectEqual(@as(usize, 1), report.runner_events);
+    try std.testing.expectEqual(@as(usize, 1), report.message_events);
+    try std.testing.expectEqual(@as(usize, 1), report.entity_events);
+    try std.testing.expectEqual(@as(usize, 1), report.failures);
+}
+
+test "cluster failure report identifies runner shard message entity and cause" {
+    const report = fx.ClusterFailureReport{
+        .runner = fx.runnerAddress("machine-observe", "runner-a"),
+        .shard_id = 4,
+        .message_id = 99,
+        .attempt = 3,
+        .address = fx.entityAddress("workflow.execution", "123"),
+        .cause = "Boom",
+        .redacted_detail = "handler failed",
+    };
+    const text = try fx.formatClusterFailureReport(std.testing.allocator, report);
+    defer std.testing.allocator.free(text);
+
+    try expectContains(text, "runner=");
+    try expectContains(text, "shard=4");
+    try expectContains(text, "message=99");
+    try expectContains(text, "attempt=3");
+    try expectContains(text, "workflow.execution");
+    try expectContains(text, "cause=Boom");
+}
+
 fn expectClusterEvent(snapshot: fx.CausalSnapshot, kind: fx.CausalEventKind) !void {
     for (snapshot.events) |event| {
         if (event.kind == kind) return;
     }
     return error.ExpectedClusterEvent;
+}
+
+fn expectContains(haystack: []const u8, needle: []const u8) !void {
+    try std.testing.expect(std.mem.indexOf(u8, haystack, needle) != null);
 }
 
 fn observedAddressForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.EntityAddress {

@@ -127,6 +127,66 @@ pub const ClusterFailureReport = struct {
     redacted_detail: []const u8 = "",
 };
 
+pub fn clusterCausalReport(store: *const CausalStore) Allocator.Error!ClusterCausalReport {
+    var report = ClusterCausalReport{};
+    for (store.events.items) |event| {
+        if (!isClusterEvent(event.kind)) continue;
+        report.cluster_events += 1;
+        switch (event.kind) {
+            .cluster_runner_registered,
+            .cluster_runner_heartbeat,
+            => report.runner_events += 1,
+            .cluster_shard_lease_acquired,
+            .cluster_shard_lease_refreshed,
+            .cluster_shard_lease_released,
+            .cluster_shard_lease_conflict,
+            .cluster_shard_handoff_started,
+            .cluster_shard_recovery_started,
+            .cluster_shard_recovery_completed,
+            => report.shard_events += 1,
+            .cluster_message_submitted,
+            .cluster_message_claimed,
+            .cluster_message_acked,
+            .cluster_message_replied,
+            => report.message_events += 1,
+            .cluster_entity_registered,
+            .cluster_entity_processed,
+            .cluster_entity_failed,
+            => report.entity_events += 1,
+            .cluster_trace_propagated => {},
+            else => {},
+        }
+        if (std.mem.eql(u8, event.status, "failure") or event.kind == .cluster_entity_failed) {
+            report.failures += 1;
+        }
+    }
+    return report;
+}
+
+pub fn isClusterEvent(kind: CausalEventKind) bool {
+    return switch (kind) {
+        .cluster_shard_lease_acquired,
+        .cluster_shard_lease_refreshed,
+        .cluster_shard_lease_released,
+        .cluster_shard_lease_conflict,
+        .cluster_shard_handoff_started,
+        .cluster_shard_recovery_started,
+        .cluster_shard_recovery_completed,
+        .cluster_runner_registered,
+        .cluster_runner_heartbeat,
+        .cluster_message_submitted,
+        .cluster_message_claimed,
+        .cluster_message_acked,
+        .cluster_message_replied,
+        .cluster_entity_registered,
+        .cluster_entity_processed,
+        .cluster_entity_failed,
+        .cluster_trace_propagated,
+        => true,
+        else => false,
+    };
+}
+
 pub fn formatClusterCausalDot(allocator: Allocator, store: *const CausalStore) Allocator.Error![]const u8 {
     _ = store;
     return allocator.dupe(u8, "digraph zigeffect_cluster {\n}\n");
