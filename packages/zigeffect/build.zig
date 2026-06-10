@@ -26,6 +26,21 @@ pub fn build(b: *std.Build) void {
     const raw_test_step = b.step("test-raw", "Run zigeffect tests without causal wrapping");
     raw_test_step.dependOn(&run_unit_tests.step);
 
+    const public_api_stability_test_module = b.createModule(.{
+        .root_source_file = b.path("test/public_api_stability_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    public_api_stability_test_module.addImport("zigeffect", zigeffect);
+
+    const public_api_stability_tests = b.addTest(.{
+        .name = "zigeffect-public-api-stability-tests",
+        .root_module = public_api_stability_test_module,
+    });
+    const run_public_api_stability_tests = b.addRunArtifact(public_api_stability_tests);
+    const public_api_review_step = b.step("public-api-review", "Run public API stability review tests");
+    public_api_review_step.dependOn(&run_public_api_stability_tests.step);
+
     const causal_backend_conformance_test_module = b.createModule(.{
         .root_source_file = b.path("test/causal_backend_conformance_test.zig"),
         .target = target,
@@ -832,6 +847,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_resource_bounds_tests.step);
     test_step.dependOn(&run_workflow_snapshot_frequency_tests.step);
     test_step.dependOn(&run_cluster_observability_tests.step);
+    test_step.dependOn(&run_public_api_stability_tests.step);
     test_step.dependOn(&run_causal_jsonl_backend_tests.step);
     test_step.dependOn(&run_causal_dot_backend_tests.step);
     test_step.dependOn(&run_causal_otel_backend_tests.step);

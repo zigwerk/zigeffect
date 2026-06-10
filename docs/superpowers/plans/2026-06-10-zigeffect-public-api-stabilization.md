@@ -40,33 +40,33 @@ Modify:
 
 ## Task 1: Add The Public API Test Harness
 
-- [ ] Add `public-api-review` build wiring to `packages/zigeffect/build.zig`
+- [x] Add `public-api-review` build wiring to `packages/zigeffect/build.zig`
   that points at `test/public_api_stability_test.zig`.
-- [ ] Import `public_api_stability_test.zig` from
+- [x] Import `public_api_stability_test.zig` from
   `packages/zigeffect/test/all_test.zig`.
-- [ ] Run `(cd packages/zigeffect && zig build public-api-review)` and confirm
+- [x] Run `(cd packages/zigeffect && zig build public-api-review)` and confirm
   the gate fails because the test file is absent.
 
 ## Task 2: Lock The Public API Surface
 
-- [ ] Create `packages/zigeffect/test/public_api_stability_test.zig`.
-- [ ] Assert required root namespaces exist:
+- [x] Create `packages/zigeffect/test/public_api_stability_test.zig`.
+- [x] Assert required root namespaces exist:
   `core`, `dependency`, `effect`, `runtime`, `layer`, `services`, `testing`,
   `traits`, `data`, `match`, `pattern`, `workflow`, `cluster`, `storage`, and
   `performance`.
-- [ ] Assert workflow stable exports exist for workflow definitions, activity
+- [x] Assert workflow stable exports exist for workflow definitions, activity
   definitions, journal stores, workflow engine, workflow context, durable clock,
   durable deferreds, durable signals, durable queues, scheduler, lifecycle, and
   ownership helpers.
-- [ ] Assert cluster stable exports exist for entity identity, local actor
+- [x] Assert cluster stable exports exist for entity identity, local actor
   runtime, mailbox storage, message storage, runner storage, shard leases,
   fencing, cluster runtime, transport, cluster workflow engine, timer wakeups,
   durable queue indexes, local cluster runners, and ownership helpers.
-- [ ] Assert selected top-level aliases point to namespace exports.
-- [ ] Assert workflow, cluster, storage, and performance schema constants remain
+- [x] Assert selected top-level aliases point to namespace exports.
+- [x] Assert workflow, cluster, storage, and performance schema constants remain
   version `1`.
-- [ ] Assert public error sets include the documented members.
-- [ ] Run `(cd packages/zigeffect && zig build public-api-review)` and confirm
+- [x] Assert public error sets include the documented members.
+- [x] Run `(cd packages/zigeffect && zig build public-api-review)` and confirm
   the focused gate passes.
 
 ## Task 3: Write The Public API Review Artifact

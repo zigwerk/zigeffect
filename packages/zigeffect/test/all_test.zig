@@ -1,5 +1,6 @@
 comptime {
     _ = @import("architecture_test.zig");
+    _ = @import("public_api_stability_test.zig");
     _ = @import("dependency_test.zig");
     _ = @import("effect_test.zig");
     _ = @import("scope_test.zig");
