@@ -797,15 +797,15 @@ Goal: make stale runners harmless.
 
 Deliverables:
 
-- [ ] Add lease epoch to all shard-owned writes.
-- [ ] Reject writes from stale epochs.
-- [ ] Add fencing tokens to message and journal stores.
-- [ ] Add stale runner shutdown behavior.
-- [ ] Add diagnostics for lease conflicts.
+- [x] Add lease epoch to all shard-owned writes.
+- [x] Reject writes from stale epochs.
+- [x] Add fencing tokens to message and journal stores.
+- [x] Add stale runner shutdown behavior.
+- [x] Add diagnostics for lease conflicts.
 
 Acceptance:
 
-- [ ] Tests prove stale runner writes cannot corrupt journal or mailbox state.
+- [x] Tests prove stale runner writes cannot corrupt journal or mailbox state.
 
 ## Milestone 39: Cluster Supervision
 
