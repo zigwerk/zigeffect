@@ -430,6 +430,32 @@ pipeline execution, durable writes, NenDB writes, and CI gates disabled. The
 full policy is in
 [docs/production-telemetry-nendb-retention-fixtures.md](docs/production-telemetry-nendb-retention-fixtures.md).
 
+Review the production telemetry workbench read-only preview:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-telemetry-workbench-readonly-preview -- \
+  --from-retention ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures.json \
+  approve \
+  --reason "read-only SolidJS webui preview reviewed" \
+  --verified-command "bun run zigeffect:workbench:typecheck" \
+  --verified-command "bun run zigeffect:workbench:test" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The report uses schema
+`zigeffect.causal.production-telemetry-workbench-readonly-preview.v1`, backs the
+read-only `Telemetry` workbench tab, and emits a `ready` or `blocked` preview
+artifact before CI artifact preview work starts. It keeps `applied=false`,
+`mutation_authority=none`, read-only SolidJS/webui mode enabled, live
+telemetry, network send, collector endpoints, OTLP serialization, runtime
+pipeline execution, durable writes, NenDB writes, and CI gates disabled. The
+full policy is in
+[docs/production-telemetry-workbench-readonly-preview.md](docs/production-telemetry-workbench-readonly-preview.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -455,8 +481,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-workbench-readonly-preview` after
-the delivered production telemetry NenDB retention fixtures.
+`codex/zigeffect-causal-production-telemetry-ci-artifact-preview` after the
+delivered production telemetry workbench read-only preview.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in

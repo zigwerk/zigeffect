@@ -116,8 +116,11 @@ exporter-boundary branch is now delivered through
 branch is now delivered through
 `causal-production-telemetry-local-pipeline-fixtures`. The NenDB-retention
 fixtures branch is now delivered through
-`causal-production-telemetry-nendb-retention-fixtures`. The current handoff is
-`codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`.
+`causal-production-telemetry-nendb-retention-fixtures`. The workbench
+read-only preview handoff is now delivered through
+`causal-production-telemetry-workbench-readonly-preview`.
+The current next branch is
+`codex/zigeffect-causal-production-telemetry-ci-artifact-preview`.
 
 ## Verification
 

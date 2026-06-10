@@ -67,6 +67,11 @@ mapping, or agent handoff, also update [operations.md](operations.md).
   network transport.
 - `local-pipeline-fixtures`: fixture-only local envelope shaping, redaction,
   sampling, and correlation evidence; not runtime pipeline execution.
+- `workbench-readonly-preview`: human workbench evidence only; not live
+  telemetry, durable writes, CI gates, hosted dashboard readiness, or mutation
+  authority.
+- `solid-webui`: SolidJS inside `webui-dev/zig-webui` is the reviewed workbench
+  direction for this artifact family.
 
 ## New Schema Checklist
 
@@ -365,6 +370,21 @@ exporters, send OTLP, configure collector endpoints, write NenDB records, write
 durable production storage, compact records, run backup or recovery, fail CI,
 add non-NenDB adapter work, add alternate renderers, or grant mutation
 authority.
+
+- `zigeffect.causal.production-telemetry-workbench-readonly-preview.v1`
+
+The production-telemetry-workbench-readonly-preview report is a record-only,
+`workbench-readonly-preview`, `solid-webui`, `no-network`,
+`no-live-ingestion`, `no-durable-write`, and `no-nendb-write` production
+hardening contract. It consumes a ready NenDB-retention-fixtures artifact,
+backs the read-only SolidJS `Telemetry` workbench tab and development sample,
+records source checks, authority boundary evidence, mapping fixtures,
+validation checks, blocked claims, and required verification commands, and
+emits `ready` or `blocked` artifacts before future CI artifact preview work. It
+does not ingest live telemetry, run a telemetry pipeline, configure exporters,
+send OTLP, configure collector endpoints, write NenDB records, write durable
+production storage, fail CI, host a production dashboard, add non-NenDB adapter
+work, add alternate renderers, or grant mutation authority.
 
 ### Human-Agent Feedback
 

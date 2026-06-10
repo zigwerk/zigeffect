@@ -495,7 +495,7 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-production-telemetry-workbench-readonly-preview` after
+`codex/zigeffect-causal-production-telemetry-ci-artifact-preview` after
 the unified causal spine, deep runtime internals, app semantic trace API,
 bounded agent query surface, record-only encryption-at-rest policy,
 record-only alerting integrations, delivered live dashboard streaming
@@ -504,7 +504,8 @@ loop, delivered rollout automation guardrails, delivered wall-clock benchmark
 baseline contract, and delivered production capacity planning,
 completion-audit, load-test observation harness, production telemetry capture
 design, fixture, readiness-review, implementation-proposal, exporter-boundary,
-local-pipeline-fixtures, and NenDB-retention-fixtures contracts.
+local-pipeline-fixtures, NenDB-retention-fixtures, and workbench read-only
+preview contracts.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -554,8 +555,9 @@ production load, no capacity claim, and `mutation_authority=none`.
 
 The harness has now been consumed by the delivered telemetry design, fixture,
 readiness-review, implementation-proposal, exporter-boundary, local pipeline
-fixture, and NenDB retention fixture milestones. The current next branch is
-`codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`.
+fixture, NenDB retention fixture, and workbench read-only preview milestones.
+The current next branch is
+`codex/zigeffect-causal-production-telemetry-ci-artifact-preview`.
 
 ## Production Telemetry Capture Design
 
@@ -733,12 +735,40 @@ The retention fixture report records schema
 consumes a ready local-pipeline-fixtures artifact, emits `ready` or `blocked`
 NenDB retention fixture artifacts, records node, edge, retention policy,
 compaction, backup, and recovery mapping fixtures, and hands off to
+the delivered
 `codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`. Do
 not treat the fixtures as runtime pipeline execution, live telemetry, network
 send, collector configuration, OTLP serialization, NenDB writes, durable
 production writes, compaction execution, backup execution, restore execution,
 CI gates, production capacity evidence, non-NenDB adapter scope, alternate
 renderer scope, or mutation authority.
+
+Run the workbench read-only preview after NenDB retention fixture approval:
+
+```sh
+cd packages/zigeffect
+zig build causal-production-telemetry-workbench-readonly-preview -- \
+  --from-retention ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures.json \
+  approve \
+  --reason "read-only SolidJS webui preview reviewed" \
+  --verified-command "bun run zigeffect:workbench:typecheck" \
+  --verified-command "bun run zigeffect:workbench:test" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The workbench preview report records schema
+`zigeffect.causal.production-telemetry-workbench-readonly-preview.v1`. It
+consumes a ready NenDB retention fixture artifact, backs the read-only
+`Telemetry` tab and `?sample=production-telemetry` fixture, emits `ready` or
+`blocked` workbench preview artifacts, and hands off to
+`codex/zigeffect-causal-production-telemetry-ci-artifact-preview`. Do not treat
+the preview as runtime pipeline execution, live telemetry, network send,
+collector configuration, OTLP serialization, NenDB writes, durable production
+writes, CI gates, hosted dashboard readiness, production capacity evidence,
+non-NenDB adapter scope, alternate renderer scope, or mutation authority.
 
 ## Production Artifact Aggregation
 
@@ -1029,9 +1059,9 @@ Run `causal-production-hardening-completion-audit` after capacity planning to
 confirm the delivered hardening sequence and choose the next evidence-producing
 branch. The load-test observation harness and production telemetry capture
 design, fixture, readiness-review, implementation-proposal, and
-exporter-boundary, local-pipeline-fixtures, and NenDB-retention-fixtures
-reports are now delivered. The current next branch is
-`codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`.
+exporter-boundary, local-pipeline-fixtures, NenDB-retention-fixtures, and
+workbench-readonly-preview reports are now delivered. The current next branch is
+`codex/zigeffect-causal-production-telemetry-ci-artifact-preview`.
 
 ## Production Gaps
 

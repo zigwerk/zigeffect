@@ -143,10 +143,12 @@ they cannot justify local pipeline fixture work.
 The local-pipeline-fixtures branch is now delivered through
 `causal-production-telemetry-local-pipeline-fixtures`. The NenDB-retention
 fixtures branch is now delivered through
-`causal-production-telemetry-nendb-retention-fixtures`. The current handoff is
-`codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`, which
-must consume ready retention fixture artifacts rather than treating this
-boundary report as runtime telemetry.
+`causal-production-telemetry-nendb-retention-fixtures`. The workbench
+read-only preview is now delivered through
+`causal-production-telemetry-workbench-readonly-preview`. The current handoff is
+`codex/zigeffect-causal-production-telemetry-ci-artifact-preview`, which must
+consume ready workbench preview artifacts rather than treating this boundary
+report as runtime telemetry.
 
 ## Verification
 

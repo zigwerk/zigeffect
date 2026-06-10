@@ -120,8 +120,9 @@ Use `--out-prefix <path-prefix>` to choose a custom artifact prefix.
 
 ## Agent Guidance
 
-Agents may use a `ready` NenDB retention fixture artifact to start
-`codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`. They
+Agents may use a `ready` NenDB retention fixture artifact to inspect the
+delivered `codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`
+branch or regenerate its source preview artifact. They
 must cite the source local-pipeline artifact, boundary, proposal, readiness,
 fixture paths, mapping fixture catalog, retention validation checks, required
 commands, recorded commands, and blocked claims.

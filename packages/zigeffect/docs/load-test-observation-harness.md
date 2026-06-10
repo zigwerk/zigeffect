@@ -119,8 +119,10 @@ pipeline fixture handoff is delivered as
 `codex/zigeffect-causal-production-telemetry-local-pipeline-fixtures`. The
 NenDB retention fixture handoff is delivered as
 `codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures`. The
+workbench read-only preview handoff is delivered as
+`codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`. The
 current next branch is
-`codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`.
+`codex/zigeffect-causal-production-telemetry-ci-artifact-preview`.
 
 ## Verification
 

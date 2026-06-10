@@ -835,6 +835,20 @@ metrics, and traces.
   without touching production systems, running a telemetry pipeline, writing
   NenDB, compacting records, running backup or recovery, or claiming production
   capacity.
+- Delivered: `causal-production-telemetry-workbench-readonly-preview` publishes
+  `zigeffect.causal.production-telemetry-workbench-readonly-preview.v1`, adds a
+  read-only SolidJS `webui-dev/zig-webui` Telemetry tab, supports
+  `?sample=production-telemetry`, carries NenDB mapping fixtures and authority
+  checks into the workbench, emits ready and blocked preview artifacts, and
+  hands off to
+  `codex/zigeffect-causal-production-telemetry-ci-artifact-preview`. It keeps
+  `applied=false`, `production_telemetry_ingestion=false`,
+  `live_exporter_enabled=false`, `network_send_enabled=false`,
+  `collector_endpoint_configured=false`, `otlp_serialization_enabled=false`,
+  `runtime_pipeline_enabled=false`, `durable_write_enabled=false`,
+  `nendb_write_enabled=false`, `ci_gate_enabled=false`,
+  `mutation_authority=none`, and avoids live telemetry, durable writes, CI
+  gates, hosted dashboard claims, alternate renderers, or production mutation.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,

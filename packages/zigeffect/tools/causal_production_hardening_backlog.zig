@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-production-telemetry-workbench-readonly-preview";
-pub const recommended_next_branch = "codex/zigeffect-causal-production-telemetry-workbench-readonly-preview";
+pub const recommendation = "start-production-telemetry-ci-artifact-preview";
+pub const recommended_next_branch = "codex/zigeffect-causal-production-telemetry-ci-artifact-preview";
 
 const OutputFormat = enum { text, json };
 
@@ -671,6 +671,33 @@ const backlog_items: []const BacklogItem = &.{
         .branch = "codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures",
         .agent_guidance = "Use approved NenDB retention fixture artifacts to start the read-only SolidJS/webui workbench preview only; do not infer runtime ingestion, network transport, OTLP serialization, NenDB writes, durable writes, non-NenDB adapters, alternate renderers, CI gates, or mutation authority.",
     },
+    .{
+        .id = "production-telemetry-workbench-readonly-preview",
+        .title = "Production Telemetry Workbench Read-Only Preview",
+        .gap_id = "production-telemetry-workbench-readonly-preview",
+        .priority = "P5",
+        .status = "delivered",
+        .summary = "Consumes ready NenDB retention fixture evidence, adds a read-only SolidJS/webui Telemetry tab and sample artifact, and emits a record-only workbench preview artifact before CI artifact preview work.",
+        .depends_on = &.{ "production-telemetry-nendb-retention-fixtures", "workbench-graph-visual-debugging", "live-dashboard-streaming-workbench" },
+        .deliverables = &.{
+            "production telemetry workbench parser model",
+            "development sample artifact for ?sample=production-telemetry",
+            "read-only Telemetry tab with source authority checks mapping fixtures and verification evidence",
+            "approved and blocked workbench preview artifacts",
+            "CI artifact preview handoff",
+        },
+        .evidence_sources = &.{
+            "docs/superpowers/specs/2026-06-10-zigeffect-causal-production-telemetry-workbench-readonly-preview-design.md",
+            "docs/superpowers/plans/2026-06-10-zigeffect-causal-production-telemetry-workbench-readonly-preview-implementation.md",
+            "packages/zigeffect/tools/causal_production_telemetry_workbench_readonly_preview.zig",
+            "packages/zigeffect/docs/production-telemetry-workbench-readonly-preview.md",
+            "packages/zigeffect/workbench/src/App.tsx",
+            "packages/zigeffect/workbench/src/causalArtifact.ts",
+            "packages/zigeffect/workbench/public/sample-production-telemetry-nendb-retention-fixtures.json",
+        },
+        .branch = "codex/zigeffect-causal-production-telemetry-workbench-readonly-preview",
+        .agent_guidance = "Use approved workbench preview artifacts to start CI artifact preview only; do not infer runtime ingestion, network transport, OTLP serialization, NenDB writes, durable writes, CI gates, hosted dashboard readiness, alternate renderers, or mutation authority.",
+    },
 };
 
 const dependency_order: []const []const u8 = &.{
@@ -699,6 +726,7 @@ const dependency_order: []const []const u8 = &.{
     "production-telemetry-exporter-boundary",
     "production-telemetry-local-pipeline-fixtures",
     "production-telemetry-nendb-retention-fixtures",
+    "production-telemetry-workbench-readonly-preview",
 };
 
 const verification_commands: []const []const u8 = &.{
@@ -744,6 +772,10 @@ const verification_commands: []const []const u8 = &.{
     "zig build causal-production-telemetry-local-pipeline-fixtures -- --from-boundary ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary.json reject --reason \"negative local pipeline fixture path\"",
     "zig build causal-production-telemetry-nendb-retention-fixtures -- --from-local-pipeline ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures.json approve --reason \"approved local pipeline reviewed for NenDB retention fixtures\" --verified-command \"zig build causal-production-telemetry-local-pipeline-fixtures\" --verified-command \"zig build causal-nendb-storage-backend\" --verified-command \"zig build causal-durable-production-retention -- --format json\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"",
     "zig build causal-production-telemetry-nendb-retention-fixtures -- --from-local-pipeline ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures.json reject --reason \"negative NenDB retention fixture path\"",
+    "bun run zigeffect:workbench:typecheck",
+    "bun run zigeffect:workbench:test",
+    "zig build causal-production-telemetry-workbench-readonly-preview -- --from-retention ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures.json approve --reason \"read-only SolidJS webui preview reviewed\" --verified-command \"bun run zigeffect:workbench:typecheck\" --verified-command \"bun run zigeffect:workbench:test\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"",
+    "zig build causal-production-telemetry-workbench-readonly-preview -- --from-retention ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures.json reject --reason \"negative workbench preview path\"",
     "zig build causal-production-deployment-runbooks",
     "zig build causal-production-deployment-runbooks -- --format json",
     "zig build causal-durable-production-retention",
@@ -1016,11 +1048,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-production-telemetry-workbench-readonly-preview",
+        "start-production-telemetry-ci-artifact-preview",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-production-telemetry-workbench-readonly-preview",
+        "codex/zigeffect-causal-production-telemetry-ci-artifact-preview",
         recommended_next_branch,
     );
 }
@@ -1067,6 +1099,8 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItemStatus("production-telemetry-local-pipeline-fixtures", "delivered");
     try expectBacklogItem("production-telemetry-nendb-retention-fixtures");
     try expectBacklogItemStatus("production-telemetry-nendb-retention-fixtures", "delivered");
+    try expectBacklogItem("production-telemetry-workbench-readonly-preview");
+    try expectBacklogItemStatus("production-telemetry-workbench-readonly-preview", "delivered");
 }
 
 test "production hardening backlog preserves user constraints" {
@@ -1085,7 +1119,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-production-telemetry-workbench-readonly-preview") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-production-telemetry-ci-artifact-preview") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -1112,6 +1146,8 @@ test "production hardening backlog text mentions dependency order and next branc
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-telemetry-local-pipeline-fixtures") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-telemetry-nendb-retention-fixtures") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-telemetry-nendb-retention-fixtures") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "production-telemetry-workbench-readonly-preview") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-telemetry-workbench-readonly-preview") != null);
 }
 
 test "production hardening backlog JSON is agent-readable" {
@@ -1120,7 +1156,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-production-telemetry-workbench-readonly-preview\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-production-telemetry-ci-artifact-preview\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);
@@ -1159,6 +1195,9 @@ test "production hardening backlog JSON is agent-readable" {
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"production-telemetry-nendb-retention-fixtures\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-production-telemetry-nendb-retention-fixtures") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"production-telemetry-workbench-readonly-preview\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-production-telemetry-workbench-readonly-preview\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-production-telemetry-workbench-readonly-preview") != null);
 }
 
 test "production hardening backlog parses supported formats" {

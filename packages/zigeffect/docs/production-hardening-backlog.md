@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-telemetry-workbench-readonly-preview` means the
+The recommendation `start-production-telemetry-ci-artifact-preview` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -98,8 +98,16 @@ recovery markers, and preserve disabled runtime pipeline execution, live
 telemetry, network send, collector endpoint, OTLP serialization, durable writes,
 NenDB writes, CI gates, non-NenDB adapter scope, alternate renderer scope, and
 mutation authority before any workbench preview branch.
+The production telemetry workbench read-only preview is also delivered: it
+consumes ready NenDB retention fixture artifacts, adds a read-only SolidJS
+`webui-dev/zig-webui` Telemetry tab and development sample, emits ready or
+blocked workbench preview artifacts, and preserves disabled runtime pipeline
+execution, live telemetry, network send, collector endpoint, OTLP
+serialization, durable writes, NenDB writes, CI gates, hosted dashboard claims,
+alternate renderer scope, and mutation authority before any CI artifact preview
+branch.
 The next branch should be
-`codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`.
+`codex/zigeffect-causal-production-telemetry-ci-artifact-preview`.
 
 ## Dependency Order
 
@@ -130,6 +138,7 @@ The backlog currently orders future production-hardening branches as:
 23. `production-telemetry-exporter-boundary` delivered
 24. `production-telemetry-local-pipeline-fixtures` delivered
 25. `production-telemetry-nendb-retention-fixtures` delivered
+26. `production-telemetry-workbench-readonly-preview` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -331,8 +340,22 @@ disabled OTLP serialization, disabled runtime pipeline execution, disabled
 durable writes, disabled NenDB writes, disabled CI gates, NenDB-only durable
 direction, and SolidJS `zig-webui` workbench direction.
 
-The next branch should use ready NenDB retention fixture artifacts to define a
-read-only SolidJS `webui-dev/zig-webui` workbench preview before any durable
+Production telemetry workbench read-only preview is documented in
+[production-telemetry-workbench-readonly-preview.md](production-telemetry-workbench-readonly-preview.md).
+It emits `zigeffect.causal.production-telemetry-workbench-readonly-preview.v1`
+through `zig build causal-production-telemetry-workbench-readonly-preview`,
+consumes ready NenDB retention fixture JSON, backs the read-only `Telemetry`
+tab and `?sample=production-telemetry`, records source checks, authority
+boundary evidence, mapping fixtures, validation checks, blocked claims, and
+required verification commands, and preserves `applied=false`,
+`mutation_authority=none`, disabled live telemetry, disabled network send,
+disabled collector endpoint configuration, disabled OTLP serialization,
+disabled runtime pipeline execution, disabled durable writes, disabled NenDB
+writes, disabled CI gates, NenDB-only durable direction, and SolidJS
+`zig-webui` workbench direction.
+
+The next branch should use ready workbench preview artifacts to define a CI
+artifact preview before any durable
 production writes, live ingestion, exporters, capacity claims, CI gates, or
 mutation authority are considered.
 
@@ -452,6 +475,22 @@ zig build causal-production-telemetry-nendb-retention-fixtures -- \
   --from-local-pipeline ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures.json \
   reject \
   --reason "negative NenDB retention fixture path"
+bun run zigeffect:workbench:typecheck
+bun run zigeffect:workbench:test
+zig build causal-production-telemetry-workbench-readonly-preview -- \
+  --from-retention ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures.json \
+  approve \
+  --reason "read-only SolidJS webui preview reviewed" \
+  --verified-command "bun run zigeffect:workbench:typecheck" \
+  --verified-command "bun run zigeffect:workbench:test" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+zig build causal-production-telemetry-workbench-readonly-preview -- \
+  --from-retention ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures.json \
+  reject \
+  --reason "negative workbench preview path"
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

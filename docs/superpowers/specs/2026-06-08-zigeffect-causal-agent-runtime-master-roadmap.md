@@ -805,11 +805,27 @@ Status values:
      NenDB, compacting records, running backup or recovery, or claiming
      production capacity.
 21. `codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`
-   - Current next branch: use ready NenDB retention fixture artifacts to build
-     a read-only SolidJS `webui-dev/zig-webui` preview of production telemetry
-     evidence before any durable production writes, live ingestion, CI gates,
-     capacity claims, alternate renderers, or mutation authority are
-     considered.
+   - Delivered: `causal-production-telemetry-workbench-readonly-preview` emits
+     `zigeffect.causal.production-telemetry-workbench-readonly-preview.v1`,
+     adds a read-only SolidJS `webui-dev/zig-webui` Telemetry tab, loads the
+     `?sample=production-telemetry` fixture, carries NenDB mapping fixtures and
+     disabled authority checks into the workbench, emits ready and blocked
+     preview artifacts, and hands off to
+     `codex/zigeffect-causal-production-telemetry-ci-artifact-preview`. It keeps
+     `applied=false`, `production_telemetry_ingestion=false`,
+     `live_exporter_enabled=false`, `network_send_enabled=false`,
+     `collector_endpoint_configured=false`, `otlp_serialization_enabled=false`,
+     `runtime_pipeline_enabled=false`, `durable_write_enabled=false`,
+     `nendb_write_enabled=false`, `ci_gate_enabled=false`,
+     `mutation_authority=none`, and avoids live telemetry, durable writes, CI
+     gates, hosted dashboard claims, alternate renderers, or production
+     mutation.
+22. `codex/zigeffect-causal-production-telemetry-ci-artifact-preview`
+   - Current next branch: use ready workbench preview artifacts to define CI
+     artifact shape, upload/retention preview evidence, and agent-readable
+     failure attachments before enabling any CI gate, durable write, live
+     telemetry ingestion, hosted dashboard, capacity claim, alternate renderer,
+     or mutation authority.
 
 ## Dual-Interface Causal Spine Expansion
 
