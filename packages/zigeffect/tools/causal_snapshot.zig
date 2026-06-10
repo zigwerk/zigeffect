@@ -11,6 +11,8 @@ pub const replay_feasibility_schema = "zigeffect.causal.replay-feasibility.v1";
 pub const replay_feasibility_schema_version: u32 = 1;
 pub const deterministic_replay_schema = "zigeffect.causal.deterministic-replay.v1";
 pub const deterministic_replay_schema_version: u32 = 1;
+pub const scenario_fork_proposal_schema = "zigeffect.causal.scenario-fork-proposal.v1";
+pub const scenario_fork_proposal_schema_version: u32 = 1;
 const replay_feasibility_event_sample_limit: usize = 20;
 
 pub const SnapshotManifestOptions = struct {
@@ -39,6 +41,16 @@ pub const SnapshotManifestReferencePath = struct {
 
     pub fn deinit(self: SnapshotManifestReferencePath, allocator: std.mem.Allocator) void {
         allocator.free(self.path);
+    }
+};
+
+const ScenarioForkProposalPaths = struct {
+    json_path: []const u8,
+    text_path: []const u8,
+
+    fn deinit(self: ScenarioForkProposalPaths, allocator: std.mem.Allocator) void {
+        allocator.free(self.json_path);
+        allocator.free(self.text_path);
     }
 };
 
@@ -133,29 +145,45 @@ fn deterministicReplayArtifactPaths(
     try validateSnapshotName(snapshot_name);
     _ = try causal_run.scenarioByName(scenario_slug);
 
-    const report_path = try std.fmt.allocPrint(
-        allocator,
-        "{s}/zigeffect-causal-replay-{s}-{s}.txt",
-        .{ causal_run.artifact_dir, snapshot_name, scenario_slug },
-    );
+    const report_path = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-replay-{s}-{s}.txt", .{ causal_run.artifact_dir, snapshot_name, scenario_slug });
     errdefer allocator.free(report_path);
-    const json_path = try std.fmt.allocPrint(
-        allocator,
-        "{s}/zigeffect-causal-replay-{s}-{s}.json",
-        .{ causal_run.artifact_dir, snapshot_name, scenario_slug },
-    );
+    const json_path = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-replay-{s}-{s}.json", .{ causal_run.artifact_dir, snapshot_name, scenario_slug });
     errdefer allocator.free(json_path);
-    const dot_path = try std.fmt.allocPrint(
-        allocator,
-        "{s}/zigeffect-causal-replay-{s}-{s}.dot",
-        .{ causal_run.artifact_dir, snapshot_name, scenario_slug },
-    );
+    const dot_path = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-replay-{s}-{s}.dot", .{ causal_run.artifact_dir, snapshot_name, scenario_slug });
     errdefer allocator.free(dot_path);
 
     return .{
         .report_path = report_path,
         .json_path = json_path,
         .dot_path = dot_path,
+    };
+}
+
+fn scenarioForkProposalPaths(
+    allocator: std.mem.Allocator,
+    snapshot_name: []const u8,
+    scenario_slug: []const u8,
+    fork_name: []const u8,
+) !ScenarioForkProposalPaths {
+    try validateSnapshotName(snapshot_name);
+    _ = try causal_run.scenarioByName(scenario_slug);
+    try validateSnapshotName(fork_name);
+
+    const json_path = try std.fmt.allocPrint(
+        allocator,
+        "{s}/zigeffect-causal-fork-proposal-{s}-{s}-{s}.json",
+        .{ causal_run.artifact_dir, snapshot_name, scenario_slug, fork_name },
+    );
+    errdefer allocator.free(json_path);
+    const text_path = try std.fmt.allocPrint(
+        allocator,
+        "{s}/zigeffect-causal-fork-proposal-{s}-{s}-{s}.txt",
+        .{ causal_run.artifact_dir, snapshot_name, scenario_slug, fork_name },
+    );
+
+    return .{
+        .json_path = json_path,
+        .text_path = text_path,
     };
 }
 
@@ -167,74 +195,6 @@ pub fn resolveSnapshotManifestReference(allocator: std.mem.Allocator, value: []c
     const paths = try snapshotManifestPaths(allocator, value);
     allocator.free(paths.text_path);
     return .{ .path = paths.json_path };
-}
-
-fn commandSucceeded(term: std.process.Child.Term) bool {
-    return switch (term) {
-        .exited => |code| code == 0,
-        else => false,
-    };
-}
-
-fn deterministicReplayCommandStatus(term: std.process.Child.Term) []const u8 {
-    return if (commandSucceeded(term)) "success" else "failure";
-}
-
-fn deterministicReplayVerdict(term: std.process.Child.Term) []const u8 {
-    return if (commandSucceeded(term)) "replay_completed" else "command_failed";
-}
-
-pub fn formatDeterministicReplayText(
-    allocator: std.mem.Allocator,
-    manifest_path: []const u8,
-    manifest_json: []const u8,
-    baseline_artifact_json: []const u8,
-    scenario: causal_run.Scenario,
-    replay_paths: causal_run.ArtifactPaths,
-    term: std.process.Child.Term,
-    replay_json: []const u8,
-) ![]const u8 {
-    var manifest_parsed = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, manifest_json, .{ .ignore_unknown_fields = true });
-    defer manifest_parsed.deinit();
-
-    const compare_report = try causal_compare.runCompare(allocator, baseline_artifact_json, replay_json);
-    defer allocator.free(compare_report);
-
-    var output = std.ArrayList(u8).empty;
-    errdefer output.deinit(allocator);
-
-    try output.appendSlice(allocator, "zigeffect causal deterministic replay report\n");
-    try output.print(allocator, "schema: {s}\n", .{deterministic_replay_schema});
-    try output.print(allocator, "schema version: {d}\n", .{deterministic_replay_schema_version});
-    try output.appendSlice(allocator, "mode: registered_scenario_rerun\n");
-    try output.appendSlice(allocator, "executed: true\n");
-    try output.appendSlice(allocator, "arbitrary event replay: false\n");
-    try output.print(allocator, "snapshot: {s}\n", .{manifest_parsed.value.name});
-    try output.print(allocator, "manifest: {s}\n", .{manifest_path});
-    try output.print(allocator, "baseline artifact: {s}\n", .{manifest_parsed.value.artifact.path});
-    try output.print(allocator, "scenario: {s}\n", .{scenario.slug});
-    try output.print(allocator, "scenario label: {s}\n", .{scenario.label});
-    try output.print(allocator, "scenario expectation: {s}\n", .{@tagName(scenario.expectation)});
-    try output.print(allocator, "scenario owner: {s}\n", .{@tagName(scenario.owner)});
-    try output.print(allocator, "replay report: {s}\n", .{replay_paths.report_path});
-    try output.print(allocator, "replay artifact: {s}\n", .{replay_paths.json_path});
-    try output.print(allocator, "replay dot: {s}\n", .{replay_paths.dot_path});
-    try output.print(allocator, "command status: {s}\n", .{deterministicReplayCommandStatus(term)});
-    try output.print(allocator, "verdict: {s}\n", .{deterministicReplayVerdict(term)});
-    try output.appendSlice(allocator, "boundary:\n");
-    try output.appendSlice(allocator, "- reruns a registered causal scenario command\n");
-    try output.appendSlice(allocator, "- compares the original snapshot artifact to the rerun artifact\n");
-    try output.appendSlice(allocator, "- does not replay arbitrary recorded event logs as executable programs\n");
-    try output.appendSlice(allocator, "event compare:\n");
-    try output.appendSlice(allocator, compare_report);
-    if (compare_report.len == 0 or compare_report[compare_report.len - 1] != '\n') {
-        try output.append(allocator, '\n');
-    }
-    try output.appendSlice(allocator, "next queries:\n");
-    try output.print(allocator, "- zig build causal-query -- --file {s} snapshot\n", .{replay_paths.json_path});
-    try output.print(allocator, "- zig build causal-compare -- {s} {s}\n", .{ manifest_parsed.value.artifact.path, replay_paths.json_path });
-
-    return output.toOwnedSlice(allocator);
 }
 
 pub fn formatSnapshotCompareText(
@@ -285,6 +245,196 @@ pub fn formatSnapshotCompareText(
     try output.print(allocator, "- zig build causal-compare -- {s} {s}\n", .{ left.artifact.path, right.artifact.path });
 
     return output.toOwnedSlice(allocator);
+}
+
+pub fn formatDeterministicReplayText(
+    allocator: std.mem.Allocator,
+    manifest_path: []const u8,
+    manifest_json: []const u8,
+    baseline_artifact_json: []const u8,
+    scenario: causal_run.Scenario,
+    replay_paths: causal_run.ArtifactPaths,
+    term: std.process.Child.Term,
+    replay_artifact_json_input: []const u8,
+) ![]const u8 {
+    var manifest_parsed = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, manifest_json, .{ .ignore_unknown_fields = true });
+    defer manifest_parsed.deinit();
+    const manifest = manifest_parsed.value;
+
+    const compare_report = try causal_compare.runCompare(allocator, baseline_artifact_json, replay_artifact_json_input);
+    defer allocator.free(compare_report);
+
+    const status = commandStatus(term);
+    const verdict = deterministicReplayVerdict(scenario, term, compare_report);
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "zigeffect causal deterministic replay report\n");
+    try output.print(allocator, "schema: {s}\n", .{deterministic_replay_schema});
+    try output.print(allocator, "schema version: {d}\n", .{deterministic_replay_schema_version});
+    try output.appendSlice(allocator, "mode: registered_scenario_rerun\n");
+    try output.appendSlice(allocator, "executed: true\n");
+    try output.appendSlice(allocator, "arbitrary event replay: false\n");
+    try output.print(allocator, "snapshot: {s}\n", .{manifest.name});
+    try output.print(allocator, "manifest: {s}\n", .{manifest_path});
+    try output.print(allocator, "baseline artifact: {s}\n", .{manifest.artifact.path});
+    try output.print(allocator, "scenario: {s}\n", .{scenario.slug});
+    try output.print(allocator, "scenario expectation: {s}\n", .{@tagName(scenario.expectation)});
+    try output.print(allocator, "scenario owner: {s}\n", .{@tagName(scenario.owner)});
+    try output.print(allocator, "replay report: {s}\n", .{replay_paths.report_path});
+    try output.print(allocator, "replay artifact: {s}\n", .{replay_paths.json_path});
+    try output.print(allocator, "replay dot: {s}\n", .{replay_paths.dot_path});
+    try output.print(allocator, "command status: {s}\n", .{status});
+    try output.print(allocator, "verdict: {s}\n", .{verdict});
+    try output.appendSlice(allocator, "boundary:\n");
+    try output.appendSlice(allocator, "- replay reruns a registered deterministic scenario command\n");
+    try output.appendSlice(allocator, "- replay does not execute or reconstruct causal event logs\n");
+    try output.appendSlice(allocator, "- replay does not reconstruct services, closures, resources, fibers, clocks, scheduler state, external IO, or runtime memory\n");
+    try output.appendSlice(allocator, "event compare:\n");
+    try output.appendSlice(allocator, compare_report);
+    if (compare_report.len == 0 or compare_report[compare_report.len - 1] != '\n') {
+        try output.append(allocator, '\n');
+    }
+    try output.appendSlice(allocator, "next queries:\n");
+    try output.print(allocator, "- zig build causal-query -- --file {s} snapshot\n", .{manifest.artifact.path});
+    try output.print(allocator, "- zig build causal-query -- --file {s} snapshot\n", .{replay_paths.json_path});
+    try output.print(allocator, "- zig build causal-snapshot -- replay-feasibility {s}\n", .{manifest_path});
+
+    return output.toOwnedSlice(allocator);
+}
+
+pub fn formatScenarioForkProposalJson(
+    allocator: std.mem.Allocator,
+    manifest_path: []const u8,
+    manifest_json: []const u8,
+    scenario: causal_run.Scenario,
+    fork_name: []const u8,
+) ![]const u8 {
+    try validateSnapshotName(fork_name);
+    var manifest_parsed = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, manifest_json, .{ .ignore_unknown_fields = true });
+    defer manifest_parsed.deinit();
+    const manifest = manifest_parsed.value;
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\"schema\":");
+    try appendJsonString(&output, allocator, scenario_fork_proposal_schema);
+    try output.print(allocator, ",\"schema_version\":{d}", .{scenario_fork_proposal_schema_version});
+    try output.appendSlice(allocator, ",\"mode\":\"registered_scenario_fork_proposal\"");
+    try output.appendSlice(allocator, ",\"proposal_status\":\"draft\"");
+    try output.appendSlice(allocator, ",\"approved\":false");
+    try output.appendSlice(allocator, ",\"executed\":false");
+    try output.appendSlice(allocator, ",\"fork_name\":");
+    try appendJsonString(&output, allocator, fork_name);
+    try output.appendSlice(allocator, ",\"source\":{\"manifest\":");
+    try appendJsonString(&output, allocator, manifest_path);
+    try output.appendSlice(allocator, ",\"snapshot\":");
+    try appendJsonString(&output, allocator, manifest.name);
+    try output.appendSlice(allocator, ",\"artifact\":");
+    try appendJsonString(&output, allocator, manifest.artifact.path);
+    try output.appendSlice(allocator, "},\"scenario\":{\"slug\":");
+    try appendJsonString(&output, allocator, scenario.slug);
+    try output.appendSlice(allocator, ",\"owner\":");
+    try appendJsonString(&output, allocator, @tagName(scenario.owner));
+    try output.appendSlice(allocator, ",\"expectation\":");
+    try appendJsonString(&output, allocator, @tagName(scenario.expectation));
+    try output.appendSlice(allocator, ",\"finding_policy\":");
+    try appendJsonString(&output, allocator, @tagName(scenario.finding_policy));
+    try output.appendSlice(allocator, "},\"allowed_commands\":[");
+    try appendScenarioForkAllowedCommandsJson(&output, allocator, manifest.name, scenario.slug);
+    try output.appendSlice(allocator, "],\"blocked_operations\":[");
+    try appendScenarioForkBlockedOperationsJson(&output, allocator);
+    try output.appendSlice(allocator, "],\"guardrails\":[");
+    try appendScenarioForkGuardrailsJson(&output, allocator);
+    try output.appendSlice(allocator, "],\"next_queries\":[");
+    try appendScenarioForkNextQueriesJson(&output, allocator, manifest.artifact.path);
+    try output.appendSlice(allocator, "]}");
+
+    return output.toOwnedSlice(allocator);
+}
+
+pub fn formatScenarioForkProposalText(
+    allocator: std.mem.Allocator,
+    manifest_path: []const u8,
+    manifest_json: []const u8,
+    scenario: causal_run.Scenario,
+    fork_name: []const u8,
+) ![]const u8 {
+    try validateSnapshotName(fork_name);
+    var manifest_parsed = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, manifest_json, .{ .ignore_unknown_fields = true });
+    defer manifest_parsed.deinit();
+    const manifest = manifest_parsed.value;
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "zigeffect causal scenario fork proposal\n");
+    try output.print(allocator, "schema: {s}\n", .{scenario_fork_proposal_schema});
+    try output.print(allocator, "schema version: {d}\n", .{scenario_fork_proposal_schema_version});
+    try output.appendSlice(allocator, "mode: registered_scenario_fork_proposal\n");
+    try output.appendSlice(allocator, "proposal status: draft\n");
+    try output.appendSlice(allocator, "approved: false\n");
+    try output.appendSlice(allocator, "executed: false\n");
+    try output.print(allocator, "fork: {s}\n", .{fork_name});
+    try output.print(allocator, "source manifest: {s}\n", .{manifest_path});
+    try output.print(allocator, "source snapshot: {s}\n", .{manifest.name});
+    try output.print(allocator, "source artifact: {s}\n", .{manifest.artifact.path});
+    try output.print(allocator, "scenario: {s}\n", .{scenario.slug});
+    try output.print(allocator, "scenario owner: {s}\n", .{@tagName(scenario.owner)});
+    try output.print(allocator, "scenario expectation: {s}\n", .{@tagName(scenario.expectation)});
+    try output.print(allocator, "finding policy: {s}\n", .{@tagName(scenario.finding_policy)});
+    try output.appendSlice(allocator, "allowed commands:\n");
+    try output.print(allocator, "- zig build causal-snapshot -- replay-scenario {s} {s}\n", .{ manifest.name, scenario.slug });
+    try output.print(allocator, "- zig build causal-snapshot -- replay-feasibility {s}\n", .{manifest.name});
+    try output.appendSlice(allocator, "blocked operations:\n");
+    try output.appendSlice(allocator, "- runtime memory forking\n");
+    try output.appendSlice(allocator, "- arbitrary causal event-log replay\n");
+    try output.appendSlice(allocator, "- source mutation\n");
+    try output.appendSlice(allocator, "- scenario registry mutation\n");
+    try output.appendSlice(allocator, "guardrails:\n");
+    try output.appendSlice(allocator, "- Proposal is advisory until reviewed.\n");
+    try output.appendSlice(allocator, "- Fork proposal does not execute commands.\n");
+    try output.appendSlice(allocator, "- Use replay output and compare reports before claiming behavior changed.\n");
+    try output.appendSlice(allocator, "next queries:\n");
+    try output.print(allocator, "- zig build causal-query -- --file {s} snapshot\n", .{manifest.artifact.path});
+
+    return output.toOwnedSlice(allocator);
+}
+
+fn appendScenarioForkAllowedCommandsJson(output: *std.ArrayList(u8), allocator: std.mem.Allocator, snapshot_name: []const u8, scenario_slug: []const u8) !void {
+    const replay_command = try std.fmt.allocPrint(allocator, "zig build causal-snapshot -- replay-scenario {s} {s}", .{ snapshot_name, scenario_slug });
+    defer allocator.free(replay_command);
+    const feasibility_command = try std.fmt.allocPrint(allocator, "zig build causal-snapshot -- replay-feasibility {s}", .{snapshot_name});
+    defer allocator.free(feasibility_command);
+    try appendJsonString(output, allocator, replay_command);
+    try output.append(allocator, ',');
+    try appendJsonString(output, allocator, feasibility_command);
+}
+
+fn appendScenarioForkBlockedOperationsJson(output: *std.ArrayList(u8), allocator: std.mem.Allocator) !void {
+    try appendJsonString(output, allocator, "runtime memory forking");
+    try output.append(allocator, ',');
+    try appendJsonString(output, allocator, "arbitrary causal event-log replay");
+    try output.append(allocator, ',');
+    try appendJsonString(output, allocator, "source mutation");
+    try output.append(allocator, ',');
+    try appendJsonString(output, allocator, "scenario registry mutation");
+}
+
+fn appendScenarioForkGuardrailsJson(output: *std.ArrayList(u8), allocator: std.mem.Allocator) !void {
+    try appendJsonString(output, allocator, "Proposal is advisory until reviewed.");
+    try output.append(allocator, ',');
+    try appendJsonString(output, allocator, "Fork proposal does not execute commands.");
+    try output.append(allocator, ',');
+    try appendJsonString(output, allocator, "Use replay output and compare reports before claiming behavior changed.");
+}
+
+fn appendScenarioForkNextQueriesJson(output: *std.ArrayList(u8), allocator: std.mem.Allocator, artifact_path: []const u8) !void {
+    const snapshot_query = try std.fmt.allocPrint(allocator, "zig build causal-query -- --file {s} snapshot", .{artifact_path});
+    defer allocator.free(snapshot_query);
+    try appendJsonString(output, allocator, snapshot_query);
 }
 
 pub fn formatReplayFeasibilityText(
@@ -613,7 +763,7 @@ fn appendReplayArtifactWarnings(output: *std.ArrayList(u8), allocator: std.mem.A
 fn appendReplayBlockingReasons(output: *std.ArrayList(u8), allocator: std.mem.Allocator, stats: ReplayFeasibilityStats) !void {
     try output.appendSlice(allocator, "blocking reasons:\n");
     try output.appendSlice(allocator, "- snapshot manifest references observed artifacts, not executable programs\n");
-    try output.appendSlice(allocator, "- replay engine is unavailable in artifact snapshots\n");
+    try output.appendSlice(allocator, "- replay engine is not implemented\n");
     try output.appendSlice(allocator, "- event records do not serialize service implementations, closures, resource constructors, scheduler state, clock transcripts, or external effects\n");
     if (stats.has_service_events) try output.appendSlice(allocator, "- service values/providers are not serialized\n");
     if (stats.has_resource_events) try output.appendSlice(allocator, "- resource constructors/finalizers are not serialized\n");
@@ -646,6 +796,42 @@ fn appendReplayNextQueries(output: *std.ArrayList(u8), allocator: std.mem.Alloca
         try output.print(allocator, "- zig build causal-query -- --file {s} lineage {d}\n", .{ artifact_path, event_id });
     }
     try output.print(allocator, "- zig build causal-snapshot -- compare {s} {s}\n", .{ manifest_path, manifest_path });
+}
+
+fn commandFailed(term: std.process.Child.Term) bool {
+    return switch (term) {
+        .exited => |code| code != 0,
+        else => true,
+    };
+}
+
+fn commandStatus(term: std.process.Child.Term) []const u8 {
+    return if (commandFailed(term)) "failure" else "success";
+}
+
+fn commandMatchesScenarioExpectation(scenario: causal_run.Scenario, term: std.process.Child.Term) bool {
+    const failed = commandFailed(term);
+    return switch (scenario.expectation) {
+        .expected_pass => !failed,
+        .expected_failure => failed,
+    };
+}
+
+fn compareReportMatched(compare_report: []const u8) bool {
+    return std.mem.indexOf(u8, compare_report, "event delta: +0") != null and
+        std.mem.indexOf(u8, compare_report, "finding delta: +0") != null and
+        std.mem.indexOf(u8, compare_report, "added events:\n- none") != null and
+        std.mem.indexOf(u8, compare_report, "removed events:\n- none") != null and
+        std.mem.indexOf(u8, compare_report, "changed events:\n- none") != null;
+}
+
+fn deterministicReplayVerdict(
+    scenario: causal_run.Scenario,
+    term: std.process.Child.Term,
+    compare_report: []const u8,
+) []const u8 {
+    if (!commandMatchesScenarioExpectation(scenario, term)) return "command_failed";
+    return if (compareReportMatched(compare_report)) "matched" else "changed";
 }
 
 fn artifactMetadata(artifact: Artifact) causal_artifact.ArtifactMetadata {
@@ -875,7 +1061,7 @@ const ManifestFormat = enum {
 };
 
 fn usage() []const u8 {
-    return "usage: zig build causal-snapshot -- manifest <name> <artifact.json> [--format json|text] [--target <target>] [--phase <phase>] [--baseline <path>] [--compare-report <path>] [--query-report <path>] [--advice-report <path>]\n       zig build causal-snapshot -- capture <name> [scenario]\n       zig build causal-snapshot -- compare <left> <right>\n       zig build causal-snapshot -- replay-feasibility <snapshot>\n       zig build causal-snapshot -- replay-scenario <snapshot> <scenario>\n";
+    return "usage: zig build causal-snapshot -- manifest <name> <artifact.json> [--format json|text] [--target <target>] [--phase <phase>] [--baseline <path>] [--compare-report <path>] [--query-report <path>] [--advice-report <path>]\n       zig build causal-snapshot -- capture <name> [scenario]\n       zig build causal-snapshot -- compare <left> <right>\n       zig build causal-snapshot -- replay-feasibility <snapshot>\n       zig build causal-snapshot -- replay-scenario <snapshot> <scenario>\n       zig build causal-snapshot -- fork-proposal <snapshot> <scenario> <fork>\n";
 }
 
 fn failUsage(err: anyerror) noreturn {
@@ -905,6 +1091,29 @@ fn captureSourcePath(allocator: std.mem.Allocator, scenario_slug: ?[]const u8) !
         return paths.json_path;
     }
     return allocator.dupe(u8, causal_run.artifact_dir ++ "/zigeffect-causal-dogfood.json");
+}
+
+fn runScenarioCommand(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    scenario: causal_run.Scenario,
+) !causal_run.CommandResult {
+    const result = std.process.run(allocator, io, .{
+        .argv = scenario.argv,
+        .stdout_limit = .limited(64 * 1024),
+        .stderr_limit = .limited(64 * 1024),
+    }) catch |err| {
+        return .{
+            .term = .{ .unknown = 0 },
+            .stdout = try allocator.dupe(u8, ""),
+            .stderr = try allocator.dupe(u8, @errorName(err)),
+        };
+    };
+    return .{
+        .term = result.term,
+        .stdout = result.stdout,
+        .stderr = result.stderr,
+    };
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -1027,6 +1236,80 @@ pub fn main(init: std.process.Init) !void {
         );
         defer allocator.free(report);
         std.debug.print("{s}", .{report});
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "replay-scenario")) {
+        if (args.len != 4) failUsage(error.InvalidDeterministicReplayArguments);
+        const manifest_ref = try resolveSnapshotManifestReference(allocator, args[2]);
+        defer manifest_ref.deinit(allocator);
+        const scenario = causal_run.scenarioByName(args[3]) catch |err| failUsage(err);
+
+        const manifest_json = try std.Io.Dir.cwd().readFileAlloc(init.io, manifest_ref.path, allocator, .limited(1024 * 1024));
+        defer allocator.free(manifest_json);
+        const baseline_artifact_path = try snapshotArtifactPathFromManifestJson(allocator, manifest_json);
+        defer allocator.free(baseline_artifact_path);
+        const baseline_artifact_json = try std.Io.Dir.cwd().readFileAlloc(init.io, baseline_artifact_path, allocator, .limited(1024 * 1024));
+        defer allocator.free(baseline_artifact_json);
+
+        var manifest = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, manifest_json, .{ .ignore_unknown_fields = true });
+        defer manifest.deinit();
+        const replay_paths = try deterministicReplayArtifactPaths(allocator, manifest.value.name, scenario.slug);
+        defer replay_paths.deinit(allocator);
+
+        const result = try runScenarioCommand(allocator, init.io, scenario);
+        defer allocator.free(result.stdout);
+        defer allocator.free(result.stderr);
+
+        const artifacts = try causal_run.buildCommandArtifacts(allocator, scenario, result);
+        defer artifacts.deinit(allocator);
+        try writeArtifact(init.io, replay_paths.report_path, artifacts.report);
+        try writeArtifact(init.io, replay_paths.json_path, artifacts.json);
+        try writeArtifact(init.io, replay_paths.dot_path, artifacts.dot);
+
+        const report = try formatDeterministicReplayText(
+            allocator,
+            manifest_ref.path,
+            manifest_json,
+            baseline_artifact_json,
+            scenario,
+            replay_paths,
+            result.term,
+            artifacts.json,
+        );
+        defer allocator.free(report);
+        std.debug.print("{s}", .{report});
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "fork-proposal")) {
+        if (args.len != 5) failUsage(error.InvalidScenarioForkProposalArguments);
+        const manifest_ref = try resolveSnapshotManifestReference(allocator, args[2]);
+        defer manifest_ref.deinit(allocator);
+        const scenario = causal_run.scenarioByName(args[3]) catch |err| failUsage(err);
+        const fork_name = args[4];
+        try validateSnapshotName(fork_name);
+
+        const manifest_json = try std.Io.Dir.cwd().readFileAlloc(init.io, manifest_ref.path, allocator, .limited(1024 * 1024));
+        defer allocator.free(manifest_json);
+        var manifest = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, manifest_json, .{ .ignore_unknown_fields = true });
+        defer manifest.deinit();
+
+        const paths = try scenarioForkProposalPaths(allocator, manifest.value.name, scenario.slug, fork_name);
+        defer paths.deinit(allocator);
+        const json = try formatScenarioForkProposalJson(allocator, manifest_ref.path, manifest_json, scenario, fork_name);
+        defer allocator.free(json);
+        const text = try formatScenarioForkProposalText(allocator, manifest_ref.path, manifest_json, scenario, fork_name);
+        defer allocator.free(text);
+
+        try writeArtifact(init.io, paths.json_path, json);
+        try writeArtifact(init.io, paths.text_path, text);
+        std.debug.print("zigeffect causal scenario fork proposal written\njson: {s}\ntext: {s}\nreplay: zig build causal-snapshot -- replay-scenario {s} {s}\n", .{
+            paths.json_path,
+            paths.text_path,
+            manifest.value.name,
+            scenario.slug,
+        });
         return;
     }
 
@@ -1313,6 +1596,87 @@ test "deterministic replay report states registered rerun boundary" {
     try std.testing.expect(std.mem.indexOf(u8, report, "boundary:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "event compare:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect causal compare report") != null);
+}
+
+test "deterministic replay report marks command expectation mismatch" {
+    const scenario = try causal_run.scenarioByName("causal-scoped-fiber");
+    const paths = try deterministicReplayArtifactPaths(std.testing.allocator, "scoped-baseline", scenario.slug);
+    defer paths.deinit(std.testing.allocator);
+
+    const report = try formatDeterministicReplayText(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-scoped-baseline.json",
+        baseline_manifest_json,
+        compare_before_json,
+        scenario,
+        paths,
+        .{ .exited = 1 },
+        compare_after_json,
+    );
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "command status: failure") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "verdict: command_failed") != null);
+}
+
+test "scenario fork proposal paths include snapshot scenario and fork" {
+    const paths = try scenarioForkProposalPaths(std.testing.allocator, "missing-service-baseline", "missing-service-compile-fail", "missing-service-fork");
+    defer paths.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-fork-proposal-missing-service-baseline-missing-service-compile-fail-missing-service-fork.json",
+        paths.json_path,
+    );
+    try std.testing.expectEqualStrings(
+        ".zig-cache/causal-artifacts/zigeffect-causal-fork-proposal-missing-service-baseline-missing-service-compile-fail-missing-service-fork.txt",
+        paths.text_path,
+    );
+}
+
+test "scenario fork proposal json is draft non executing evidence" {
+    const scenario = try causal_run.scenarioByName("missing-service-compile-fail");
+    const json = try formatScenarioForkProposalJson(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-missing-service-baseline.json",
+        baseline_manifest_json,
+        scenario,
+        "missing-service-fork",
+    );
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.scenario-fork-proposal.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"mode\":\"registered_scenario_fork_proposal\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"proposal_status\":\"draft\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"approved\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"executed\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"fork_name\":\"missing-service-fork\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"scenario\":{\"slug\":\"missing-service-compile-fail\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "replay-scenario baseline missing-service-compile-fail") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "runtime memory forking") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "arbitrary causal event-log replay") != null);
+}
+
+test "scenario fork proposal text states review boundary" {
+    const scenario = try causal_run.scenarioByName("missing-service-compile-fail");
+    const text = try formatScenarioForkProposalText(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-missing-service-baseline.json",
+        baseline_manifest_json,
+        scenario,
+        "missing-service-fork",
+    );
+    defer std.testing.allocator.free(text);
+
+    try std.testing.expect(std.mem.indexOf(u8, text, "zigeffect causal scenario fork proposal") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "mode: registered_scenario_fork_proposal") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "approved: false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "executed: false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "blocked operations:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "Fork proposal does not execute commands.") != null);
+}
+
+test "causal snapshot usage lists fork proposal command" {
+    try std.testing.expect(std.mem.indexOf(u8, usage(), "fork-proposal <snapshot> <scenario> <fork>") != null);
 }
 
 test "causal snapshot usage lists replay scenario command" {

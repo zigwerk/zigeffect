@@ -55,6 +55,8 @@ zig build causal-snapshot -- capture <name> [scenario]
 zig build causal-snapshot -- manifest <name> <artifact.json> --format text
 zig build causal-snapshot -- compare <left> <right>
 zig build causal-snapshot -- replay-feasibility <snapshot>
+zig build causal-snapshot -- replay-scenario <snapshot> <scenario>
+zig build causal-snapshot -- fork-proposal <snapshot> <scenario> <fork>
 ```
 
 Snapshot compare reads existing snapshot manifests and their referenced causal
@@ -64,6 +66,30 @@ summarize named-state deltas before querying event-level evidence.
 Replay feasibility also reads existing artifacts only. It does not rerun
 scenarios, replay effects, or fork runtime state; it explains why the current
 snapshot remains `feasible: false` and which event categories block replay.
+
+Deterministic replay is deliberately narrower than event-log replay. It reruns a
+registered scenario command and compares the newly written replay artifact with
+the snapshot baseline. For a clean-cache walkthrough, use a scenario that writes
+baseline artifacts through `causal-run`:
+
+```sh
+zig build causal-run -- missing-service-compile-fail
+zig build causal-snapshot -- capture missing-service-baseline missing-service-compile-fail
+zig build causal-snapshot -- fork-proposal missing-service-baseline missing-service-compile-fail missing-service-fork
+zig build causal-snapshot -- replay-scenario missing-service-baseline missing-service-compile-fail
+```
+
+The replay report uses schema `zigeffect.causal.deterministic-replay.v1`, mode
+`registered_scenario_rerun`, and `arbitrary event replay: false`. Treat it as
+evidence that a registered scenario was rerun and compared, not as evidence that
+causal JSON can reconstruct services, closures, resources, fibers, clocks,
+scheduler state, external IO, or runtime memory.
+
+Fork proposals use schema `zigeffect.causal.scenario-fork-proposal.v1`. They are
+draft review artifacts with `approved=false` and `executed=false`; they list
+allowed replay/feasibility commands and blocked operations. They do not execute
+commands, fork runtime memory, replay arbitrary event logs, mutate source, or
+update the scenario registry.
 
 Run the two-phase causal development loop:
 

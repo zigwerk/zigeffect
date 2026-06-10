@@ -120,9 +120,9 @@ zig build causal-snapshot -- replay-scenario <snapshot> <scenario>
 Examples:
 
 ```sh
-zig build causal-run -- causal-scoped-fiber
-zig build causal-snapshot -- capture scoped-baseline causal-scoped-fiber
-zig build causal-snapshot -- replay-scenario scoped-baseline causal-scoped-fiber
+zig build causal-run -- missing-service-compile-fail
+zig build causal-snapshot -- capture missing-service-baseline missing-service-compile-fail
+zig build causal-snapshot -- replay-scenario missing-service-baseline missing-service-compile-fail
 ```
 
 `<snapshot>` can be a snapshot name or an explicit manifest JSON path.
@@ -137,16 +137,16 @@ schema version: 1
 mode: registered_scenario_rerun
 executed: true
 arbitrary event replay: false
-snapshot: scoped-baseline
-manifest: .zig-cache/causal-artifacts/zigeffect-causal-snapshot-scoped-baseline.json
-baseline artifact: .zig-cache/causal-artifacts/zigeffect-causal-causal-scoped-fiber.json
-scenario: causal-scoped-fiber
-scenario expectation: expected_pass
-scenario owner: fiber_runtime
-replay report: .zig-cache/causal-artifacts/zigeffect-causal-replay-scoped-baseline-causal-scoped-fiber.txt
-replay artifact: .zig-cache/causal-artifacts/zigeffect-causal-replay-scoped-baseline-causal-scoped-fiber.json
-replay dot: .zig-cache/causal-artifacts/zigeffect-causal-replay-scoped-baseline-causal-scoped-fiber.dot
-command status: success
+snapshot: missing-service-baseline
+manifest: .zig-cache/causal-artifacts/zigeffect-causal-snapshot-missing-service-baseline.json
+baseline artifact: .zig-cache/causal-artifacts/zigeffect-causal-missing-service-compile-fail.json
+scenario: missing-service-compile-fail
+scenario expectation: expected_failure
+scenario owner: service_resolution
+replay report: .zig-cache/causal-artifacts/zigeffect-causal-replay-missing-service-baseline-missing-service-compile-fail.txt
+replay artifact: .zig-cache/causal-artifacts/zigeffect-causal-replay-missing-service-baseline-missing-service-compile-fail.json
+replay dot: .zig-cache/causal-artifacts/zigeffect-causal-replay-missing-service-baseline-missing-service-compile-fail.dot
+command status: failure
 verdict: matched
 boundary:
 - replay reruns a registered deterministic scenario command
@@ -156,9 +156,9 @@ event compare:
 zigeffect causal compare report
 ...
 next queries:
-- zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-causal-scoped-fiber.json snapshot
-- zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-replay-scoped-baseline-causal-scoped-fiber.json snapshot
-- zig build causal-snapshot -- replay-feasibility scoped-baseline
+- zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-missing-service-compile-fail.json snapshot
+- zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-replay-missing-service-baseline-missing-service-compile-fail.json snapshot
+- zig build causal-snapshot -- replay-feasibility missing-service-baseline
 ```
 
 ## Testing

@@ -458,6 +458,10 @@ paths under `.zig-cache/causal-artifacts/`.
 Name an existing causal JSON artifact with a snapshot manifest:
 
 ```bash
+zig build causal-run -- missing-service-compile-fail
+zig build causal-snapshot -- capture missing-service-baseline missing-service-compile-fail
+zig build causal-snapshot -- fork-proposal missing-service-baseline missing-service-compile-fail missing-service-fork
+zig build causal-snapshot -- replay-scenario missing-service-baseline missing-service-compile-fail
 zig build causal-snapshot -- capture baseline
 zig build causal-snapshot -- manifest baseline .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json --format text
 zig build causal-snapshot -- compare baseline baseline
@@ -467,9 +471,20 @@ zig build causal-snapshot -- replay-feasibility baseline
 `causal-snapshot` writes or prints `zigeffect.causal.snapshot-manifest.v1`
 metadata for an existing causal JSON artifact. The manifest records the
 snapshot name, artifact path, event count, event id range, finding count, replay
-feasibility, warnings, and next query commands. It does not embed events, rerun
-tests, or make replay feasible yet; query and compare the underlying causal JSON
-artifact for event-level evidence.
+feasibility, warnings, and next query commands. It does not embed events.
+`causal-snapshot replay-scenario` is the execution step: it reruns a registered
+scenario command, writes replay-specific `.txt`, `.json`, and `.dot` artifacts,
+compares the baseline artifact with the replay artifact, and prints
+`zigeffect.causal.deterministic-replay.v1`. It does not execute arbitrary
+causal event logs or reconstruct services, closures, resources, fibers, clocks,
+scheduler state, external IO, or runtime memory.
+
+`causal-snapshot fork-proposal` writes
+`zigeffect.causal.scenario-fork-proposal.v1` JSON/text artifacts for a named
+snapshot, registered scenario, and proposed fork name. The artifact is a draft:
+`approved=false`, `executed=false`, and it lists allowed replay/feasibility
+commands plus blocked operations such as runtime memory forking, arbitrary
+event-log replay, source mutation, and scenario registry mutation.
 
 `causal-snapshot compare` accepts snapshot names or manifest JSON paths. It
 reads each manifest's referenced causal JSON artifact, prints snapshot-level
@@ -477,7 +492,7 @@ event and finding deltas, and embeds the existing `causal-compare` event diff.
 
 `causal-snapshot replay-feasibility` reads a snapshot manifest and its causal
 JSON artifact, keeps `feasible: false`, and lists the blockers that must be
-resolved before deterministic replay can exist.
+resolved before arbitrary event-log replay can exist.
 
 Run a named scenario from the catalog:
 

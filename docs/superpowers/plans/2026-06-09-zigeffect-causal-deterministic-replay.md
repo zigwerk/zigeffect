@@ -322,13 +322,14 @@ Run:
 zig build examples
 zig build causal-snapshot
 zig build causal-test
-zig build causal-run -- causal-scoped-fiber
-zig build causal-snapshot -- capture scoped-baseline causal-scoped-fiber
-zig build causal-snapshot -- replay-scenario scoped-baseline causal-scoped-fiber
+zig build causal-run -- missing-service-compile-fail
+zig build causal-snapshot -- capture missing-service-baseline missing-service-compile-fail
+zig build causal-snapshot -- replay-scenario missing-service-baseline missing-service-compile-fail
 ```
 
 Expected: all commands pass; replay output includes `mode:
-registered_scenario_rerun` and `arbitrary event replay: false`.
+registered_scenario_rerun`, `arbitrary event replay: false`, `command status:
+failure`, and `verdict: matched`.
 
 - [ ] **Step 2: Run package verification**
 
