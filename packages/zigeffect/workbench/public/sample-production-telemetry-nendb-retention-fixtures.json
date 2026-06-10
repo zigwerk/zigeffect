@@ -1,0 +1,330 @@
+{
+  "schema": "zigeffect.causal.production-telemetry-nendb-retention-fixtures.v1",
+  "schema_version": 1,
+  "source_local_pipeline": ".zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures.json",
+  "source_boundary": ".zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary.json",
+  "source_proposal": ".zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal.json",
+  "source_readiness": ".zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review.json",
+  "source_fixtures": ".zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json",
+  "decision": "approve",
+  "retention_fixture_status": "ready",
+  "ready_for_next_branch": true,
+  "reviewed_by": "codex",
+  "policy": "manual-production-telemetry-nendb-retention-fixtures",
+  "reason": "local pipeline fixture evidence reviewed for read-only workbench preview",
+  "applied": false,
+  "mutation_authority": "none",
+  "production_telemetry_ingestion": false,
+  "live_exporter_enabled": false,
+  "network_send_enabled": false,
+  "collector_endpoint_configured": false,
+  "otlp_serialization_enabled": false,
+  "runtime_pipeline_enabled": false,
+  "durable_write_enabled": false,
+  "nendb_write_enabled": false,
+  "ci_gate_enabled": false,
+  "local_pipeline_fixture_mode": true,
+  "nendb_retention_fixture_mode": true,
+  "source_branch": "codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures",
+  "recommendation": "start-production-telemetry-workbench-readonly-preview",
+  "next_branch_if_ready": "codex/zigeffect-causal-production-telemetry-workbench-readonly-preview",
+  "local_pipeline_summary": {
+    "source_contract_count": 5,
+    "positive_fixture_count": 7,
+    "negative_fixture_count": 4,
+    "validation_check_count": 14
+  },
+  "checks": [
+    {
+      "name": "local-pipeline-schema",
+      "status": "pass",
+      "detail": "source local pipeline schema is supported"
+    },
+    {
+      "name": "local-pipeline-status",
+      "status": "pass",
+      "detail": "source local pipeline is ready for NenDB retention fixture work"
+    },
+    {
+      "name": "local-pipeline-decision-approved",
+      "status": "pass",
+      "detail": "source local pipeline decision approved the handoff"
+    },
+    {
+      "name": "decision-approved",
+      "status": "pass",
+      "detail": "fixture decision must approve workbench preview handoff"
+    },
+    {
+      "name": "authority-disabled",
+      "status": "pass",
+      "detail": "live telemetry, network, durable, and NenDB writes remain disabled"
+    },
+    {
+      "name": "nendb-fixture-catalog-complete",
+      "status": "pass",
+      "detail": "node, edge, retention, compaction, backup, and recovery fixtures are present"
+    },
+    {
+      "name": "local-pipeline-checks-passed",
+      "status": "pass",
+      "detail": "all required source local pipeline checks passed"
+    },
+    {
+      "name": "local-pipeline-verification-recorded",
+      "status": "pass",
+      "detail": "source local pipeline recorded required verification command evidence"
+    }
+  ],
+  "nendb_mapping_fixtures": [
+    {
+      "id": "nendb-runtime-event-node-fixture",
+      "source_envelope": "runtime-span-normalized-envelope",
+      "target_schema": "zigeffect.causal.nendb_node.v1",
+      "label": "causal.telemetry.runtime_span",
+      "retained_fields": [
+        "event_id_ref",
+        "trace_id_ref",
+        "span_id_ref",
+        "parent_span_id_ref",
+        "causal_event_ref",
+        "redaction_state",
+        "sample_state"
+      ],
+      "blocked_fields": [
+        "raw_payload",
+        "headers",
+        "prompts",
+        "credentials",
+        "raw_tenant_id",
+        "raw_user_id",
+        "collector_endpoint",
+        "network_address"
+      ]
+    },
+    {
+      "id": "nendb-app-semantic-node-fixture",
+      "source_envelope": "app-semantic-normalized-envelope",
+      "target_schema": "zigeffect.causal.nendb_node.v1",
+      "label": "causal.telemetry.app_semantic",
+      "retained_fields": [
+        "event_id_ref",
+        "domain_entity_ref",
+        "schema_ref",
+        "data_subject_ref",
+        "operation_ref",
+        "redaction_state",
+        "sample_state"
+      ],
+      "blocked_fields": [
+        "raw_request_body",
+        "raw_response_body",
+        "prompt_text",
+        "credential_material",
+        "raw_pii"
+      ]
+    },
+    {
+      "id": "nendb-otel-attribute-node-fixture",
+      "source_envelope": "backend-otel-local-envelope",
+      "target_schema": "zigeffect.causal.nendb_node.v1",
+      "label": "causal.telemetry.otel_ref",
+      "retained_fields": [
+        "otel_schema_ref",
+        "trace_id_ref",
+        "span_id_ref",
+        "attribute_refs",
+        "redaction_state",
+        "sample_state"
+      ],
+      "blocked_fields": [
+        "collector_endpoint",
+        "auth_headers",
+        "wire_payload_bytes",
+        "exporter_sdk_configuration",
+        "otlp_protobuf_bytes"
+      ]
+    },
+    {
+      "id": "nendb-redaction-access-node-fixture",
+      "source_envelope": "redaction-access-reviewed-envelope",
+      "target_schema": "zigeffect.causal.nendb_node.v1",
+      "label": "causal.telemetry.redaction_access",
+      "retained_fields": [
+        "visibility_class",
+        "redaction_state",
+        "access_policy_ref",
+        "denied_raw_fields"
+      ],
+      "blocked_fields": [
+        "raw_secrets",
+        "raw_credentials",
+        "raw_headers",
+        "raw_prompts",
+        "raw_tenant_id",
+        "raw_user_id"
+      ]
+    },
+    {
+      "id": "nendb-sampling-retention-node-fixture",
+      "source_envelope": "sampling-kept-envelope+sampling-dropped-envelope",
+      "target_schema": "zigeffect.causal.nendb_node.v1",
+      "label": "causal.telemetry.sampling",
+      "retained_fields": [
+        "sample_state",
+        "sample_policy_ref",
+        "sample_reason",
+        "retained_fields"
+      ],
+      "blocked_fields": [
+        "unsampled_raw_payload_fields",
+        "wall_clock_randomness",
+        "production_traffic_rates",
+        "production_capacity_claims"
+      ]
+    },
+    {
+      "id": "nendb-correlation-edge-fixture",
+      "source_envelope": "correlation-link-envelope",
+      "target_schema": "zigeffect.causal.nendb_edge.v1",
+      "label": "causal.telemetry.correlates",
+      "retained_fields": [
+        "from_event_ref",
+        "to_artifact_ref",
+        "causal_event_ref",
+        "trace_id_ref",
+        "schema_ref"
+      ],
+      "blocked_fields": [
+        "raw_payload_joins",
+        "source_database_reads"
+      ]
+    },
+    {
+      "id": "nendb-retention-policy-record-fixture",
+      "source_envelope": "durable-production-retention-policy",
+      "target_schema": "zigeffect.causal.nendb-retention-report.v1",
+      "label": "causal.telemetry.retention_policy",
+      "retained_fields": [
+        "ttl_days=14",
+        "max_events=4096",
+        "compaction_trigger_events=2048",
+        "compact_to_events=1024",
+        "backup_required=true",
+        "recovery_required=true"
+      ],
+      "blocked_fields": [
+        "production_byte_estimates",
+        "production_cost_estimates",
+        "live_deletion_decisions"
+      ]
+    },
+    {
+      "id": "nendb-compaction-window-fixture",
+      "source_envelope": "durable-production-retention-policy",
+      "target_schema": "zigeffect.causal.nendb-retention-report.v1",
+      "label": "causal.telemetry.compaction_window",
+      "retained_fields": [
+        "compaction_required_ref",
+        "preserve_run_roots",
+        "preserve_terminal_failures",
+        "preserve_governance_artifacts"
+      ],
+      "blocked_fields": [
+        "compaction_execution",
+        "destructive_deletion"
+      ]
+    },
+    {
+      "id": "nendb-backup-recovery-marker-fixture",
+      "source_envelope": "durable-production-retention-policy",
+      "target_schema": "zigeffect.causal.nendb-retention-report.v1",
+      "label": "causal.telemetry.backup_recovery",
+      "retained_fields": [
+        "backup_required",
+        "recovery_required",
+        "oldest_retained_event_id_ref",
+        "newest_retained_event_id_ref",
+        "lineage_recovery_check_ref"
+      ],
+      "blocked_fields": [
+        "backup_execution",
+        "restore_execution",
+        "live_credentials"
+      ]
+    }
+  ],
+  "retention_validation_checks": [
+    "source-local-pipeline-ready",
+    "source-authority-disabled",
+    "source-fixture-catalog-covered",
+    "nendb-node-mappings-present",
+    "nendb-edge-mappings-present",
+    "retention-policy-constants-match",
+    "ttl-policy-record-only",
+    "compaction-policy-record-only",
+    "backup-recovery-markers-present",
+    "nendb-write-disabled",
+    "durable-write-disabled",
+    "non-nendb-scope-rejected",
+    "cockroach-scope-rejected",
+    "workbench-preview-next-only"
+  ],
+  "implementation_gates": [
+    "source local pipeline artifact is ready",
+    "source local pipeline checks and verification commands remain pass",
+    "NenDB retention fixtures emit mapping records only",
+    "network send collector endpoint and OTLP serialization remain disabled",
+    "durable and NenDB writes remain disabled",
+    "workbench work remains SolidJS inside webui-dev/zig-webui",
+    "workbench read-only preview must be reviewed before UI work"
+  ],
+  "non_goals": [
+    "Runtime telemetry ingestion or instrumentation changes",
+    "Live local or production pipeline execution",
+    "Network sends collector endpoint configuration or outbound exporter transport",
+    "OTLP serialization SDK setup or collector delivery",
+    "Durable production writes",
+    "NenDB writes durable writer execution compaction execution backup execution or restore execution",
+    "NenDB retention record writes",
+    "Non-NenDB durable adapter work",
+    "Cockroach adapter work",
+    "CI telemetry gates or fail thresholds",
+    "Production dashboards streaming hosted workbench or workbench UI implementation",
+    "React or alternate renderer work",
+    "Source config registry deployment rollout alert app or production mutation authority"
+  ],
+  "blocked_claims": [
+    "runtime-pipeline-enabled",
+    "live-exporter-enabled",
+    "network-send-enabled",
+    "collector-endpoint-configured",
+    "otlp-serialization-enabled",
+    "durable-production-write-enabled",
+    "nendb-write-enabled",
+    "nendb-retention-write-enabled",
+    "non-nendb-durable-storage",
+    "cockroach-adapter-work",
+    "ci-telemetry-gate",
+    "react-or-alternate-renderer",
+    "mutation-authority-granted"
+  ],
+  "required_verification_commands": [
+    "zig build causal-production-telemetry-local-pipeline-fixtures",
+    "zig build causal-nendb-storage-backend",
+    "zig build causal-durable-production-retention -- --format json",
+    "zig build causal-schema-governance -- --format json",
+    "zig build causal-production-hardening-backlog -- --format json",
+    "zig build examples",
+    "zig build test"
+  ],
+  "verified_commands": [
+    "zig build causal-production-telemetry-local-pipeline-fixtures",
+    "zig build test"
+  ],
+  "agent_guidance": [
+    "Proceed to the read-only SolidJS webui workbench preview branch.",
+    "Keep mutation authority none until a later reviewed branch grants it.",
+    "Use this artifact as UI evidence only; do not infer live telemetry availability."
+  ]
+}

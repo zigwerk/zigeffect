@@ -81,6 +81,20 @@ test("loadPayloadFromBridge can load the live dashboard stream development sampl
   expect(payload.session?.artifact_path).toBe("sample-live-dashboard-stream.json");
 });
 
+test("loadPayloadFromBridge can load the production telemetry retention sample", async () => {
+  const payload = await loadPayloadFromBridge(
+    {},
+    async (sampleName) => {
+      expect(sampleName).toBe("sample-production-telemetry-nendb-retention-fixtures.json");
+      return JSON.stringify({ schema: "zigeffect.causal.production-telemetry-nendb-retention-fixtures.v1" });
+    },
+    "?sample=production-telemetry",
+  );
+
+  expect(payload.session?.artifact_path).toBe("sample-production-telemetry-nendb-retention-fixtures.json");
+  expect(payload.artifactJson).toContain("production-telemetry-nendb-retention-fixtures");
+});
+
 test("loadPayloadFromBridge can load the graph visual debugging development sample", async () => {
   const payload = await loadPayloadFromBridge(
     {},
