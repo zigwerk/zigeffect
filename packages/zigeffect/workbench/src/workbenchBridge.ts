@@ -101,6 +101,7 @@ function sampleNameFromSearch(search: string): string {
   if (sample === "app-review") return "sample-app-human-review.json";
   if (sample === "app-readiness") return "sample-app-application-readiness.json";
   if (sample === "app-application") return "sample-app-application.json";
+  if (sample === "live") return "sample-live-dashboard-stream.json";
   return "sample-artifact.json";
 }
 

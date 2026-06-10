@@ -70,6 +70,17 @@ test("loadPayloadFromBridge can load app remediation development samples", async
   }
 });
 
+test("loadPayloadFromBridge can load the live dashboard stream development sample", async () => {
+  const payload = await loadPayloadFromBridge(
+    {},
+    async (sampleName) => JSON.stringify({ schema: sampleName }),
+    "?sample=live",
+  );
+
+  expect(payload.artifactJson).toBe(JSON.stringify({ schema: "sample-live-dashboard-stream.json" }));
+  expect(payload.session?.artifact_path).toBe("sample-live-dashboard-stream.json");
+});
+
 test("workbench HTML loads the WebUI bridge before the Solid bundle", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const webuiScript = html.indexOf('src="/webui.js"');
