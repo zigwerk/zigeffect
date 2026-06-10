@@ -89,8 +89,10 @@ emits `ready` or `blocked` artifacts before any implementation proposal branch.
 The implementation proposal branch is delivered through
 `causal-production-telemetry-implementation-proposal`, and the exporter
 boundary branch is delivered through
-`causal-production-telemetry-exporter-boundary`. The current next branch is
-`codex/zigeffect-causal-production-telemetry-local-pipeline-fixtures`.
+`causal-production-telemetry-exporter-boundary`. The local-pipeline-fixtures
+branch is delivered through
+`causal-production-telemetry-local-pipeline-fixtures`. The current next branch
+is `codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures`.
 
 ## Verification
 

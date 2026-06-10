@@ -381,6 +381,29 @@ network send, collector endpoints, OTLP serialization, durable writes, and CI
 gates disabled. The full policy is in
 [docs/production-telemetry-exporter-boundary.md](docs/production-telemetry-exporter-boundary.md).
 
+Review the production telemetry local pipeline fixtures:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-telemetry-local-pipeline-fixtures -- \
+  --from-boundary ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary.json \
+  approve \
+  --reason "approved boundary reviewed for local pipeline fixtures" \
+  --verified-command "zig build causal-production-telemetry-exporter-boundary -- --from-proposal ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal.json approve --reason \"proposal evidence reviewed for local pipeline fixtures\" --verified-command \"zig build causal-production-telemetry-implementation-proposal -- --from-readiness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review.json approve --reason \\\"ready evidence reviewed for exporter boundary planning\\\" --verified-command \\\"zig build causal-production-telemetry-readiness-review -- --from-fixtures ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json approve --reason \\\\\\\"fixtures reviewed for implementation proposal\\\\\\\" --verified-command \\\\\\\"zig build causal-production-telemetry-capture-fixtures -- validate --format json\\\\\\\" --verified-command \\\\\\\"zig build causal-schema-governance -- --format json\\\\\\\" --verified-command \\\\\\\"zig build causal-production-hardening-backlog -- --format json\\\\\\\" --verified-command \\\\\\\"zig build examples\\\\\\\" --verified-command \\\\\\\"zig build test\\\\\\\"\\\" --verified-command \\\"zig build causal-schema-governance -- --format json\\\" --verified-command \\\"zig build causal-production-hardening-backlog -- --format json\\\" --verified-command \\\"zig build examples\\\" --verified-command \\\"zig build test\\\"\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The report uses schema
+`zigeffect.causal.production-telemetry-local-pipeline-fixtures.v1` and emits a
+`ready` or `blocked` fixture artifact before any NenDB retention fixture branch
+starts. It keeps `applied=false`, `mutation_authority=none`, live telemetry,
+network send, collector endpoints, OTLP serialization, runtime pipeline
+execution, durable writes, and CI gates disabled. The full policy is in
+[docs/production-telemetry-local-pipeline-fixtures.md](docs/production-telemetry-local-pipeline-fixtures.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -406,8 +429,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-local-pipeline-fixtures` after the
-delivered production telemetry exporter boundary.
+`codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures` after
+the delivered production telemetry local pipeline fixtures.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in

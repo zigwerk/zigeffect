@@ -1373,6 +1373,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_production_telemetry_exporter_boundary_tool_tests = b.addRunArtifact(causal_production_telemetry_exporter_boundary_tool_tests);
     test_step.dependOn(&run_causal_production_telemetry_exporter_boundary_tool_tests.step);
 
+    const causal_production_telemetry_local_pipeline_fixtures_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_production_telemetry_local_pipeline_fixtures.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_production_telemetry_local_pipeline_fixtures_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-production-telemetry-local-pipeline-fixtures",
+        .root_module = causal_production_telemetry_local_pipeline_fixtures_tool_module,
+    });
+    const run_causal_production_telemetry_local_pipeline_fixtures_tool = b.addRunArtifact(causal_production_telemetry_local_pipeline_fixtures_tool);
+    if (b.args) |args| run_causal_production_telemetry_local_pipeline_fixtures_tool.addArgs(args);
+    const causal_production_telemetry_local_pipeline_fixtures_step = b.step("causal-production-telemetry-local-pipeline-fixtures", "Review production telemetry local pipeline fixtures");
+    causal_production_telemetry_local_pipeline_fixtures_step.dependOn(&run_causal_production_telemetry_local_pipeline_fixtures_tool.step);
+
+    const causal_production_telemetry_local_pipeline_fixtures_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-production-telemetry-local-pipeline-fixtures-tests",
+        .root_module = causal_production_telemetry_local_pipeline_fixtures_tool_module,
+    });
+    const run_causal_production_telemetry_local_pipeline_fixtures_tool_tests = b.addRunArtifact(causal_production_telemetry_local_pipeline_fixtures_tool_tests);
+    test_step.dependOn(&run_causal_production_telemetry_local_pipeline_fixtures_tool_tests.step);
+
     const causal_m9_completion_audit_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_m9_completion_audit.zig"),
         .target = target,
@@ -2195,6 +2217,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_production_telemetry_implementation_proposal_tool_tests.step);
     examples_step.dependOn(&causal_production_telemetry_exporter_boundary_tool.step);
     examples_step.dependOn(&run_causal_production_telemetry_exporter_boundary_tool_tests.step);
+    examples_step.dependOn(&causal_production_telemetry_local_pipeline_fixtures_tool.step);
+    examples_step.dependOn(&run_causal_production_telemetry_local_pipeline_fixtures_tool_tests.step);
 
     const release_gate_step = b.step("release-gate", "Run complete durable workflow and cluster release gate");
     release_gate_step.dependOn(test_step);

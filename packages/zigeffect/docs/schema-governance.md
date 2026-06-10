@@ -65,6 +65,8 @@ mapping, or agent handoff, also update [operations.md](operations.md).
   serialization, collector configuration, live transport, or durable writes.
 - `no-network`: confirms an artifact cannot send to a collector or configure a
   network transport.
+- `local-pipeline-fixtures`: fixture-only local envelope shaping, redaction,
+  sampling, and correlation evidence; not runtime pipeline execution.
 
 ## New Schema Checklist
 
@@ -335,6 +337,19 @@ does not ingest live production telemetry, configure exporters, send OTLP,
 configure collector endpoints, write durable production storage, size
 capacity, fail CI, add non-NenDB adapter work, add alternate renderers, or
 grant mutation authority.
+
+- `zigeffect.causal.production-telemetry-local-pipeline-fixtures.v1`
+
+The production-telemetry-local-pipeline-fixtures report is a record-only,
+`local-pipeline-fixtures`, `fixtures-only`, `no-network`, `no-live-ingestion`
+production hardening contract. It consumes an approved exporter-boundary
+artifact, verifies no-network evidence, records local envelope fixture records,
+redaction and access fixture checks, sampling fixture checks, and emits
+`ready` or `blocked` artifacts before future NenDB retention fixtures. It does
+not run a telemetry pipeline, ingest live telemetry, configure exporters, send
+OTLP, configure collector endpoints, write NenDB records, write durable
+production storage, fail CI, add non-NenDB adapter work, add alternate
+renderers, or grant mutation authority.
 
 ### Human-Agent Feedback
 

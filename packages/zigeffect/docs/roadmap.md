@@ -655,9 +655,10 @@ metrics, and traces.
   wall-clock benchmark baseline, production capacity planning, and
   production-hardening completion audit plus load-test observation harness,
   production telemetry capture design, fixture, readiness-review, and
-  implementation-proposal and exporter-boundary contracts, milestones,
-  non-goals, verification commands, and the current next branch
-  `codex/zigeffect-causal-production-telemetry-local-pipeline-fixtures`.
+  implementation-proposal, exporter-boundary, and local-pipeline-fixtures
+  contracts, milestones, non-goals, verification commands, and the current
+  next branch
+  `codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
@@ -804,6 +805,20 @@ metrics, and traces.
   network, configure collectors, serialize OTLP, write durable production
   storage, size capacity, fail CI, add non-NenDB adapter work, add alternate
   frontend renderer support, or mutate production state.
+- Delivered: `causal-production-telemetry-local-pipeline-fixtures` publishes
+  `zigeffect.causal.production-telemetry-local-pipeline-fixtures.v1` with
+  approved exporter-boundary consumption, normalized local envelope fixtures,
+  redaction and access checks, sampling fixtures, correlation-link fixtures,
+  ready and blocked fixture artifacts, and the handoff to
+  `codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures`. It
+  keeps `applied=false`, `production_telemetry_ingestion=false`,
+  `live_exporter_enabled=false`, `network_send_enabled=false`,
+  `collector_endpoint_configured=false`, `otlp_serialization_enabled=false`,
+  `runtime_pipeline_enabled=false`, `durable_write_enabled=false`,
+  `ci_gate_enabled=false`, `mutation_authority=none`, and does not run a
+  telemetry pipeline, write NenDB, write durable production storage, size
+  capacity, fail CI, add non-NenDB adapter work, add alternate frontend
+  renderer support, or mutate production state.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,

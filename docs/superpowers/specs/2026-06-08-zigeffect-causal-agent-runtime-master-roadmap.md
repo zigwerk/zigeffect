@@ -775,10 +775,25 @@ Status values:
      without touching production systems, sending over networks, configuring
      collectors, serializing OTLP, or claiming production capacity.
 19. `codex/zigeffect-causal-production-telemetry-local-pipeline-fixtures`
-   - Current next branch: use approved exporter-boundary artifacts to define
-     local in-process pipeline fixtures for redaction, sampling, and envelope
-     shape checks before any live ingestion, durable production writes, CI
-     gates, capacity claims, or mutation authority are considered.
+   - Delivered: `causal-production-telemetry-local-pipeline-fixtures` emits
+     `zigeffect.causal.production-telemetry-local-pipeline-fixtures.v1` with
+     approved exporter-boundary consumption, fixture-only local envelope
+     shaping, redaction and access checks, sampling kept/dropped fixtures,
+     correlation-link fixtures, ready and blocked fixture artifacts, and NenDB
+     retention fixture handoff. It keeps `applied=false`,
+     `production_telemetry_ingestion=false`, `live_exporter_enabled=false`,
+     `network_send_enabled=false`, `collector_endpoint_configured=false`,
+     `otlp_serialization_enabled=false`, `runtime_pipeline_enabled=false`,
+     `durable_write_enabled=false`, `ci_gate_enabled=false`,
+     `mutation_authority=none`, NenDB-only, and SolidJS `zig-webui` aligned
+     without touching production systems, running a telemetry pipeline, writing
+     NenDB, or claiming production capacity.
+20. `codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures`
+   - Current next branch: use ready local-pipeline-fixtures artifacts to define
+     NenDB retention fixture mapping, retention policy records, compaction
+     assumptions, and rejected non-NenDB scope before any durable production
+     writes, live ingestion, CI gates, capacity claims, or mutation authority
+     are considered.
 
 ## Dual-Interface Causal Spine Expansion
 

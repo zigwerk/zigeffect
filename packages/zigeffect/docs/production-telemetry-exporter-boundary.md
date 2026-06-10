@@ -140,6 +140,12 @@ Agents must treat `blocked` boundary artifacts as stop signs. Blocked
 boundaries can guide proposal, verification, or authority-boundary repair, but
 they cannot justify local pipeline fixture work.
 
+The local-pipeline-fixtures branch is now delivered through
+`causal-production-telemetry-local-pipeline-fixtures`. The current handoff is
+`codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures`, which
+must consume ready fixture artifacts rather than treating this boundary report
+as runtime telemetry.
+
 ## Verification
 
 ```sh

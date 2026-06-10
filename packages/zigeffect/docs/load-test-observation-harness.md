@@ -114,9 +114,11 @@ readiness-review handoff is delivered as
 implementation-proposal handoff is delivered as
 `codex/zigeffect-causal-production-telemetry-implementation-proposal`. The
 exporter-boundary handoff is delivered as
-`codex/zigeffect-causal-production-telemetry-exporter-boundary`. The current
-next branch is
-`codex/zigeffect-causal-production-telemetry-local-pipeline-fixtures`.
+`codex/zigeffect-causal-production-telemetry-exporter-boundary`. The local
+pipeline fixture handoff is delivered as
+`codex/zigeffect-causal-production-telemetry-local-pipeline-fixtures`. The
+current next branch is
+`codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures`.
 
 ## Verification
 

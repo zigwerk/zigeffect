@@ -112,8 +112,10 @@ delivered through `causal-production-telemetry-readiness-review`, and the
 implementation-proposal branch is now delivered through
 `causal-production-telemetry-implementation-proposal`, and the
 exporter-boundary branch is now delivered through
-`causal-production-telemetry-exporter-boundary`. The current handoff is
-`codex/zigeffect-causal-production-telemetry-local-pipeline-fixtures`.
+`causal-production-telemetry-exporter-boundary`. The local-pipeline-fixtures
+branch is now delivered through
+`causal-production-telemetry-local-pipeline-fixtures`. The current handoff is
+`codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures`.
 
 ## Verification
 
