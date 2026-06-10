@@ -87,7 +87,7 @@ Ready publication-policy artifacts hand off to
 That branch is now delivered and evaluates readiness for required status check
 semantics as record-only evidence, not enforcement. Ready readiness artifacts
 hand off to
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-application-boundary`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-policy`.
 
 ## Verification
 

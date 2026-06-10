@@ -572,14 +572,29 @@ record-only readiness artifact for future required status check application
 work. It consumes ready advisory CI report publication-policy artifacts,
 defines candidate required-check profiles with activation disabled, records
 activation guardrails, records denied required-check and branch-protection
-inferences, and hands off to required-status-check application-boundary work
-only after reviewer approval and verification commands are present. It does
+inferences, and hands off toward required-status-check policy work after the
+application-boundary milestone. It does
 not create required status checks, mutate branch protection, call GitHub APIs,
 mutate workflows, execute CI uploads, write GitHub step summaries, post pull
 request comments, ingest live telemetry, call networks, write NenDB, write
 durable production storage, host a production dashboard, orchestrate
 production clusters, add non-NenDB adapter work, add alternate renderers, or
 grant production mutation authority.
+
+- `zigeffect.causal.production-telemetry-ci-gate-required-status-check-application-boundary.v1`
+
+The production-telemetry-ci-gate-required-status-check-application-boundary
+report is a record-only, plan-or-record-applied boundary contract. It consumes
+ready required-status-check readiness artifacts, records planned or externally
+applied required-check boundary evidence, and only sets `applied=true` after
+reviewed branch-protection, workflow or check-run, before/after, after-state
+safety, and post-application verification evidence passes. It does not create
+required status checks, mutate branch protection, call GitHub APIs, mutate
+workflows, execute CI uploads, write GitHub step summaries, post pull request
+comments, ingest live telemetry, call networks, write NenDB, write durable
+production storage, host a production dashboard, orchestrate production
+clusters, add non-NenDB adapter work, add alternate renderers, or grant
+production mutation authority.
 
 ### Human-Agent Feedback
 

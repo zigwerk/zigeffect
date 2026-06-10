@@ -749,11 +749,33 @@ The readiness artifact uses schema
 `zigeffect.causal.production-telemetry-ci-gate-required-status-check-readiness.v1`,
 consumes ready publication-policy artifacts, defines candidate required-check
 profiles with activation disabled, records activation guardrails, and hands
-off to the guarded required-status-check application-boundary branch. It does
+off to the guarded required-status-check policy branch after the application
+boundary milestone. It does
 not create required checks, mutate branch protection, call GitHub APIs, mutate
 workflows, enable CI gate enforcement, write NenDB, write durable storage, or
 grant mutation authority. The full policy is in
 [docs/production-telemetry-ci-gate-required-status-check-readiness.md](docs/production-telemetry-ci-gate-required-status-check-readiness.md).
+
+Plan the production telemetry CI gate required status check application
+boundary:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-gate-required-status-check-application-boundary -- \
+  --from-readiness ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-readiness.json \
+  plan \
+  --reason "required status check application boundary planned"
+```
+
+The application-boundary artifact uses schema
+`zigeffect.causal.production-telemetry-ci-gate-required-status-check-application-boundary.v1`,
+consumes ready required-status-check readiness artifacts, records planned or
+externally applied required-status-check boundary evidence, and hands off to
+the required-status-check policy branch. It does not mutate GitHub branch
+protection, create check runs, call GitHub APIs, mutate workflows, enable CI
+gate enforcement, write NenDB, write durable storage, or grant mutation
+authority. The full policy is in
+[docs/production-telemetry-ci-gate-required-status-check-application-boundary.md](docs/production-telemetry-ci-gate-required-status-check-application-boundary.md).
 
 Print the M9 operating-model completion audit:
 
@@ -780,9 +802,9 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-application-boundary`
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-policy`
 after the delivered production telemetry CI gate required status check
-readiness milestone.
+application-boundary milestone.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in

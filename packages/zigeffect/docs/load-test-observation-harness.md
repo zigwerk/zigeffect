@@ -143,7 +143,7 @@ CI gate advisory CI report application boundary handoff is delivered as
 `codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary`.
 The
 current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-application-boundary`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-policy`.
 
 ## Verification
 

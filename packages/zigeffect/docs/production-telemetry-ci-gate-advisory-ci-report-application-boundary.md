@@ -86,7 +86,7 @@ tokens, or OTLP endpoints.
 Applied application-boundary artifacts hand off to
 `codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy`.
 That branch is now delivered and hands off to
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-application-boundary`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-policy`.
 The readiness branch must still treat required status checks as future
 readiness evidence, not enforcement.
 

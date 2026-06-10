@@ -147,7 +147,7 @@ guidance and publication-channel evidence before report application boundary
 work. The advisory CI report application boundary branch now records planned,
 applied, or blocked report publication boundary evidence before publication
 policy work. The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-application-boundary`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-policy`.
 Reviewed production capacity sizing remains future until compatible
 observations, telemetry design, fixtures, readiness review, implementation
 proposal, exporter boundary, local pipeline fixture evidence, NenDB retention

@@ -2,7 +2,8 @@
 
 `causal-production-telemetry-ci-gate-required-status-check-readiness` consumes
 a ready advisory CI report publication-policy artifact and emits record-only
-readiness evidence for a future required-status-check application boundary.
+readiness evidence for the guarded required-status-check application-boundary
+and policy sequence.
 
 It does not create GitHub required checks, update branch protection, create
 check runs, call GitHub APIs, mutate workflows, upload artifacts, write GitHub
@@ -80,9 +81,9 @@ authority.
 ## Handoff
 
 Ready artifacts hand off to
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-application-boundary`.
-That future branch may evaluate a guarded application boundary, but this
-readiness branch is not enforcement and does not apply branch protection.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-policy`
+after the delivered application-boundary milestone. The readiness branch is
+not enforcement and does not apply branch protection.
 
 ## Verification
 

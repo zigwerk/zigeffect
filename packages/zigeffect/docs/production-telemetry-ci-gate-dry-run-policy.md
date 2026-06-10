@@ -84,7 +84,7 @@ off to
 That application boundary is now delivered and hands off to
 `codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy`.
 That publication policy is now delivered and hands off to
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-application-boundary`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-policy`.
 
 ## Verification
 

@@ -495,7 +495,7 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-application-boundary`
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-policy`
 after the unified causal spine, deep runtime internals, app semantic trace API,
 bounded agent query surface, record-only encryption-at-rest policy,
 record-only alerting integrations, delivered live dashboard streaming
@@ -565,7 +565,7 @@ policy, evaluator, advisory CI report, and advisory CI report application
 boundary, advisory CI report publication policy, and required status check
 readiness milestones.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-application-boundary`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-policy`.
 
 ## Production Telemetry Capture Design
 
@@ -1105,6 +1105,29 @@ durable production write, hosted dashboard readiness, production cluster
 readiness, non-NenDB adapter scope, alternate renderer scope, or production
 mutation authority.
 
+Run the CI gate required status check application boundary after ready
+required-status-check readiness evidence exists:
+
+```sh
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-gate-required-status-check-application-boundary -- \
+  --from-readiness ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-readiness.json \
+  plan \
+  --reason "required status check application boundary planned"
+```
+
+The CI gate required status check application boundary records schema
+`zigeffect.causal.production-telemetry-ci-gate-required-status-check-application-boundary.v1`.
+It consumes ready required-status-check readiness artifacts and emits planned,
+applied, or blocked boundary evidence. `record-applied` is only a record of a
+separately reviewed external branch-protection, workflow, or check-run update
+with before/after evidence and verification commands. Do not treat it as
+GitHub API mutation by this tool, branch-protection mutation by this tool,
+workflow mutation by this tool, CI upload execution, live telemetry, durable
+production write, NenDB write, hosted dashboard readiness, production cluster
+readiness, non-NenDB adapter scope, alternate renderer scope, or production
+mutation authority.
+
 ## Production Artifact Aggregation
 
 Run the production artifact aggregation contract before starting durable
@@ -1400,11 +1423,12 @@ CI-archive-application, CI-archive-evidence-policy, CI-gate-readiness, and
 CI-gate-application-boundary, CI-gate-dry-run-policy, and
 CI-gate-dry-run-evaluator, CI-gate-advisory-ci-report, and
 CI-gate-advisory-ci-report-application-boundary,
-CI-gate-advisory-ci-report-publication-policy, and
-CI-gate-required-status-check-readiness
+CI-gate-advisory-ci-report-publication-policy,
+CI-gate-required-status-check-readiness, and
+CI-gate-required-status-check-application-boundary
 reports are now delivered.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-application-boundary`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-policy`.
 
 ## Production Gaps
 

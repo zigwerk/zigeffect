@@ -989,13 +989,27 @@ metrics, and traces.
   candidate required-check profiles with activation disabled, records
   activation guardrails and denied required-check or branch-protection
   inferences, and hands off to
-  `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-application-boundary`.
+  `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-policy`
+  after the application-boundary milestone.
   It keeps required checks, merge blocking, branch protection mutation, GitHub
   API mutation, workflow mutation by the tool, artifact upload execution by
   the tool, GitHub step summary writes by the tool, pull request comments by
   the tool, live telemetry, durable writes, NenDB writes, hosted dashboard
   claims, production cluster claims, alternate renderers, and production
   mutation disabled.
+- Delivered:
+  `causal-production-telemetry-ci-gate-required-status-check-application-boundary`
+  publishes
+  `zigeffect.causal.production-telemetry-ci-gate-required-status-check-application-boundary.v1`,
+  consumes ready required-status-check readiness artifacts, records planned,
+  applied, or blocked required-status-check boundary evidence, and hands off to
+  `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-policy`.
+  It keeps GitHub API mutation by the tool, branch-protection mutation by the
+  tool, workflow mutation by the tool, check-run creation by the tool, artifact
+  upload execution by the tool, GitHub step summary writes by the tool, pull
+  request comments by the tool, live telemetry, durable writes, NenDB writes,
+  hosted dashboard claims, production cluster claims, alternate renderers, and
+  production mutation disabled.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,
