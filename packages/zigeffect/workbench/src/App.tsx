@@ -1,4 +1,4 @@
-import { For, Match, Show, Switch, createMemo, createResource, createSignal } from "solid-js";
+import { For, Match, Show, Suspense, Switch, createMemo, createResource, createSignal, lazy } from "solid-js";
 import {
   type CausalEvent,
   type AppCitationGroup,
@@ -10,12 +10,19 @@ import {
   type GraphLane,
   type GraphLaneKind,
   type GovernanceModel,
+  type LiveDashboardModel,
+  type LiveDashboardSourceStep,
+  type LiveStreamFrameModel,
   type QueryCommand,
   type RemediationChainModel,
   type ChainSourceStep,
+  type VisualGraphLayoutMode,
+  type VisualGraphModel,
   causePathForEvent,
   deriveGovernanceModel,
   deriveGraphModel,
+  deriveLiveDashboardModel,
+  deriveVisualGraphModel,
   deriveWorkbenchModel,
   filterEvents,
   parseArtifactJson,
@@ -23,12 +30,19 @@ import {
 } from "./causalArtifact";
 import { loadPayload, type WorkbenchSession } from "./workbenchBridge";
 
-type Tab = "timeline" | "findings" | "graph" | "chain" | "queries" | "metadata";
+const VisualGraphCanvas = lazy(async () => {
+  const module = await import("./visualGraphAdapter");
+  return { default: module.VisualGraphCanvas };
+});
+
+type Tab = "timeline" | "findings" | "live" | "graph" | "visual-graph" | "chain" | "queries" | "metadata";
 
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: "timeline", label: "Timeline" },
   { id: "findings", label: "Findings" },
+  { id: "live", label: "Live" },
   { id: "graph", label: "Graph" },
+  { id: "visual-graph", label: "Visual Graph" },
   { id: "chain", label: "Chain" },
   { id: "queries", label: "Queries" },
   { id: "metadata", label: "Metadata" },
@@ -52,6 +66,7 @@ export function App() {
   const [kind, setKind] = createSignal("all");
   const [status, setStatus] = createSignal("all");
   const [copiedCommand, setCopiedCommand] = createSignal<string | null>(null);
+  const [layoutMode, setLayoutMode] = createSignal<VisualGraphLayoutMode>("dagre");
 
   const parsed = createMemo(() => {
     const loaded = payload();
@@ -65,6 +80,7 @@ export function App() {
       return {
         model: deriveWorkbenchModel(raw, { artifactPath }),
         governance: deriveGovernanceModel(raw, { artifactPath }),
+        raw,
         session: loaded.session,
         error: null,
       };
@@ -72,6 +88,7 @@ export function App() {
       return {
         model: null,
         governance: null,
+        raw: null,
         session: loaded.session,
         error: error instanceof Error ? error.message : "failed to parse artifact",
       };
@@ -80,6 +97,26 @@ export function App() {
 
   const model = createMemo(() => parsed()?.model ?? null);
   const governance = createMemo(() => parsed()?.governance ?? null);
+  const graphModel = createMemo(() => {
+    const current = model();
+    return current ? deriveGraphModel(current.events, current.findings) : null;
+  });
+  const liveDashboard = createMemo(() => {
+    const current = model();
+    const raw = parsed()?.raw;
+    if (!current || !raw) {
+      return null;
+    }
+    return deriveLiveDashboardModel(raw, { artifactPath: current.artifactPath }, current);
+  });
+  const visualGraph = createMemo(() => {
+    const current = model();
+    const graph = graphModel();
+    if (!current || !graph) {
+      return null;
+    }
+    return deriveVisualGraphModel(current, graph, layoutMode());
+  });
   const visibleEvents = createMemo(() => {
     const current = model();
     if (!current) {
@@ -202,11 +239,29 @@ export function App() {
                   <Match when={activeTab() === "findings"}>
                     <Findings events={current().events} findings={current().findings} onSelect={setSelectedId} />
                   </Match>
+                  <Match when={activeTab() === "live"}>
+                    <LiveDashboard
+                      dashboard={liveDashboard()}
+                      copiedCommand={copiedCommand()}
+                      onCopy={copyCommand}
+                      onSelectEvent={setSelectedId}
+                    />
+                  </Match>
                   <Match when={activeTab() === "graph"}>
                     <Graph
                       events={current().events}
                       findings={current().findings}
                       selected={selectedEvent()}
+                      onSelect={setSelectedId}
+                    />
+                  </Match>
+                  <Match when={activeTab() === "visual-graph"}>
+                    <VisualGraphView
+                      model={visualGraph()}
+                      layoutMode={layoutMode()}
+                      selected={selectedEvent()}
+                      events={current().events}
+                      onLayoutMode={setLayoutMode}
                       onSelect={setSelectedId}
                     />
                   </Match>
@@ -812,6 +867,254 @@ function Findings(props: {
           )}
         </For>
       </div>
+    </div>
+  );
+}
+
+function LiveDashboard(props: {
+  dashboard: LiveDashboardModel | null;
+  copiedCommand: string | null;
+  onCopy: (command: string) => void;
+  onSelectEvent: (id: string) => void;
+}) {
+  return (
+    <div class="view-stack">
+      <div class="view-heading">
+        <h2>Live</h2>
+        <span>{props.dashboard?.mode ?? "no stream"}</span>
+      </div>
+
+      <Show when={props.dashboard} fallback={<EmptyState label="No stream dashboard model" />}>
+        {(dashboard) => (
+          <>
+            <div class="live-summary">
+              <Metric label="target" value={dashboard().target} />
+              <Metric label="frames" value={String(dashboard().frames.length)} />
+              <Metric label="max" value={String(dashboard().stream.maxFrames)} />
+              <Metric
+                label="truncated"
+                value={String(dashboard().stream.truncated)}
+                tone={dashboard().stream.truncated ? "warn" : "ok"}
+              />
+              <Metric
+                label="authority"
+                value={dashboard().mutationAuthority ?? "none"}
+                tone={dashboard().mutationAuthority === "none" ? "ok" : "warn"}
+              />
+            </div>
+
+            <div class="live-priority-strip">
+              <Metric label="critical" value={String(dashboard().priorityCounts.critical)} tone={dashboard().priorityCounts.critical ? "warn" : "ok"} />
+              <Metric label="watch" value={String(dashboard().priorityCounts.watch)} tone={dashboard().priorityCounts.watch ? "warn" : "ok"} />
+              <Metric label="normal" value={String(dashboard().priorityCounts.normal)} />
+              <Metric label="redaction" value={dashboard().stream.redaction} />
+            </div>
+
+            <LiveSources
+              sources={dashboard().sources}
+              copiedCommand={props.copiedCommand}
+              onCopy={props.onCopy}
+            />
+            <LiveFrameList frames={dashboard().frames} onSelectEvent={props.onSelectEvent} />
+            <LiveGuardrails guardrails={dashboard().guardrails} warnings={dashboard().warnings} />
+          </>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+function LiveSources(props: {
+  sources: LiveDashboardSourceStep[];
+  copiedCommand: string | null;
+  onCopy: (command: string) => void;
+}) {
+  return (
+    <section class="live-panel">
+      <div class="lane-section-head">
+        <h3>Sources</h3>
+        <span>{props.sources.length}</span>
+      </div>
+      <div class="chain-source-list">
+        <For each={props.sources} fallback={<EmptyState label="No stream source paths" compact />}>
+          {(source) => (
+            <div class="chain-source-row">
+              <span>{source.label}</span>
+              <code>{source.path}</code>
+              <Show when={source.workbenchCommand} fallback={<small>text artifact</small>}>
+                {(command) => (
+                  <button type="button" onClick={() => props.onCopy(command())}>
+                    {props.copiedCommand === command() ? "Copied" : "Copy"}
+                  </button>
+                )}
+              </Show>
+            </div>
+          )}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function LiveFrameList(props: {
+  frames: LiveStreamFrameModel[];
+  onSelectEvent: (id: string) => void;
+}) {
+  return (
+    <section class="live-panel">
+      <div class="lane-section-head">
+        <h3>Latest frames</h3>
+        <span>{props.frames.length}</span>
+      </div>
+      <div class="live-frame-list">
+        <For each={props.frames} fallback={<EmptyState label="No live frames" compact />}>
+          {(frame) => (
+            <button
+              type="button"
+              classList={{
+                "live-frame-row": true,
+                critical: frame.priority === "critical",
+                watch: frame.priority === "watch",
+              }}
+              onClick={() => props.onSelectEvent(frame.eventId)}
+            >
+              <span class="event-id">#{frame.eventId}</span>
+              <span class="event-main">
+                <strong>{frame.eventKind}</strong>
+                <span>{frame.label || frame.lane}</span>
+              </span>
+              <Badge value={frame.status} />
+              <span class={`live-priority priority-${frame.priority}`}>{frame.priority}</span>
+              <small>{frame.findingKind ?? "no finding"}</small>
+            </button>
+          )}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function LiveGuardrails(props: { guardrails: string[]; warnings: string[] }) {
+  return (
+    <section class="live-panel">
+      <div class="lane-section-head">
+        <h3>Guardrails</h3>
+        <span>{props.guardrails.length + props.warnings.length}</span>
+      </div>
+      <div class="guardrail-list">
+        <For each={[...props.guardrails, ...props.warnings]} fallback={<EmptyState label="No stream guardrails" compact />}>
+          {(guardrail) => <span>{guardrail}</span>}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function VisualGraphView(props: {
+  model: VisualGraphModel | null;
+  layoutMode: VisualGraphLayoutMode;
+  selected: CausalEvent | null;
+  events: CausalEvent[];
+  onLayoutMode: (mode: VisualGraphLayoutMode) => void;
+  onSelect: (id: string) => void;
+}) {
+  const modes: VisualGraphLayoutMode[] = ["dagre", "force", "radial"];
+  const causePath = createMemo(() => (
+    props.selected ? causePathForEvent(props.events, props.selected.idText) : []
+  ));
+
+  return (
+    <div class="view-stack">
+      <div class="view-heading visual-heading">
+        <h2>Visual Graph</h2>
+        <div class="segmented-control" aria-label="Visual graph layout">
+          <For each={modes}>
+            {(mode) => (
+              <button
+                type="button"
+                classList={{ active: props.layoutMode === mode }}
+                onClick={() => props.onLayoutMode(mode)}
+              >
+                {mode}
+              </button>
+            )}
+          </For>
+        </div>
+      </div>
+
+      <Show when={props.model} fallback={<EmptyState label="No visual graph model" />}>
+        {(model) => (
+          <>
+            <div class="visual-graph-summary">
+              <Metric label="layout" value={model().layoutMode} />
+              <Metric label="nodes" value={String(model().nodes.length)} />
+              <Metric label="edges" value={String(model().edges.length)} />
+              <Metric label="adapter" value={model().adapter.solid} />
+              <Metric label="engine" value={model().adapter.engine} />
+            </div>
+            <div class="visual-graph-shell">
+              <Suspense fallback={<EmptyState label="Loading visual graph" compact />}>
+                <VisualGraphCanvas model={model()} />
+              </Suspense>
+            </div>
+            <CausePath path={causePath()} selected={props.selected} onSelect={props.onSelect} />
+            <VisualGraphFallback model={model()} selected={props.selected} onSelect={props.onSelect} />
+          </>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+function VisualGraphFallback(props: {
+  model: VisualGraphModel;
+  selected: CausalEvent | null;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div class="visual-fallback-grid">
+      <section class="live-panel">
+        <div class="lane-section-head">
+          <h3>Nodes</h3>
+          <span>{props.model.nodes.length}</span>
+        </div>
+        <div class="visual-node-list">
+          <For each={props.model.nodes} fallback={<EmptyState label="No nodes" compact />}>
+            {(node) => (
+              <button
+                type="button"
+                classList={{
+                  "visual-node-row": true,
+                  selected: props.selected?.idText === node.id,
+                  failure: node.tone === "failure",
+                  warning: node.tone === "warning",
+                }}
+                onClick={() => props.onSelect(node.id)}
+              >
+                <span>#{node.id}</span>
+                <strong>{node.kind}</strong>
+                <small>{node.status}</small>
+              </button>
+            )}
+          </For>
+        </div>
+      </section>
+      <section class="live-panel">
+        <div class="lane-section-head">
+          <h3>Edges</h3>
+          <span>{props.model.edges.length}</span>
+        </div>
+        <div class="relationship-list">
+          <For each={props.model.edges} fallback={<EmptyState label="No visual edges" compact />}>
+            {(edge) => (
+              <button type="button" class="relationship-row" onClick={() => props.onSelect(edge.target)}>
+                <span>#{edge.source} -&gt; #{edge.target}</span>
+                <strong>{edge.label}</strong>
+              </button>
+            )}
+          </For>
+        </div>
+      </section>
     </div>
   );
 }

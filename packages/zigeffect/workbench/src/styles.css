@@ -164,9 +164,12 @@ h3 {
 .relationship-row,
 .orphan-row,
 .cause-chip,
+.live-frame-row,
+.visual-node-row,
 .lane-events button,
 .chain-source-row button,
 .group-block button,
+.segmented-control button,
 .command-row button {
   border: 1px solid #d6ddd2;
   border-radius: 6px;
@@ -278,9 +281,12 @@ h3 {
 .relationship-row:hover,
 .orphan-row:hover,
 .cause-chip:hover,
+.live-frame-row:hover,
+.visual-node-row:hover,
 .lane-events button:hover,
 .chain-source-row button:hover,
 .group-block button:hover,
+.segmented-control button:hover,
 .command-row button:hover {
   border-color: #8db7ad;
 }
@@ -578,6 +584,170 @@ h3 {
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(220px, 0.7fr);
   gap: 14px;
+}
+
+.live-summary,
+.visual-graph-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.live-priority-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.live-panel {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #d6ddd2;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.live-frame-list,
+.visual-node-list {
+  display: grid;
+  gap: 8px;
+}
+
+.live-frame-row {
+  width: 100%;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) 92px 90px minmax(120px, 0.7fr);
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.live-frame-row.critical {
+  border-color: #d99376;
+  background: #fff5f0;
+}
+
+.live-frame-row.watch {
+  border-color: #d8b05d;
+  background: #fffaf0;
+}
+
+.live-frame-row small {
+  min-width: 0;
+  color: #66736e;
+  font-size: 0.75rem;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.live-priority {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #eef0ef;
+  color: #3f4a47;
+  font-size: 0.74rem;
+  font-weight: 850;
+}
+
+.priority-critical {
+  background: #fff1db;
+  color: #7a4319;
+}
+
+.priority-watch {
+  background: #eaf2ff;
+  color: #255789;
+}
+
+.visual-heading {
+  align-items: center;
+}
+
+.segmented-control {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 4px;
+}
+
+.segmented-control button {
+  min-height: 32px;
+  padding: 0 10px;
+  color: #35413e;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.segmented-control button.active {
+  border-color: #2b7d6b;
+  background: #e8f4ee;
+  color: #125140;
+}
+
+.visual-graph-shell {
+  min-height: 460px;
+  border: 1px solid #d6ddd2;
+  border-radius: 6px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.visual-fallback-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.8fr);
+  gap: 14px;
+}
+
+.visual-node-row {
+  min-width: 0;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) minmax(74px, auto);
+  gap: 8px;
+  align-items: center;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.visual-node-row.selected {
+  border-color: #2b7d6b;
+  background: #eef8f3;
+}
+
+.visual-node-row.warning {
+  border-color: #d8b05d;
+  background: #fffaf0;
+}
+
+.visual-node-row.failure {
+  border-color: #d99376;
+  background: #fff5f0;
+}
+
+.visual-node-row span {
+  color: #2c6356;
+  font-weight: 850;
+}
+
+.visual-node-row strong {
+  min-width: 0;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.visual-node-row small {
+  color: #66736e;
+  font-size: 0.72rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 .relationship-list,
@@ -1073,6 +1243,16 @@ dd {
     grid-template-columns: 1fr;
   }
 
+  .live-summary,
+  .live-priority-strip,
+  .visual-graph-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .visual-fallback-grid {
+    grid-template-columns: 1fr;
+  }
+
   .app-status,
   .app-remediation-grid {
     grid-template-columns: 1fr;
@@ -1113,11 +1293,16 @@ dd {
   .event-row,
   .command-row,
   .command-list.compact .command-row,
-  .chain-source-row {
+  .chain-source-row,
+  .live-frame-row,
+  .visual-node-row {
     grid-template-columns: 1fr;
   }
 
-  .graph-summary {
+  .graph-summary,
+  .live-summary,
+  .live-priority-strip,
+  .visual-graph-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1128,8 +1313,19 @@ dd {
   }
 
   .lane-board,
-  .graph-grid {
+  .graph-grid,
+  .visual-fallback-grid {
     grid-template-columns: 1fr;
+  }
+
+  .visual-graph-shell {
+    min-height: 340px;
+  }
+
+  .segmented-control {
+    width: 100%;
+    grid-auto-flow: row;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .small-meta {
