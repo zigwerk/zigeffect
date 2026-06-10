@@ -39,7 +39,7 @@ Use `causal-wall-clock-benchmark-baselines` for noisy observation contracts:
 - what metadata makes an observation comparable;
 - what sample counts and warmups are required;
 - what deltas require review;
-- when benchmark evidence is ready for production capacity planning.
+- how benchmark evidence feeds the production capacity planning contract.
 
 Do not use wall-clock baselines as automatic CI failure gates. Wall-clock
 observations are advisory until reviewed by a human.

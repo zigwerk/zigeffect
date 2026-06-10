@@ -62,7 +62,9 @@ The audit originally kept these as explicit future hardening:
 - automated source/config mutation authority;
 - gradual rollout, canary, or circuit-breaker automation;
 - wall-clock benchmark baselines or gates;
-- production capacity planning.
+- production capacity planning at M9 time, with the record-only planning
+  contract now delivered and telemetry, load-test execution, and reviewed
+  production sizing still future.
 
 No Cockroach adapter work is part of this audit. The current durable database
 direction remains NenDB adapter work only.

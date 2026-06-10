@@ -695,9 +695,18 @@ Status values:
      Timing evidence remains record-only and cannot fail CI or claim capacity
      without human review.
 11. `codex/zigeffect-causal-production-capacity-planning`
-   - Current next branch: build capacity planning from reviewed aggregation,
-     retention, benchmark baseline, dashboard, graph, agent query,
-     feedback-loop, alerting, and rollout evidence.
+   - Delivered: `causal-production-capacity-planning` emits
+     `zigeffect.causal.production-capacity-planning.v1` with source evidence,
+     capacity domains, storage assumptions, load-test fixture plans, workbench
+     and graph concurrency assumptions, readiness gates, negative capacity
+     fixtures, and completion-audit handoff. It remains record-only,
+     planning-only, NenDB-only, and does not ingest telemetry, run load tests,
+     size production capacity, provision infrastructure, or grant mutation
+     authority.
+12. `codex/zigeffect-causal-production-hardening-completion-audit`
+   - Current next branch: audit the delivered production-hardening reports,
+     confirm record-only and NenDB-only boundaries, and choose the next
+     evidence-producing branch without claiming capacity from planning records.
 
 ## Dual-Interface Causal Spine Expansion
 

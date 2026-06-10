@@ -56,6 +56,9 @@ mapping, or agent handoff, also update [operations.md](operations.md).
 - `advisory-wall-clock`: observed timing evidence is comparable only when
   environment metadata is compatible and cannot fail CI or claim capacity
   without human review.
+- `planning-only`: deterministic planning assumptions and missing-evidence
+  gates only; not production sizing, telemetry, load testing, or mutation
+  authority.
 
 ## New Schema Checklist
 
@@ -235,6 +238,18 @@ environment metadata, calibration policy, advisory review gates, and agent
 guidance for future observation harnesses and capacity planning. It does not
 collect live timings, fail CI from timing, run load tests, size production
 capacity, write durable stores, or grant mutation authority.
+
+- `zigeffect.causal.production-capacity-planning.v1`
+
+The production-capacity-planning report is a record-only, `planning-only`
+production hardening contract. It consumes aggregation, NenDB retention,
+wall-clock benchmark baseline, live dashboard stream, visual graph, agent
+query, human-agent feedback, alerting, and rollout guardrail evidence, then
+records source contracts, capacity domains, storage assumptions, load-test
+fixture plans, concurrency assumptions, readiness gates, and negative capacity
+fixtures. It does not ingest telemetry, run load tests, size production
+capacity, provision infrastructure, write durable storage, introduce non-NenDB
+adapter work, add alternate workbench renderers, or grant mutation authority.
 
 ### Human-Agent Feedback
 

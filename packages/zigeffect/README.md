@@ -179,6 +179,21 @@ calibration policy, advisory review gates, and capacity-planning handoff. It is
 record-only and does not collect timings or fail CI. The full policy is in
 [docs/wall-clock-benchmark-baselines.md](docs/wall-clock-benchmark-baselines.md).
 
+Print the causal production capacity planning contract:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-capacity-planning
+zig build causal-production-capacity-planning -- --format json
+```
+
+The report uses schema `zigeffect.causal.production-capacity-planning.v1` and
+defines source evidence, capacity domains, storage assumptions, load-test
+fixture plans, workbench and graph concurrency assumptions, readiness gates,
+and negative capacity fixtures. It is record-only, planning-only, NenDB-only,
+and does not run load tests or claim production capacity. The full policy is in
+[docs/production-capacity-planning.md](docs/production-capacity-planning.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -204,8 +219,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-capacity-planning` after the delivered
-wall-clock benchmark baseline contract.
+`codex/zigeffect-causal-production-hardening-completion-audit` after the
+delivered production capacity planning contract.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in

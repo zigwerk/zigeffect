@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-production-capacity-planning";
-pub const recommended_next_branch = "codex/zigeffect-causal-production-capacity-planning";
+pub const recommendation = "start-production-hardening-completion-audit";
+pub const recommended_next_branch = "codex/zigeffect-causal-production-hardening-completion-audit";
 
 const OutputFormat = enum { text, json };
 
@@ -426,21 +426,29 @@ const backlog_items: []const BacklogItem = &.{
         .title = "Production Capacity Planning",
         .gap_id = "production-capacity-planning",
         .priority = "P5",
-        .status = "planned",
-        .summary = "Build capacity planning from real aggregation, retention, benchmark, dashboard, graph visualization, and integration evidence.",
+        .status = "delivered",
+        .summary = "Defines a record-only production capacity planning contract from aggregation, NenDB retention, wall-clock benchmark, dashboard stream, visual graph, agent query, feedback-loop, alerting, and rollout evidence without claiming measured production capacity.",
         .depends_on = &.{ "production-artifact-aggregation", "durable-production-retention", "wall-clock-benchmark-baselines", "live-dashboard-streaming-workbench", "workbench-graph-visual-debugging", "agent-query-interface", "human-agent-feedback-loop" },
         .deliverables = &.{
-            "capacity model",
+            "capacity model contract",
             "load-test fixture plan",
             "storage growth assumptions",
             "workbench dashboard and graph concurrency assumptions",
+            "agent feedback alert and rollout handoff assumptions",
+            "negative capacity fixtures",
+            "completion-audit handoff",
         },
         .evidence_sources = &.{
-            "packages/zigeffect/docs/m9-completion-audit.md",
-            "packages/zigeffect/docs/performance-budget.md",
+            "docs/superpowers/specs/2026-06-10-zigeffect-causal-production-capacity-planning-design.md",
+            "docs/superpowers/plans/2026-06-10-zigeffect-causal-production-capacity-planning-implementation.md",
+            "packages/zigeffect/tools/causal_production_capacity_planning.zig",
+            "packages/zigeffect/docs/production-capacity-planning.md",
+            "packages/zigeffect/docs/wall-clock-benchmark-baselines.md",
+            "packages/zigeffect/docs/durable-production-retention.md",
+            "packages/zigeffect/docs/production-hardening-backlog.md",
         },
         .branch = "codex/zigeffect-causal-production-capacity-planning",
-        .agent_guidance = "Do not estimate capacity before real retention and benchmark evidence exists.",
+        .agent_guidance = "Use causal-production-capacity-planning for formula-only capacity domains, storage assumptions, load-test fixture planning, concurrency assumptions, readiness gates, and negative capacity fixtures; do not claim production capacity or grant mutation authority.",
     },
 };
 
@@ -481,6 +489,8 @@ const verification_commands: []const []const u8 = &.{
     "zig build causal-rollout-automation-guardrails -- --format json",
     "zig build causal-wall-clock-benchmark-baselines",
     "zig build causal-wall-clock-benchmark-baselines -- --format json",
+    "zig build causal-production-capacity-planning",
+    "zig build causal-production-capacity-planning -- --format json",
     "zig build causal-production-deployment-runbooks",
     "zig build causal-production-deployment-runbooks -- --format json",
     "zig build causal-durable-production-retention",
@@ -753,11 +763,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-production-capacity-planning",
+        "start-production-hardening-completion-audit",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-production-capacity-planning",
+        "codex/zigeffect-causal-production-hardening-completion-audit",
         recommended_next_branch,
     );
 }
@@ -785,6 +795,7 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItem("wall-clock-benchmark-baselines");
     try expectBacklogItemStatus("wall-clock-benchmark-baselines", "delivered");
     try expectBacklogItem("production-capacity-planning");
+    try expectBacklogItemStatus("production-capacity-planning", "delivered");
 }
 
 test "production hardening backlog preserves user constraints" {
@@ -803,13 +814,15 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-production-capacity-planning") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-production-hardening-completion-audit") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "artifact-access-control") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "unified-causal-spine-contract") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "agent-query-interface") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "production-capacity-planning") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-capacity-planning") != null);
 }
 
 test "production hardening backlog JSON is agent-readable" {
@@ -818,7 +831,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-production-capacity-planning\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-production-hardening-completion-audit\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);
@@ -827,6 +840,9 @@ test "production hardening backlog JSON is agent-readable" {
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-rollout-automation-guardrails\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"wall-clock-benchmark-baselines\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-wall-clock-benchmark-baselines\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"production-capacity-planning\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-production-capacity-planning\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-production-capacity-planning -- --format json") != null);
 }
 
 test "production hardening backlog parses supported formats" {

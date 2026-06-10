@@ -722,6 +722,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_wall_clock_benchmark_baselines_tool_tests = b.addRunArtifact(causal_wall_clock_benchmark_baselines_tool_tests);
     test_step.dependOn(&run_causal_wall_clock_benchmark_baselines_tool_tests.step);
 
+    const causal_production_capacity_planning_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_production_capacity_planning.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_production_capacity_planning_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-production-capacity-planning",
+        .root_module = causal_production_capacity_planning_tool_module,
+    });
+    const run_causal_production_capacity_planning_tool = b.addRunArtifact(causal_production_capacity_planning_tool);
+    if (b.args) |args| run_causal_production_capacity_planning_tool.addArgs(args);
+    const causal_production_capacity_planning_step = b.step("causal-production-capacity-planning", "Print causal production capacity planning contract");
+    causal_production_capacity_planning_step.dependOn(&run_causal_production_capacity_planning_tool.step);
+
+    const causal_production_capacity_planning_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-production-capacity-planning-tests",
+        .root_module = causal_production_capacity_planning_tool_module,
+    });
+    const run_causal_production_capacity_planning_tool_tests = b.addRunArtifact(causal_production_capacity_planning_tool_tests);
+    test_step.dependOn(&run_causal_production_capacity_planning_tool_tests.step);
+
     const causal_m9_completion_audit_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_m9_completion_audit.zig"),
         .target = target,

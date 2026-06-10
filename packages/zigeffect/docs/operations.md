@@ -100,6 +100,8 @@ zig build causal-performance-budget
 zig build causal-performance-budget -- --format json
 zig build causal-wall-clock-benchmark-baselines
 zig build causal-wall-clock-benchmark-baselines -- --format json
+zig build causal-production-capacity-planning
+zig build causal-production-capacity-planning -- --format json
 zig build causal-m9-completion-audit
 zig build causal-m9-completion-audit -- --format json
 zig build causal-production-hardening-backlog
@@ -413,6 +415,13 @@ contracts. That report is also record-only, but it describes noisy benchmark
 observation fields, environment metadata, calibration policy, advisory review
 gates, and the capacity-planning handoff rather than deterministic constants.
 
+Use `causal-production-capacity-planning` after benchmark, retention,
+dashboard, graph, agent-query, feedback-loop, alerting, and rollout contracts
+exist. That report is planning-only: it records capacity domains, storage
+assumptions, load-test fixtures, concurrency assumptions, readiness gates, and
+negative capacity fixtures without running load tests or claiming production
+capacity.
+
 Add release notes whenever a causal runtime change alters retention, string
 bounds, sampling, backend emission, artifact schemas, workbench bounds or
 bridge behavior, CI upload globs, or CI retention.
@@ -451,12 +460,13 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-production-capacity-planning` after the unified causal
-spine, deep runtime internals, app semantic trace API, bounded agent query
-surface, record-only encryption-at-rest policy, record-only alerting
-integrations, delivered live dashboard streaming workbench, delivered graph
-visual debugging, delivered human-agent feedback loop, delivered rollout
-automation guardrails, and delivered wall-clock benchmark baseline contract.
+`codex/zigeffect-causal-production-hardening-completion-audit` after the
+unified causal spine, deep runtime internals, app semantic trace API, bounded
+agent query surface, record-only encryption-at-rest policy, record-only
+alerting integrations, delivered live dashboard streaming workbench, delivered
+graph visual debugging, delivered human-agent feedback loop, delivered rollout
+automation guardrails, delivered wall-clock benchmark baseline contract, and
+delivered production capacity planning contract.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -716,6 +726,34 @@ it to fail CI automatically, estimate production capacity, run load tests, call
 networks, write durable stores, mutate source/config/app/registry/deployment
 state, or grant production authority.
 
+## Production Capacity Planning
+
+Run the production capacity planning contract after the source evidence
+contracts are present and before starting a completion audit or future load-test
+harness design:
+
+```sh
+cd packages/zigeffect
+zig build causal-production-capacity-planning
+zig build causal-production-capacity-planning -- --format json
+```
+
+The contract records schema
+`zigeffect.causal.production-capacity-planning.v1`. It consumes aggregation,
+NenDB retention, wall-clock benchmark baselines, live dashboard stream, visual
+graph, agent query, human-agent feedback, alerting, and rollout guardrail
+contracts. It defines capacity domains, storage growth assumptions, load-test
+fixture plans, workbench and graph concurrency assumptions, readiness gates,
+negative capacity fixtures, agent guidance, non-goals, and the completion-audit
+handoff.
+
+Use it to ask better capacity questions and to block weak claims. Do not use it
+to ingest production telemetry, execute load tests, estimate production
+capacity or cost, provision infrastructure, host production dashboards, write
+durable stores, introduce non-NenDB adapter work, add alternate workbench
+renderers, mutate source/config/app/registry/deployment/rollout/alert state, or
+grant production authority.
+
 ## Production Gaps
 
 The current operating model does not provide:
@@ -731,7 +769,8 @@ The current operating model does not provide:
 - automated source/config mutation authority;
 - gradual rollout, canary, or circuit-breaker automation;
 - dynamic benchmark observation harnesses or wall-clock CI gates;
-- production capacity planning.
+- production telemetry capture, load-test execution, or reviewed production
+  capacity sizing.
 
 Those belong to future production hardening. Use
 `zig build causal-production-hardening-backlog` as the branch queue before

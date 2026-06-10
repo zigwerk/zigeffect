@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-capacity-planning` means the
+The recommendation `start-production-hardening-completion-audit` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -47,8 +47,13 @@ Wall-clock benchmark baselines are also delivered: they define local and CI
 benchmark scenario families, baseline record fields, environment metadata,
 calibration policy, advisory review gates, and agent guidance without running
 benchmarks or creating timing-based CI gates.
+Production capacity planning is also delivered: it defines source evidence,
+capacity domains, storage assumptions, load-test fixture plans, workbench and
+graph concurrency assumptions, readiness gates, negative capacity fixtures, and
+completion-audit handoff without running load tests or claiming production
+capacity.
 The next branch should be
-`codex/zigeffect-causal-production-capacity-planning`.
+`codex/zigeffect-causal-production-hardening-completion-audit`.
 
 ## Dependency Order
 
@@ -69,7 +74,7 @@ The backlog currently orders future production-hardening branches as:
 13. `human-agent-feedback-loop` delivered
 14. `rollout-automation-guardrails` delivered
 15. `wall-clock-benchmark-baselines` delivered
-16. `production-capacity-planning`
+16. `production-capacity-planning` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -173,11 +178,19 @@ emit `zigeffect.causal.wall-clock-benchmark-baselines.v1` through
 `zig build causal-wall-clock-benchmark-baselines` and keep local and CI timing
 evidence advisory, environment-scoped, and record-only.
 
+Production capacity planning is documented in
+[production-capacity-planning.md](production-capacity-planning.md). It emits
+`zigeffect.causal.production-capacity-planning.v1` through
+`zig build causal-production-capacity-planning` and keeps capacity domains,
+storage assumptions, load-test fixture plans, dashboard and graph concurrency
+assumptions, agent guidance, readiness gates, and negative capacity fixtures
+record-only.
+
 The next branch is
-`codex/zigeffect-causal-production-capacity-planning`. It should build capacity
-planning from reviewed aggregation, retention, benchmark baseline, dashboard,
-graph, agent query, feedback-loop, alerting, and rollout evidence without
-claiming capacity from unreviewed timing records.
+`codex/zigeffect-causal-production-hardening-completion-audit`. It should audit
+the delivered production-hardening reports, confirm the record-only and
+NenDB-only boundaries, and decide the next evidence-producing branch without
+claiming production capacity from planning records.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -212,6 +225,8 @@ zig build causal-rollout-automation-guardrails
 zig build causal-rollout-automation-guardrails -- --format json
 zig build causal-wall-clock-benchmark-baselines
 zig build causal-wall-clock-benchmark-baselines -- --format json
+zig build causal-production-capacity-planning
+zig build causal-production-capacity-planning -- --format json
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance
