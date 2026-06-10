@@ -1,9 +1,11 @@
 const std = @import("std");
 const entity = @import("entity.zig");
 const envelope = @import("envelope.zig");
+const fencing = @import("fencing.zig");
 const identity = @import("identity.zig");
 const local_cluster = @import("local_cluster.zig");
 const routing = @import("routing.zig");
+const runner_storage = @import("runner_storage.zig");
 const transport = @import("transport.zig");
 const workflow_clock = @import("../workflow/clock.zig");
 const workflow_deferred = @import("../workflow/deferred.zig");
@@ -24,6 +26,7 @@ pub const JournalStore = store.JournalStore;
 pub const LocalClusterRunner = local_cluster.LocalClusterRunner;
 pub const MessageCorrelationId = envelope.MessageCorrelationId;
 pub const MessageEnvelope = envelope.MessageEnvelope;
+pub const RunnerStorage = runner_storage.RunnerStorage;
 pub const WorkflowId = journal.WorkflowId;
 pub const ExecutionId = journal.ExecutionId;
 pub const ActivityId = journal.ActivityId;
@@ -395,12 +398,20 @@ pub const ClusterWorkflowEngine = struct {
 pub const ClusterWorkflowEntityServices = struct {
     allocator: Allocator,
     journal_store: JournalStore,
+    runner_storage: ?RunnerStorage = null,
+    lease_fence: ?fencing.ShardLeaseFence = null,
     workflow_id: WorkflowId,
     execution_id: ExecutionId,
     last_reply_json: []const u8 = "",
 
     pub fn deinit(self: *ClusterWorkflowEntityServices) void {
         if (self.last_reply_json.len > 0) self.allocator.free(self.last_reply_json);
+    }
+
+    pub fn validateLeaseFence(self: *const ClusterWorkflowEntityServices) !void {
+        const storage_ref = self.runner_storage orelse return;
+        const fence = self.lease_fence orelse return;
+        try fencing.validateShardFence(storage_ref, fence);
     }
 };
 
@@ -456,11 +467,16 @@ pub const ClusterWorkflowEntityRegistry = struct {
         }
 
         _ = try runner.registerEntity(.{ .address = address, .name = cluster_workflow_entity_type }, now_ms);
+        const lease_fence = try runner.runtime.lease_manager.fenceForShard(shard_id);
+        try fencing.validateShardFence(runner.runtime.lease_manager.storage, lease_fence);
+
         const services = try self.allocator.create(ClusterWorkflowEntityServices);
         errdefer self.allocator.destroy(services);
         services.* = .{
             .allocator = self.allocator,
             .journal_store = journal_store,
+            .runner_storage = runner.runtime.lease_manager.storage,
+            .lease_fence = lease_fence,
             .workflow_id = workflow_id,
             .execution_id = execution_id,
         };
@@ -525,6 +541,8 @@ pub const ClusterWorkflowEntityHandler = struct {
         defer command.deinit(scope.allocator);
 
         if (command.execution_id != entity_envelope.address.id) return error.WorkflowExecutionMismatch;
+
+        try services.validateLeaseFence();
 
         var result = try applyClusterWorkflowCommand(scope.allocator, services.journal_store, command);
         defer result.deinit(scope.allocator);

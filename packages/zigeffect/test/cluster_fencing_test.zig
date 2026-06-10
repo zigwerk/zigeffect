@@ -129,6 +129,78 @@ test "stale cluster runtime rejects shard processing before message claim" {
     try std.testing.expectEqual(@as(usize, 1), unprocessed.records.len);
 }
 
+test "stale workflow entity rejects journal write after lease epoch moves" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    const runner_storage = runner_storage_state.asRunnerStorage();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    const workflow_id = fx.workflow.workflowId("approval");
+    const execution_id = try executionIdForWorkflowShard(0, 8);
+    const address = fx.clusterWorkflowExecutionAddress(execution_id);
+
+    var runner_a = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = fx.runnerAddress("machine", "runner-a"),
+        .runner_storage = runner_storage,
+        .message_storage = message_storage,
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 1,
+        .lease_options = .{ .ttl_ms = 100, .refresh_interval_ms = 50 },
+    });
+    defer runner_a.deinit();
+    _ = try runner_a.runtime.acquireShard(0, 1_000);
+
+    var registry_a = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry_a.deinit();
+    _ = try registry_a.registerExecution(&runner_a, journal_store, workflow_id, execution_id, 1_000);
+
+    var runner_b = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = fx.runnerAddress("machine", "runner-b"),
+        .runner_storage = runner_storage,
+        .message_storage = message_storage,
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 1,
+        .lease_options = .{ .ttl_ms = 100, .refresh_interval_ms = 50 },
+    });
+    defer runner_b.deinit();
+    _ = try runner_b.runtime.acquireShard(0, 1_100);
+
+    const payload = try fx.formatClusterWorkflowCommandJson(std.testing.allocator, .{
+        .kind = .append_event,
+        .event_kind = .workflow_started,
+        .workflow_id = workflow_id,
+        .execution_id = execution_id,
+        .workflow_name = "approval",
+        .name = "approval",
+        .status = "running",
+        .idempotency_key = "stale-journal-start",
+    });
+    defer std.testing.allocator.free(payload);
+
+    const scope = try runner_a.entityScope(address);
+    try std.testing.expectError(error.StaleShardFence, fx.ClusterWorkflowEntityHandler.handle(scope, .{
+        .id = 1,
+        .sequence = 1,
+        .kind = .ask,
+        .address = address,
+        .correlation_id = 1,
+        .payload_type_name = fx.cluster_workflow_command_payload_type,
+        .payload = payload,
+        .redacted_detail = "stale-journal-start",
+    }));
+
+    var events = try journal_store.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 0), events.events.len);
+}
+
 const NoopEntityHandler = struct {
     pub fn handle(_: *fx.EntityScope, _: fx.EntityEnvelope) !fx.EntityHandlerResult {
         return .noreply;
@@ -144,4 +216,13 @@ fn addressForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.EntityA
         if (try fx.shardIdForAddress(address, shard_count) == shard_id) return address;
     }
     return error.EntityShardNotFound;
+}
+
+fn executionIdForWorkflowShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.workflow.ExecutionId {
+    var id: fx.workflow.ExecutionId = 1;
+    while (id < 100_000) : (id += 1) {
+        const address = fx.clusterWorkflowExecutionAddress(id);
+        if (try fx.shardIdForAddress(address, shard_count) == shard_id) return id;
+    }
+    return error.ExecutionShardNotFound;
 }
