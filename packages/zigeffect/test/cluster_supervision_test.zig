@@ -41,3 +41,33 @@ test "cluster runner restart state escalates after intensity budget" {
     try std.testing.expect(fourth.restart_allowed);
     try std.testing.expect(!fourth.escalated);
 }
+
+test "entity runtime exposes last supervisor decision after handler failure" {
+    var runtime = fx.LocalEntityRuntime.init(std.testing.allocator, .{
+        .restart_intensity = .{ .max_restarts = 2, .within_ms = 1_000 },
+    });
+    defer runtime.deinit();
+
+    const address = fx.entityAddress("counter", "decision");
+    _ = try runtime.registerEntity(.{ .address = address, .name = "counter-decision" }, 1_000);
+
+    const envelope = try fx.cloneEntityEnvelope(std.testing.allocator, .{
+        .id = 1,
+        .sequence = 1,
+        .kind = .tell,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "boom",
+    });
+
+    const Handler = struct {
+        pub fn handle(_: *fx.EntityScope, _: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            return error.Boom;
+        }
+    };
+
+    try std.testing.expectError(error.Boom, runtime.processEnvelope(envelope, Handler, 1_100));
+    const decision = (try runtime.lastSupervisorDecision(address)).?;
+    try std.testing.expectEqual(@as(usize, 1), decision.restarted_children);
+    try std.testing.expect(!decision.escalated);
+}

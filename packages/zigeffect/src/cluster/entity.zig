@@ -121,6 +121,7 @@ const EntityInstance = struct {
     idle_timeout_ms: ?u64 = null,
     last_active_ms: u64 = 0,
     supervisor_child_id: supervisor_mod.SupervisorChildId,
+    last_supervisor_decision: ?SupervisorDecision = null,
 
     fn deinit(self: *EntityInstance, allocator: Allocator) void {
         mailbox_mod.deinitEntityAddress(allocator, self.address);
@@ -257,6 +258,11 @@ pub const LocalEntityRuntime = struct {
         return self.supervisor.childRestartCount(self.entities.items[index].supervisor_child_id) catch error.EntityNotFound;
     }
 
+    pub fn lastSupervisorDecision(self: *const LocalEntityRuntime, address: EntityAddress) EntityRuntimeError!?SupervisorDecision {
+        const index = self.findEntityIndex(address) orelse return error.EntityNotFound;
+        return self.entities.items[index].last_supervisor_decision;
+    }
+
     pub fn pendingCount(self: *const LocalEntityRuntime, address: EntityAddress) usize {
         return self.mailbox.pendingCount(address);
     }
@@ -294,6 +300,7 @@ pub const LocalEntityRuntime = struct {
             try self.handleEntityFailure(index, err, now_ms);
             return err;
         };
+        instance.last_supervisor_decision = null;
 
         var replied = false;
         switch (outcome) {
@@ -345,6 +352,7 @@ pub const LocalEntityRuntime = struct {
             .{ .failure = @errorName(err) },
             now_ms,
         );
+        instance.last_supervisor_decision = decision;
 
         instance.scope.close(.{ .failure = @errorName(err) });
         instance.scope.deinit();
