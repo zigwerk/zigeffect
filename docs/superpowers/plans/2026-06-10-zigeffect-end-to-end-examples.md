@@ -366,7 +366,7 @@ git commit -m "example(zigeffect): add timer signal workflow"
 - Create: `packages/zigeffect/examples/local_actor.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Add the failing example shell and build wiring**
+- [x] **Step 1: Add the failing example shell and build wiring**
 
 Create `local_actor.zig` with:
 
@@ -398,7 +398,7 @@ Wire the module with:
 - binary name: `zigeffect-local-actor-example`
 - test name: `zigeffect-local-actor-example-tests`
 
-- [ ] **Step 2: Run the failing example gate**
+- [x] **Step 2: Run the failing example gate**
 
 Run:
 
@@ -408,7 +408,7 @@ Run:
 
 Expected: FAIL from `error.ExpectedLocalActorScenario`.
 
-- [ ] **Step 3: Implement the local actor scenario**
+- [x] **Step 3: Implement the local actor scenario**
 
 Implement:
 
@@ -426,7 +426,7 @@ Implement:
 
 The report can store `reply_payload = "value=1"` as a static slice.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 

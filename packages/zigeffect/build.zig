@@ -442,6 +442,24 @@ pub fn build(b: *std.Build) void {
     });
     const run_workflow_timer_signal_example_tests = b.addRunArtifact(workflow_timer_signal_example_tests);
 
+    const local_actor_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/local_actor.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    local_actor_example_module.addImport("zigeffect", zigeffect);
+
+    const local_actor_example = b.addExecutable(.{
+        .name = "zigeffect-local-actor-example",
+        .root_module = local_actor_example_module,
+    });
+
+    const local_actor_example_tests = b.addTest(.{
+        .name = "zigeffect-local-actor-example-tests",
+        .root_module = local_actor_example_module,
+    });
+    const run_local_actor_example_tests = b.addRunArtifact(local_actor_example_tests);
+
     const scaffold_module = b.createModule(.{
         .root_source_file = b.path("tools/scaffold_module.zig"),
         .target = target,
@@ -1233,6 +1251,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_workflow_queue_worker_example_tests.step);
     examples_step.dependOn(&workflow_timer_signal_example.step);
     examples_step.dependOn(&run_workflow_timer_signal_example_tests.step);
+    examples_step.dependOn(&local_actor_example.step);
+    examples_step.dependOn(&run_local_actor_example_tests.step);
     examples_step.dependOn(&scaffold_tool.step);
     examples_step.dependOn(&run_scaffold_tool_tests.step);
     examples_step.dependOn(&causal_report_tool.step);
