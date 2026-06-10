@@ -234,6 +234,57 @@ test "guarded journal store stamps lease epoch and rejects stale fence" {
     } }));
 }
 
+test "lease audit reports valid stale epoch missing and expired owned leases" {
+    var storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asRunnerStorage();
+    const owner_a = fx.runnerAddress("machine", "runner-a");
+    const owner_b = fx.runnerAddress("machine", "runner-b");
+
+    var manager = try fx.LocalShardLeaseManager.init(std.testing.allocator, storage, owner_a, .{
+        .ttl_ms = 100,
+        .refresh_interval_ms = 20,
+        .renewal_deadline_ms = 80,
+        .clock_skew_tolerance_ms = 10,
+    });
+    defer manager.deinit();
+
+    _ = try manager.acquireShard(0, 1_000);
+    _ = try manager.acquireShard(1, 1_000);
+    _ = try manager.acquireShard(2, 1_000);
+    try storage.release(.{ .shard_id = 1, .owner = owner_a });
+    _ = try storage.acquire(.{ .shard_id = 2, .owner = owner_b, .now_ms = 1_100, .ttl_ms = 100 });
+
+    var report = try manager.auditOwnedLeases(std.testing.allocator, 1_111);
+    defer report.deinit();
+    try std.testing.expectEqual(@as(usize, 3), report.scanned);
+    try std.testing.expectEqual(@as(usize, 1), report.expired);
+    try std.testing.expectEqual(@as(usize, 1), report.missing);
+    try std.testing.expectEqual(@as(usize, 1), report.stale_owner);
+}
+
+test "force release stale shard releases only after skew tolerant expiry" {
+    var storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asRunnerStorage();
+    const owner_a = fx.runnerAddress("machine", "runner-a");
+    const owner_b = fx.runnerAddress("machine", "runner-b");
+
+    _ = try storage.acquire(.{ .shard_id = 4, .owner = owner_a, .now_ms = 1_000, .ttl_ms = 100 });
+    var manager = try fx.LocalShardLeaseManager.init(std.testing.allocator, storage, owner_b, .{
+        .ttl_ms = 100,
+        .refresh_interval_ms = 20,
+        .clock_skew_tolerance_ms = 10,
+    });
+    defer manager.deinit();
+
+    try std.testing.expectError(error.RunnerStillAlive, manager.forceReleaseStaleShard(4, 1_109));
+    const released = try manager.forceReleaseStaleShard(4, 1_110);
+    try std.testing.expectEqual(@as(fx.ShardId, 4), released.shard_id);
+    try std.testing.expect(released.released_owner.eql(owner_a));
+    try std.testing.expect((try storage.lease(4)) == null);
+}
+
 fn addressForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.EntityAddress {
     var id: u64 = 1;
     while (id < 100_000) : (id += 1) {
