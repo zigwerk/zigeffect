@@ -59,6 +59,7 @@ pub const SupervisorOptions = struct {
     name: []const u8,
     strategy: SupervisorStrategy = .one_for_one,
     intensity: RestartIntensity = .{},
+    max_recent_decisions: usize = 32,
 };
 
 pub const SupervisorChildSnapshot = struct {
@@ -183,6 +184,7 @@ pub const Supervisor = struct {
     options: SupervisorOptions,
     children: std.ArrayList(ChildState) = .empty,
     restart_history: std.ArrayList(u64) = .empty,
+    recent_decisions: std.ArrayList(SupervisorDecisionRecord) = .empty,
     causal_store: ?*CausalStore = null,
     causal_run_id: ?u64 = null,
 
@@ -193,6 +195,7 @@ pub const Supervisor = struct {
     pub fn deinit(self: *Supervisor) void {
         self.children.deinit(self.allocator);
         self.restart_history.deinit(self.allocator);
+        self.recent_decisions.deinit(self.allocator);
     }
 
     pub fn attachCausalStore(self: *Supervisor, store: *CausalStore, run_id: u64) void {
@@ -254,6 +257,57 @@ pub const Supervisor = struct {
         };
     }
 
+    pub fn inspect(self: *const Supervisor, allocator: Allocator) Allocator.Error!SupervisorInspectionReport {
+        const snapshots = try allocator.alloc(SupervisorChildSnapshot, self.children.items.len);
+        errdefer allocator.free(snapshots);
+
+        var running_children: usize = 0;
+        var stopped_children: usize = 0;
+        var failed_children: usize = 0;
+        var escalated_children: usize = 0;
+        for (self.children.items, 0..) |child, index| {
+            snapshots[index] = child.snapshot();
+            switch (child.status) {
+                .idle, .restarting => {},
+                .running => running_children += 1,
+                .stopped => stopped_children += 1,
+                .failed => failed_children += 1,
+                .escalated => escalated_children += 1,
+            }
+        }
+
+        const decisions = try allocator.alloc(SupervisorDecisionRecord, self.recent_decisions.items.len);
+        errdefer allocator.free(decisions);
+        @memcpy(decisions, self.recent_decisions.items);
+
+        const ordered = try allocator.alloc(ChildState, self.children.items.len);
+        defer allocator.free(ordered);
+        @memcpy(ordered, self.children.items);
+        std.mem.sort(ChildState, ordered, {}, shutdownBefore);
+
+        const shutdown_order = try allocator.alloc(SupervisorChildId, ordered.len);
+        errdefer allocator.free(shutdown_order);
+        for (ordered, 0..) |child, index| {
+            shutdown_order[index] = child.spec.id;
+        }
+
+        return .{
+            .allocator = allocator,
+            .supervisor_id = self.options.id,
+            .name = self.options.name,
+            .strategy = self.options.strategy,
+            .intensity = self.options.intensity,
+            .children = snapshots,
+            .decisions = decisions,
+            .shutdown_order = shutdown_order,
+            .running_children = running_children,
+            .stopped_children = stopped_children,
+            .failed_children = failed_children,
+            .escalated_children = escalated_children,
+            .dynamic_children = if (self.options.strategy == .dynamic) snapshots.len else 0,
+        };
+    }
+
     pub fn reportChildExit(
         self: *Supervisor,
         child_id: SupervisorChildId,
@@ -271,7 +325,7 @@ pub const Supervisor = struct {
         if (!restartAllowed(self.children.items[failed_index].spec.restart_mode, exit)) {
             markStoppedOrFailed(&self.children.items[failed_index], exit);
             decision.stopped_children = 1;
-            try self.recordRestartDecision(self.children.items[failed_index], decision);
+            try self.recordRestartDecision(self.children.items[failed_index], decision, now_ms, decision.stopped_children);
             return decision;
         }
 
@@ -279,7 +333,7 @@ pub const Supervisor = struct {
         if (planned_restarts > 0 and !self.canRestartWithinIntensity(now_ms, planned_restarts)) {
             decision.escalated = true;
             decision.stopped_children = self.markAffectedEscalated(failed_index);
-            try self.recordRestartDecision(self.children.items[failed_index], decision);
+            try self.recordRestartDecision(self.children.items[failed_index], decision, now_ms, decision.stopped_children);
             try self.recordEscalated(self.children.items[failed_index]);
             return decision;
         }
@@ -298,7 +352,12 @@ pub const Supervisor = struct {
             }
         }
 
-        try self.recordRestartDecision(self.children.items[failed_index], decision);
+        try self.recordRestartDecision(
+            self.children.items[failed_index],
+            decision,
+            now_ms,
+            decision.restarted_children + decision.stopped_children,
+        );
         return decision;
     }
 
@@ -339,7 +398,14 @@ pub const Supervisor = struct {
         );
     }
 
-    fn recordRestartDecision(self: *Supervisor, child: ChildState, decision: SupervisorDecision) Allocator.Error!void {
+    fn recordRestartDecision(
+        self: *Supervisor,
+        child: ChildState,
+        decision: SupervisorDecision,
+        now_ms: u64,
+        affected_children: usize,
+    ) Allocator.Error!void {
+        try self.recordDecisionRecord(child, decision, now_ms, affected_children);
         if (self.causal_store == null) return;
         const detail = try std.fmt.allocPrint(
             self.allocator,
@@ -361,6 +427,25 @@ pub const Supervisor = struct {
             decisionStatus(decision),
             detail,
         );
+    }
+
+    fn recordDecisionRecord(
+        self: *Supervisor,
+        child: ChildState,
+        decision: SupervisorDecision,
+        now_ms: u64,
+        affected_children: usize,
+    ) Allocator.Error!void {
+        if (self.options.max_recent_decisions == 0) return;
+        while (self.recent_decisions.items.len >= self.options.max_recent_decisions) {
+            _ = self.recent_decisions.orderedRemove(0);
+        }
+        try self.recent_decisions.append(self.allocator, .{
+            .at_ms = now_ms,
+            .child = child.snapshot(),
+            .decision = decision,
+            .affected_children = affected_children,
+        });
     }
 
     fn recordEscalated(self: *Supervisor, child: ChildState) Allocator.Error!void {

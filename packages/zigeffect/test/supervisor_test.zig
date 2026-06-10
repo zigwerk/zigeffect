@@ -264,6 +264,44 @@ test "supervisor escalates when restart intensity is exceeded" {
     try std.testing.expect(std.mem.indexOf(u8, report, "RestartIntensityExceeded") != null);
 }
 
+test "supervisor inspection reports children decisions escalation and shutdown order" {
+    var supervisor = fx.Supervisor.init(std.testing.allocator, .{
+        .id = 80,
+        .name = "inspect-root",
+        .strategy = .one_for_one,
+        .intensity = .{ .max_restarts = 1, .within_ms = 1_000 },
+    });
+    defer supervisor.deinit();
+
+    try supervisor.addChild(.{ .id = 1, .name = "fiber", .kind = .fiber, .shutdown_order = 1 });
+    try supervisor.addChild(.{ .id = 2, .name = "transport", .kind = .transport_server, .shutdown_order = 10 });
+    try supervisor.startAll(1_000);
+
+    _ = try supervisor.reportChildExit(2, .{ .failure = "port closed" }, 1_100);
+    _ = try supervisor.reportChildExit(2, .{ .failure = "port closed again" }, 1_200);
+
+    var inspection = try supervisor.inspect(std.testing.allocator);
+    defer inspection.deinit();
+    try std.testing.expectEqual(@as(u64, 80), inspection.supervisor_id);
+    try std.testing.expectEqual(fx.SupervisorStrategy.one_for_one, inspection.strategy);
+    try std.testing.expectEqual(@as(usize, 2), inspection.children.len);
+    try std.testing.expectEqual(@as(usize, 1), inspection.escalated_children);
+    try std.testing.expectEqual(@as(usize, 2), inspection.decisions.len);
+    try std.testing.expect(inspection.decisions[1].decision.escalated);
+    try std.testing.expectEqual(@as(usize, 1), inspection.decisions[1].affected_children);
+    try std.testing.expectEqual(@as(u64, 2), inspection.shutdown_order[0]);
+
+    const text = try fx.formatSupervisorInspectionText(std.testing.allocator, inspection);
+    defer std.testing.allocator.free(text);
+    try std.testing.expect(std.mem.indexOf(u8, text, "inspect-root") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "escalated_children: 1") != null);
+
+    const json = try fx.formatSupervisorInspectionJson(std.testing.allocator, inspection);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"supervisor_id\":80") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"decision_count\":2") != null);
+}
+
 test "supervisor records causal lifecycle decision escalation and shutdown events" {
     var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
