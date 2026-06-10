@@ -288,6 +288,22 @@ test "cluster workflow lifecycle commands suspend resume interrupt and cancel" {
     try expectTerminalLifecycle(.cancel);
 }
 
+test "cluster workflow fire due timers runs through owning entity" {
+    try expectHelperCommand(.timer);
+}
+
+test "cluster workflow deferred commands resume suspended workflow" {
+    try expectHelperCommand(.deferred);
+}
+
+test "cluster workflow signal commands resume suspended workflow" {
+    try expectHelperCommand(.signal);
+}
+
+test "cluster workflow queue commands resume suspended workflow" {
+    try expectHelperCommand(.queue);
+}
+
 fn executionIdForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.workflow.ExecutionId {
     var id: fx.workflow.ExecutionId = 1;
     while (id < 100_000) : (id += 1) {
@@ -437,5 +453,180 @@ fn expectTerminalLifecycle(kind: fx.ClusterWorkflowCommandKind) !void {
             try std.testing.expectEqual(fx.workflow.WorkflowStatus.cancelled, state.workflow_status);
         },
         else => unreachable,
+    }
+}
+
+const HelperScenario = enum { timer, deferred, signal, queue };
+
+fn expectHelperCommand(scenario: HelperScenario) !void {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    const workflow_id = fx.workflow.workflowId("approval");
+    const execution_id = fx.workflow.executionId("approval", @tagName(scenario));
+    try seedStarted(journal_store, workflow_id, execution_id, "approval", @tagName(scenario));
+    try seedHelperSuspension(journal_store, scenario, workflow_id, execution_id);
+
+    var runner = try workflowRunner(runner_storage_state.asRunnerStorage(), message_storage);
+    defer runner.deinit();
+    var plan = try runner.acquireBalancedShards(1_000);
+    defer plan.deinit();
+    var registry = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+    _ = try registry.registerExecution(&runner, journal_store, workflow_id, execution_id, 1_000);
+
+    var transport_state = try fx.InProcessClusterTransport.init(std.testing.allocator, message_storage, .{ .shard_count = 8 });
+    defer transport_state.deinit();
+    var engine = fx.ClusterWorkflowEngine.init(std.testing.allocator, transport_state.asClusterTransport());
+    defer engine.deinit();
+
+    var submission = switch (scenario) {
+        .timer => try engine.fireDueTimers(workflow_id, execution_id, 1_500),
+        .deferred => try engine.completeDeferred(workflow_id, execution_id, "approval-deferred", "ok"),
+        .signal => try engine.sendSignal(workflow_id, execution_id, "approval-signal", "approved", "signal-1"),
+        .queue => try engine.completeQueue(
+            workflow_id,
+            execution_id,
+            "approval-queue",
+            fx.workflow.queueItemId("approval-queue", "item-1"),
+            "done",
+        ),
+    };
+    defer submission.deinit(std.testing.allocator);
+    var result = try processWorkflowSubmission(&runner, message_storage, submission, 1_500);
+    defer result.deinit(std.testing.allocator);
+
+    var events = try journal_store.readAll(std.testing.allocator);
+    defer events.deinit();
+    switch (scenario) {
+        .timer => {
+            try std.testing.expectEqual(@as(usize, 1), result.timers_fired);
+            try std.testing.expectEqual(fx.workflow.WorkflowEventKind.timer_fired, events.events[3].kind);
+            try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[4].kind);
+        },
+        .deferred => {
+            try std.testing.expectEqual(fx.workflow.WorkflowEventKind.deferred_completed, events.events[4].kind);
+            try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[5].kind);
+        },
+        .signal => {
+            try std.testing.expectEqual(fx.workflow.WorkflowEventKind.signal_received, events.events[2].kind);
+            try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[3].kind);
+        },
+        .queue => {
+            try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_completed, events.events[3].kind);
+            try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[4].kind);
+        },
+    }
+}
+
+fn seedHelperSuspension(
+    journal_store: fx.workflow.JournalStore,
+    scenario: HelperScenario,
+    workflow_id: fx.workflow.WorkflowId,
+    execution_id: fx.workflow.ExecutionId,
+) !void {
+    switch (scenario) {
+        .timer => {
+            const timer_id = fx.workflow.timerId("approval-timeout");
+            _ = try journal_store.append(.{ .event = .{
+                .sequence = 2,
+                .kind = .timer_scheduled,
+                .workflow_id = workflow_id,
+                .execution_id = execution_id,
+                .timer_id = timer_id,
+                .name = "approval-timeout",
+                .status = "scheduled",
+                .redacted_detail = "fire_at_ms=1000",
+                .idempotency_key = "timer-scheduled",
+            } });
+            _ = try journal_store.append(.{ .event = .{
+                .sequence = 3,
+                .kind = .workflow_suspended,
+                .workflow_id = workflow_id,
+                .execution_id = execution_id,
+                .timer_id = timer_id,
+                .name = "approval-timeout",
+                .status = "waiting",
+                .redacted_detail = "timer",
+                .idempotency_key = "timer-suspended",
+            } });
+        },
+        .deferred => {
+            const deferred_id = fx.workflow.deferredId("approval-deferred");
+            _ = try journal_store.append(.{ .event = .{
+                .sequence = 2,
+                .kind = .deferred_created,
+                .workflow_id = workflow_id,
+                .execution_id = execution_id,
+                .deferred_id = deferred_id,
+                .name = "approval-deferred",
+                .status = "pending",
+                .idempotency_key = "deferred-created",
+            } });
+            _ = try journal_store.append(.{ .event = .{
+                .sequence = 3,
+                .kind = .deferred_awaited,
+                .workflow_id = workflow_id,
+                .execution_id = execution_id,
+                .deferred_id = deferred_id,
+                .name = "approval-deferred",
+                .status = "waiting",
+                .idempotency_key = "deferred-awaited",
+            } });
+            _ = try journal_store.append(.{ .event = .{
+                .sequence = 4,
+                .kind = .workflow_suspended,
+                .workflow_id = workflow_id,
+                .execution_id = execution_id,
+                .deferred_id = deferred_id,
+                .name = "approval-deferred",
+                .status = "waiting",
+                .redacted_detail = "deferred",
+                .idempotency_key = "deferred-suspended",
+            } });
+        },
+        .signal => {
+            _ = try journal_store.append(.{ .event = .{
+                .sequence = 2,
+                .kind = .workflow_suspended,
+                .workflow_id = workflow_id,
+                .execution_id = execution_id,
+                .name = "approval-signal",
+                .status = "waiting",
+                .redacted_detail = "signal",
+                .idempotency_key = "signal-suspended",
+            } });
+        },
+        .queue => {
+            const queue_id = fx.workflow.queueItemId("approval-queue", "item-1");
+            _ = try journal_store.append(.{ .event = .{
+                .sequence = 2,
+                .kind = .queue_offered,
+                .workflow_id = workflow_id,
+                .execution_id = execution_id,
+                .queue_id = queue_id,
+                .name = "approval-queue",
+                .status = "pending",
+                .redacted_detail = "item-1",
+                .idempotency_key = "queue-offered",
+            } });
+            _ = try journal_store.append(.{ .event = .{
+                .sequence = 3,
+                .kind = .workflow_suspended,
+                .workflow_id = workflow_id,
+                .execution_id = execution_id,
+                .queue_id = queue_id,
+                .name = "approval-queue",
+                .status = "waiting",
+                .redacted_detail = "queue",
+                .idempotency_key = "queue-suspended",
+            } });
+        },
     }
 }

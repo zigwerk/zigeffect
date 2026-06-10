@@ -5,9 +5,12 @@ const identity = @import("identity.zig");
 const local_cluster = @import("local_cluster.zig");
 const routing = @import("routing.zig");
 const transport = @import("transport.zig");
+const workflow_clock = @import("../workflow/clock.zig");
+const workflow_deferred = @import("../workflow/deferred.zig");
 const workflow_engine = @import("../workflow/engine.zig");
 const journal = @import("../workflow/journal.zig");
 const lifecycle = @import("../workflow/lifecycle.zig");
+const workflow_queue = @import("../workflow/queue.zig");
 const replay = @import("../workflow/replay.zig");
 const store = @import("../workflow/store.zig");
 
@@ -172,6 +175,109 @@ pub const ClusterWorkflowEngine = struct {
         return self.submitWithGeneratedKey(.cancel, workflow_id, execution_id, "cancelled", reason);
     }
 
+    pub fn fireDueTimers(self: *ClusterWorkflowEngine, workflow_id: WorkflowId, execution_id: ExecutionId, now_ms: u64) !ClusterWorkflowCommandSubmission {
+        return self.submitWithGeneratedKeyAndIds(.{
+            .kind = .fire_due_timers,
+            .workflow_id = workflow_id,
+            .execution_id = execution_id,
+            .status = "running",
+            .now_ms = now_ms,
+        });
+    }
+
+    pub fn completeDeferred(self: *ClusterWorkflowEngine, workflow_id: WorkflowId, execution_id: ExecutionId, label: []const u8, detail: []const u8) !ClusterWorkflowCommandSubmission {
+        return self.submitWithGeneratedKeyAndIds(.{
+            .kind = .complete_deferred,
+            .workflow_id = workflow_id,
+            .execution_id = execution_id,
+            .name = label,
+            .status = "completed",
+            .redacted_detail = detail,
+            .deferred_id = workflow_deferred.deferredId(label),
+        });
+    }
+
+    pub fn failDeferred(self: *ClusterWorkflowEngine, workflow_id: WorkflowId, execution_id: ExecutionId, label: []const u8, detail: []const u8) !ClusterWorkflowCommandSubmission {
+        return self.submitWithGeneratedKeyAndIds(.{
+            .kind = .fail_deferred,
+            .workflow_id = workflow_id,
+            .execution_id = execution_id,
+            .name = label,
+            .status = "failed",
+            .redacted_detail = detail,
+            .deferred_id = workflow_deferred.deferredId(label),
+        });
+    }
+
+    pub fn cancelDeferred(self: *ClusterWorkflowEngine, workflow_id: WorkflowId, execution_id: ExecutionId, label: []const u8, reason: []const u8) !ClusterWorkflowCommandSubmission {
+        return self.submitWithGeneratedKeyAndIds(.{
+            .kind = .cancel_deferred,
+            .workflow_id = workflow_id,
+            .execution_id = execution_id,
+            .name = label,
+            .status = "cancelled",
+            .redacted_detail = reason,
+            .deferred_id = workflow_deferred.deferredId(label),
+        });
+    }
+
+    pub fn sendSignal(
+        self: *ClusterWorkflowEngine,
+        workflow_id: WorkflowId,
+        execution_id: ExecutionId,
+        signal_name: []const u8,
+        encoded_payload: []const u8,
+        external_idempotency_key: []const u8,
+    ) !ClusterWorkflowCommandSubmission {
+        return self.submit(.{
+            .kind = .send_signal,
+            .workflow_id = workflow_id,
+            .execution_id = execution_id,
+            .name = signal_name,
+            .status = "received",
+            .redacted_detail = encoded_payload,
+            .idempotency_key = external_idempotency_key,
+        });
+    }
+
+    pub fn completeQueue(
+        self: *ClusterWorkflowEngine,
+        workflow_id: WorkflowId,
+        execution_id: ExecutionId,
+        queue_name: []const u8,
+        queue_id: QueueId,
+        detail: []const u8,
+    ) !ClusterWorkflowCommandSubmission {
+        return self.submitWithGeneratedKeyAndIds(.{
+            .kind = .complete_queue,
+            .workflow_id = workflow_id,
+            .execution_id = execution_id,
+            .name = queue_name,
+            .status = "completed",
+            .redacted_detail = detail,
+            .queue_id = queue_id,
+        });
+    }
+
+    pub fn failQueue(
+        self: *ClusterWorkflowEngine,
+        workflow_id: WorkflowId,
+        execution_id: ExecutionId,
+        queue_name: []const u8,
+        queue_id: QueueId,
+        detail: []const u8,
+    ) !ClusterWorkflowCommandSubmission {
+        return self.submitWithGeneratedKeyAndIds(.{
+            .kind = .fail_queue,
+            .workflow_id = workflow_id,
+            .execution_id = execution_id,
+            .name = queue_name,
+            .status = "failed",
+            .redacted_detail = detail,
+            .queue_id = queue_id,
+        });
+    }
+
     fn submitWithGeneratedKey(
         self: *ClusterWorkflowEngine,
         kind: ClusterWorkflowCommandKind,
@@ -195,6 +301,19 @@ pub const ClusterWorkflowEngine = struct {
             .redacted_detail = detail,
             .idempotency_key = key,
         });
+    }
+
+    fn submitWithGeneratedKeyAndIds(self: *ClusterWorkflowEngine, command: ClusterWorkflowCommand) !ClusterWorkflowCommandSubmission {
+        const key = try std.fmt.allocPrint(
+            self.allocator,
+            "cluster-workflow:{s}:{d}:{d}",
+            .{ @tagName(command.kind), command.execution_id, self.next_command_sequence },
+        );
+        defer self.allocator.free(key);
+        self.next_command_sequence += 1;
+        var command_with_key = command;
+        command_with_key.idempotency_key = key;
+        return self.submit(command_with_key);
     }
 
     fn submit(self: *ClusterWorkflowEngine, command: ClusterWorkflowCommand) !ClusterWorkflowCommandSubmission {
@@ -559,7 +678,13 @@ fn applyClusterWorkflowCommand(
         .@"resume" => applyLifecycleCommand(allocator, journal_store, command, .workflow_resumed, "running"),
         .interrupt => applyLifecycleCommand(allocator, journal_store, command, .workflow_interrupted, "interrupted"),
         .cancel => applyLifecycleCommand(allocator, journal_store, command, .workflow_cancelled, "cancelled"),
-        else => return error.UnsupportedClusterWorkflowCommand,
+        .fire_due_timers => applyFireDueTimersCommand(allocator, journal_store, command),
+        .complete_deferred => appendHelperEventAndResume(allocator, journal_store, command, .deferred_completed, command.deferred_id orelse return error.CorruptClusterWorkflowCommand, "completed"),
+        .fail_deferred => appendHelperEventAndResume(allocator, journal_store, command, .deferred_failed, command.deferred_id orelse return error.CorruptClusterWorkflowCommand, "failed"),
+        .cancel_deferred => appendHelperEventAndResume(allocator, journal_store, command, .deferred_cancelled, command.deferred_id orelse return error.CorruptClusterWorkflowCommand, "cancelled"),
+        .send_signal => appendHelperEventAndResume(allocator, journal_store, command, .signal_received, null, "received"),
+        .complete_queue => appendHelperEventAndResume(allocator, journal_store, command, .queue_completed, command.queue_id orelse return error.CorruptClusterWorkflowCommand, "completed"),
+        .fail_queue => appendHelperEventAndResume(allocator, journal_store, command, .queue_failed, command.queue_id orelse return error.CorruptClusterWorkflowCommand, "failed"),
     };
 }
 
@@ -618,6 +743,89 @@ fn applyLifecycleCommand(
     return commandResultFromJournal(allocator, journal_store, command, appended, sequence, status, 0);
 }
 
+fn applyFireDueTimersCommand(
+    allocator: Allocator,
+    journal_store: JournalStore,
+    command: ClusterWorkflowCommand,
+) !ClusterWorkflowCommandResult {
+    var durable_clock = workflow_clock.DurableClock.init(allocator, journal_store, command.workflow_id, command.execution_id);
+    const fired = try durable_clock.fireDueTimers(command.now_ms);
+    const sequence = if (fired > 0) try latestJournalSequence(allocator, journal_store) else null;
+    return commandResultFromJournal(allocator, journal_store, command, fired > 0, sequence, "running", fired);
+}
+
+fn appendHelperEventAndResume(
+    allocator: Allocator,
+    journal_store: JournalStore,
+    command: ClusterWorkflowCommand,
+    event_kind: WorkflowEventKind,
+    id: ?u64,
+    default_status: []const u8,
+) !ClusterWorkflowCommandResult {
+    const was_suspended = try workflowIsSuspended(allocator, journal_store);
+    var sequence = try nextJournalSequence(allocator, journal_store);
+    const terminal_sequence = sequence;
+    const status = if (command.status.len == 0) default_status else command.status;
+
+    _ = journal_store.append(.{
+        .expected_next_sequence = terminal_sequence,
+        .event = helperWorkflowEvent(command, event_kind, id, terminal_sequence, status),
+    }) catch |err| switch (err) {
+        error.DuplicateEvent => return commandResultFromJournal(allocator, journal_store, command, false, null, status, 0),
+        else => return err,
+    };
+    sequence = try sequenceAfter(terminal_sequence);
+
+    if (was_suspended) {
+        const resume_key = try std.fmt.allocPrint(
+            allocator,
+            "cluster-workflow:resume:{s}:{d}:{d}",
+            .{ @tagName(command.kind), command.execution_id, sequence },
+        );
+        defer allocator.free(resume_key);
+        _ = try journal_store.append(.{
+            .expected_next_sequence = sequence,
+            .event = .{
+                .sequence = sequence,
+                .kind = .workflow_resumed,
+                .workflow_id = command.workflow_id,
+                .execution_id = command.execution_id,
+                .name = command.name,
+                .status = "running",
+                .redacted_detail = @tagName(command.kind),
+                .idempotency_key = resume_key,
+            },
+        });
+    }
+
+    return commandResultFromJournal(allocator, journal_store, command, true, terminal_sequence, status, 0);
+}
+
+fn helperWorkflowEvent(
+    command: ClusterWorkflowCommand,
+    event_kind: WorkflowEventKind,
+    id: ?u64,
+    sequence: JournalSequence,
+    status: []const u8,
+) journal.WorkflowEvent {
+    var event = journal.WorkflowEvent{
+        .sequence = sequence,
+        .kind = event_kind,
+        .workflow_id = command.workflow_id,
+        .execution_id = command.execution_id,
+        .name = command.name,
+        .status = status,
+        .redacted_detail = command.redacted_detail,
+        .idempotency_key = command.idempotency_key,
+    };
+    switch (event_kind) {
+        .deferred_completed, .deferred_failed, .deferred_cancelled => event.deferred_id = id,
+        .queue_completed, .queue_failed => event.queue_id = id,
+        else => {},
+    }
+    return event;
+}
+
 fn commandResultFromJournal(
     allocator: Allocator,
     journal_store: JournalStore,
@@ -653,6 +861,17 @@ fn nextJournalSequence(allocator: Allocator, journal_store: JournalStore) !Journ
     const latest = try latestJournalSequence(allocator, journal_store);
     if (latest == std.math.maxInt(JournalSequence)) return error.SequenceOverflow;
     return latest + 1;
+}
+
+fn sequenceAfter(sequence: JournalSequence) !JournalSequence {
+    if (sequence == std.math.maxInt(JournalSequence)) return error.SequenceOverflow;
+    return sequence + 1;
+}
+
+fn workflowIsSuspended(allocator: Allocator, journal_store: JournalStore) !bool {
+    var state = try journal_store.latestState(allocator);
+    defer state.deinit();
+    return state.workflow_status == .suspended;
 }
 
 fn latestJournalSequence(allocator: Allocator, journal_store: JournalStore) !JournalSequence {
