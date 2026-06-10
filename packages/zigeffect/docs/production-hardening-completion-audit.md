@@ -142,9 +142,10 @@ records advisory candidate signal policies, bounded evidence requirements,
 and negative fixtures before evaluator work. The CI gate dry-run evaluator
 branch now records bounded evidence classifications, observed signals,
 advisory findings, blocked findings, and next queries before advisory CI report
-work. The
-current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report`.
+work. The advisory CI report branch now renders local JSON/text reviewer
+guidance and publication-channel evidence before report application boundary
+work. The current next branch is
+`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary`.
 Reviewed production capacity sizing remains future until compatible
 observations, telemetry design, fixtures, readiness review, implementation
 proposal, exporter boundary, local pipeline fixture evidence, NenDB retention

@@ -78,7 +78,9 @@ claim production cluster readiness, or grant mutation authority.
 
 Evaluator artifacts then hand off to
 `codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report` for
-reviewer-facing CI report presentation.
+reviewer-facing CI report presentation. That report is now delivered and hands
+off to
+`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary`.
 
 ## Verification
 

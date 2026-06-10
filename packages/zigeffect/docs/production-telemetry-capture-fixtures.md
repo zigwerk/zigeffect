@@ -112,8 +112,10 @@ The CI gate dry-run policy handoff is now delivered through
 `causal-production-telemetry-ci-gate-dry-run-policy`.
 The CI gate dry-run evaluator handoff is now delivered through
 `causal-production-telemetry-ci-gate-dry-run-evaluator`.
+The CI gate advisory CI report handoff is now delivered through
+`causal-production-telemetry-ci-gate-advisory-ci-report`.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary`.
 
 ## Verification
 

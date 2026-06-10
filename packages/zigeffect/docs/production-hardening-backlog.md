@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-telemetry-ci-gate-advisory-ci-report` means the
+The recommendation `start-production-telemetry-ci-gate-advisory-ci-report-application-boundary` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -166,8 +166,16 @@ mutation, artifact upload execution, live telemetry, network send, durable
 writes, NenDB writes, hosted dashboard claims, production cluster claims,
 alternate renderer scope, and mutation authority before any advisory CI report
 branch.
+The production telemetry CI gate advisory CI report branch is also delivered:
+it consumes ready or advisory evaluator artifacts, renders local JSON/text
+reviewer guidance, records publication channels, and preserves disabled CI
+gate enforcement, required status checks, workflow mutation, artifact upload
+execution, GitHub step summary writes, pull request comments, live telemetry,
+network send, durable writes, NenDB writes, hosted dashboard claims,
+production cluster claims, alternate renderer scope, and mutation authority
+before any report application boundary branch.
 The next branch should be
-`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary`.
 
 ## Dependency Order
 
@@ -207,6 +215,7 @@ The backlog currently orders future production-hardening branches as:
 32. `production-telemetry-ci-gate-application-boundary` delivered
 33. `production-telemetry-ci-gate-dry-run-policy` delivered
 34. `production-telemetry-ci-gate-dry-run-evaluator` delivered
+35. `production-telemetry-ci-gate-advisory-ci-report` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -557,8 +566,22 @@ artifact upload execution, disabled live telemetry, disabled durable writes,
 disabled NenDB writes, NenDB-only durable direction, and SolidJS `zig-webui`
 workbench direction.
 
-The next branch should use ready or advisory evaluator artifacts to present
-reviewer-facing CI artifact summaries before any CI telemetry gate enforcement,
+Production telemetry CI gate advisory CI report is documented in
+[production-telemetry-ci-gate-advisory-ci-report.md](production-telemetry-ci-gate-advisory-ci-report.md).
+It emits
+`zigeffect.causal.production-telemetry-ci-gate-advisory-ci-report.v1` through
+`zig build causal-production-telemetry-ci-gate-advisory-ci-report`, consumes
+ready or advisory evaluator artifacts, records local JSON/text reviewer
+guidance and publication channels, and hands off to the advisory CI report
+application boundary. It preserves disabled CI gate enforcement, disabled
+required status checks, disabled workflow mutation by the tool, disabled
+artifact upload execution, disabled GitHub step summary writes, disabled pull
+request comments, disabled live telemetry, disabled durable writes, disabled
+NenDB writes, NenDB-only durable direction, and SolidJS `zig-webui` workbench
+direction.
+
+The next branch should use ready or advisory CI report artifacts to define a
+guarded report application boundary before any CI telemetry gate enforcement,
 required status checks, live telemetry, durable production writes, capacity
 claims, production cluster claims, or mutation authority are considered.
 
@@ -808,6 +831,15 @@ zig build causal-production-telemetry-ci-gate-dry-run-evaluator -- \
   --reason "negative CI gate dry-run evaluator path" \
   --evidence .zig-cache/release-gate/zigeffect-release-gate.json \
   --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-dry-run-evaluator-negative
+zig build causal-production-telemetry-ci-gate-advisory-ci-report -- \
+  --from-evaluator ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary-ci-gate-dry-run-evaluator.json \
+  summarize \
+  --reason "CI advisory report reviewed"
+zig build causal-production-telemetry-ci-gate-advisory-ci-report -- \
+  --from-evaluator ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-dry-run-evaluator-negative.json \
+  summarize \
+  --reason "negative CI advisory report path" \
+  --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-advisory-ci-report-negative
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

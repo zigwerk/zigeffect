@@ -1615,6 +1615,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_production_telemetry_ci_gate_dry_run_evaluator_tool_tests = b.addRunArtifact(causal_production_telemetry_ci_gate_dry_run_evaluator_tool_tests);
     test_step.dependOn(&run_causal_production_telemetry_ci_gate_dry_run_evaluator_tool_tests.step);
 
+    const causal_production_telemetry_ci_gate_advisory_ci_report_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_production_telemetry_ci_gate_advisory_ci_report.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_production_telemetry_ci_gate_advisory_ci_report_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report",
+        .root_module = causal_production_telemetry_ci_gate_advisory_ci_report_tool_module,
+    });
+    const run_causal_production_telemetry_ci_gate_advisory_ci_report_tool = b.addRunArtifact(causal_production_telemetry_ci_gate_advisory_ci_report_tool);
+    if (b.args) |args| run_causal_production_telemetry_ci_gate_advisory_ci_report_tool.addArgs(args);
+    const causal_production_telemetry_ci_gate_advisory_ci_report_step = b.step("causal-production-telemetry-ci-gate-advisory-ci-report", "Render production telemetry CI gate advisory CI report");
+    causal_production_telemetry_ci_gate_advisory_ci_report_step.dependOn(&run_causal_production_telemetry_ci_gate_advisory_ci_report_tool.step);
+
+    const causal_production_telemetry_ci_gate_advisory_ci_report_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-tests",
+        .root_module = causal_production_telemetry_ci_gate_advisory_ci_report_tool_module,
+    });
+    const run_causal_production_telemetry_ci_gate_advisory_ci_report_tool_tests = b.addRunArtifact(causal_production_telemetry_ci_gate_advisory_ci_report_tool_tests);
+    test_step.dependOn(&run_causal_production_telemetry_ci_gate_advisory_ci_report_tool_tests.step);
+
     const causal_m9_completion_audit_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_m9_completion_audit.zig"),
         .target = target,

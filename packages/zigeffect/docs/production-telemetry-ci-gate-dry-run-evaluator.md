@@ -98,8 +98,11 @@ for `blocked`.
 
 Ready or advisory evaluator artifacts hand off to
 `codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report`.
-That branch should decide how to present evaluator findings in CI artifacts or
-reviewer summaries while still avoiding required checks, workflow mutation,
+That branch is now delivered through local JSON/text reviewer guidance reports.
+Those artifacts now hand off to
+`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary`,
+which should decide whether any reviewed report publication can be recorded as
+applied while still avoiding required checks, workflow mutation by the tool,
 live telemetry, durable writes, NenDB writes, production cluster claims, and
 mutation authority.
 
