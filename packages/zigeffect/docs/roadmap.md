@@ -849,6 +849,21 @@ metrics, and traces.
   `nendb_write_enabled=false`, `ci_gate_enabled=false`,
   `mutation_authority=none`, and avoids live telemetry, durable writes, CI
   gates, hosted dashboard claims, alternate renderers, or production mutation.
+- Delivered: `causal-production-telemetry-ci-artifact-preview` publishes
+  `zigeffect.causal.production-telemetry-ci-artifact-preview.v1`, consumes a
+  ready workbench-preview artifact, records a preview-only CI archive candidate
+  catalog and upload policy, emits ready and blocked CI artifact preview
+  artifacts, and hands off to
+  `codex/zigeffect-causal-production-telemetry-ci-harness-boundary`. It keeps
+  `applied=false`, `production_telemetry_ingestion=false`,
+  `live_exporter_enabled=false`, `network_send_enabled=false`,
+  `collector_endpoint_configured=false`, `otlp_serialization_enabled=false`,
+  `runtime_pipeline_enabled=false`, `durable_write_enabled=false`,
+  `nendb_write_enabled=false`, `ci_upload_enabled=false`,
+  `ci_workflow_mutation_enabled=false`, `ci_gate_enabled=false`,
+  `mutation_authority=none`, and avoids artifact upload execution, workflow
+  mutation, live telemetry, durable writes, CI gates, hosted dashboard claims,
+  alternate renderers, or production mutation.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,

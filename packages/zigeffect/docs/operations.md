@@ -495,7 +495,7 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-production-telemetry-ci-artifact-preview` after
+`codex/zigeffect-causal-production-telemetry-ci-harness-boundary` after
 the unified causal spine, deep runtime internals, app semantic trace API,
 bounded agent query surface, record-only encryption-at-rest policy,
 record-only alerting integrations, delivered live dashboard streaming
@@ -504,8 +504,8 @@ loop, delivered rollout automation guardrails, delivered wall-clock benchmark
 baseline contract, and delivered production capacity planning,
 completion-audit, load-test observation harness, production telemetry capture
 design, fixture, readiness-review, implementation-proposal, exporter-boundary,
-local-pipeline-fixtures, NenDB-retention-fixtures, and workbench read-only
-preview contracts.
+local-pipeline-fixtures, NenDB-retention-fixtures, workbench read-only
+preview, and CI artifact preview contracts.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -557,7 +557,7 @@ The harness has now been consumed by the delivered telemetry design, fixture,
 readiness-review, implementation-proposal, exporter-boundary, local pipeline
 fixture, NenDB retention fixture, and workbench read-only preview milestones.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-artifact-preview`.
+`codex/zigeffect-causal-production-telemetry-ci-harness-boundary`.
 
 ## Production Telemetry Capture Design
 
@@ -764,11 +764,40 @@ The workbench preview report records schema
 consumes a ready NenDB retention fixture artifact, backs the read-only
 `Telemetry` tab and `?sample=production-telemetry` fixture, emits `ready` or
 `blocked` workbench preview artifacts, and hands off to
-`codex/zigeffect-causal-production-telemetry-ci-artifact-preview`. Do not treat
+the delivered `codex/zigeffect-causal-production-telemetry-ci-artifact-preview`.
+Do not treat
 the preview as runtime pipeline execution, live telemetry, network send,
 collector configuration, OTLP serialization, NenDB writes, durable production
 writes, CI gates, hosted dashboard readiness, production capacity evidence,
 non-NenDB adapter scope, alternate renderer scope, or mutation authority.
+
+Run the CI artifact preview after workbench preview approval:
+
+```sh
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-artifact-preview -- \
+  --from-workbench ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview.json \
+  approve \
+  --reason "CI artifact preview reviewed" \
+  --verified-command "zig build causal-production-telemetry-workbench-readonly-preview" \
+  --verified-command "zig build causal-artifacts" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The CI artifact preview report records schema
+`zigeffect.causal.production-telemetry-ci-artifact-preview.v1`. It consumes a
+ready workbench preview artifact, emits `ready` or `blocked` CI artifact
+preview artifacts, records a failure-only archive candidate catalog and
+preview-only upload policy, and hands off to
+`codex/zigeffect-causal-production-telemetry-ci-harness-boundary`. Do not treat
+the preview as artifact upload execution, GitHub Actions mutation, CI gate
+enablement, runtime pipeline execution, live telemetry, network send,
+collector configuration, OTLP serialization, NenDB writes, durable production
+writes, hosted dashboard readiness, production capacity evidence, non-NenDB
+adapter scope, alternate renderer scope, or mutation authority.
 
 ## Production Artifact Aggregation
 
@@ -1060,8 +1089,9 @@ confirm the delivered hardening sequence and choose the next evidence-producing
 branch. The load-test observation harness and production telemetry capture
 design, fixture, readiness-review, implementation-proposal, and
 exporter-boundary, local-pipeline-fixtures, NenDB-retention-fixtures, and
-workbench-readonly-preview reports are now delivered. The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-artifact-preview`.
+workbench-readonly-preview and CI-artifact-preview reports are now delivered.
+The current next branch is
+`codex/zigeffect-causal-production-telemetry-ci-harness-boundary`.
 
 ## Production Gaps
 

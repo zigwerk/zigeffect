@@ -821,11 +821,26 @@ Status values:
      gates, hosted dashboard claims, alternate renderers, or production
      mutation.
 22. `codex/zigeffect-causal-production-telemetry-ci-artifact-preview`
-   - Current next branch: use ready workbench preview artifacts to define CI
-     artifact shape, upload/retention preview evidence, and agent-readable
-     failure attachments before enabling any CI gate, durable write, live
-     telemetry ingestion, hosted dashboard, capacity claim, alternate renderer,
-     or mutation authority.
+   - Delivered: `causal-production-telemetry-ci-artifact-preview` emits
+     `zigeffect.causal.production-telemetry-ci-artifact-preview.v1`, consumes
+     ready workbench-preview artifacts, records a failure-only archive
+     candidate catalog and preview-only upload policy, emits ready and blocked
+     CI artifact preview artifacts, and hands off to
+     `codex/zigeffect-causal-production-telemetry-ci-harness-boundary`. It
+     keeps `applied=false`, `production_telemetry_ingestion=false`,
+     `live_exporter_enabled=false`, `network_send_enabled=false`,
+     `collector_endpoint_configured=false`, `otlp_serialization_enabled=false`,
+     `runtime_pipeline_enabled=false`, `durable_write_enabled=false`,
+     `nendb_write_enabled=false`, `ci_upload_enabled=false`,
+     `ci_workflow_mutation_enabled=false`, `ci_gate_enabled=false`,
+     `mutation_authority=none`, and avoids artifact upload execution, workflow
+     mutation, live telemetry, durable writes, CI gates, hosted dashboard
+     claims, alternate renderers, or production mutation.
+23. `codex/zigeffect-causal-production-telemetry-ci-harness-boundary`
+   - Current next branch: use ready CI artifact preview evidence to define the
+     CI harness boundary before enabling artifact upload execution, CI gates,
+     durable writes, live telemetry ingestion, hosted dashboard claims,
+     capacity claims, alternate renderers, or mutation authority.
 
 ## Dual-Interface Causal Spine Expansion
 

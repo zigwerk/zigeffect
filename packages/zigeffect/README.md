@@ -456,6 +456,32 @@ pipeline execution, durable writes, NenDB writes, and CI gates disabled. The
 full policy is in
 [docs/production-telemetry-workbench-readonly-preview.md](docs/production-telemetry-workbench-readonly-preview.md).
 
+Review the production telemetry CI artifact preview:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-artifact-preview -- \
+  --from-workbench ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview.json \
+  approve \
+  --reason "CI artifact preview reviewed" \
+  --verified-command "zig build causal-production-telemetry-workbench-readonly-preview" \
+  --verified-command "zig build causal-artifacts" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The report uses schema
+`zigeffect.causal.production-telemetry-ci-artifact-preview.v1`, records a
+preview-only CI archive candidate catalog and upload policy, and emits a
+`ready` or `blocked` CI artifact preview before CI harness boundary work
+starts. It keeps `applied=false`, `mutation_authority=none`, CI upload,
+workflow mutation, CI gates, live telemetry, network send, collector endpoints,
+OTLP serialization, runtime pipeline execution, durable writes, and NenDB
+writes disabled. The full policy is in
+[docs/production-telemetry-ci-artifact-preview.md](docs/production-telemetry-ci-artifact-preview.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -481,8 +507,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-ci-artifact-preview` after the
-delivered production telemetry workbench read-only preview.
+`codex/zigeffect-causal-production-telemetry-ci-harness-boundary` after the
+delivered production telemetry CI artifact preview.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in

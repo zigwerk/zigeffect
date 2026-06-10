@@ -118,9 +118,11 @@ branch is now delivered through
 fixtures branch is now delivered through
 `causal-production-telemetry-nendb-retention-fixtures`. The workbench
 read-only preview handoff is now delivered through
-`causal-production-telemetry-workbench-readonly-preview`.
+`causal-production-telemetry-workbench-readonly-preview`. The CI artifact
+preview handoff is now delivered through
+`causal-production-telemetry-ci-artifact-preview`.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-artifact-preview`.
+`codex/zigeffect-causal-production-telemetry-ci-harness-boundary`.
 
 ## Verification
 

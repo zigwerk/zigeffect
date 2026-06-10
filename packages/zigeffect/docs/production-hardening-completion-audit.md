@@ -87,7 +87,8 @@ The audit deliberately separates delivered contracts from missing evidence:
 - `production-telemetry-local-pipeline-fixtures`: delivered;
 - `production-telemetry-nendb-retention-fixtures`: delivered;
 - `production-telemetry-workbench-readonly-preview`: delivered;
-- `production-telemetry-ci-artifact-preview`: recommended next branch;
+- `production-telemetry-ci-artifact-preview`: delivered;
+- `production-telemetry-ci-harness-boundary`: recommended next branch;
 - `reviewed-production-capacity-sizing`: future;
 - `live-alert-delivery`: future;
 - `live-rollout-automation`: future;
@@ -124,9 +125,9 @@ production load execution, or capacity claims.
 
 The telemetry capture design, fixture, readiness-review,
 implementation-proposal, exporter-boundary, local-pipeline-fixtures,
-NenDB-retention-fixtures, and workbench-readonly-preview branches are now
-delivered after this handoff. The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-artifact-preview`.
+NenDB-retention-fixtures, workbench-readonly-preview, and CI-artifact-preview
+branches are now delivered after this handoff. The current next branch is
+`codex/zigeffect-causal-production-telemetry-ci-harness-boundary`.
 Reviewed production capacity sizing remains future until compatible
 observations, telemetry design, fixtures, readiness review, implementation
 proposal, exporter boundary, local pipeline fixture evidence, NenDB retention

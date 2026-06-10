@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-telemetry-ci-artifact-preview` means the
+The recommendation `start-production-telemetry-ci-harness-boundary` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -106,8 +106,16 @@ execution, live telemetry, network send, collector endpoint, OTLP
 serialization, durable writes, NenDB writes, CI gates, hosted dashboard claims,
 alternate renderer scope, and mutation authority before any CI artifact preview
 branch.
+The production telemetry CI artifact preview is also delivered: it consumes
+ready workbench preview artifacts, records a preview-only CI archive candidate
+catalog and upload policy, emits ready or blocked CI artifact preview
+artifacts, and preserves disabled artifact upload execution, workflow mutation,
+CI gates, runtime pipeline execution, live telemetry, network send, collector
+endpoint, OTLP serialization, durable writes, NenDB writes, hosted dashboard
+claims, alternate renderer scope, and mutation authority before any CI harness
+boundary branch.
 The next branch should be
-`codex/zigeffect-causal-production-telemetry-ci-artifact-preview`.
+`codex/zigeffect-causal-production-telemetry-ci-harness-boundary`.
 
 ## Dependency Order
 
@@ -139,6 +147,7 @@ The backlog currently orders future production-hardening branches as:
 24. `production-telemetry-local-pipeline-fixtures` delivered
 25. `production-telemetry-nendb-retention-fixtures` delivered
 26. `production-telemetry-workbench-readonly-preview` delivered
+27. `production-telemetry-ci-artifact-preview` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -354,10 +363,30 @@ disabled runtime pipeline execution, disabled durable writes, disabled NenDB
 writes, disabled CI gates, NenDB-only durable direction, and SolidJS
 `zig-webui` workbench direction.
 
-The next branch should use ready workbench preview artifacts to define a CI
-artifact preview before any durable
-production writes, live ingestion, exporters, capacity claims, CI gates, or
-mutation authority are considered.
+The delivered CI artifact preview branch used ready workbench preview artifacts
+to define a CI artifact preview before any durable production writes, live
+ingestion, exporters, capacity claims, CI gates, or mutation authority are
+considered.
+
+Production telemetry CI artifact preview is documented in
+[production-telemetry-ci-artifact-preview.md](production-telemetry-ci-artifact-preview.md).
+It emits `zigeffect.causal.production-telemetry-ci-artifact-preview.v1`
+through `zig build causal-production-telemetry-ci-artifact-preview`, consumes a
+ready workbench preview artifact, records source checks, authority boundary
+evidence, mapping fixture ids, a failure-only artifact candidate catalog,
+preview-only upload policy, validation checks, blocked claims, and required
+verification commands, and preserves `applied=false`,
+`mutation_authority=none`, disabled artifact upload execution, disabled
+workflow mutation, disabled CI gates, disabled live telemetry, disabled network
+send, disabled collector endpoint configuration, disabled OTLP serialization,
+disabled runtime pipeline execution, disabled durable writes, disabled NenDB
+writes, NenDB-only durable direction, and SolidJS `zig-webui` workbench
+direction.
+
+The next branch should use ready CI artifact preview artifacts to define a CI
+harness boundary before artifact upload execution, CI telemetry gates, durable
+production writes, live ingestion, exporters, capacity claims, or mutation
+authority are considered.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -491,6 +520,20 @@ zig build causal-production-telemetry-workbench-readonly-preview -- \
   --from-retention ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures.json \
   reject \
   --reason "negative workbench preview path"
+zig build causal-production-telemetry-ci-artifact-preview -- \
+  --from-workbench ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview.json \
+  approve \
+  --reason "CI artifact preview reviewed" \
+  --verified-command "zig build causal-production-telemetry-workbench-readonly-preview" \
+  --verified-command "zig build causal-artifacts" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+zig build causal-production-telemetry-ci-artifact-preview -- \
+  --from-workbench ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview.json \
+  reject \
+  --reason "negative CI artifact preview path"
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

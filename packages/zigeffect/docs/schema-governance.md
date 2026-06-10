@@ -386,6 +386,22 @@ send OTLP, configure collector endpoints, write NenDB records, write durable
 production storage, fail CI, host a production dashboard, add non-NenDB adapter
 work, add alternate renderers, or grant mutation authority.
 
+- `zigeffect.causal.production-telemetry-ci-artifact-preview.v1`
+
+The production-telemetry-ci-artifact-preview report is a record-only,
+`ci-artifact-preview`, `preview-only`, `failure-attachment-catalog`,
+`no-network`, `no-live-ingestion`, `no-durable-write`, `no-nendb-write`, and
+`no-ci-gate` production hardening contract. It consumes a ready workbench
+read-only preview artifact, records source checks, authority boundary evidence,
+mapping fixture ids, upload policy preview, artifact candidates, blocked
+claims, and required verification commands, and emits `ready` or `blocked`
+artifacts before future CI harness boundary work. It does not mutate GitHub
+Actions, upload artifacts, configure CI retention, fail CI, ingest live
+telemetry, run a telemetry pipeline, configure exporters, send OTLP, configure
+collector endpoints, write NenDB records, write durable production storage,
+host a production dashboard, add non-NenDB adapter work, add alternate
+renderers, or grant mutation authority.
+
 ### Human-Agent Feedback
 
 - `zigeffect.causal.human-agent-feedback-loop.v1`

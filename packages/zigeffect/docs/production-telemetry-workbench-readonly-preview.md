@@ -99,8 +99,10 @@ authority.
 
 `ready_for_next_branch=true` means a later
 `codex/zigeffect-causal-production-telemetry-ci-artifact-preview` branch may be
-started. It does not approve live ingestion, a runtime pipeline, NenDB writes,
-durable writes, hosted dashboards, CI gates, or mutation authority.
+started; that branch is now delivered and hands off to
+`codex/zigeffect-causal-production-telemetry-ci-harness-boundary`. It does not
+approve live ingestion, a runtime pipeline, NenDB writes, durable writes,
+hosted dashboards, artifact upload execution, CI gates, or mutation authority.
 
 ## Output Paths
 
@@ -122,10 +124,11 @@ Use `--out-prefix <path-prefix>` to choose a custom artifact prefix.
 ## Agent Guidance
 
 Agents may use a `ready` workbench preview artifact to start
-`codex/zigeffect-causal-production-telemetry-ci-artifact-preview`. They must
-cite the source retention artifact, local-pipeline artifact, mapping fixtures,
-authority boundary, validation checks, required commands, recorded commands,
-and blocked claims.
+or regenerate the delivered
+`codex/zigeffect-causal-production-telemetry-ci-artifact-preview` evidence
+before CI harness boundary work. They must cite the source retention artifact,
+local-pipeline artifact, mapping fixtures, authority boundary, validation
+checks, required commands, recorded commands, and blocked claims.
 
 Agents must treat `blocked` workbench preview artifacts as stop signs. Blocked
 artifacts can guide source evidence, UI, or verification repair, but they
