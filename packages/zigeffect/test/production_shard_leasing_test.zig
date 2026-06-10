@@ -285,6 +285,46 @@ test "force release stale shard releases only after skew tolerant expiry" {
     try std.testing.expect((try storage.lease(4)) == null);
 }
 
+test "cluster runtime stamps epochs and rejects stale owner after reacquisition" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    const runner_storage = runner_storage_state.asRunnerStorage();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+    const address = try addressForShard(0, 8);
+
+    var fixture_a = try runtimeFor(runner_storage, message_storage, "runner-a");
+    defer fixture_a.deinit();
+    const runtime_a = &fixture_a.runtime;
+    _ = try runtime_a.acquireShard(0, 1_000);
+    _ = try runtime_a.registerEntity(.{ .address = address, .name = "runtime-lease" }, 1_000);
+    const ref_a = try runtime_a.ref(address);
+
+    var request = try ref_a.ask("text/plain", "ping", "ping");
+    defer request.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(?fx.ShardLeaseEpoch, 1), request.envelope.lease_epoch);
+
+    var fixture_b = try runtimeFor(runner_storage, message_storage, "runner-b");
+    defer fixture_b.deinit();
+    const runtime_b = &fixture_b.runtime;
+    _ = try runtime_b.acquireShard(0, 1_100);
+    _ = try runtime_b.registerEntity(.{ .address = address, .name = "runtime-lease" }, 1_100);
+
+    try std.testing.expectError(error.StaleShardFence, runtime_a.processShard(0, NoopEntityHandler, 1_110));
+    try std.testing.expect(!runtime_a.ownsShard(0));
+
+    const report = try runtime_b.processShard(0, NoopEntityHandler, 1_120);
+    try std.testing.expectEqual(@as(usize, 1), report.acked);
+    try std.testing.expectEqual(@as(?fx.ShardLeaseEpoch, 2), message_storage_state.messages.items[0].lease_epoch);
+}
+
+const NoopEntityHandler = struct {
+    pub fn handle(_: *fx.EntityScope, _: fx.EntityEnvelope) !fx.EntityHandlerResult {
+        return .noreply;
+    }
+};
+
 fn addressForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.EntityAddress {
     var id: u64 = 1;
     while (id < 100_000) : (id += 1) {
@@ -294,4 +334,39 @@ fn addressForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.EntityA
         if (try fx.shardIdForAddress(address, shard_count) == shard_id) return address;
     }
     return error.EntityShardNotFound;
+}
+
+const RuntimeFixture = struct {
+    manager: *fx.LocalShardLeaseManager,
+    runtime: fx.ClusterRuntime,
+
+    pub fn deinit(self: *RuntimeFixture) void {
+        self.runtime.deinit();
+        self.manager.deinit();
+        std.testing.allocator.destroy(self.manager);
+    }
+};
+
+fn runtimeFor(runner_storage: fx.RunnerStorage, message_storage: fx.MessageStorage, runner_name: []const u8) !RuntimeFixture {
+    const owner = fx.runnerAddress("machine", runner_name);
+    const manager = try std.testing.allocator.create(fx.LocalShardLeaseManager);
+    errdefer std.testing.allocator.destroy(manager);
+    manager.* = try fx.LocalShardLeaseManager.init(
+        std.testing.allocator,
+        runner_storage,
+        owner,
+        .{ .ttl_ms = 100, .refresh_interval_ms = 20 },
+    );
+    errdefer manager.deinit();
+
+    const runtime = try fx.ClusterRuntime.init(
+        std.testing.allocator,
+        message_storage,
+        manager,
+        .{ .shard_count = 8 },
+    );
+    return .{
+        .manager = manager,
+        .runtime = runtime,
+    };
 }
