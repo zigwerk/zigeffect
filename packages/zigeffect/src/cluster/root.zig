@@ -140,6 +140,7 @@ pub const ClusterRuntime = runtime.ClusterRuntime;
 pub const LocalClusterError = local_cluster.LocalClusterError;
 pub const ShardBalancePlan = local_cluster.ShardBalancePlan;
 pub const LocalClusterRouteResult = local_cluster.LocalClusterRouteResult;
+pub const LocalClusterRouterOptions = local_cluster.LocalClusterRouterOptions;
 pub const LocalClusterRouter = local_cluster.LocalClusterRouter;
 pub const LocalClusterRunnerOptions = local_cluster.LocalClusterRunnerOptions;
 pub const LocalClusterRunnerReport = local_cluster.LocalClusterRunnerReport;

@@ -30,3 +30,39 @@ test "balanced shard plan validates shard and runner counts" {
     try std.testing.expectError(error.InvalidRunnerCount, fx.balancedShardPlan(std.testing.allocator, 8, 0, 0));
     try std.testing.expectError(error.InvalidRunnerIndex, fx.balancedShardPlan(std.testing.allocator, 8, 2, 2));
 }
+
+test "local cluster router writes tell and ask messages to shared file storage" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var message_storage_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+
+    var router = fx.LocalClusterRouter.init(std.testing.allocator, message_storage, .{ .shard_count = 16 });
+    const address = fx.entityAddress("counter", "router-shared");
+    const shard_id = try fx.shardIdForAddress(address, 16);
+
+    var tell = try router.routeTell(address, "text", "inc", "first command");
+    defer tell.deinit(std.testing.allocator);
+    try std.testing.expectEqual(shard_id, tell.shard_id);
+    try std.testing.expectEqual(fx.MessageEnvelopeKind.tell, tell.envelope.kind);
+    try std.testing.expect(!tell.duplicate);
+
+    var ask = try router.routeAsk(address, "text", "get", "read current value");
+    defer ask.deinit(std.testing.allocator);
+    try std.testing.expectEqual(shard_id, ask.shard_id);
+    try std.testing.expectEqual(fx.MessageEnvelopeKind.request, ask.envelope.kind);
+    try std.testing.expect(ask.correlation_id != null);
+
+    var by_shard = try message_storage.unprocessedByShard(shard_id, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 2), by_shard.records.len);
+    var saw_tell = false;
+    var saw_request = false;
+    for (by_shard.records) |record| {
+        if (record.envelope.kind == .tell) saw_tell = true;
+        if (record.envelope.kind == .request) saw_request = true;
+    }
+    try std.testing.expect(saw_tell);
+    try std.testing.expect(saw_request);
+}

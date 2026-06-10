@@ -1,10 +1,16 @@
 const std = @import("std");
 const envelope = @import("envelope.zig");
+const identity = @import("identity.zig");
+const message_storage = @import("message_storage.zig");
 const routing = @import("routing.zig");
 
 pub const Allocator = std.mem.Allocator;
+pub const EntityAddress = identity.EntityAddress;
 pub const MessageCorrelationId = envelope.MessageCorrelationId;
 pub const MessageEnvelope = envelope.MessageEnvelope;
+pub const MessageEnvelopeKind = envelope.MessageEnvelopeKind;
+pub const MessageStorage = message_storage.MessageStorage;
+pub const MessageSubmitResult = envelope.MessageSubmitResult;
 pub const ShardCount = routing.ShardCount;
 pub const ShardId = routing.ShardId;
 
@@ -34,7 +40,70 @@ pub const LocalClusterRouteResult = struct {
     }
 };
 
-pub const LocalClusterRouter = struct {};
+pub const LocalClusterRouterOptions = struct {
+    shard_count: ShardCount,
+};
+
+pub const LocalClusterRouter = struct {
+    allocator: Allocator,
+    message_storage: MessageStorage,
+    shard_count: ShardCount,
+    next_message_sequence: u64 = 1,
+
+    pub fn init(allocator: Allocator, storage: MessageStorage, options: LocalClusterRouterOptions) LocalClusterRouter {
+        return .{
+            .allocator = allocator,
+            .message_storage = storage,
+            .shard_count = options.shard_count,
+        };
+    }
+
+    pub fn routeTell(self: *LocalClusterRouter, address: EntityAddress, payload_type_name: []const u8, payload: []const u8, redacted_detail: []const u8) !LocalClusterRouteResult {
+        return self.routeMessage(.tell, address, payload_type_name, payload, redacted_detail);
+    }
+
+    pub fn routeAsk(self: *LocalClusterRouter, address: EntityAddress, payload_type_name: []const u8, payload: []const u8, redacted_detail: []const u8) !LocalClusterRouteResult {
+        return self.routeMessage(.request, address, payload_type_name, payload, redacted_detail);
+    }
+
+    pub fn routeInterrupt(self: *LocalClusterRouter, address: EntityAddress, reason: []const u8) !LocalClusterRouteResult {
+        return self.routeMessage(.interrupt, address, "interrupt", reason, reason);
+    }
+
+    fn routeMessage(
+        self: *LocalClusterRouter,
+        kind: MessageEnvelopeKind,
+        address: EntityAddress,
+        payload_type_name: []const u8,
+        payload: []const u8,
+        redacted_detail: []const u8,
+    ) !LocalClusterRouteResult {
+        const shard_id = try routing.shardIdForAddress(address, self.shard_count);
+        var idempotency_buf: [40]u8 = undefined;
+        const idempotency_key = std.fmt.bufPrint(&idempotency_buf, "local-router:{d}", .{self.next_message_sequence}) catch unreachable;
+        self.next_message_sequence += 1;
+
+        var submitted = try self.message_storage.submit(.{
+            .shard_id = shard_id,
+            .envelope = .{
+                .kind = kind,
+                .address = address,
+                .idempotency_key = idempotency_key,
+                .payload_type_name = payload_type_name,
+                .payload = payload,
+                .redacted_detail = redacted_detail,
+            },
+        });
+        errdefer submitted.deinit(self.allocator);
+
+        return .{
+            .shard_id = shard_id,
+            .envelope = submitted.envelope,
+            .correlation_id = submitted.envelope.correlation_id,
+            .duplicate = submitted.duplicate,
+        };
+    }
+};
 
 pub const LocalClusterRunnerOptions = struct {};
 
