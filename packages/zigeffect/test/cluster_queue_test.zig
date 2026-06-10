@@ -148,6 +148,68 @@ test "cluster queue rebuild parses claim metadata" {
     try std.testing.expectEqualStrings("worker-a", item.claim_worker);
 }
 
+test "cluster queue claimable respects runner and queue limits" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    const workflow_id = fx.workflow.workflowId("approval");
+    const execution_id = try executionIdForShard(0, 8);
+    const email_1 = fx.workflow.queueItemId("email", "1");
+    const email_2 = fx.workflow.queueItemId("email", "2");
+    const sms_1 = fx.workflow.queueItemId("sms", "1");
+    try seedQueueEvent(journal_store, .queue_offered, workflow_id, execution_id, email_1, 1, "email", "1", "email-1", 0);
+    try seedQueueEvent(journal_store, .queue_offered, workflow_id, execution_id, email_2, 2, "email", "2", "email-2", 0);
+    try seedQueueEvent(journal_store, .queue_offered, workflow_id, execution_id, sms_1, 3, "sms", "3", "sms-1", 0);
+
+    var runner = try runnerOwningShard(runner_storage_state.asRunnerStorage(), message_storage_state.asMessageStorage(), 0);
+    defer runner.deinit();
+    var index = fx.ClusterQueueIndex.init(std.testing.allocator);
+    defer index.deinit();
+    _ = try index.rebuildOwned(&runner, journal_store);
+
+    var claimable = try index.claimable(std.testing.allocator, .{ .max_per_runner = 2, .max_per_queue = 1 });
+    defer claimable.deinit();
+    try std.testing.expectEqual(@as(usize, 2), claimable.items.len);
+    try std.testing.expectEqual(email_1, claimable.items[0].queue_id);
+    try std.testing.expectEqual(sms_1, claimable.items[1].queue_id);
+}
+
+test "cluster queue expired claims require passed deadlines" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    const workflow_id = fx.workflow.workflowId("approval");
+    const execution_id = try executionIdForShard(0, 8);
+    const expired_id = fx.workflow.queueItemId("email", "expired");
+    const future_id = fx.workflow.queueItemId("email", "future");
+    const no_deadline_id = fx.workflow.queueItemId("email", "no-deadline");
+    try seedClaimedQueue(journal_store, workflow_id, execution_id, expired_id, 1, "expired", "worker-a", "1250");
+    try seedClaimedQueue(journal_store, workflow_id, execution_id, future_id, 3, "future", "worker-b", "2000");
+    try seedClaimedQueue(journal_store, workflow_id, execution_id, no_deadline_id, 5, "no-deadline", "worker-c", "null");
+
+    var runner = try runnerOwningShard(runner_storage_state.asRunnerStorage(), message_storage_state.asMessageStorage(), 0);
+    defer runner.deinit();
+    var index = fx.ClusterQueueIndex.init(std.testing.allocator);
+    defer index.deinit();
+    _ = try index.rebuildOwned(&runner, journal_store);
+
+    var expired = try index.expiredClaims(std.testing.allocator, 1_500);
+    defer expired.deinit();
+    try std.testing.expectEqual(@as(usize, 1), expired.items.len);
+    try std.testing.expectEqual(expired_id, expired.items[0].queue_id);
+    try std.testing.expectEqual(@as(?u64, 1_250), expired.items[0].claim_deadline_ms);
+}
+
 fn executionIdForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.workflow.ExecutionId {
     var id: fx.workflow.ExecutionId = 1;
     while (id < 100_000) : (id += 1) {
@@ -200,6 +262,27 @@ fn seedQueueEvent(
         .redacted_detail = detail,
         .idempotency_key = idempotency_key,
     } });
+}
+
+fn seedClaimedQueue(
+    journal_store: fx.workflow.JournalStore,
+    workflow_id: fx.workflow.WorkflowId,
+    execution_id: fx.workflow.ExecutionId,
+    queue_id: fx.workflow.QueueId,
+    first_sequence: fx.workflow.JournalSequence,
+    key: []const u8,
+    worker: []const u8,
+    deadline: []const u8,
+) !void {
+    const offer_key = try std.fmt.allocPrint(std.testing.allocator, "{s}-offer", .{key});
+    defer std.testing.allocator.free(offer_key);
+    try seedQueueEvent(journal_store, .queue_offered, workflow_id, execution_id, queue_id, first_sequence, "email", key, offer_key, 0);
+
+    const claim_key = try std.fmt.allocPrint(std.testing.allocator, "{s}-claim", .{key});
+    defer std.testing.allocator.free(claim_key);
+    const detail = try std.fmt.allocPrint(std.testing.allocator, "worker={s} claim_deadline_ms={s} attempt=1", .{ worker, deadline });
+    defer std.testing.allocator.free(detail);
+    try seedQueueEvent(journal_store, .queue_claimed, workflow_id, execution_id, queue_id, first_sequence + 1, "email", detail, claim_key, 1);
 }
 
 fn queueItem(index: *const fx.ClusterQueueIndex, queue_id: fx.workflow.QueueId) !?fx.ClusterQueueItem {

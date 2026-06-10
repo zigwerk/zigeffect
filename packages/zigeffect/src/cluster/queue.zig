@@ -110,6 +110,54 @@ pub const ClusterQueueIndex = struct {
         return report;
     }
 
+    pub fn claimable(
+        self: *const ClusterQueueIndex,
+        allocator: Allocator,
+        limits: ClusterQueueClaimLimits,
+    ) Allocator.Error!ClusterQueueBatch {
+        var output = std.ArrayList(ClusterQueueItem).empty;
+        errdefer deinitItems(allocator, output.items);
+        errdefer output.deinit(allocator);
+
+        if (limits.max_per_runner == 0 or limits.max_per_queue == 0) {
+            return .{ .allocator = allocator, .items = try output.toOwnedSlice(allocator) };
+        }
+
+        var counts = std.ArrayList(QueueSelectionCount).empty;
+        defer counts.deinit(allocator);
+
+        for (self.items.items) |item| {
+            if (output.items.len >= limits.max_per_runner) break;
+            if (item.status != .offered and item.status != .retry_ready) continue;
+            if (queueSelectionCount(counts.items, item.name) >= limits.max_per_queue) continue;
+            try incrementQueueSelectionCount(allocator, &counts, item.name);
+            const cloned = try cloneItem(allocator, item);
+            errdefer deinitItem(allocator, cloned);
+            try output.append(allocator, cloned);
+        }
+
+        return .{ .allocator = allocator, .items = try output.toOwnedSlice(allocator) };
+    }
+
+    pub fn expiredClaims(
+        self: *const ClusterQueueIndex,
+        allocator: Allocator,
+        now_ms: u64,
+    ) Allocator.Error!ClusterQueueBatch {
+        var output = std.ArrayList(ClusterQueueItem).empty;
+        errdefer deinitItems(allocator, output.items);
+        errdefer output.deinit(allocator);
+
+        for (self.items.items) |item| {
+            if (item.status != .claimed) continue;
+            const deadline = item.claim_deadline_ms orelse continue;
+            if (deadline > now_ms) continue;
+            try output.append(allocator, try cloneItem(allocator, item));
+        }
+
+        return .{ .allocator = allocator, .items = try output.toOwnedSlice(allocator) };
+    }
+
     fn clear(self: *ClusterQueueIndex) void {
         deinitItems(self.allocator, self.items.items);
         self.items.clearRetainingCapacity();
@@ -197,12 +245,57 @@ pub const ClusterQueueIndex = struct {
     }
 };
 
+const QueueSelectionCount = struct {
+    name: []const u8,
+    count: usize,
+};
+
 fn deinitItems(allocator: Allocator, items: []const ClusterQueueItem) void {
     for (items) |item| {
-        if (item.name.len != 0) allocator.free(item.name);
-        if (item.payload.len != 0) allocator.free(item.payload);
-        if (item.claim_worker.len != 0) allocator.free(item.claim_worker);
+        deinitItem(allocator, item);
     }
+}
+
+fn deinitItem(allocator: Allocator, item: ClusterQueueItem) void {
+    if (item.name.len != 0) allocator.free(item.name);
+    if (item.payload.len != 0) allocator.free(item.payload);
+    if (item.claim_worker.len != 0) allocator.free(item.claim_worker);
+}
+
+fn cloneItem(allocator: Allocator, item: ClusterQueueItem) Allocator.Error!ClusterQueueItem {
+    var cloned = item;
+    cloned.name = try cloneSlice(allocator, item.name);
+    errdefer if (cloned.name.len != 0) allocator.free(cloned.name);
+    cloned.payload = try cloneSlice(allocator, item.payload);
+    errdefer if (cloned.payload.len != 0) allocator.free(cloned.payload);
+    cloned.claim_worker = try cloneSlice(allocator, item.claim_worker);
+    return cloned;
+}
+
+fn cloneSlice(allocator: Allocator, value: []const u8) Allocator.Error![]const u8 {
+    if (value.len == 0) return "";
+    return allocator.dupe(u8, value);
+}
+
+fn queueSelectionCount(counts: []const QueueSelectionCount, name: []const u8) usize {
+    for (counts) |entry| {
+        if (std.mem.eql(u8, entry.name, name)) return entry.count;
+    }
+    return 0;
+}
+
+fn incrementQueueSelectionCount(
+    allocator: Allocator,
+    counts: *std.ArrayList(QueueSelectionCount),
+    name: []const u8,
+) Allocator.Error!void {
+    for (counts.items) |*entry| {
+        if (std.mem.eql(u8, entry.name, name)) {
+            entry.count += 1;
+            return;
+        }
+    }
+    try counts.append(allocator, .{ .name = name, .count = 1 });
 }
 
 fn isQueueEventKind(kind: workflow_journal.WorkflowEventKind) bool {
