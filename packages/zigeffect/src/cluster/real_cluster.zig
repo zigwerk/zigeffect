@@ -192,7 +192,74 @@ pub const RealClusterController = struct {
             .options = init_options.options,
         };
     }
+
+    pub fn admitRunner(self: *RealClusterController, registration: runner.RunnerRegistration) (Allocator.Error || runner.RunnerRegistryError)!ClusterAdmissionDecision {
+        _ = self.registry.registerRunner(registration) catch |err| switch (err) {
+            error.DuplicateRunner => return .already_member,
+            else => return err,
+        };
+        return .admitted;
+    }
+
+    pub fn recordHeartbeat(self: *RealClusterController, heartbeat: runner.RunnerHeartbeat) (Allocator.Error || runner.RunnerRegistryError)!runner.RunnerHealthSnapshot {
+        return self.registry.recordHeartbeat(heartbeat);
+    }
+
+    pub fn discoverRunners(self: *RealClusterController, allocator: Allocator, now_ms: u64) (Allocator.Error || runner.RunnerRegistryError)!ClusterMembershipReport {
+        var health = try self.inspector.inspectAll(allocator, self.registry, now_ms);
+        defer health.deinit();
+
+        var members = try allocator.alloc(ClusterMember, health.snapshots.len);
+        errdefer allocator.free(members);
+        var initialized: usize = 0;
+        errdefer {
+            for (members[0..initialized]) |member| {
+                if (member.name.len > 0) allocator.free(member.name);
+            }
+        }
+
+        var report = ClusterMembershipReport{
+            .allocator = allocator,
+            .generated_at_ms = now_ms,
+            .members = members,
+        };
+
+        for (health.snapshots, 0..) |snapshot, index| {
+            const state = clusterMembershipStateFromHealth(snapshot.state);
+            members[index] = .{
+                .address = snapshot.address,
+                .name = try allocator.dupe(u8, snapshot.name),
+                .state = state,
+                .started_at_ms = snapshot.started_at_ms,
+                .last_seen_at_ms = snapshot.last_heartbeat_at_ms,
+            };
+            initialized += 1;
+            switch (state) {
+                .active => report.active += 1,
+                .draining => report.draining += 1,
+                .down => report.down += 1,
+                else => {},
+            }
+        }
+
+        std.mem.sort(ClusterMember, report.members, {}, clusterMemberLessThan);
+        return report;
+    }
 };
+
+fn clusterMembershipStateFromHealth(state: runner.RunnerHealthState) ClusterMembershipState {
+    return switch (state) {
+        .starting => .joining,
+        .healthy, .degraded => .active,
+        .unhealthy => .down,
+        .stopped => .leaving,
+    };
+}
+
+fn clusterMemberLessThan(_: void, left: ClusterMember, right: ClusterMember) bool {
+    if (left.address.machine_id != right.address.machine_id) return left.address.machine_id < right.address.machine_id;
+    return left.address.runner_id < right.address.runner_id;
+}
 
 pub fn formatClusterInspectionText(allocator: Allocator, report: ClusterInspectionReport) Allocator.Error![]const u8 {
     return std.fmt.allocPrint(
