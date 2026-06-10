@@ -21,6 +21,7 @@ comptime {
     _ = @import("cluster_observability_test.zig");
     _ = @import("cluster_runtime_test.zig");
     _ = @import("multi_runner_cluster_test.zig");
+    _ = @import("real_cluster_test.zig");
     _ = @import("routing_test.zig");
     _ = @import("runner_test.zig");
     _ = @import("runner_storage_test.zig");
