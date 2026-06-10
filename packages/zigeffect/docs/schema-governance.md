@@ -656,6 +656,20 @@ writes, non-NenDB adapter work, alternate renderer scope, production health,
 deployment success, customer impact, production cluster readiness, and mutation
 authority.
 
+- `zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-evaluator.v1`
+
+The production-telemetry-ci-gate-required-status-check-enforcement-evaluator
+report is a record-only evidence evaluation artifact. It consumes ready
+enforcement-policy artifacts plus explicit bounded `.json` or `.txt` evidence
+files, classifies evidence, evaluates active-enforcement and merge-blocking
+signals, and emits ready, advisory, or blocked findings before the future
+enforcement report branch. It denies GitHub API mutation by the tool, branch
+protection mutation by the tool, workflow mutation by the tool, check-run
+creation by the tool, CI upload execution, live telemetry, durable writes,
+NenDB writes, non-NenDB adapter work, alternate renderer scope, production
+health, deployment success, customer impact, production cluster readiness,
+secret-shaped evidence, and mutation authority.
+
 ### Human-Agent Feedback
 
 - `zigeffect.causal.human-agent-feedback-loop.v1`

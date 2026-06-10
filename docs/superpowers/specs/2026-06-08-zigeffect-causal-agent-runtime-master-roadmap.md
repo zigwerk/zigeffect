@@ -1070,10 +1070,25 @@ Status values:
      production health claims, production cluster claims, and mutation authority
      disabled.
 39. `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-evaluator`
-   - Current next branch: evaluate bounded enforcement evidence against the
-     delivered policy before any agent may use active required-check or
-     merge-blocking evidence as a gate for later rollout or production
-     authority work.
+   - Delivered:
+     `causal-production-telemetry-ci-gate-required-status-check-enforcement-evaluator`
+     publishes
+     `zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-evaluator.v1`,
+     consumes ready enforcement-policy artifacts plus explicit bounded
+     evidence files, emits ready, advisory, or blocked findings for active
+     enforcement and merge-blocking observations, and hands off to
+     `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report`
+     while keeping GitHub API mutation by the tool, branch-protection mutation
+     by the tool, workflow mutation by the tool, check-run creation by the
+     tool, artifact upload execution by the tool, GitHub step summary writes
+     by the tool, pull request comments by the tool, live telemetry, durable
+     writes, NenDB writes, non-NenDB durable adapter work, alternate renderers,
+     production health claims, production cluster claims, and mutation authority
+     disabled.
+40. `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report`
+   - Current next branch: summarize ready, advisory, and blocked evaluator
+     findings before any agent may use active required-check or merge-blocking
+     evidence as a gate for later rollout or production authority work.
 
 ## Dual-Interface Causal Spine Expansion
 
