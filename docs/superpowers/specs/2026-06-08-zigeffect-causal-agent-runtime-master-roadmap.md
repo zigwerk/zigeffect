@@ -869,9 +869,23 @@ Status values:
      claims, production cluster claims, alternate renderers, and mutation
      authority disabled.
 25. `codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy`
-   - Current next branch: define the evidence policy for CI archive artifacts
-     before telemetry gates, production storage, live ingestion, hosted
-     dashboards, or mutation authority are considered.
+   - Delivered: `causal-production-telemetry-ci-archive-evidence-policy`
+     emits
+     `zigeffect.causal.production-telemetry-ci-archive-evidence-policy.v1`,
+     consumes planned or applied CI archive application artifacts, defines
+     allowed archive evidence classes, required provenance metadata,
+     interpretation rules, denied claims, negative fixtures, ready and blocked
+     policy artifacts, and hands off to
+     `codex/zigeffect-causal-production-telemetry-ci-gate-readiness` while
+     keeping workflow mutation, artifact upload execution, CI gates, live
+     telemetry, durable writes, NenDB writes, hosted dashboard claims,
+     production cluster claims, alternate renderers, and mutation authority
+     disabled.
+26. `codex/zigeffect-causal-production-telemetry-ci-gate-readiness`
+   - Current next branch: consume ready archive evidence policy artifacts and
+     define CI gate readiness without yet enforcing CI telemetry gates,
+     production storage, live ingestion, hosted dashboards, production cluster
+     readiness, or mutation authority.
 
 ## Dual-Interface Causal Spine Expansion
 

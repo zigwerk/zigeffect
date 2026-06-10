@@ -892,6 +892,17 @@ metrics, and traces.
   keeps local workflow mutation, artifact upload execution, CI gates, live
   telemetry, durable writes, NenDB writes, hosted dashboard claims, production
   cluster claims, alternate renderers, and production mutation disabled.
+- Delivered: `causal-production-telemetry-ci-archive-evidence-policy`
+  publishes
+  `zigeffect.causal.production-telemetry-ci-archive-evidence-policy.v1`,
+  consumes planned or applied CI archive application artifacts, defines
+  allowed archive evidence classes, required provenance metadata,
+  interpretation rules, denied claims, negative fixtures, ready and blocked
+  policy artifacts, and hands off to
+  `codex/zigeffect-causal-production-telemetry-ci-gate-readiness`. It keeps
+  workflow mutation, artifact upload execution, CI gates, live telemetry,
+  durable writes, NenDB writes, hosted dashboard claims, production cluster
+  claims, alternate renderers, and production mutation disabled.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,

@@ -101,9 +101,11 @@ preview handoff is delivered through
 handoff is delivered through
 `causal-production-telemetry-ci-harness-boundary`. The CI archive application
 handoff is delivered through
-`causal-production-telemetry-ci-archive-application`.
+`causal-production-telemetry-ci-archive-application`. The CI archive evidence
+policy handoff is delivered through
+`causal-production-telemetry-ci-archive-evidence-policy`.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-readiness`.
 
 ## Verification
 

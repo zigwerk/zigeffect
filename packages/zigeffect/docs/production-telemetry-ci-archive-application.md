@@ -84,8 +84,11 @@ executed artifact uploads.
 ## Agent Guidance
 
 Agents may use `planned` artifacts to prepare a reviewed workflow/archive
-patch. They may use `applied` artifacts to start
-`codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy`.
+patch. They may use `planned` or `applied` artifacts as source evidence for
+the delivered
+`codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy`
+branch. Ready archive evidence policy artifacts, not archive application
+artifacts alone, are the handoff into CI gate readiness.
 Blocked artifacts are stop signs and cannot justify CI gates, live telemetry,
 runtime ingestion, durable writes, NenDB writes, hosted dashboard readiness, or
 mutation authority.
@@ -105,4 +108,3 @@ zig build causal-production-hardening-backlog -- --format json
 zig build examples
 zig build test
 ```
-

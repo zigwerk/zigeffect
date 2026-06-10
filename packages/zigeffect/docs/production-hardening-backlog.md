@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-telemetry-ci-archive-evidence-policy` means the
+The recommendation `start-production-telemetry-ci-gate-readiness` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -133,8 +133,17 @@ pipeline execution, live telemetry, network send, collector endpoint, OTLP
 serialization, durable writes, NenDB writes, hosted dashboard claims,
 production cluster claims, alternate renderer scope, and mutation authority
 before any archive evidence policy branch.
+The production telemetry CI archive evidence policy is also delivered: it
+consumes planned or applied CI archive application artifacts, defines allowed
+archive evidence classes, required metadata, interpretation rules, denied
+claims, and negative fixtures, and preserves disabled CI gates, workflow
+mutation, artifact upload execution, runtime pipeline execution, live
+telemetry, network send, collector endpoint, OTLP serialization, durable
+writes, NenDB writes, hosted dashboard claims, production cluster claims,
+alternate renderer scope, and mutation authority before any CI gate readiness
+branch.
 The next branch should be
-`codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-readiness`.
 
 ## Dependency Order
 
@@ -169,6 +178,7 @@ The backlog currently orders future production-hardening branches as:
 27. `production-telemetry-ci-artifact-preview` delivered
 28. `production-telemetry-ci-harness-boundary` delivered
 29. `production-telemetry-ci-archive-application` delivered
+30. `production-telemetry-ci-archive-evidence-policy` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -433,10 +443,29 @@ disabled runtime pipeline execution, disabled durable writes, disabled NenDB
 writes, NenDB-only durable direction, and SolidJS `zig-webui` workbench
 direction.
 
-The next branch should use ready CI archive application artifacts to define
-archive evidence policy before CI telemetry gates, durable production writes,
-live ingestion, exporters, capacity claims, production cluster claims, or
-mutation authority are considered.
+Ready CI archive application artifacts are the source evidence for archive
+evidence policy work; they do not themselves approve CI telemetry gates,
+durable production writes, live ingestion, exporters, capacity claims,
+production cluster claims, or mutation authority.
+
+Production telemetry CI archive evidence policy is documented in
+[production-telemetry-ci-archive-evidence-policy.md](production-telemetry-ci-archive-evidence-policy.md).
+It emits
+`zigeffect.causal.production-telemetry-ci-archive-evidence-policy.v1` through
+`zig build causal-production-telemetry-ci-archive-evidence-policy`, consumes
+planned or applied CI archive application artifacts, records archive evidence
+classes, provenance metadata requirements, interpretation rules, denied
+claims, negative fixtures, blocked claims, and required verification commands,
+and preserves disabled workflow mutation, disabled artifact upload execution,
+disabled CI gates, disabled live telemetry, disabled network send, disabled
+collector endpoint configuration, disabled OTLP serialization, disabled
+runtime pipeline execution, disabled durable writes, disabled NenDB writes,
+NenDB-only durable direction, and SolidJS `zig-webui` workbench direction.
+
+The next branch should use ready archive evidence policy artifacts to define
+CI gate readiness before CI telemetry gates, durable production writes, live
+ingestion, exporters, capacity claims, production cluster claims, or mutation
+authority are considered.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -613,6 +642,22 @@ zig build causal-production-telemetry-ci-archive-application -- \
   --workflow-change ".github/workflows/zigeffect-causal.yml" \
   --before "source harness workflow digest" \
   --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-archive-application-negative
+zig build causal-production-telemetry-ci-archive-evidence-policy -- \
+  --from-archive-application ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary-ci-archive-application.json \
+  approve \
+  --reason "CI archive evidence policy reviewed" \
+  --verified-command "zig build causal-production-telemetry-ci-archive-application" \
+  --verified-command "zig build causal-artifacts" \
+  --verified-command "zig build release-gate --summary none" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+zig build causal-production-telemetry-ci-archive-evidence-policy -- \
+  --from-archive-application ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary-ci-archive-application.json \
+  reject \
+  --reason "negative CI archive evidence policy path" \
+  --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-archive-evidence-policy-negative
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

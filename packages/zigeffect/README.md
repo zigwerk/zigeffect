@@ -533,6 +533,33 @@ write NenDB, write durable production storage, or grant mutation authority.
 The full policy is in
 [docs/production-telemetry-ci-archive-application.md](docs/production-telemetry-ci-archive-application.md).
 
+Record the production telemetry CI archive evidence policy:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-archive-evidence-policy -- \
+  --from-archive-application ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary-ci-archive-application.json \
+  approve \
+  --reason "CI archive evidence policy reviewed" \
+  --verified-command "zig build causal-production-telemetry-ci-archive-application" \
+  --verified-command "zig build causal-artifacts" \
+  --verified-command "zig build release-gate --summary none" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The report uses schema
+`zigeffect.causal.production-telemetry-ci-archive-evidence-policy.v1`,
+consumes planned or applied CI archive application artifacts, defines allowed
+archive evidence classes, required metadata, interpretation rules, denied
+claims, and negative fixtures, and hands off to CI gate readiness without
+enabling workflow mutation, artifact upload execution, CI gates, live
+telemetry, NenDB writes, durable writes, or mutation authority. The full policy
+is in
+[docs/production-telemetry-ci-archive-evidence-policy.md](docs/production-telemetry-ci-archive-evidence-policy.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -558,8 +585,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy` after
-the delivered production telemetry CI archive application.
+`codex/zigeffect-causal-production-telemetry-ci-gate-readiness` after the
+delivered production telemetry CI archive evidence policy.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in
