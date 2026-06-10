@@ -611,6 +611,21 @@ durable production storage, host a production dashboard, orchestrate
 production clusters, add non-NenDB adapter work, add alternate renderers, or
 grant production mutation authority.
 
+- `zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-readiness.v1`
+
+The production-telemetry-ci-gate-required-status-check-enforcement-readiness
+report is a record-only evidence gate. It consumes required-status-check
+policy artifacts, blocks planned policy sources from becoming ready, requires
+externally applied source policy plus required check names, branch-protection
+evidence, workflow or check-run evidence, failure-mode evidence, owner
+approval, rollback evidence, and verification commands before readiness can
+hand off to an enforcement application-boundary branch. It keeps active
+enforcement claims, merge-blocker claims, GitHub API mutation, branch
+protection mutation by the tool, workflow mutation by the tool, check-run
+creation by the tool, CI upload execution, live telemetry, durable writes,
+NenDB writes, non-NenDB adapter work, alternate renderer scope, and mutation
+authority denied.
+
 ### Human-Agent Feedback
 
 - `zigeffect.causal.human-agent-feedback-loop.v1`

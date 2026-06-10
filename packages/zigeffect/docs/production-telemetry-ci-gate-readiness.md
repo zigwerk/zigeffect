@@ -97,7 +97,7 @@ report application boundary is now delivered by
 `causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary`.
 The current next
 branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-readiness`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-application-boundary`.
 
 ## Verification
 

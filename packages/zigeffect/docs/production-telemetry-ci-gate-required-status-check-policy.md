@@ -67,9 +67,11 @@ Ready policy artifacts hand off to:
 
 `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-readiness`
 
-That branch should define what additional externally verifiable GitHub,
-branch-protection, workflow, and CI evidence is required before an agent may
-describe a required status check as active enforcement.
+That branch defines the additional externally verifiable GitHub,
+branch-protection, workflow, CI, failure-mode, owner approval, and rollback
+evidence required before a future enforcement application-boundary branch can
+start. It still does not let an agent describe a required status check as
+active enforcement.
 
 ## Verification
 

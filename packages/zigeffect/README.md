@@ -805,6 +805,41 @@ gate enforcement, write NenDB, write durable storage, or grant mutation
 authority. The full policy is in
 [docs/production-telemetry-ci-gate-required-status-check-policy.md](docs/production-telemetry-ci-gate-required-status-check-policy.md).
 
+Review the production telemetry CI gate required status check enforcement
+readiness evidence:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-readiness -- \
+  --from-policy ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-policy.json \
+  approve \
+  --reason "required status check enforcement readiness reviewed" \
+  --required-check-name "zigeffect causal release gate" \
+  --branch-protection-evidence "reviewed branch protection required status check evidence" \
+  --workflow-evidence "reviewed release gate workflow evidence" \
+  --failure-mode-evidence "reviewed failing release gate blocks future required check" \
+  --owner-approval "reviewed owner approval for future required check enforcement" \
+  --rollback-evidence "reviewed rollback removes required status check from branch protection" \
+  --verified-command "zig build causal-production-telemetry-ci-gate-required-status-check-policy" \
+  --verified-command "zig build causal-artifacts" \
+  --verified-command "zig build release-gate --summary none" \
+  --verified-command "zig build release-gate-report" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The enforcement-readiness artifact uses schema
+`zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-readiness.v1`,
+requires an applied source policy plus explicit branch-protection, workflow or
+check-run, failure-mode, owner approval, rollback, and verification evidence,
+and hands off to the enforcement application-boundary branch. It does not
+claim an active required status check, active merge blocking, GitHub mutation,
+workflow mutation, CI upload execution, live telemetry, NenDB writes, durable
+writes, production health, or mutation authority. The full policy is in
+[docs/production-telemetry-ci-gate-required-status-check-enforcement-readiness.md](docs/production-telemetry-ci-gate-required-status-check-enforcement-readiness.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -830,9 +865,9 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-readiness`
-after the delivered production telemetry CI gate required status check policy
-milestone.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-application-boundary`
+after the delivered production telemetry CI gate required status check
+enforcement-readiness milestone.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in
