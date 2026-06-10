@@ -682,16 +682,16 @@ Goal: persist cluster messages independently of runner memory.
 
 Deliverables:
 
-- [ ] Add `MessageStorage` contract.
-- [ ] Implement in-memory message storage.
-- [ ] Implement file-backed message storage.
-- [ ] Add unprocessed messages by shard.
-- [ ] Add unprocessed messages by id.
-- [ ] Add ack and reply storage.
+- [x] Add `MessageStorage` contract.
+- [x] Implement in-memory message storage.
+- [x] Implement file-backed message storage.
+- [x] Add unprocessed messages by shard.
+- [x] Add unprocessed messages by id.
+- [x] Add ack and reply storage.
 
 Acceptance:
 
-- [ ] Recovery replays unprocessed messages without losing replies.
+- [x] Recovery replays unprocessed messages without losing replies.
 
 ## Milestone 32: Cluster Entity Runtime
 
