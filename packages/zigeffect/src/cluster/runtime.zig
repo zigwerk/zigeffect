@@ -7,6 +7,7 @@ const message_storage = @import("message_storage.zig");
 const routing = @import("routing.zig");
 const shard_lease = @import("shard_lease.zig");
 const fencing = @import("fencing.zig");
+const supervision = @import("supervision.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const EntityAddress = identity.EntityAddress;
@@ -25,6 +26,8 @@ pub const LocalShardLeaseManager = shard_lease.LocalShardLeaseManager;
 pub const EntityRegistration = entity.EntityRegistration;
 pub const EntityRuntimeError = entity.EntityRuntimeError;
 pub const LocalEntityRuntimeOptions = entity.LocalEntityRuntimeOptions;
+pub const ClusterSupervisionPolicy = supervision.ClusterSupervisionPolicy;
+pub const ClusterSupervisionReport = supervision.ClusterSupervisionReport;
 
 pub const ClusterRuntimeError = error{
     RuntimeShuttingDown,
@@ -37,6 +40,7 @@ pub const ClusterRuntimeError = error{
 pub const ClusterRuntimeOptions = struct {
     shard_count: ShardCount,
     entity_runtime_options: LocalEntityRuntimeOptions = .{},
+    supervision_policy: ClusterSupervisionPolicy = .{},
 };
 
 pub const ClusterProcessReport = struct {
@@ -92,6 +96,7 @@ pub const ClusterRuntime = struct {
     lease_manager: *LocalShardLeaseManager,
     local_runtime: entity.LocalEntityRuntime,
     shard_count: ShardCount,
+    supervision_policy: ClusterSupervisionPolicy = .{},
     owned_shards: std.ArrayList(ShardId) = .empty,
     accepting_messages: bool = true,
     next_message_sequence: u64 = 1,
@@ -109,6 +114,7 @@ pub const ClusterRuntime = struct {
             .lease_manager = lease_manager,
             .local_runtime = entity.LocalEntityRuntime.init(allocator, options.entity_runtime_options),
             .shard_count = options.shard_count,
+            .supervision_policy = options.supervision_policy,
         };
     }
 
@@ -187,6 +193,20 @@ pub const ClusterRuntime = struct {
         return total;
     }
 
+    pub fn processOwnedShardsSupervised(self: *ClusterRuntime, handler: anytype, now_ms: u64) !ClusterSupervisionReport {
+        var total = ClusterSupervisionReport{};
+        var index: usize = 0;
+        while (index < self.owned_shards.items.len) {
+            const shard_id = self.owned_shards.items[index];
+            const report = try self.processShardSupervised(shard_id, handler, now_ms);
+            total.add(report);
+            if (self.ownsShard(shard_id)) {
+                index += 1;
+            }
+        }
+        return total;
+    }
+
     pub fn processShard(self: *ClusterRuntime, shard_id: ShardId, handler: anytype, now_ms: u64) !ClusterProcessReport {
         if (!self.ownsShard(shard_id)) return error.ShardNotOwned;
         self.validateShardFence(shard_id) catch |err| switch (err) {
@@ -216,6 +236,72 @@ pub const ClusterRuntime = struct {
             var result = self.local_runtime.processEnvelope(entity_envelope, handler, now_ms) catch |err| {
                 report.failed += 1;
                 return err;
+            };
+            defer result.deinit(self.allocator);
+            report.dispatched += 1;
+
+            if (result.replied) {
+                const correlation_id = result.envelope.correlation_id orelse return error.MissingReply;
+                const local_reply = try self.local_runtime.takeReply(correlation_id);
+                defer mailbox.deinitEntityEnvelope(self.allocator, local_reply);
+                const durable_reply = try entityReplyToMessageEnvelope(self.allocator, local_reply);
+                defer envelope.deinitMessageEnvelope(self.allocator, durable_reply);
+                const stored_reply = try self.message_storage.storeReply(.{
+                    .shard_id = shard_id,
+                    .envelope = durable_reply,
+                    .now_ms = now_ms,
+                });
+                defer envelope.deinitMessageEnvelope(self.allocator, stored_reply);
+                report.replied += 1;
+            }
+
+            try self.message_storage.ack(.{
+                .message_id = claimed.id,
+                .now_ms = now_ms,
+            });
+            report.acked += 1;
+        }
+
+        return report;
+    }
+
+    pub fn processShardSupervised(self: *ClusterRuntime, shard_id: ShardId, handler: anytype, now_ms: u64) !ClusterSupervisionReport {
+        if (!self.ownsShard(shard_id)) return error.ShardNotOwned;
+        self.validateShardFence(shard_id) catch |err| switch (err) {
+            error.StaleShardFence => {
+                self.removeOwnedShard(shard_id);
+                self.accepting_messages = false;
+                return err;
+            },
+            else => return err,
+        };
+
+        var report = ClusterSupervisionReport{};
+        var batch = try self.message_storage.unprocessedByShard(shard_id, self.allocator);
+        defer batch.deinit();
+
+        for (batch.records) |record| {
+            report.scanned += 1;
+            const claimed = try self.message_storage.claim(.{
+                .shard_id = shard_id,
+                .message_id = record.envelope.id,
+                .now_ms = now_ms,
+            });
+            defer envelope.deinitMessageEnvelope(self.allocator, claimed);
+            report.claimed += 1;
+
+            const entity_envelope = try messageToEntityEnvelope(self.allocator, claimed);
+            var result = self.local_runtime.processEnvelope(entity_envelope, handler, now_ms) catch |err| {
+                report.failed += 1;
+                report.entity_failures += 1;
+                const decision = (try self.local_runtime.lastSupervisorDecision(record.envelope.address)) orelse return err;
+                if (decision.restarted_children > 0) {
+                    report.entity_restarts += 1;
+                }
+                if (decision.escalated) {
+                    report.entity_escalations += 1;
+                }
+                continue;
             };
             defer result.deinit(self.allocator);
             report.dispatched += 1;

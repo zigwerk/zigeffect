@@ -71,3 +71,68 @@ test "entity runtime exposes last supervisor decision after handler failure" {
     try std.testing.expectEqual(@as(usize, 1), decision.restarted_children);
     try std.testing.expect(!decision.escalated);
 }
+
+test "supervised cluster processing records local entity restart and keeps shard" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    const runner_storage = runner_storage_state.asRunnerStorage();
+    const owner = fx.runnerAddress("machine-supervision", "runner-a");
+    var lease_manager = try fx.LocalShardLeaseManager.init(
+        std.testing.allocator,
+        runner_storage,
+        owner,
+        .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    );
+    defer lease_manager.deinit();
+
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+
+    var runtime = try fx.ClusterRuntime.init(
+        std.testing.allocator,
+        message_storage,
+        &lease_manager,
+        .{
+            .shard_count = 8,
+            .entity_runtime_options = .{ .restart_intensity = .{ .max_restarts = 2, .within_ms = 1_000 } },
+        },
+    );
+    defer runtime.deinit();
+
+    const address = try addressForShard(0, 8);
+    _ = try runtime.acquireShard(0, 1_000);
+    const ref = try runtime.registerEntity(.{ .address = address, .name = "supervised-counter" }, 1_000);
+    var submitted = try ref.tell("text", "boom", "supervised-failure");
+    defer submitted.deinit(std.testing.allocator);
+
+    const Handler = struct {
+        pub fn handle(_: *fx.EntityScope, _: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            return error.Boom;
+        }
+    };
+
+    const report = try runtime.processShardSupervised(0, Handler, 1_100);
+    try std.testing.expectEqual(@as(usize, 1), report.failed);
+    try std.testing.expectEqual(@as(usize, 1), report.entity_failures);
+    try std.testing.expectEqual(@as(usize, 1), report.entity_restarts);
+    try std.testing.expectEqual(@as(usize, 0), report.entity_escalations);
+    try std.testing.expectEqual(@as(usize, 0), report.shard_releases);
+    try std.testing.expect(runtime.ownsShard(0));
+    try std.testing.expectEqual(fx.EntityStatus.running, try runtime.local_runtime.status(address));
+
+    var retryable = (try message_storage.unprocessedById(submitted.envelope.id, std.testing.allocator)).?;
+    defer retryable.deinit(std.testing.allocator);
+    try std.testing.expectEqual(fx.MessageDeliveryStatus.claimed, retryable.status);
+}
+
+fn addressForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.EntityAddress {
+    var id: u64 = 1;
+    while (id < 100_000) : (id += 1) {
+        var key_buf: [32]u8 = undefined;
+        const key = std.fmt.bufPrint(&key_buf, "supervised-{d}", .{id}) catch unreachable;
+        const address = fx.entityAddress("supervised", key);
+        if (try fx.shardIdForAddress(address, shard_count) == shard_id) return address;
+    }
+    return error.EntityShardNotFound;
+}
