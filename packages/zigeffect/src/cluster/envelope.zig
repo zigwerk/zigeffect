@@ -1,6 +1,7 @@
 const std = @import("std");
 const identity = @import("identity.zig");
 const mailbox_mod = @import("mailbox.zig");
+const runner_storage = @import("runner_storage.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const EntityAddress = identity.EntityAddress;
@@ -36,6 +37,7 @@ pub const MessageEnvelope = struct {
     span_id: ?u64 = null,
     chunk_index: ?u32 = null,
     chunk_count: ?u32 = null,
+    lease_epoch: ?runner_storage.ShardLeaseEpoch = null,
     payload_type_name: []const u8 = "",
     payload: []const u8 = "",
     redacted_detail: []const u8 = "",

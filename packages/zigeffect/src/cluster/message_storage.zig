@@ -1,6 +1,7 @@
 const std = @import("std");
 const envelope_mod = @import("envelope.zig");
 const routing = @import("routing.zig");
+const runner_storage = @import("runner_storage.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const ShardId = routing.ShardId;
@@ -9,6 +10,7 @@ pub const MessageCorrelationId = envelope_mod.MessageCorrelationId;
 pub const MessageEnvelope = envelope_mod.MessageEnvelope;
 pub const MessageDeliveryStatus = envelope_mod.MessageDeliveryStatus;
 pub const MessageSubmitResult = envelope_mod.MessageSubmitResult;
+pub const ShardLeaseEpoch = runner_storage.ShardLeaseEpoch;
 
 pub const MessageStorageError = error{
     MessageNotFound,
@@ -24,6 +26,7 @@ pub const StoredMessageRecord = struct {
     status: MessageDeliveryStatus = .pending,
     stored_at_ms: u64,
     updated_at_ms: u64,
+    lease_epoch: ?ShardLeaseEpoch = null,
 
     pub fn deinit(self: *StoredMessageRecord, allocator: Allocator) void {
         envelope_mod.deinitMessageEnvelope(allocator, self.envelope);
@@ -34,6 +37,7 @@ pub const StoredReplyRecord = struct {
     shard_id: ShardId,
     envelope: MessageEnvelope,
     stored_at_ms: u64,
+    lease_epoch: ?ShardLeaseEpoch = null,
 
     pub fn deinit(self: *StoredReplyRecord, allocator: Allocator) void {
         envelope_mod.deinitMessageEnvelope(allocator, self.envelope);
@@ -44,23 +48,28 @@ pub const MessageStorageSubmit = struct {
     shard_id: ShardId,
     envelope: MessageEnvelope,
     now_ms: u64 = 0,
+    lease_epoch: ?ShardLeaseEpoch = null,
 };
 
 pub const MessageStorageClaim = struct {
     shard_id: ShardId,
     message_id: MessageId,
     now_ms: u64 = 0,
+    lease_epoch: ?ShardLeaseEpoch = null,
 };
 
 pub const MessageStorageAck = struct {
     message_id: MessageId,
+    shard_id: ?ShardId = null,
     now_ms: u64 = 0,
+    lease_epoch: ?ShardLeaseEpoch = null,
 };
 
 pub const MessageStorageReply = struct {
     shard_id: ShardId,
     envelope: MessageEnvelope,
     now_ms: u64 = 0,
+    lease_epoch: ?ShardLeaseEpoch = null,
 };
 
 pub const MessageRecordBatch = struct {
@@ -153,7 +162,8 @@ pub const InMemoryMessageStorage = struct {
             };
         }
 
-        const owned = try prepareEnvelope(self.allocator, request.envelope);
+        var owned = try prepareEnvelope(self.allocator, request.envelope);
+        owned.lease_epoch = request.lease_epoch orelse owned.lease_epoch;
         errdefer envelope_mod.deinitMessageEnvelope(self.allocator, owned);
         const returned = try envelope_mod.cloneMessageEnvelope(self.allocator, owned);
         errdefer envelope_mod.deinitMessageEnvelope(self.allocator, returned);
@@ -162,6 +172,7 @@ pub const InMemoryMessageStorage = struct {
             .envelope = owned,
             .stored_at_ms = request.now_ms,
             .updated_at_ms = request.now_ms,
+            .lease_epoch = owned.lease_epoch,
         });
         return .{ .envelope = returned };
     }
@@ -173,13 +184,20 @@ pub const InMemoryMessageStorage = struct {
         if (!messageIsUnprocessed(record.status)) return error.MessageNotFound;
         record.status = .claimed;
         record.envelope.attempt += 1;
+        record.lease_epoch = request.lease_epoch orelse record.lease_epoch;
+        record.envelope.lease_epoch = record.lease_epoch;
         record.updated_at_ms = request.now_ms;
         return envelope_mod.cloneMessageEnvelope(self.allocator, record.envelope);
     }
 
     pub fn ack(self: *InMemoryMessageStorage, request: MessageStorageAck) MessageStorageError!void {
         const index = self.findMessageIndex(request.message_id) orelse return error.MessageNotFound;
+        if (request.shard_id) |shard_id| {
+            if (self.messages.items[index].shard_id != shard_id) return error.MessageNotFound;
+        }
         self.messages.items[index].status = .acknowledged;
+        self.messages.items[index].lease_epoch = request.lease_epoch orelse self.messages.items[index].lease_epoch;
+        self.messages.items[index].envelope.lease_epoch = self.messages.items[index].lease_epoch;
         self.messages.items[index].updated_at_ms = request.now_ms;
     }
 
@@ -188,7 +206,8 @@ pub const InMemoryMessageStorage = struct {
         const request_index = self.findRequestIndexByCorrelation(correlation_id) orelse return error.MissingRequest;
         if (self.findReplyIndexByCorrelation(correlation_id) != null) return error.DuplicateReply;
 
-        const owned = try prepareEnvelope(self.allocator, request.envelope);
+        var owned = try prepareEnvelope(self.allocator, request.envelope);
+        owned.lease_epoch = request.lease_epoch orelse owned.lease_epoch;
         errdefer envelope_mod.deinitMessageEnvelope(self.allocator, owned);
         const returned = try envelope_mod.cloneMessageEnvelope(self.allocator, owned);
         errdefer envelope_mod.deinitMessageEnvelope(self.allocator, returned);
@@ -196,6 +215,7 @@ pub const InMemoryMessageStorage = struct {
             .shard_id = request.shard_id,
             .envelope = owned,
             .stored_at_ms = request.now_ms,
+            .lease_epoch = owned.lease_epoch,
         });
         self.messages.items[request_index].status = .replied;
         self.messages.items[request_index].updated_at_ms = request.now_ms;
@@ -330,7 +350,8 @@ pub const FileMessageStorage = struct {
             };
         }
 
-        const owned = try prepareEnvelope(self.allocator, request.envelope);
+        var owned = try prepareEnvelope(self.allocator, request.envelope);
+        owned.lease_epoch = request.lease_epoch orelse owned.lease_epoch;
         errdefer envelope_mod.deinitMessageEnvelope(self.allocator, owned);
         const returned = try envelope_mod.cloneMessageEnvelope(self.allocator, owned);
         errdefer envelope_mod.deinitMessageEnvelope(self.allocator, returned);
@@ -339,6 +360,7 @@ pub const FileMessageStorage = struct {
             .envelope = owned,
             .stored_at_ms = request.now_ms,
             .updated_at_ms = request.now_ms,
+            .lease_epoch = owned.lease_epoch,
         };
         defer record.deinit(self.allocator);
         try self.writeMessageRecord(record);
@@ -356,6 +378,8 @@ pub const FileMessageStorage = struct {
 
         record.status = .claimed;
         record.envelope.attempt += 1;
+        record.lease_epoch = request.lease_epoch orelse record.lease_epoch;
+        record.envelope.lease_epoch = record.lease_epoch;
         record.updated_at_ms = request.now_ms;
         try self.writeMessageRecord(record);
         return envelope_mod.cloneMessageEnvelope(self.allocator, record.envelope);
@@ -367,7 +391,12 @@ pub const FileMessageStorage = struct {
         var record = (try self.readMessageRecordWithAllocator(name, self.allocator)) orelse return error.MessageNotFound;
         defer record.deinit(self.allocator);
 
+        if (request.shard_id) |shard_id| {
+            if (record.shard_id != shard_id) return error.MessageNotFound;
+        }
         record.status = .acknowledged;
+        record.lease_epoch = request.lease_epoch orelse record.lease_epoch;
+        record.envelope.lease_epoch = record.lease_epoch;
         record.updated_at_ms = request.now_ms;
         try self.writeMessageRecord(record);
     }
@@ -385,7 +414,8 @@ pub const FileMessageStorage = struct {
         var request_record = (try self.findRequestRecordByCorrelation(correlation_id)) orelse return error.MissingRequest;
         defer request_record.deinit(self.allocator);
 
-        const owned = try prepareEnvelope(self.allocator, request.envelope);
+        var owned = try prepareEnvelope(self.allocator, request.envelope);
+        owned.lease_epoch = request.lease_epoch orelse owned.lease_epoch;
         errdefer envelope_mod.deinitMessageEnvelope(self.allocator, owned);
         const returned = try envelope_mod.cloneMessageEnvelope(self.allocator, owned);
         errdefer envelope_mod.deinitMessageEnvelope(self.allocator, returned);
@@ -393,6 +423,7 @@ pub const FileMessageStorage = struct {
             .shard_id = request.shard_id,
             .envelope = owned,
             .stored_at_ms = request.now_ms,
+            .lease_epoch = owned.lease_epoch,
         };
         defer reply_record.deinit(self.allocator);
 
@@ -558,6 +589,7 @@ const StoredMessageRecordJson = struct {
     payload_type_name: []const u8 = "",
     payload: []const u8 = "",
     redacted_detail: []const u8 = "",
+    lease_epoch: ?ShardLeaseEpoch = null,
 };
 
 const StoredReplyRecordJson = struct {
@@ -579,6 +611,7 @@ const StoredReplyRecordJson = struct {
     payload_type_name: []const u8 = "",
     payload: []const u8 = "",
     redacted_detail: []const u8 = "",
+    lease_epoch: ?ShardLeaseEpoch = null,
 };
 
 pub fn messageRecordFileName(allocator: Allocator, options: FileMessageStorageOptions, message_id_value: MessageId) Allocator.Error![]const u8 {
@@ -619,7 +652,9 @@ pub fn formatStoredMessageRecordJson(allocator: Allocator, record: StoredMessage
     try appendJsonString(&output, allocator, @tagName(record.status));
     try output.print(allocator, ",\"stored_at_ms\":{d}", .{record.stored_at_ms});
     try output.print(allocator, ",\"updated_at_ms\":{d}", .{record.updated_at_ms});
-    try appendEnvelopeJsonFields(&output, allocator, record.envelope);
+    var envelope = record.envelope;
+    envelope.lease_epoch = record.lease_epoch orelse envelope.lease_epoch;
+    try appendEnvelopeJsonFields(&output, allocator, envelope);
     try output.append(allocator, '}');
     return output.toOwnedSlice(allocator);
 }
@@ -642,6 +677,7 @@ pub fn parseStoredMessageRecordJson(allocator: Allocator, content: []const u8) (
         .status = status,
         .stored_at_ms = parsed.value.stored_at_ms,
         .updated_at_ms = parsed.value.updated_at_ms,
+        .lease_epoch = parsed.value.lease_epoch,
     };
 }
 
@@ -654,7 +690,9 @@ pub fn formatStoredReplyRecordJson(allocator: Allocator, record: StoredReplyReco
     try output.print(allocator, ",\"schema_version\":{d}", .{message_reply_schema_version});
     try output.print(allocator, ",\"shard_id\":{d}", .{record.shard_id});
     try output.print(allocator, ",\"stored_at_ms\":{d}", .{record.stored_at_ms});
-    try appendEnvelopeJsonFields(&output, allocator, record.envelope);
+    var envelope = record.envelope;
+    envelope.lease_epoch = record.lease_epoch orelse envelope.lease_epoch;
+    try appendEnvelopeJsonFields(&output, allocator, envelope);
     try output.append(allocator, '}');
     return output.toOwnedSlice(allocator);
 }
@@ -674,6 +712,7 @@ pub fn parseStoredReplyRecordJson(allocator: Allocator, content: []const u8) (Al
         .shard_id = parsed.value.shard_id,
         .envelope = try envelopeFromJson(allocator, parsed.value, kind),
         .stored_at_ms = parsed.value.stored_at_ms,
+        .lease_epoch = parsed.value.lease_epoch,
     };
 }
 
@@ -720,6 +759,8 @@ fn appendEnvelopeJsonFields(output: *std.ArrayList(u8), allocator: Allocator, en
     try appendOptionalJsonU64(output, allocator, if (envelope.chunk_index) |index| @as(u64, index) else null);
     try output.appendSlice(allocator, ",\"chunk_count\":");
     try appendOptionalJsonU64(output, allocator, if (envelope.chunk_count) |count| @as(u64, count) else null);
+    try output.appendSlice(allocator, ",\"lease_epoch\":");
+    try appendOptionalJsonU64(output, allocator, envelope.lease_epoch);
     try output.appendSlice(allocator, ",\"payload_type_name\":");
     try appendJsonString(output, allocator, envelope.payload_type_name);
     try output.appendSlice(allocator, ",\"payload\":");
@@ -754,6 +795,7 @@ fn envelopeFromJson(allocator: Allocator, value: anytype, kind: envelope_mod.Mes
         .span_id = value.span_id,
         .chunk_index = value.chunk_index,
         .chunk_count = value.chunk_count,
+        .lease_epoch = value.lease_epoch,
         .payload_type_name = payload_type_name,
         .payload = payload,
         .redacted_detail = redacted_detail,
@@ -794,6 +836,7 @@ fn cloneStoredMessageRecord(allocator: Allocator, record: StoredMessageRecord) A
         .status = record.status,
         .stored_at_ms = record.stored_at_ms,
         .updated_at_ms = record.updated_at_ms,
+        .lease_epoch = record.lease_epoch,
     };
 }
 

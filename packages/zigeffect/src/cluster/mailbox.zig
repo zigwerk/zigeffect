@@ -1,5 +1,6 @@
 const std = @import("std");
 const identity = @import("identity.zig");
+const runner_storage = @import("runner_storage.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const EntityAddress = identity.EntityAddress;
@@ -15,6 +16,7 @@ pub const EntityEnvelope = struct {
     kind: EntityEnvelopeKind,
     address: EntityAddress,
     correlation_id: ?EntityCorrelationId = null,
+    lease_epoch: ?runner_storage.ShardLeaseEpoch = null,
     payload_type_name: []const u8 = "",
     payload: []const u8 = "",
     redacted_detail: []const u8 = "",
