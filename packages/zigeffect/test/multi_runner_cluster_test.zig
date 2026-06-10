@@ -66,3 +66,106 @@ test "local cluster router writes tell and ask messages to shared file storage" 
     try std.testing.expect(saw_tell);
     try std.testing.expect(saw_request);
 }
+
+test "two local cluster runners split shards and process routed file-backed messages" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var runner_storage_a = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer runner_storage_a.deinit();
+    var runner_storage_b = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer runner_storage_b.deinit();
+    var message_storage_a = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_a.deinit();
+    var message_storage_b = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_b.deinit();
+    const shared_messages = message_storage_a.asMessageStorage();
+
+    var runner_a = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = fx.runnerAddress("machine-local", "runner-a"),
+        .runner_storage = runner_storage_a.asRunnerStorage(),
+        .message_storage = message_storage_a.asMessageStorage(),
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 2,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    });
+    defer runner_a.deinit();
+    var runner_b = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = fx.runnerAddress("machine-local", "runner-b"),
+        .runner_storage = runner_storage_b.asRunnerStorage(),
+        .message_storage = message_storage_b.asMessageStorage(),
+        .shard_count = 8,
+        .runner_index = 1,
+        .runner_count = 2,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    });
+    defer runner_b.deinit();
+
+    var plan_a = try runner_a.acquireBalancedShards(1_000);
+    defer plan_a.deinit();
+    var plan_b = try runner_b.acquireBalancedShards(1_000);
+    defer plan_b.deinit();
+    try std.testing.expectEqualSlices(fx.ShardId, &.{ 0, 2, 4, 6 }, plan_a.shards);
+    try std.testing.expectEqualSlices(fx.ShardId, &.{ 1, 3, 5, 7 }, plan_b.shards);
+
+    const even_address = try addressForShard(0, 8);
+    const odd_address = try addressForShard(1, 8);
+    _ = try runner_a.registerEntity(.{ .address = even_address, .name = "even" }, 1_000);
+    _ = try runner_b.registerEntity(.{ .address = odd_address, .name = "odd" }, 1_000);
+
+    var seen_a = std.ArrayList([]u8).empty;
+    defer {
+        for (seen_a.items) |item| std.testing.allocator.free(item);
+        seen_a.deinit(std.testing.allocator);
+    }
+    var seen_b = std.ArrayList([]u8).empty;
+    defer {
+        for (seen_b.items) |item| std.testing.allocator.free(item);
+        seen_b.deinit(std.testing.allocator);
+    }
+    try (try runner_a.entityScope(even_address)).provideService("seen", &seen_a);
+    try (try runner_b.entityScope(odd_address)).provideService("seen", &seen_b);
+
+    var even_ask = try runner_a.router.routeAsk(even_address, "text", "even-get", "read even");
+    defer even_ask.deinit(std.testing.allocator);
+    var odd_ask = try runner_a.router.routeAsk(odd_address, "text", "odd-get", "read odd");
+    defer odd_ask.deinit(std.testing.allocator);
+
+    const Handler = struct {
+        pub fn handle(entity_scope: *fx.EntityScope, envelope: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            const raw = (try entity_scope.service("seen")).?;
+            const seen_messages: *std.ArrayList([]u8) = @ptrCast(@alignCast(raw));
+            const owned_payload = try std.testing.allocator.dupe(u8, envelope.payload);
+            errdefer std.testing.allocator.free(owned_payload);
+            try seen_messages.append(std.testing.allocator, owned_payload);
+            if (envelope.kind == .ask) return .{ .reply = "value=ok" };
+            return .noreply;
+        }
+    };
+
+    const report_a = try runner_a.tick(Handler, 1_100);
+    const report_b = try runner_b.tick(Handler, 1_100);
+    try std.testing.expectEqual(@as(usize, 1), report_a.dispatched);
+    try std.testing.expectEqual(@as(usize, 1), report_b.dispatched);
+    try std.testing.expectEqualStrings("even-get", seen_a.items[0]);
+    try std.testing.expectEqualStrings("odd-get", seen_b.items[0]);
+
+    const even_reply = (try shared_messages.reply(even_ask.correlation_id.?, std.testing.allocator)).?;
+    defer fx.deinitMessageEnvelope(std.testing.allocator, even_reply);
+    const odd_reply = (try shared_messages.reply(odd_ask.correlation_id.?, std.testing.allocator)).?;
+    defer fx.deinitMessageEnvelope(std.testing.allocator, odd_reply);
+    try std.testing.expectEqualStrings("value=ok", even_reply.payload);
+    try std.testing.expectEqualStrings("value=ok", odd_reply.payload);
+}
+
+fn addressForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.EntityAddress {
+    var index: usize = 0;
+    while (index < 10_000) : (index += 1) {
+        var key_buf: [32]u8 = undefined;
+        const key = try std.fmt.bufPrint(&key_buf, "entity-{d}-{d}", .{ shard_id, index });
+        const address = fx.entityAddress("counter", key);
+        if (try fx.shardIdForAddress(address, shard_count) == shard_id) return address;
+    }
+    return error.ShardAddressNotFound;
+}

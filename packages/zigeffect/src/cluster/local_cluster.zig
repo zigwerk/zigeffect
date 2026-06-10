@@ -1,18 +1,32 @@
 const std = @import("std");
+const cluster_runtime = @import("runtime.zig");
+const entity = @import("entity.zig");
 const envelope = @import("envelope.zig");
 const identity = @import("identity.zig");
 const message_storage = @import("message_storage.zig");
+const runner = @import("runner.zig");
+const runner_storage = @import("runner_storage.zig");
 const routing = @import("routing.zig");
+const shard_lease = @import("shard_lease.zig");
 
 pub const Allocator = std.mem.Allocator;
+pub const ClusterRuntime = cluster_runtime.ClusterRuntime;
+pub const ClusterRuntimeOptions = cluster_runtime.ClusterRuntimeOptions;
+pub const EntityRegistration = entity.EntityRegistration;
+pub const EntityRuntimeError = entity.EntityRuntimeError;
+pub const EntityScope = entity.EntityScope;
 pub const EntityAddress = identity.EntityAddress;
+pub const LocalEntityRuntimeOptions = entity.LocalEntityRuntimeOptions;
 pub const MessageCorrelationId = envelope.MessageCorrelationId;
 pub const MessageEnvelope = envelope.MessageEnvelope;
 pub const MessageEnvelopeKind = envelope.MessageEnvelopeKind;
 pub const MessageStorage = message_storage.MessageStorage;
 pub const MessageSubmitResult = envelope.MessageSubmitResult;
+pub const RunnerAddress = runner.RunnerAddress;
+pub const RunnerStorage = runner_storage.RunnerStorage;
 pub const ShardCount = routing.ShardCount;
 pub const ShardId = routing.ShardId;
+pub const ShardLeaseManagerOptions = shard_lease.ShardLeaseManagerOptions;
 
 pub const LocalClusterError = error{
     InvalidShardCount,
@@ -105,7 +119,16 @@ pub const LocalClusterRouter = struct {
     }
 };
 
-pub const LocalClusterRunnerOptions = struct {};
+pub const LocalClusterRunnerOptions = struct {
+    runner: RunnerAddress,
+    runner_storage: RunnerStorage,
+    message_storage: MessageStorage,
+    shard_count: ShardCount,
+    runner_index: usize,
+    runner_count: usize,
+    lease_options: ShardLeaseManagerOptions,
+    entity_runtime_options: LocalEntityRuntimeOptions = .{},
+};
 
 pub const LocalClusterRunnerReport = struct {
     refreshed: usize = 0,
@@ -121,7 +144,101 @@ pub const LocalClusterRunnerReport = struct {
     skipped: usize = 0,
 };
 
-pub const LocalClusterRunner = struct {};
+pub const LocalClusterRunner = struct {
+    allocator: Allocator,
+    runner: RunnerAddress,
+    lease_manager: *shard_lease.LocalShardLeaseManager,
+    runtime: ClusterRuntime,
+    router: LocalClusterRouter,
+    shard_count: ShardCount,
+    runner_index: usize,
+    runner_count: usize,
+
+    pub fn init(allocator: Allocator, options: LocalClusterRunnerOptions) !LocalClusterRunner {
+        const lease_manager = try allocator.create(shard_lease.LocalShardLeaseManager);
+        errdefer allocator.destroy(lease_manager);
+        lease_manager.* = try shard_lease.LocalShardLeaseManager.init(
+            allocator,
+            options.runner_storage,
+            options.runner,
+            options.lease_options,
+        );
+        errdefer lease_manager.deinit();
+
+        var runtime = try ClusterRuntime.init(
+            allocator,
+            options.message_storage,
+            lease_manager,
+            .{
+                .shard_count = options.shard_count,
+                .entity_runtime_options = options.entity_runtime_options,
+            },
+        );
+        errdefer runtime.deinit();
+
+        return .{
+            .allocator = allocator,
+            .runner = options.runner,
+            .lease_manager = lease_manager,
+            .runtime = runtime,
+            .router = LocalClusterRouter.init(allocator, options.message_storage, .{ .shard_count = options.shard_count }),
+            .shard_count = options.shard_count,
+            .runner_index = options.runner_index,
+            .runner_count = options.runner_count,
+        };
+    }
+
+    pub fn deinit(self: *LocalClusterRunner) void {
+        self.runtime.deinit();
+        self.lease_manager.deinit();
+        self.allocator.destroy(self.lease_manager);
+    }
+
+    pub fn acquireBalancedShards(self: *LocalClusterRunner, now_ms: u64) !ShardBalancePlan {
+        var plan = try balancedShardPlan(self.allocator, self.shard_count, self.runner_index, self.runner_count);
+        errdefer plan.deinit();
+        for (plan.shards) |shard_id| {
+            _ = try self.runtime.acquireShard(shard_id, now_ms);
+        }
+        _ = try self.runtime.loadOwnedShards();
+        return plan;
+    }
+
+    pub fn loadOwnedShards(self: *LocalClusterRunner) !usize {
+        return self.runtime.loadOwnedShards();
+    }
+
+    pub fn registerEntity(self: *LocalClusterRunner, registration: EntityRegistration, now_ms: u64) !cluster_runtime.ClusterEntityRef {
+        return self.runtime.registerEntity(registration, now_ms);
+    }
+
+    pub fn entityScope(self: *LocalClusterRunner, address: EntityAddress) EntityRuntimeError!*EntityScope {
+        return self.runtime.entityScope(address);
+    }
+
+    pub fn tick(self: *LocalClusterRunner, handler: anytype, now_ms: u64) !LocalClusterRunnerReport {
+        const refresh = try self.lease_manager.refreshOwnedLeases(now_ms);
+        _ = try self.runtime.loadOwnedShards();
+        const processed = try self.runtime.processOwnedShards(handler, now_ms);
+        return .{
+            .refreshed = refresh.refreshed,
+            .reacquired = refresh.reacquired,
+            .expired = refresh.expired,
+            .conflicts = refresh.conflicts,
+            .scanned = processed.scanned,
+            .claimed = processed.claimed,
+            .dispatched = processed.dispatched,
+            .replied = processed.replied,
+            .acked = processed.acked,
+            .failed = processed.failed,
+            .skipped = processed.skipped,
+        };
+    }
+
+    pub fn shutdown(self: *LocalClusterRunner, now_ms: u64) !cluster_runtime.ClusterShutdownReport {
+        return self.runtime.shutdown(now_ms);
+    }
+};
 
 pub const ShardRecoveryPlan = struct {
     allocator: Allocator,
