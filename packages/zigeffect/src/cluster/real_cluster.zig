@@ -245,6 +245,125 @@ pub const RealClusterController = struct {
         std.mem.sort(ClusterMember, report.members, {}, clusterMemberLessThan);
         return report;
     }
+
+    pub fn placementPlan(self: *RealClusterController, allocator: Allocator, now_ms: u64) !ClusterPlacementPlan {
+        var report = try self.discoverRunners(allocator, now_ms);
+        defer report.deinit();
+
+        if (report.active == 0) return error.NoActiveClusterMembers;
+        const active = try allocator.alloc(RunnerAddress, report.active);
+        defer allocator.free(active);
+
+        var active_index: usize = 0;
+        for (report.members) |member| {
+            if (member.state != .active) continue;
+            active[active_index] = member.address;
+            active_index += 1;
+        }
+
+        const placements = try allocator.alloc(ClusterShardPlacement, self.options.shard_count);
+        errdefer allocator.free(placements);
+        var shard_id: ShardId = 0;
+        while (shard_id < @as(ShardId, self.options.shard_count)) : (shard_id += 1) {
+            placements[@intCast(shard_id)] = .{
+                .shard_id = shard_id,
+                .owner = active[@intCast(shard_id % active.len)],
+            };
+        }
+
+        return .{
+            .allocator = allocator,
+            .strategy = self.options.placement_strategy,
+            .placements = placements,
+        };
+    }
+
+    pub fn rebalancePlan(self: *RealClusterController, allocator: Allocator, placement: ClusterPlacementPlan) !ClusterRebalancePlan {
+        var leases = try self.runner_storage.leases(allocator);
+        defer leases.deinit();
+
+        var actions = std.ArrayList(ClusterRebalanceAction).empty;
+        errdefer actions.deinit(allocator);
+
+        for (placement.placements) |desired| {
+            const current = try self.runner_storage.lease(desired.shard_id);
+            if (current) |lease| {
+                if (!lease.owner.eql(desired.owner)) {
+                    try actions.append(allocator, .{
+                        .kind = .handoff,
+                        .shard_id = desired.shard_id,
+                        .from = lease.owner,
+                        .to = desired.owner,
+                    });
+                }
+            } else {
+                try actions.append(allocator, .{
+                    .kind = .acquire,
+                    .shard_id = desired.shard_id,
+                    .to = desired.owner,
+                });
+            }
+        }
+
+        for (leases.leases) |lease| {
+            if (lease.shard_id < @as(ShardId, self.options.shard_count)) continue;
+            try actions.append(allocator, .{
+                .kind = .release,
+                .shard_id = lease.shard_id,
+                .from = lease.owner,
+            });
+        }
+
+        return .{
+            .allocator = allocator,
+            .actions = try actions.toOwnedSlice(allocator),
+            .current_placements = leases.leases.len,
+            .desired_placements = placement.placements.len,
+        };
+    }
+
+    pub fn applyRebalancePlan(self: *RealClusterController, plan: ClusterRebalancePlan, now_ms: u64) !usize {
+        var applied: usize = 0;
+        for (plan.actions) |action| {
+            switch (action.kind) {
+                .acquire => {
+                    const owner = action.to orelse continue;
+                    _ = try self.runner_storage.acquire(.{
+                        .shard_id = action.shard_id,
+                        .owner = owner,
+                        .now_ms = now_ms,
+                        .ttl_ms = self.options.lease_ttl_ms,
+                    });
+                    applied += 1;
+                },
+                .release => {
+                    const owner = action.from orelse continue;
+                    try self.runner_storage.release(.{
+                        .shard_id = action.shard_id,
+                        .owner = owner,
+                    });
+                    applied += 1;
+                },
+                .handoff => {
+                    const from = action.from orelse continue;
+                    const to = action.to orelse continue;
+                    try self.runner_storage.release(.{
+                        .shard_id = action.shard_id,
+                        .owner = from,
+                    });
+                    _ = try self.runner_storage.acquire(.{
+                        .shard_id = action.shard_id,
+                        .owner = to,
+                        .now_ms = now_ms,
+                        .ttl_ms = self.options.lease_ttl_ms,
+                    });
+                    applied += 1;
+                },
+            }
+        }
+        self.recent_rebalance_actions += applied;
+        return applied;
+    }
 };
 
 fn clusterMembershipStateFromHealth(state: runner.RunnerHealthState) ClusterMembershipState {
