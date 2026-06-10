@@ -60,7 +60,9 @@ const CompileError = error{
 ```
 
 Include `OutOfMemory` when the program allocates or registers scoped finalizers.
-Let Zig prove that a function only throws errors listed in the error set.
+Include `MissingScope` when using `acquireRelease`, `acquireReleaseValue`, or
+direct scoped finalizer registration. Let Zig prove that a function only throws
+errors listed in the error set.
 
 ## Services
 
@@ -115,6 +117,168 @@ if (!report.isValid()) {
 }
 ```
 
+Use `requirementsSatisfiedBy` for a boolean preflight check when both sides have
+declared metadata:
+
+```zig
+if (!try fx.requirementsSatisfiedBy(allocator, layer, Program)) {
+    return error.InvalidDependencyGraph;
+}
+```
+
+When both sides are compile-time known wrapper types, use the static helper:
+
+```zig
+comptime {
+    fx.assertStaticRequirementsSatisfied(@TypeOf(layer), @TypeOf(Program));
+}
+```
+
+## Typed Config
+
+`Config` still supports direct string reads, and typed descriptors can parse the
+same provider values:
+
+```zig
+try config.set("http.port", "8080");
+try config.set("feature.enabled", "true");
+
+const port = try config.read(fx.Config.int("http.port"));
+const enabled = try config.read(fx.Config.boolean("feature.enabled"));
+const region = try config.read(fx.Config.string("region").withDefault("local"));
+```
+
+Load a whole typed struct from descriptors when startup code wants one config
+value object:
+
+```zig
+const AppConfig = struct {
+    name: []const u8,
+    port: i64,
+    enabled: bool,
+};
+
+const schema = fx.Config.schema(AppConfig, .{
+    .name = fx.Config.string("app.name"),
+    .port = fx.Config.int("http.port"),
+    .enabled = fx.Config.boolean("feature.enabled").withDefault(false),
+});
+
+const app = try config.readSchema(schema);
+```
+
+Use `secret()` when formatting diagnostics for sensitive keys:
+
+```zig
+const password = fx.Config.string("database.password").secret();
+const report = try fx.services.config.formatConfigError(
+    allocator,
+    password,
+    error.MissingConfig,
+);
+defer allocator.free(report);
+```
+
+Load provider data from explicit entries or dotenv/file text supplied by the
+caller:
+
+```zig
+const entries = [_]fx.ConfigEntry{
+    .{ .key = "http.port", .value = "8080" },
+    .{ .key = "feature.enabled", .value = "true" },
+};
+try config.loadEntries(&entries);
+
+try config.loadDotEnv(
+    \\database.dsn = postgres://local
+    \\feature.enabled = false
+);
+```
+
+Use `ConfigEnv` when config should participate in normal layer graph startup:
+
+```zig
+var configEnv = fx.ConfigEnv.init(allocator);
+defer configEnv.deinit();
+try configEnv.config.loadDotEnv(dotenvText);
+
+const configLayer = fx.Layer(fx.ConfigEnv)
+    .fromEnv(&configEnv)
+    .provides(.{fx.Config});
+```
+
+For a compile-checked startup example that combines config, logger, a database
+layer, graph startup validation, narrowed app execution, and fake test layers,
+see [`../examples/readiness.zig`](../examples/readiness.zig).
+
+## Observability
+
+Logger keeps plain messages for simple assertions and also records structured
+entries:
+
+```zig
+try logger.logFields(.info, "request handled", &.{
+    .{ .key = "route", .value = "/health" },
+});
+
+try logger.logWithContext(
+    .info,
+    "request handled",
+    &.{.{ .key = "status", .value = "200" }},
+    .{ .timestamp_ms = 1234, .trace_id = trace_id, .span_id = span_id },
+);
+```
+
+Runtimes can carry trace metadata into effect contexts:
+
+```zig
+var runtime = fx.Runtime(AppEnv)
+    .init(allocator, &env)
+    .withTraceContext(trace_id, span_id);
+
+try runtime.run(Program);
+```
+
+Inside `Program`, read `ctx.trace_id` and `ctx.span_id` when service calls need
+to attach the active trace context. `FiberRuntime` and `LayerGraphRuntime`
+propagate the same metadata into the contexts they create.
+
+Metrics supports counters, gauges, histograms, and deterministic snapshots:
+
+```zig
+try metrics.increment("requests.total", 1);
+try metrics.observe("request.ms", 25);
+
+var snapshot = try metrics.snapshot(allocator);
+defer snapshot.deinit();
+```
+
+Tracing supports plain events plus span ids and parent relationships:
+
+```zig
+const root = try tracing.startSpanWithAttributes("compile", null, &.{
+    .{ .key = "component", .value = "compiler" },
+});
+const child = try tracing.startSpan("parse", root);
+try tracing.endSpan(child);
+```
+
+Root spans allocate trace ids. Child spans inherit their parent's trace id.
+
+Format captured observability state for CLI diagnostics, test snapshots, or
+agent-readable reports:
+
+```zig
+const report = try fx.formatObservabilityReport(
+    allocator,
+    "health check",
+    logger,
+    metrics,
+    tracing,
+);
+defer allocator.free(report);
+```
+
 ## Layers
 
 Use `Layer.fromEnv` when a test or app already owns the environment:
@@ -166,8 +330,98 @@ fn buildEnv(allocator: std.mem.Allocator, scope: *fx.Scope)
 const layer = fx.LayerWithError(Env, StartupError).fromBuilder(buildEnv);
 ```
 
+Use `fromContextBuilder` when a layer needs services that were built by earlier
+layers in a graph:
+
+```zig
+const StartupError = error{ConnectionFailed};
+
+const Database = struct {
+    dsn: []const u8,
+};
+
+const DatabaseEnv = struct {
+    allocator: std.mem.Allocator,
+    database: Database,
+
+    pub fn service(self: *DatabaseEnv, comptime Service: type) *Service {
+        if (Service == Database) return &self.database;
+        return fx.serviceNotFound(DatabaseEnv, Service);
+    }
+};
+
+fn releaseDatabase(env: *DatabaseEnv) void {
+    env.allocator.destroy(env);
+}
+
+fn buildDatabase(
+    allocator: std.mem.Allocator,
+    scope: *fx.Scope,
+    ctx: anytype,
+) (std.mem.Allocator.Error || StartupError)!*DatabaseEnv {
+    const config = ctx.service(fx.Config);
+    const logger = ctx.service(fx.Logger);
+
+    try logger.info("database layer starting");
+    const dsn = config.require("database.dsn") catch return error.ConnectionFailed;
+
+    const env = try allocator.create(DatabaseEnv);
+    errdefer allocator.destroy(env);
+    env.* = .{
+        .allocator = allocator,
+        .database = .{ .dsn = dsn },
+    };
+    try scope.addFinalizerFor(DatabaseEnv, env, releaseDatabase);
+    return env;
+}
+
+const databaseLayer = fx.LayerWithError(DatabaseEnv, StartupError)
+    .fromContextBuilder(buildDatabase)
+    .requires(.{ fx.Config, fx.Logger })
+    .provides(.{Database});
+```
+
+Use `fromEffect` when startup is easier to express as an effect over a narrowed
+service environment:
+
+```zig
+const StartupEnv = fx.ServiceEnv(.{ fx.Config, fx.Logger });
+
+const BuildDatabase = fx.Effect(*DatabaseEnv, std.mem.Allocator.Error || StartupError, StartupEnv)
+    .fromFn(buildDatabaseEffect)
+    .requires(.{ fx.Config, fx.Logger });
+
+const databaseLayer = fx.LayerWithError(DatabaseEnv, StartupError)
+    .fromEffect(BuildDatabase)
+    .provides(.{Database});
+```
+
+The builder receives the graph startup context, not a per-run context. Services
+come from already-started dependency layers, and finalizers registered into the
+provided `scope` live until `graph.deinit()`. If a later builder fails,
+`layerGraph` closes already-started dependencies before returning the startup
+error.
+
+Use `ServiceEnv` when an app effect should depend on a narrow service slice
+instead of the whole generated graph environment:
+
+```zig
+const DatabaseOnly = fx.ServiceEnv(.{Database});
+
+const Program = fx.Effect([]const u8, AppError, DatabaseOnly)
+    .fromFn(loadFromDatabase)
+    .requires(.{Database});
+
+const value = try graph.runNarrowed(.{Database}, Program);
+```
+
+`runNarrowed` and `exitNarrowed` build a normal per-run scope, project the
+requested service pointers from the graph context, and keep startup resources
+owned by `graph.deinit()`.
+
 The scope owns teardown. Close the scope manually only in low-level tests; app
 runtime paths should normally use `Runtime.run` or `TestEnv.run`.
+For deeper ownership rules, see [Resource Ownership](resource-ownership.md).
 
 Run a program directly from a layer:
 
@@ -196,6 +450,34 @@ var report = try graph.validate(allocator);
 defer report.deinit();
 ```
 
+Executable graph runtimes can format the same report directly:
+
+```zig
+var graph = fx.layerGraph(allocator, .{ loggerLayer, appLayer });
+defer graph.deinit();
+
+const report = try graph.report("app startup");
+defer allocator.free(report);
+```
+
+Duplicate providers are invalid unless the later graph layer explicitly replaces
+the service:
+
+```zig
+const baseConfig = fx.Layer(BaseConfigEnv)
+    .fromEnv(&base)
+    .provides(.{fx.Config});
+
+const overrideConfig = fx.Layer(OverrideConfigEnv)
+    .fromEnv(&override)
+    .provides(.{fx.Config})
+    .replaces(.{fx.Config});
+```
+
+Replacement is graph-local metadata. Validation accepts the duplicate only for
+services named in `.replaces`, and generated graph environments resolve that
+service to the latest provider.
+
 Build and memoize a heterogeneous graph when callers should not hand-write a
 merged environment:
 
@@ -218,6 +500,30 @@ const result = try graph.run(Program);
 `graph.start()` validates duplicates and missing requirements, builds layers in
 dependency order, and reuses the same started environments for later `run`
 calls. `graph.deinit()` closes the startup scope and releases layer resources.
+
+Use `graph.runtime()` when a graph-started environment should run through the
+regular runtime API:
+
+```zig
+var runtime = try graph.runtime();
+const result = try runtime.run(Program);
+```
+
+Use `graph.fiberRuntime()` when the same graph-started environment should run
+through deterministic fibers:
+
+```zig
+var fiber_runtime = try graph.fiberRuntime();
+defer fiber_runtime.deinit();
+
+const fiber = try fiber_runtime.fork(Program);
+const exit = fiber_runtime.join(fiber);
+```
+
+Both adapters validate effect requirements against the graph's declared
+providers. Runtime and fiber scopes are per-run or parent/child scopes; graph
+startup resources remain owned by the graph startup scope and are released only
+when `graph.deinit()` closes that scope.
 
 ## Scoped Resources
 
@@ -260,8 +566,61 @@ The runtime creates a scope, runs the effect, and closes the scope automatically
 on success or failure. Manual scope closing is reserved for low-level tests and
 advanced cases.
 
+Use `Runtime.withScope` when an application lifecycle should own resources
+across multiple runs:
+
+```zig
+var appScope = fx.Scope.init(allocator);
+defer appScope.deinit();
+
+var runtime = fx.Runtime(AppEnv)
+    .init(allocator, &env)
+    .withScope(&appScope);
+
+_ = try runtime.run(OpenHandle);
+
+appScope.close();
+```
+
+Shared runtime scopes are explicit: the runtime does not close the scope after
+each run, and `Runtime.exit` does not include finalizer failures until the
+caller closes the shared scope. If a shared scope is already closed, resource
+registration returns `error.MissingScope` and `acquireRelease` immediately
+releases the acquired handle.
+
 If you run `OpenHandle` against a context without a scope, the effect returns
 `error.MissingScope` and immediately releases the acquired handle.
+
+Use `acquireReleaseValue` for small handle-like values where copying the value
+into a finalizer box is acceptable:
+
+```zig
+const Permit = struct {
+    id: u32,
+};
+
+fn acquirePermit(ctx: *fx.Context(AppEnv)) ResourceError!Permit {
+    _ = ctx;
+    return .{ .id = 1 };
+}
+
+fn releasePermit(permit: Permit) void {
+    _ = permit;
+}
+
+const OpenPermit = fx.acquireReleaseValue(
+    Permit,
+    ResourceError,
+    AppEnv,
+    acquirePermit,
+    releasePermit,
+);
+```
+
+The returned value is a copy. The scope owns a boxed copy for cleanup and closes
+resources in reverse acquisition order. Use this helper only for values where
+that copy-based cleanup model is safe; use pointer `acquireRelease` when a
+resource needs identity or unique mutable ownership.
 
 Fallible cleanup can be recorded by the scope:
 
@@ -324,12 +683,41 @@ var ctx = env.context();
 const fiber = try runtime.forkScoped(&ctx, Program);
 ```
 
+Use `forkInScope` when a layer builder or low-level owner already has the
+parent scope:
+
+```zig
+const fiber = try runtime.forkInScope(startup_scope, Program);
+```
+
 If the parent scope closes before the child is joined, the runtime interrupts
 the child and closes the child scope with `FinalizerExit.interrupted`.
 
-The zio adapter is the planned real async backend. Libraries that do IO should
-prefer `std.Io` at their boundaries so the zio-backed runtime can provide
-stackful coroutine execution later without changing application code.
+Use `LocalAsyncBackendState` when a local runtime, workflow scheduler, or
+cluster transport wait needs backend-owned suspension, timer wakeups, typed
+network/file waits, or cancellation wakeups:
+
+```zig
+var async_state = fx.LocalAsyncBackendState.init(allocator, .{ .now_ms = 1_000 });
+defer async_state.deinit();
+const backend = async_state.backend();
+var runtime = fx.Runtime(AppEnv).init(allocator, &env).withAsyncBackend(backend);
+```
+
+Direct-style effects stay synchronous unless they explicitly use
+`ctx.suspendRuntime`, `ctx.registerIoWait`, or return
+`RuntimeDecision.suspended`.
+
+The current backend is explicit and deterministic:
+
+```zig
+const backend = fx.deterministicBackend();
+try std.testing.expect(!backend.can_suspend);
+```
+
+`Runtime.backendCapabilities()` and `FiberRuntime.backendCapabilities()` expose
+the same capability contract. Async backend additions should preserve `Scope`,
+`Exit`, `Cause`, and service lookup contracts.
 
 Core coordination primitives are deterministic:
 
@@ -342,10 +730,33 @@ var queue = fx.Queue(u32).bounded(allocator, 16);
 defer queue.deinit();
 try queue.offer(1);
 const value = try queue.take();
+queue.shutdown();
+try std.testing.expectError(error.QueueShutdown, queue.take());
 
 var semaphore = fx.Semaphore.init(4);
 try semaphore.acquire(1);
 try semaphore.release(1);
+
+var scope = fx.Scope.init(allocator);
+defer scope.deinit();
+try semaphore.acquireScoped(&scope, 2);
+scope.close();
+```
+
+A shut down queue rejects new offers but still lets callers drain already
+buffered items. `Semaphore.acquireScoped` releases permits through the supplied
+scope, which is useful when a permit should be tied to a runtime, graph, or
+fiber lifetime.
+
+Deterministic coordination never suspends. Inspect wait states before deciding
+whether an operation would proceed, fail immediately, or suspend in a future
+backend:
+
+```zig
+try std.testing.expectEqual(fx.DeferredAwaitState.pending, deferred.awaitState());
+try std.testing.expectEqual(fx.QueueOfferState.backpressured, queue.offerState());
+try std.testing.expectEqual(fx.QueueTakeState.empty, queue.takeState());
+try std.testing.expectEqual(fx.SemaphoreAcquireState.unavailable, semaphore.acquireState(8));
 ```
 
 ## Composition
@@ -483,6 +894,73 @@ var schedule = fx.Schedule.jitteredBackoff(.{
 });
 ```
 
+Use `timeout` when a fixed-delay retry policy must stop before exceeding an
+elapsed delay budget, and `reset` when a runtime/test needs to know when idle
+time should reset retry state:
+
+```zig
+var timeout = fx.Schedule.timeout(.{
+    .max_retries = 5,
+    .delay_ms = 100,
+    .timeout_ms = 250,
+});
+
+var reset = fx.Schedule.reset(.{
+    .max_retries = 3,
+    .delay_ms = 50,
+    .reset_after_ms = 1_000,
+});
+
+const next_attempt = reset.resetAttempt(attempt, idle_ms);
+```
+
+Inspect schedule decisions in tests:
+
+```zig
+const decision = schedule.decision(2);
+try std.testing.expect(decision.continues);
+try std.testing.expectEqual(@as(?u64, 100), decision.delay_ms);
+```
+
+Compose two schedules at a decision point when a boundary needs simple algebra:
+
+```zig
+var retry_a = fx.Schedule.recurs(3);
+var retry_b = fx.Schedule.spaced(.{ .max_retries = 2, .delay_ms = 50 });
+
+const earlier = retry_a.unionNextDelay(&retry_b, attempt);
+const later_when_both_continue = retry_a.intersectionNextDelay(&retry_b, attempt);
+```
+
+`unionNextDelay` continues while either schedule continues and chooses the
+earlier available delay. `intersectionNextDelay` continues only while both
+schedules continue and chooses the later delay.
+
+Use `ScheduleProgram` when composition should be an owned recursive program:
+
+```zig
+var program = fx.ScheduleProgram.init(allocator);
+defer program.deinit();
+
+const fast = try program.schedule(fx.Schedule.fixed(.{
+    .max_retries = 3,
+    .delay_ms = 10,
+}));
+const slow = try program.schedule(fx.Schedule.fixed(.{
+    .max_retries = 2,
+    .delay_ms = 25,
+}));
+
+const either = try program.unionWith(fast, slow);
+const both = try program.intersectionWith(fast, slow);
+_ = try program.sequence(either, both);
+
+const delay = program.nextDelay(attempt);
+```
+
+`sequence` runs the first child until it is exhausted, then runs the second
+child with attempts reset to zero.
+
 `TestEnv` wires the fake clock into the context, so retry sleeps are deterministic
 in tests.
 
@@ -513,3 +991,49 @@ Use this loop for new behavior:
 3. Implement the smallest API that makes the test pass.
 4. Run `bun run zig:test`.
 5. Update docs if the public API changed.
+
+Useful deterministic assertions live on `TestEnv` and `fx.testing`:
+
+```zig
+try env.expectStructuredLog(.info, "request handled");
+try env.expectHistogram("request.ms", 2, 35, 10, 25);
+try env.expectSpanEnded(span_id);
+try env.expectSpanParent(child_span, root_span);
+try env.putFixture("report", "expected output");
+try env.expectGolden("report", actual_output);
+
+try fx.testing.expectDependencyReportMissing(&report, @typeName(fx.Config));
+try fx.testing.expectCauseFinalizerFailure(cause, "CloseFailed");
+try fx.testing.expectScheduleDelay(&schedule, 0, 25);
+try fx.testing.expectFiberStatus(fiber, .done);
+try fx.testing.expectQueueLen(&queue, 0);
+try fx.testing.expectQueueShutdown(&queue, true);
+```
+
+When an agent-facing harness needs a readable failure body, format assertion
+reports explicitly:
+
+```zig
+const log_report = try env.formatLogAssertionReport("request handled");
+defer allocator.free(log_report);
+
+const schedule_report = try fx.testing.formatScheduleDelayAssertionReport(
+    allocator,
+    attempt,
+    25,
+    schedule.nextDelay(attempt),
+);
+defer allocator.free(schedule_report);
+```
+
+Use `TestEnv` service layers when tests need normal layer graph wiring with
+fake services:
+
+```zig
+var graph = fx.layerGraph(allocator, .{
+    env.loggerLayer(),
+    env.configLayer(),
+});
+
+const logger_and_config = env.serviceLayer(.{ fx.Logger, fx.Config });
+```

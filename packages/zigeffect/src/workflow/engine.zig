@@ -1,6 +1,7 @@
 const std = @import("std");
 const dep_services = @import("../dependency/services.zig");
 const backend_mod = @import("../runtime/backend.zig");
+const async_backend_mod = @import("../runtime/async_backend.zig");
 const backend_diagnostics = @import("../runtime/backend_diagnostics.zig");
 const journal_mod = @import("journal.zig");
 const store_mod = @import("store.zig");
@@ -9,6 +10,7 @@ pub const Allocator = std.mem.Allocator;
 pub const ServiceSet = dep_services.ServiceSet;
 pub const BackendCapabilities = backend_mod.BackendCapabilities;
 pub const deterministicBackend = backend_mod.deterministicBackend;
+pub const AsyncBackend = async_backend_mod.AsyncBackend;
 pub const WorkflowBackendRequirement = backend_diagnostics.BackendCapabilityRequirement;
 pub const JournalStore = store_mod.JournalStore;
 pub const WorkflowId = journal_mod.WorkflowId;
@@ -67,6 +69,7 @@ pub const WorkflowEngine = struct {
     journal_store: JournalStore,
     provider_services: ServiceSet,
     backend: BackendCapabilities = deterministicBackend(),
+    async_backend: ?AsyncBackend = null,
     registrations: std.ArrayList(WorkflowRegistration) = .empty,
     executions: std.ArrayList(WorkflowExecution) = .empty,
 
@@ -81,6 +84,12 @@ pub const WorkflowEngine = struct {
     pub fn initWithBackend(allocator: Allocator, journal_store: JournalStore, backend: BackendCapabilities) WorkflowEngine {
         var engine = WorkflowEngine.init(allocator, journal_store);
         engine.backend = backend;
+        return engine;
+    }
+
+    pub fn initWithAsyncBackend(allocator: Allocator, journal_store: JournalStore, async_backend: AsyncBackend) WorkflowEngine {
+        var engine = WorkflowEngine.initWithBackend(allocator, journal_store, async_backend.capabilities);
+        engine.async_backend = async_backend;
         return engine;
     }
 
@@ -99,6 +108,17 @@ pub const WorkflowEngine = struct {
 
     pub fn backendCapabilities(self: *const WorkflowEngine) BackendCapabilities {
         return self.backend;
+    }
+
+    pub fn asyncBackend(self: *const WorkflowEngine) ?AsyncBackend {
+        return self.async_backend;
+    }
+
+    pub fn withAsyncBackend(self: WorkflowEngine, async_backend: AsyncBackend) WorkflowEngine {
+        var engine = self;
+        engine.async_backend = async_backend;
+        engine.backend = async_backend.capabilities;
+        return engine;
     }
 
     pub fn requireBackendFeature(self: *const WorkflowEngine, requirement: WorkflowBackendRequirement) WorkflowEngineError!void {

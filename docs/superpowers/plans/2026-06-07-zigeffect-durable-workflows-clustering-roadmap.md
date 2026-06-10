@@ -952,22 +952,22 @@ blocking the whole runtime.
 
 Deliverables:
 
-- [ ] Select and document the production async backend strategy.
-- [ ] Add an async backend implementation for timers, network waits, file waits,
+- [x] Select and document the production async backend strategy.
+- [x] Add an async backend implementation for timers, network waits, file waits,
   and cancellation wakeups.
-- [ ] Integrate async backend execution with `Runtime`, `FiberRuntime`,
+- [x] Integrate async backend execution with `Runtime`, `FiberRuntime`,
   `WorkflowEngine`, durable timers, durable queues, and cluster transports.
-- [ ] Add async-safe `Scope` finalization behavior.
-- [ ] Add interruption tests for suspended IO work.
-- [ ] Add compatibility tests proving deterministic backend semantics remain
+- [x] Add async-safe `Scope` finalization behavior.
+- [x] Add interruption tests for suspended IO work.
+- [x] Add compatibility tests proving deterministic backend semantics remain
   unchanged.
 
 Acceptance:
 
-- [ ] A workflow can await real async IO, suspend, resume, and clean up on
+- [x] A workflow can await real async IO, suspend, resume, and clean up on
   interruption.
-- [ ] Async execution does not duplicate completed durable activity results.
-- [ ] Deterministic and async backends both pass the shared backend conformance
+- [x] Async execution does not duplicate completed durable activity results.
+- [x] Deterministic and async backends both pass the shared backend conformance
   suite.
 
 ## Milestone 48: Production Shard Leasing

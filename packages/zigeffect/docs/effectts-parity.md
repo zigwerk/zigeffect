@@ -147,11 +147,13 @@ surface:
 - `Deferred`, `Queue`, and `Semaphore` as deterministic coordination
   primitives, including queue shutdown and scoped semaphore permits
 
-The current core runtime is deterministic and run-to-completion on `join`; it is
-not a real green-thread scheduler. True suspension, task groups, cancellation
-against blocking IO, and `std.Io` integration are deferred to the optional zio
-backend adapter. The deterministic backend is exposed through
-`BackendCapabilities` so future backends have a compatibility boundary.
+The core runtime remains deterministic and run-to-completion on `join` by
+default. `LocalAsyncBackendState` now provides the first real async backend
+surface for backend-owned suspension, timer wakeups, typed network/file waits,
+and cancellation wakeups. Direct-style effects opt into that surface through
+`RuntimeDecision.suspended` or context async backend helpers; stackful coroutine
+lowering and task groups can target the same backend contract without changing
+the deterministic compatibility suite.
 
 ### Schedule
 
@@ -227,12 +229,12 @@ diagnostic surface for the same family of questions:
   graph queries, durable history, and future async streams
 
 This is not EffectTS's full runtime inspector or a durable workflow engine. It
-is the deterministic Zig core that future async backends, production adapters,
-and agent tools can build on.
+is the deterministic Zig core plus a local async wait backend that production
+adapters and agent tools can build on.
 
 ## Next Parity Priorities
 
-1. Zio backend adapter for real fibers, cancellation, and `std.Io`.
+1. Coroutine lowering and task groups on top of the async backend contract.
 2. Production causal adapters for JSON Lines, OpenTelemetry, embedded graph
    queries, and durable history.
 3. Deterministic replay/forking for selected effect inputs.

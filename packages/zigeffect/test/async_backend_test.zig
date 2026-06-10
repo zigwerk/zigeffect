@@ -196,6 +196,24 @@ test "runtime and fiber runtime propagate async backend into context" {
     }
 }
 
+test "workflow engine stores async backend handle and capabilities" {
+    var state = fx.LocalAsyncBackendState.init(std.testing.allocator, .{});
+    defer state.deinit();
+    const backend = state.backend();
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+
+    var engine = fx.workflow.WorkflowEngine.initWithAsyncBackend(
+        std.testing.allocator,
+        journal_memory.asJournalStore(),
+        backend,
+    );
+    defer engine.deinit();
+
+    try std.testing.expectEqual(fx.BackendKind.async_local, engine.backendCapabilities().kind);
+    try std.testing.expect(engine.asyncBackend() != null);
+}
+
 test "workflow scheduler tickAsync wakes durable timer once" {
     var state = fx.LocalAsyncBackendState.init(std.testing.allocator, .{ .now_ms = 1_000 });
     defer state.deinit();

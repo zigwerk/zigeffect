@@ -93,8 +93,9 @@ Owns execution runtimes and deterministic concurrency primitives:
 - `coordination.zig`: `Deferred`, `Queue`, `Semaphore`, queue wait states, and
   queue capacity stats.
 - `backend.zig`: backend capability contract and deterministic backend marker.
-- `async_backend.zig`: async backend vtable shape for suspend, wake, timers,
-  and interrupts.
+- `async_backend.zig`: async backend vtable plus the local backend state for
+  suspend, wake, timers, typed network/file waits, cancellation, wake polling,
+  and scope interruption finalizers.
 - `backend_diagnostics.zig`: backend capability requirements and formatted
   diagnostics for unsupported runtime features.
 - `control.zig`: shared suspension and cooperative cancellation vocabulary.
@@ -103,15 +104,16 @@ Owns execution runtimes and deterministic concurrency primitives:
   ordering, `Cause` evidence, and causal supervisor events.
 
 Runtime/scope/fiber cohesion, coordination backpressure, scoped permits,
-controlled suspension vocabulary, cooperative cancellation, and future backend
-boundaries belong here.
+controlled suspension vocabulary, cooperative cancellation, and backend wait
+ownership belong here.
 
 Runtime backend capabilities include operation-specific async workflow flags for
 wake, timer scheduling, interruption, and durable suspension. The async backend
-vtable names the future suspend, wake, timer, and interrupt operations without
-implementing real async I/O yet. Backend diagnostics format missing capability
-errors so workflow code can fail clearly before a deterministic backend attempts
-async-only behavior.
+vtable supports runtime suspension, wake polling, timer advancement, typed
+network/file waits, and interrupt requests. `LocalAsyncBackendState` implements
+that vtable for local execution and tests. Backend diagnostics format missing
+capability errors so workflow code can fail clearly before a deterministic
+backend attempts async-only behavior.
 
 Local supervision is a deterministic policy layer. It records child specs and
 restart decisions, preserves failure evidence through `Cause`, and emits causal
@@ -315,15 +317,15 @@ configured event interval, and the file store resets its in-memory replay tail
 after the committed checkpoint so long histories can run with bounded local
 memory.
 
-### Cooperative Local Scheduling
+### Async-Aware Local Scheduling
 
 The workflow scheduler is a local orchestration boundary over the journal,
-durable clock, and durable queues. It does not provide real async I/O or
-distributed execution; it fairly visits registered workflow workers, timer
-watches, queue retry workers, and queue claim workers within explicit budgets
-and records durable progress through existing workflow events. Later cluster
-and supervision modules should reuse this boundary instead of bypassing the
-workflow journal.
+durable clock, durable queues, and optional async backend. `tick` keeps the
+deterministic polling contract. `tickAsync` registers pending durable timers
+with the async backend, advances backend time from the scheduler clock, consumes
+ready wake events, fires due timers, processes queue workers, and wakes queue
+suspensions after terminal journal writes. Cluster and supervision modules
+should reuse this boundary instead of bypassing the workflow journal.
 
 ```text
 src/cluster/

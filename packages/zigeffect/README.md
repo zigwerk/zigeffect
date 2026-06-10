@@ -73,12 +73,17 @@ Included in this package:
 - `TestEnv`: fake clock, memory filesystem, logger, config, metrics, tracing,
   runtime helpers, assertion helpers, and readable assertion report formatters.
 - `Clock`: fake/system time service used by schedules and tests.
+- `LocalAsyncBackendState`: local async wait registry for runtime suspension,
+  timer wakeups, typed network/file waits, cancellation, and wake polling.
 - `serviceNotFound`: rich compile-time diagnostics for missing environment
   services.
 
-The core fiber runtime is semantic-first and deterministic. It does not claim
-real green-thread suspension; a future optional zio adapter will provide the
-stackful coroutine and `std.Io` backend.
+The core fiber runtime is semantic-first and deterministic by default. Attach
+`LocalAsyncBackendState.backend()` to `Runtime`, `FiberRuntime`, workflow
+schedulers, or cluster transport waits when code needs backend-owned
+suspension, timer wakeups, typed network/file waits, or cancellation wakeups.
+Direct-style effects stay synchronous unless they explicitly return
+`RuntimeDecision.suspended` or call an async backend helper from context.
 
 `zigeffect` now includes the first deterministic agent-observable causal
 runtime surface: attach a `CausalStore` to a runtime, fiber runtime, layer

@@ -232,7 +232,7 @@ the direct-style source model.
 
 | Backend area | Public compatibility rule |
 | --- | --- |
-| Real async IO | Direct-style functions remain the user-facing shape. Async backends add suspend, wake, timer, and interrupt capabilities behind runtime/backend contracts. |
+| Real async IO | Direct-style functions remain the user-facing shape. `LocalAsyncBackendState` adds suspend, wake, timer, typed IO wait, interrupt, and wake polling capabilities behind runtime/backend contracts. |
 | Real clustering | Cluster APIs keep entity identity, shard ids, message storage, runner storage, leases, fencing, and transport schemas stable. |
 | Shard leasing | Lease ownership remains fenced by runner identity, lease epoch, and shard id. Stale fences fail through typed errors and diagnostics. |
 | Multi-runner transport | Transports preserve request/response schemas, idempotency keys, retry policy, and owned response envelopes. |
@@ -253,6 +253,6 @@ deterministic capabilities should continue to run on more capable backends.
 | Diagnostics | Text diagnostics remain stable. Structured output grows through additive formatters. |
 | Schema versioning | Durable v1 schemas locked by the focused test gate. Breaking changes require migration or compatibility handling. |
 | Direct-style clarity | Plain Zig functions remain the center of workflow and actor programming. |
-| Backend adapters | Real async IO, real clustering, shard leasing, multi-runner transport, and supervision tree expansion have compatibility rules. |
+| Backend adapters | Real async IO, real clustering, shard leasing, multi-runner transport, and supervision tree expansion have compatibility rules. Local async wait ownership is implemented; socket transport and task groups build on the same contracts. |
 
 No naming or ownership issue remains open for Milestone 45.

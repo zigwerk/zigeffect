@@ -123,9 +123,9 @@ pub const LocalAsyncBackendState = struct {
 
 - [x] Add `async_backend: ?AsyncBackend = null` to `Context`.
 - [x] Add `Context.requireAsyncBackend`, `Context.suspendRuntime`, and `Context.registerIoWait`.
-- [x] Add `async_backend: ?AsyncBackend = null` to `Runtime` and `FiberRuntime`.
-- [x] Add `withAsyncBackend` to both runtime types and set `backend` from `backend.capabilities`.
-- [x] Propagate `async_backend` in `Runtime.context` and `FiberRuntime.context`.
+- [x] Add `async_backend: ?AsyncBackend = null` to `Runtime`, `FiberRuntime`, and `WorkflowEngine`.
+- [x] Add `withAsyncBackend` to both runtime types and `initWithAsyncBackend` to `WorkflowEngine`, setting `backend` from `backend.capabilities`.
+- [x] Propagate `async_backend` in `Runtime.context` and `FiberRuntime.context`, and expose the workflow engine async backend handle.
 - [x] Add `attachAsyncInterruptFinalizer(scope, backend, suspension_id, reason)` in `runtime/async_backend.zig`.
 - [x] Run `cd packages/zigeffect && zig build test-raw`.
 - [x] Confirm runtime/context/scope tests pass while workflow/cluster red tests still fail.
@@ -158,16 +158,16 @@ pub const LocalAsyncBackendState = struct {
 
 ## Task 6: Documentation And Roadmap Closeout
 
-- [ ] Update architecture, usage, Effect parity, public API review, and README docs to describe the implemented local async backend.
-- [ ] Add `docs/superpowers/reports/2026-06-10-zigeffect-milestone-47-completion.md` after full verification.
-- [ ] Mark Milestone 47 deliverables and acceptance boxes complete in the durable workflows and clustering roadmap.
-- [ ] Update this plan's checkboxes as tasks finish.
-- [ ] Run a scoped marker scan over all M47 files.
-- [ ] Commit docs and roadmap closeout with `docs(zigeffect): mark real async io backend complete`.
+- [x] Update architecture, usage, Effect parity, public API review, and README docs to describe the implemented local async backend.
+- [x] Add `docs/superpowers/reports/2026-06-10-zigeffect-milestone-47-completion.md` after full verification.
+- [x] Mark Milestone 47 deliverables and acceptance boxes complete in the durable workflows and clustering roadmap.
+- [x] Update this plan's checkboxes as tasks finish.
+- [x] Run a scoped marker scan over all M47 files.
+- [x] Commit docs and roadmap closeout with `docs(zigeffect): mark real async io backend complete`.
 
 ## Task 7: Final Verification
 
-- [ ] Run:
+- [x] Run:
 
 ```bash
 cd packages/zigeffect
@@ -193,5 +193,5 @@ zig fmt --check \
 git diff --check
 ```
 
-- [ ] Run the scoped marker scan over code, docs, spec, plan, report, and roadmap files.
-- [ ] Check `git status --short` and confirm only intended files are committed.
+- [x] Run the scoped marker scan over code, docs, spec, plan, report, and roadmap files.
+- [x] Check `git status --short` and confirm only intended files are committed.
