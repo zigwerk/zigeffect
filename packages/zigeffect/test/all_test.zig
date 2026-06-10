@@ -10,6 +10,7 @@ comptime {
     _ = @import("message_envelope_test.zig");
     _ = @import("message_storage_test.zig");
     _ = @import("cluster_transport_test.zig");
+    _ = @import("cluster_workflow_engine_test.zig");
     _ = @import("cluster_runtime_test.zig");
     _ = @import("multi_runner_cluster_test.zig");
     _ = @import("routing_test.zig");
