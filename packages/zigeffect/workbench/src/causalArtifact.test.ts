@@ -686,6 +686,36 @@ test("deriveVisualGraphModel emphasizes ownership and finalizer failures", () =>
   expect(visual.warnings.every((warning) => !warning.includes("mutation"))).toBe(true);
 });
 
+test("deriveVisualGraphModel creates lineage ref nodes from app semantic refs", () => {
+  const raw = {
+    schema: "zigeffect.causal.v1",
+    schema_version: 1,
+    event_taxonomy_version: 1,
+    events: [
+      {
+        id: 1,
+        kind: "span_recorded",
+        label: "load project",
+        status: "success",
+        artifact_id: "artifact:response:project",
+        domain_entity_ref: "project:123",
+        data_subject_ref: "tenant:acme",
+        schema_ref: "Project.v1",
+      },
+    ],
+  };
+  const workbench = deriveWorkbenchModel(raw, { artifactPath: "lineage.json" });
+  const graph = deriveGraphModel(workbench.events, workbench.findings);
+  const visual = deriveVisualGraphModel(workbench, graph, {
+    layoutMode: "radial",
+    perspective: "lineage",
+  });
+
+  expect(visual.nodes.some((node) => node.group === "data" && node.id === "data-subject:tenant:acme")).toBe(true);
+  expect(visual.nodes.some((node) => node.group === "artifact" && node.id === "artifact:artifact:response:project")).toBe(true);
+  expect(visual.edges.some((edge) => edge.kind === "reads" || edge.kind === "emits")).toBe(true);
+});
+
 test("deriveVisualGraphModel maps live stream frames when events are absent", () => {
   const workbench = deriveWorkbenchModel(sampleLiveStream, {
     artifactPath: "sample-live-dashboard-stream.json",

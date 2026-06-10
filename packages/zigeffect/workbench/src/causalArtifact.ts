@@ -689,8 +689,7 @@ function applyVisualGraphPerspective(
     return addRuntimeTopology(workbench.events, nodes, edges, ["scope", "fiber", "resource"]);
   }
 
-  warnings.push("lineage perspective found no app semantic refs in this artifact");
-  return { nodes, edges };
+  return applyLineagePerspective(nodes, edges, warnings);
 }
 
 function addRuntimeTopology(
@@ -727,6 +726,75 @@ function addRuntimeTopology(
         });
       }
     }
+  }
+
+  return { nodes: nextNodes, edges: nextEdges };
+}
+
+function applyLineagePerspective(
+  nodes: VisualGraphNode[],
+  edges: VisualGraphEdge[],
+  warnings: string[],
+): { nodes: VisualGraphNode[]; edges: VisualGraphEdge[] } {
+  const nextNodes = [...nodes];
+  const nextEdges = [...edges];
+  const seenNodes = new Set(nextNodes.map((node) => node.id));
+  const seenEdges = new Set(nextEdges.map((edge) => edge.id));
+
+  for (const node of nodes) {
+    const refs: Array<{
+      id: string | null;
+      group: VisualGraphNodeGroup;
+      prefix: string;
+      kind: string;
+      edge: VisualGraphEdgeKind;
+      tone: VisualGraphNodeTone;
+    }> = [
+      { id: node.refs.dataSubjectRef, group: "data", prefix: "data-subject", kind: "data_subject", edge: "reads", tone: "ok" },
+      { id: node.refs.domainEntityRef, group: "data", prefix: "domain-entity", kind: "domain_entity", edge: "writes", tone: "ok" },
+      { id: node.refs.schemaRef, group: "data", prefix: "schema", kind: "schema", edge: "transforms", tone: "ok" },
+      { id: node.refs.artifactId, group: "artifact", prefix: "artifact", kind: "artifact", edge: "emits", tone: node.tone },
+    ];
+
+    for (const ref of refs) {
+      if (!ref.id) continue;
+
+      const refNodeId = `${ref.prefix}:${ref.id}`;
+      if (!seenNodes.has(refNodeId)) {
+        seenNodes.add(refNodeId);
+        nextNodes.push({
+          id: refNodeId,
+          eventId: null,
+          label: ref.id,
+          detail: ref.kind,
+          kind: ref.kind,
+          status: "reference",
+          lane: "lineage",
+          group: ref.group,
+          refs: visualEmptyRefs(),
+          tone: ref.tone,
+          priority: visualPriority(ref.tone, false),
+        });
+      }
+
+      const edgeId = `${node.id}->${refNodeId}:${ref.edge}`;
+      if (!seenEdges.has(edgeId)) {
+        seenEdges.add(edgeId);
+        nextEdges.push({
+          id: edgeId,
+          source: node.id,
+          target: refNodeId,
+          label: ref.edge,
+          detail: `${node.label} ${ref.edge} ${ref.id}`,
+          kind: ref.edge,
+          tone: node.tone,
+        });
+      }
+    }
+  }
+
+  if (nextNodes.length === nodes.length) {
+    warnings.push("lineage perspective found no app semantic refs in this artifact");
   }
 
   return { nodes: nextNodes, edges: nextEdges };

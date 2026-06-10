@@ -1,0 +1,85 @@
+{
+  "schema": "zigeffect.causal.v1",
+  "schema_version": 1,
+  "event_taxonomy_version": 1,
+  "events": [
+    {
+      "id": 1,
+      "kind": "run_started",
+      "run_id": 7,
+      "parent_id": null,
+      "fiber_id": null,
+      "scope_id": null,
+      "label": "visual graph debugging run",
+      "type_name": "WorkbenchVisualGraphFixture",
+      "status": "success",
+      "redacted_detail": "local development fixture"
+    },
+    {
+      "id": 2,
+      "kind": "scope_opened",
+      "run_id": 7,
+      "parent_id": 1,
+      "fiber_id": null,
+      "scope_id": 70,
+      "label": "request scope",
+      "type_name": "Scope",
+      "status": "opened",
+      "redacted_detail": "GET /projects/123"
+    },
+    {
+      "id": 3,
+      "kind": "service_required",
+      "run_id": 7,
+      "parent_id": 2,
+      "fiber_id": null,
+      "scope_id": 70,
+      "label": "ProjectRepository",
+      "type_name": "ProjectRepository",
+      "status": "success",
+      "redacted_detail": "repository dependency satisfied"
+    },
+    {
+      "id": 4,
+      "kind": "span_recorded",
+      "run_id": 7,
+      "parent_id": 3,
+      "fiber_id": 11,
+      "scope_id": 70,
+      "label": "load project",
+      "type_name": "ProjectLoadEffect",
+      "status": "success",
+      "redacted_detail": "loaded project projection",
+      "artifact_id": "artifact:response:project",
+      "domain_entity_ref": "project:123",
+      "data_subject_ref": "tenant:acme",
+      "schema_ref": "Project.v1"
+    },
+    {
+      "id": 5,
+      "kind": "resource_acquired",
+      "run_id": 7,
+      "parent_id": 2,
+      "fiber_id": null,
+      "scope_id": 70,
+      "label": "nendb adapter connection",
+      "type_name": "NendbConnection",
+      "status": "success",
+      "redacted_detail": "adapter resource acquired",
+      "domain_entity_ref": "project:123",
+      "schema_ref": "Nendb.ProjectIndex.v1"
+    },
+    {
+      "id": 6,
+      "kind": "resource_finalized",
+      "run_id": 7,
+      "parent_id": 5,
+      "fiber_id": null,
+      "scope_id": 70,
+      "label": "nendb adapter finalizer",
+      "type_name": "NendbConnection",
+      "status": "failure",
+      "redacted_detail": "finalizer returned timeout"
+    }
+  ]
+}
