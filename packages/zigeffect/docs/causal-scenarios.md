@@ -139,7 +139,7 @@ zig build causal-scenario-registry-patch -- --from-proposal <scenario-proposal.j
 
 This writes schema `zigeffect.causal.registry-patch.v1` as JSON plus text and
 Zig review drafts. The generated Zig snippet never changes
-`tools/causal_run.zig`; replace its placeholder argv with the smallest
+`tools/causal_run.zig`; replace its generated argv with the smallest
 reproducing command before applying a registry entry manually.
 
 Check whether a reviewed registry patch is ready to apply manually:

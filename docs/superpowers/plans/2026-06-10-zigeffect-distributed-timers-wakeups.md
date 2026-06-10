@@ -1,6 +1,6 @@
 # zigeffect Distributed Timers And Wakeups Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
 **Goal:** Add a journal-backed cluster timer wakeup index so due timers migrate with workflow execution shards and fire exactly once after runner ownership moves.
 
@@ -41,7 +41,7 @@ Modify:
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 - Modify: `packages/zigeffect/test/all_test.zig`
 
-- [ ] **Step 1: Write failing public surface tests**
+- [x] **Step 1: Write failing public surface tests**
 
 Add:
 
@@ -58,7 +58,7 @@ test "cluster timer wakeup public exports are available" {
 
 Import the new test file from `packages/zigeffect/test/all_test.zig`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -68,7 +68,7 @@ bun run zigeffect:test
 
 Expected: compile failure for missing cluster timer wakeup declarations.
 
-- [ ] **Step 3: Add minimal module and exports**
+- [x] **Step 3: Add minimal module and exports**
 
 Implement:
 
@@ -87,7 +87,7 @@ pub const ClusterTimerWakeup = struct {
 Also add `ClusterTimerWakeupBatch`, `ClusterTimerWakeupReport`, and
 `ClusterTimerWakeupIndex` with `init`, `deinit`, and empty storage.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -98,7 +98,7 @@ zig fmt --check packages/zigeffect/src/cluster/timer_wakeup.zig packages/zigeffe
 
 Expected: tests pass and formatting passes.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/cluster/timer_wakeup.zig packages/zigeffect/src/cluster/root.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/test/cluster_timer_wakeup_test.zig packages/zigeffect/test/all_test.zig
@@ -112,7 +112,7 @@ git commit -m "feat(zigeffect): add cluster timer wakeup index surface"
 - Modify: `packages/zigeffect/src/cluster/timer_wakeup.zig`
 - Modify: `packages/zigeffect/test/cluster_timer_wakeup_test.zig`
 
-- [ ] **Step 1: Write failing rebuild tests**
+- [x] **Step 1: Write failing rebuild tests**
 
 Add tests:
 
@@ -125,7 +125,7 @@ Use in-memory runner storage, message storage, journal storage, and helper
 `executionIdForShard(shard_id, shard_count)` to create owned and unowned
 executions.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -135,7 +135,7 @@ bun run zigeffect:test
 
 Expected: compile or assertion failure for missing `rebuildOwned` behavior.
 
-- [ ] **Step 3: Implement rebuild rules**
+- [x] **Step 3: Implement rebuild rules**
 
 Add:
 
@@ -152,7 +152,7 @@ The method clears old wakeups, scans `journal_store.readAll`, evaluates only
 the execution shard, filters unowned shards, filters terminal timers, and
 deduplicates `(workflow_id, execution_id, timer_id)`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -163,7 +163,7 @@ zig fmt --check packages/zigeffect/src/cluster/timer_wakeup.zig packages/zigeffe
 
 Expected: tests pass and formatting passes.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/cluster/timer_wakeup.zig packages/zigeffect/test/cluster_timer_wakeup_test.zig
@@ -177,7 +177,7 @@ git commit -m "feat(zigeffect): rebuild owned timer wakeups"
 - Modify: `packages/zigeffect/src/cluster/timer_wakeup.zig`
 - Modify: `packages/zigeffect/test/cluster_timer_wakeup_test.zig`
 
-- [ ] **Step 1: Write failing due batch tests**
+- [x] **Step 1: Write failing due batch tests**
 
 Add tests:
 
@@ -187,7 +187,7 @@ Add tests:
 Assert that `due(allocator, 1_500)` excludes timers with `fire_at_ms = 2_000`
 and returns timers with `fire_at_ms = 1_000` and `late_by_ms = 500`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -197,7 +197,7 @@ bun run zigeffect:test
 
 Expected: compile or assertion failure for missing `due` behavior.
 
-- [ ] **Step 3: Implement due batches**
+- [x] **Step 3: Implement due batches**
 
 Add:
 
@@ -212,7 +212,7 @@ pub fn due(
 Clone timer names into the returned batch, compute `late_by_ms`, and provide a
 batch `deinit` that frees names and the owned slice.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -223,7 +223,7 @@ zig fmt --check packages/zigeffect/src/cluster/timer_wakeup.zig packages/zigeffe
 
 Expected: tests pass and formatting passes.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/cluster/timer_wakeup.zig packages/zigeffect/test/cluster_timer_wakeup_test.zig
@@ -236,7 +236,7 @@ git commit -m "feat(zigeffect): report due cluster timer wakeups"
 
 - Modify: `packages/zigeffect/test/cluster_timer_wakeup_test.zig`
 
-- [ ] **Step 1: Write failing idempotency acceptance test**
+- [x] **Step 1: Write failing idempotency acceptance test**
 
 Add:
 
@@ -254,7 +254,7 @@ test "cluster timer wakeup firing is idempotent through workflow entity" {
 Use the same message submission and reply parsing pattern as
 `cluster_workflow_engine_test.zig`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -265,13 +265,13 @@ bun run zigeffect:test
 Expected: failure if the existing command path appends duplicate timer terminal
 events or if the test helpers are incomplete.
 
-- [ ] **Step 3: Implement any needed test helper support**
+- [x] **Step 3: Implement any needed test helper support**
 
 Keep production changes out of this task unless the test proves a real defect.
 If a defect exists, fix it in `DurableClock.fireDueTimers` or
 `ClusterWorkflowEntityHandler` with the smallest journal-based change.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -282,7 +282,7 @@ zig fmt --check packages/zigeffect/test/cluster_timer_wakeup_test.zig packages/z
 
 Expected: tests pass and formatting passes.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/test/cluster_timer_wakeup_test.zig packages/zigeffect/src/workflow/clock.zig packages/zigeffect/src/cluster/workflow_engine.zig
@@ -297,7 +297,7 @@ If no production file changed, stage only the test file.
 
 - Modify: `packages/zigeffect/test/cluster_timer_wakeup_test.zig`
 
-- [ ] **Step 1: Write failing migration test**
+- [x] **Step 1: Write failing migration test**
 
 Add:
 
@@ -314,7 +314,7 @@ test "timer scheduled on runner a fires once after ownership moves" {
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -324,7 +324,7 @@ bun run zigeffect:test
 
 Expected: failure until the helper flow is complete.
 
-- [ ] **Step 3: Implement helper flow**
+- [x] **Step 3: Implement helper flow**
 
 Reuse local helpers for:
 
@@ -335,7 +335,7 @@ Reuse local helpers for:
 
 Production changes should be limited to defects exposed by the migration test.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -346,7 +346,7 @@ zig fmt --check packages/zigeffect/test/cluster_timer_wakeup_test.zig
 
 Expected: tests pass and formatting passes.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/test/cluster_timer_wakeup_test.zig
@@ -360,16 +360,16 @@ git commit -m "test(zigeffect): prove timer wakeups migrate with shards"
 - Modify: `packages/zigeffect/docs/architecture.md`
 - Modify: `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Document `cluster/timer_wakeup.zig` as the rebuilt journal-backed index for
 cluster timer ownership and late wakeup reporting.
 
-- [ ] **Step 2: Mark roadmap milestone complete**
+- [x] **Step 2: Mark roadmap milestone complete**
 
 Mark Milestone 36 checklist items complete after the verification gate passes.
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -385,7 +385,7 @@ rg "TO""DO|FIX""ME|st""ub|place""holder|not imple""mented|unimple""mented" packa
 
 Expected: all commands pass. The marker scan should return no matches.
 
-- [ ] **Step 4: Commit docs**
+- [x] **Step 4: Commit docs**
 
 ```bash
 git add packages/zigeffect/docs/architecture.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md docs/superpowers/plans/2026-06-10-zigeffect-distributed-timers-wakeups.md

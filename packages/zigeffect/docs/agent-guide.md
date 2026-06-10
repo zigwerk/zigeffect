@@ -730,7 +730,7 @@ zig build causal-scenario-registry-patch -- --from-proposal .zig-cache/causal-ar
 The command writes `*-registry-patch.json`, `*-registry-patch.txt`, and
 `*-registry-patch.zig` with schema `zigeffect.causal.registry-patch.v1`. Review
 the `.zig` snippet before manually applying anything to `tools/causal_run.zig`.
-The generated argv is a placeholder until the reviewer replaces it with the
+The generated argv is temporary until the reviewer replaces it with the
 smallest reproducing command.
 
 Before treating a registry patch as applicable, run the readiness gate:
@@ -745,7 +745,7 @@ The command writes `*-registry-application-readiness.json` and
 `zigeffect.causal.registry-application-readiness.v1`. It records the reviewer,
 policy, decision, reason, verified commands, readiness checks, and
 `readiness_status=applicable|blocked|not-applicable`. It verifies reviewer
-approval, current registry state, placeholder argv replacement, invariant
+approval, current registry state, generated argv replacement, invariant
 catalog consistency, scenario docs, and required verification commands. It
 never edits source or the scenario registry, and every report keeps
 `applied=false`.

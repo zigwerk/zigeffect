@@ -765,15 +765,15 @@ Goal: make timers safe when shards move.
 
 Deliverables:
 
-- [ ] Store timer ownership by shard.
-- [ ] Rebuild wake-up indexes after shard acquisition.
-- [ ] Prevent duplicate timer firing with event idempotency.
-- [ ] Add late timer handling.
-- [ ] Add timer migration tests.
+- [x] Store timer ownership by shard.
+- [x] Rebuild wake-up indexes after shard acquisition.
+- [x] Prevent duplicate timer firing with event idempotency.
+- [x] Add late timer handling.
+- [x] Add timer migration tests.
 
 Acceptance:
 
-- [ ] Timer scheduled on one runner fires once after ownership moves.
+- [x] Timer scheduled on one runner fires once after ownership moves.
 
 ## Milestone 37: Cluster Durable Queues
 

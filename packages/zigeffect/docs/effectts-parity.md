@@ -182,7 +182,7 @@ bundles:
 
 - fake `Clock`
 - in-memory filesystem
-- stub logger
+- minimal logger
 - config map
 - counters/gauges
 - tracing events/spans
@@ -196,7 +196,7 @@ schedule delays.
 ### Logger, Config, Metrics, Tracing
 
 EffectTS observability/config is substantially more mature than the current
-stubs. The first `zigeffect` parity line is service shape, deterministic tests,
+draft services. The first `zigeffect` parity line is service shape, deterministic tests,
 and useful names:
 
 - Logger has level-aware structured entries with fields; timestamps and richer

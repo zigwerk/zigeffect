@@ -354,6 +354,11 @@ Owns Erlang-style distributed runtime surfaces:
   transport, mutates `JournalStore` from the owning entity, rebuilds execution
   entity registrations after shard migration, and exposes timer, deferred,
   signal, and queue command paths through shard ownership.
+- `timer_wakeup.zig`: journal-backed cluster timer wakeup index that rebuilds
+  owned timers after shard acquisition, derives ownership from workflow
+  execution shards, filters terminal and duplicate timer records, and reports
+  late due timers before the workflow entity fires them through the durable
+  clock.
 
 Entity identity, actor references, message envelopes, durable message storage,
 shard ids, runner ids, runner storage, leases, rebalancing, transports,
