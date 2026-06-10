@@ -519,6 +519,102 @@ test "transport failure report formats without secrets" {
     try std.testing.expect(std.mem.indexOf(u8, text, "secret") == null);
 }
 
+test "production http transport stores messages through authenticated encoded request bytes" {
+    var storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asMessageStorage();
+    var transport_state = try fx.ProductionHttpClusterTransport.init(std.testing.allocator, storage, .{
+        .shard_count = 16,
+        .auth = .{ .mode = .shared_secret, .credential = "shared-1" },
+    });
+    defer transport_state.deinit();
+
+    const address = fx.entityAddress("counter", "production-http-store");
+    const shard_id = try fx.shardIdForAddress(address, 16);
+    var response = try transport_state.asClusterTransport().send(std.testing.allocator, .{
+        .kind = .request,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "get",
+        .redacted_detail = "read current value",
+        .idempotency_key = "production-http-store-key",
+        .auth = .{ .mode = .shared_secret, .credential = "shared-1" },
+        .trace_id = 9001,
+        .span_id = 9002,
+    });
+    defer response.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(shard_id, response.shard_id);
+    try std.testing.expectEqual(fx.ClusterTransportKind.production_http, response.transport);
+    try std.testing.expectEqual(@as(?u64, 9001), response.envelope.trace_id);
+    try std.testing.expectEqual(@as(?u64, 9002), response.envelope.span_id);
+
+    var by_shard = try storage.unprocessedByShard(shard_id, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 1), by_shard.records.len);
+    try std.testing.expectEqual(@as(?u64, 9001), by_shard.records[0].envelope.trace_id);
+
+    const metrics = transport_state.snapshotMetrics();
+    try std.testing.expect(metrics.bytes_sent > 0);
+    try std.testing.expect(metrics.bytes_received > 0);
+    try std.testing.expectEqual(@as(usize, 1), metrics.successes);
+}
+
+test "production http transport retries transient unavailable attempts" {
+    var storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    var transport_state = try fx.ProductionHttpClusterTransport.init(std.testing.allocator, storage_state.asMessageStorage(), .{
+        .shard_count = 8,
+        .failures_before_success = 2,
+    });
+    defer transport_state.deinit();
+
+    var response = try transport_state.asClusterTransport().send(std.testing.allocator, .{
+        .kind = .tell,
+        .address = fx.entityAddress("counter", "production-http-retry"),
+        .payload_type_name = "text",
+        .payload = "inc",
+        .redacted_detail = "increment",
+        .policy = .{ .timeout_ms = 500, .max_retries = 2 },
+    });
+    defer response.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 3), response.attempts);
+    try std.testing.expectEqual(fx.ClusterTransportKind.production_http, response.transport);
+    const metrics = transport_state.snapshotMetrics();
+    try std.testing.expectEqual(@as(usize, 2), metrics.retries);
+    try std.testing.expectEqual(@as(usize, 1), metrics.successes);
+}
+
+test "production http transport stops after retry limit without durable submission" {
+    var storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asMessageStorage();
+    var transport_state = try fx.ProductionHttpClusterTransport.init(std.testing.allocator, storage, .{
+        .shard_count = 8,
+        .failures_before_success = 2,
+    });
+    defer transport_state.deinit();
+
+    const address = fx.entityAddress("counter", "production-http-retry-limit");
+    const shard_id = try fx.shardIdForAddress(address, 8);
+    try std.testing.expectError(error.RetryLimitExceeded, transport_state.asClusterTransport().send(std.testing.allocator, .{
+        .kind = .tell,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "inc",
+        .redacted_detail = "increment",
+        .policy = .{ .timeout_ms = 500, .max_retries = 1 },
+    }));
+
+    var by_shard = try storage.unprocessedByShard(shard_id, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 0), by_shard.records.len);
+    const failure = transport_state.lastFailure().?;
+    try std.testing.expectEqual(fx.ClusterTransportKind.production_http, failure.transport);
+    try std.testing.expectEqualStrings("RetryLimitExceeded", failure.error_name);
+}
+
 test "cluster runner processes ask sent through in-process transport" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

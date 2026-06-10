@@ -262,6 +262,10 @@ pub const InProcessClusterTransport = struct {
                 .kind = request.kind,
                 .address = request.address,
                 .idempotency_key = idempotency_key,
+                .trace_id = request.trace_id,
+                .span_id = request.span_id,
+                .chunk_index = request.chunk_index,
+                .chunk_count = request.chunk_count,
                 .payload_type_name = request.payload_type_name,
                 .payload = request.payload,
                 .redacted_detail = request.redacted_detail,
@@ -325,24 +329,8 @@ pub const LoopbackHttpClusterTransport = struct {
                 continue;
             }
 
-            const request_json = try formatClusterTransportRequestJson(allocator, request);
-            defer allocator.free(request_json);
-            const http_request = try formatClusterTransportHttpRequest(allocator, request_json);
-            defer allocator.free(http_request);
-            const request_body = try clusterTransportHttpBody(http_request);
-
-            var parsed_request = try parseClusterTransportRequestJson(allocator, request_body);
-            defer parsed_request.deinit(allocator);
-
-            var handler_response = try self.handler.sendWithAttempts(parsed_request, attempts, .loopback_http);
-            defer handler_response.deinit(allocator);
-
-            const response_json = try formatClusterTransportResponseJson(allocator, handler_response);
-            defer allocator.free(response_json);
-            const http_response = try formatClusterTransportHttpResponse(allocator, response_json);
-            defer allocator.free(http_response);
-            const response_body = try clusterTransportHttpBody(http_response);
-            return try parseClusterTransportResponseJson(allocator, response_body);
+            const encoded = try sendHttpBytes(allocator, &self.handler, request, attempts, .loopback_http);
+            return encoded.response;
         }
 
         return error.RetryLimitExceeded;
@@ -409,17 +397,45 @@ pub const ProductionHttpClusterTransport = struct {
         self.lifecycle.sends += 1;
         try self.preflight(request);
 
+        const max_attempts = request.policy.max_retries + 1;
         self.lifecycle.in_flight += 1;
         defer self.lifecycle.in_flight -= 1;
 
-        var response = self.handler.sendWithAttempts(request, 1, .production_http) catch |err| {
-            self.recordFailure(1, err, "durable submit failed");
-            return err;
-        };
-        errdefer response.deinit(allocator);
+        var attempts: usize = 0;
+        while (attempts < max_attempts) {
+            attempts += 1;
+            if (self.failures_before_success > 0) {
+                self.failures_before_success -= 1;
+                self.recordFailure(attempts, error.TransportUnavailable, "transient unavailable");
+                if (attempts >= max_attempts) {
+                    self.recordFailure(attempts, error.RetryLimitExceeded, "retry budget exhausted");
+                    return error.RetryLimitExceeded;
+                }
+                self.lifecycle.retries += 1;
+                continue;
+            }
 
-        self.lifecycle.successes += 1;
-        return response;
+            const encoded = sendHttpBytes(allocator, &self.handler, request, attempts, .production_http) catch |err| {
+                self.recordFailure(attempts, err, "encoded http send failed");
+                if (isRetryableTransportError(err) and attempts < max_attempts) {
+                    self.lifecycle.retries += 1;
+                    continue;
+                }
+                if (isRetryableTransportError(err)) {
+                    self.recordFailure(attempts, error.RetryLimitExceeded, "retry budget exhausted");
+                    return error.RetryLimitExceeded;
+                }
+                return err;
+            };
+
+            self.lifecycle.bytes_sent += encoded.bytes_sent;
+            self.lifecycle.bytes_received += encoded.bytes_received;
+            self.lifecycle.successes += 1;
+            return encoded.response;
+        }
+
+        self.recordFailure(attempts, error.RetryLimitExceeded, "retry budget exhausted");
+        return error.RetryLimitExceeded;
     }
 
     fn preflight(self: *ProductionHttpClusterTransport, request: ClusterTransportRequest) ClusterTransportError!void {
@@ -458,6 +474,43 @@ pub const ProductionHttpClusterTransport = struct {
 pub const ProductionSocketClusterTransportOptions = ProductionHttpClusterTransportOptions;
 
 pub const ProductionSocketClusterTransport = struct {};
+
+const ClusterTransportEncodedSend = struct {
+    response: ClusterTransportResponse,
+    bytes_sent: usize,
+    bytes_received: usize,
+};
+
+fn sendHttpBytes(
+    allocator: Allocator,
+    handler: *InProcessClusterTransport,
+    request: ClusterTransportRequest,
+    attempts: usize,
+    transport_kind: ClusterTransportKind,
+) !ClusterTransportEncodedSend {
+    const request_json = try formatClusterTransportRequestJson(allocator, request);
+    defer allocator.free(request_json);
+    const http_request = try formatClusterTransportHttpRequest(allocator, request_json);
+    defer allocator.free(http_request);
+    const request_body = try clusterTransportHttpBody(http_request);
+
+    var parsed_request = try parseClusterTransportRequestJson(allocator, request_body);
+    defer parsed_request.deinit(allocator);
+
+    var handler_response = try handler.sendWithAttempts(parsed_request, attempts, transport_kind);
+    defer handler_response.deinit(allocator);
+
+    const response_json = try formatClusterTransportResponseJson(allocator, handler_response);
+    defer allocator.free(response_json);
+    const http_response = try formatClusterTransportHttpResponse(allocator, response_json);
+    defer allocator.free(http_response);
+    const response_body = try clusterTransportHttpBody(http_response);
+    return .{
+        .response = try parseClusterTransportResponseJson(allocator, response_body),
+        .bytes_sent = http_request.len,
+        .bytes_received = http_response.len,
+    };
+}
 
 const ClusterTransportRequestJson = struct {
     schema: []const u8,
