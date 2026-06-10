@@ -1,4 +1,4 @@
-import { For, Match, Show, Suspense, Switch, createMemo, createResource, createSignal, lazy } from "solid-js";
+import { For, Match, Show, Suspense, Switch, createEffect, createMemo, createResource, createSignal, lazy } from "solid-js";
 import {
   type CausalEvent,
   type AppCitationGroup,
@@ -13,6 +13,10 @@ import {
   type LiveDashboardModel,
   type LiveDashboardSourceStep,
   type LiveStreamFrameModel,
+  type ProductionTelemetryAuthority,
+  type ProductionTelemetryCheck,
+  type ProductionTelemetryMappingFixture,
+  type ProductionTelemetryPreviewModel,
   type QueryCommand,
   type RemediationChainModel,
   type ChainSourceStep,
@@ -23,6 +27,7 @@ import {
   deriveGovernanceModel,
   deriveGraphModel,
   deriveLiveDashboardModel,
+  deriveProductionTelemetryPreviewModel,
   deriveVisualGraphModel,
   deriveWorkbenchModel,
   filterEvents,
@@ -36,18 +41,76 @@ const VisualGraphCanvas = lazy(async () => {
   return { default: module.VisualGraphCanvas };
 });
 
-type Tab = "timeline" | "findings" | "live" | "graph" | "visual-graph" | "chain" | "queries" | "metadata";
+type Tab = "timeline" | "findings" | "live" | "graph" | "visual-graph" | "chain" | "telemetry" | "queries" | "metadata";
+type MetricTone = "ok" | "warn";
+type WorkbenchTab = { id: Tab; label: string };
+type TelemetryMetricRow = { label: string; value: string; tone?: MetricTone };
+type TelemetryAuthorityRow = { label: string; value: string; safe: boolean };
 
-const tabs: Array<{ id: Tab; label: string }> = [
+const tabs: WorkbenchTab[] = [
   { id: "timeline", label: "Timeline" },
   { id: "findings", label: "Findings" },
   { id: "live", label: "Live" },
   { id: "graph", label: "Graph" },
   { id: "visual-graph", label: "Visual Graph" },
   { id: "chain", label: "Chain" },
+  { id: "telemetry", label: "Telemetry" },
   { id: "queries", label: "Queries" },
   { id: "metadata", label: "Metadata" },
 ];
+
+export function workbenchTabsForArtifact(hasProductionTelemetry: boolean): WorkbenchTab[] {
+  return hasProductionTelemetry ? tabs : tabs.filter((tab) => tab.id !== "telemetry");
+}
+
+export function productionTelemetryStatusMetrics(telemetry: ProductionTelemetryPreviewModel): TelemetryMetricRow[] {
+  return [
+    { label: "status", value: telemetry.status, tone: telemetry.status === "ready" ? "ok" : "warn" },
+    { label: "decision", value: telemetry.decision, tone: telemetry.decision === "approve" ? "ok" : "warn" },
+    {
+      label: "ready",
+      value: String(telemetry.readyForNextBranch ?? "unknown"),
+      tone: telemetry.readyForNextBranch ? "ok" : "warn",
+    },
+    { label: "fixtures", value: String(telemetry.mappingFixtures.length) },
+    { label: "checks", value: String(telemetry.checks.length) },
+    {
+      label: "authority",
+      value: telemetry.authority.mutationAuthority ?? "none",
+      tone: telemetry.authority.mutationAuthority === "none" ? "ok" : "warn",
+    },
+  ];
+}
+
+export function productionTelemetryAuthorityRows(authority: ProductionTelemetryAuthority): TelemetryAuthorityRow[] {
+  return [
+    { label: "applied", value: String(authority.applied ?? "unknown"), safe: authority.applied === false },
+    {
+      label: "mutation authority",
+      value: authority.mutationAuthority ?? "unknown",
+      safe: authority.mutationAuthority === "none",
+    },
+    { label: "live exporter", value: String(authority.liveTelemetryEnabled ?? "unknown"), safe: authority.liveTelemetryEnabled === false },
+    { label: "network send", value: String(authority.networkSendEnabled ?? "unknown"), safe: authority.networkSendEnabled === false },
+    {
+      label: "collector endpoint",
+      value: String(authority.collectorEndpointConfigured ?? "unknown"),
+      safe: authority.collectorEndpointConfigured === false,
+    },
+    { label: "otlp serialization", value: String(authority.otlpSerializationEnabled ?? "unknown"), safe: authority.otlpSerializationEnabled === false },
+    { label: "runtime pipeline", value: String(authority.runtimePipelineEnabled ?? "unknown"), safe: authority.runtimePipelineEnabled === false },
+    { label: "durable writes", value: String(authority.durableWriteEnabled ?? "unknown"), safe: authority.durableWriteEnabled === false },
+    { label: "nendb writes", value: String(authority.nendbWriteEnabled ?? "unknown"), safe: authority.nendbWriteEnabled === false },
+    { label: "ci gate", value: String(authority.ciGateEnabled ?? "unknown"), safe: authority.ciGateEnabled === false },
+  ];
+}
+
+export function productionTelemetryVerificationCommands(telemetry: ProductionTelemetryPreviewModel): QueryCommand[] {
+  return telemetry.verificationCommands.map((command, index) => ({
+    label: `verify ${index + 1}`,
+    command,
+  }));
+}
 
 const laneKinds: GraphLaneKind[] = ["run", "scope", "fiber", "resource", "retry"];
 
@@ -83,6 +146,7 @@ export function App() {
       return {
         model: deriveWorkbenchModel(raw, { artifactPath }),
         governance: deriveGovernanceModel(raw, { artifactPath }),
+        productionTelemetry: deriveProductionTelemetryPreviewModel(raw, { artifactPath }),
         raw,
         session: loaded.session,
         error: null,
@@ -91,6 +155,7 @@ export function App() {
       return {
         model: null,
         governance: null,
+        productionTelemetry: null,
         raw: null,
         session: loaded.session,
         error: error instanceof Error ? error.message : "failed to parse artifact",
@@ -100,6 +165,10 @@ export function App() {
 
   const model = createMemo(() => parsed()?.model ?? null);
   const governance = createMemo(() => parsed()?.governance ?? null);
+  const productionTelemetry = createMemo(() => parsed()?.productionTelemetry ?? null);
+  const availableTabs = createMemo(() => (
+    workbenchTabsForArtifact(Boolean(productionTelemetry()))
+  ));
   const graphModel = createMemo(() => {
     const current = model();
     return current ? deriveGraphModel(current.events, current.findings) : null;
@@ -150,6 +219,17 @@ export function App() {
     return queryCommandsForEvent(event, current.artifactPath);
   });
 
+  createEffect(() => {
+    const telemetry = productionTelemetry();
+    const current = model();
+    if (telemetry && activeTab() === "timeline" && current?.events.length === 0) {
+      setActiveTab("telemetry");
+    }
+    if (!telemetry && activeTab() === "telemetry") {
+      setActiveTab("timeline");
+    }
+  });
+
   async function copyCommand(command: string) {
     if (navigator.clipboard) {
       await navigator.clipboard.writeText(command);
@@ -189,7 +269,7 @@ export function App() {
             <section class="layout-grid">
               <aside class="left-rail">
                 <nav class="tab-list" aria-label="Workbench views">
-                  <For each={tabs}>
+                  <For each={availableTabs()}>
                     {(tab) => (
                       <button
                         type="button"
@@ -289,6 +369,13 @@ export function App() {
                       onSelectEvent={setSelectedId}
                     />
                   </Match>
+                  <Match when={activeTab() === "telemetry"}>
+                    <ProductionTelemetryView
+                      telemetry={productionTelemetry()}
+                      copiedCommand={copiedCommand()}
+                      onCopy={copyCommand}
+                    />
+                  </Match>
                   <Match when={activeTab() === "queries"}>
                     <Queries
                       artifactPath={current().artifactPath}
@@ -317,6 +404,207 @@ export function App() {
         )}
       </Show>
     </main>
+  );
+}
+
+export function ProductionTelemetryView(props: {
+  telemetry: ProductionTelemetryPreviewModel | null;
+  copiedCommand: string | null;
+  onCopy: (command: string) => void;
+}) {
+  const commands = createMemo<QueryCommand[]>(() => (
+    props.telemetry ? productionTelemetryVerificationCommands(props.telemetry) : []
+  ));
+
+  return (
+    <div class="view-stack">
+      <div class="view-heading">
+        <h2>Telemetry</h2>
+        <span>{props.telemetry?.status ?? "no telemetry artifact"}</span>
+      </div>
+
+      <Show when={props.telemetry} fallback={<EmptyState label="Loaded artifact has no production telemetry preview" />}>
+        {(telemetry) => (
+          <>
+            <div class="chain-status telemetry-status">
+              <For each={productionTelemetryStatusMetrics(telemetry())}>
+                {(metric) => <Metric label={metric.label} value={metric.value} tone={metric.tone} />}
+              </For>
+            </div>
+
+            <div class="telemetry-grid">
+              <ChainSources
+                steps={telemetry().sources}
+                copiedCommand={props.copiedCommand}
+                onCopy={props.onCopy}
+              />
+              <TelemetryAuthority authority={telemetry().authority} />
+            </div>
+
+            <div class="telemetry-grid">
+              <TelemetryChecks checks={telemetry().checks} />
+              <section class="chain-panel">
+                <h3>Verification</h3>
+                <CommandList
+                  commands={commands()}
+                  copiedCommand={props.copiedCommand}
+                  onCopy={props.onCopy}
+                  compact
+                />
+              </section>
+            </div>
+
+            <TelemetryMappingFixtures fixtures={telemetry().mappingFixtures} />
+
+            <div class="telemetry-grid">
+              <TelemetryStringPanel title="Validation checks" values={telemetry().validationChecks} chip />
+              <TelemetryStringPanel title="Implementation gates" values={telemetry().implementationGates} />
+            </div>
+
+            <div class="telemetry-grid">
+              <TelemetryStringPanel title="Blocked claims" values={telemetry().blockedClaims} chip tone="blocked" />
+              <TelemetryStringPanel title="Non-goals" values={telemetry().nonGoals} />
+            </div>
+
+            <section class="chain-panel">
+              <div class="lane-section-head">
+                <h3>Next branch</h3>
+                <span>{telemetry().recommendation}</span>
+              </div>
+              <dl class="metadata-grid">
+                <Meta label="schema" value={telemetry().schema} />
+                <Meta label="schema version" value={telemetry().schemaVersion} />
+                <Meta label="artifact" value={telemetry().artifactPath} />
+                <Meta label="branch" value={telemetry().nextBranch} />
+              </dl>
+            </section>
+
+            <div class="warning-list">
+              <For each={telemetry().warnings} fallback={<EmptyState label="No telemetry warnings" compact />}>
+                {(warning) => <span>{warning}</span>}
+              </For>
+            </div>
+          </>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+function TelemetryAuthority(props: { authority: ProductionTelemetryAuthority }) {
+  const flags = createMemo(() => productionTelemetryAuthorityRows(props.authority));
+
+  return (
+    <section class="chain-panel">
+      <div class="lane-section-head">
+        <h3>Authority boundary</h3>
+        <span>read-only</span>
+      </div>
+      <div class="telemetry-authority-grid">
+        <For each={flags()}>
+          {(flag) => <Metric label={flag.label} value={flag.value} tone={flag.safe ? "ok" : "warn"} />}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function TelemetryChecks(props: { checks: ProductionTelemetryCheck[] }) {
+  return (
+    <section class="chain-panel">
+      <div class="lane-section-head">
+        <h3>Checks</h3>
+        <span>{props.checks.length}</span>
+      </div>
+      <div class="gate-result-list">
+        <For each={props.checks} fallback={<EmptyState label="No telemetry checks" compact />}>
+          {(check) => (
+            <div class="gate-result-row">
+              <span class={`gate-chip ${check.status === "pass" ? "allow" : "blocked"}`}>{check.status}</span>
+              <strong>{check.name}</strong>
+              <p>{check.detail || "No detail recorded"}</p>
+            </div>
+          )}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function TelemetryMappingFixtures(props: { fixtures: ProductionTelemetryMappingFixture[] }) {
+  return (
+    <section class="chain-panel app-remediation-full">
+      <div class="lane-section-head">
+        <h3>NenDB mapping fixtures</h3>
+        <span>{props.fixtures.length}</span>
+      </div>
+      <div class="telemetry-fixture-grid">
+        <For each={props.fixtures} fallback={<EmptyState label="No NenDB mapping fixtures" compact />}>
+          {(fixture) => <TelemetryMappingFixture fixture={fixture} />}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function TelemetryMappingFixture(props: { fixture: ProductionTelemetryMappingFixture }) {
+  return (
+    <article class="telemetry-fixture-card">
+      <div class="telemetry-fixture-head">
+        <span>{props.fixture.label}</span>
+        <strong>{props.fixture.id}</strong>
+        <small>{props.fixture.sourceEnvelope} / {props.fixture.targetSchema}</small>
+      </div>
+      <div class="telemetry-field-grid">
+        <TelemetryFieldGroup label="Retained" values={props.fixture.retainedFields} />
+        <TelemetryFieldGroup label="Blocked" values={props.fixture.blockedFields} blocked />
+      </div>
+    </article>
+  );
+}
+
+function TelemetryFieldGroup(props: { label: string; values: string[]; blocked?: boolean }) {
+  return (
+    <div class="telemetry-field-group">
+      <span>{props.label}</span>
+      <div class="telemetry-field-list">
+        <For each={props.values} fallback={<small>none</small>}>
+          {(value) => <code classList={{ blocked: props.blocked }}>{value}</code>}
+        </For>
+      </div>
+    </div>
+  );
+}
+
+function TelemetryStringPanel(props: {
+  title: string;
+  values: string[];
+  chip?: boolean;
+  tone?: "blocked";
+}) {
+  return (
+    <section class="chain-panel">
+      <div class="lane-section-head">
+        <h3>{props.title}</h3>
+        <span>{props.values.length}</span>
+      </div>
+      <Show
+        when={props.chip}
+        fallback={(
+          <div class="guardrail-list">
+            <For each={props.values} fallback={<EmptyState label={`No ${props.title.toLowerCase()}`} compact />}>
+              {(value) => <span>{value}</span>}
+            </For>
+          </div>
+        )}
+      >
+        <div class="gate-chip-list">
+          <For each={props.values} fallback={<EmptyState label={`No ${props.title.toLowerCase()}`} compact />}>
+            {(value) => <span class={`gate-chip ${props.tone === "blocked" ? "blocked" : "allow"}`}>{value}</span>}
+          </For>
+        </div>
+      </Show>
+    </section>
   );
 }
 
