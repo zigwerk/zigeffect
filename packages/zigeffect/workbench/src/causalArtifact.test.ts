@@ -638,6 +638,54 @@ test("deriveVisualGraphModel maps causal graph data for read-only layouts", () =
   expect(visual.adapter.directEngineApi).toBe("not-required");
 });
 
+test("deriveVisualGraphModel defaults to cause perspective with parent edges", () => {
+  const workbench = deriveWorkbenchModel(parseArtifactJson(sampleArtifact), {
+    artifactPath: "sample-artifact.json",
+  });
+  const graph = deriveGraphModel(workbench.events, workbench.findings);
+  const visual = deriveVisualGraphModel(workbench, graph, {
+    layoutMode: "dagre",
+    perspective: "cause",
+    selectedEventId: "8",
+  });
+
+  expect(visual.perspective).toBe("cause");
+  expect(visual.nodes.some((node) => node.id === "event:8" && node.priority === "critical")).toBe(true);
+  expect(visual.edges.some((edge) => edge.kind === "parent" && edge.source === "event:2" && edge.target === "event:8")).toBe(true);
+  expect(visual.legend.some((entry) => entry.label === "Failure")).toBe(true);
+});
+
+test("deriveVisualGraphModel creates topology group nodes for runtime lanes", () => {
+  const workbench = deriveWorkbenchModel(parseArtifactJson(sampleArtifact), {
+    artifactPath: "sample-artifact.json",
+  });
+  const graph = deriveGraphModel(workbench.events, workbench.findings);
+  const visual = deriveVisualGraphModel(workbench, graph, {
+    layoutMode: "force",
+    perspective: "topology",
+  });
+
+  expect(visual.perspective).toBe("topology");
+  expect(visual.nodes.some((node) => node.group === "run" && node.id === "run:1")).toBe(true);
+  expect(visual.nodes.some((node) => node.group === "scope" && node.id === "scope:1")).toBe(true);
+  expect(visual.edges.some((edge) => edge.kind === "owns" && edge.source === "scope:1" && edge.target === "event:2")).toBe(true);
+});
+
+test("deriveVisualGraphModel emphasizes ownership and finalizer failures", () => {
+  const workbench = deriveWorkbenchModel(parseArtifactJson(sampleArtifact), {
+    artifactPath: "sample-artifact.json",
+  });
+  const graph = deriveGraphModel(workbench.events, workbench.findings);
+  const visual = deriveVisualGraphModel(workbench, graph, {
+    layoutMode: "radial",
+    perspective: "ownership",
+  });
+
+  expect(visual.nodes.some((node) => node.group === "resource" && node.tone === "failure")).toBe(true);
+  expect(visual.edges.some((edge) => edge.kind === "finalizes" && edge.target === "event:8")).toBe(true);
+  expect(visual.warnings.every((warning) => !warning.includes("mutation"))).toBe(true);
+});
+
 test("deriveVisualGraphModel maps live stream frames when events are absent", () => {
   const workbench = deriveWorkbenchModel(sampleLiveStream, {
     artifactPath: "sample-live-dashboard-stream.json",

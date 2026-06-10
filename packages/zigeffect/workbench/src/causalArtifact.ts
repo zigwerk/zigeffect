@@ -68,15 +68,60 @@ export type GraphModel = {
 
 export type VisualGraphLayoutMode = "dagre" | "force" | "radial";
 
+export type VisualGraphPerspective = "cause" | "topology" | "ownership" | "lineage";
+
 export type VisualGraphNodeTone = "ok" | "warning" | "failure";
+
+export type VisualGraphNodePriority = "normal" | "watch" | "critical";
+
+export type VisualGraphNodeGroup =
+  | "event"
+  | "run"
+  | "scope"
+  | "fiber"
+  | "resource"
+  | "retry"
+  | "service"
+  | "artifact"
+  | "data";
+
+export type VisualGraphEdgeKind =
+  | "parent"
+  | "caused_by"
+  | "owns"
+  | "finalizes"
+  | "requires"
+  | "reads"
+  | "writes"
+  | "transforms"
+  | "emits";
+
+export type VisualGraphRefSet = {
+  artifactId: string | null;
+  domainEntityRef: string | null;
+  dataSubjectRef: string | null;
+  schemaRef: string | null;
+};
+
+export type VisualGraphLegendEntry = {
+  id: string;
+  label: string;
+  tone: VisualGraphNodeTone;
+  detail: string;
+};
 
 export type VisualGraphNode = {
   id: string;
+  eventId: string | null;
   label: string;
+  detail: string;
   kind: string;
   status: string;
   lane: string;
+  group: VisualGraphNodeGroup;
+  refs: VisualGraphRefSet;
   tone: VisualGraphNodeTone;
+  priority: VisualGraphNodePriority;
 };
 
 export type VisualGraphEdge = {
@@ -84,17 +129,30 @@ export type VisualGraphEdge = {
   source: string;
   target: string;
   label: string;
+  detail: string;
+  kind: VisualGraphEdgeKind;
+  tone: VisualGraphNodeTone;
 };
 
 export type VisualGraphModel = {
+  perspective: VisualGraphPerspective;
   layoutMode: VisualGraphLayoutMode;
   nodes: VisualGraphNode[];
   edges: VisualGraphEdge[];
+  legend: VisualGraphLegendEntry[];
+  warnings: string[];
   adapter: {
     solid: "@dschz/solid-g6";
     engine: "@antv/g6";
     directEngineApi: "not-required";
   };
+};
+
+export type VisualGraphOptions = {
+  layoutMode: VisualGraphLayoutMode;
+  perspective?: VisualGraphPerspective;
+  selectedEventId?: string | null;
+  liveDashboard?: LiveDashboardModel | null;
 };
 
 export type LiveDashboardPriority = "normal" | "watch" | "critical";
@@ -506,55 +564,239 @@ export function deriveLiveDashboardModel(
 export function deriveVisualGraphModel(
   workbench: WorkbenchModel,
   graph: GraphModel,
-  layoutMode: VisualGraphLayoutMode,
-  liveDashboard?: LiveDashboardModel | null,
+  optionsOrLayout: VisualGraphOptions | VisualGraphLayoutMode,
+  legacyLiveDashboard?: LiveDashboardModel | null,
 ): VisualGraphModel {
+  const options: VisualGraphOptions = typeof optionsOrLayout === "string"
+    ? { layoutMode: optionsOrLayout, perspective: "cause", liveDashboard: legacyLiveDashboard }
+    : optionsOrLayout;
+  const perspective = options.perspective ?? "cause";
+  const legacyIds = typeof optionsOrLayout === "string";
+  const liveDashboard = options.liveDashboard ?? null;
+  const warnings: string[] = [];
   const findingEventIds = new Set(workbench.findings.map((finding) => finding.eventId));
-  const eventNodes = workbench.events.map((event) => ({
-    id: event.idText,
-    label: event.label || event.typeName || event.kind,
-    kind: event.kind,
-    status: event.status,
-    lane: eventLaneLabel(event),
-    tone: visualNodeTone(event, findingEventIds),
-  }));
-  const eventEdges = graph.parentEdges.map((edge) => ({
-    id: `${edge.from}->${edge.to}`,
-    source: edge.from,
-    target: edge.to,
-    label: edge.label,
-  }));
-  const streamNodes = liveDashboard?.frames.map((frame) => ({
-    id: frame.eventId,
-    label: frame.label || frame.eventKind,
-    kind: frame.eventKind,
-    status: frame.status,
-    lane: frame.lane,
-    tone: visualStreamFrameTone(frame),
-  })) ?? [];
+  const eventNodes = workbench.events.map((event) => visualNodeFromEvent(event, findingEventIds, options.selectedEventId ?? null, legacyIds));
+  const eventNodeToneById = new Map(eventNodes.map((node) => [node.eventId ?? node.id, node.tone]));
+  const eventEdges = graph.parentEdges.map((edge) => visualParentEdge(edge, eventNodeToneById, legacyIds));
+  const streamNodes = liveDashboard?.frames.map((frame) => visualNodeFromStreamFrame(frame, legacyIds)) ?? [];
   const streamNodeIds = new Set(streamNodes.map((node) => node.id));
   const streamEdges = liveDashboard?.frames.flatMap((frame) => {
-    if (!frame.parentId || !streamNodeIds.has(frame.parentId)) {
+    const source = legacyIds ? frame.parentId : (frame.parentId ? `event:${frame.parentId}` : null);
+    const target = legacyIds ? frame.eventId : `event:${frame.eventId}`;
+    if (!source || !streamNodeIds.has(source)) {
       return [];
     }
 
     return [{
-      id: `${frame.parentId}->${frame.eventId}`,
-      source: frame.parentId,
-      target: frame.eventId,
+      id: `${source}->${target}`,
+      source,
+      target,
       label: "parent",
+      detail: "stream parent edge",
+      kind: "parent" as const,
+      tone: visualStreamFrameTone(frame),
     }];
   }) ?? [];
+  const baseNodes = eventNodes.length > 0 ? eventNodes : streamNodes;
+  const baseEdges = eventNodes.length > 0 ? eventEdges : streamEdges;
+  const perspectiveGraph = applyVisualGraphPerspective(perspective, workbench, baseNodes, baseEdges, warnings, legacyIds);
 
   return {
-    layoutMode,
-    nodes: eventNodes.length > 0 ? eventNodes : streamNodes,
-    edges: eventNodes.length > 0 ? eventEdges : streamEdges,
+    perspective,
+    layoutMode: options.layoutMode,
+    nodes: perspectiveGraph.nodes,
+    edges: perspectiveGraph.edges,
+    legend: visualGraphLegend(),
+    warnings,
     adapter: {
       solid: "@dschz/solid-g6",
       engine: "@antv/g6",
       directEngineApi: "not-required",
     },
+  };
+}
+
+function visualNodeFromEvent(
+  event: CausalEvent,
+  findingEventIds: Set<string>,
+  selectedEventId: string | null,
+  legacyIds: boolean,
+): VisualGraphNode {
+  const tone = visualNodeTone(event, findingEventIds);
+  return {
+    id: visualEventNodeId(event.idText, legacyIds),
+    eventId: event.idText,
+    label: event.label || event.typeName || event.kind,
+    detail: event.redactedDetail || event.typeName || event.kind,
+    kind: event.kind,
+    status: event.status,
+    lane: eventLaneLabel(event),
+    group: "event",
+    refs: visualRefsForEvent(event),
+    tone,
+    priority: visualPriority(tone, event.idText === selectedEventId),
+  };
+}
+
+function visualNodeFromStreamFrame(frame: LiveStreamFrameModel, legacyIds: boolean): VisualGraphNode {
+  const tone = visualStreamFrameTone(frame);
+  return {
+    id: visualEventNodeId(frame.eventId, legacyIds),
+    eventId: frame.eventId,
+    label: frame.label || frame.eventKind,
+    detail: frame.findingKind ?? frame.eventKind,
+    kind: frame.eventKind,
+    status: frame.status,
+    lane: frame.lane,
+    group: "event",
+    refs: visualEmptyRefs(),
+    tone,
+    priority: frame.priority,
+  };
+}
+
+function visualParentEdge(edge: GraphEdge, toneByEventId: Map<string, VisualGraphNodeTone>, legacyIds: boolean): VisualGraphEdge {
+  const source = visualEventNodeId(edge.from, legacyIds);
+  const target = visualEventNodeId(edge.to, legacyIds);
+  return {
+    id: `${source}->${target}`,
+    source,
+    target,
+    label: edge.label,
+    detail: "parent relationship",
+    kind: "parent",
+    tone: toneByEventId.get(edge.to) ?? "ok",
+  };
+}
+
+function applyVisualGraphPerspective(
+  perspective: VisualGraphPerspective,
+  workbench: WorkbenchModel,
+  nodes: VisualGraphNode[],
+  edges: VisualGraphEdge[],
+  warnings: string[],
+  legacyIds: boolean,
+): { nodes: VisualGraphNode[]; edges: VisualGraphEdge[] } {
+  if (legacyIds || perspective === "cause") {
+    return { nodes, edges };
+  }
+
+  if (perspective === "topology") {
+    return addRuntimeTopology(workbench.events, nodes, edges, ["run", "scope", "fiber", "resource", "retry"]);
+  }
+
+  if (perspective === "ownership") {
+    return addRuntimeTopology(workbench.events, nodes, edges, ["scope", "fiber", "resource"]);
+  }
+
+  warnings.push("lineage perspective found no app semantic refs in this artifact");
+  return { nodes, edges };
+}
+
+function addRuntimeTopology(
+  events: CausalEvent[],
+  nodes: VisualGraphNode[],
+  edges: VisualGraphEdge[],
+  groups: VisualGraphNodeGroup[],
+): { nodes: VisualGraphNode[]; edges: VisualGraphEdge[] } {
+  const nextNodes = [...nodes];
+  const nextEdges = [...edges];
+  const seenNodes = new Set(nextNodes.map((node) => node.id));
+  const seenEdges = new Set(nextEdges.map((edge) => edge.id));
+
+  for (const event of events) {
+    const eventNodeId = visualEventNodeId(event.idText, false);
+    for (const group of visualGroupsForEvent(event, groups)) {
+      if (!seenNodes.has(group.id)) {
+        seenNodes.add(group.id);
+        nextNodes.push(group);
+      }
+
+      const kind: VisualGraphEdgeKind = group.group === "resource" && event.kind === "resource_finalized" ? "finalizes" : "owns";
+      const edgeId = `${group.id}->${eventNodeId}:${kind}`;
+      if (!seenEdges.has(edgeId)) {
+        seenEdges.add(edgeId);
+        nextEdges.push({
+          id: edgeId,
+          source: group.id,
+          target: eventNodeId,
+          label: kind,
+          detail: `${group.label} ${kind} ${event.label || event.kind}`,
+          kind,
+          tone: kind === "finalizes" ? visualNodeTone(event, new Set()) : group.tone,
+        });
+      }
+    }
+  }
+
+  return { nodes: nextNodes, edges: nextEdges };
+}
+
+function visualGroupsForEvent(event: CausalEvent, groups: VisualGraphNodeGroup[]): VisualGraphNode[] {
+  const candidates: VisualGraphNode[] = [];
+  const emptyRefs = visualEmptyRefs();
+  const add = (group: VisualGraphNodeGroup, id: string, label: string, tone: VisualGraphNodeTone = "ok") => {
+    if (!groups.includes(group)) return;
+    candidates.push({
+      id,
+      eventId: null,
+      label,
+      detail: group,
+      kind: group,
+      status: "group",
+      lane: group,
+      group,
+      refs: emptyRefs,
+      tone,
+      priority: visualPriority(tone, false),
+    });
+  };
+
+  if (event.runId) add("run", `run:${event.runId}`, `run ${event.runId}`);
+  if (event.scopeId) add("scope", `scope:${event.scopeId}`, `scope ${event.scopeId}`);
+  if (event.fiberId) add("fiber", `fiber:${event.fiberId}`, `fiber ${event.fiberId}`);
+  if (event.kind === "schedule_decision") add("retry", `retry:${event.label || event.idText}`, event.label || "retry", event.status === "exhausted" ? "warning" : "ok");
+  if (event.kind.includes("resource")) {
+    const resourceLabel = event.typeName || event.label || `resource ${event.idText}`;
+    add("resource", `resource:${resourceLabel}`, resourceLabel, event.status === "failure" ? "failure" : event.status === "success" ? "ok" : "warning");
+  }
+
+  return candidates;
+}
+
+function visualEventNodeId(eventId: string, legacyIds: boolean): string {
+  return legacyIds ? eventId : `event:${eventId}`;
+}
+
+function visualPriority(tone: VisualGraphNodeTone, selected: boolean): VisualGraphNodePriority {
+  if (tone === "failure" || selected) return "critical";
+  if (tone === "warning") return "watch";
+  return "normal";
+}
+
+function visualGraphLegend(): VisualGraphLegendEntry[] {
+  return [
+    { id: "ok", label: "OK", tone: "ok", detail: "No finding or failure evidence" },
+    { id: "warning", label: "Warning", tone: "warning", detail: "Finding, pending, missing, exhausted, or running evidence" },
+    { id: "failure", label: "Failure", tone: "failure", detail: "Failure or critical evidence" },
+  ];
+}
+
+function visualEmptyRefs(): VisualGraphRefSet {
+  return {
+    artifactId: null,
+    domainEntityRef: null,
+    dataSubjectRef: null,
+    schemaRef: null,
+  };
+}
+
+function visualRefsForEvent(event: CausalEvent): VisualGraphRefSet {
+  return {
+    artifactId: event.artifactId || null,
+    domainEntityRef: event.domainEntityRef || null,
+    dataSubjectRef: event.dataSubjectRef || null,
+    schemaRef: event.schemaRef || null,
   };
 }
 
