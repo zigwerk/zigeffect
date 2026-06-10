@@ -1049,6 +1049,20 @@ metrics, and traces.
   request comments by the tool, live telemetry, durable writes, NenDB writes,
   hosted dashboard claims, production cluster claims, alternate renderers, and
   production mutation disabled.
+  `causal-production-telemetry-ci-gate-required-status-check-enforcement-policy`
+  publishes
+  `zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-policy.v1`,
+  consumes planned or externally applied enforcement application-boundary
+  artifacts, defines planned, active-enforcement, and merge-blocking
+  interpretation policy, and hands off to
+  `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-evaluator`.
+  It keeps GitHub API mutation by the tool, branch-protection mutation by the
+  tool, workflow mutation by the tool, check-run creation by the tool, artifact
+  upload execution by the tool, GitHub step summary writes by the tool, pull
+  request comments by the tool, live telemetry, durable writes, NenDB writes,
+  non-NenDB adapter work, alternate renderers, production health claims,
+  hosted dashboard claims, production cluster claims, and production mutation
+  disabled.
   It keeps GitHub API mutation by the tool, branch-protection mutation by the
   tool, workflow mutation by the tool, check-run creation by the tool, artifact
   upload execution by the tool, GitHub step summary writes by the tool, pull

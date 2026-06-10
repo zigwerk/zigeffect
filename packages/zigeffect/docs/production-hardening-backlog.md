@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-telemetry-ci-gate-required-status-check-enforcement-policy` means the
+The recommendation `start-production-telemetry-ci-gate-required-status-check-enforcement-evaluator` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -212,8 +212,16 @@ rollback evidence, complete verification, and merge-blocking evidence when
 that claim is made. It still denies GitHub mutation by the tool, workflow
 mutation by the tool, CI upload execution, live telemetry, durable writes,
 NenDB writes, production cluster claims, and mutation authority.
+The required-status-check enforcement policy branch is also delivered: it
+consumes planned or externally applied enforcement application-boundary
+artifacts and defines record-only interpretation rules for planned evidence,
+active enforcement evidence, and merge-blocking evidence. It still denies
+GitHub mutation by the tool, workflow mutation by the tool, check-run creation
+by the tool, CI upload execution, live telemetry, durable writes, NenDB
+writes, non-NenDB durable adapters, alternate renderers, production health,
+production cluster claims, and mutation authority.
 The next branch should be
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-policy`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-evaluator`.
 
 ## Dependency Order
 
@@ -261,6 +269,7 @@ The backlog currently orders future production-hardening branches as:
 40. `production-telemetry-ci-gate-required-status-check-policy` delivered
 41. `production-telemetry-ci-gate-required-status-check-enforcement-readiness` delivered
 42. `production-telemetry-ci-gate-required-status-check-enforcement-application-boundary` delivered
+43. `production-telemetry-ci-gate-required-status-check-enforcement-policy` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -736,11 +745,26 @@ check-run creation by the tool, disabled CI uploads, disabled live telemetry,
 disabled durable writes, disabled NenDB writes, NenDB-only durable direction,
 and SolidJS `zig-webui` workbench direction.
 
-The next branch should define enforcement interpretation policy for externally
-applied required-status-check enforcement before any CI telemetry gate
-enforcement, active required status checks, branch protection mutation, live
-telemetry, durable production writes, capacity claims, production cluster
-claims, or mutation authority are considered.
+Production telemetry CI gate required status check enforcement policy is
+documented in
+[production-telemetry-ci-gate-required-status-check-enforcement-policy.md](production-telemetry-ci-gate-required-status-check-enforcement-policy.md).
+It emits
+`zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-policy.v1`
+through
+`zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-policy`,
+defines interpretation policy for planned, active-enforcement, and
+merge-blocking evidence, and hands off to enforcement evaluator work. It
+preserves disabled GitHub API mutation by the tool, disabled branch-protection
+mutation by the tool, disabled workflow mutation by the tool, disabled
+check-run creation by the tool, disabled CI uploads, disabled live telemetry,
+disabled durable writes, disabled NenDB writes, NenDB-only durable direction,
+and SolidJS `zig-webui` workbench direction.
+
+The next branch should evaluate bounded enforcement evidence against the
+policy before any CI telemetry gate enforcement, active required status
+checks, branch protection mutation, live telemetry, durable production writes,
+capacity claims, production cluster claims, or mutation authority are
+considered.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -1015,6 +1039,23 @@ zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-
   record-applied \
   --reason "negative required status check enforcement application boundary path" \
   --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-enforcement-application-boundary-negative
+zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-policy -- \
+  --from-application-boundary ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-enforcement-application-boundary.json \
+  approve \
+  --reason "required status check enforcement policy reviewed" \
+  --verified-command "zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-application-boundary" \
+  --verified-command "zig build causal-artifacts" \
+  --verified-command "zig build release-gate --summary none" \
+  --verified-command "zig build release-gate-report" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-policy -- \
+  --from-application-boundary ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-enforcement-application-boundary-negative.json \
+  reject \
+  --reason "negative required status check enforcement policy path" \
+  --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-enforcement-policy-negative
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

@@ -495,7 +495,7 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-policy`
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-evaluator`
 after the unified causal spine, deep runtime internals, app semantic trace API,
 bounded agent query surface, record-only encryption-at-rest policy,
 record-only alerting integrations, delivered live dashboard streaming
@@ -512,7 +512,8 @@ CI report, CI gate advisory CI report application boundary, CI gate advisory
 CI report publication policy, required status check readiness, required status
 check application boundary, required status check policy, required status
 check enforcement-readiness, and required status check enforcement
-application-boundary milestones.
+application-boundary, and required status check enforcement policy
+milestones.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -568,10 +569,10 @@ policy, CI gate readiness, CI gate application boundary, and CI gate dry-run
 policy, evaluator, advisory CI report, and advisory CI report application
 boundary, advisory CI report publication policy, required status check
 readiness, required status check application boundary, and required status
-check policy, enforcement-readiness, and enforcement application-boundary
-milestones.
+check policy, enforcement-readiness, enforcement application-boundary, and
+enforcement policy milestones.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-policy`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-evaluator`.
 
 ## Production Telemetry Capture Design
 
@@ -1229,6 +1230,37 @@ check-run creation by the tool, CI upload execution, live telemetry, durable
 production write, NenDB write, production cluster readiness, non-NenDB adapter
 scope, alternate renderer scope, or production mutation authority.
 
+Run the CI gate required status check enforcement policy after an enforcement
+application-boundary artifact exists:
+
+```sh
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-policy -- \
+  --from-application-boundary ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-enforcement-application-boundary.json \
+  approve \
+  --reason "required status check enforcement policy reviewed" \
+  --verified-command "zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-application-boundary" \
+  --verified-command "zig build causal-artifacts" \
+  --verified-command "zig build release-gate --summary none" \
+  --verified-command "zig build release-gate-report" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The CI gate required status check enforcement policy artifact records schema
+`zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-policy.v1`.
+It consumes planned or externally applied enforcement application-boundary
+artifacts, defines planned, active-enforcement, and merge-blocking
+interpretation policy, and hands off to the enforcement evaluator branch. Do
+not treat it as GitHub mutation by the tool, branch-protection mutation by the
+tool, workflow mutation by the tool, check-run creation by the tool, CI upload
+execution, step-summary or pull-request-comment writes, live telemetry,
+durable production write, NenDB write, non-NenDB adapter scope, alternate
+renderer scope, production health, production cluster readiness, or production
+mutation authority.
+
 ## Production Artifact Aggregation
 
 Run the production artifact aggregation contract before starting durable
@@ -1529,10 +1561,11 @@ CI-gate-required-status-check-readiness, and
 CI-gate-required-status-check-application-boundary,
 CI-gate-required-status-check-policy, and
 CI-gate-required-status-check-enforcement-readiness, and
-CI-gate-required-status-check-enforcement-application-boundary
+CI-gate-required-status-check-enforcement-application-boundary, and
+CI-gate-required-status-check-enforcement-policy
 reports are now delivered.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-policy`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-evaluator`.
 
 ## Production Gaps
 
