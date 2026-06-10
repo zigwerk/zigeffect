@@ -637,8 +637,8 @@ metrics, and traces.
   production-hardening branch queue, NenDB-only durable direction, SolidJS plus
   `webui-dev/zig-webui` workbench direction, the post-streaming
   `workbench-graph-visual-debugging` milestone, non-goals, verification
-  commands, and the next branch
-  `codex/zigeffect-causal-encryption-at-rest-policy`.
+  commands, and the current next branch
+  `codex/zigeffect-causal-alerting-integrations`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
@@ -658,6 +658,12 @@ metrics, and traces.
   fields. It consumes the aggregation, durable-retention, and deployment-runbook
   contracts while keeping live RBAC enforcement and mutation authority out of
   scope.
+- Delivered: `causal-encryption-at-rest-policy` publishes
+  `zigeffect.causal.encryption-at-rest-policy.v1` with encryption domains, key
+  owner labels, rotation evidence, encrypted artifact fixture metadata,
+  redaction ordering, denied fixtures, and authority boundaries. It keeps
+  encryption implementation, KMS integration, live RBAC, Cockroach adapter
+  work, React workbench support, and mutation authority out of scope.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,

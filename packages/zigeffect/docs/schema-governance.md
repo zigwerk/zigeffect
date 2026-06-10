@@ -184,6 +184,16 @@ by deep runtime internals, app semantic traces, agent queries, the SolidJS
 runtime emission, implement app trace APIs, write durable storage, or grant
 mutation authority.
 
+- `zigeffect.causal.encryption-at-rest-policy.v1`
+
+The encryption-at-rest-policy report is a record-only production hardening
+contract. It consumes aggregation, durable-retention, and artifact
+access-control contracts, then defines encryption domains, key owner labels,
+rotation evidence, encrypted artifact fixture metadata, redaction ordering,
+denied fixtures, and authority boundaries. It does not encrypt bytes, decrypt
+bytes, generate keys, call a KMS, enforce live RBAC, or grant mutation
+authority.
+
 ### Agent Query
 
 - `zigeffect.causal.agent-query.v1`

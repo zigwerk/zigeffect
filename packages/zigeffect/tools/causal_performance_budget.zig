@@ -130,7 +130,7 @@ const non_goals: []const []const u8 = &.{
     "production capacity planning",
     "production dashboards",
     "alerting or paging",
-    "RBAC or encryption-at-rest policy",
+    "live RBAC enforcement or encryption-at-rest implementation",
     "source or config mutation authority",
     "React workbench support",
     "Cockroach adapter work",
@@ -138,14 +138,14 @@ const non_goals: []const []const u8 = &.{
 
 fn usage() []const u8 {
     return
-        \\usage:
-        \\  zig build causal-performance-budget
-        \\  zig build causal-performance-budget -- --format text
-        \\  zig build causal-performance-budget -- --format json
-        \\
-        \\formats:
-        \\  --format text|json
-        \\
+    \\usage:
+    \\  zig build causal-performance-budget
+    \\  zig build causal-performance-budget -- --format text
+    \\  zig build causal-performance-budget -- --format json
+    \\
+    \\formats:
+    \\  --format text|json
+    \\
     ;
 }
 

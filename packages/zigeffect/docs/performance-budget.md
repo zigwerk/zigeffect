@@ -102,7 +102,7 @@ This budget report does not add:
 - production capacity planning;
 - production dashboards;
 - alerting or paging;
-- RBAC or encryption-at-rest policy;
+- live RBAC enforcement or encryption-at-rest implementation;
 - source or config mutation authority;
 - React workbench support;
 - Cockroach adapter work.

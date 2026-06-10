@@ -25,12 +25,12 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-encryption-at-rest-policy` means the aggregation
-bundle contract, NenDB-only durable-retention contract, manual production
-deployment runbooks, record-only artifact access-control contract, unified
-causal spine contract, deep runtime internals, app semantic trace API, and
-bounded agent query surface now exist. The next branch should be
-`codex/zigeffect-causal-encryption-at-rest-policy`.
+The recommendation `start-alerting-integrations` means the aggregation bundle
+contract, NenDB-only durable-retention contract, manual production deployment
+runbooks, record-only artifact access-control contract, unified causal spine
+contract, deep runtime internals, app semantic trace API, bounded agent query
+surface, and record-only encryption-at-rest policy now exist. The next branch
+should be `codex/zigeffect-causal-alerting-integrations`.
 
 ## Dependency Order
 
@@ -44,7 +44,7 @@ The backlog currently orders future production-hardening branches as:
 6. `deep-runtime-internals` delivered
 7. `app-semantic-trace-api` delivered
 8. `agent-query-interface` partial
-9. `encryption-at-rest-policy`
+9. `encryption-at-rest-policy` delivered
 10. `alerting-integrations`
 11. `live-dashboard-streaming-workbench`
 12. `workbench-graph-visual-debugging`
@@ -79,6 +79,13 @@ Artifact access control is documented in
 classes, role labels, permissions, decisions, denied-view fixtures, and audit
 record fields without live RBAC enforcement, identity providers, workbench
 mutation, or production mutation authority.
+
+Encryption-at-rest policy is documented in
+[encryption-at-rest-policy.md](encryption-at-rest-policy.md). It defines
+encryption domains, key owner labels, rotation evidence, encrypted artifact
+fixture metadata, redaction ordering, denied fixtures, and authority boundaries
+without encrypting bytes, decrypting bytes, generating keys, calling a KMS,
+enforcing live RBAC, or granting production mutation authority.
 
 Workbench work remains SolidJS inside `webui-dev/zig-webui`. React remains a
 non-goal unless a later adapter proves a concrete need.
@@ -134,6 +141,8 @@ zig build causal-durable-production-retention
 zig build causal-durable-production-retention -- --format json
 zig build causal-production-artifact-aggregation
 zig build causal-production-artifact-aggregation -- --format json
+zig build causal-encryption-at-rest-policy
+zig build causal-encryption-at-rest-policy -- --format json
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

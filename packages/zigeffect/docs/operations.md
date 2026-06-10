@@ -439,9 +439,9 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-encryption-at-rest-policy` after the unified causal
-spine, deep runtime internals, app semantic trace API, and bounded agent query
-surface.
+`codex/zigeffect-causal-alerting-integrations` after the unified causal spine,
+deep runtime internals, app semantic trace API, bounded agent query surface,
+and record-only encryption-at-rest policy.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -558,6 +558,29 @@ This contract was the handoff into
 semantic branches preserve the same boundaries: no Cockroach scope, no React
 workbench switch, and no production mutation authority.
 
+## Encryption At Rest Policy
+
+Run the encryption-at-rest policy contract after artifact access control and
+before alerting integrations:
+
+```sh
+cd packages/zigeffect
+zig build causal-encryption-at-rest-policy
+zig build causal-encryption-at-rest-policy -- --format json
+```
+
+The contract records schema
+`zigeffect.causal.encryption-at-rest-policy.v1`, consumes aggregation,
+durable-retention, and artifact access-control contracts, and defines
+encryption domains, key owner labels, rotation evidence, encrypted artifact
+fixture metadata, redaction ordering, denied fixtures, and authority
+boundaries.
+
+Redaction review precedes encryption-at-rest eligibility. Key ids are
+references, never key material. This contract does not encrypt bytes, decrypt
+bytes, generate keys, call a KMS, enforce live RBAC, modify the SolidJS
+workbench, add Cockroach scope, add React support, or grant mutation authority.
+
 ## Production Gaps
 
 The current operating model does not provide:
@@ -566,7 +589,7 @@ The current operating model does not provide:
 - durable production retention beyond local files and CI uploads;
 - alerting, paging, Slack, Linear, Jira, or SIEM integrations;
 - live RBAC enforcement over artifact bundles;
-- encryption-at-rest policy;
+- encryption-at-rest implementation, KMS integration, or live key rotation;
 - live dashboards or streaming workbench;
 - automated source/config mutation authority;
 - gradual rollout, canary, or circuit-breaker automation;
