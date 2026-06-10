@@ -903,6 +903,16 @@ metrics, and traces.
   workflow mutation, artifact upload execution, CI gates, live telemetry,
   durable writes, NenDB writes, hosted dashboard claims, production cluster
   claims, alternate renderers, and production mutation disabled.
+- Delivered: `causal-production-telemetry-ci-gate-readiness` publishes
+  `zigeffect.causal.production-telemetry-ci-gate-readiness.v1`, consumes ready
+  archive evidence policy artifacts, records advisory readiness dimensions,
+  candidate gate signals, limited gate semantics, release-gate verification
+  evidence, ready and blocked gate readiness artifacts, and hands off to
+  `codex/zigeffect-causal-production-telemetry-ci-gate-application-boundary`.
+  It keeps CI gate enforcement, required status checks, workflow mutation,
+  artifact upload execution, live telemetry, durable writes, NenDB writes,
+  hosted dashboard claims, production cluster claims, alternate renderers, and
+  production mutation disabled.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,

@@ -456,6 +456,24 @@ records, write durable production storage, host a production dashboard,
 orchestrate production clusters, add non-NenDB adapter work, add alternate
 renderers, or grant mutation authority.
 
+- `zigeffect.causal.production-telemetry-ci-gate-readiness.v1`
+
+The production-telemetry-ci-gate-readiness report is a record-only,
+ci-gate-readiness, gate-semantics, `cluster-release-gate-aware`,
+`mutation-authority-none`, `no-live-ingestion`, `no-network`,
+`no-durable-write`, `no-nendb-write`, `no-ci-gate-enforcement`, and
+`no-workflow-mutation` production hardening contract. It consumes ready archive
+evidence policy artifacts and emits `ready` or `blocked` readiness artifacts
+with readiness dimensions, advisory candidate gate signals, limited gate
+semantics, release-gate verification evidence, negative fixtures, blocked
+claims, and required verification commands before future gate application
+boundary work. It does not modify GitHub Actions, execute artifact uploads,
+enable CI gates, create required status checks, ingest live telemetry, run a
+telemetry pipeline, configure exporters, send OTLP, configure collector
+endpoints, write NenDB records, write durable production storage, host a
+production dashboard, orchestrate production clusters, add non-NenDB adapter
+work, add alternate renderers, or grant mutation authority.
+
 ### Human-Agent Feedback
 
 - `zigeffect.causal.human-agent-feedback-loop.v1`

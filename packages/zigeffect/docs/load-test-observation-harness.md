@@ -129,8 +129,10 @@ archive application handoff is delivered as
 `codex/zigeffect-causal-production-telemetry-ci-archive-application`. The
 CI archive evidence policy handoff is delivered as
 `codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy`. The
+CI gate readiness handoff is delivered as
+`codex/zigeffect-causal-production-telemetry-ci-gate-readiness`. The
 current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-readiness`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-application-boundary`.
 
 ## Verification
 

@@ -882,10 +882,22 @@ Status values:
      production cluster claims, alternate renderers, and mutation authority
      disabled.
 26. `codex/zigeffect-causal-production-telemetry-ci-gate-readiness`
-   - Current next branch: consume ready archive evidence policy artifacts and
-     define CI gate readiness without yet enforcing CI telemetry gates,
-     production storage, live ingestion, hosted dashboards, production cluster
-     readiness, or mutation authority.
+   - Delivered: `causal-production-telemetry-ci-gate-readiness` emits
+     `zigeffect.causal.production-telemetry-ci-gate-readiness.v1`, consumes
+     ready archive evidence policy artifacts, records advisory readiness
+     dimensions, candidate gate signals, limited gate semantics, release-gate
+     verification evidence, ready and blocked gate readiness artifacts, and
+     hands off to
+     `codex/zigeffect-causal-production-telemetry-ci-gate-application-boundary`
+     while keeping CI gate enforcement, required status checks, workflow
+     mutation, artifact upload execution, live telemetry, durable writes,
+     NenDB writes, hosted dashboard claims, production cluster claims,
+     alternate renderers, and mutation authority disabled.
+27. `codex/zigeffect-causal-production-telemetry-ci-gate-application-boundary`
+   - Current next branch: design the reviewed application boundary for future
+     CI telemetry gates without yet enforcing gates, mutating workflows, running
+     live telemetry, writing durable production storage, claiming production
+     cluster readiness, or granting mutation authority.
 
 ## Dual-Interface Causal Spine Expansion
 

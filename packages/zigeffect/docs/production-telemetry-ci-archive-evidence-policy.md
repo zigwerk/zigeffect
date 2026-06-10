@@ -125,11 +125,11 @@ SolidJS inside `webui-dev/zig-webui`.
   missing, verification command evidence is incomplete, or policy catalogs are
   incomplete.
 
-`ready_for_next_branch=true` means
-`codex/zigeffect-causal-production-telemetry-ci-gate-readiness` may be
-started. It does not approve CI gates, artifact upload execution, workflow
-mutation, live telemetry, runtime pipelines, NenDB writes, durable writes,
-hosted dashboards, production cluster claims, or mutation authority.
+`ready_for_next_branch=true` means the delivered
+`codex/zigeffect-causal-production-telemetry-ci-gate-readiness` branch may
+consume the artifact. It does not approve CI gates, artifact upload execution,
+workflow mutation, live telemetry, runtime pipelines, NenDB writes, durable
+writes, hosted dashboards, production cluster claims, or mutation authority.
 
 ## Output Paths
 
@@ -148,10 +148,12 @@ default output paths are:
 
 ## Agent Guidance
 
-Agents may use a `ready` archive evidence policy to start CI gate readiness
-design. They must cite the source archive application, source workflow digest,
-evidence class catalog, required metadata, interpretation rules, negative
-fixtures, blocked claims, required commands, and recorded commands.
+Agents may use a `ready` archive evidence policy as source evidence for the
+delivered CI gate readiness branch. They must cite the source archive
+application, source workflow digest, evidence class catalog, required metadata,
+interpretation rules, negative fixtures, blocked claims, required commands, and
+recorded commands. Ready CI gate readiness artifacts, not archive evidence
+policy artifacts alone, are the handoff into the gate application boundary.
 
 Agents must treat `blocked` archive evidence policies as stop signs. Blocked
 artifacts can guide source application or policy repair, but they cannot

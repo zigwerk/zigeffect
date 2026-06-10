@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-telemetry-ci-gate-readiness` means the
+The recommendation `start-production-telemetry-ci-gate-application-boundary` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -142,8 +142,17 @@ telemetry, network send, collector endpoint, OTLP serialization, durable
 writes, NenDB writes, hosted dashboard claims, production cluster claims,
 alternate renderer scope, and mutation authority before any CI gate readiness
 branch.
+The production telemetry CI gate readiness branch is also delivered: it
+consumes ready archive evidence policy artifacts, records advisory readiness
+dimensions, candidate gate signals, limited gate semantics, release-gate
+verification evidence, and negative fixtures, and preserves disabled CI gate
+enforcement, required status checks, workflow mutation, artifact upload
+execution, runtime pipeline execution, live telemetry, network send, collector
+endpoint, OTLP serialization, durable writes, NenDB writes, hosted dashboard
+claims, production cluster claims, alternate renderer scope, and mutation
+authority before any gate application boundary branch.
 The next branch should be
-`codex/zigeffect-causal-production-telemetry-ci-gate-readiness`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-application-boundary`.
 
 ## Dependency Order
 
@@ -179,6 +188,7 @@ The backlog currently orders future production-hardening branches as:
 28. `production-telemetry-ci-harness-boundary` delivered
 29. `production-telemetry-ci-archive-application` delivered
 30. `production-telemetry-ci-archive-evidence-policy` delivered
+31. `production-telemetry-ci-gate-readiness` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -462,10 +472,30 @@ collector endpoint configuration, disabled OTLP serialization, disabled
 runtime pipeline execution, disabled durable writes, disabled NenDB writes,
 NenDB-only durable direction, and SolidJS `zig-webui` workbench direction.
 
-The next branch should use ready archive evidence policy artifacts to define
-CI gate readiness before CI telemetry gates, durable production writes, live
-ingestion, exporters, capacity claims, production cluster claims, or mutation
-authority are considered.
+Ready archive evidence policy artifacts are the source evidence for CI gate
+readiness; they do not themselves approve CI telemetry gates, durable
+production writes, live ingestion, exporters, capacity claims, production
+cluster claims, or mutation authority.
+
+Production telemetry CI gate readiness is documented in
+[production-telemetry-ci-gate-readiness.md](production-telemetry-ci-gate-readiness.md).
+It emits `zigeffect.causal.production-telemetry-ci-gate-readiness.v1` through
+`zig build causal-production-telemetry-ci-gate-readiness`, consumes ready
+archive evidence policy artifacts, records readiness dimensions, advisory
+candidate gate signals, limited gate semantics, release-gate verification
+evidence, negative fixtures, blocked claims, and required verification
+commands, and preserves disabled workflow mutation, disabled artifact upload
+execution, disabled CI gate enforcement, disabled required status checks,
+disabled live telemetry, disabled network send, disabled collector endpoint
+configuration, disabled OTLP serialization, disabled runtime pipeline
+execution, disabled durable writes, disabled NenDB writes, NenDB-only durable
+direction, and SolidJS `zig-webui` workbench direction.
+
+The next branch should use ready CI gate readiness artifacts to design the gate
+application boundary before any CI telemetry gate enforcement, required status
+checks, workflow mutation, durable production writes, live ingestion,
+exporters, capacity claims, production cluster claims, or mutation authority
+are considered.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -658,6 +688,23 @@ zig build causal-production-telemetry-ci-archive-evidence-policy -- \
   reject \
   --reason "negative CI archive evidence policy path" \
   --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-archive-evidence-policy-negative
+zig build causal-production-telemetry-ci-gate-readiness -- \
+  --from-archive-evidence-policy ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary-ci-archive-evidence-policy.json \
+  approve \
+  --reason "CI gate readiness reviewed" \
+  --verified-command "zig build causal-production-telemetry-ci-archive-evidence-policy" \
+  --verified-command "zig build causal-artifacts" \
+  --verified-command "zig build release-gate --summary none" \
+  --verified-command "zig build release-gate-report" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+zig build causal-production-telemetry-ci-gate-readiness -- \
+  --from-archive-evidence-policy ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary-ci-archive-evidence-policy.json \
+  reject \
+  --reason "negative CI gate readiness path" \
+  --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-readiness-negative
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

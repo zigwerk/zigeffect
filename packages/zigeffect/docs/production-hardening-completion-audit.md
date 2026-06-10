@@ -91,6 +91,7 @@ The audit deliberately separates delivered contracts from missing evidence:
 - `production-telemetry-ci-harness-boundary`: delivered;
 - `production-telemetry-ci-archive-application`: delivered;
 - `production-telemetry-ci-archive-evidence-policy`: delivered;
+- `production-telemetry-ci-gate-readiness`: delivered;
 - `reviewed-production-capacity-sizing`: future;
 - `live-alert-delivery`: future;
 - `live-rollout-automation`: future;
@@ -132,14 +133,17 @@ CI-harness-boundary branches are now delivered after this handoff. The CI
 archive application branch now records guarded plan or record-applied archive
 evidence. The CI archive evidence policy branch now defines allowed archived
 evidence classes, required provenance metadata, interpretation rules, denied
-claims, and negative fixtures. The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-readiness`.
+claims, and negative fixtures. The CI gate readiness branch now defines
+advisory gate readiness dimensions, candidate gate signals, limited gate
+semantics, release-gate verification evidence, and negative fixtures. The
+current next branch is
+`codex/zigeffect-causal-production-telemetry-ci-gate-application-boundary`.
 Reviewed production capacity sizing remains future until compatible
 observations, telemetry design, fixtures, readiness review, implementation
 proposal, exporter boundary, local pipeline fixture evidence, NenDB retention
 fixture evidence, workbench preview evidence, CI artifact preview evidence, CI
 harness boundary evidence, CI archive application evidence, archive evidence
-policy evidence, and human review exist.
+policy evidence, CI gate readiness evidence, and human review exist.
 
 ## Verification
 
