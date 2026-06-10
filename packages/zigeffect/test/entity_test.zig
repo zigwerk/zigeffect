@@ -193,6 +193,90 @@ test "entity refs tell ask reply and process ordered messages" {
     try std.testing.expectEqualStrings("value=1", reply.payload);
 }
 
+test "local entity runtime processes externally supplied envelopes" {
+    var runtime = fx.LocalEntityRuntime.init(std.testing.allocator, .{});
+    defer runtime.deinit();
+
+    const address = fx.entityAddress("counter", "external");
+    _ = try runtime.registerEntity(.{ .address = address, .name = "counter-external" }, 1_000);
+
+    var seen = std.ArrayList([]const u8).empty;
+    defer seen.deinit(std.testing.allocator);
+    const scope = try runtime.entityScope(address);
+    try scope.provideService("seen", &seen);
+
+    const Handler = struct {
+        pub fn handle(entity_scope: *fx.EntityScope, envelope: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            const raw = (try entity_scope.service("seen")).?;
+            const seen_messages: *std.ArrayList([]const u8) = @ptrCast(@alignCast(raw));
+            try seen_messages.append(std.testing.allocator, envelope.payload);
+            if (envelope.kind == .ask) return .{ .reply = "value=external" };
+            return .noreply;
+        }
+    };
+
+    const tell_envelope = try fx.cloneEntityEnvelope(std.testing.allocator, .{
+        .id = 10,
+        .sequence = 10,
+        .kind = .tell,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "inc",
+    });
+    var tell_result = try runtime.processEnvelope(tell_envelope, Handler, 1_100);
+    defer tell_result.deinit(std.testing.allocator);
+    try std.testing.expect(!tell_result.replied);
+
+    const ask_envelope = try fx.cloneEntityEnvelope(std.testing.allocator, .{
+        .id = 11,
+        .sequence = 11,
+        .kind = .ask,
+        .address = address,
+        .correlation_id = 77,
+        .payload_type_name = "text",
+        .payload = "get",
+    });
+    var ask_result = try runtime.processEnvelope(ask_envelope, Handler, 1_200);
+    defer ask_result.deinit(std.testing.allocator);
+    try std.testing.expect(ask_result.replied);
+
+    try std.testing.expectEqualStrings("inc", seen.items[0]);
+    try std.testing.expectEqualStrings("get", seen.items[1]);
+
+    const reply = try runtime.takeReply(77);
+    defer fx.deinitEntityEnvelope(std.testing.allocator, reply);
+    try std.testing.expectEqual(fx.EntityEnvelopeKind.reply, reply.kind);
+    try std.testing.expectEqualStrings("value=external", reply.payload);
+}
+
+test "local entity runtime external envelope failures use supervisor policy" {
+    var runtime = fx.LocalEntityRuntime.init(std.testing.allocator, .{
+        .restart_intensity = .{ .max_restarts = 2, .within_ms = 1_000 },
+    });
+    defer runtime.deinit();
+
+    const address = fx.entityAddress("counter", "external-failure");
+    _ = try runtime.registerEntity(.{ .address = address, .name = "counter-external-failure" }, 1_000);
+
+    const Handler = struct {
+        pub fn handle(_: *fx.EntityScope, _: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            return error.Boom;
+        }
+    };
+
+    const envelope = try fx.cloneEntityEnvelope(std.testing.allocator, .{
+        .id = 12,
+        .sequence = 12,
+        .kind = .tell,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "boom",
+    });
+    try std.testing.expectError(error.Boom, runtime.processEnvelope(envelope, Handler, 1_100));
+    try std.testing.expectEqual(fx.EntityStatus.running, try runtime.status(address));
+    try std.testing.expectEqual(@as(usize, 1), try runtime.restartCount(address));
+}
+
 test "interrupt envelope marks entity interrupted and closes scope" {
     var runtime = fx.LocalEntityRuntime.init(std.testing.allocator, .{});
     defer runtime.deinit();

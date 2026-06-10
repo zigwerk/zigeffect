@@ -267,12 +267,17 @@ pub const LocalEntityRuntime = struct {
     }
 
     pub fn processNext(self: *LocalEntityRuntime, address: EntityAddress, handler: anytype, now_ms: u64) anyerror!EntityProcessResult {
+        const envelope = try self.mailbox.take(address);
+        return self.processEnvelope(envelope, handler, now_ms);
+    }
+
+    pub fn processEnvelope(self: *LocalEntityRuntime, envelope: EntityEnvelope, handler: anytype, now_ms: u64) anyerror!EntityProcessResult {
+        errdefer mailbox_mod.deinitEntityEnvelope(self.allocator, envelope);
+        const address = envelope.address;
         const index = self.findEntityIndex(address) orelse return error.EntityNotFound;
         var instance = &self.entities.items[index];
         if (instance.status != .running and instance.status != .idle) return error.EntityNotRunning;
 
-        const envelope = try self.mailbox.take(address);
-        errdefer mailbox_mod.deinitEntityEnvelope(self.allocator, envelope);
         instance.last_active_ms = now_ms;
 
         if (envelope.kind == .interrupt) {
