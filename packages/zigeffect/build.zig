@@ -56,6 +56,64 @@ pub fn build(b: *std.Build) void {
     const storage_conformance_step = b.step("storage-conformance", "Run workflow and cluster storage conformance contract tests");
     storage_conformance_step.dependOn(&run_storage_conformance_tests.step);
 
+    const property_history_test_module = b.createModule(.{
+        .root_source_file = b.path("test/property_history_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    property_history_test_module.addImport("zigeffect", zigeffect);
+
+    const property_history_tests = b.addTest(.{
+        .name = "zigeffect-property-history-tests",
+        .root_module = property_history_test_module,
+    });
+    const run_property_history_tests = b.addRunArtifact(property_history_tests);
+
+    const crash_recovery_property_test_module = b.createModule(.{
+        .root_source_file = b.path("test/crash_recovery_property_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    crash_recovery_property_test_module.addImport("zigeffect", zigeffect);
+
+    const crash_recovery_property_tests = b.addTest(.{
+        .name = "zigeffect-crash-recovery-property-tests",
+        .root_module = crash_recovery_property_test_module,
+    });
+    const run_crash_recovery_property_tests = b.addRunArtifact(crash_recovery_property_tests);
+
+    const message_history_property_test_module = b.createModule(.{
+        .root_source_file = b.path("test/message_history_property_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    message_history_property_test_module.addImport("zigeffect", zigeffect);
+
+    const message_history_property_tests = b.addTest(.{
+        .name = "zigeffect-message-history-property-tests",
+        .root_module = message_history_property_test_module,
+    });
+    const run_message_history_property_tests = b.addRunArtifact(message_history_property_tests);
+
+    const scheduler_fairness_property_test_module = b.createModule(.{
+        .root_source_file = b.path("test/scheduler_fairness_property_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    scheduler_fairness_property_test_module.addImport("zigeffect", zigeffect);
+
+    const scheduler_fairness_property_tests = b.addTest(.{
+        .name = "zigeffect-scheduler-fairness-property-tests",
+        .root_module = scheduler_fairness_property_test_module,
+    });
+    const run_scheduler_fairness_property_tests = b.addRunArtifact(scheduler_fairness_property_tests);
+
+    const property_crash_step = b.step("property-crash", "Run generated workflow, message, crash, and scheduler property tests");
+    property_crash_step.dependOn(&run_property_history_tests.step);
+    property_crash_step.dependOn(&run_crash_recovery_property_tests.step);
+    property_crash_step.dependOn(&run_message_history_property_tests.step);
+    property_crash_step.dependOn(&run_scheduler_fairness_property_tests.step);
+
     const causal_jsonl_backend_test_module = b.createModule(.{
         .root_source_file = b.path("test/causal_jsonl_backend_test.zig"),
         .target = target,
@@ -578,6 +636,10 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_causal_artifact_tool_tests.step);
     test_step.dependOn(&run_causal_backend_conformance_tests.step);
     test_step.dependOn(&run_storage_conformance_tests.step);
+    test_step.dependOn(&run_property_history_tests.step);
+    test_step.dependOn(&run_crash_recovery_property_tests.step);
+    test_step.dependOn(&run_message_history_property_tests.step);
+    test_step.dependOn(&run_scheduler_fairness_property_tests.step);
     test_step.dependOn(&run_causal_jsonl_backend_tests.step);
     test_step.dependOn(&run_causal_dot_backend_tests.step);
     test_step.dependOn(&run_causal_otel_backend_tests.step);
