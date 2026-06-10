@@ -719,6 +719,39 @@ try std.testing.expect(!backend.can_suspend);
 the same capability contract. Async backend additions should preserve `Scope`,
 `Exit`, `Cause`, and service lookup contracts.
 
+Use production cluster transports when runner ingress should cross a byte
+protocol boundary while still landing in durable `MessageStorage`:
+
+```zig
+var transport_state = try fx.ProductionHttpClusterTransport.init(allocator, message_storage, .{
+    .shard_count = 32,
+    .auth = .{ .mode = .bearer_token, .credential = "runner-token" },
+    .limits = .{
+        .max_envelope_bytes = 1024 * 1024,
+        .max_chunk_bytes = 64 * 1024,
+        .max_in_flight = 512,
+    },
+});
+defer transport_state.deinit();
+
+var response = try transport_state.asClusterTransport().send(allocator, .{
+    .kind = .request,
+    .address = fx.entityAddress("counter", "alice"),
+    .payload_type_name = "text",
+    .payload = "get",
+    .redacted_detail = "read counter",
+    .auth = .{ .mode = .bearer_token, .credential = "runner-token" },
+    .trace_id = 42,
+    .policy = .{ .timeout_ms = 1_000, .max_retries = 2 },
+});
+defer response.deinit(allocator);
+```
+
+`ProductionSocketClusterTransport` uses the same auth, limit, retry, and
+lifecycle metrics contract with deterministic `ZIGFX/1` socket frames.
+`chunkedClusterTransportRequest` can attach chunk metadata before sending a
+large payload while keeping the durable payload bytes intact.
+
 ## Production Shard Lease Guards
 
 Cluster-owned durable writes should validate a storage-backed fence immediately

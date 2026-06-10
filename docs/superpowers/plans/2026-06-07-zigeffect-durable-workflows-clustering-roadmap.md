@@ -1000,21 +1000,21 @@ a transport abstraction with backpressure, retries, and observability.
 
 Deliverables:
 
-- [ ] Implement production HTTP transport.
-- [ ] Implement production socket transport if it fits the selected async
+- [x] Implement production HTTP transport.
+- [x] Implement production socket transport if it fits the selected async
   backend.
-- [ ] Add transport-level authentication hooks.
-- [ ] Add envelope size limits and streaming or chunking for large replies.
-- [ ] Add connection lifecycle metrics and trace propagation.
-- [ ] Add transport backpressure and retry policies.
-- [ ] Add compatibility tests across in-process, loopback HTTP, and production
+- [x] Add transport-level authentication hooks.
+- [x] Add envelope size limits and streaming or chunking for large replies.
+- [x] Add connection lifecycle metrics and trace propagation.
+- [x] Add transport backpressure and retry policies.
+- [x] Add compatibility tests across in-process, loopback HTTP, and production
   transport modes.
 
 Acceptance:
 
-- [ ] Multiple runners on separate processes can route entity messages,
+- [x] Multiple runners on separate processes can route entity messages,
   workflow commands, replies, interrupts, and queue completions reliably.
-- [ ] Transport failure produces retryable cluster errors and causal evidence
+- [x] Transport failure produces retryable cluster errors and causal evidence
   without corrupting durable state.
 
 ## Milestone 50: Real Clustering

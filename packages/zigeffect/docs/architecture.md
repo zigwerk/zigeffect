@@ -381,10 +381,13 @@ Owns Erlang-style distributed runtime surfaces:
 - `local_cluster.zig`: local multi-runner composition for shared storage,
   balanced shard acquisition, durable message routing, runner ticks, and
   dead-runner shard recovery.
-- `transport.zig`: deterministic cluster transport boundary with a synchronous
-  vtable, versioned request/response JSON, HTTP-shaped loopback bytes,
-  in-process transport, loopback HTTP transport, and timeout/retry policy
-  metadata.
+- `transport.zig`: durable cluster transport boundary with a synchronous
+  vtable, versioned request/response JSON, in-process transport, loopback HTTP
+  transport, production HTTP transport, and production socket-frame transport.
+  Production transports enforce auth hooks, envelope limits, backpressure,
+  retry policy, trace/chunk propagation, lifecycle metrics, and secret-free
+  failure evidence before appending accepted ingress messages to
+  `MessageStorage`.
 - `workflow_engine.zig`: shard-owned durable workflow command layer that maps
   execution ids to workflow execution entities, routes commands through cluster
   transport, mutates `JournalStore` from the owning entity through a guarded

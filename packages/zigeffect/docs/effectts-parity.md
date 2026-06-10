@@ -171,9 +171,14 @@ identity, sharding, runners, message storage, and lease-protected ownership.
   explain which ownership epoch performed a durable mutation.
 - Renewal jitter, renewal deadlines, clock-skew-tolerant expiry, owned-lease
   audit reports, and forced stale shard release for local runner recovery.
+- Production-shaped HTTP and socket-frame cluster transports with auth hooks,
+  envelope limits, backpressure, retry evidence, lifecycle metrics, and
+  trace/chunk propagation through durable message storage.
 
-This remains a local durable runtime until the transport and full distributed IO
-milestones provide host-to-host production networking.
+This now covers the Effect-style workflow and cluster substrate inside a local
+durable runtime. Real cluster membership, remote runner discovery, and
+host-to-host operational packaging remain the focus of the final clustering and
+supervision milestones.
 
 ### Schedule
 
