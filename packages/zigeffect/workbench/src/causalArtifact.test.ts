@@ -5,6 +5,7 @@ import {
   deriveAppRemediationModel,
   deriveGovernanceModel,
   deriveLiveDashboardModel,
+  deriveVisualGraphModel,
   deriveWorkbenchModel,
   deriveGraphModel,
   deriveRemediationChainModel,
@@ -618,6 +619,23 @@ test("deriveGraphModel summarizes roots parent edges and runtime lanes", () => {
   expect(graph.lanes.some((lane) => lane.kind === "resource" && lane.status === "warning")).toBe(true);
   expect(graph.lanes.some((lane) => lane.kind === "retry" && lane.status === "warning")).toBe(true);
   expect(graph.unhealthyLanes.length).toBeGreaterThan(0);
+});
+
+test("deriveVisualGraphModel maps causal graph data for read-only layouts", () => {
+  const workbench = deriveWorkbenchModel(parseArtifactJson(sampleArtifact), {
+    artifactPath: "sample-artifact.json",
+  });
+  const graph = deriveGraphModel(workbench.events, workbench.findings);
+  const visual = deriveVisualGraphModel(workbench, graph, "force");
+
+  expect(visual.layoutMode).toBe("force");
+  expect(visual.nodes.length).toBe(workbench.events.length);
+  expect(visual.edges.length).toBe(graph.parentEdges.length);
+  expect(visual.nodes.find((node) => node.id === "3")?.tone).toBe("warning");
+  expect(visual.nodes.find((node) => node.id === "8")?.tone).toBe("failure");
+  expect(visual.adapter.solid).toBe("@dschz/solid-g6");
+  expect(visual.adapter.engine).toBe("@antv/g6");
+  expect(visual.adapter.directEngineApi).toBe("not-required");
 });
 
 test("deriveGraphModel tracks orphaned parent references", () => {

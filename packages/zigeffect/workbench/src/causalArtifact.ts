@@ -68,6 +68,35 @@ export type GraphModel = {
 
 export type VisualGraphLayoutMode = "dagre" | "force" | "radial";
 
+export type VisualGraphNodeTone = "ok" | "warning" | "failure";
+
+export type VisualGraphNode = {
+  id: string;
+  label: string;
+  kind: string;
+  status: string;
+  lane: string;
+  tone: VisualGraphNodeTone;
+};
+
+export type VisualGraphEdge = {
+  id: string;
+  source: string;
+  target: string;
+  label: string;
+};
+
+export type VisualGraphModel = {
+  layoutMode: VisualGraphLayoutMode;
+  nodes: VisualGraphNode[];
+  edges: VisualGraphEdge[];
+  adapter: {
+    solid: "@dschz/solid-g6";
+    engine: "@antv/g6";
+    directEngineApi: "not-required";
+  };
+};
+
 export type LiveDashboardPriority = "normal" | "watch" | "critical";
 
 export type LiveDashboardSourceStep = {
@@ -472,6 +501,37 @@ export function deriveLiveDashboardModel(
 
   const model = workbench ?? deriveWorkbenchModel(raw, options);
   return deriveStaticDashboard(model);
+}
+
+export function deriveVisualGraphModel(
+  workbench: WorkbenchModel,
+  graph: GraphModel,
+  layoutMode: VisualGraphLayoutMode,
+): VisualGraphModel {
+  const findingEventIds = new Set(workbench.findings.map((finding) => finding.eventId));
+
+  return {
+    layoutMode,
+    nodes: workbench.events.map((event) => ({
+      id: event.idText,
+      label: event.label || event.typeName || event.kind,
+      kind: event.kind,
+      status: event.status,
+      lane: eventLaneLabel(event),
+      tone: visualNodeTone(event, findingEventIds),
+    })),
+    edges: graph.parentEdges.map((edge) => ({
+      id: `${edge.from}->${edge.to}`,
+      source: edge.from,
+      target: edge.to,
+      label: edge.label,
+    })),
+    adapter: {
+      solid: "@dschz/solid-g6",
+      engine: "@antv/g6",
+      directEngineApi: "not-required",
+    },
+  };
 }
 
 export function deriveRemediationChainModel(raw: unknown, options: WorkbenchOptions): RemediationChainModel | null {
@@ -932,6 +992,16 @@ function eventLaneLabel(event: CausalEvent): string {
   if (event.scopeId) return `scope:${event.scopeId}`;
   if (event.runId) return `run:${event.runId}`;
   return "event";
+}
+
+function visualNodeTone(event: CausalEvent, findingEventIds: Set<string>): VisualGraphNodeTone {
+  if (event.status === "failure") {
+    return "failure";
+  }
+  if (findingEventIds.has(event.idText) || graphWarningStatuses.has(event.status)) {
+    return "warning";
+  }
+  return "ok";
 }
 
 function liveDashboardPriority(value: unknown, status: string, findingKind: string | null): LiveDashboardPriority {
