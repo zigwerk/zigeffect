@@ -492,6 +492,21 @@ live telemetry, write NenDB, write durable production storage, host a
 production dashboard, orchestrate production clusters, add non-NenDB adapter
 work, add alternate renderers, or grant production mutation authority.
 
+- `zigeffect.causal.production-telemetry-ci-gate-dry-run-policy.v1`
+
+The production-telemetry-ci-gate-dry-run-policy report is a record-only,
+advisory-only, bounded-CI-artifact dry-run policy contract. It consumes
+planned or applied CI gate application boundary artifacts, records candidate
+signal policies, evidence requirements, negative fixtures, ready or blocked
+policy status, and a handoff to the future dry-run evaluator. Every candidate
+signal remains `evaluation_mode="dry-run"`, `enforcement_enabled=false`,
+`required_status_check_enabled=false`, and `failure_effect="advisory"`. It
+does not enable CI gate enforcement, create required status checks, mutate
+workflows, execute artifact uploads, ingest live telemetry, call networks,
+write NenDB, write durable production storage, host a production dashboard,
+orchestrate production clusters, add non-NenDB adapter work, add alternate
+renderers, or grant production mutation authority.
+
 ### Human-Agent Feedback
 
 - `zigeffect.causal.human-agent-feedback-loop.v1`

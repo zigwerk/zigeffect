@@ -609,6 +609,34 @@ workflow mutation by the tool, artifact upload execution, live telemetry,
 NenDB writes, durable writes, or mutation authority. The full policy is in
 [docs/production-telemetry-ci-gate-application-boundary.md](docs/production-telemetry-ci-gate-application-boundary.md).
 
+Record the production telemetry CI gate dry-run policy:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-gate-dry-run-policy -- \
+  --from-gate-application-boundary ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary-ci-gate-application-boundary.json \
+  approve \
+  --reason "CI gate dry-run policy reviewed" \
+  --verified-command "zig build causal-production-telemetry-ci-gate-application-boundary" \
+  --verified-command "zig build causal-artifacts" \
+  --verified-command "zig build release-gate --summary none" \
+  --verified-command "zig build release-gate-report" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The report uses schema
+`zigeffect.causal.production-telemetry-ci-gate-dry-run-policy.v1`, consumes
+planned or applied CI gate application boundary artifacts, records advisory
+candidate signal policies, bounded evidence requirements, negative fixtures,
+and ready or blocked dry-run policy evidence, and hands off to the dry-run
+evaluator branch. It does not enable CI gates, required status checks,
+workflow mutation by the tool, artifact upload execution, live telemetry,
+NenDB writes, durable writes, or mutation authority. The full policy is in
+[docs/production-telemetry-ci-gate-dry-run-policy.md](docs/production-telemetry-ci-gate-dry-run-policy.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -634,8 +662,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-policy` after the
-delivered production telemetry CI gate application boundary.
+`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-evaluator` after
+the delivered production telemetry CI gate dry-run policy.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in

@@ -495,7 +495,7 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-policy` after
+`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-evaluator` after
 the unified causal spine, deep runtime internals, app semantic trace API,
 bounded agent query surface, record-only encryption-at-rest policy,
 record-only alerting integrations, delivered live dashboard streaming
@@ -559,9 +559,10 @@ The harness has now been consumed by the delivered telemetry design, fixture,
 readiness-review, implementation-proposal, exporter-boundary, local pipeline
 fixture, NenDB retention fixture, workbench read-only preview, CI artifact
 preview, CI harness boundary, CI archive application, CI archive evidence
-policy, CI gate readiness, and CI gate application boundary milestones.
+policy, CI gate readiness, CI gate application boundary, and CI gate dry-run
+policy milestones.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-policy`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-evaluator`.
 
 ## Production Telemetry Capture Design
 
@@ -938,6 +939,36 @@ serialization, NenDB writes, durable production writes, hosted dashboard
 readiness, production cluster readiness, non-NenDB adapter scope, alternate
 renderer scope, or production mutation authority.
 
+Run the CI gate dry-run policy after the gate application boundary:
+
+```sh
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-gate-dry-run-policy -- \
+  --from-gate-application-boundary ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary-ci-gate-application-boundary.json \
+  approve \
+  --reason "CI gate dry-run policy reviewed" \
+  --verified-command "zig build causal-production-telemetry-ci-gate-application-boundary" \
+  --verified-command "zig build causal-artifacts" \
+  --verified-command "zig build release-gate --summary none" \
+  --verified-command "zig build release-gate-report" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The CI gate dry-run policy report records schema
+`zigeffect.causal.production-telemetry-ci-gate-dry-run-policy.v1`. It consumes
+planned or applied CI gate application boundary artifacts and emits `ready` or
+`blocked` dry-run policy artifacts with advisory candidate signal policies,
+bounded evidence requirements, negative fixtures, and the evaluator handoff.
+Do not treat it as CI gate enforcement, required status checks, workflow
+mutation by the tool, artifact upload execution, runtime pipeline execution,
+live telemetry, network send, collector configuration, OTLP serialization,
+NenDB writes, durable production writes, hosted dashboard readiness,
+production cluster readiness, non-NenDB adapter scope, alternate renderer
+scope, or production mutation authority.
+
 ## Production Artifact Aggregation
 
 Run the production artifact aggregation contract before starting durable
@@ -1230,10 +1261,10 @@ design, fixture, readiness-review, implementation-proposal, and
 exporter-boundary, local-pipeline-fixtures, NenDB-retention-fixtures,
 workbench-readonly-preview, CI-artifact-preview, CI-harness-boundary,
 CI-archive-application, CI-archive-evidence-policy, CI-gate-readiness, and
-CI-gate-application-boundary
+CI-gate-application-boundary, and CI-gate-dry-run-policy
 reports are now delivered.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-policy`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-evaluator`.
 
 ## Production Gaps
 

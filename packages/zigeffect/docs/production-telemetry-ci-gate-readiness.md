@@ -87,8 +87,10 @@ pipelines, NenDB writes, durable writes, hosted dashboards, production cluster
 claims, or mutation authority.
 
 That application boundary is now delivered by
-`causal-production-telemetry-ci-gate-application-boundary`. The current next
-branch is `codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-policy`.
+`causal-production-telemetry-ci-gate-application-boundary`. The dry-run policy
+is now delivered by `causal-production-telemetry-ci-gate-dry-run-policy`. The
+current next branch is
+`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-evaluator`.
 
 ## Verification
 
