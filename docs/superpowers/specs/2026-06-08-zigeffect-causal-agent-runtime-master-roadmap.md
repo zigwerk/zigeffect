@@ -1038,9 +1038,25 @@ Status values:
      writes, NenDB writes, hosted dashboard claims, production cluster claims,
      alternate renderers, and mutation authority disabled.
 37. `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-application-boundary`
-   - Current next branch: record guarded enforcement application-boundary
-     evidence before any agent may describe a required status check as active
-     enforcement or merge blocking.
+   - Delivered:
+     `causal-production-telemetry-ci-gate-required-status-check-enforcement-application-boundary`
+     emits
+     `zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-application-boundary.v1`,
+     consumes ready enforcement-readiness artifacts, records planned or
+     externally applied active required-check enforcement evidence, allows
+     merge-blocking claims only with explicit merge-blocking evidence, and
+     hands off to
+     `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-policy`
+     while keeping GitHub API mutation by the tool, branch-protection mutation
+     by the tool, workflow mutation by the tool, check-run creation by the
+     tool, artifact upload execution by the tool, GitHub step summary writes
+     by the tool, pull request comments by the tool, live telemetry, durable
+     writes, NenDB writes, hosted dashboard claims, production cluster claims,
+     alternate renderers, and mutation authority disabled.
+38. `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-policy`
+   - Current next branch: define enforcement interpretation policy before any
+     agent may use active required-check or merge-blocking evidence as a gate
+     for later evaluator, rollout, or production authority work.
 
 ## Dual-Interface Causal Spine Expansion
 

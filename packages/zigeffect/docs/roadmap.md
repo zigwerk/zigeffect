@@ -1034,6 +1034,21 @@ metrics, and traces.
   readiness can hand off, keeps active enforcement and merge-blocker claims
   denied, and hands off to
   `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-application-boundary`.
+- Delivered:
+  `causal-production-telemetry-ci-gate-required-status-check-enforcement-application-boundary`
+  publishes
+  `zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-application-boundary.v1`,
+  consumes ready enforcement-readiness artifacts, records planned or externally
+  applied active required-check enforcement evidence, allows
+  `merge_blocker_claim_allowed=true` only with explicit merge-blocking
+  evidence, and hands off to
+  `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-policy`.
+  It keeps GitHub API mutation by the tool, branch-protection mutation by the
+  tool, workflow mutation by the tool, check-run creation by the tool, artifact
+  upload execution by the tool, GitHub step summary writes by the tool, pull
+  request comments by the tool, live telemetry, durable writes, NenDB writes,
+  hosted dashboard claims, production cluster claims, alternate renderers, and
+  production mutation disabled.
   It keeps GitHub API mutation by the tool, branch-protection mutation by the
   tool, workflow mutation by the tool, check-run creation by the tool, artifact
   upload execution by the tool, GitHub step summary writes by the tool, pull
