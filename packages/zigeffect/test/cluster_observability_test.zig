@@ -222,6 +222,25 @@ test "cluster metrics collect leases lag retries migrations and failures" {
     try std.testing.expectEqual(@as(i64, 1), metrics.get("cluster.messages.retries"));
 }
 
+test "local cluster router traced asks preserve trace context" {
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    var router = fx.LocalClusterRouter.init(std.testing.allocator, message_storage_state.asMessageStorage(), .{ .shard_count = 8 });
+
+    const address = try observedAddressForShard(0, 8);
+    var routed = try router.routeAskWithTrace(
+        address,
+        "text",
+        "get",
+        "traced ask",
+        .{ .trace_id = 77, .span_id = 78 },
+    );
+    defer routed.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(?u64, 77), routed.envelope.trace_id);
+    try std.testing.expectEqual(@as(?u64, 78), routed.envelope.span_id);
+}
+
 fn expectClusterEvent(snapshot: fx.CausalSnapshot, kind: fx.CausalEventKind) !void {
     for (snapshot.events) |event| {
         if (event.kind == kind) return;

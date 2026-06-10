@@ -35,6 +35,7 @@ pub const ClusterRunnerRestartPolicy = supervision.ClusterRunnerRestartPolicy;
 pub const ClusterRunnerRestartState = supervision.ClusterRunnerRestartState;
 pub const ClusterSupervisionReport = supervision.ClusterSupervisionReport;
 pub const CausalStore = observability.CausalStore;
+pub const ClusterTraceContext = observability.ClusterTraceContext;
 
 pub const LocalClusterError = error{
     InvalidShardCount,
@@ -84,8 +85,16 @@ pub const LocalClusterRouter = struct {
         return self.routeMessage(.tell, address, payload_type_name, payload, redacted_detail);
     }
 
+    pub fn routeTellWithTrace(self: *LocalClusterRouter, address: EntityAddress, payload_type_name: []const u8, payload: []const u8, redacted_detail: []const u8, trace: ClusterTraceContext) !LocalClusterRouteResult {
+        return self.routeMessageWithTrace(.tell, address, payload_type_name, payload, redacted_detail, trace);
+    }
+
     pub fn routeAsk(self: *LocalClusterRouter, address: EntityAddress, payload_type_name: []const u8, payload: []const u8, redacted_detail: []const u8) !LocalClusterRouteResult {
         return self.routeMessage(.request, address, payload_type_name, payload, redacted_detail);
+    }
+
+    pub fn routeAskWithTrace(self: *LocalClusterRouter, address: EntityAddress, payload_type_name: []const u8, payload: []const u8, redacted_detail: []const u8, trace: ClusterTraceContext) !LocalClusterRouteResult {
+        return self.routeMessageWithTrace(.request, address, payload_type_name, payload, redacted_detail, trace);
     }
 
     pub fn routeInterrupt(self: *LocalClusterRouter, address: EntityAddress, reason: []const u8) !LocalClusterRouteResult {
@@ -100,6 +109,30 @@ pub const LocalClusterRouter = struct {
         payload: []const u8,
         redacted_detail: []const u8,
     ) !LocalClusterRouteResult {
+        return self.routeMessageWithOptionalTrace(kind, address, payload_type_name, payload, redacted_detail, null);
+    }
+
+    fn routeMessageWithTrace(
+        self: *LocalClusterRouter,
+        kind: MessageEnvelopeKind,
+        address: EntityAddress,
+        payload_type_name: []const u8,
+        payload: []const u8,
+        redacted_detail: []const u8,
+        trace: ClusterTraceContext,
+    ) !LocalClusterRouteResult {
+        return self.routeMessageWithOptionalTrace(kind, address, payload_type_name, payload, redacted_detail, trace);
+    }
+
+    fn routeMessageWithOptionalTrace(
+        self: *LocalClusterRouter,
+        kind: MessageEnvelopeKind,
+        address: EntityAddress,
+        payload_type_name: []const u8,
+        payload: []const u8,
+        redacted_detail: []const u8,
+        trace: ?ClusterTraceContext,
+    ) !LocalClusterRouteResult {
         const shard_id = try routing.shardIdForAddress(address, self.shard_count);
         var idempotency_buf: [40]u8 = undefined;
         const idempotency_key = std.fmt.bufPrint(&idempotency_buf, "local-router:{d}", .{self.next_message_sequence}) catch unreachable;
@@ -111,6 +144,8 @@ pub const LocalClusterRouter = struct {
                 .kind = kind,
                 .address = address,
                 .idempotency_key = idempotency_key,
+                .trace_id = if (trace) |value| value.trace_id else null,
+                .span_id = if (trace) |value| value.span_id else null,
                 .payload_type_name = payload_type_name,
                 .payload = payload,
                 .redacted_detail = redacted_detail,
