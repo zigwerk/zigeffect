@@ -337,3 +337,105 @@ test "loopback http transport stops after retry limit" {
     defer by_shard.deinit();
     try std.testing.expectEqual(@as(usize, 0), by_shard.records.len);
 }
+
+test "cluster runner processes ask sent through in-process transport" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runner_storage_state = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer runner_storage_state.deinit();
+    var message_storage_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_state.deinit();
+
+    var transport_state = try fx.InProcessClusterTransport.init(
+        std.testing.allocator,
+        message_storage_state.asMessageStorage(),
+        .{ .shard_count = 8 },
+    );
+    defer transport_state.deinit();
+
+    try expectRunnerProcessesTransportAsk(
+        transport_state.asClusterTransport(),
+        runner_storage_state.asRunnerStorage(),
+        message_storage_state.asMessageStorage(),
+        .in_process,
+    );
+}
+
+test "cluster runner processes ask sent through loopback http transport" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runner_storage_state = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer runner_storage_state.deinit();
+    var message_storage_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_state.deinit();
+
+    var transport_state = try fx.LoopbackHttpClusterTransport.init(
+        std.testing.allocator,
+        message_storage_state.asMessageStorage(),
+        .{ .shard_count = 8 },
+    );
+    defer transport_state.deinit();
+
+    try expectRunnerProcessesTransportAsk(
+        transport_state.asClusterTransport(),
+        runner_storage_state.asRunnerStorage(),
+        message_storage_state.asMessageStorage(),
+        .loopback_http,
+    );
+}
+
+fn expectRunnerProcessesTransportAsk(
+    transport: fx.ClusterTransport,
+    runner_storage: fx.RunnerStorage,
+    message_storage: fx.MessageStorage,
+    expected_transport: fx.ClusterTransportKind,
+) !void {
+    var runner = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = fx.runnerAddress("machine-transport", "runner-transport"),
+        .runner_storage = runner_storage,
+        .message_storage = message_storage,
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 1,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    });
+    defer runner.deinit();
+
+    var plan = try runner.acquireBalancedShards(1_000);
+    defer plan.deinit();
+    try std.testing.expectEqual(@as(usize, 8), plan.shards.len);
+
+    const address = fx.entityAddress("counter", "transport-runner-acceptance");
+    _ = try runner.registerEntity(.{ .address = address, .name = "transport-counter" }, 1_000);
+
+    var response = try transport.send(std.testing.allocator, .{
+        .kind = .request,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "get",
+        .redacted_detail = "read through transport",
+        .idempotency_key = "transport-runner-acceptance-key",
+    });
+    defer response.deinit(std.testing.allocator);
+    try std.testing.expectEqual(expected_transport, response.transport);
+    try std.testing.expect(response.correlation_id != null);
+
+    const Handler = struct {
+        pub fn handle(_: *fx.EntityScope, envelope: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            try std.testing.expectEqual(fx.EntityEnvelopeKind.ask, envelope.kind);
+            try std.testing.expectEqualStrings("get", envelope.payload);
+            return .{ .reply = "value=transport" };
+        }
+    };
+
+    const report = try runner.tick(Handler, 1_100);
+    try std.testing.expectEqual(@as(usize, 1), report.scanned);
+    try std.testing.expectEqual(@as(usize, 1), report.dispatched);
+    try std.testing.expectEqual(@as(usize, 1), report.replied);
+    try std.testing.expectEqual(@as(usize, 1), report.acked);
+
+    const reply = (try message_storage.reply(response.correlation_id.?, std.testing.allocator)).?;
+    defer fx.deinitMessageEnvelope(std.testing.allocator, reply);
+    try std.testing.expectEqual(fx.MessageEnvelopeKind.reply, reply.kind);
+    try std.testing.expectEqualStrings("value=transport", reply.payload);
+}
