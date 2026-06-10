@@ -234,7 +234,9 @@ fn workflowIsSuspended(
 fn parseTimerFireAt(detail: []const u8) DurableClockError!u64 {
     const prefix = "fire_at_ms=";
     if (!std.mem.startsWith(u8, detail, prefix)) return error.InvalidTimerFireAtDetail;
-    return std.fmt.parseInt(u64, detail[prefix.len..], 10) catch error.InvalidTimerFireAtDetail;
+    const value_start = prefix.len;
+    const value_end = std.mem.indexOfScalarPos(u8, detail, value_start, ' ') orelse detail.len;
+    return std.fmt.parseInt(u64, detail[value_start..value_end], 10) catch error.InvalidTimerFireAtDetail;
 }
 
 fn nextSequence(events: []const journal_mod.WorkflowEvent) store_mod.JournalStoreError!JournalSequence {

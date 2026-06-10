@@ -248,7 +248,7 @@ test "cluster workflow claim queue appends durable claim through owning entity" 
     var events = try journal_store.readAll(std.testing.allocator);
     defer events.deinit();
     try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_claimed, events.events[2].kind);
-    try std.testing.expectEqualStrings("worker=worker-a claim_deadline_ms=1250 attempt=1", events.events[2].redacted_detail);
+    try std.testing.expectEqualStrings("worker=worker-a claim_deadline_ms=1250 attempt=1 lease_epoch=1", events.events[2].redacted_detail);
 }
 
 test "cluster workflow claim queue respects max concurrency" {
@@ -332,7 +332,7 @@ test "cluster workflow retry expired queues appends retry rows through owning en
     var events = try journal_store.readAll(std.testing.allocator);
     defer events.deinit();
     try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_retry_scheduled, events.events[3].kind);
-    try std.testing.expectEqualStrings("claim_sequence=3 attempt=1", events.events[3].redacted_detail);
+    try std.testing.expectEqualStrings("claim_sequence=3 attempt=1 lease_epoch=1", events.events[3].redacted_detail);
 }
 
 test "queue worker crash returns claimed work to the cluster" {

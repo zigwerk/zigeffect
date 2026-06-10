@@ -4,6 +4,7 @@ const envelope = @import("envelope.zig");
 const fencing = @import("fencing.zig");
 const identity = @import("identity.zig");
 const local_cluster = @import("local_cluster.zig");
+const lease_guard = @import("lease_guard.zig");
 const routing = @import("routing.zig");
 const runner_storage = @import("runner_storage.zig");
 const transport = @import("transport.zig");
@@ -544,7 +545,17 @@ pub const ClusterWorkflowEntityHandler = struct {
 
         try services.validateLeaseFence();
 
-        var result = try applyClusterWorkflowCommand(scope.allocator, services.journal_store, command);
+        var guarded_store = if (services.runner_storage) |storage_ref|
+            lease_guard.ShardLeaseGuardedJournalStore.init(
+                scope.allocator,
+                services.journal_store,
+                lease_guard.ShardLeaseWriteGuard.init(storage_ref, services.lease_fence.?, .journal),
+            )
+        else
+            null;
+        const journal_store = if (guarded_store) |*guarded| guarded.asJournalStore() else services.journal_store;
+
+        var result = try applyClusterWorkflowCommand(scope.allocator, journal_store, command);
         defer result.deinit(scope.allocator);
 
         if (services.last_reply_json.len > 0) {
