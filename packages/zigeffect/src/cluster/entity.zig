@@ -141,7 +141,7 @@ pub const EntityRef = struct {
     address: EntityAddress,
     runtime: *LocalEntityRuntime,
 
-    pub fn tell(self: EntityRef, payload_type_name: []const u8, payload: []const u8, redacted_detail: []const u8) Allocator.Error!EntityEnvelope {
+    pub fn tell(self: EntityRef, payload_type_name: []const u8, payload: []const u8, redacted_detail: []const u8) (Allocator.Error || EntityMailboxError)!EntityEnvelope {
         return self.runtime.mailbox.offer(.{
             .kind = .tell,
             .address = self.address,
@@ -151,7 +151,7 @@ pub const EntityRef = struct {
         });
     }
 
-    pub fn ask(self: EntityRef, payload_type_name: []const u8, payload: []const u8, redacted_detail: []const u8) Allocator.Error!EntityAsk {
+    pub fn ask(self: EntityRef, payload_type_name: []const u8, payload: []const u8, redacted_detail: []const u8) (Allocator.Error || EntityMailboxError)!EntityAsk {
         const envelope = try self.runtime.mailbox.offer(.{
             .kind = .ask,
             .address = self.address,
@@ -162,7 +162,7 @@ pub const EntityRef = struct {
         return .{ .envelope = envelope, .correlation_id = envelope.correlation_id.? };
     }
 
-    pub fn interrupt(self: EntityRef, reason: []const u8) Allocator.Error!EntityEnvelope {
+    pub fn interrupt(self: EntityRef, reason: []const u8) (Allocator.Error || EntityMailboxError)!EntityEnvelope {
         return self.runtime.mailbox.offer(.{
             .kind = .interrupt,
             .address = self.address,

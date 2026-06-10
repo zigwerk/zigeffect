@@ -31,12 +31,27 @@ pub const EntityAsk = struct {
 
 pub const EntityMailboxError = error{
     MailboxEmpty,
+    MailboxFull,
     ReplyNotFound,
 };
 
 const Mailbox = struct {
     address: EntityAddress,
     items: std.ArrayList(EntityEnvelope) = .empty,
+};
+
+pub const LocalMailboxStoreOptions = struct {
+    max_total_pending: ?usize = null,
+    max_pending_per_mailbox: ?usize = null,
+};
+
+pub const LocalMailboxStats = struct {
+    mailbox_count: usize = 0,
+    total_pending: usize = 0,
+    max_mailbox_pending: usize = 0,
+    max_total_pending: ?usize = null,
+    max_pending_per_mailbox: ?usize = null,
+    backpressured_mailboxes: usize = 0,
 };
 
 pub fn cloneEntityAddress(allocator: Allocator, address: EntityAddress) Allocator.Error!EntityAddress {
@@ -74,14 +89,23 @@ pub fn deinitEntityEnvelope(allocator: Allocator, envelope: EntityEnvelope) void
 
 pub const LocalMailboxStore = struct {
     allocator: Allocator,
+    options: LocalMailboxStoreOptions = .{},
     mailboxes: std.ArrayList(Mailbox) = .empty,
     replies: std.ArrayList(EntityEnvelope) = .empty,
     next_message_id: EntityMessageId = 1,
     next_sequence: EntityMessageSequence = 1,
     next_correlation_id: EntityCorrelationId = 1,
+    total_pending: usize = 0,
 
     pub fn init(allocator: Allocator) LocalMailboxStore {
-        return .{ .allocator = allocator };
+        return initBounded(allocator, .{});
+    }
+
+    pub fn initBounded(allocator: Allocator, options: LocalMailboxStoreOptions) LocalMailboxStore {
+        return .{
+            .allocator = allocator,
+            .options = options,
+        };
     }
 
     pub fn deinit(self: *LocalMailboxStore) void {
@@ -100,7 +124,9 @@ pub const LocalMailboxStore = struct {
         self.replies.deinit(self.allocator);
     }
 
-    pub fn offer(self: *LocalMailboxStore, envelope: EntityEnvelope) Allocator.Error!EntityEnvelope {
+    pub fn offer(self: *LocalMailboxStore, envelope: EntityEnvelope) (Allocator.Error || EntityMailboxError)!EntityEnvelope {
+        try self.ensureCanOffer(envelope.address);
+
         const owned = try self.prepareEnvelope(envelope);
         errdefer deinitEntityEnvelope(self.allocator, owned);
 
@@ -109,12 +135,14 @@ pub const LocalMailboxStore = struct {
 
         const mailbox = try self.mailboxFor(owned.address);
         try mailbox.items.append(self.allocator, owned);
+        self.total_pending += 1;
         return returned;
     }
 
     pub fn take(self: *LocalMailboxStore, address: EntityAddress) (Allocator.Error || EntityMailboxError)!EntityEnvelope {
         const mailbox = self.findMailbox(address) orelse return error.MailboxEmpty;
         if (mailbox.items.items.len == 0) return error.MailboxEmpty;
+        self.total_pending -= 1;
         return mailbox.items.orderedRemove(0);
     }
 
@@ -139,6 +167,36 @@ pub const LocalMailboxStore = struct {
             if (reply.correlation_id == correlation_id) return self.replies.orderedRemove(index);
         }
         return error.ReplyNotFound;
+    }
+
+    pub fn stats(self: *const LocalMailboxStore) LocalMailboxStats {
+        var max_mailbox_pending: usize = 0;
+        var backpressured_mailboxes: usize = 0;
+        const total_full = if (self.options.max_total_pending) |max_total| self.total_pending >= max_total else false;
+        for (self.mailboxes.items) |mailbox| {
+            const pending = mailbox.items.items.len;
+            max_mailbox_pending = @max(max_mailbox_pending, pending);
+            const mailbox_full = if (self.options.max_pending_per_mailbox) |max_pending| pending >= max_pending else false;
+            if (total_full or mailbox_full) backpressured_mailboxes += 1;
+        }
+        return .{
+            .mailbox_count = self.mailboxes.items.len,
+            .total_pending = self.total_pending,
+            .max_mailbox_pending = max_mailbox_pending,
+            .max_total_pending = self.options.max_total_pending,
+            .max_pending_per_mailbox = self.options.max_pending_per_mailbox,
+            .backpressured_mailboxes = backpressured_mailboxes,
+        };
+    }
+
+    fn ensureCanOffer(self: *const LocalMailboxStore, address: EntityAddress) EntityMailboxError!void {
+        if (self.options.max_total_pending) |max_total| {
+            if (self.total_pending >= max_total) return error.MailboxFull;
+        }
+        if (self.options.max_pending_per_mailbox) |max_pending| {
+            const pending = if (self.findMailboxConst(address)) |mailbox| mailbox.items.items.len else 0;
+            if (pending >= max_pending) return error.MailboxFull;
+        }
     }
 
     fn prepareEnvelope(self: *LocalMailboxStore, envelope: EntityEnvelope) Allocator.Error!EntityEnvelope {
