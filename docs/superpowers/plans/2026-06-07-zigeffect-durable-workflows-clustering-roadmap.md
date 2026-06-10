@@ -716,15 +716,15 @@ Goal: prove clustering on one machine with multiple runner processes.
 
 Deliverables:
 
-- [ ] Add runner process CLI.
-- [ ] Add shared file-backed runner and message storage.
-- [ ] Add shard balancing across runners.
-- [ ] Add runner death simulation.
-- [ ] Add message routing between runner processes.
+- [x] Add runner process CLI.
+- [x] Add shared file-backed runner and message storage.
+- [x] Add shard balancing across runners.
+- [x] Add runner death simulation.
+- [x] Add message routing between runner processes.
 
 Acceptance:
 
-- [ ] Two local runners split shards, recover from one runner exit, and keep
+- [x] Two local runners split shards, recover from one runner exit, and keep
   entity messages correct.
 
 ## Milestone 34: Transport Abstraction
