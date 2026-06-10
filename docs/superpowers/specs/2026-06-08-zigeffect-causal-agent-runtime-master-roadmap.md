@@ -663,19 +663,19 @@ Status values:
      zigeffect causal graph model as source of truth, and add direct
      `@antv/g6` usage only where the adapter needs engine APIs.
 7. `codex/zigeffect-causal-workbench-graph-visual-debugging`
-   - Current next branch: deepen read-only graph visual debugging for causal
-     traces, runtime
-     topology, scopes, fibers, causes, retries, resource ownership, and semantic
-     app data lineage. Required layout modes are dagre or hierarchical for
-     cause chains, force for runtime topology, and radial for scope, fiber, and
-     resource ownership. Keep `solid-flow` as optional later research for
-     editable remediation planning surfaces, not as a default dashboard
-     dependency.
+   - Delivered: Visual Graph now supports cause, topology, ownership, and
+     lineage perspectives for causal traces, runtime topology, scopes, fibers,
+     causes, retries, resource ownership, and semantic app data lineage.
+     `?sample=visual-graph` loads the local debugging fixture, Solid G6 carries
+     group/tone/priority metadata, and browser verification covers
+     desktop/mobile plus nonblank canvas evidence. Keep `solid-flow` as
+     optional later research for editable remediation planning surfaces, not as
+     a default dashboard dependency.
 8. `codex/zigeffect-causal-human-agent-feedback-loop`
-   - Connect the human WebUI and the agent query interface into a self-improving
-     development loop: failure-to-query, before/after trace comparison,
-     regression clustering, guarded proposal records, and durable history
-     handoff.
+   - Current next branch: connect the human WebUI and the agent query interface
+     into a self-improving development loop: failure-to-query, before/after
+     trace comparison, regression clustering, guarded proposal records, and
+     durable history handoff. Mutation authority remains `none`.
 9. `codex/zigeffect-causal-rollout-automation-guardrails`
 10. `codex/zigeffect-causal-wall-clock-benchmark-baselines`
 11. `codex/zigeffect-causal-production-capacity-planning`

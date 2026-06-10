@@ -25,15 +25,19 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-workbench-graph-visual-debugging` means the
+The recommendation `start-human-agent-feedback-loop` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
 bounded agent query surface, record-only encryption-at-rest policy, and
 record-only alerting integrations now exist, and the read-only live dashboard
 streaming workbench now has a stream contract, local fixture, Live tab, and
-first Solid G6 visual graph adapter boundary. The next branch should be
-`codex/zigeffect-causal-workbench-graph-visual-debugging`.
+Solid G6 visual graph adapter boundary. Graph visual debugging is also
+delivered: Visual Graph supports cause, topology, ownership, and lineage
+perspectives; `?sample=visual-graph` loads the graph debugging fixture; and
+browser verification covers desktop/mobile plus nonblank G6 canvas evidence.
+The next branch should be
+`codex/zigeffect-causal-human-agent-feedback-loop`.
 
 ## Dependency Order
 
@@ -50,7 +54,7 @@ The backlog currently orders future production-hardening branches as:
 9. `encryption-at-rest-policy` delivered
 10. `alerting-integrations` delivered
 11. `live-dashboard-streaming-workbench` delivered
-12. `workbench-graph-visual-debugging`
+12. `workbench-graph-visual-debugging` delivered
 13. `human-agent-feedback-loop`
 14. `rollout-automation-guardrails`
 15. `wall-clock-benchmark-baselines`
@@ -131,11 +135,18 @@ keeps the zigeffect causal graph model as the source of truth, lazy-loads the
 large graph chunk, and keeps direct `@antv/g6` engine API usage
 `not-required`.
 
-The dedicated graph visual debugging branch should deepen that adapter with
-layout modes: dagre or hierarchical for cause chains, force for runtime
-topology, and radial for scope, fiber, and resource ownership. Treat
-`solid-flow` as optional later editor research for editable remediation
-planning, not as a default dashboard dependency.
+The dedicated graph visual debugging branch delivered cause, topology,
+ownership, and lineage perspectives in the Visual Graph tab. It adds
+perspective controls, selection details, legend and warning panels, richer G6
+adapter metadata, the `?sample=visual-graph` fixture, and desktop/mobile
+nonblank canvas verification. Treat `solid-flow` as optional later editor
+research for editable remediation planning, not as a default dashboard
+dependency.
+
+The next branch is
+`codex/zigeffect-causal-human-agent-feedback-loop`. It should connect human
+Workbench selections and the agent query interface into the self-improving
+development loop while preserving `mutation_authority: none`.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,

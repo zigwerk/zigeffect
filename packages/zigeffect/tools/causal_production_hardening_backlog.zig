@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-workbench-graph-visual-debugging";
-pub const recommended_next_branch = "codex/zigeffect-causal-workbench-graph-visual-debugging";
+pub const recommendation = "start-human-agent-feedback-loop";
+pub const recommended_next_branch = "codex/zigeffect-causal-human-agent-feedback-loop";
 
 const OutputFormat = enum { text, json };
 
@@ -308,8 +308,8 @@ const backlog_items: []const BacklogItem = &.{
         .title = "Workbench Graph Visual Debugging",
         .gap_id = "solid-workbench-graph-visual-debugging",
         .priority = "P3",
-        .status = "planned",
-        .summary = "Deepen the read-only graph visualization layer for causal traces, runtime topology, scopes, fibers, causes, retries, resource ownership, and app data lineage after live streaming is stable.",
+        .status = "delivered",
+        .summary = "Deepens the read-only graph visualization layer with cause, topology, ownership, and lineage perspectives for causal traces, runtime internals, resource ownership, and app semantic refs.",
         .depends_on = &.{ "live-dashboard-streaming-workbench", "deep-runtime-internals", "app-semantic-trace-api" },
         .deliverables = &.{
             "graph visualization dependency decision record",
@@ -317,7 +317,8 @@ const backlog_items: []const BacklogItem = &.{
             "dagre or hierarchical cause-chain layout",
             "force runtime topology layout",
             "radial scope fiber and resource ownership layout",
-            "cause-chain, scope-tree, fiber-lane, resource-ownership, and data-lineage fixtures",
+            "cause, topology, ownership, and data-lineage perspectives",
+            "visual graph debugging fixture selected by ?sample=visual-graph",
             "graph timeline and finding selection sync",
             "browser screenshot and canvas-render verification",
             "solid-flow applicability decision for later editable remediation planning",
@@ -325,11 +326,16 @@ const backlog_items: []const BacklogItem = &.{
         .evidence_sources = &.{
             "packages/zigeffect/workbench/src/App.tsx",
             "packages/zigeffect/workbench/src/causalArtifact.ts",
+            "packages/zigeffect/workbench/src/visualGraphAdapter.tsx",
+            "packages/zigeffect/workbench/src/causalArtifact.test.ts",
+            "packages/zigeffect/workbench/src/visualGraphAdapter.test.ts",
+            "packages/zigeffect/workbench/src/visualGraphUi.test.ts",
+            "packages/zigeffect/workbench/public/sample-visual-graph-debugging.json",
             "packages/zigeffect/workbench/src/styles.css",
             "package.json",
         },
         .branch = "codex/zigeffect-causal-workbench-graph-visual-debugging",
-        .agent_guidance = "Use the Solid G6 adapter for read-only exploration; treat solid-flow as optional later editor research and keep the WebUI bridge read-only.",
+        .agent_guidance = "Use delivered Visual Graph cause topology ownership and lineage perspectives for read-only debugging; next connect human selections and agent queries in the feedback-loop branch while mutation authority remains none.",
     },
     .{
         .id = "human-agent-feedback-loop",
@@ -722,11 +728,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-workbench-graph-visual-debugging",
+        "start-human-agent-feedback-loop",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-workbench-graph-visual-debugging",
+        "codex/zigeffect-causal-human-agent-feedback-loop",
         recommended_next_branch,
     );
 }
@@ -746,6 +752,7 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItem("live-dashboard-streaming-workbench");
     try expectBacklogItemStatus("live-dashboard-streaming-workbench", "delivered");
     try expectBacklogItem("workbench-graph-visual-debugging");
+    try expectBacklogItemStatus("workbench-graph-visual-debugging", "delivered");
     try expectBacklogItem("human-agent-feedback-loop");
     try expectBacklogItem("production-capacity-planning");
 }
@@ -766,7 +773,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-workbench-graph-visual-debugging") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-human-agent-feedback-loop") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -781,7 +788,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-workbench-graph-visual-debugging\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-human-agent-feedback-loop\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);

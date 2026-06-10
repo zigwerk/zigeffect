@@ -63,6 +63,14 @@ latest frames, guardrails, and warnings. The Visual Graph tab renders a
 read-only graph from the same causal model. The existing Graph tab remains the
 text-first structural view.
 
+The follow-on graph visual debugging branch deepened the Visual Graph tab with
+cause, topology, ownership, and lineage perspectives. For local development,
+open the richer fixture with:
+
+```text
+http://127.0.0.1:5179/?sample=visual-graph
+```
+
 ## Graph Adapter
 
 The visual graph path starts with `@dschz/solid-g6` over `@antv/g6`. The
@@ -72,6 +80,11 @@ and maps that model into the Solid G6 adapter at the UI boundary. Direct
 
 The G6 adapter is lazy-loaded, so the normal workbench bundle remains small and
 the large graph dependency is loaded only when Visual Graph renders.
+
+Graph visual debugging keeps mutation authority at `none`. It adds
+perspective controls, selection detail, legend and warning panels, richer node
+and edge metadata, and browser verification for desktop/mobile layouts with
+nonblank G6 canvas evidence.
 
 ## Authority Boundaries
 
@@ -111,9 +124,9 @@ bun run zig:test
 git diff --check
 ```
 
-## Next Branch
+## Handoff
 
-The next branch is
-`codex/zigeffect-causal-workbench-graph-visual-debugging`. It should deepen
-the visual graph layouts, browser screenshot and canvas-pixel verification,
-timeline/selection synchronization, and graph-debugging fixtures.
+`codex/zigeffect-causal-workbench-graph-visual-debugging` is delivered. The
+next branch is `codex/zigeffect-causal-human-agent-feedback-loop`, which should
+connect human workbench selections and agent queries into a guarded
+self-improving development loop while mutation authority remains `none`.
