@@ -12,6 +12,7 @@ comptime {
     _ = @import("cluster_transport_test.zig");
     _ = @import("cluster_workflow_engine_test.zig");
     _ = @import("cluster_timer_wakeup_test.zig");
+    _ = @import("cluster_queue_test.zig");
     _ = @import("cluster_runtime_test.zig");
     _ = @import("multi_runner_cluster_test.zig");
     _ = @import("routing_test.zig");
