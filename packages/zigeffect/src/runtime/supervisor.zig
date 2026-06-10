@@ -137,11 +137,27 @@ pub const SupervisorTreeNodeOptions = struct {
     intensity: RestartIntensity = .{},
 };
 
+pub const SupervisorTreeError = error{
+    DuplicateSupervisor,
+    SupervisorNotFound,
+    ParentSupervisorNotFound,
+};
+
+pub const SupervisorTreeNodeSnapshot = struct {
+    supervisor_id: SupervisorId,
+    parent_id: ?SupervisorId = null,
+    name: []const u8,
+    strategy: SupervisorStrategy,
+    child_count: usize = 0,
+    decision_count: usize = 0,
+    escalated_children: usize = 0,
+};
+
 pub const SupervisorTreeInspectionReport = struct {
     allocator: Allocator,
     tree_id: u64,
     name: []const u8,
-    nodes: []const u8,
+    nodes: []SupervisorTreeNodeSnapshot,
     total_children: usize = 0,
     total_decisions: usize = 0,
     total_escalated_children: usize = 0,
@@ -151,16 +167,111 @@ pub const SupervisorTreeInspectionReport = struct {
     }
 };
 
+const SupervisorTreeNodeState = struct {
+    parent_id: ?SupervisorId = null,
+    supervisor: Supervisor,
+};
+
 pub const SupervisorTree = struct {
     allocator: Allocator,
     options: SupervisorTreeOptions,
+    nodes: std.ArrayList(SupervisorTreeNodeState) = .empty,
 
     pub fn init(allocator: Allocator, options: SupervisorTreeOptions) SupervisorTree {
         return .{ .allocator = allocator, .options = options };
     }
 
     pub fn deinit(self: *SupervisorTree) void {
-        _ = self;
+        for (self.nodes.items) |*node| {
+            node.supervisor.deinit();
+        }
+        self.nodes.deinit(self.allocator);
+    }
+
+    pub fn addSupervisor(self: *SupervisorTree, options: SupervisorTreeNodeOptions) (Allocator.Error || SupervisorTreeError)!void {
+        if (self.findNodeIndex(options.id) != null) return error.DuplicateSupervisor;
+        if (options.parent_id) |parent_id| {
+            if (self.findNodeIndex(parent_id) == null) return error.ParentSupervisorNotFound;
+        }
+
+        try self.nodes.append(self.allocator, .{
+            .parent_id = options.parent_id,
+            .supervisor = Supervisor.init(self.allocator, .{
+                .id = options.id,
+                .name = options.name,
+                .strategy = options.strategy,
+                .intensity = options.intensity,
+            }),
+        });
+    }
+
+    pub fn addChild(
+        self: *SupervisorTree,
+        supervisor_id: SupervisorId,
+        spec: SupervisorChildSpec,
+    ) (Allocator.Error || SupervisorTreeError || SupervisorError)!void {
+        const index = self.findNodeIndex(supervisor_id) orelse return error.SupervisorNotFound;
+        try self.nodes.items[index].supervisor.addChild(spec);
+    }
+
+    pub fn startAll(self: *SupervisorTree, now_ms: u64) Allocator.Error!void {
+        for (self.nodes.items) |*node| {
+            try node.supervisor.startAll(now_ms);
+        }
+    }
+
+    pub fn reportChildExit(
+        self: *SupervisorTree,
+        supervisor_id: SupervisorId,
+        child_id: SupervisorChildId,
+        exit: SupervisorChildExit,
+        now_ms: u64,
+    ) (Allocator.Error || SupervisorTreeError || SupervisorError)!SupervisorDecision {
+        const index = self.findNodeIndex(supervisor_id) orelse return error.SupervisorNotFound;
+        return self.nodes.items[index].supervisor.reportChildExit(child_id, exit, now_ms);
+    }
+
+    pub fn inspect(self: *SupervisorTree, allocator: Allocator) Allocator.Error!SupervisorTreeInspectionReport {
+        const snapshots = try allocator.alloc(SupervisorTreeNodeSnapshot, self.nodes.items.len);
+        errdefer allocator.free(snapshots);
+
+        var total_children: usize = 0;
+        var total_decisions: usize = 0;
+        var total_escalated_children: usize = 0;
+        for (self.nodes.items, 0..) |*node, index| {
+            var supervisor_report = try node.supervisor.inspect(allocator);
+            defer supervisor_report.deinit();
+
+            snapshots[index] = .{
+                .supervisor_id = supervisor_report.supervisor_id,
+                .parent_id = node.parent_id,
+                .name = supervisor_report.name,
+                .strategy = supervisor_report.strategy,
+                .child_count = supervisor_report.children.len,
+                .decision_count = supervisor_report.decisions.len,
+                .escalated_children = supervisor_report.escalated_children,
+            };
+            total_children += supervisor_report.children.len;
+            total_decisions += supervisor_report.decisions.len;
+            total_escalated_children += supervisor_report.escalated_children;
+        }
+
+        return .{
+            .allocator = allocator,
+            .tree_id = self.options.id,
+            .name = self.options.name,
+            .nodes = snapshots,
+            .total_children = total_children,
+            .total_decisions = total_decisions,
+            .total_escalated_children = total_escalated_children,
+        };
+    }
+
+    fn findNodeIndex(self: *const SupervisorTree, supervisor_id: SupervisorId) ?usize {
+        for (self.nodes.items, 0..) |node, index| {
+            if (node.supervisor.options.id == supervisor_id) return index;
+        }
+        return null;
     }
 };
 

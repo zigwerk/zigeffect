@@ -302,6 +302,50 @@ test "supervisor inspection reports children decisions escalation and shutdown o
     try std.testing.expect(std.mem.indexOf(u8, json, "\"decision_count\":2") != null);
 }
 
+test "supervisor tree inspects parent child supervisor nodes and escalations" {
+    var tree = fx.SupervisorTree.init(std.testing.allocator, .{
+        .id = 900,
+        .name = "runtime-tree",
+    });
+    defer tree.deinit();
+
+    try tree.addSupervisor(.{
+        .id = 1,
+        .name = "root",
+        .strategy = .one_for_all,
+    });
+    try tree.addSupervisor(.{
+        .id = 2,
+        .parent_id = 1,
+        .name = "cluster-services",
+        .strategy = .dynamic,
+        .intensity = .{ .max_restarts = 0, .within_ms = 1_000 },
+    });
+    try tree.addChild(1, .{ .id = 10, .name = "fiber", .kind = .fiber });
+    try tree.addChild(2, .{ .id = 20, .name = "transport", .kind = .transport_server });
+    try tree.startAll(1_000);
+
+    const decision = try tree.reportChildExit(2, 20, .{ .failure = "transport failed" }, 1_100);
+    try std.testing.expect(decision.escalated);
+
+    var inspection = try tree.inspect(std.testing.allocator);
+    defer inspection.deinit();
+    try std.testing.expectEqual(@as(u64, 900), inspection.tree_id);
+    try std.testing.expectEqual(@as(usize, 2), inspection.nodes.len);
+    try std.testing.expectEqual(@as(usize, 2), inspection.total_children);
+    try std.testing.expectEqual(@as(usize, 1), inspection.total_decisions);
+    try std.testing.expectEqual(@as(usize, 1), inspection.total_escalated_children);
+    try std.testing.expectEqual(@as(?u64, 1), inspection.nodes[1].parent_id);
+
+    const text = try fx.formatSupervisorTreeInspectionText(std.testing.allocator, inspection);
+    defer std.testing.allocator.free(text);
+    try std.testing.expect(std.mem.indexOf(u8, text, "runtime-tree") != null);
+
+    const json = try fx.formatSupervisorTreeInspectionJson(std.testing.allocator, inspection);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"tree_id\":900") != null);
+}
+
 test "supervisor records causal lifecycle decision escalation and shutdown events" {
     var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
