@@ -732,10 +732,19 @@ Status values:
      without live exporters, durable production writes, CI gates, or capacity
      claims.
 15. `codex/zigeffect-causal-production-telemetry-capture-fixtures`
-   - Current next branch: create safe production telemetry capture fixtures
-     from the design contract without touching production systems, granting
-     mutation authority, writing non-NenDB durable stores, or claiming
-     production capacity.
+   - Delivered: `causal-production-telemetry-capture-fixtures` emits
+     `zigeffect.causal.production-telemetry-capture-fixtures.v1` with safe
+     example records, selected fixture output, negative fixtures, and
+     validation checks. It keeps `production_telemetry_ingestion=false`,
+     `live_exporter_enabled=false`, `durable_write_enabled=false`,
+     `ci_gate_enabled=false`, `mutation_authority=none`, NenDB-only, and
+     SolidJS `zig-webui` aligned without touching production systems or
+     claiming production capacity.
+16. `codex/zigeffect-causal-production-telemetry-readiness-review`
+   - Current next branch: audit fixture coverage and readiness before any
+     later telemetry implementation proposal can discuss live ingestion,
+     exporters, durable production writes, CI gates, capacity claims, or
+     mutation authority.
 
 ## Dual-Interface Causal Spine Expansion
 

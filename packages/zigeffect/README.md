@@ -291,6 +291,26 @@ exporters, durable production writes, CI gates, or production capacity claims.
 The full policy is in
 [docs/production-telemetry-capture-design.md](docs/production-telemetry-capture-design.md).
 
+Print the causal production telemetry capture fixture catalog, selected
+fixture, or validation report:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-telemetry-capture-fixtures
+zig build causal-production-telemetry-capture-fixtures -- --format json
+zig build causal-production-telemetry-capture-fixtures -- emit runtime-trace-span-event --format json
+zig build causal-production-telemetry-capture-fixtures -- validate --format json
+```
+
+The report uses schema
+`zigeffect.causal.production-telemetry-capture-fixtures.v1` and defines safe
+example records plus negative fixtures for blocked production telemetry claims.
+It is fixtures-only, `mutation_authority=none`, and does not enable live
+telemetry ingestion, exporters, durable production writes, CI gates, production
+capacity claims, non-NenDB adapters, alternate renderers, or mutation
+authority. The full policy is in
+[docs/production-telemetry-capture-fixtures.md](docs/production-telemetry-capture-fixtures.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -316,8 +336,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-capture-fixtures` after the
-delivered production telemetry capture design report.
+`codex/zigeffect-causal-production-telemetry-readiness-review` after the
+delivered production telemetry capture fixtures report.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in

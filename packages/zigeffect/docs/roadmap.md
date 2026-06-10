@@ -654,9 +654,9 @@ metrics, and traces.
   debugging, human-agent feedback-loop, rollout automation guardrails, and
   wall-clock benchmark baseline, production capacity planning, and
   production-hardening completion audit plus load-test observation harness
-  and production telemetry capture design contracts, milestones, non-goals,
-  verification commands, and the current next branch
-  `codex/zigeffect-causal-production-telemetry-capture-fixtures`.
+  and production telemetry capture design and fixture contracts, milestones,
+  non-goals, verification commands, and the current next branch
+  `codex/zigeffect-causal-production-telemetry-readiness-review`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
@@ -753,6 +753,16 @@ metrics, and traces.
   gates, negative fixtures, and the handoff to
   `codex/zigeffect-causal-production-telemetry-capture-fixtures`. It keeps
   `production_telemetry_ingestion=false`, `live_exporter_enabled=false`,
+  `mutation_authority=none`, and does not write durable production storage,
+  size capacity, fail CI, add non-NenDB adapter work, add alternate frontend
+  renderer support, or mutate production state.
+- Delivered: `causal-production-telemetry-capture-fixtures` publishes
+  `zigeffect.causal.production-telemetry-capture-fixtures.v1` with safe
+  example records, selected fixture output, negative fixtures, validation
+  checks, and the handoff to
+  `codex/zigeffect-causal-production-telemetry-readiness-review`. It keeps
+  `production_telemetry_ingestion=false`, `live_exporter_enabled=false`,
+  `durable_write_enabled=false`, `ci_gate_enabled=false`,
   `mutation_authority=none`, and does not write durable production storage,
   size capacity, fail CI, add non-NenDB adapter work, add alternate frontend
   renderer support, or mutate production state.

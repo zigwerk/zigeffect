@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-telemetry-capture-fixtures` means the
+The recommendation `start-production-telemetry-readiness-review` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -64,8 +64,12 @@ The production telemetry capture design is also delivered: it defines safe
 future capture surfaces, field contracts, redaction, sampling, retention,
 access, encryption, OTel bridge review, negative fixtures, and local
 observation separation without enabling live ingestion or exporter authority.
+The production telemetry capture fixtures are also delivered: they define safe
+example records, selected fixture output, negative fixtures, and validation
+checks without enabling live ingestion, exporter authority, durable production
+writes, CI gates, capacity claims, or mutation authority.
 The next branch should be
-`codex/zigeffect-causal-production-telemetry-capture-fixtures`.
+`codex/zigeffect-causal-production-telemetry-readiness-review`.
 
 ## Dependency Order
 
@@ -90,6 +94,7 @@ The backlog currently orders future production-hardening branches as:
 17. `production-hardening-completion-audit` delivered
 18. `load-test-observation-harness` delivered
 19. `production-telemetry-capture-design` delivered
+20. `production-telemetry-capture-fixtures` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -224,10 +229,20 @@ surfaces, field contracts, review gates, negative fixtures, and preserves local
 observation boundaries, NenDB-only durable direction, SolidJS `zig-webui`
 workbench direction, and `mutation_authority=none`.
 
+Production telemetry capture fixtures are documented in
+[production-telemetry-capture-fixtures.md](production-telemetry-capture-fixtures.md).
+They emit `zigeffect.causal.production-telemetry-capture-fixtures.v1` through
+`zig build causal-production-telemetry-capture-fixtures`, provide safe example
+records, selected fixture output, negative fixtures, validation checks, and
+preserve `mutation_authority=none`, disabled live telemetry, disabled durable
+writes, disabled CI gates, NenDB-only durable direction, and SolidJS
+`zig-webui` workbench direction.
+
 The next branch is
-`codex/zigeffect-causal-production-telemetry-capture-fixtures`. It should model
-safe telemetry records without live ingestion, exporters, durable production
-writes, capacity claims, CI gates, or mutation authority.
+`codex/zigeffect-causal-production-telemetry-readiness-review`. It should audit
+fixture coverage and readiness before any later telemetry implementation
+proposal considers live ingestion, exporters, durable production writes,
+capacity claims, CI gates, or mutation authority.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -271,6 +286,10 @@ zig build causal-load-test-observation-harness -- --format json
 zig build causal-load-test-observation-harness -- observe app-request-trace --iterations 1 --format json
 zig build causal-production-telemetry-capture-design
 zig build causal-production-telemetry-capture-design -- --format json
+zig build causal-production-telemetry-capture-fixtures
+zig build causal-production-telemetry-capture-fixtures -- --format json
+zig build causal-production-telemetry-capture-fixtures -- emit runtime-trace-span-event --format json
+zig build causal-production-telemetry-capture-fixtures -- validate --format json
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

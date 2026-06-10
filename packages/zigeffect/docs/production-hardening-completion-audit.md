@@ -114,11 +114,11 @@ capacity-planning fixture plan and wall-clock baseline assumptions, then
 produces local observation records without live production telemetry,
 production load execution, or capacity claims.
 
-The current next branch is
-`codex/zigeffect-causal-production-telemetry-capture-design`. That branch
-should design privacy-safe production telemetry capture separately from local
-observations. Reviewed production capacity sizing remains future until
-compatible observations, telemetry design, and human review exist.
+The telemetry capture design and fixture branches are now delivered after this
+handoff. The current next branch is
+`codex/zigeffect-causal-production-telemetry-readiness-review`. Reviewed
+production capacity sizing remains future until compatible observations,
+telemetry design, fixtures, readiness review, and human review exist.
 
 ## Verification
 

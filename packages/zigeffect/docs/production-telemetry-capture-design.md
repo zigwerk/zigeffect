@@ -105,10 +105,10 @@ Agents should classify the capture surface first, cite the source schema and
 review gates, keep local observations separate from production telemetry, and
 use `blocked_claims` to avoid over-stating evidence.
 
-The next branch is
-`codex/zigeffect-causal-production-telemetry-capture-fixtures`. It should add
-safe fixtures that model approved telemetry records without touching production
-systems.
+The fixture branch is now delivered through
+`causal-production-telemetry-capture-fixtures`. It models approved telemetry
+records without touching production systems and hands off to
+`codex/zigeffect-causal-production-telemetry-readiness-review`.
 
 ## Verification
 
@@ -117,6 +117,10 @@ cd packages/zigeffect
 zig test tools/causal_production_telemetry_capture_design.zig
 zig build causal-production-telemetry-capture-design
 zig build causal-production-telemetry-capture-design -- --format json
+zig build causal-production-telemetry-capture-fixtures
+zig build causal-production-telemetry-capture-fixtures -- --format json
+zig build causal-production-telemetry-capture-fixtures -- emit runtime-trace-span-event --format json
+zig build causal-production-telemetry-capture-fixtures -- validate --format json
 zig build causal-schema-governance -- --format json
 zig build causal-production-hardening-backlog -- --format json
 zig build examples

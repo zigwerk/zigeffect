@@ -109,6 +109,10 @@ zig build causal-load-test-observation-harness -- --format json
 zig build causal-load-test-observation-harness -- observe app-request-trace --iterations 1 --format json
 zig build causal-production-telemetry-capture-design
 zig build causal-production-telemetry-capture-design -- --format json
+zig build causal-production-telemetry-capture-fixtures
+zig build causal-production-telemetry-capture-fixtures -- --format json
+zig build causal-production-telemetry-capture-fixtures -- emit runtime-trace-span-event --format json
+zig build causal-production-telemetry-capture-fixtures -- validate --format json
 zig build causal-m9-completion-audit
 zig build causal-m9-completion-audit -- --format json
 zig build causal-production-hardening-backlog
@@ -486,7 +490,7 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-production-telemetry-capture-fixtures` after the
+`codex/zigeffect-causal-production-telemetry-readiness-review` after the
 unified causal spine, deep runtime internals, app semantic trace API, bounded
 agent query surface, record-only encryption-at-rest policy, record-only
 alerting integrations, delivered live dashboard streaming workbench, delivered
@@ -541,8 +545,9 @@ workbench, and future CI scenario families. Observation mode is explicit and
 bounded: curated argv arrays only, no shell, no production telemetry, no
 production load, no capacity claim, and `mutation_authority=none`.
 
-The current next branch after the delivered harness is
-`codex/zigeffect-causal-production-telemetry-capture-fixtures`.
+The harness has now been consumed by the delivered telemetry design and fixture
+milestones. The current next branch is
+`codex/zigeffect-causal-production-telemetry-readiness-review`.
 
 ## Production Telemetry Capture Design
 
@@ -563,10 +568,36 @@ surfaces plus the required future telemetry field contract. It keeps
 `mutation_authority=none`.
 
 Use it as the handoff into
-`codex/zigeffect-causal-production-telemetry-capture-fixtures`. Do not use it
-to configure exporters, collector endpoints, OTLP sends, durable production
-writes, capacity sizing, CI gates, non-NenDB adapters, alternate renderers, or
-mutation authority.
+`causal-production-telemetry-capture-fixtures`. Do not use it to configure
+exporters, collector endpoints, OTLP sends, durable production writes, capacity
+sizing, CI gates, non-NenDB adapters, alternate renderers, or mutation
+authority.
+
+## Production Telemetry Capture Fixtures
+
+Run the fixture catalog after the production telemetry capture design report:
+
+```sh
+cd packages/zigeffect
+zig build causal-production-telemetry-capture-fixtures
+zig build causal-production-telemetry-capture-fixtures -- --format json
+zig build causal-production-telemetry-capture-fixtures -- emit runtime-trace-span-event --format json
+zig build causal-production-telemetry-capture-fixtures -- validate --format json
+```
+
+The report records schema
+`zigeffect.causal.production-telemetry-capture-fixtures.v1`. It emits safe
+example records for runtime trace, app semantic, backend OTel, redaction/access,
+local observation correlation, and sampling boundaries. It also emits negative
+fixtures and validation checks that block live ingestion, exporters, collector
+endpoints, raw payloads, credentials, unbounded attributes, sampled-out
+forwarding, production capacity claims, non-NenDB storage, alternate renderers,
+CI gates, and mutation authority.
+
+Use it as the handoff into
+`codex/zigeffect-causal-production-telemetry-readiness-review`. Do not treat
+fixtures as live telemetry, durable writes, CI gates, or production capacity
+evidence.
 
 ## Production Artifact Aggregation
 
@@ -856,8 +887,8 @@ grant production authority.
 Run `causal-production-hardening-completion-audit` after capacity planning to
 confirm the delivered hardening sequence and choose the next evidence-producing
 branch. The load-test observation harness and production telemetry capture
-design report are now delivered, and the current next branch is
-`codex/zigeffect-causal-production-telemetry-capture-fixtures`.
+design and fixture reports are now delivered, and the current next branch is
+`codex/zigeffect-causal-production-telemetry-readiness-review`.
 
 ## Production Gaps
 
