@@ -1,5 +1,5 @@
 import { Graph, createGraphData, createGraphLayout } from "@dschz/solid-g6";
-import type { VisualGraphLayoutMode, VisualGraphModel, VisualGraphNodeTone } from "./causalArtifact";
+import type { VisualGraphModel, VisualGraphNodeTone } from "./causalArtifact";
 
 export const visualGraphAdapterMetadata = {
   solid: "@dschz/solid-g6",
@@ -11,7 +11,7 @@ export function VisualGraphCanvas(props: { model: VisualGraphModel }) {
   return (
     <Graph
       data={solidG6Data(props.model)}
-      layout={solidG6Layout(props.model.layoutMode)}
+      layout={solidG6Layout(props.model)}
       behaviors={["drag-canvas", "zoom-canvas"]}
       style={{ width: "100%", height: "100%" }}
     />
@@ -24,11 +24,15 @@ export function solidG6Data(model: VisualGraphModel) {
       id: node.id,
       data: {
         label: node.label,
+        detail: node.detail,
         kind: node.kind,
         status: node.status,
         lane: node.lane,
+        group: node.group,
         tone: node.tone,
+        priority: node.priority,
         fill: toneFill(node.tone),
+        stroke: toneStroke(node.tone),
       },
     })),
     edges: model.edges.map((edge) => ({
@@ -37,27 +41,33 @@ export function solidG6Data(model: VisualGraphModel) {
       target: edge.target,
       data: {
         label: edge.label,
+        detail: edge.detail,
+        kind: edge.kind,
+        tone: edge.tone,
+        stroke: toneStroke(edge.tone),
       },
     })),
   });
 }
 
-export function solidG6Layout(mode: VisualGraphLayoutMode) {
-  if (mode === "force") {
+export function solidG6Layout(model: VisualGraphModel) {
+  if (model.layoutMode === "force") {
     return createGraphLayout<Record<string, unknown>>({
       type: "force",
       preventOverlap: true,
     });
   }
 
-  if (mode === "radial") {
+  if (model.layoutMode === "radial") {
     return createGraphLayout<Record<string, unknown>>({
       type: "radial",
+      unitRadius: model.perspective === "ownership" ? 120 : 90,
     });
   }
 
   return createGraphLayout<Record<string, unknown>>({
     type: "dagre",
+    rankdir: "LR",
   });
 }
 
@@ -65,4 +75,10 @@ function toneFill(tone: VisualGraphNodeTone): string {
   if (tone === "failure") return "#fff1db";
   if (tone === "warning") return "#fff7df";
   return "#eff9f3";
+}
+
+function toneStroke(tone: VisualGraphNodeTone): string {
+  if (tone === "failure") return "#b45309";
+  if (tone === "warning") return "#c08403";
+  return "#40835b";
 }
