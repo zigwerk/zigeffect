@@ -38,7 +38,7 @@ Modify:
 
 ## Task 1: Causal Taxonomy And Observability Surface
 
-- [ ] **Step 1: Write failing public taxonomy tests**
+- [x] **Step 1: Write failing public taxonomy tests**
 
 Create `packages/zigeffect/test/cluster_observability_test.zig`:
 
@@ -78,7 +78,7 @@ test "causal taxonomy includes cluster runner message entity and trace events" {
 Import the new test in `packages/zigeffect/test/all_test.zig` near the other
 cluster tests.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -89,7 +89,7 @@ zig build test-raw --summary all
 Expected: failure because observability exports and causal event kinds are
 absent.
 
-- [ ] **Step 3: Implement taxonomy and minimal module**
+- [x] **Step 3: Implement taxonomy and minimal module**
 
 In `services/causal.zig`, add the new event kinds after existing cluster shard
 events:
@@ -233,7 +233,7 @@ pub fn formatClusterFailureReport(allocator: Allocator, report: ClusterFailureRe
 
 Export the module and public names from `cluster/root.zig` and `zigeffect.zig`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -242,7 +242,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/src/services/causal.zig packages/zigeffect/src/cluster/observability.zig packages/zigeffect/src/cluster/root.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/test/cluster_observability_test.zig packages/zigeffect/test/all_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/services/causal.zig packages/zigeffect/src/cluster/observability.zig packages/zigeffect/src/cluster/root.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/test/cluster_observability_test.zig packages/zigeffect/test/all_test.zig
@@ -251,7 +251,7 @@ git commit -m "feat(zigeffect): add cluster observability surface"
 
 ## Task 2: Durable Message Trace Context
 
-- [ ] **Step 1: Write failing trace context tests**
+- [x] **Step 1: Write failing trace context tests**
 
 Append to `cluster_observability_test.zig`:
 
@@ -290,7 +290,7 @@ test "message envelope trace context clones and survives json round trip" {
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -300,7 +300,7 @@ zig build test-raw --summary all
 
 Expected: failure because `MessageEnvelope.trace_id` and `span_id` are absent.
 
-- [ ] **Step 3: Add trace context fields**
+- [x] **Step 3: Add trace context fields**
 
 In `cluster/envelope.zig`, add fields to `MessageEnvelope`:
 
@@ -330,7 +330,7 @@ try appendOptionalJsonU64(&output, allocator, record.envelope.span_id);
 
 Parse fields in `parseStoredMessageRecordJson` into the returned envelope.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -339,7 +339,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/src/cluster/envelope.zig packages/zigeffect/src/cluster/message_storage.zig packages/zigeffect/test/cluster_observability_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/cluster/envelope.zig packages/zigeffect/src/cluster/message_storage.zig packages/zigeffect/test/cluster_observability_test.zig
@@ -348,7 +348,7 @@ git commit -m "feat(zigeffect): persist cluster message trace context"
 
 ## Task 3: Causal Recorder And Runtime Hooks
 
-- [ ] **Step 1: Write failing runtime causal recording test**
+- [x] **Step 1: Write failing runtime causal recording test**
 
 Append to `cluster_observability_test.zig`:
 
@@ -429,7 +429,7 @@ fn observedAddressForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -439,7 +439,7 @@ zig build test-raw --summary all
 
 Expected: failure because runtime causal hooks and traced send APIs are absent.
 
-- [ ] **Step 3: Implement recorder and runtime hooks**
+- [x] **Step 3: Implement recorder and runtime hooks**
 
 In `cluster/observability.zig`, add recorder methods:
 
@@ -483,7 +483,7 @@ Existing `tell` and `ask` pass `null`.
 In `cluster/local_cluster.zig`, add `attachCausalStore` that calls both
 `lease_manager.attachCausalStore` and `runtime.attachCausalStore`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -492,7 +492,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/src/cluster/observability.zig packages/zigeffect/src/cluster/runtime.zig packages/zigeffect/src/cluster/local_cluster.zig packages/zigeffect/test/cluster_observability_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/cluster/observability.zig packages/zigeffect/src/cluster/runtime.zig packages/zigeffect/src/cluster/local_cluster.zig packages/zigeffect/test/cluster_observability_test.zig
@@ -501,7 +501,7 @@ git commit -m "feat(zigeffect): record cluster causal events"
 
 ## Task 4: Query Reports And Failure Reports
 
-- [ ] **Step 1: Write failing report tests**
+- [x] **Step 1: Write failing report tests**
 
 Append to `cluster_observability_test.zig`:
 
@@ -551,7 +551,7 @@ fn expectContains(haystack: []const u8, needle: []const u8) !void {
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -562,7 +562,7 @@ zig build test-raw --summary all
 Expected: failure because `clusterCausalReport` is absent or returns empty
 counts.
 
-- [ ] **Step 3: Implement report functions**
+- [x] **Step 3: Implement report functions**
 
 In `cluster/observability.zig`, add:
 
@@ -607,7 +607,7 @@ Add `isClusterEvent` covering all cluster kinds. Keep
 `formatClusterFailureReport` from Task 1 and adjust wording until the test
 passes.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -616,7 +616,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/src/cluster/observability.zig packages/zigeffect/test/cluster_observability_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/cluster/observability.zig packages/zigeffect/test/cluster_observability_test.zig
@@ -625,7 +625,7 @@ git commit -m "feat(zigeffect): add cluster causal reports"
 
 ## Task 5: DOT Rendering And Metrics Collection
 
-- [ ] **Step 1: Write failing DOT and metrics tests**
+- [x] **Step 1: Write failing DOT and metrics tests**
 
 Append to `cluster_observability_test.zig`:
 
@@ -700,7 +700,7 @@ test "cluster metrics collect leases lag retries migrations and failures" {
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -711,7 +711,7 @@ zig build test-raw --summary all
 Expected: failure because DOT filtering and metrics collection still return
 empty values.
 
-- [ ] **Step 3: Implement DOT and metrics**
+- [x] **Step 3: Implement DOT and metrics**
 
 Implement `formatClusterCausalDot` with deterministic output:
 
@@ -761,7 +761,7 @@ while (shard_id < @as(ShardId, shard_count)) : (shard_id += 1) {
 
 Count migrations and failures from `clusterCausalReport` and event kinds.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -770,7 +770,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/src/cluster/observability.zig packages/zigeffect/test/cluster_observability_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/cluster/observability.zig packages/zigeffect/test/cluster_observability_test.zig
@@ -779,7 +779,7 @@ git commit -m "feat(zigeffect): add cluster dot and metrics reports"
 
 ## Task 6: Traced Local Router APIs
 
-- [ ] **Step 1: Write failing traced router test**
+- [x] **Step 1: Write failing traced router test**
 
 Append to `cluster_observability_test.zig`:
 
@@ -804,7 +804,7 @@ test "local cluster router traced asks preserve trace context" {
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -814,7 +814,7 @@ zig build test-raw --summary all
 
 Expected: failure because `routeAskWithTrace` is absent.
 
-- [ ] **Step 3: Implement traced router APIs**
+- [x] **Step 3: Implement traced router APIs**
 
 In `cluster/local_cluster.zig`, add:
 
@@ -831,7 +831,7 @@ pub fn routeAskWithTrace(self: *LocalClusterRouter, address: EntityAddress, payl
 Refactor private `routeMessage` to call `routeMessageWithOptionalTrace`, and
 set `trace_id`/`span_id` on the submitted envelope when trace is present.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -840,7 +840,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/src/cluster/local_cluster.zig packages/zigeffect/test/cluster_observability_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/cluster/local_cluster.zig packages/zigeffect/test/cluster_observability_test.zig
@@ -849,7 +849,7 @@ git commit -m "feat(zigeffect): add traced cluster router sends"
 
 ## Task 7: Docs, Roadmap, And Full Gate
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Add `observability.zig` to the `src/cluster/` list in
 `packages/zigeffect/docs/architecture.md`:
@@ -860,14 +860,14 @@ Add `observability.zig` to the `src/cluster/` list in
   helpers.
 ```
 
-- [ ] **Step 2: Mark M40 complete**
+- [x] **Step 2: Mark M40 complete**
 
 In `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`,
 mark every M40 deliverable and acceptance checkbox complete.
 
 In this plan, mark completed task steps with `- [x]` as each task finishes.
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -881,7 +881,7 @@ git diff --check
 rg "TO""DO|FIX""ME|st""ub|place""holder|not imple""mented|unimple""mented" packages/zigeffect/src packages/zigeffect/test packages/zigeffect/docs docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md docs/superpowers/specs/2026-06-10-zigeffect-cluster-observability-design.md docs/superpowers/plans/2026-06-10-zigeffect-cluster-observability.md
 ```
 
-- [ ] **Step 4: Commit docs**
+- [x] **Step 4: Commit docs**
 
 ```bash
 git add packages/zigeffect/docs/architecture.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md docs/superpowers/plans/2026-06-10-zigeffect-cluster-observability.md

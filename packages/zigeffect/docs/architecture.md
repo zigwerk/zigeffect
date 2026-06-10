@@ -341,6 +341,9 @@ Owns Erlang-style distributed runtime surfaces:
 - `supervision.zig`: cluster supervision policies, reports, runner restart
   intensity state, workflow-worker classification, and shard-release
   escalation vocabulary.
+- `observability.zig`: cluster causal query reports, failure summaries,
+  cluster-only DOT rendering, metrics collection, and message trace context
+  helpers.
 - `shard_lease.zig`: local shard lease manager with bounded TTLs, refresh
   cadence, owned-lease tracking, graceful handoff, dead-runner recovery, and
   causal shard ownership events.

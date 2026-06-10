@@ -829,15 +829,15 @@ Goal: make cluster behavior inspectable with the same causal tools.
 
 Deliverables:
 
-- [ ] Add runner, shard, message, lease, and entity causal events.
-- [ ] Add cluster query reports.
-- [ ] Add cluster DOT graph rendering.
-- [ ] Add metrics for leases, mailbox lag, retries, and migrations.
-- [ ] Add trace propagation across message sends.
+- [x] Add runner, shard, message, lease, and entity causal events.
+- [x] Add cluster query reports.
+- [x] Add cluster DOT graph rendering.
+- [x] Add metrics for leases, mailbox lag, retries, and migrations.
+- [x] Add trace propagation across message sends.
 
 Acceptance:
 
-- [ ] A cluster failure report identifies runner, shard, message, and cause.
+- [x] A cluster failure report identifies runner, shard, message, and cause.
 
 ## Milestone 41: Storage Adapter Hardening
 
