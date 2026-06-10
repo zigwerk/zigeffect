@@ -285,6 +285,8 @@ pub const ClusterRuntime = struct {
                 defer envelope.deinitMessageEnvelope(self.allocator, durable_reply);
                 durable_reply.trace_id = claimed.trace_id;
                 durable_reply.span_id = claimed.span_id;
+                durable_reply.chunk_index = claimed.chunk_index;
+                durable_reply.chunk_count = claimed.chunk_count;
                 const stored_reply = lease_guard.guardMessageReply(self.message_storage, .{
                     .guard = try self.messageWriteGuard(shard_id, .message_reply),
                     .request = .{
@@ -401,6 +403,8 @@ pub const ClusterRuntime = struct {
                 defer envelope.deinitMessageEnvelope(self.allocator, durable_reply);
                 durable_reply.trace_id = claimed.trace_id;
                 durable_reply.span_id = claimed.span_id;
+                durable_reply.chunk_index = claimed.chunk_index;
+                durable_reply.chunk_count = claimed.chunk_count;
                 const stored_reply = lease_guard.guardMessageReply(self.message_storage, .{
                     .guard = try self.messageWriteGuard(shard_id, .message_reply),
                     .request = .{

@@ -127,6 +127,7 @@ test "cluster namespace keeps actor runner storage and transport exports" {
         "LoopbackHttpClusterTransport",
         "ProductionHttpClusterTransport",
         "ProductionSocketClusterTransport",
+        "chunkedClusterTransportRequest",
         "ClusterWorkflowEngine",
         "ClusterWorkflowEntityRegistry",
         "ClusterTimerWakeupIndex",

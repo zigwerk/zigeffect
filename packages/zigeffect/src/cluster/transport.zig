@@ -910,6 +910,26 @@ pub fn formatClusterTransportFailureReport(allocator: Allocator, report: Cluster
     );
 }
 
+pub fn chunkedClusterTransportRequest(
+    allocator: Allocator,
+    request: ClusterTransportRequest,
+    limits: ClusterTransportLimits,
+) (Allocator.Error || ClusterTransportError)!ClusterTransportRequest {
+    try validateTransportLimits(limits);
+    try validateTransportEnvelopeLimits(request, limits);
+
+    var owned = try cloneClusterTransportRequest(allocator, request);
+    errdefer owned.deinit(allocator);
+
+    if (owned.payload.len > limits.max_chunk_bytes) {
+        const chunk_count = (owned.payload.len + limits.max_chunk_bytes - 1) / limits.max_chunk_bytes;
+        owned.chunk_index = 0;
+        owned.chunk_count = std.math.cast(u32, chunk_count) orelse return error.TransportPayloadTooLarge;
+    }
+
+    return owned;
+}
+
 fn validateTransportLimits(limits: ClusterTransportLimits) ClusterTransportError!void {
     if (limits.max_envelope_bytes == 0) return error.InvalidTransportLimits;
     if (limits.max_chunk_bytes == 0) return error.InvalidTransportLimits;

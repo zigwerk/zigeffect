@@ -22,6 +22,7 @@ test "cluster transport public exports are available" {
     try std.testing.expect(@hasDecl(fx.cluster, "formatClusterTransportSocketFrame"));
     try std.testing.expect(@hasDecl(fx.cluster, "clusterTransportSocketFrameBody"));
     try std.testing.expect(@hasDecl(fx.cluster, "formatClusterTransportFailureReport"));
+    try std.testing.expect(@hasDecl(fx.cluster, "chunkedClusterTransportRequest"));
     try std.testing.expect(@hasDecl(fx, "ClusterTransport"));
     try std.testing.expect(@hasDecl(fx, "ProductionHttpClusterTransport"));
     try std.testing.expect(@hasDecl(fx, "ProductionSocketClusterTransport"));
@@ -691,6 +692,25 @@ test "production socket transport retries transient unavailable attempts" {
     try std.testing.expectEqual(@as(usize, 1), metrics.successes);
 }
 
+test "chunked transport request records chunk metadata without changing payload" {
+    const request = fx.ClusterTransportRequest{
+        .kind = .request,
+        .address = fx.entityAddress("counter", "chunk-helper"),
+        .payload_type_name = "text",
+        .payload = "abcdef",
+        .redacted_detail = "chunk",
+    };
+    var chunked = try fx.chunkedClusterTransportRequest(std.testing.allocator, request, .{
+        .max_envelope_bytes = 64,
+        .max_chunk_bytes = 2,
+        .max_in_flight = 2,
+    });
+    defer chunked.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(?u32, 0), chunked.chunk_index);
+    try std.testing.expectEqual(@as(?u32, 3), chunked.chunk_count);
+    try std.testing.expectEqualStrings("abcdef", chunked.payload);
+}
+
 test "cluster runner processes ask sent through in-process transport" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -737,6 +757,52 @@ test "cluster runner processes ask sent through loopback http transport" {
     );
 }
 
+test "cluster runner processes ask sent through production http transport" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runner_storage_state = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer runner_storage_state.deinit();
+    var message_storage_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_state.deinit();
+
+    var transport_state = try fx.ProductionHttpClusterTransport.init(
+        std.testing.allocator,
+        message_storage_state.asMessageStorage(),
+        .{ .shard_count = 8 },
+    );
+    defer transport_state.deinit();
+
+    try expectRunnerProcessesTransportAsk(
+        transport_state.asClusterTransport(),
+        runner_storage_state.asRunnerStorage(),
+        message_storage_state.asMessageStorage(),
+        .production_http,
+    );
+}
+
+test "cluster runner processes ask sent through production socket transport" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runner_storage_state = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer runner_storage_state.deinit();
+    var message_storage_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_state.deinit();
+
+    var transport_state = try fx.ProductionSocketClusterTransport.init(
+        std.testing.allocator,
+        message_storage_state.asMessageStorage(),
+        .{ .shard_count = 8 },
+    );
+    defer transport_state.deinit();
+
+    try expectRunnerProcessesTransportAsk(
+        transport_state.asClusterTransport(),
+        runner_storage_state.asRunnerStorage(),
+        message_storage_state.asMessageStorage(),
+        .production_socket,
+    );
+}
+
 fn expectRunnerProcessesTransportAsk(
     transport: fx.ClusterTransport,
     runner_storage: fx.RunnerStorage,
@@ -768,10 +834,26 @@ fn expectRunnerProcessesTransportAsk(
         .payload = "get",
         .redacted_detail = "read through transport",
         .idempotency_key = "transport-runner-acceptance-key",
+        .trace_id = 12001,
+        .span_id = 12002,
+        .chunk_index = 0,
+        .chunk_count = 1,
     });
     defer response.deinit(std.testing.allocator);
     try std.testing.expectEqual(expected_transport, response.transport);
     try std.testing.expect(response.correlation_id != null);
+    try std.testing.expectEqual(@as(?u64, 12001), response.envelope.trace_id);
+    try std.testing.expectEqual(@as(?u64, 12002), response.envelope.span_id);
+    try std.testing.expectEqual(@as(?u32, 0), response.envelope.chunk_index);
+    try std.testing.expectEqual(@as(?u32, 1), response.envelope.chunk_count);
+
+    var before_tick = try message_storage.unprocessedByShard(response.shard_id, std.testing.allocator);
+    defer before_tick.deinit();
+    try std.testing.expectEqual(@as(usize, 1), before_tick.records.len);
+    try std.testing.expectEqual(@as(?u64, 12001), before_tick.records[0].envelope.trace_id);
+    try std.testing.expectEqual(@as(?u64, 12002), before_tick.records[0].envelope.span_id);
+    try std.testing.expectEqual(@as(?u32, 0), before_tick.records[0].envelope.chunk_index);
+    try std.testing.expectEqual(@as(?u32, 1), before_tick.records[0].envelope.chunk_count);
 
     const Handler = struct {
         pub fn handle(_: *fx.EntityScope, envelope: fx.EntityEnvelope) !fx.EntityHandlerResult {
@@ -791,4 +873,8 @@ fn expectRunnerProcessesTransportAsk(
     defer fx.deinitMessageEnvelope(std.testing.allocator, reply);
     try std.testing.expectEqual(fx.MessageEnvelopeKind.reply, reply.kind);
     try std.testing.expectEqualStrings("value=transport", reply.payload);
+    try std.testing.expectEqual(@as(?u64, 12001), reply.trace_id);
+    try std.testing.expectEqual(@as(?u64, 12002), reply.span_id);
+    try std.testing.expectEqual(@as(?u32, 0), reply.chunk_index);
+    try std.testing.expectEqual(@as(?u32, 1), reply.chunk_count);
 }

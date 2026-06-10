@@ -580,6 +580,7 @@ pub const clusterTransportHttpBody = cluster.clusterTransportHttpBody;
 pub const formatClusterTransportSocketFrame = cluster.formatClusterTransportSocketFrame;
 pub const clusterTransportSocketFrameBody = cluster.clusterTransportSocketFrameBody;
 pub const formatClusterTransportFailureReport = cluster.formatClusterTransportFailureReport;
+pub const chunkedClusterTransportRequest = cluster.chunkedClusterTransportRequest;
 pub const registerClusterTransportWait = cluster.registerClusterTransportWait;
 pub const completeClusterTransportWait = cluster.completeClusterTransportWait;
 pub const cluster_workflow_entity_type = cluster.cluster_workflow_entity_type;
