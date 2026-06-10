@@ -18,6 +18,19 @@ test "supervisor public exports are available" {
     try std.testing.expect(@hasDecl(fx, "SupervisorError"));
 }
 
+test "full supervision public exports are available" {
+    try std.testing.expect(@hasDecl(fx.runtime, "SupervisorDecisionRecord"));
+    try std.testing.expect(@hasDecl(fx.runtime, "SupervisorInspectionReport"));
+    try std.testing.expect(@hasDecl(fx.runtime, "formatSupervisorInspectionText"));
+    try std.testing.expect(@hasDecl(fx.runtime, "formatSupervisorInspectionJson"));
+    try std.testing.expect(@hasDecl(fx.runtime, "SupervisorTree"));
+    try std.testing.expect(@hasDecl(fx.runtime, "SupervisorTreeOptions"));
+    try std.testing.expect(@hasDecl(fx.runtime, "SupervisorTreeNodeOptions"));
+    try std.testing.expect(@hasDecl(fx.runtime, "SupervisorTreeInspectionReport"));
+    try std.testing.expect(@hasDecl(fx, "SupervisorDecisionRecord"));
+    try std.testing.expect(@hasDecl(fx, "SupervisorTree"));
+}
+
 test "supervisor child specs cover local runtime domains" {
     const specs = [_]fx.SupervisorChildSpec{
         .{ .id = 1, .name = "fiber-child", .kind = .fiber },
@@ -28,6 +41,19 @@ test "supervisor child specs cover local runtime domains" {
     try std.testing.expectEqual(fx.SupervisorChildKind.fiber, specs[0].kind);
     try std.testing.expectEqual(fx.SupervisorRestartMode.permanent, specs[0].restart_mode);
     try std.testing.expectEqual(@as(u32, 0), specs[0].shutdown_order);
+}
+
+test "supervisor child specs cover full runtime cluster domains" {
+    const specs = [_]fx.SupervisorChildSpec{
+        .{ .id = 10, .name = "activity", .kind = .activity },
+        .{ .id = 11, .name = "shard-worker", .kind = .shard_worker },
+        .{ .id = 12, .name = "runner-service", .kind = .runner_service },
+        .{ .id = 13, .name = "transport-server", .kind = .transport_server },
+    };
+    try std.testing.expectEqual(fx.SupervisorChildKind.activity, specs[0].kind);
+    try std.testing.expectEqual(fx.SupervisorChildKind.shard_worker, specs[1].kind);
+    try std.testing.expectEqual(fx.SupervisorChildKind.runner_service, specs[2].kind);
+    try std.testing.expectEqual(fx.SupervisorChildKind.transport_server, specs[3].kind);
 }
 
 test "supervisor registers children and rejects duplicate ids" {
@@ -88,6 +114,30 @@ test "supervisor one-for-one restarts only failed child" {
     try std.testing.expectEqual(fx.SupervisorChildStatus.running, try supervisor.childStatus(1));
     try std.testing.expectEqual(fx.SupervisorChildStatus.running, try supervisor.childStatus(2));
     try std.testing.expectEqual(fx.SupervisorChildStatus.running, try supervisor.childStatus(3));
+}
+
+test "dynamic supervisor restarts removes and rejects missing dynamic children" {
+    var supervisor = fx.Supervisor.init(std.testing.allocator, .{
+        .id = 70,
+        .name = "dynamic-root",
+        .strategy = .dynamic,
+    });
+    defer supervisor.deinit();
+
+    try supervisor.addChild(.{ .id = 1, .name = "queue", .kind = .queue_worker });
+    try supervisor.addChild(.{ .id = 2, .name = "activity", .kind = .activity });
+    try supervisor.startAll(1_000);
+
+    const decision = try supervisor.reportChildExit(2, .{ .failure = "activity failed" }, 1_100);
+    try std.testing.expectEqual(fx.SupervisorStrategy.dynamic, decision.strategy);
+    try std.testing.expectEqual(@as(usize, 1), decision.restarted_children);
+    try std.testing.expectEqual(@as(usize, 0), try supervisor.childRestartCount(1));
+    try std.testing.expectEqual(@as(usize, 1), try supervisor.childRestartCount(2));
+
+    try supervisor.stopChild(2, .{ .interrupted = 0 });
+    try std.testing.expectEqual(fx.SupervisorChildStatus.stopped, try supervisor.childStatus(2));
+    try supervisor.removeChild(2);
+    try std.testing.expectError(error.ChildNotFound, supervisor.childStatus(2));
 }
 
 test "supervisor one-for-all restarts every restartable child" {

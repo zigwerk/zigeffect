@@ -9,9 +9,20 @@ pub const Cause = result_mod.Cause;
 pub const SupervisorId = u64;
 pub const SupervisorChildId = u64;
 
-pub const SupervisorStrategy = enum { one_for_one, one_for_all, rest_for_one };
+pub const SupervisorStrategy = enum { one_for_one, one_for_all, rest_for_one, dynamic };
 pub const SupervisorRestartMode = enum { permanent, transient, temporary };
-pub const SupervisorChildKind = enum { fiber, workflow_worker, queue_worker, entity, runner, shard };
+pub const SupervisorChildKind = enum {
+    fiber,
+    activity,
+    workflow_worker,
+    queue_worker,
+    entity,
+    runner,
+    shard,
+    shard_worker,
+    runner_service,
+    transport_server,
+};
 pub const SupervisorChildStatus = enum { idle, running, restarting, stopped, failed, escalated };
 
 pub const SupervisorError = error{
@@ -83,6 +94,75 @@ pub const SupervisorShutdownPlan = struct {
     }
 };
 
+pub const SupervisorDecisionRecord = struct {
+    at_ms: u64,
+    child: SupervisorChildSnapshot,
+    decision: SupervisorDecision,
+    affected_children: usize = 0,
+};
+
+pub const SupervisorInspectionReport = struct {
+    allocator: Allocator,
+    supervisor_id: SupervisorId,
+    name: []const u8,
+    strategy: SupervisorStrategy,
+    intensity: RestartIntensity,
+    children: []SupervisorChildSnapshot,
+    decisions: []SupervisorDecisionRecord,
+    shutdown_order: []SupervisorChildId,
+    running_children: usize = 0,
+    stopped_children: usize = 0,
+    failed_children: usize = 0,
+    escalated_children: usize = 0,
+    dynamic_children: usize = 0,
+
+    pub fn deinit(self: *SupervisorInspectionReport) void {
+        self.allocator.free(self.children);
+        self.allocator.free(self.decisions);
+        self.allocator.free(self.shutdown_order);
+    }
+};
+
+pub const SupervisorTreeOptions = struct {
+    id: u64,
+    name: []const u8,
+};
+
+pub const SupervisorTreeNodeOptions = struct {
+    id: SupervisorId,
+    parent_id: ?SupervisorId = null,
+    name: []const u8,
+    strategy: SupervisorStrategy = .one_for_one,
+    intensity: RestartIntensity = .{},
+};
+
+pub const SupervisorTreeInspectionReport = struct {
+    allocator: Allocator,
+    tree_id: u64,
+    name: []const u8,
+    nodes: []const u8,
+    total_children: usize = 0,
+    total_decisions: usize = 0,
+    total_escalated_children: usize = 0,
+
+    pub fn deinit(self: *SupervisorTreeInspectionReport) void {
+        self.allocator.free(self.nodes);
+    }
+};
+
+pub const SupervisorTree = struct {
+    allocator: Allocator,
+    options: SupervisorTreeOptions,
+
+    pub fn init(allocator: Allocator, options: SupervisorTreeOptions) SupervisorTree {
+        return .{ .allocator = allocator, .options = options };
+    }
+
+    pub fn deinit(self: *SupervisorTree) void {
+        _ = self;
+    }
+};
+
 const ChildState = struct {
     spec: SupervisorChildSpec,
     status: SupervisorChildStatus = .idle,
@@ -144,6 +224,16 @@ pub const Supervisor = struct {
     pub fn childRestartCount(self: *const Supervisor, child_id: SupervisorChildId) SupervisorError!usize {
         const index = self.findChildIndex(child_id) orelse return error.ChildNotFound;
         return self.children.items[index].restart_count;
+    }
+
+    pub fn stopChild(self: *Supervisor, child_id: SupervisorChildId, exit: SupervisorChildExit) SupervisorError!void {
+        const index = self.findChildIndex(child_id) orelse return error.ChildNotFound;
+        markStoppedOrFailed(&self.children.items[index], exit);
+    }
+
+    pub fn removeChild(self: *Supervisor, child_id: SupervisorChildId) SupervisorError!void {
+        const index = self.findChildIndex(child_id) orelse return error.ChildNotFound;
+        _ = self.children.orderedRemove(index);
     }
 
     pub fn shutdownPlan(self: *Supervisor, allocator: Allocator) Allocator.Error!SupervisorShutdownPlan {
@@ -376,7 +466,7 @@ fn restartAllowed(mode: SupervisorRestartMode, exit: SupervisorChildExit) bool {
 
 fn strategyAffects(strategy: SupervisorStrategy, failed_index: usize, candidate_index: usize) bool {
     return switch (strategy) {
-        .one_for_one => candidate_index == failed_index,
+        .one_for_one, .dynamic => candidate_index == failed_index,
         .one_for_all => true,
         .rest_for_one => candidate_index >= failed_index,
     };
@@ -403,4 +493,64 @@ fn decisionStatus(decision: SupervisorDecision) []const u8 {
     if (decision.restarted_children > 0) return "restarted";
     if (decision.stopped_children > 0) return "stopped";
     return exitStatus(decision.exit);
+}
+
+pub fn formatSupervisorInspectionText(allocator: Allocator, report: SupervisorInspectionReport) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "supervisor_id: {d}\nname: {s}\nstrategy: {s}\nchildren: {d}\ndecisions: {d}\nescalated_children: {d}\n",
+        .{
+            report.supervisor_id,
+            report.name,
+            @tagName(report.strategy),
+            report.children.len,
+            report.decisions.len,
+            report.escalated_children,
+        },
+    );
+}
+
+pub fn formatSupervisorInspectionJson(allocator: Allocator, report: SupervisorInspectionReport) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{{\"supervisor_id\":{d},\"name\":\"{s}\",\"strategy\":\"{s}\",\"child_count\":{d},\"decision_count\":{d},\"escalated_children\":{d}}}",
+        .{
+            report.supervisor_id,
+            report.name,
+            @tagName(report.strategy),
+            report.children.len,
+            report.decisions.len,
+            report.escalated_children,
+        },
+    );
+}
+
+pub fn formatSupervisorTreeInspectionText(allocator: Allocator, report: SupervisorTreeInspectionReport) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "tree_id: {d}\nname: {s}\nnodes: {d}\ntotal_children: {d}\ntotal_decisions: {d}\ntotal_escalated_children: {d}\n",
+        .{
+            report.tree_id,
+            report.name,
+            report.nodes.len,
+            report.total_children,
+            report.total_decisions,
+            report.total_escalated_children,
+        },
+    );
+}
+
+pub fn formatSupervisorTreeInspectionJson(allocator: Allocator, report: SupervisorTreeInspectionReport) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{{\"tree_id\":{d},\"name\":\"{s}\",\"node_count\":{d},\"total_children\":{d},\"total_decisions\":{d},\"total_escalated_children\":{d}}}",
+        .{
+            report.tree_id,
+            report.name,
+            report.nodes.len,
+            report.total_children,
+            report.total_decisions,
+            report.total_escalated_children,
+        },
+    );
 }
