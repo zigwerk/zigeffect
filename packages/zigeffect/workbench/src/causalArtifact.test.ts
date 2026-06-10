@@ -4,6 +4,7 @@ import {
   causePathForEvent,
   deriveAppRemediationModel,
   deriveGovernanceModel,
+  deriveLiveDashboardModel,
   deriveWorkbenchModel,
   deriveGraphModel,
   deriveRemediationChainModel,
@@ -157,6 +158,82 @@ const sampleAuditChain = {
   claim_guardrails: ["Do not claim remediation without verification."],
   proposal_guardrails: ["This proposal does not apply source changes."],
   chain_guardrails: ["Chain comparison is evidence, not authorization to edit source."],
+};
+
+const sampleLiveStream = {
+  schema: "zigeffect.causal.live-dashboard-stream.v1",
+  schema_version: 1,
+  mode: "local-fixture",
+  target: "package-tests",
+  mutation_authority: "none",
+  source: {
+    snapshot: ".zig-cache/causal-artifacts/zigeffect-causal-dogfood.json",
+    alert_preview: ".zig-cache/causal-artifacts/alerting-integrations.json",
+    compare: ".zig-cache/causal-artifacts/compare.txt",
+  },
+  stream: {
+    window_policy: "drop-oldest",
+    max_frames: 4,
+    frame_count: 5,
+    truncated: true,
+    redaction: "artifact-redacted",
+  },
+  frames: [
+    {
+      sequence: 1,
+      event_id: 1,
+      event_kind: "run_started",
+      status: "ok",
+      label: "run",
+      lane: "run:1",
+      parent_id: null,
+      dashboard_priority: "normal",
+    },
+    {
+      sequence: 2,
+      event_id: 2,
+      event_kind: "scope_opened",
+      status: "ok",
+      label: "scope",
+      lane: "scope:1",
+      parent_id: 1,
+      dashboard_priority: "normal",
+    },
+    {
+      sequence: 3,
+      event_id: 3,
+      event_kind: "service_required",
+      status: "missing",
+      label: "Config",
+      lane: "run:1",
+      parent_id: 2,
+      finding_kind: "service_requirement_without_provider",
+      dashboard_priority: "critical",
+    },
+    {
+      sequence: 4,
+      event_id: 4,
+      event_kind: "resource_acquired",
+      status: "success",
+      label: "db",
+      lane: "resource:db",
+      parent_id: 2,
+      dashboard_priority: "watch",
+    },
+    {
+      sequence: 5,
+      event_id: 5,
+      event_kind: "fiber_forked",
+      status: "pending",
+      label: "child",
+      lane: "fiber:42",
+      parent_id: 2,
+      finding_kind: "fiber_pending_after_scope_close",
+      dashboard_priority: "watch",
+    },
+  ],
+  layouts: ["dagre", "force", "radial"],
+  guardrails: ["Read-only dashboard evidence only.", "Mutation authority remains none."],
 };
 
 const sampleAppAudit = {
@@ -436,6 +513,40 @@ test("filterEvents supports text kind and status filters", () => {
   expect(filterEvents(model.events, { text: "Config" }).map((event) => event.idText)).toEqual(["3"]);
   expect(filterEvents(model.events, { kind: "resource_acquired" }).map((event) => event.idText)).toEqual(["4"]);
   expect(filterEvents(model.events, { status: "failure" }).map((event) => event.idText)).toEqual(["8", "9"]);
+});
+
+test("deriveLiveDashboardModel normalizes bounded stream artifacts", () => {
+  const dashboard = deriveLiveDashboardModel(sampleLiveStream, { artifactPath: "live.json" });
+
+  expect(dashboard?.schema).toBe("zigeffect.causal.live-dashboard-stream.v1");
+  expect(dashboard?.target).toBe("package-tests");
+  expect(dashboard?.mode).toBe("local-fixture");
+  expect(dashboard?.mutationAuthority).toBe("none");
+  expect(dashboard?.stream.windowPolicy).toBe("drop-oldest");
+  expect(dashboard?.stream.maxFrames).toBe(4);
+  expect(dashboard?.stream.frameCount).toBe(5);
+  expect(dashboard?.stream.truncated).toBe(true);
+  expect(dashboard?.frames.map((frame) => frame.eventId)).toEqual(["1", "2", "3", "4", "5"]);
+  expect(dashboard?.priorityCounts.critical).toBe(1);
+  expect(dashboard?.priorityCounts.watch).toBe(2);
+  expect(dashboard?.sources.find((source) => source.kind === "snapshot")?.workbenchCommand).toBe(
+    "zig build causal-workbench -- .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json",
+  );
+  expect(dashboard?.sources.find((source) => source.kind === "compare")?.workbenchCommand).toBeNull();
+  expect(dashboard?.layouts).toEqual(["dagre", "force", "radial"]);
+  expect(dashboard?.guardrails).toContain("Mutation authority remains none.");
+});
+
+test("deriveLiveDashboardModel treats normal causal artifacts as static streams", () => {
+  const raw = parseArtifactJson(sampleArtifact);
+  const workbench = deriveWorkbenchModel(raw, { artifactPath: "sample-artifact.json" });
+  const dashboard = deriveLiveDashboardModel(raw, { artifactPath: "sample-artifact.json" }, workbench);
+
+  expect(dashboard?.schema).toBe("zigeffect.causal.v1");
+  expect(dashboard?.mode).toBe("static-snapshot");
+  expect(dashboard?.frames.length).toBe(workbench.events.length);
+  expect(dashboard?.stream.truncated).toBe(false);
+  expect(dashboard?.priorityCounts.critical).toBeGreaterThan(0);
 });
 
 test("queryCommandsForEvent generates copyable causal-query commands", () => {

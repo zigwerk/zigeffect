@@ -66,6 +66,51 @@ export type GraphModel = {
   unhealthyLanes: GraphLane[];
 };
 
+export type VisualGraphLayoutMode = "dagre" | "force" | "radial";
+
+export type LiveDashboardPriority = "normal" | "watch" | "critical";
+
+export type LiveDashboardSourceStep = {
+  kind: string;
+  label: string;
+  path: string;
+  workbenchCommand: string | null;
+};
+
+export type LiveStreamFrameModel = {
+  sequence: number;
+  eventId: string;
+  parentId: string | null;
+  eventKind: string;
+  status: string;
+  label: string;
+  lane: string;
+  findingKind: string | null;
+  priority: LiveDashboardPriority;
+};
+
+export type LiveDashboardModel = {
+  artifactPath: string;
+  schema: string;
+  schemaVersion: string;
+  mode: string;
+  target: string;
+  mutationAuthority: string | null;
+  stream: {
+    windowPolicy: string;
+    maxFrames: number;
+    frameCount: number;
+    truncated: boolean;
+    redaction: string;
+  };
+  frames: LiveStreamFrameModel[];
+  priorityCounts: Record<LiveDashboardPriority, number>;
+  sources: LiveDashboardSourceStep[];
+  layouts: VisualGraphLayoutMode[];
+  guardrails: string[];
+  warnings: string[];
+};
+
 export type GovernanceArtifactKind =
   | "audit-chain"
   | "remediation-audit"
@@ -236,6 +281,16 @@ const graphFailureStatuses = new Set(["failure"]);
 const graphWarningStatuses = new Set(["missing", "exhausted", "pending", "running"]);
 const graphLaneKindOrder: GraphLaneKind[] = ["run", "scope", "fiber", "resource", "retry"];
 const auditChainSchema = "zigeffect.causal.audit-chain.v1";
+const liveDashboardStreamSchema = "zigeffect.causal.live-dashboard-stream.v1";
+const defaultVisualGraphLayouts: VisualGraphLayoutMode[] = ["dagre", "force", "radial"];
+const liveDashboardSourceKinds = ["snapshot", "aggregation_bundle", "access_policy", "alert_preview", "compare"];
+const liveDashboardSourceLabels: Record<string, string> = {
+  snapshot: "Snapshot artifact",
+  aggregation_bundle: "Aggregation bundle",
+  access_policy: "Access policy",
+  alert_preview: "Alert preview",
+  compare: "Compare report",
+};
 const chainSourceKinds: ChainSourceKind[] = ["session", "audit", "decision", "proposal", "before", "after", "compare"];
 const chainSourceLabels: Record<ChainSourceKind, string> = {
   session: "Dev session",
@@ -401,6 +456,22 @@ export function causePathForEvent(events: CausalEvent[], eventId: string): Causa
   }
 
   return path.reverse();
+}
+
+export function deriveLiveDashboardModel(
+  raw: unknown,
+  options: WorkbenchOptions,
+  workbench?: WorkbenchModel,
+): LiveDashboardModel | null {
+  const artifact = isRecord(raw) ? raw : {};
+  const schema = textValue(artifact.schema, "unknown");
+
+  if (schema === liveDashboardStreamSchema) {
+    return deriveLiveStreamDashboard(artifact, options);
+  }
+
+  const model = workbench ?? deriveWorkbenchModel(raw, options);
+  return deriveStaticDashboard(model);
 }
 
 export function deriveRemediationChainModel(raw: unknown, options: WorkbenchOptions): RemediationChainModel | null {
@@ -740,6 +811,173 @@ function compareGraphLanes(left: GraphLane, right: GraphLane): number {
     return leftKind - rightKind;
   }
   return left.key.localeCompare(right.key);
+}
+
+function deriveLiveStreamDashboard(artifact: UnknownRecord, options: WorkbenchOptions): LiveDashboardModel {
+  const warnings: string[] = [];
+  const schemaVersion = textValue(artifact.schema_version, "unknown");
+  if (schemaVersion === "unknown") {
+    warnings.push("artifact schema_version is missing");
+  }
+
+  const source = isRecord(artifact.source) ? artifact.source : {};
+  if (!isRecord(artifact.source)) {
+    warnings.push("artifact source object is missing");
+  }
+
+  const stream = isRecord(artifact.stream) ? artifact.stream : {};
+  if (!isRecord(artifact.stream)) {
+    warnings.push("artifact stream object is missing");
+  }
+
+  const rawFrames = Array.isArray(artifact.frames) ? artifact.frames : [];
+  if (!Array.isArray(artifact.frames)) {
+    warnings.push("artifact frames array is missing");
+  }
+
+  const frames = rawFrames
+    .filter(isRecord)
+    .map((frame, index) => liveFrameFromRecord(frame, index))
+    .sort((left, right) => left.sequence - right.sequence);
+
+  return {
+    artifactPath: options.artifactPath,
+    schema: liveDashboardStreamSchema,
+    schemaVersion,
+    mode: textValue(artifact.mode, "unknown"),
+    target: textValue(artifact.target, "unknown"),
+    mutationAuthority: nullableTextValue(artifact.mutation_authority),
+    stream: {
+      windowPolicy: textValue(stream.window_policy, "unknown"),
+      maxFrames: numericValue(stream.max_frames) ?? frames.length,
+      frameCount: numericValue(stream.frame_count) ?? frames.length,
+      truncated: booleanValue(stream.truncated) ?? false,
+      redaction: textValue(stream.redaction, "unknown"),
+    },
+    frames,
+    priorityCounts: priorityCounts(frames),
+    sources: liveDashboardSources(source),
+    layouts: visualLayoutList(artifact.layouts),
+    guardrails: stringList(artifact.guardrails),
+    warnings,
+  };
+}
+
+function deriveStaticDashboard(model: WorkbenchModel): LiveDashboardModel {
+  const frames = model.events.map((event, index) => liveFrameFromEvent(event, model.findings, index));
+
+  return {
+    artifactPath: model.artifactPath,
+    schema: model.schema,
+    schemaVersion: model.schemaVersion,
+    mode: "static-snapshot",
+    target: model.artifactPath,
+    mutationAuthority: "none",
+    stream: {
+      windowPolicy: "static",
+      maxFrames: frames.length,
+      frameCount: frames.length,
+      truncated: false,
+      redaction: model.safeToShare,
+    },
+    frames,
+    priorityCounts: priorityCounts(frames),
+    sources: [{
+      kind: "snapshot",
+      label: liveDashboardSourceLabels.snapshot ?? "Snapshot artifact",
+      path: model.artifactPath,
+      workbenchCommand: workbenchCommandForPath(model.artifactPath),
+    }],
+    layouts: defaultVisualGraphLayouts,
+    guardrails: [
+      "Read-only static artifact dashboard.",
+      "Mutation authority remains none.",
+    ],
+    warnings: model.warnings,
+  };
+}
+
+function liveFrameFromRecord(frame: UnknownRecord, index: number): LiveStreamFrameModel {
+  const status = textValue(frame.status, "unknown");
+  return {
+    sequence: numericValue(frame.sequence) ?? index + 1,
+    eventId: idValue(frame.event_id) ?? `frame-${index + 1}`,
+    parentId: nullableIdValue(frame.parent_id),
+    eventKind: textValue(frame.event_kind, "unknown"),
+    status,
+    label: textValue(frame.label, ""),
+    lane: textValue(frame.lane, "unknown"),
+    findingKind: nullableTextValue(frame.finding_kind),
+    priority: liveDashboardPriority(frame.dashboard_priority, status, nullableTextValue(frame.finding_kind)),
+  };
+}
+
+function liveFrameFromEvent(event: CausalEvent, findings: CausalFinding[], index: number): LiveStreamFrameModel {
+  const findingKind = findings.find((finding) => finding.eventId === event.idText)?.kind ?? null;
+  return {
+    sequence: event.numericId ?? index + 1,
+    eventId: event.idText,
+    parentId: event.parentId,
+    eventKind: event.kind,
+    status: event.status,
+    label: event.label || event.typeName,
+    lane: eventLaneLabel(event),
+    findingKind,
+    priority: liveDashboardPriority("", event.status, findingKind),
+  };
+}
+
+function eventLaneLabel(event: CausalEvent): string {
+  if (event.fiberId) return `fiber:${event.fiberId}`;
+  if (event.scopeId) return `scope:${event.scopeId}`;
+  if (event.runId) return `run:${event.runId}`;
+  return "event";
+}
+
+function liveDashboardPriority(value: unknown, status: string, findingKind: string | null): LiveDashboardPriority {
+  const priority = textValue(value, "");
+  if (priority === "critical" || priority === "watch" || priority === "normal") {
+    return priority;
+  }
+  if (status === "failure" || status === "missing" || status === "exhausted") {
+    return "critical";
+  }
+  if (findingKind || status === "pending" || status === "running") {
+    return "watch";
+  }
+  return "normal";
+}
+
+function priorityCounts(frames: LiveStreamFrameModel[]): Record<LiveDashboardPriority, number> {
+  return frames.reduce<Record<LiveDashboardPriority, number>>((counts, frame) => {
+    counts[frame.priority] += 1;
+    return counts;
+  }, { normal: 0, watch: 0, critical: 0 });
+}
+
+function liveDashboardSources(source: UnknownRecord): LiveDashboardSourceStep[] {
+  return liveDashboardSourceKinds.flatMap((kind) => {
+    const path = textValue(source[kind], "");
+    if (!path) {
+      return [];
+    }
+    return [{
+      kind,
+      label: liveDashboardSourceLabels[kind] ?? kind,
+      path,
+      workbenchCommand: workbenchCommandForPath(path),
+    }];
+  });
+}
+
+function visualLayoutList(value: unknown): VisualGraphLayoutMode[] {
+  if (!Array.isArray(value)) {
+    return defaultVisualGraphLayouts;
+  }
+  const layouts = value.filter((layout): layout is VisualGraphLayoutMode => (
+    layout === "dagre" || layout === "force" || layout === "radial"
+  ));
+  return layouts.length > 0 ? uniqueInOrder(layouts) as VisualGraphLayoutMode[] : defaultVisualGraphLayouts;
 }
 
 function governanceKindForSchema(schema: string): GovernanceArtifactKind | null {
