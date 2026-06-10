@@ -370,8 +370,9 @@ manually opening many text artifacts.
 Deliverables:
 
 - SolidJS workbench renderer built with Bun/Vite.
-- Preferred frontend path: SolidJS plus `webui-dev/zig-webui`; React remains a
-  future adapter option only for a specific integration need.
+- Preferred frontend path: SolidJS plus `webui-dev/zig-webui`; alternate
+  frontend renderers remain future adapter options only for a specific
+  integration need.
 - Zig WebUI launcher:
   - `zig build causal-workbench -- <artifact.json>`.
 - UI build step:
@@ -687,9 +688,16 @@ Status values:
      traffic, feature-flag, alert, ticket, page, source, config, app, registry,
      and durable mutation authority remain `none`.
 10. `codex/zigeffect-causal-wall-clock-benchmark-baselines`
-   - Current next branch: add local and CI wall-clock benchmark baselines to
-     complement deterministic performance budget constants.
+   - Delivered: `causal-wall-clock-benchmark-baselines` emits
+     `zigeffect.causal.wall-clock-benchmark-baselines.v1` with local and CI
+     benchmark scenario families, baseline record fields, environment metadata,
+     calibration policy, advisory review gates, and capacity-planning handoff.
+     Timing evidence remains record-only and cannot fail CI or claim capacity
+     without human review.
 11. `codex/zigeffect-causal-production-capacity-planning`
+   - Current next branch: build capacity planning from reviewed aggregation,
+     retention, benchmark baseline, dashboard, graph, agent query,
+     feedback-loop, alerting, and rollout evidence.
 
 ## Dual-Interface Causal Spine Expansion
 

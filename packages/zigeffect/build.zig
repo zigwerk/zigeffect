@@ -700,6 +700,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_performance_budget_tool_tests = b.addRunArtifact(causal_performance_budget_tool_tests);
     test_step.dependOn(&run_causal_performance_budget_tool_tests.step);
 
+    const causal_wall_clock_benchmark_baselines_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_wall_clock_benchmark_baselines.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_wall_clock_benchmark_baselines_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-wall-clock-benchmark-baselines",
+        .root_module = causal_wall_clock_benchmark_baselines_tool_module,
+    });
+    const run_causal_wall_clock_benchmark_baselines_tool = b.addRunArtifact(causal_wall_clock_benchmark_baselines_tool);
+    if (b.args) |args| run_causal_wall_clock_benchmark_baselines_tool.addArgs(args);
+    const causal_wall_clock_benchmark_baselines_step = b.step("causal-wall-clock-benchmark-baselines", "Print causal wall-clock benchmark baseline contract");
+    causal_wall_clock_benchmark_baselines_step.dependOn(&run_causal_wall_clock_benchmark_baselines_tool.step);
+
+    const causal_wall_clock_benchmark_baselines_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-wall-clock-benchmark-baselines-tests",
+        .root_module = causal_wall_clock_benchmark_baselines_tool_module,
+    });
+    const run_causal_wall_clock_benchmark_baselines_tool_tests = b.addRunArtifact(causal_wall_clock_benchmark_baselines_tool_tests);
+    test_step.dependOn(&run_causal_wall_clock_benchmark_baselines_tool_tests.step);
+
     const causal_m9_completion_audit_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_m9_completion_audit.zig"),
         .target = target,

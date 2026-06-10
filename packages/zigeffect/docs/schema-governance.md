@@ -53,6 +53,9 @@ mapping, or agent handoff, also update [operations.md](operations.md).
   changing source event emission.
 - `agent-query`: compact bounded graph slices for agents; read-only and
   policy-aware.
+- `advisory-wall-clock`: observed timing evidence is comparable only when
+  environment metadata is compatible and cannot fail CI or claim capacity
+  without human review.
 
 ## New Schema Checklist
 
@@ -112,8 +115,8 @@ redaction review.
 
 Workbench sessions are `viewer-session` artifacts. They are local read-only
 operating state, not remediation authority. The preferred UI path is SolidJS
-with `webui-dev/zig-webui`; React should be introduced only for a specific
-future integration that cannot fit that path.
+with `webui-dev/zig-webui`; alternate renderers should be introduced only for a
+specific future integration that cannot fit that path.
 
 Live dashboard stream artifacts are `record-only`, `bounded-stream`,
 `viewer-session` artifacts. They feed the Live tab and Visual Graph tab in the
@@ -218,9 +221,20 @@ The rollout-automation-guardrails report is a record-only production hardening
 contract. It consumes deployment runbooks, alerting integrations, and the
 human-agent feedback loop, then defines canary evidence, rollout progression
 gates, circuit-breaker decisions, rollback readiness gates, and negative
-automation fixtures. It does not deploy services, roll back services, shift
-traffic, mutate feature flags, send alerts, create tickets, page humans, or
-grant mutation authority.
+automation fixtures. It does not shift traffic, mutate feature flags, execute
+rollbacks, send alerts, create tickets, page humans, or grant mutation
+authority.
+
+- `zigeffect.causal.wall-clock-benchmark-baselines.v1`
+
+The wall-clock-benchmark-baselines report is a record-only production
+hardening contract. It consumes the deterministic performance budget,
+production artifact aggregation direction, and production-hardening backlog,
+then defines local and CI benchmark scenario families, baseline record fields,
+environment metadata, calibration policy, advisory review gates, and agent
+guidance for future observation harnesses and capacity planning. It does not
+collect live timings, fail CI from timing, run load tests, size production
+capacity, write durable stores, or grant mutation authority.
 
 ### Human-Agent Feedback
 

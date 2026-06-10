@@ -164,6 +164,21 @@ current retention, string-bound, sampling, workbench, artifact-retention,
 backend-sink, and release-note budgets. The full policy is in
 [docs/performance-budget.md](docs/performance-budget.md).
 
+Print the causal wall-clock benchmark baseline contract:
+
+```bash
+cd packages/zigeffect
+zig build causal-wall-clock-benchmark-baselines
+zig build causal-wall-clock-benchmark-baselines -- --format json
+```
+
+The report uses schema
+`zigeffect.causal.wall-clock-benchmark-baselines.v1` and defines the local and
+CI timing scenario families, baseline record fields, environment metadata,
+calibration policy, advisory review gates, and capacity-planning handoff. It is
+record-only and does not collect timings or fail CI. The full policy is in
+[docs/wall-clock-benchmark-baselines.md](docs/wall-clock-benchmark-baselines.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -189,9 +204,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-workbench-graph-visual-debugging` as the next branch
-after the record-only alerting integrations contract and delivered live
-dashboard streaming workbench.
+`codex/zigeffect-causal-production-capacity-planning` after the delivered
+wall-clock benchmark baseline contract.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in
@@ -239,8 +253,8 @@ The contract uses schema
 `zigeffect.causal.durable-production-retention.v1`, consumes the artifact
 aggregation contract, and defines the NenDB-only TTL, compaction, backup,
 recovery, and retained-bundle fixture policy before deployment runbooks. It
-does not ingest live telemetry, restore production data, add Cockroach scope,
-or grant mutation authority. The full policy is in
+does not ingest live telemetry, restore production data, add non-NenDB durable
+scope, or grant mutation authority. The full policy is in
 [docs/durable-production-retention.md](docs/durable-production-retention.md).
 
 Print the causal production deployment runbooks contract:

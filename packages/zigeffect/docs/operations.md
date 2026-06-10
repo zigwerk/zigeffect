@@ -98,6 +98,8 @@ Schema, workbench, and backend checks:
 zig build causal-schema-governance
 zig build causal-performance-budget
 zig build causal-performance-budget -- --format json
+zig build causal-wall-clock-benchmark-baselines
+zig build causal-wall-clock-benchmark-baselines -- --format json
 zig build causal-m9-completion-audit
 zig build causal-m9-completion-audit -- --format json
 zig build causal-production-hardening-backlog
@@ -320,7 +322,8 @@ Use the workbench for:
 - copyable `causal-query` commands.
 
 Workbench UI work should stay on the SolidJS plus `webui-dev/zig-webui` path.
-React is only a future adapter option if a concrete integration requires it.
+Alternate frontend renderers are only future adapter options if a concrete
+integration requires them.
 
 ## Backend Adapter Operations
 
@@ -405,6 +408,11 @@ workbench artifact read limit. It also records documented budgets for sampling,
 CI artifact retention, backend sink failure posture, and the SolidJS inside
 `webui-dev/zig-webui` workbench direction.
 
+Use `causal-wall-clock-benchmark-baselines` for local and CI timing evidence
+contracts. That report is also record-only, but it describes noisy benchmark
+observation fields, environment metadata, calibration policy, advisory review
+gates, and the capacity-planning handoff rather than deterministic constants.
+
 Add release notes whenever a causal runtime change alters retention, string
 bounds, sampling, backend emission, artifact schemas, workbench bounds or
 bridge behavior, CI upload globs, or CI retention.
@@ -443,12 +451,12 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-wall-clock-benchmark-baselines` after the unified
-causal spine, deep runtime internals, app semantic trace API, bounded agent
-query surface, record-only encryption-at-rest policy, record-only alerting
+`codex/zigeffect-causal-production-capacity-planning` after the unified causal
+spine, deep runtime internals, app semantic trace API, bounded agent query
+surface, record-only encryption-at-rest policy, record-only alerting
 integrations, delivered live dashboard streaming workbench, delivered graph
-visual debugging, delivered human-agent feedback loop, and delivered rollout
-automation guardrails.
+visual debugging, delivered human-agent feedback loop, delivered rollout
+automation guardrails, and delivered wall-clock benchmark baseline contract.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -563,7 +571,8 @@ mappings.
 This contract was the handoff into
 `codex/zigeffect-causal-deep-runtime-internals`. The later runtime and app
 semantic branches preserve the same boundaries: no non-NenDB durable adapter
-scope, no React workbench switch, and no production mutation authority.
+scope, no alternate frontend renderer switch, and no production mutation
+authority.
 
 ## Encryption At Rest Policy
 
@@ -586,8 +595,8 @@ boundaries.
 Redaction review precedes encryption-at-rest eligibility. Key ids are
 references, never key material. This contract does not encrypt bytes, decrypt
 bytes, generate keys, call a KMS, enforce live RBAC, modify the SolidJS
-workbench, add non-NenDB durable adapter scope, add React support, or grant
-mutation authority.
+workbench, add non-NenDB durable adapter scope, add alternate frontend renderer
+support, or grant mutation authority.
 
 ## Alerting Integrations
 
@@ -610,7 +619,8 @@ authority boundaries for Slack, Linear, Jira, SIEM, and paging handoffs.
 Every fixture is record-only. This contract does not send alerts, create
 tickets, forward SIEM events, page humans, call networks, read secrets, mutate
 external systems, ingest production telemetry, add non-NenDB durable adapter
-scope, add React support, or grant production mutation authority.
+scope, add alternate frontend renderer support, or grant production mutation
+authority.
 
 ## Live Dashboard Streaming Workbench
 
@@ -633,7 +643,7 @@ lazy-loaded `@dschz/solid-g6` adapter over `@antv/g6`.
 The stream and UI are local evidence surfaces only. They do not ingest
 production telemetry, host a shared production dashboard, call networks, edit
 source, update registries, approve remediation, add non-NenDB durable adapter
-scope, add React support, or grant mutation authority.
+scope, add alternate frontend renderer support, or grant mutation authority.
 
 ## Human-Agent Feedback Loop
 
@@ -682,6 +692,30 @@ services, shift traffic, mutate feature flags, send alerts, create tickets,
 forward SIEM events, page humans, edit source, update registries, change app
 code, write durable state, or grant mutation authority.
 
+## Wall Clock Benchmark Baselines
+
+Run the wall-clock benchmark baseline contract when a branch needs local or CI
+timing evidence shape without turning timing into deterministic CI gates:
+
+```sh
+cd packages/zigeffect
+zig build causal-wall-clock-benchmark-baselines
+zig build causal-wall-clock-benchmark-baselines -- --format json
+```
+
+The contract records schema
+`zigeffect.causal.wall-clock-benchmark-baselines.v1`. It defines scenario
+families for request traces, background jobs, artifact formatting, bounded
+agent queries, before/after comparison, dev-loop package tests, SolidJS
+workbench build/test boundaries, and CI baseline capture. It also defines the
+future baseline record fields, environment metadata, calibration policy,
+advisory review gates, and agent guidance.
+
+Use it to decide whether future timing observations are comparable. Do not use
+it to fail CI automatically, estimate production capacity, run load tests, call
+networks, write durable stores, mutate source/config/app/registry/deployment
+state, or grant production authority.
+
 ## Production Gaps
 
 The current operating model does not provide:
@@ -696,7 +730,7 @@ The current operating model does not provide:
   streams;
 - automated source/config mutation authority;
 - gradual rollout, canary, or circuit-breaker automation;
-- wall-clock benchmark baselines or gates;
+- dynamic benchmark observation harnesses or wall-clock CI gates;
 - production capacity planning.
 
 Those belong to future production hardening. Use

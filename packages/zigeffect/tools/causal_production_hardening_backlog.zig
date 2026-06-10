@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-wall-clock-benchmark-baselines";
-pub const recommended_next_branch = "codex/zigeffect-causal-wall-clock-benchmark-baselines";
+pub const recommendation = "start-production-capacity-planning";
+pub const recommended_next_branch = "codex/zigeffect-causal-production-capacity-planning";
 
 const OutputFormat = enum { text, json };
 
@@ -34,7 +34,7 @@ const global_constraints: []const []const u8 = &.{
 
 const non_goals: []const []const u8 = &.{
     "non-NenDB durable adapter work",
-    "React workbench support",
+    "alternate frontend renderer support",
     "production mutation authority",
     "live production telemetry ingestion",
     "deployment or rollout automation",
@@ -398,21 +398,28 @@ const backlog_items: []const BacklogItem = &.{
         .title = "Wall Clock Benchmark Baselines",
         .gap_id = "wall-clock-benchmark-gates",
         .priority = "P4",
-        .status = "planned",
-        .summary = "Add local and CI wall-clock benchmark baselines to complement the deterministic performance budget report.",
+        .status = "delivered",
+        .summary = "Defines record-only local and CI wall-clock benchmark baseline contracts, environment metadata, calibration policy, advisory review gates, and agent guidance to complement deterministic performance budget constants.",
         .depends_on = &.{ "production-artifact-aggregation", "durable-production-retention" },
         .deliverables = &.{
-            "benchmark harness",
-            "request and background-job fixtures",
+            "benchmark scenario catalog",
+            "request and background-job baseline families",
             "baseline artifact schema",
-            "regression review gate",
+            "environment metadata contract",
+            "calibration and noise policy",
+            "advisory regression review gate",
+            "capacity planning handoff",
         },
         .evidence_sources = &.{
+            "docs/superpowers/specs/2026-06-10-zigeffect-causal-wall-clock-benchmark-baselines-design.md",
+            "docs/superpowers/plans/2026-06-10-zigeffect-causal-wall-clock-benchmark-baselines-implementation.md",
+            "packages/zigeffect/tools/causal_wall_clock_benchmark_baselines.zig",
+            "packages/zigeffect/docs/wall-clock-benchmark-baselines.md",
             "packages/zigeffect/docs/performance-budget.md",
             "docs/roachgraph/performance-baseline.md",
         },
         .branch = "codex/zigeffect-causal-wall-clock-benchmark-baselines",
-        .agent_guidance = "Keep wall-clock gates separate from deterministic budget constants.",
+        .agent_guidance = "Use causal-wall-clock-benchmark-baselines to compare only compatible local or CI timing evidence; keep all wall-clock deltas advisory until human review.",
     },
     .{
         .id = "production-capacity-planning",
@@ -472,6 +479,8 @@ const verification_commands: []const []const u8 = &.{
     "zig build causal-human-agent-feedback-loop -- --format json",
     "zig build causal-rollout-automation-guardrails",
     "zig build causal-rollout-automation-guardrails -- --format json",
+    "zig build causal-wall-clock-benchmark-baselines",
+    "zig build causal-wall-clock-benchmark-baselines -- --format json",
     "zig build causal-production-deployment-runbooks",
     "zig build causal-production-deployment-runbooks -- --format json",
     "zig build causal-durable-production-retention",
@@ -744,11 +753,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-wall-clock-benchmark-baselines",
+        "start-production-capacity-planning",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-wall-clock-benchmark-baselines",
+        "codex/zigeffect-causal-production-capacity-planning",
         recommended_next_branch,
     );
 }
@@ -773,6 +782,8 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItemStatus("human-agent-feedback-loop", "delivered");
     try expectBacklogItem("rollout-automation-guardrails");
     try expectBacklogItemStatus("rollout-automation-guardrails", "delivered");
+    try expectBacklogItem("wall-clock-benchmark-baselines");
+    try expectBacklogItemStatus("wall-clock-benchmark-baselines", "delivered");
     try expectBacklogItem("production-capacity-planning");
 }
 
@@ -782,7 +793,7 @@ test "production hardening backlog preserves user constraints" {
     try expectConstraint("visual graph adapter starts with @dschz/solid-g6 over @antv/g6; solid-flow remains optional editor research");
     try expectConstraint("human workbench and agent query interface share one causal truth model but expose separate ergonomics");
     try expectNonGoal("non-NenDB durable adapter work");
-    try expectNonGoal("React workbench support");
+    try expectNonGoal("alternate frontend renderer support");
     try expectNonGoal("production mutation authority");
 }
 
@@ -792,7 +803,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-wall-clock-benchmark-baselines") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-production-capacity-planning") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -807,13 +818,15 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-wall-clock-benchmark-baselines\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-production-capacity-planning\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-human-agent-feedback-loop\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"rollout-automation-guardrails\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-rollout-automation-guardrails\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"wall-clock-benchmark-baselines\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-wall-clock-benchmark-baselines\"") != null);
 }
 
 test "production hardening backlog parses supported formats" {

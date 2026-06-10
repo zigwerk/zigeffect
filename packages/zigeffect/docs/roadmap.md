@@ -636,9 +636,10 @@ metrics, and traces.
   `zigeffect.causal.production-hardening-backlog.v1` with the ordered
   production-hardening branch queue, NenDB-only durable direction, SolidJS plus
   `webui-dev/zig-webui` workbench direction, the delivered graph visual
-  debugging, human-agent feedback-loop, and rollout automation guardrails
+  debugging, human-agent feedback-loop, rollout automation guardrails, and
+  wall-clock benchmark baseline contract
   milestones, non-goals, verification commands, and the current next branch
-  `codex/zigeffect-causal-wall-clock-benchmark-baselines`.
+  `codex/zigeffect-causal-production-capacity-planning`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
@@ -663,15 +664,16 @@ metrics, and traces.
   owner labels, rotation evidence, encrypted artifact fixture metadata,
   redaction ordering, denied fixtures, and authority boundaries. It keeps
   encryption implementation, KMS integration, live RBAC, non-NenDB durable
-  adapter work, React workbench support, and mutation authority out of scope.
+  adapter work, alternate frontend renderer support, and mutation authority out
+  of scope.
 - Delivered: `causal-alerting-integrations` publishes
   `zigeffect.causal.alerting-integrations.v1` with record-only channel
   contracts, severity and routing policy, escalation gates, payload fields,
   preview fixtures, denied fixtures, and authority boundaries for Slack,
   Linear, Jira, SIEM, and paging handoffs. It keeps live alert delivery, ticket
   creation, SIEM forwarding, paging execution, network calls, secrets,
-  non-NenDB durable adapter work, React support, and mutation authority out of
-  scope.
+  non-NenDB durable adapter work, alternate frontend renderer support, and
+  mutation authority out of scope.
 - Delivered: `causal-live-dashboard-streaming-workbench` publishes
   `zigeffect.causal.live-dashboard-streaming-workbench.v1`, registers
   `zigeffect.causal.live-dashboard-stream.v1`, adds the local live stream
@@ -695,6 +697,12 @@ metrics, and traces.
   gates, and negative automation fixtures. It keeps rollout progression,
   traffic shifts, feature flags, alert delivery, ticket creation, paging,
   deploys, and rollbacks outside zigeffect authority.
+- Delivered: `causal-wall-clock-benchmark-baselines` publishes
+  `zigeffect.causal.wall-clock-benchmark-baselines.v1` with local and CI
+  benchmark scenario families, baseline record fields, environment metadata,
+  calibration policy, advisory review gates, and capacity-planning handoff. It
+  keeps timing observations record-only and does not collect timings, fail CI,
+  run load tests, size production capacity, or grant mutation authority.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,

@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-wall-clock-benchmark-baselines` means the
+The recommendation `start-production-capacity-planning` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -43,8 +43,12 @@ handoff while preserving `mutation_authority=none`.
 Rollout automation guardrails are also delivered: they define canary evidence,
 rollout progression gates, circuit-breaker decisions, rollback readiness gates,
 and negative automation fixtures without granting rollout authority.
+Wall-clock benchmark baselines are also delivered: they define local and CI
+benchmark scenario families, baseline record fields, environment metadata,
+calibration policy, advisory review gates, and agent guidance without running
+benchmarks or creating timing-based CI gates.
 The next branch should be
-`codex/zigeffect-causal-wall-clock-benchmark-baselines`.
+`codex/zigeffect-causal-production-capacity-planning`.
 
 ## Dependency Order
 
@@ -64,7 +68,7 @@ The backlog currently orders future production-hardening branches as:
 12. `workbench-graph-visual-debugging` delivered
 13. `human-agent-feedback-loop` delivered
 14. `rollout-automation-guardrails` delivered
-15. `wall-clock-benchmark-baselines`
+15. `wall-clock-benchmark-baselines` delivered
 16. `production-capacity-planning`
 
 The ordering is intentionally conservative. It keeps contracts and review
@@ -116,8 +120,9 @@ fixture, Live and Visual Graph workbench tabs, and the first
 executing commands, enforcing RBAC, writing durable stores, or granting
 mutation authority.
 
-Workbench work remains SolidJS inside `webui-dev/zig-webui`. React remains a
-non-goal unless a later adapter proves a concrete need.
+Workbench work remains SolidJS inside `webui-dev/zig-webui`. Alternate
+frontend renderer work remains a non-goal unless a later adapter proves a
+concrete need.
 
 The unified causal spine is documented in
 [unified-spine-contract.md](unified-spine-contract.md). It defines stable
@@ -162,10 +167,17 @@ Rollout automation guardrails are documented in
 `zig build causal-rollout-automation-guardrails` and keep canary progression,
 circuit breakers, and rollback readiness record-only.
 
+Wall-clock benchmark baselines are documented in
+[wall-clock-benchmark-baselines.md](wall-clock-benchmark-baselines.md). They
+emit `zigeffect.causal.wall-clock-benchmark-baselines.v1` through
+`zig build causal-wall-clock-benchmark-baselines` and keep local and CI timing
+evidence advisory, environment-scoped, and record-only.
+
 The next branch is
-`codex/zigeffect-causal-wall-clock-benchmark-baselines`. It should add local
-and CI wall-clock benchmark baselines to complement deterministic performance
-budget constants.
+`codex/zigeffect-causal-production-capacity-planning`. It should build capacity
+planning from reviewed aggregation, retention, benchmark baseline, dashboard,
+graph, agent query, feedback-loop, alerting, and rollout evidence without
+claiming capacity from unreviewed timing records.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -198,6 +210,8 @@ zig build causal-human-agent-feedback-loop
 zig build causal-human-agent-feedback-loop -- --format json
 zig build causal-rollout-automation-guardrails
 zig build causal-rollout-automation-guardrails -- --format json
+zig build causal-wall-clock-benchmark-baselines
+zig build causal-wall-clock-benchmark-baselines -- --format json
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

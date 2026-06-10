@@ -9,6 +9,11 @@ the causal runtime.
 It is not a wall-clock benchmark. The report is designed to be stable in local
 development and CI.
 
+Wall-clock benchmark baselines are now documented separately in
+[wall-clock-benchmark-baselines.md](wall-clock-benchmark-baselines.md). Use
+that report for noisy local and CI timing evidence, calibration policy,
+environment metadata, and advisory review gates.
+
 ## Command
 
 ```sh
@@ -74,6 +79,8 @@ Use this verification set for broad causal-runtime changes:
 cd packages/zigeffect
 zig build causal-performance-budget
 zig build causal-performance-budget -- --format json
+zig build causal-wall-clock-benchmark-baselines
+zig build causal-wall-clock-benchmark-baselines -- --format json
 zig build causal-schema-governance
 zig build examples
 zig build test
@@ -96,9 +103,21 @@ small. A larger lazy graph chunk is expected; it should remain isolated from the
 initial workbench payload unless a future adapter proves the split is
 unnecessary.
 
-React is not part of the current causal workbench direction. Add a React path
-only when a concrete future adapter cannot fit the SolidJS plus `zig-webui`
-boundary.
+Alternate frontend renderers are not part of the current causal workbench
+direction. Add another renderer path only when a concrete future adapter cannot
+fit the SolidJS plus `zig-webui` boundary.
+
+## Wall Clock Baselines
+
+`causal-wall-clock-benchmark-baselines` emits
+`zigeffect.causal.wall-clock-benchmark-baselines.v1`. It defines the benchmark
+scenario families, baseline record fields, environment metadata, calibration
+policy, advisory review gates, and agent guidance that future dynamic
+observation harnesses must follow.
+
+The wall-clock report is record-only. It does not collect timings, fail CI,
+size production capacity, or mutate CI, source, config, app, registry,
+deployment, rollout, durable, or production state.
 
 ## Non-Goals
 
@@ -111,5 +130,5 @@ This budget report does not add:
 - live alert delivery or paging execution;
 - live RBAC enforcement or encryption-at-rest implementation;
 - source or config mutation authority;
-- React workbench support;
-- Cockroach adapter work.
+- alternate frontend renderer support;
+- non-NenDB durable adapter work.
