@@ -359,6 +359,28 @@ pub fn build(b: *std.Build) void {
     });
     const run_cluster_runner_tool_tests = b.addRunArtifact(cluster_runner_tool_tests);
 
+    const storage_migrate_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/storage_migrate.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    storage_migrate_tool_module.addImport("zigeffect", zigeffect);
+
+    const storage_migrate_tool = b.addExecutable(.{
+        .name = "zigeffect-storage-migrate",
+        .root_module = storage_migrate_tool_module,
+    });
+    const run_storage_migrate_tool = b.addRunArtifact(storage_migrate_tool);
+    if (b.args) |args| run_storage_migrate_tool.addArgs(args);
+    const storage_migrate_step = b.step("storage-migrate", "Print zigeffect storage schema and SQL migration plans");
+    storage_migrate_step.dependOn(&run_storage_migrate_tool.step);
+
+    const storage_migrate_tool_tests = b.addTest(.{
+        .name = "zigeffect-storage-migrate-tests",
+        .root_module = storage_migrate_tool_module,
+    });
+    const run_storage_migrate_tool_tests = b.addRunArtifact(storage_migrate_tool_tests);
+
     const causal_artifact_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_artifact.zig"),
         .target = target,
@@ -562,6 +584,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_causal_graph_history_backend_tests.step);
     test_step.dependOn(&run_causal_nendb_storage_backend_tests.step);
     test_step.dependOn(&run_causal_async_stream_backend_tests.step);
+    test_step.dependOn(&run_storage_migrate_tool_tests.step);
     const causal_dev_test_step = b.step("causal-dev-test", "Run zigeffect tests with causal failure capture");
     causal_dev_test_step.dependOn(&run_causal_package_test_tool.step);
 
@@ -1011,6 +1034,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_test_tool_tests.step);
     examples_step.dependOn(&cluster_runner_tool.step);
     examples_step.dependOn(&run_cluster_runner_tool_tests.step);
+    examples_step.dependOn(&storage_migrate_tool.step);
+    examples_step.dependOn(&run_storage_migrate_tool_tests.step);
     examples_step.dependOn(&run_causal_artifact_tool_tests.step);
     examples_step.dependOn(&run_workflow_tool_support_tests.step);
     examples_step.dependOn(&workflow_list_tool.step);
