@@ -91,6 +91,7 @@ Docs:
 - [Usage](docs/usage.md)
 - [Architecture](docs/architecture.md)
 - [Public API Review](docs/public-api-review.md)
+- [Migration To Durable Runtime](docs/migration-to-durable-runtime.md)
 - [Errors](docs/errors.md)
 - [Resource Ownership](docs/resource-ownership.md)
 - [Data](docs/data.md)
@@ -109,6 +110,7 @@ Docs:
 - [Workflow Approval Example](examples/workflow_approval.zig)
 - [Workflow Queue Worker Example](examples/workflow_queue_worker.zig)
 - [Workflow Timer Signal Example](examples/workflow_timer_signal.zig)
+- [Workflow Crash Recovery Example](examples/workflow_crash_recovery.zig)
 - [Local Actor Example](examples/local_actor.zig)
 - [Multi-Runner Cluster Example](examples/multi_runner_cluster.zig)
 - [Cluster Workflow Migration Example](examples/cluster_workflow_migration.zig)
@@ -121,6 +123,17 @@ Run tests:
 ```bash
 bun run zigeffect:test
 ```
+
+Run the durable workflow and cluster release gate:
+
+```bash
+bun run zigeffect:release
+```
+
+The release gate runs package tests, storage conformance, property crash tests,
+bounded-resource checks, public API review, causal artifact generation, and all
+examples. It writes release reports under
+`packages/zigeffect/.zig-cache/release-gate/`.
 
 Compile and test the package examples:
 

@@ -74,12 +74,12 @@ Modify:
 
 ## Task 4: Add Docs And CI Paths
 
-- [ ] Update README with release-gate quickstart and docs links.
-- [ ] Add `packages/zigeffect/docs/migration-to-durable-runtime.md`.
+- [x] Update README with release-gate quickstart and docs links.
+- [x] Add `packages/zigeffect/docs/migration-to-durable-runtime.md`.
 - [ ] Add the Milestone 46 completion report under `docs/superpowers/reports/`.
-- [ ] Update `.github/workflows/zigeffect-causal.yml` to run
+- [x] Update `.github/workflows/zigeffect-causal.yml` to run
   `zig build release-gate --summary none`.
-- [ ] Add `.zig-cache/release-gate/*.txt` and `.zig-cache/release-gate/*.json`
+- [x] Add `.zig-cache/release-gate/*.txt` and `.zig-cache/release-gate/*.json`
   to the CI artifact upload paths.
 
 ## Task 5: Verify And Close Milestone 46

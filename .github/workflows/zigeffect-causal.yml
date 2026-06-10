@@ -56,17 +56,9 @@ jobs:
         working-directory: packages/zigeffect
         run: zig build causal-artifacts
 
-      - name: Generate causal dogfood artifacts
+      - name: Run release gate
         working-directory: packages/zigeffect
-        run: zig build causal-test
-
-      - name: Compile and test examples
-        working-directory: packages/zigeffect
-        run: zig build examples
-
-      - name: Run causal package test gate
-        working-directory: packages/zigeffect
-        run: zig build test --summary none
+        run: zig build release-gate --summary none
 
       - name: Write causal CI handoff
         if: ${{ failure() }}
@@ -84,3 +76,5 @@ jobs:
             packages/zigeffect/.zig-cache/causal-artifacts/*.txt
             packages/zigeffect/.zig-cache/causal-artifacts/*.json
             packages/zigeffect/.zig-cache/causal-artifacts/*.dot
+            packages/zigeffect/.zig-cache/release-gate/*.txt
+            packages/zigeffect/.zig-cache/release-gate/*.json
