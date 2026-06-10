@@ -977,20 +977,20 @@ fencing, renewal, expiration, and recovery guarantees.
 
 Deliverables:
 
-- [ ] Add lease epochs to all shard-owned journal, mailbox, queue, and timer
+- [x] Add lease epochs to all shard-owned journal, mailbox, queue, and timer
   writes.
-- [ ] Add storage-backed fencing tokens.
-- [ ] Add renewal jitter, renewal deadlines, and clock-skew tolerance rules.
-- [ ] Add stale owner detection and forced shard release.
-- [ ] Add lease audit reports.
-- [ ] Add crash tests for renewal loss, partial release, stale writes, and
+- [x] Add storage-backed fencing tokens.
+- [x] Add renewal jitter, renewal deadlines, and clock-skew tolerance rules.
+- [x] Add stale owner detection and forced shard release.
+- [x] Add lease audit reports.
+- [x] Add crash tests for renewal loss, partial release, stale writes, and
   rapid reacquisition.
 
 Acceptance:
 
-- [ ] Stale runners cannot write workflow journal, mailbox, queue, or timer
+- [x] Stale runners cannot write workflow journal, mailbox, queue, or timer
   state after lease loss.
-- [ ] Shards recover automatically after runner death without duplicate timer
+- [x] Shards recover automatically after runner death without duplicate timer
   firing or lost mailbox messages.
 
 ## Milestone 49: Multi-Runner Transport

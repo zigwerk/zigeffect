@@ -337,17 +337,18 @@ Owns Erlang-style distributed runtime surfaces:
 - `identity.zig`: local entity type, id, address, and stable id derivation.
 - `mailbox.zig`: local in-memory entity envelopes, per-entity FIFO mailbox
   storage, opt-in total/per-mailbox bounds, pressure stats, ask correlations,
-  reply storage, and envelope ownership helpers.
+  reply storage, lease epoch metadata, and envelope ownership helpers.
 - `entity.zig`: local entity runtime, runtime-bound refs, entity scopes,
   services, finalizers, idle shutdown, and supervisor-backed handler failure
   recovery.
 - `envelope.zig`: durable cluster message protocol with message ids,
   idempotency keys, request/reply/ack/interrupt/chunk-reply envelopes,
-  at-least-once delivery tracking, duplicate reply detection, and redacted
-  diagnostics.
+  lease epoch metadata, at-least-once delivery tracking, duplicate reply
+  detection, and redacted diagnostics.
 - `message_storage.zig`: shard-aware durable message and reply storage
   contract, in-memory storage, file-backed append/recovery semantics, and
-  stable JSON compatibility helpers.
+  stable JSON compatibility helpers with optional lease epoch persistence for
+  backward-compatible record replay.
 - `routing.zig`: deterministic shard ids, entity-id shard hashing,
   configurable local shard routing tables, local route targets, and
   snapshot/reload helpers for restart-stable routing.
@@ -360,19 +361,23 @@ Owns Erlang-style distributed runtime surfaces:
 - `fencing.zig`: shard lease fence tokens, stale epoch validation, and
   diagnostics that make outdated shard owners harmless before mailbox or
   workflow journal mutation.
+- `lease_guard.zig`: storage-backed write guards for message, mailbox, and
+  workflow journal mutations; guarded `JournalStore` wrapper; and
+  `lease_epoch` detail helpers for journal, queue, and timer events.
 - `supervision.zig`: cluster supervision policies, reports, runner restart
   intensity state, workflow-worker classification, and shard-release
   escalation vocabulary.
 - `observability.zig`: cluster causal query reports, failure summaries,
   cluster-only DOT rendering, mailbox lag and message backpressure metrics,
   metrics collection, and message trace context helpers.
-- `shard_lease.zig`: local shard lease manager with bounded TTLs, refresh
-  cadence, owned-lease tracking, graceful handoff, dead-runner recovery, and
-  causal shard ownership events.
+- `shard_lease.zig`: local shard lease manager with bounded TTLs, deterministic
+  renewal jitter, renewal deadlines, clock-skew-tolerant expiry, owned-lease
+  audit reports, forced stale release, graceful handoff, dead-runner recovery,
+  and causal shard ownership events.
 - `runtime.zig`: shard-owned cluster runtime that registers local entities,
-  accepts messages for owned shards, dispatches durable envelopes, stores
-  replies, acknowledges processed messages, and releases owned shards on
-  shutdown.
+  accepts messages for owned shards, validates storage-backed lease guards
+  before durable message writes, dispatches durable envelopes, stores replies,
+  acknowledges processed messages, and releases owned shards on shutdown.
 - `local_cluster.zig`: local multi-runner composition for shared storage,
   balanced shard acquisition, durable message routing, runner ticks, and
   dead-runner shard recovery.
@@ -382,9 +387,10 @@ Owns Erlang-style distributed runtime surfaces:
   metadata.
 - `workflow_engine.zig`: shard-owned durable workflow command layer that maps
   execution ids to workflow execution entities, routes commands through cluster
-  transport, mutates `JournalStore` from the owning entity, rebuilds execution
-  entity registrations after shard migration, and exposes timer, deferred,
-  signal, and queue command paths through shard ownership.
+  transport, mutates `JournalStore` from the owning entity through a guarded
+  journal wrapper, rebuilds execution entity registrations after shard
+  migration, and exposes timer, deferred, signal, and queue command paths
+  through shard ownership.
 - `timer_wakeup.zig`: journal-backed cluster timer wakeup index that rebuilds
   owned timers after shard acquisition, derives ownership from workflow
   execution shards, filters terminal and duplicate timer records, and reports

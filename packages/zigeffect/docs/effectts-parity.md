@@ -155,6 +155,26 @@ and cancellation wakeups. Direct-style effects opt into that surface through
 lowering and task groups can target the same backend contract without changing
 the deterministic compatibility suite.
 
+### Durable Workflows And Cluster
+
+EffectTS workflow and cluster packages combine durable execution with entity
+identity, sharding, runners, message storage, and lease-protected ownership.
+`zigeffect` mirrors that production shape with local-first Zig modules:
+
+- `WorkflowEngine`, `DurableClock`, durable queues, lifecycle controls, and an
+  append-only `JournalStore`.
+- Cluster entities, routing, runner storage, message storage, shard leases,
+  lease fencing, and workflow command entities.
+- Storage-backed `ShardLeaseWriteGuard` checks for message, mailbox, queue,
+  timer, and journal writes.
+- Lease epoch metadata on message records and journal details so recovery can
+  explain which ownership epoch performed a durable mutation.
+- Renewal jitter, renewal deadlines, clock-skew-tolerant expiry, owned-lease
+  audit reports, and forced stale shard release for local runner recovery.
+
+This remains a local durable runtime until the transport and full distributed IO
+milestones provide host-to-host production networking.
+
 ### Schedule
 
 EffectTS has a deep scheduling algebra. `zigeffect` now covers the names needed

@@ -719,6 +719,52 @@ try std.testing.expect(!backend.can_suspend);
 the same capability contract. Async backend additions should preserve `Scope`,
 `Exit`, `Cause`, and service lookup contracts.
 
+## Production Shard Lease Guards
+
+Cluster-owned durable writes should validate a storage-backed fence immediately
+before mutation. Use `LocalShardLeaseManager.fenceForShard` to derive the
+current token, then use `ShardLeaseWriteGuard` or the higher-level runtime and
+workflow APIs:
+
+```zig
+const fence = try lease_manager.fenceForShard(shard_id);
+const guard = fx.ShardLeaseWriteGuard.init(
+    lease_manager.storage,
+    fence,
+    .message_submit,
+);
+
+var submitted = try fx.guardMessageSubmit(message_storage, .{
+    .guard = guard,
+    .request = .{
+        .shard_id = shard_id,
+        .envelope = envelope,
+        .now_ms = now_ms,
+    },
+});
+defer submitted.deinit(allocator);
+```
+
+Successful guarded writes stamp `lease_epoch` on message/mailbox envelopes and
+append `lease_epoch=<epoch>` to workflow journal details. `ClusterRuntime` and
+`ClusterWorkflowEntityHandler` already use these guards for shard-owned message,
+queue, timer, and journal mutation paths.
+
+Use `auditOwnedLeases` to inspect local ownership against durable storage:
+
+```zig
+var audit = try lease_manager.auditOwnedLeases(allocator, now_ms);
+defer audit.deinit();
+
+if (audit.stale_owner != 0 or audit.stale_epoch != 0 or audit.expired != 0) {
+    // Drain or reacquire according to the runner policy.
+}
+```
+
+Use `forceReleaseStaleShard` only after the stored lease has expired past the
+configured clock-skew tolerance. Health-inspector recovery by owner still uses
+`recoverDeadRunner`.
+
 Core coordination primitives are deterministic:
 
 ```zig

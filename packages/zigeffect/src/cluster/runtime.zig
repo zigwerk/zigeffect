@@ -252,9 +252,9 @@ pub const ClusterRuntime = struct {
             const claimed = lease_guard.guardMessageClaim(self.message_storage, .{
                 .guard = try self.messageWriteGuard(shard_id, .message_claim),
                 .request = .{
-                .shard_id = shard_id,
-                .message_id = record.envelope.id,
-                .now_ms = now_ms,
+                    .shard_id = shard_id,
+                    .message_id = record.envelope.id,
+                    .now_ms = now_ms,
                 },
             }) catch |err| switch (err) {
                 error.StaleShardFence => {
@@ -288,9 +288,9 @@ pub const ClusterRuntime = struct {
                 const stored_reply = lease_guard.guardMessageReply(self.message_storage, .{
                     .guard = try self.messageWriteGuard(shard_id, .message_reply),
                     .request = .{
-                    .shard_id = shard_id,
-                    .envelope = durable_reply,
-                    .now_ms = now_ms,
+                        .shard_id = shard_id,
+                        .envelope = durable_reply,
+                        .now_ms = now_ms,
                     },
                 }) catch |err| switch (err) {
                     error.StaleShardFence => {
@@ -344,9 +344,9 @@ pub const ClusterRuntime = struct {
             const claimed = lease_guard.guardMessageClaim(self.message_storage, .{
                 .guard = try self.messageWriteGuard(shard_id, .message_claim),
                 .request = .{
-                .shard_id = shard_id,
-                .message_id = record.envelope.id,
-                .now_ms = now_ms,
+                    .shard_id = shard_id,
+                    .message_id = record.envelope.id,
+                    .now_ms = now_ms,
                 },
             }) catch |err| switch (err) {
                 error.StaleShardFence => {
@@ -404,9 +404,9 @@ pub const ClusterRuntime = struct {
                 const stored_reply = lease_guard.guardMessageReply(self.message_storage, .{
                     .guard = try self.messageWriteGuard(shard_id, .message_reply),
                     .request = .{
-                    .shard_id = shard_id,
-                    .envelope = durable_reply,
-                    .now_ms = now_ms,
+                        .shard_id = shard_id,
+                        .envelope = durable_reply,
+                        .now_ms = now_ms,
                     },
                 }) catch |err| switch (err) {
                     error.StaleShardFence => {
@@ -504,17 +504,17 @@ pub const ClusterRuntime = struct {
         var submitted = lease_guard.guardMessageSubmit(self.message_storage, .{
             .guard = try self.messageWriteGuard(shard_id, .message_submit),
             .request = .{
-            .shard_id = shard_id,
-            .envelope = .{
-                .kind = kind,
-                .address = address,
-                .idempotency_key = idempotency_key,
-                .trace_id = if (trace) |value| value.trace_id else null,
-                .span_id = if (trace) |value| value.span_id else null,
-                .payload_type_name = payload_type_name,
-                .payload = payload,
-                .redacted_detail = redacted_detail,
-            },
+                .shard_id = shard_id,
+                .envelope = .{
+                    .kind = kind,
+                    .address = address,
+                    .idempotency_key = idempotency_key,
+                    .trace_id = if (trace) |value| value.trace_id else null,
+                    .span_id = if (trace) |value| value.span_id else null,
+                    .payload_type_name = payload_type_name,
+                    .payload = payload,
+                    .redacted_detail = redacted_detail,
+                },
             },
         }) catch |err| switch (err) {
             error.StaleShardFence => {
