@@ -155,6 +155,7 @@ bun run zig:test
 git diff --check
 ```
 
-This contract hands off to
+This contract handed off to the now-delivered
 `codex/zigeffect-causal-live-dashboard-streaming-workbench`. Use
-`causal-production-hardening-backlog` for the current branch queue.
+`causal-production-hardening-backlog` for the current branch queue, which now
+points at graph visual debugging.

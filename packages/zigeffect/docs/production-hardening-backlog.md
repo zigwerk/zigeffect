@@ -25,13 +25,15 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-live-dashboard-streaming-workbench` means the
+The recommendation `start-workbench-graph-visual-debugging` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
 bounded agent query surface, record-only encryption-at-rest policy, and
-record-only alerting integrations now exist. The next branch should be
-`codex/zigeffect-causal-live-dashboard-streaming-workbench`.
+record-only alerting integrations now exist, and the read-only live dashboard
+streaming workbench now has a stream contract, local fixture, Live tab, and
+first Solid G6 visual graph adapter boundary. The next branch should be
+`codex/zigeffect-causal-workbench-graph-visual-debugging`.
 
 ## Dependency Order
 
@@ -47,7 +49,7 @@ The backlog currently orders future production-hardening branches as:
 8. `agent-query-interface` partial
 9. `encryption-at-rest-policy` delivered
 10. `alerting-integrations` delivered
-11. `live-dashboard-streaming-workbench`
+11. `live-dashboard-streaming-workbench` delivered
 12. `workbench-graph-visual-debugging`
 13. `human-agent-feedback-loop`
 14. `rollout-automation-guardrails`
@@ -95,6 +97,14 @@ fields, preview fixtures, denied fixtures, and authority boundaries without
 sending alerts, creating tickets, forwarding SIEM events, paging humans,
 calling networks, reading secrets, or granting production mutation authority.
 
+The live dashboard streaming workbench is documented in
+[live-dashboard-streaming-workbench.md](live-dashboard-streaming-workbench.md).
+It defines `zigeffect.causal.live-dashboard-stream.v1`, a bounded local stream
+fixture, Live and Visual Graph workbench tabs, and the first
+`@dschz/solid-g6` adapter boundary without opening production telemetry,
+executing commands, enforcing RBAC, writing durable stores, or granting
+mutation authority.
+
 Workbench work remains SolidJS inside `webui-dev/zig-webui`. React remains a
 non-goal unless a later adapter proves a concrete need.
 
@@ -115,12 +125,11 @@ interface is a compact query surface for bounded graph slices, evidence ids,
 diffs, redaction state, truncation state, confidence, and recommended next
 queries.
 
-The live dashboard and streaming workbench branch should add the first graph
-adapter boundary. Start with `@dschz/solid-g6` as the SolidJS integration layer.
-Keep the zigeffect causal graph model as the source of truth. Add direct
-`@antv/g6` usage only when the Solid adapter does not expose the required
-engine API cleanly. The first UI should be a read-only upgraded `Graph` tab or
-new `Visual Graph` tab.
+The live dashboard and streaming workbench branch added the first graph adapter
+boundary. It starts with `@dschz/solid-g6` as the SolidJS integration layer,
+keeps the zigeffect causal graph model as the source of truth, lazy-loads the
+large graph chunk, and keeps direct `@antv/g6` engine API usage
+`not-required`.
 
 The dedicated graph visual debugging branch should deepen that adapter with
 layout modes: dagre or hierarchical for cause chains, force for runtime
@@ -153,6 +162,8 @@ zig build causal-encryption-at-rest-policy
 zig build causal-encryption-at-rest-policy -- --format json
 zig build causal-alerting-integrations
 zig build causal-alerting-integrations -- --format json
+zig build causal-live-dashboard-streaming-workbench
+zig build causal-live-dashboard-streaming-workbench -- --format json
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

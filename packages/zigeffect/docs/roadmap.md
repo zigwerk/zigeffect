@@ -638,7 +638,7 @@ metrics, and traces.
   `webui-dev/zig-webui` workbench direction, the post-streaming
   `workbench-graph-visual-debugging` milestone, non-goals, verification
   commands, and the current next branch
-  `codex/zigeffect-causal-live-dashboard-streaming-workbench`.
+  `codex/zigeffect-causal-workbench-graph-visual-debugging`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
@@ -671,6 +671,11 @@ metrics, and traces.
   Linear, Jira, SIEM, and paging handoffs. It keeps live alert delivery, ticket
   creation, SIEM forwarding, paging execution, network calls, secrets,
   Cockroach adapter work, React support, and mutation authority out of scope.
+- Delivered: `causal-live-dashboard-streaming-workbench` publishes
+  `zigeffect.causal.live-dashboard-streaming-workbench.v1`, registers
+  `zigeffect.causal.live-dashboard-stream.v1`, adds the local live stream
+  sample, and extends the SolidJS/zig-webui workbench with Live and Visual Graph
+  tabs backed by a lazy `@dschz/solid-g6` adapter over `@antv/g6`.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,
@@ -693,13 +698,13 @@ metrics, and traces.
 - Extend the SolidJS `zig-webui` causal workbench when future UI branches need
   richer effect-run, scope-tree, fiber-tree, layer-graph, retry-timeline,
   resource-ownership, and cause-tree views.
-- In the live dashboard streaming branch, start the graph layer with
+- The live dashboard streaming branch starts the graph layer with
   `@dschz/solid-g6` as the SolidJS adapter over the current causal graph model.
-  Use direct `@antv/g6` APIs only when the adapter needs engine access. The
-  first visual graph should be read-only and support dagre or hierarchical
-  cause chains, force runtime topology, and radial scope/fiber/resource
-  ownership. Keep `solid-flow` as optional later research for editable
-  remediation planning surfaces.
+  The next visual debugging branch should deepen read-only graph layouts,
+  browser/canvas verification, runtime topology, cause chains, and app data
+  lineage. Use direct `@antv/g6` APIs only when the adapter needs engine access.
+  Keep `solid-flow` as optional later research for editable remediation planning
+  surfaces.
 - Keep remediation controlled: agents may propose retries, graph restarts,
   provider replacement, config-layer replacement, fiber interruption, or
   deterministic replay, but arbitrary runtime memory mutation is out of scope.

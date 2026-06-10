@@ -439,10 +439,10 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-live-dashboard-streaming-workbench` after the unified
+`codex/zigeffect-causal-workbench-graph-visual-debugging` after the unified
 causal spine, deep runtime internals, app semantic trace API, bounded agent
-query surface, record-only encryption-at-rest policy, and record-only alerting
-integrations.
+query surface, record-only encryption-at-rest policy, record-only alerting
+integrations, and delivered live dashboard streaming workbench.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -585,7 +585,7 @@ workbench, add Cockroach scope, add React support, or grant mutation authority.
 ## Alerting Integrations
 
 Run the alerting integrations contract after encryption-at-rest policy and
-before the live dashboard streaming workbench:
+before the now-delivered live dashboard streaming workbench:
 
 ```sh
 cd packages/zigeffect
@@ -605,6 +605,29 @@ tickets, forward SIEM events, page humans, call networks, read secrets, mutate
 external systems, ingest production telemetry, add Cockroach scope, add React
 support, or grant production mutation authority.
 
+## Live Dashboard Streaming Workbench
+
+Run the live dashboard streaming workbench contract after alerting integrations
+and before deeper graph visual debugging:
+
+```sh
+cd packages/zigeffect
+zig build causal-live-dashboard-streaming-workbench
+zig build causal-live-dashboard-streaming-workbench -- --format json
+```
+
+The contract records schema
+`zigeffect.causal.live-dashboard-streaming-workbench.v1` and registers the
+bounded stream artifact schema `zigeffect.causal.live-dashboard-stream.v1`.
+The SolidJS workbench can load the sample with `?sample=live`, render Live
+frames and guardrails, and render a read-only Visual Graph tab through the
+lazy-loaded `@dschz/solid-g6` adapter over `@antv/g6`.
+
+The stream and UI are local evidence surfaces only. They do not ingest
+production telemetry, host a shared production dashboard, call networks, edit
+source, update registries, approve remediation, add Cockroach scope, add React
+support, or grant mutation authority.
+
 ## Production Gaps
 
 The current operating model does not provide:
@@ -615,7 +638,8 @@ The current operating model does not provide:
   execution;
 - live RBAC enforcement over artifact bundles;
 - encryption-at-rest implementation, KMS integration, or live key rotation;
-- live dashboards or streaming workbench;
+- production live dashboard ingestion, multi-user hosting, or server-side
+  streams;
 - automated source/config mutation authority;
 - gradual rollout, canary, or circuit-breaker automation;
 - wall-clock benchmark baselines or gates;

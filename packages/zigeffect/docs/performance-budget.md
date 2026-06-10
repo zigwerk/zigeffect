@@ -89,6 +89,13 @@ The workbench UI direction is SolidJS inside `webui-dev/zig-webui`: SolidJS
 renders the interface, Bun/Vite builds it, and Zig plus `zig-webui` host the
 native window or local server through a bounded read-only bridge.
 
+The visual graph path is read-only and starts with `@dschz/solid-g6` over
+`@antv/g6`. The adapter is lazy-loaded from the Visual Graph tab so ordinary
+timeline, findings, metadata, and Live views keep the main workbench bundle
+small. A larger lazy graph chunk is expected; it should remain isolated from the
+initial workbench payload unless a future adapter proves the split is
+unnecessary.
+
 React is not part of the current causal workbench direction. Add a React path
 only when a concrete future adapter cannot fit the SolidJS plus `zig-webui`
 boundary.

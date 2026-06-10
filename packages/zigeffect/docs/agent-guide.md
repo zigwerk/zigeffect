@@ -637,8 +637,12 @@ zig build causal-workbench -- .zig-cache/causal-artifacts/zigeffect-causal-dogfo
 
 The workbench is a SolidJS app hosted by `zig-webui`. It reads exactly one
 artifact through a bounded Zig bridge and renders timeline, findings,
-relationships, query commands, metadata, and event inspector views. It is local
-and read-only: no source edits, registry edits, policy decisions, or
+relationships, query commands, metadata, event inspector, Live, and Visual Graph
+views. The dev sample `?sample=live` loads
+`zigeffect.causal.live-dashboard-stream.v1` so agents and humans can inspect
+bounded frame updates, source health, guardrails, and the read-only Solid G6
+graph path before production telemetry exists. It is local and read-only: no
+source edits, registry edits, policy decisions, approval decisions, or
 remediation writes happen through the UI. Use copied `causal-query` commands as
 explicit follow-up evidence, not as implied approval.
 

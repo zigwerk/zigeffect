@@ -189,12 +189,27 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-live-dashboard-streaming-workbench` as the next branch
-after the record-only alerting integrations contract.
+`codex/zigeffect-causal-workbench-graph-visual-debugging` as the next branch
+after the record-only alerting integrations contract and delivered live
+dashboard streaming workbench.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in
 [docs/production-hardening-backlog.md](docs/production-hardening-backlog.md).
+
+Print the causal live dashboard streaming workbench contract:
+
+```bash
+cd packages/zigeffect
+zig build causal-live-dashboard-streaming-workbench
+zig build causal-live-dashboard-streaming-workbench -- --format json
+```
+
+The contract uses schema
+`zigeffect.causal.live-dashboard-streaming-workbench.v1`, registers
+`zigeffect.causal.live-dashboard-stream.v1`, and backs the read-only Live and
+Visual Graph workbench tabs. The full policy is in
+[docs/live-dashboard-streaming-workbench.md](docs/live-dashboard-streaming-workbench.md).
 
 Print the causal production artifact aggregation contract:
 

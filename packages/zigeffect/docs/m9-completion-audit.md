@@ -56,7 +56,9 @@ The audit originally kept these as explicit future hardening:
   record-only alerting now delivered and live delivery still future;
 - RBAC or access control over artifact bundles;
 - encryption-at-rest policy, implementation, and key rotation;
-- live dashboards or streaming workbench;
+- live dashboards or streaming workbench at M9 time, with the local
+  live-dashboard stream and workbench slice now delivered and production
+  ingestion still future;
 - automated source/config mutation authority;
 - gradual rollout, canary, or circuit-breaker automation;
 - wall-clock benchmark baselines or gates;
@@ -80,12 +82,12 @@ That report uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, keeps durable work on the
 NenDB adapter path, keeps workbench work on SolidJS inside
 `webui-dev/zig-webui`, and now recommends
-`codex/zigeffect-causal-live-dashboard-streaming-workbench` after the
+`codex/zigeffect-causal-workbench-graph-visual-debugging` after the
 production artifact aggregation, durable production retention, production
 deployment runbook, artifact access-control contract, unified causal spine
 contract, deep runtime internals, app semantic tracing, bounded agent query,
-record-only encryption-at-rest policy, and record-only alerting integration
-branches.
+record-only encryption-at-rest policy, record-only alerting integration, and
+live dashboard streaming workbench branches.
 
 ## Verification Suite
 

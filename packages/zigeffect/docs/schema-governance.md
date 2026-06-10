@@ -47,6 +47,8 @@ mapping, or agent handoff, also update [operations.md](operations.md).
 - `sink-contract`: emitted for downstream backend/export systems.
 - `record-only`: records review/application state without mutating source.
 - `viewer-session`: read-only local workbench/session operating state.
+- `bounded-stream`: ordered dashboard frame records with declared truncation
+  and redaction state.
 - `spine-contract`: defines shared identity and relationship vocabulary without
   changing source event emission.
 - `agent-query`: compact bounded graph slices for agents; read-only and
@@ -106,11 +108,17 @@ redaction review.
 ### Workbench
 
 - `zigeffect.causal.workbench-session.v1`
+- `zigeffect.causal.live-dashboard-stream.v1`
 
 Workbench sessions are `viewer-session` artifacts. They are local read-only
 operating state, not remediation authority. The preferred UI path is SolidJS
 with `webui-dev/zig-webui`; React should be introduced only for a specific
 future integration that cannot fit that path.
+
+Live dashboard stream artifacts are `record-only`, `bounded-stream`,
+`viewer-session` artifacts. They feed the Live tab and Visual Graph tab in the
+SolidJS workbench. The first visual graph adapter is `@dschz/solid-g6` over
+`@antv/g6`, with direct engine API usage reserved for future gaps.
 
 ### Operating Model
 

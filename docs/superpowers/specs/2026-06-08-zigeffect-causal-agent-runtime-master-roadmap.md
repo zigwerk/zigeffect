@@ -657,12 +657,14 @@ Status values:
 4. `codex/zigeffect-causal-encryption-at-rest-policy`
 5. `codex/zigeffect-causal-alerting-integrations`
 6. `codex/zigeffect-causal-live-dashboard-streaming-workbench`
-   - Add the read-only live workbench stream and the first visual graph adapter.
+   - Delivered: add the read-only live workbench stream and the first visual
+     graph adapter.
      Start with `@dschz/solid-g6` as the SolidJS integration layer, keep the
      zigeffect causal graph model as source of truth, and add direct
      `@antv/g6` usage only where the adapter needs engine APIs.
 7. `codex/zigeffect-causal-workbench-graph-visual-debugging`
-   - Deepen read-only graph visual debugging for causal traces, runtime
+   - Current next branch: deepen read-only graph visual debugging for causal
+     traces, runtime
      topology, scopes, fibers, causes, retries, resource ownership, and semantic
      app data lineage. Required layout modes are dagre or hierarchical for
      cause chains, force for runtime topology, and radial for scope, fiber, and
