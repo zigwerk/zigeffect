@@ -541,7 +541,7 @@ git commit -m "example(zigeffect): add multi-runner cluster"
 - Create: `packages/zigeffect/examples/cluster_workflow_migration.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Add the failing example shell and build wiring**
+- [x] **Step 1: Add the failing example shell and build wiring**
 
 Create `cluster_workflow_migration.zig` with:
 
@@ -577,7 +577,7 @@ Wire the module with:
 - binary name: `zigeffect-cluster-workflow-migration-example`
 - test name: `zigeffect-cluster-workflow-migration-example-tests`
 
-- [ ] **Step 2: Run the failing example gate**
+- [x] **Step 2: Run the failing example gate**
 
 Run:
 
@@ -587,7 +587,7 @@ Run:
 
 Expected: FAIL from `error.ExpectedClusterWorkflowMigrationScenario`.
 
-- [ ] **Step 3: Implement the cluster workflow migration scenario**
+- [x] **Step 3: Implement the cluster workflow migration scenario**
 
 Implement:
 
@@ -608,7 +608,7 @@ Implement:
 - `engine.complete(workflow_id, execution_id, "value=approved-after-migration")`;
 - final `journal_store.latestState`.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 

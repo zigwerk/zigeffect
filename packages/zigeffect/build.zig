@@ -478,6 +478,24 @@ pub fn build(b: *std.Build) void {
     });
     const run_multi_runner_cluster_example_tests = b.addRunArtifact(multi_runner_cluster_example_tests);
 
+    const cluster_workflow_migration_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/cluster_workflow_migration.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cluster_workflow_migration_example_module.addImport("zigeffect", zigeffect);
+
+    const cluster_workflow_migration_example = b.addExecutable(.{
+        .name = "zigeffect-cluster-workflow-migration-example",
+        .root_module = cluster_workflow_migration_example_module,
+    });
+
+    const cluster_workflow_migration_example_tests = b.addTest(.{
+        .name = "zigeffect-cluster-workflow-migration-example-tests",
+        .root_module = cluster_workflow_migration_example_module,
+    });
+    const run_cluster_workflow_migration_example_tests = b.addRunArtifact(cluster_workflow_migration_example_tests);
+
     const scaffold_module = b.createModule(.{
         .root_source_file = b.path("tools/scaffold_module.zig"),
         .target = target,
@@ -1273,6 +1291,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_local_actor_example_tests.step);
     examples_step.dependOn(&multi_runner_cluster_example.step);
     examples_step.dependOn(&run_multi_runner_cluster_example_tests.step);
+    examples_step.dependOn(&cluster_workflow_migration_example.step);
+    examples_step.dependOn(&run_cluster_workflow_migration_example_tests.step);
     examples_step.dependOn(&scaffold_tool.step);
     examples_step.dependOn(&run_scaffold_tool_tests.step);
     examples_step.dependOn(&causal_report_tool.step);
