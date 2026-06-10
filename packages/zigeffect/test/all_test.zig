@@ -43,5 +43,6 @@ comptime {
     _ = @import("workflow_test.zig");
     _ = @import("property_history_test.zig");
     _ = @import("crash_recovery_property_test.zig");
+    _ = @import("message_history_property_test.zig");
     _ = @import("workflow_scheduler_test.zig");
 }
