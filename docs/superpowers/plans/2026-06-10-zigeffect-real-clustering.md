@@ -53,7 +53,7 @@ Roadmap: `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clusteri
 - Modify: `packages/zigeffect/src/cluster/root.zig`
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 
-- [ ] **Step 1: Add failing public API tests**
+- [x] **Step 1: Add failing public API tests**
 
 Create `real_cluster_test.zig` with:
 
@@ -85,7 +85,7 @@ Add `_ = @import("real_cluster_test.zig");` to `all_test.zig`.
 Extend public API stability tests with the new cluster names and top-level
 aliases.
 
-- [ ] **Step 2: Run the red test**
+- [x] **Step 2: Run the red test**
 
 Run:
 
@@ -95,7 +95,7 @@ cd packages/zigeffect && zig build test-raw
 
 Expected: compile failure for missing `real_cluster` declarations.
 
-- [ ] **Step 3: Add the minimal module and exports**
+- [x] **Step 3: Add the minimal module and exports**
 
 Create `real_cluster.zig` with public enums, structs, `deinit` methods, and
 `RealClusterController.init`. Include `RealClusterError`:
@@ -111,7 +111,7 @@ pub const RealClusterError = error{
 
 Export the module and aliases through `cluster/root.zig` and `zigeffect.zig`.
 
-- [ ] **Step 4: Run green test and commit**
+- [x] **Step 4: Run green test and commit**
 
 Run:
 
@@ -133,7 +133,7 @@ git commit -m "feat(zigeffect): add real cluster public contract"
 - Modify: `packages/zigeffect/test/real_cluster_test.zig`
 - Modify: `packages/zigeffect/src/cluster/real_cluster.zig`
 
-- [ ] **Step 1: Add failing membership tests**
+- [x] **Step 1: Add failing membership tests**
 
 Add tests for:
 
@@ -182,7 +182,7 @@ try std.testing.expectEqual(fx.ClusterMembershipState.active, report.members[0].
 try std.testing.expectEqual(@as(usize, 1), report.active);
 ```
 
-- [ ] **Step 2: Run red test**
+- [x] **Step 2: Run red test**
 
 Run:
 
@@ -192,7 +192,7 @@ cd packages/zigeffect && zig build test-raw
 
 Expected: missing controller methods and membership report behavior.
 
-- [ ] **Step 3: Implement membership**
+- [x] **Step 3: Implement membership**
 
 Implement:
 
@@ -204,7 +204,7 @@ Implement:
 
 Sort members by machine id then runner id.
 
-- [ ] **Step 4: Run green test and commit**
+- [x] **Step 4: Run green test and commit**
 
 Run raw tests and fmt, then commit:
 
@@ -219,7 +219,7 @@ git commit -m "feat(zigeffect): add cluster membership discovery"
 - Modify: `packages/zigeffect/test/real_cluster_test.zig`
 - Modify: `packages/zigeffect/src/cluster/real_cluster.zig`
 
-- [ ] **Step 1: Add failing placement/rebalance tests**
+- [x] **Step 1: Add failing placement/rebalance tests**
 
 Add tests for:
 
@@ -239,7 +239,7 @@ fn expectPlacementOwners(plan: fx.ClusterPlacementPlan, owners: []const fx.Runne
 }
 ```
 
-- [ ] **Step 2: Run red test**
+- [x] **Step 2: Run red test**
 
 Run:
 
@@ -250,7 +250,7 @@ cd packages/zigeffect && zig build test-raw
 Expected: missing `placementPlan`, `rebalancePlan`, and
 `applyRebalancePlan`.
 
-- [ ] **Step 3: Implement placement/rebalance**
+- [x] **Step 3: Implement placement/rebalance**
 
 Implement:
 
@@ -263,7 +263,7 @@ Implement:
 The apply path releases stale owners before acquiring desired owners. Count
 applied actions in `recent_rebalance_actions`.
 
-- [ ] **Step 4: Run green test and commit**
+- [x] **Step 4: Run green test and commit**
 
 Run raw tests and fmt, then commit:
 
@@ -282,7 +282,7 @@ git commit -m "feat(zigeffect): add cluster placement and rebalancing"
 - Modify: `packages/zigeffect/src/cluster/root.zig`
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 
-- [ ] **Step 1: Add failing sync and drain tests**
+- [x] **Step 1: Add failing sync and drain tests**
 
 Add tests that:
 
@@ -295,7 +295,7 @@ Add tests that:
 The message correctness assertion should mirror existing multi-runner tests:
 the reply payload must be `value=drained`.
 
-- [ ] **Step 2: Run red test**
+- [x] **Step 2: Run red test**
 
 Run:
 
@@ -306,7 +306,7 @@ cd packages/zigeffect && zig build test-raw
 Expected: missing `syncOwnedLeasesFromStorage`, `syncOwnedShards`, and
 `drainRunner`.
 
-- [ ] **Step 3: Implement sync and drain**
+- [x] **Step 3: Implement sync and drain**
 
 Add to `LocalShardLeaseManager`:
 
@@ -329,7 +329,7 @@ Implement `RealClusterController.drainRunner`. It marks the runner stopped,
 recomputes placement from remaining active members, releases drained leases,
 acquires replacement leases, and returns `ClusterDrainPlan`.
 
-- [ ] **Step 4: Run green test and commit**
+- [x] **Step 4: Run green test and commit**
 
 Run raw tests and fmt, then commit:
 
@@ -344,7 +344,7 @@ git commit -m "feat(zigeffect): add cluster drain and runner lease sync"
 - Modify: `packages/zigeffect/test/real_cluster_test.zig`
 - Modify: `packages/zigeffect/src/cluster/real_cluster.zig`
 
-- [ ] **Step 1: Add failing recovery and split-brain tests**
+- [x] **Step 1: Add failing recovery and split-brain tests**
 
 Add tests for:
 
@@ -356,7 +356,7 @@ Add tests for:
 
 Build local split-brain input from two `RunnerLeaseBatch` snapshots.
 
-- [ ] **Step 2: Run red test**
+- [x] **Step 2: Run red test**
 
 Run:
 
@@ -366,7 +366,7 @@ cd packages/zigeffect && zig build test-raw
 
 Expected: missing recovery and split-brain APIs.
 
-- [ ] **Step 3: Implement recovery and split-brain**
+- [x] **Step 3: Implement recovery and split-brain**
 
 Implement:
 
@@ -378,7 +378,7 @@ Implement:
 Recovery uses the health inspector, releases dead-runner leases, and acquires
 replacement leases from the active placement plan.
 
-- [ ] **Step 4: Run green test and commit**
+- [x] **Step 4: Run green test and commit**
 
 Run raw tests and fmt, then commit:
 
@@ -395,7 +395,7 @@ git commit -m "feat(zigeffect): add node down recovery and split brain reports"
 - Create: `packages/zigeffect/tools/cluster_inspect.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Add failing inspection and CLI tests**
+- [x] **Step 1: Add failing inspection and CLI tests**
 
 Add tests for:
 
@@ -405,7 +405,7 @@ Add tests for:
 - `formatClusterInspectionJson` contains the report schema and counts;
 - `zig build cluster-inspect -- --help` exits successfully.
 
-- [ ] **Step 2: Run red tests**
+- [x] **Step 2: Run red tests**
 
 Run:
 
@@ -417,7 +417,7 @@ cd packages/zigeffect && zig build cluster-inspect -- --help
 Expected: missing inspection methods, formatter functions, tool, and build
 step.
 
-- [ ] **Step 3: Implement inspection and CLI**
+- [x] **Step 3: Implement inspection and CLI**
 
 Implement:
 
@@ -437,7 +437,7 @@ pub fn main() !void {
 Add a `--help` path that prints available flags and exits. Wire the build step
 as `cluster-inspect`.
 
-- [ ] **Step 4: Run green tests and commit**
+- [x] **Step 4: Run green tests and commit**
 
 Run raw tests, CLI help, and fmt. Commit:
 
@@ -455,20 +455,20 @@ git commit -m "feat(zigeffect): add cluster inspection command"
 - Modify: `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`
 - Create: `docs/superpowers/reports/2026-06-10-zigeffect-milestone-50-completion.md`
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
 Document `real_cluster.zig`, runner lease sync, controller placement/rebalance,
 node-down recovery, split-brain reports, and `cluster-inspect`.
 
-- [ ] **Step 2: Mark roadmap M50 complete**
+- [x] **Step 2: Mark roadmap M50 complete**
 
 Mark every M50 deliverable and acceptance checkbox complete.
 
-- [ ] **Step 3: Add completion report**
+- [x] **Step 3: Add completion report**
 
 Create a report listing shipped APIs, tests, and verification commands.
 
-- [ ] **Step 4: Run full verification**
+- [x] **Step 4: Run full verification**
 
 Run:
 
@@ -486,7 +486,7 @@ run the project marker scan on modified source, tests, tools, docs, spec, plan, 
 
 Expected: all commands pass.
 
-- [ ] **Step 5: Commit closeout**
+- [x] **Step 5: Commit closeout**
 
 Run:
 

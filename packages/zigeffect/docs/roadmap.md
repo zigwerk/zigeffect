@@ -33,6 +33,10 @@ What is real today:
 - Durable workflow and cluster prerequisites now have explicit contracts for
   codecs, deterministic id generation, suspension/cancellation vocabulary,
   expanded backend capability labels, and causal extension domains.
+- Durable clustering now includes production shard leasing, production-shaped
+  HTTP/socket transports, and a real shared-storage control plane for
+  membership, placement, rebalancing, drain, node-down recovery,
+  split-brain evidence, and inspection.
 - Tests cover these paths.
 
 Current boundary decisions:
@@ -67,7 +71,7 @@ Current boundary decisions:
   add the small core prerequisites for durability, then build local durable
   workflow journals, workflow execution, durable timers/deferreds/queues,
   entity actors, sharding, multi-runner clustering, real async IO, production
-  leases, transports, and full supervision.
+  leases, transports, real clustering, and full supervision.
 
 ## Engine Integration Invariants
 

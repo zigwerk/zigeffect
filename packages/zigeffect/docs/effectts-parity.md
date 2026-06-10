@@ -174,11 +174,13 @@ identity, sharding, runners, message storage, and lease-protected ownership.
 - Production-shaped HTTP and socket-frame cluster transports with auth hooks,
   envelope limits, backpressure, retry evidence, lifecycle metrics, and
   trace/chunk propagation through durable message storage.
+- Real cluster control-plane APIs for runner admission and discovery,
+  deterministic shard placement, durable rebalancing, graceful drain,
+  node-down recovery, split-brain evidence, and operator inspection reports.
 
 This now covers the Effect-style workflow and cluster substrate inside a local
-durable runtime. Real cluster membership, remote runner discovery, and
-host-to-host operational packaging remain the focus of the final clustering and
-supervision milestones.
+durable runtime, including a real shared-storage cluster control plane. Full
+supervision trees remain the next Erlang-style runtime milestone.
 
 ### Schedule
 

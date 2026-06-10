@@ -381,6 +381,10 @@ Owns Erlang-style distributed runtime surfaces:
 - `local_cluster.zig`: local multi-runner composition for shared storage,
   balanced shard acquisition, durable message routing, runner ticks, and
   dead-runner shard recovery.
+- `real_cluster.zig`: real cluster control plane for runner admission,
+  membership discovery, deterministic shard placement, durable lease
+  rebalancing, graceful drain, node-down recovery, split-brain evidence, and
+  text/JSON inspection reports.
 - `transport.zig`: durable cluster transport boundary with a synchronous
   vtable, versioned request/response JSON, in-process transport, loopback HTTP
   transport, production HTTP transport, and production socket-frame transport.
@@ -416,9 +420,11 @@ histories exercise duplicate submits, claims, replies, acknowledgements, shard
 queries, id lookups, and reopen behavior across in-memory and file-backed
 message storage.
 
-The local entity runtime is single-process and in-memory. It gives cluster
-concepts a deterministic local execution model, but durable message storage,
-runner ownership, and transport are separate milestones.
+The local entity runtime remains single-process and in-memory, but the cluster
+boundary now has durable message storage, durable runner ownership, production
+transports, and a real control plane over shared stores. Runners call
+`syncOwnedShards` after a controller-driven rebalance, drain, or recovery before
+processing reassigned shards.
 
 ```text
 src/performance/
@@ -469,15 +475,19 @@ Owns local developer and agent CLI entrypoints:
   command.
 - `workflow_journal_inspect.zig`: `zig build workflow-journal-inspect` selected
   execution event inspection command.
+- `cluster_inspect.zig`: `zig build cluster-inspect` durable cluster storage,
+  membership, lease, lag, rebalance, and failure inspection command.
 - `storage_migrate.zig`: `zig build storage-migrate` storage schema catalog and
   SQL migration plan command.
 - `performance_bench.zig`: `zig build performance-bench` deterministic
   performance threshold report command.
 
 Workflow tools should stay thin and delegate durable state interpretation to
-`src/workflow/inspect.zig`. Storage tools should stay thin and delegate schema
-and migration planning to `src/storage/`. Performance tools should stay thin
-and delegate benchmark report construction to `src/performance/`.
+`src/workflow/inspect.zig`. Cluster tools should stay thin and delegate
+membership, lease, and metrics interpretation to `src/cluster/real_cluster.zig`.
+Storage tools should stay thin and delegate schema and migration planning to
+`src/storage/`. Performance tools should stay thin and delegate benchmark
+report construction to `src/performance/`.
 
 ```text
 src/testing/

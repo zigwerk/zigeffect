@@ -752,6 +752,88 @@ lifecycle metrics contract with deterministic `ZIGFX/1` socket frames.
 `chunkedClusterTransportRequest` can attach chunk metadata before sending a
 large payload while keeping the durable payload bytes intact.
 
+## Real Cluster Control Plane
+
+Use `RealClusterController` when shared durable runner/message storage should
+be the authority for runner membership, shard placement, and recovery:
+
+```zig
+var registry = fx.LocalRunnerRegistry.init(allocator);
+defer registry.deinit();
+
+var controller = try fx.RealClusterController.init(allocator, .{
+    .runner_storage = runner_storage,
+    .message_storage = message_storage,
+    .registry = &registry,
+    .options = .{
+        .shard_count = 32,
+        .lease_ttl_ms = 5_000,
+    },
+});
+
+const runner_a = fx.runnerAddress("machine-a", "runner-a");
+const runner_b = fx.runnerAddress("machine-b", "runner-b");
+_ = try controller.admitRunner(.{ .address = runner_a, .name = "runner-a", .started_at_ms = 1_000 });
+_ = try controller.admitRunner(.{ .address = runner_b, .name = "runner-b", .started_at_ms = 1_000 });
+_ = try controller.recordHeartbeat(.{ .address = runner_a, .sequence = 1, .observed_at_ms = 1_010 });
+_ = try controller.recordHeartbeat(.{ .address = runner_b, .sequence = 1, .observed_at_ms = 1_010 });
+
+var placement = try controller.placementPlan(allocator, 1_050);
+defer placement.deinit();
+var rebalance = try controller.rebalancePlan(allocator, placement);
+defer rebalance.deinit();
+_ = try controller.applyRebalancePlan(rebalance, 1_100);
+```
+
+After a controller-driven rebalance, drain, or recovery, each local runner
+should resync its in-memory ownership cache before ticking:
+
+```zig
+_ = try local_runner.syncOwnedShards();
+```
+
+Graceful drain and node-down recovery mutate durable lease storage, then the
+surviving runner can process queued messages from reassigned shards:
+
+```zig
+const drain = try controller.drainRunner(runner_a, 1_200);
+_ = drain;
+
+const recovery = try controller.recoverNodeDown(runner_a, runner_b, 2_000);
+_ = recovery;
+```
+
+Split-brain reports compare local runner lease snapshots with durable storage
+owner/epoch facts:
+
+```zig
+var owned = try local_runner.lease_manager.ownedLeases(allocator);
+defer owned.deinit();
+
+var split_brain = try controller.detectSplitBrain(allocator, &.{owned});
+defer split_brain.deinit();
+```
+
+Inspection reports combine membership, durable leases, mailbox lag,
+backpressure, recent rebalance actions, and failure counters:
+
+```zig
+var report = try controller.inspectCluster(allocator, 2_100);
+defer report.deinit();
+
+const json = try fx.formatClusterInspectionJson(allocator, report);
+defer allocator.free(json);
+```
+
+For file-backed stores, use the local CLI:
+
+```bash
+zig build cluster-inspect -- --storage-dir .zig-cache/local-cluster --shard-count 32 --format json --runner machine-a:runner-a:runner-a:1000:1010
+```
+
+`--runner` flags seed the in-memory inspection registry while durable leases and
+mailbox lag are read from the storage directory.
+
 ## Production Shard Lease Guards
 
 Cluster-owned durable writes should validate a storage-backed fence immediately

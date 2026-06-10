@@ -1024,20 +1024,20 @@ runtime with membership, placement, rebalancing, and rolling recovery.
 
 Deliverables:
 
-- [ ] Add cluster membership protocol.
-- [ ] Add runner discovery and admission.
-- [ ] Add shard placement strategy.
-- [ ] Add rebalancing planner.
-- [ ] Add rolling restart and graceful drain behavior.
-- [ ] Add node-down detection and recovery.
-- [ ] Add split-brain test scenarios.
-- [ ] Add cluster administration and inspection commands.
+- [x] Add cluster membership protocol.
+- [x] Add runner discovery and admission.
+- [x] Add shard placement strategy.
+- [x] Add rebalancing planner.
+- [x] Add rolling restart and graceful drain behavior.
+- [x] Add node-down detection and recovery.
+- [x] Add split-brain test scenarios.
+- [x] Add cluster administration and inspection commands.
 
 Acceptance:
 
-- [ ] A cluster can add a runner, rebalance shards, remove a runner, recover
+- [x] A cluster can add a runner, rebalance shards, remove a runner, recover
   from runner death, and keep workflows and entity mailboxes correct.
-- [ ] Cluster inspection reports show membership, placement, leases, lag,
+- [x] Cluster inspection reports show membership, placement, leases, lag,
   rebalancing actions, and recent failures.
 
 ## Milestone 51: Full Supervision Trees
