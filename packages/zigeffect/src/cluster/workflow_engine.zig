@@ -1,14 +1,26 @@
 const std = @import("std");
+const entity = @import("entity.zig");
+const envelope = @import("envelope.zig");
 const identity = @import("identity.zig");
 const local_cluster = @import("local_cluster.zig");
 const routing = @import("routing.zig");
+const transport = @import("transport.zig");
+const workflow_engine = @import("../workflow/engine.zig");
 const journal = @import("../workflow/journal.zig");
+const lifecycle = @import("../workflow/lifecycle.zig");
+const replay = @import("../workflow/replay.zig");
 const store = @import("../workflow/store.zig");
 
 pub const Allocator = std.mem.Allocator;
+pub const ClusterTransport = transport.ClusterTransport;
 pub const EntityAddress = identity.EntityAddress;
+pub const EntityEnvelope = entity.EntityEnvelope;
+pub const EntityHandlerResult = entity.EntityHandlerResult;
+pub const EntityScope = entity.EntityScope;
 pub const JournalStore = store.JournalStore;
 pub const LocalClusterRunner = local_cluster.LocalClusterRunner;
+pub const MessageCorrelationId = envelope.MessageCorrelationId;
+pub const MessageEnvelope = envelope.MessageEnvelope;
 pub const WorkflowId = journal.WorkflowId;
 pub const ExecutionId = journal.ExecutionId;
 pub const ActivityId = journal.ActivityId;
@@ -33,6 +45,7 @@ pub const ClusterWorkflowCommandError = error{
     UnsupportedClusterWorkflowCommand,
     WorkflowExecutionMismatch,
     MissingWorkflowEntityServices,
+    MissingWorkflowCommandReply,
 };
 
 pub const ClusterWorkflowCommandKind = enum {
@@ -94,12 +107,130 @@ pub const ClusterWorkflowCommandResult = struct {
     }
 };
 
-pub const ClusterWorkflowEngine = struct {};
+pub const ClusterWorkflowCommandSubmission = struct {
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    correlation_id: MessageCorrelationId,
+    response: transport.ClusterTransportResponse,
+
+    pub fn deinit(self: *ClusterWorkflowCommandSubmission, allocator: Allocator) void {
+        self.response.deinit(allocator);
+    }
+};
+
+pub const ClusterWorkflowEngine = struct {
+    allocator: Allocator,
+    transport: ClusterTransport,
+    next_command_sequence: u64 = 1,
+
+    pub fn init(allocator: Allocator, cluster_transport: ClusterTransport) ClusterWorkflowEngine {
+        return .{
+            .allocator = allocator,
+            .transport = cluster_transport,
+        };
+    }
+
+    pub fn deinit(self: *ClusterWorkflowEngine) void {
+        _ = self;
+    }
+
+    pub fn start(self: *ClusterWorkflowEngine, workflow_name: []const u8, idempotency_key: []const u8) !ClusterWorkflowCommandSubmission {
+        const workflow_id = workflow_engine.workflowId(workflow_name);
+        const execution_id = workflow_engine.executionId(workflow_name, idempotency_key);
+        return self.submit(.{
+            .kind = .start,
+            .workflow_id = workflow_id,
+            .execution_id = execution_id,
+            .workflow_name = workflow_name,
+            .name = workflow_name,
+            .status = "running",
+            .idempotency_key = idempotency_key,
+        });
+    }
+
+    pub fn appendEvent(self: *ClusterWorkflowEngine, command: ClusterWorkflowCommand) !ClusterWorkflowCommandSubmission {
+        return self.submit(command);
+    }
+
+    pub fn complete(self: *ClusterWorkflowEngine, workflow_id: WorkflowId, execution_id: ExecutionId, detail: []const u8) !ClusterWorkflowCommandSubmission {
+        return self.submitWithGeneratedKey(.complete, workflow_id, execution_id, "completed", detail);
+    }
+
+    pub fn suspendWorkflow(self: *ClusterWorkflowEngine, workflow_id: WorkflowId, execution_id: ExecutionId, reason: []const u8) !ClusterWorkflowCommandSubmission {
+        return self.submitWithGeneratedKey(.@"suspend", workflow_id, execution_id, "waiting", reason);
+    }
+
+    pub fn resumeWorkflow(self: *ClusterWorkflowEngine, workflow_id: WorkflowId, execution_id: ExecutionId, reason: []const u8) !ClusterWorkflowCommandSubmission {
+        return self.submitWithGeneratedKey(.@"resume", workflow_id, execution_id, "running", reason);
+    }
+
+    pub fn interrupt(self: *ClusterWorkflowEngine, workflow_id: WorkflowId, execution_id: ExecutionId, reason: []const u8) !ClusterWorkflowCommandSubmission {
+        return self.submitWithGeneratedKey(.interrupt, workflow_id, execution_id, "interrupted", reason);
+    }
+
+    pub fn cancel(self: *ClusterWorkflowEngine, workflow_id: WorkflowId, execution_id: ExecutionId, reason: []const u8) !ClusterWorkflowCommandSubmission {
+        return self.submitWithGeneratedKey(.cancel, workflow_id, execution_id, "cancelled", reason);
+    }
+
+    fn submitWithGeneratedKey(
+        self: *ClusterWorkflowEngine,
+        kind: ClusterWorkflowCommandKind,
+        workflow_id: WorkflowId,
+        execution_id: ExecutionId,
+        status: []const u8,
+        detail: []const u8,
+    ) !ClusterWorkflowCommandSubmission {
+        const key = try std.fmt.allocPrint(
+            self.allocator,
+            "cluster-workflow:{s}:{d}:{d}",
+            .{ @tagName(kind), execution_id, self.next_command_sequence },
+        );
+        defer self.allocator.free(key);
+        self.next_command_sequence += 1;
+        return self.submit(.{
+            .kind = kind,
+            .workflow_id = workflow_id,
+            .execution_id = execution_id,
+            .status = status,
+            .redacted_detail = detail,
+            .idempotency_key = key,
+        });
+    }
+
+    fn submit(self: *ClusterWorkflowEngine, command: ClusterWorkflowCommand) !ClusterWorkflowCommandSubmission {
+        const payload = try formatClusterWorkflowCommandJson(self.allocator, command);
+        defer self.allocator.free(payload);
+
+        var response = try self.transport.send(self.allocator, .{
+            .kind = .request,
+            .address = clusterWorkflowExecutionAddress(command.execution_id),
+            .payload_type_name = cluster_workflow_command_payload_type,
+            .payload = payload,
+            .redacted_detail = @tagName(command.kind),
+            .idempotency_key = command.idempotency_key,
+        });
+        errdefer response.deinit(self.allocator);
+
+        const correlation_id = response.correlation_id orelse return error.MissingWorkflowCommandReply;
+        return .{
+            .workflow_id = command.workflow_id,
+            .execution_id = command.execution_id,
+            .correlation_id = correlation_id,
+            .response = response,
+        };
+    }
+};
 
 pub const ClusterWorkflowEntityServices = struct {
+    allocator: Allocator,
     journal_store: JournalStore,
     workflow_id: WorkflowId,
     execution_id: ExecutionId,
+    last_reply_json: []const u8 = "",
+
+    pub fn deinit(self: *ClusterWorkflowEntityServices) void {
+        if (self.last_reply_json.len > 0) self.allocator.free(self.last_reply_json);
+    }
 };
 
 pub const ClusterWorkflowEntityRegistrationResult = struct {
@@ -128,6 +259,7 @@ pub const ClusterWorkflowEntityRegistry = struct {
 
     pub fn deinit(self: *ClusterWorkflowEntityRegistry) void {
         for (self.services.items) |services| {
+            services.deinit();
             self.allocator.destroy(services);
         }
         self.services.deinit(self.allocator);
@@ -156,6 +288,7 @@ pub const ClusterWorkflowEntityRegistry = struct {
         const services = try self.allocator.create(ClusterWorkflowEntityServices);
         errdefer self.allocator.destroy(services);
         services.* = .{
+            .allocator = self.allocator,
             .journal_store = journal_store,
             .workflow_id = workflow_id,
             .execution_id = execution_id,
@@ -213,7 +346,26 @@ pub const ClusterWorkflowEntityRegistry = struct {
         return report;
     }
 };
-pub const ClusterWorkflowEntityHandler = struct {};
+pub const ClusterWorkflowEntityHandler = struct {
+    pub fn handle(scope: *EntityScope, entity_envelope: EntityEnvelope) !EntityHandlerResult {
+        const raw = (try scope.service(cluster_workflow_entity_service_key)) orelse return error.MissingWorkflowEntityServices;
+        const services: *ClusterWorkflowEntityServices = @ptrCast(@alignCast(raw));
+        var command = try parseClusterWorkflowCommandJson(scope.allocator, entity_envelope.payload);
+        defer command.deinit(scope.allocator);
+
+        if (command.execution_id != entity_envelope.address.id) return error.WorkflowExecutionMismatch;
+
+        var result = try applyClusterWorkflowCommand(scope.allocator, services.journal_store, command);
+        defer result.deinit(scope.allocator);
+
+        if (services.last_reply_json.len > 0) {
+            services.allocator.free(services.last_reply_json);
+            services.last_reply_json = "";
+        }
+        services.last_reply_json = try formatClusterWorkflowCommandResultJson(services.allocator, result);
+        return .{ .reply = services.last_reply_json };
+    }
+};
 
 fn findRecoveredExecution(executions: []const RecoveredWorkflowExecution, execution_id: ExecutionId) ?usize {
     for (executions, 0..) |execution, index| {
@@ -382,6 +534,132 @@ pub fn parseClusterWorkflowCommandResultJson(allocator: Allocator, content: []co
         .status = try dupeOrEmpty(allocator, parsed.value.status),
         .timers_fired = parsed.value.timers_fired,
     };
+}
+
+pub fn parseClusterWorkflowCommandResultFromReply(allocator: Allocator, reply: MessageEnvelope) !ClusterWorkflowCommandResult {
+    return parseClusterWorkflowCommandResultJson(allocator, reply.payload);
+}
+
+fn applyClusterWorkflowCommand(
+    allocator: Allocator,
+    journal_store: JournalStore,
+    command: ClusterWorkflowCommand,
+) !ClusterWorkflowCommandResult {
+    return switch (command.kind) {
+        .start => appendWorkflowCommandEvent(allocator, journal_store, command, .workflow_started, "running"),
+        .append_event => appendWorkflowCommandEvent(
+            allocator,
+            journal_store,
+            command,
+            command.event_kind orelse return error.CorruptClusterWorkflowCommand,
+            command.status,
+        ),
+        .complete => appendWorkflowCommandEvent(allocator, journal_store, command, .workflow_completed, "completed"),
+        .@"suspend" => applyLifecycleCommand(allocator, journal_store, command, .workflow_suspended, "waiting"),
+        .@"resume" => applyLifecycleCommand(allocator, journal_store, command, .workflow_resumed, "running"),
+        .interrupt => applyLifecycleCommand(allocator, journal_store, command, .workflow_interrupted, "interrupted"),
+        .cancel => applyLifecycleCommand(allocator, journal_store, command, .workflow_cancelled, "cancelled"),
+        else => return error.UnsupportedClusterWorkflowCommand,
+    };
+}
+
+fn appendWorkflowCommandEvent(
+    allocator: Allocator,
+    journal_store: JournalStore,
+    command: ClusterWorkflowCommand,
+    event_kind: WorkflowEventKind,
+    default_status: []const u8,
+) !ClusterWorkflowCommandResult {
+    const sequence = command.expected_next_sequence orelse try nextJournalSequence(allocator, journal_store);
+    const status = if (command.status.len == 0) default_status else command.status;
+    const event_name = if (command.name.len != 0) command.name else command.workflow_name;
+
+    _ = journal_store.append(.{
+        .expected_next_sequence = sequence,
+        .event = .{
+            .sequence = sequence,
+            .kind = event_kind,
+            .workflow_id = command.workflow_id,
+            .execution_id = command.execution_id,
+            .activity_id = command.activity_id,
+            .timer_id = command.timer_id,
+            .deferred_id = command.deferred_id,
+            .queue_id = command.queue_id,
+            .compensation_id = command.compensation_id,
+            .name = event_name,
+            .status = status,
+            .redacted_detail = command.redacted_detail,
+            .idempotency_key = command.idempotency_key,
+        },
+    }) catch |err| switch (err) {
+        error.DuplicateEvent => return commandResultFromJournal(allocator, journal_store, command, false, null, status, 0),
+        else => return err,
+    };
+
+    return commandResultFromJournal(allocator, journal_store, command, true, sequence, status, 0);
+}
+
+fn applyLifecycleCommand(
+    allocator: Allocator,
+    journal_store: JournalStore,
+    command: ClusterWorkflowCommand,
+    event_kind: WorkflowEventKind,
+    status: []const u8,
+) !ClusterWorkflowCommandResult {
+    var workflow_lifecycle = lifecycle.WorkflowLifecycle.init(allocator, journal_store, command.workflow_id, command.execution_id);
+    const appended = switch (event_kind) {
+        .workflow_suspended => try workflow_lifecycle.suspendWorkflow(command.redacted_detail),
+        .workflow_resumed => try workflow_lifecycle.resumeWorkflow(command.redacted_detail),
+        .workflow_interrupted => try workflow_lifecycle.interrupt(command.redacted_detail),
+        .workflow_cancelled => try workflow_lifecycle.cancel(command.redacted_detail),
+        else => unreachable,
+    };
+    const sequence = if (appended) try latestJournalSequence(allocator, journal_store) else null;
+    return commandResultFromJournal(allocator, journal_store, command, appended, sequence, status, 0);
+}
+
+fn commandResultFromJournal(
+    allocator: Allocator,
+    journal_store: JournalStore,
+    command: ClusterWorkflowCommand,
+    appended: bool,
+    sequence: ?JournalSequence,
+    fallback_status: []const u8,
+    timers_fired: usize,
+) !ClusterWorkflowCommandResult {
+    var state = journal_store.latestState(allocator) catch |err| switch (err) {
+        error.EmptyWorkflowJournal => replay.WorkflowReplayState.init(allocator),
+        else => return err,
+    };
+    defer state.deinit();
+
+    const status = if (state.workflow_id == command.workflow_id and state.execution_id == command.execution_id)
+        @tagName(state.workflow_status)
+    else
+        fallback_status;
+    return .{
+        .kind = command.kind,
+        .workflow_id = command.workflow_id,
+        .execution_id = command.execution_id,
+        .appended = appended,
+        .sequence = sequence,
+        .last_sequence = state.last_sequence,
+        .status = try dupeOrEmpty(allocator, status),
+        .timers_fired = timers_fired,
+    };
+}
+
+fn nextJournalSequence(allocator: Allocator, journal_store: JournalStore) !JournalSequence {
+    const latest = try latestJournalSequence(allocator, journal_store);
+    if (latest == std.math.maxInt(JournalSequence)) return error.SequenceOverflow;
+    return latest + 1;
+}
+
+fn latestJournalSequence(allocator: Allocator, journal_store: JournalStore) !JournalSequence {
+    var events = try journal_store.readAll(allocator);
+    defer events.deinit();
+    if (events.events.len == 0) return 0;
+    return events.events[events.events.len - 1].sequence;
 }
 
 fn dupeOrEmpty(allocator: Allocator, value: []const u8) Allocator.Error![]const u8 {

@@ -198,6 +198,96 @@ test "cluster workflow registry recovers owned executions from journal" {
     try std.testing.expectError(error.EntityNotFound, runner.entityScope(fx.clusterWorkflowExecutionAddress(foreign_execution)));
 }
 
+test "cluster workflow engine start stores workflow started through owning entity" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    var runner = try workflowRunner(runner_storage_state.asRunnerStorage(), message_storage);
+    defer runner.deinit();
+    var plan = try runner.acquireBalancedShards(1_000);
+    defer plan.deinit();
+
+    var transport_state = try fx.InProcessClusterTransport.init(std.testing.allocator, message_storage, .{ .shard_count = 8 });
+    defer transport_state.deinit();
+    var engine = fx.ClusterWorkflowEngine.init(std.testing.allocator, transport_state.asClusterTransport());
+    defer engine.deinit();
+
+    const workflow_id = fx.workflow.workflowId("approval");
+    const execution_id = fx.workflow.executionId("approval", "case-start");
+    var registry = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+    _ = try registry.registerExecution(&runner, journal_store, workflow_id, execution_id, 1_000);
+
+    var submission = try engine.start("approval", "case-start");
+    defer submission.deinit(std.testing.allocator);
+    try std.testing.expectEqual(workflow_id, submission.workflow_id);
+    try std.testing.expectEqual(execution_id, submission.execution_id);
+
+    var result = try processWorkflowSubmission(&runner, message_storage, submission, 1_100);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.appended);
+    try std.testing.expectEqual(@as(?fx.workflow.JournalSequence, 1), result.sequence);
+    try std.testing.expectEqualStrings("running", result.status);
+
+    var events = try journal_store.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 1), events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_started, events.events[0].kind);
+    try std.testing.expectEqual(workflow_id, events.events[0].workflow_id);
+    try std.testing.expectEqual(execution_id, events.events[0].execution_id);
+}
+
+test "cluster workflow complete appends completed through owning entity" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    const workflow_id = fx.workflow.workflowId("approval");
+    const execution_id = fx.workflow.executionId("approval", "case-complete");
+    try seedStarted(journal_store, workflow_id, execution_id, "approval", "case-complete");
+
+    var runner = try workflowRunner(runner_storage_state.asRunnerStorage(), message_storage);
+    defer runner.deinit();
+    var plan = try runner.acquireBalancedShards(1_000);
+    defer plan.deinit();
+    var registry = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+    _ = try registry.registerExecution(&runner, journal_store, workflow_id, execution_id, 1_000);
+
+    var transport_state = try fx.InProcessClusterTransport.init(std.testing.allocator, message_storage, .{ .shard_count = 8 });
+    defer transport_state.deinit();
+    var engine = fx.ClusterWorkflowEngine.init(std.testing.allocator, transport_state.asClusterTransport());
+    defer engine.deinit();
+
+    var submission = try engine.complete(workflow_id, execution_id, "value=approved");
+    defer submission.deinit(std.testing.allocator);
+    var result = try processWorkflowSubmission(&runner, message_storage, submission, 1_100);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.appended);
+    try std.testing.expectEqualStrings("completed", result.status);
+
+    var state = try journal_store.latestState(std.testing.allocator);
+    defer state.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowStatus.completed, state.workflow_status);
+}
+
+test "cluster workflow lifecycle commands suspend resume interrupt and cancel" {
+    try expectSuspendResumeLifecycle();
+    try expectTerminalLifecycle(.interrupt);
+    try expectTerminalLifecycle(.cancel);
+}
+
 fn executionIdForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.workflow.ExecutionId {
     var id: fx.workflow.ExecutionId = 1;
     while (id < 100_000) : (id += 1) {
@@ -205,4 +295,147 @@ fn executionIdForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.wor
         if (try fx.shardIdForAddress(address, shard_count) == shard_id) return id;
     }
     return error.ExecutionShardNotFound;
+}
+
+fn workflowRunner(runner_storage: fx.RunnerStorage, message_storage: fx.MessageStorage) !fx.LocalClusterRunner {
+    return fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = fx.runnerAddress("machine-workflow", "runner-command"),
+        .runner_storage = runner_storage,
+        .message_storage = message_storage,
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 1,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    });
+}
+
+fn seedStarted(
+    journal_store: fx.workflow.JournalStore,
+    workflow_id: fx.workflow.WorkflowId,
+    execution_id: fx.workflow.ExecutionId,
+    workflow_name: []const u8,
+    idempotency_key: []const u8,
+) !void {
+    _ = try journal_store.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = workflow_id,
+        .execution_id = execution_id,
+        .name = workflow_name,
+        .status = "running",
+        .idempotency_key = idempotency_key,
+    } });
+}
+
+fn processWorkflowSubmission(
+    runner: *fx.LocalClusterRunner,
+    message_storage: fx.MessageStorage,
+    submission: fx.ClusterWorkflowCommandSubmission,
+    now_ms: u64,
+) !fx.ClusterWorkflowCommandResult {
+    const report = try runner.tick(fx.ClusterWorkflowEntityHandler, now_ms);
+    try std.testing.expectEqual(@as(usize, 1), report.dispatched);
+    try std.testing.expectEqual(@as(usize, 1), report.replied);
+    try std.testing.expectEqual(@as(usize, 1), report.acked);
+
+    const reply = (try message_storage.reply(submission.correlation_id, std.testing.allocator)).?;
+    defer fx.deinitMessageEnvelope(std.testing.allocator, reply);
+    return fx.parseClusterWorkflowCommandResultFromReply(std.testing.allocator, reply);
+}
+
+fn expectSuspendResumeLifecycle() !void {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    const workflow_id = fx.workflow.workflowId("approval");
+    const execution_id = fx.workflow.executionId("approval", "case-suspend-resume");
+    try seedStarted(journal_store, workflow_id, execution_id, "approval", "case-suspend-resume");
+
+    var runner = try workflowRunner(runner_storage_state.asRunnerStorage(), message_storage);
+    defer runner.deinit();
+    var plan = try runner.acquireBalancedShards(1_000);
+    defer plan.deinit();
+    var registry = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+    _ = try registry.registerExecution(&runner, journal_store, workflow_id, execution_id, 1_000);
+
+    var transport_state = try fx.InProcessClusterTransport.init(std.testing.allocator, message_storage, .{ .shard_count = 8 });
+    defer transport_state.deinit();
+    var engine = fx.ClusterWorkflowEngine.init(std.testing.allocator, transport_state.asClusterTransport());
+    defer engine.deinit();
+
+    var suspend_submission = try engine.suspendWorkflow(workflow_id, execution_id, "waiting-for-review");
+    defer suspend_submission.deinit(std.testing.allocator);
+    var suspended = try processWorkflowSubmission(&runner, message_storage, suspend_submission, 1_100);
+    defer suspended.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("suspended", suspended.status);
+
+    var resume_submission = try engine.resumeWorkflow(workflow_id, execution_id, "review-ready");
+    defer resume_submission.deinit(std.testing.allocator);
+    var resumed = try processWorkflowSubmission(&runner, message_storage, resume_submission, 1_200);
+    defer resumed.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("running", resumed.status);
+
+    var events = try journal_store.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_suspended, events.events[1].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[2].kind);
+}
+
+fn expectTerminalLifecycle(kind: fx.ClusterWorkflowCommandKind) !void {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    const suffix = if (kind == .interrupt) "interrupt" else "cancel";
+    const workflow_id = fx.workflow.workflowId("approval");
+    const execution_id = fx.workflow.executionId("approval", suffix);
+    try seedStarted(journal_store, workflow_id, execution_id, "approval", suffix);
+
+    var runner = try workflowRunner(runner_storage_state.asRunnerStorage(), message_storage);
+    defer runner.deinit();
+    var plan = try runner.acquireBalancedShards(1_000);
+    defer plan.deinit();
+    var registry = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+    _ = try registry.registerExecution(&runner, journal_store, workflow_id, execution_id, 1_000);
+
+    var transport_state = try fx.InProcessClusterTransport.init(std.testing.allocator, message_storage, .{ .shard_count = 8 });
+    defer transport_state.deinit();
+    var engine = fx.ClusterWorkflowEngine.init(std.testing.allocator, transport_state.asClusterTransport());
+    defer engine.deinit();
+
+    var submission = switch (kind) {
+        .interrupt => try engine.interrupt(workflow_id, execution_id, "operator"),
+        .cancel => try engine.cancel(workflow_id, execution_id, "operator"),
+        else => unreachable,
+    };
+    defer submission.deinit(std.testing.allocator);
+    var result = try processWorkflowSubmission(&runner, message_storage, submission, 1_100);
+    defer result.deinit(std.testing.allocator);
+
+    var state = try journal_store.latestState(std.testing.allocator);
+    defer state.deinit();
+    switch (kind) {
+        .interrupt => {
+            try std.testing.expectEqualStrings("interrupted", result.status);
+            try std.testing.expectEqual(fx.workflow.WorkflowStatus.interrupted, state.workflow_status);
+        },
+        .cancel => {
+            try std.testing.expectEqualStrings("cancelled", result.status);
+            try std.testing.expectEqual(fx.workflow.WorkflowStatus.cancelled, state.workflow_status);
+        },
+        else => unreachable,
+    }
 }
