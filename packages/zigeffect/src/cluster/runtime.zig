@@ -7,6 +7,7 @@ const message_storage = @import("message_storage.zig");
 const routing = @import("routing.zig");
 const shard_lease = @import("shard_lease.zig");
 const fencing = @import("fencing.zig");
+const lease_guard = @import("lease_guard.zig");
 const supervision = @import("supervision.zig");
 const observability = @import("observability.zig");
 
@@ -248,11 +249,20 @@ pub const ClusterRuntime = struct {
 
         for (batch.records) |record| {
             report.scanned += 1;
-            const claimed = try self.message_storage.claim(.{
+            const claimed = lease_guard.guardMessageClaim(self.message_storage, .{
+                .guard = try self.messageWriteGuard(shard_id, .message_claim),
+                .request = .{
                 .shard_id = shard_id,
                 .message_id = record.envelope.id,
                 .now_ms = now_ms,
-            });
+                },
+            }) catch |err| switch (err) {
+                error.StaleShardFence => {
+                    self.handleStaleShardFence(shard_id);
+                    return err;
+                },
+                else => return err,
+            };
             defer envelope.deinitMessageEnvelope(self.allocator, claimed);
             report.claimed += 1;
             try self.recordMessageCausal(.cluster_message_claimed, shard_id, claimed, "claimed", record.envelope.redacted_detail);
@@ -275,20 +285,38 @@ pub const ClusterRuntime = struct {
                 defer envelope.deinitMessageEnvelope(self.allocator, durable_reply);
                 durable_reply.trace_id = claimed.trace_id;
                 durable_reply.span_id = claimed.span_id;
-                const stored_reply = try self.message_storage.storeReply(.{
+                const stored_reply = lease_guard.guardMessageReply(self.message_storage, .{
+                    .guard = try self.messageWriteGuard(shard_id, .message_reply),
+                    .request = .{
                     .shard_id = shard_id,
                     .envelope = durable_reply,
                     .now_ms = now_ms,
-                });
+                    },
+                }) catch |err| switch (err) {
+                    error.StaleShardFence => {
+                        self.handleStaleShardFence(shard_id);
+                        return err;
+                    },
+                    else => return err,
+                };
                 defer envelope.deinitMessageEnvelope(self.allocator, stored_reply);
                 report.replied += 1;
                 try self.recordMessageCausal(.cluster_message_replied, shard_id, claimed, "replied", stored_reply.redacted_detail);
             }
 
-            try self.message_storage.ack(.{
-                .message_id = claimed.id,
-                .now_ms = now_ms,
-            });
+            lease_guard.guardMessageAck(self.message_storage, .{
+                .guard = try self.messageWriteGuard(shard_id, .message_ack),
+                .request = .{
+                    .message_id = claimed.id,
+                    .now_ms = now_ms,
+                },
+            }) catch |err| switch (err) {
+                error.StaleShardFence => {
+                    self.handleStaleShardFence(shard_id);
+                    return err;
+                },
+                else => return err,
+            };
             report.acked += 1;
             try self.recordMessageCausal(.cluster_message_acked, shard_id, claimed, "acked", claimed.redacted_detail);
         }
@@ -313,11 +341,20 @@ pub const ClusterRuntime = struct {
 
         for (batch.records) |record| {
             report.scanned += 1;
-            const claimed = try self.message_storage.claim(.{
+            const claimed = lease_guard.guardMessageClaim(self.message_storage, .{
+                .guard = try self.messageWriteGuard(shard_id, .message_claim),
+                .request = .{
                 .shard_id = shard_id,
                 .message_id = record.envelope.id,
                 .now_ms = now_ms,
-            });
+                },
+            }) catch |err| switch (err) {
+                error.StaleShardFence => {
+                    self.handleStaleShardFence(shard_id);
+                    return err;
+                },
+                else => return err,
+            };
             defer envelope.deinitMessageEnvelope(self.allocator, claimed);
             report.claimed += 1;
             try self.recordMessageCausal(.cluster_message_claimed, shard_id, claimed, "claimed", record.envelope.redacted_detail);
@@ -364,20 +401,38 @@ pub const ClusterRuntime = struct {
                 defer envelope.deinitMessageEnvelope(self.allocator, durable_reply);
                 durable_reply.trace_id = claimed.trace_id;
                 durable_reply.span_id = claimed.span_id;
-                const stored_reply = try self.message_storage.storeReply(.{
+                const stored_reply = lease_guard.guardMessageReply(self.message_storage, .{
+                    .guard = try self.messageWriteGuard(shard_id, .message_reply),
+                    .request = .{
                     .shard_id = shard_id,
                     .envelope = durable_reply,
                     .now_ms = now_ms,
-                });
+                    },
+                }) catch |err| switch (err) {
+                    error.StaleShardFence => {
+                        self.handleStaleShardFence(shard_id);
+                        return err;
+                    },
+                    else => return err,
+                };
                 defer envelope.deinitMessageEnvelope(self.allocator, stored_reply);
                 report.replied += 1;
                 try self.recordMessageCausal(.cluster_message_replied, shard_id, claimed, "replied", stored_reply.redacted_detail);
             }
 
-            try self.message_storage.ack(.{
-                .message_id = claimed.id,
-                .now_ms = now_ms,
-            });
+            lease_guard.guardMessageAck(self.message_storage, .{
+                .guard = try self.messageWriteGuard(shard_id, .message_ack),
+                .request = .{
+                    .message_id = claimed.id,
+                    .now_ms = now_ms,
+                },
+            }) catch |err| switch (err) {
+                error.StaleShardFence => {
+                    self.handleStaleShardFence(shard_id);
+                    return err;
+                },
+                else => return err,
+            };
             report.acked += 1;
             try self.recordMessageCausal(.cluster_message_acked, shard_id, claimed, "acked", claimed.redacted_detail);
         }
@@ -446,7 +501,9 @@ pub const ClusterRuntime = struct {
         const idempotency_key = std.fmt.bufPrint(&idempotency_buf, "cluster:{d}", .{self.next_message_sequence}) catch unreachable;
         self.next_message_sequence += 1;
 
-        var submitted = try self.message_storage.submit(.{
+        var submitted = lease_guard.guardMessageSubmit(self.message_storage, .{
+            .guard = try self.messageWriteGuard(shard_id, .message_submit),
+            .request = .{
             .shard_id = shard_id,
             .envelope = .{
                 .kind = kind,
@@ -458,7 +515,14 @@ pub const ClusterRuntime = struct {
                 .payload = payload,
                 .redacted_detail = redacted_detail,
             },
-        });
+            },
+        }) catch |err| switch (err) {
+            error.StaleShardFence => {
+                self.handleStaleShardFence(shard_id);
+                return err;
+            },
+            else => return err,
+        };
         errdefer submitted.deinit(self.allocator);
 
         try self.recordMessageCausal(
@@ -477,6 +541,16 @@ pub const ClusterRuntime = struct {
     fn validateShardFence(self: *ClusterRuntime, shard_id: ShardId) !void {
         const fence = try self.lease_manager.fenceForShard(shard_id);
         try fencing.validateShardFence(self.lease_manager.storage, fence);
+    }
+
+    fn messageWriteGuard(self: *ClusterRuntime, shard_id: ShardId, kind: lease_guard.ShardLeaseWriteKind) !lease_guard.ShardLeaseWriteGuard {
+        const fence = try self.lease_manager.fenceForShard(shard_id);
+        return lease_guard.ShardLeaseWriteGuard.init(self.lease_manager.storage, fence, kind);
+    }
+
+    fn handleStaleShardFence(self: *ClusterRuntime, shard_id: ShardId) void {
+        self.removeOwnedShard(shard_id);
+        self.accepting_messages = false;
     }
 
     fn recordOwnedShard(self: *ClusterRuntime, shard_id: ShardId) Allocator.Error!void {
@@ -548,6 +622,7 @@ fn messageToEntityEnvelope(allocator: Allocator, message: MessageEnvelope) !Enti
         .kind = kind,
         .address = message.address,
         .correlation_id = message.correlation_id,
+        .lease_epoch = message.lease_epoch,
         .payload_type_name = message.payload_type_name,
         .payload = message.payload,
         .redacted_detail = message.redacted_detail,
