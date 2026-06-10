@@ -942,6 +942,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_human_agent_feedback_loop_tool_tests = b.addRunArtifact(causal_human_agent_feedback_loop_tool_tests);
     test_step.dependOn(&run_causal_human_agent_feedback_loop_tool_tests.step);
 
+    const causal_rollout_automation_guardrails_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_rollout_automation_guardrails.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_rollout_automation_guardrails_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-rollout-automation-guardrails",
+        .root_module = causal_rollout_automation_guardrails_tool_module,
+    });
+    const run_causal_rollout_automation_guardrails_tool = b.addRunArtifact(causal_rollout_automation_guardrails_tool);
+    if (b.args) |args| run_causal_rollout_automation_guardrails_tool.addArgs(args);
+    const causal_rollout_automation_guardrails_step = b.step("causal-rollout-automation-guardrails", "Print causal rollout automation guardrails report");
+    causal_rollout_automation_guardrails_step.dependOn(&run_causal_rollout_automation_guardrails_tool.step);
+
+    const causal_rollout_automation_guardrails_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-rollout-automation-guardrails-tests",
+        .root_module = causal_rollout_automation_guardrails_tool_module,
+    });
+    const run_causal_rollout_automation_guardrails_tool_tests = b.addRunArtifact(causal_rollout_automation_guardrails_tool_tests);
+    test_step.dependOn(&run_causal_rollout_automation_guardrails_tool_tests.step);
+
     const causal_workbench_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_workbench.zig"),
         .target = target,
@@ -1457,4 +1479,6 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_loop_tool_tests.step);
     examples_step.dependOn(&causal_human_agent_feedback_loop_tool.step);
     examples_step.dependOn(&run_causal_human_agent_feedback_loop_tool_tests.step);
+    examples_step.dependOn(&causal_rollout_automation_guardrails_tool.step);
+    examples_step.dependOn(&run_causal_rollout_automation_guardrails_tool_tests.step);
 }

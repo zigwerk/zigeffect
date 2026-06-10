@@ -636,9 +636,9 @@ metrics, and traces.
   `zigeffect.causal.production-hardening-backlog.v1` with the ordered
   production-hardening branch queue, NenDB-only durable direction, SolidJS plus
   `webui-dev/zig-webui` workbench direction, the delivered graph visual
-  debugging and human-agent feedback-loop milestones, non-goals, verification
-  commands, and the current next branch
-  `codex/zigeffect-causal-rollout-automation-guardrails`.
+  debugging, human-agent feedback-loop, and rollout automation guardrails
+  milestones, non-goals, verification commands, and the current next branch
+  `codex/zigeffect-causal-wall-clock-benchmark-baselines`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
@@ -689,6 +689,12 @@ metrics, and traces.
   and future NenDB durable-history handoff. It keeps `applied=false`,
   `mutation_authority=none`, `workbench_mutation=false`, and
   `agent_mutation=false`.
+- Delivered: `causal-rollout-automation-guardrails` publishes
+  `zigeffect.causal.rollout-automation-guardrails.v1` with canary evidence
+  records, progression gates, circuit-breaker decisions, rollback readiness
+  gates, and negative automation fixtures. It keeps rollout progression,
+  traffic shifts, feature flags, alert delivery, ticket creation, paging,
+  deploys, and rollbacks outside zigeffect authority.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,

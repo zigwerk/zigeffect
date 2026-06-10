@@ -212,6 +212,26 @@ fixtures, and authority boundaries. It does not send notifications, create
 tickets, forward SIEM events, page humans, read secrets, call networks, or
 mutate external systems.
 
+- `zigeffect.causal.rollout-automation-guardrails.v1`
+
+The rollout-automation-guardrails report is a record-only production hardening
+contract. It consumes deployment runbooks, alerting integrations, and the
+human-agent feedback loop, then defines canary evidence, rollout progression
+gates, circuit-breaker decisions, rollback readiness gates, and negative
+automation fixtures. It does not deploy services, roll back services, shift
+traffic, mutate feature flags, send alerts, create tickets, page humans, or
+grant mutation authority.
+
+### Human-Agent Feedback
+
+- `zigeffect.causal.human-agent-feedback-loop.v1`
+
+The human-agent-feedback-loop report is a record-only bridge between the
+SolidJS `zig-webui` workbench and bounded agent query reports. It records the
+failure-to-query, before/after comparison, regression clustering, guarded
+handoff, and future NenDB history-handoff stages. It does not execute queries,
+apply remediation, write durable history, or grant mutation authority.
+
 ### Agent Query
 
 - `zigeffect.causal.agent-query.v1`

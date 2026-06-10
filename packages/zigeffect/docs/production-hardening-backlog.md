@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-rollout-automation-guardrails` means the
+The recommendation `start-wall-clock-benchmark-baselines` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -40,8 +40,11 @@ The human-agent feedback loop is also delivered: it connects workbench
 selection, bounded agent queries, before/after comparison, local regression
 clustering records, guarded remediation handoff, and future NenDB history
 handoff while preserving `mutation_authority=none`.
+Rollout automation guardrails are also delivered: they define canary evidence,
+rollout progression gates, circuit-breaker decisions, rollback readiness gates,
+and negative automation fixtures without granting rollout authority.
 The next branch should be
-`codex/zigeffect-causal-rollout-automation-guardrails`.
+`codex/zigeffect-causal-wall-clock-benchmark-baselines`.
 
 ## Dependency Order
 
@@ -60,7 +63,7 @@ The backlog currently orders future production-hardening branches as:
 11. `live-dashboard-streaming-workbench` delivered
 12. `workbench-graph-visual-debugging` delivered
 13. `human-agent-feedback-loop` delivered
-14. `rollout-automation-guardrails`
+14. `rollout-automation-guardrails` delivered
 15. `wall-clock-benchmark-baselines`
 16. `production-capacity-planning`
 
@@ -153,10 +156,16 @@ The human-agent feedback loop is documented in
 `zig build causal-human-agent-feedback-loop` and keeps the feedback loop
 record-only.
 
+Rollout automation guardrails are documented in
+[rollout-automation-guardrails.md](rollout-automation-guardrails.md). They emit
+`zigeffect.causal.rollout-automation-guardrails.v1` through
+`zig build causal-rollout-automation-guardrails` and keep canary progression,
+circuit breakers, and rollback readiness record-only.
+
 The next branch is
-`codex/zigeffect-causal-rollout-automation-guardrails`. It should define canary,
-gradual rollout, circuit-breaker, and rollback evidence records without
-granting automated mutation authority.
+`codex/zigeffect-causal-wall-clock-benchmark-baselines`. It should add local
+and CI wall-clock benchmark baselines to complement deterministic performance
+budget constants.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -187,6 +196,8 @@ zig build causal-live-dashboard-streaming-workbench
 zig build causal-live-dashboard-streaming-workbench -- --format json
 zig build causal-human-agent-feedback-loop
 zig build causal-human-agent-feedback-loop -- --format json
+zig build causal-rollout-automation-guardrails
+zig build causal-rollout-automation-guardrails -- --format json
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

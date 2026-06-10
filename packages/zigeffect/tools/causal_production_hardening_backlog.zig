@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-rollout-automation-guardrails";
-pub const recommended_next_branch = "codex/zigeffect-causal-rollout-automation-guardrails";
+pub const recommendation = "start-wall-clock-benchmark-baselines";
+pub const recommended_next_branch = "codex/zigeffect-causal-wall-clock-benchmark-baselines";
 
 const OutputFormat = enum { text, json };
 
@@ -369,7 +369,7 @@ const backlog_items: []const BacklogItem = &.{
         .title = "Rollout Automation Guardrails",
         .gap_id = "gradual-rollout-automation",
         .priority = "P4",
-        .status = "planned",
+        .status = "delivered",
         .summary = "Define canary, gradual rollout, circuit-breaker, and rollback evidence records without granting automated mutation authority.",
         .depends_on = &.{ "production-deployment-runbooks", "alerting-integrations" },
         .deliverables = &.{
@@ -380,10 +380,18 @@ const backlog_items: []const BacklogItem = &.{
         },
         .evidence_sources = &.{
             "packages/zigeffect/docs/m9-completion-audit.md",
-            "packages/zigeffect/tools/causal_app_application.zig",
+            "docs/superpowers/specs/2026-06-10-zigeffect-causal-rollout-automation-guardrails-design.md",
+            "docs/superpowers/plans/2026-06-10-zigeffect-causal-rollout-automation-guardrails-implementation.md",
+            "packages/zigeffect/tools/causal_rollout_automation_guardrails.zig",
+            "packages/zigeffect/docs/rollout-automation-guardrails.md",
+            "packages/zigeffect/tools/causal_production_deployment_runbooks.zig",
+            "packages/zigeffect/tools/causal_alerting_integrations.zig",
+            "packages/zigeffect/tools/causal_human_agent_feedback_loop.zig",
+            "packages/zigeffect/tools/causal_app_application_readiness.zig",
+            "packages/zigeffect/tools/causal_app_apply.zig",
         },
         .branch = "codex/zigeffect-causal-rollout-automation-guardrails",
-        .agent_guidance = "Record rollout advice only; leave source, config, and deploy mutation authority at none.",
+        .agent_guidance = "Use the delivered rollout guardrails report for canary evidence, progression gates, circuit-breaker decisions, rollback readiness, and negative automation fixtures; rollout execution remains external and mutation authority remains none.",
     },
     .{
         .id = "wall-clock-benchmark-baselines",
@@ -462,6 +470,8 @@ const verification_commands: []const []const u8 = &.{
     "zig build causal-unified-spine-contract -- --format json",
     "zig build causal-human-agent-feedback-loop",
     "zig build causal-human-agent-feedback-loop -- --format json",
+    "zig build causal-rollout-automation-guardrails",
+    "zig build causal-rollout-automation-guardrails -- --format json",
     "zig build causal-production-deployment-runbooks",
     "zig build causal-production-deployment-runbooks -- --format json",
     "zig build causal-durable-production-retention",
@@ -734,11 +744,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-rollout-automation-guardrails",
+        "start-wall-clock-benchmark-baselines",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-rollout-automation-guardrails",
+        "codex/zigeffect-causal-wall-clock-benchmark-baselines",
         recommended_next_branch,
     );
 }
@@ -761,6 +771,8 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItemStatus("workbench-graph-visual-debugging", "delivered");
     try expectBacklogItem("human-agent-feedback-loop");
     try expectBacklogItemStatus("human-agent-feedback-loop", "delivered");
+    try expectBacklogItem("rollout-automation-guardrails");
+    try expectBacklogItemStatus("rollout-automation-guardrails", "delivered");
     try expectBacklogItem("production-capacity-planning");
 }
 
@@ -780,7 +792,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-rollout-automation-guardrails") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-wall-clock-benchmark-baselines") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -795,11 +807,13 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-rollout-automation-guardrails\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-wall-clock-benchmark-baselines\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-human-agent-feedback-loop\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"rollout-automation-guardrails\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-rollout-automation-guardrails\"") != null);
 }
 
 test "production hardening backlog parses supported formats" {

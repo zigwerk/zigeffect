@@ -680,9 +680,15 @@ Status values:
      It keeps `applied=false`, `mutation_authority=none`,
      `workbench_mutation=false`, and `agent_mutation=false`.
 9. `codex/zigeffect-causal-rollout-automation-guardrails`
-   - Current next branch: define canary, gradual rollout, circuit-breaker, and
-     rollback evidence records without granting automated mutation authority.
+   - Delivered: `causal-rollout-automation-guardrails` emits
+     `zigeffect.causal.rollout-automation-guardrails.v1` with canary evidence
+     records, rollout progression gates, circuit-breaker decisions, rollback
+     readiness gates, and negative automation fixtures. Deployment, rollback,
+     traffic, feature-flag, alert, ticket, page, source, config, app, registry,
+     and durable mutation authority remain `none`.
 10. `codex/zigeffect-causal-wall-clock-benchmark-baselines`
+   - Current next branch: add local and CI wall-clock benchmark baselines to
+     complement deterministic performance budget constants.
 11. `codex/zigeffect-causal-production-capacity-planning`
 
 ## Dual-Interface Causal Spine Expansion

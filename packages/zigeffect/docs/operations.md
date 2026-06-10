@@ -109,6 +109,8 @@ zig build causal-unified-spine-contract
 zig build causal-unified-spine-contract -- --format json
 zig build causal-human-agent-feedback-loop
 zig build causal-human-agent-feedback-loop -- --format json
+zig build causal-rollout-automation-guardrails
+zig build causal-rollout-automation-guardrails -- --format json
 zig build causal-workbench -- <artifact.json>
 zig build causal-workbench -- --server-only <artifact.json>
 zig build causal-workbench-ui
@@ -441,11 +443,12 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-rollout-automation-guardrails` after the unified causal
-spine, deep runtime internals, app semantic trace API, bounded agent query
-surface, record-only encryption-at-rest policy, record-only alerting
+`codex/zigeffect-causal-wall-clock-benchmark-baselines` after the unified
+causal spine, deep runtime internals, app semantic trace API, bounded agent
+query surface, record-only encryption-at-rest policy, record-only alerting
 integrations, delivered live dashboard streaming workbench, delivered graph
-visual debugging, and delivered human-agent feedback loop.
+visual debugging, delivered human-agent feedback loop, and delivered rollout
+automation guardrails.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -655,6 +658,29 @@ Use it as an evidence index for local development agents and app-facing issue
 analysis. It does not run queries, write durable history, apply proposals, edit
 source, update registries, change app code, execute deployments, create alerts,
 or grant mutation authority.
+
+## Rollout Automation Guardrails
+
+Run the rollout automation guardrails contract after the human-agent feedback
+loop when canary, rollout progression, circuit-breaker, or rollback readiness
+evidence needs a record-only shape:
+
+```sh
+cd packages/zigeffect
+zig build causal-rollout-automation-guardrails
+zig build causal-rollout-automation-guardrails -- --format json
+```
+
+The contract records schema
+`zigeffect.causal.rollout-automation-guardrails.v1`. It consumes deployment
+runbooks, alerting integrations, and the human-agent feedback loop. It defines
+canary evidence records, progression gates, circuit-breaker decisions, rollback
+readiness gates, and negative automation fixtures.
+
+Use it as an evidence checklist only. It does not deploy services, roll back
+services, shift traffic, mutate feature flags, send alerts, create tickets,
+forward SIEM events, page humans, edit source, update registries, change app
+code, write durable state, or grant mutation authority.
 
 ## Production Gaps
 
