@@ -507,31 +507,67 @@ export function deriveVisualGraphModel(
   workbench: WorkbenchModel,
   graph: GraphModel,
   layoutMode: VisualGraphLayoutMode,
+  liveDashboard?: LiveDashboardModel | null,
 ): VisualGraphModel {
   const findingEventIds = new Set(workbench.findings.map((finding) => finding.eventId));
+  const eventNodes = workbench.events.map((event) => ({
+    id: event.idText,
+    label: event.label || event.typeName || event.kind,
+    kind: event.kind,
+    status: event.status,
+    lane: eventLaneLabel(event),
+    tone: visualNodeTone(event, findingEventIds),
+  }));
+  const eventEdges = graph.parentEdges.map((edge) => ({
+    id: `${edge.from}->${edge.to}`,
+    source: edge.from,
+    target: edge.to,
+    label: edge.label,
+  }));
+  const streamNodes = liveDashboard?.frames.map((frame) => ({
+    id: frame.eventId,
+    label: frame.label || frame.eventKind,
+    kind: frame.eventKind,
+    status: frame.status,
+    lane: frame.lane,
+    tone: visualStreamFrameTone(frame),
+  })) ?? [];
+  const streamNodeIds = new Set(streamNodes.map((node) => node.id));
+  const streamEdges = liveDashboard?.frames.flatMap((frame) => {
+    if (!frame.parentId || !streamNodeIds.has(frame.parentId)) {
+      return [];
+    }
+
+    return [{
+      id: `${frame.parentId}->${frame.eventId}`,
+      source: frame.parentId,
+      target: frame.eventId,
+      label: "parent",
+    }];
+  }) ?? [];
 
   return {
     layoutMode,
-    nodes: workbench.events.map((event) => ({
-      id: event.idText,
-      label: event.label || event.typeName || event.kind,
-      kind: event.kind,
-      status: event.status,
-      lane: eventLaneLabel(event),
-      tone: visualNodeTone(event, findingEventIds),
-    })),
-    edges: graph.parentEdges.map((edge) => ({
-      id: `${edge.from}->${edge.to}`,
-      source: edge.from,
-      target: edge.to,
-      label: edge.label,
-    })),
+    nodes: eventNodes.length > 0 ? eventNodes : streamNodes,
+    edges: eventNodes.length > 0 ? eventEdges : streamEdges,
     adapter: {
       solid: "@dschz/solid-g6",
       engine: "@antv/g6",
       directEngineApi: "not-required",
     },
   };
+}
+
+function visualStreamFrameTone(frame: LiveStreamFrameModel): VisualGraphNodeTone {
+  if (frame.priority === "critical" || frame.status === "failure" || frame.status === "missing") {
+    return "failure";
+  }
+
+  if (frame.priority === "watch" || frame.findingKind) {
+    return "warning";
+  }
+
+  return "ok";
 }
 
 export function deriveRemediationChainModel(raw: unknown, options: WorkbenchOptions): RemediationChainModel | null {

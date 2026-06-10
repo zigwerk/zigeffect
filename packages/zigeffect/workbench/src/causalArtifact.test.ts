@@ -638,6 +638,24 @@ test("deriveVisualGraphModel maps causal graph data for read-only layouts", () =
   expect(visual.adapter.directEngineApi).toBe("not-required");
 });
 
+test("deriveVisualGraphModel maps live stream frames when events are absent", () => {
+  const workbench = deriveWorkbenchModel(sampleLiveStream, {
+    artifactPath: "sample-live-dashboard-stream.json",
+  });
+  const graph = deriveGraphModel(workbench.events, workbench.findings);
+  const dashboard = deriveLiveDashboardModel(sampleLiveStream, {
+    artifactPath: "sample-live-dashboard-stream.json",
+  }, workbench);
+  const visual = deriveVisualGraphModel(workbench, graph, "dagre", dashboard);
+
+  expect(workbench.events.length).toBe(0);
+  expect(visual.nodes.length).toBe(5);
+  expect(visual.edges.length).toBe(4);
+  expect(visual.nodes.find((node) => node.id === "3")?.tone).toBe("failure");
+  expect(visual.nodes.find((node) => node.id === "4")?.tone).toBe("warning");
+  expect(visual.edges.map((edge) => `${edge.source}->${edge.target}`)).toContain("2->5");
+});
+
 test("deriveGraphModel tracks orphaned parent references", () => {
   const graph = deriveGraphModel([
     { ...minimalEvent("1"), parentId: null },

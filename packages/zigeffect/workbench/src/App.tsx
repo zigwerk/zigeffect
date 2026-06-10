@@ -115,7 +115,7 @@ export function App() {
     if (!current || !graph) {
       return null;
     }
-    return deriveVisualGraphModel(current, graph, layoutMode());
+    return deriveVisualGraphModel(current, graph, layoutMode(), liveDashboard());
   });
   const visibleEvents = createMemo(() => {
     const current = model();
