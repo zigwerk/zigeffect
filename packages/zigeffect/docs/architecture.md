@@ -19,10 +19,11 @@ That file is a facade. It exports domain namespaces such as `fx.core`,
 `fx.pattern`, `fx.traits`, `fx.workflow`, and `fx.cluster`, while preserving
 the existing top-level aliases such as `fx.Effect`, `fx.Context`, `fx.Scope`,
 `fx.Runtime`, `fx.Layer`, `fx.Schedule`, and `fx.TestEnv`. It also exposes
-`fx.storage` for durable storage schema metadata and SQL migration plans. Domain
-namespaces also expose ergonomic aliases, for example `fx.effect.Effect`,
-`fx.runtime.Runtime`, `fx.layer.Layer`, `fx.services.Logger`, and
-`fx.data.Option`.
+`fx.storage` for durable storage schema metadata and SQL migration plans, and
+`fx.performance` for deterministic benchmark reports and bounded-resource
+verification gates. Domain namespaces also expose ergonomic aliases, for
+example `fx.effect.Effect`, `fx.runtime.Runtime`, `fx.layer.Layer`,
+`fx.services.Logger`, and `fx.data.Option`.
 
 Package users should keep importing the facade:
 
@@ -85,7 +86,8 @@ Owns execution runtimes and deterministic concurrency primitives:
 - `runner.zig`: managed-scope run/exit helper shared by runtime, layer, and
   graph paths.
 - `fiber.zig`: `Fiber`, `FiberRuntime`, deterministic lifecycle semantics.
-- `coordination.zig`: `Deferred`, `Queue`, `Semaphore`.
+- `coordination.zig`: `Deferred`, `Queue`, `Semaphore`, queue wait states, and
+  queue capacity stats.
 - `backend.zig`: backend capability contract and deterministic backend marker.
 - `async_backend.zig`: async backend vtable shape for suspend, wake, timers,
   and interrupts.
@@ -266,9 +268,10 @@ Owns local durable workflow runtime surfaces:
   and deterministic event-folding logic.
 - `store.zig`: journal store contract, append/read batches, optimistic
   sequence checks, idempotency-key duplicate detection, in-memory store,
-  append-only file store, segment naming, lock guard, partial-write recovery,
-  future-schema downgrade failure before mutation, corruption reports, fsync
-  policy, checkpoint JSON, snapshot commit metadata, archive export, retention
+  append-only file store, opt-in event bounds, capacity stats, segment naming,
+  lock guard, partial-write recovery, future-schema downgrade failure before
+  mutation, corruption reports, fsync policy, checkpoint JSON, replay snapshot
+  frequency controls, snapshot commit metadata, archive export, retention
   policies, and completed-workflow compaction.
 
 Workflow definitions, activity definitions, journal events, replay state,
@@ -303,6 +306,10 @@ active segment only after the commit marker exists. A crash before the commit
 falls back to full segment replay; a crash after the commit recovers from
 checkpoint plus tail. Retention policies can keep all rows, archive then
 compact completed workflows, or checkpoint-only compact completed workflows.
+`WorkflowSnapshotFrequency` can trigger explicit replay snapshots after a
+configured event interval, and the file store resets its in-memory replay tail
+after the committed checkpoint so long histories can run with bounded local
+memory.
 
 ### Cooperative Local Scheduling
 
@@ -323,7 +330,8 @@ Owns Erlang-style distributed runtime surfaces:
 - `root.zig`: cluster namespace facade and ergonomic public aliases.
 - `identity.zig`: local entity type, id, address, and stable id derivation.
 - `mailbox.zig`: local in-memory entity envelopes, per-entity FIFO mailbox
-  storage, ask correlations, reply storage, and envelope ownership helpers.
+  storage, opt-in total/per-mailbox bounds, pressure stats, ask correlations,
+  reply storage, and envelope ownership helpers.
 - `entity.zig`: local entity runtime, runtime-bound refs, entity scopes,
   services, finalizers, idle shutdown, and supervisor-backed handler failure
   recovery.
@@ -350,8 +358,8 @@ Owns Erlang-style distributed runtime surfaces:
   intensity state, workflow-worker classification, and shard-release
   escalation vocabulary.
 - `observability.zig`: cluster causal query reports, failure summaries,
-  cluster-only DOT rendering, metrics collection, and message trace context
-  helpers.
+  cluster-only DOT rendering, mailbox lag and message backpressure metrics,
+  metrics collection, and message trace context helpers.
 - `shard_lease.zig`: local shard lease manager with bounded TTLs, refresh
   cadence, owned-lease tracking, graceful handoff, dead-runner recovery, and
   causal shard ownership events.
@@ -398,6 +406,26 @@ concepts a deterministic local execution model, but durable message storage,
 runner ownership, and transport are separate milestones.
 
 ```text
+src/performance/
+```
+
+Owns deterministic benchmark reporting and bounded-resource gates:
+
+- `root.zig`: performance namespace facade and public aliases.
+- `benchmark.zig`: stable journal append/replay and mailbox dispatch benchmark
+  report types, threshold verdicts, text formatter, JSON formatter, and local
+  runner.
+
+Performance reports intentionally use deterministic work counters instead of
+wall-clock timing. The focused `performance-bounds` build step checks the
+benchmark report shape, journal bounds, mailbox bounds, queue stats, replay
+snapshot frequency, and cluster backpressure metrics. The
+`performance-bench` command prints the default text report and supports
+`--json` for agent and CI consumers. Default thresholds are 1,024 journal
+events, 1,000,000 serialized journal bytes, 4,096 offered mailbox messages,
+and 4,096 peak pending mailbox messages.
+
+```text
 src/storage/
 ```
 
@@ -428,10 +456,13 @@ Owns local developer and agent CLI entrypoints:
   execution event inspection command.
 - `storage_migrate.zig`: `zig build storage-migrate` storage schema catalog and
   SQL migration plan command.
+- `performance_bench.zig`: `zig build performance-bench` deterministic
+  performance threshold report command.
 
 Workflow tools should stay thin and delegate durable state interpretation to
 `src/workflow/inspect.zig`. Storage tools should stay thin and delegate schema
-and migration planning to `src/storage/`.
+and migration planning to `src/storage/`. Performance tools should stay thin
+and delegate benchmark report construction to `src/performance/`.
 
 ```text
 src/testing/
@@ -488,6 +519,9 @@ It imports domain test files:
 - `data_test.zig`
 - `match_test.zig`
 - `pattern_test.zig`
+- `performance_benchmark_test.zig`
+- `resource_bounds_test.zig`
+- `workflow_snapshot_frequency_test.zig`
 
 Shared test-only helpers live in:
 

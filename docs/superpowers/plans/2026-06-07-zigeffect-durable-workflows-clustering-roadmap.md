@@ -879,15 +879,15 @@ Goal: make the runtime viable for long histories and large mailboxes.
 
 Deliverables:
 
-- [ ] Benchmark journal append and replay.
-- [ ] Benchmark mailbox dispatch.
-- [ ] Add bounded memory modes.
-- [ ] Add replay snapshot frequency tuning.
-- [ ] Add backpressure metrics.
+- [x] Benchmark journal append and replay.
+- [x] Benchmark mailbox dispatch.
+- [x] Add bounded memory modes.
+- [x] Add replay snapshot frequency tuning.
+- [x] Add backpressure metrics.
 
 Acceptance:
 
-- [ ] Benchmarks have stable local output and documented thresholds.
+- [x] Benchmarks have stable local output and documented thresholds.
 
 ## Milestone 44: End-To-End Examples
 

@@ -67,6 +67,9 @@ Included in this package:
 - `CausalStore` / `CausalBackend`: deterministic causal event storage, query
   helpers, report/JSON/DOT/CI formatters, and optional adapter sinks for JSON
   Lines, DOT, OpenTelemetry, embedded graph, and bounded async streams.
+- `PerformanceBenchmarkReport`: deterministic journal append/replay and mailbox
+  dispatch benchmark reports with threshold verdicts, text output, and JSON
+  output.
 - `TestEnv`: fake clock, memory filesystem, logger, config, metrics, tracing,
   runtime helpers, assertion helpers, and readable assertion report formatters.
 - `Clock`: fake/system time service used by schedules and tests.
@@ -118,6 +121,25 @@ Compile and test the package examples:
 cd packages/zigeffect
 zig build examples
 ```
+
+Run the performance and bounded-resource gate:
+
+```bash
+cd packages/zigeffect
+zig build performance-bounds
+```
+
+Print the deterministic performance benchmark report:
+
+```bash
+cd packages/zigeffect
+zig build performance-bench
+zig build performance-bench -- --json
+```
+
+Default benchmark thresholds are 1,024 journal events, 1,000,000 serialized
+journal bytes, 4,096 offered mailbox messages, and 4,096 peak pending mailbox
+messages.
 
 Print a sample causal CI report:
 
@@ -562,7 +584,7 @@ scenario registry.
 `*-registry-patch.json`, `*-registry-patch.txt`, and `*-registry-patch.zig`.
 The JSON schema is `zigeffect.causal.registry-patch.v1`. The Zig file is a
 review draft only; the command never edits `tools/causal_run.zig`, and its
-placeholder argv must be replaced with the smallest reproducing command before
+draft argv must be replaced with the smallest reproducing command before
 any manual registry change is treated as coverage.
 `causal-registry-application-readiness` reads that registry patch draft, records
 an explicit `approve` or `reject` review decision, and writes
@@ -570,7 +592,7 @@ an explicit `approve` or `reject` review decision, and writes
 `*-registry-application-readiness.txt` with schema
 `zigeffect.causal.registry-application-readiness.v1`. Its status is
 `applicable`, `blocked`, or `not-applicable`; it verifies reviewer intent,
-registry state, placeholder argv replacement, invariant catalog consistency,
+registry state, draft argv replacement, invariant catalog consistency,
 scenario docs, and required verification commands. The gate remains
 non-mutating and always reports `applied=false`.
 `causal-registry-apply` reads the readiness report and writes

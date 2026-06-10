@@ -46,7 +46,7 @@ Modify:
 - Modify: `packages/zigeffect/src/workflow/store.zig`
 - Modify: `packages/zigeffect/src/workflow/root.zig`
 
-- [ ] **Step 1: Write failing journal bound tests**
+- [x] **Step 1: Write failing journal bound tests**
 
 Create `resource_bounds_test.zig` with tests for:
 
@@ -74,7 +74,7 @@ Add a second test that opens `FileJournalStore` with
 `error.EventLimitExceeded` on the second append. Import
 `resource_bounds_test.zig` from `all_test.zig`.
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run:
 
@@ -85,7 +85,7 @@ Run:
 Expected: FAIL with missing `initBounded`, `capacityStats`, and
 `max_in_memory_events` declarations.
 
-- [ ] **Step 3: Implement journal bounds**
+- [x] **Step 3: Implement journal bounds**
 
 In `store.zig` add:
 
@@ -113,7 +113,7 @@ initialize the internal memory store with `InMemoryJournalStore.initBounded`.
 Export `JournalCapacityStats` and `InMemoryJournalStoreOptions` through
 `workflow/root.zig`.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
@@ -142,7 +142,7 @@ git commit -m "feat(zigeffect): add journal event bounds"
 - Modify: `packages/zigeffect/src/runtime/coordination.zig`
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 
-- [ ] **Step 1: Add failing mailbox and queue tests**
+- [x] **Step 1: Add failing mailbox and queue tests**
 
 Extend `resource_bounds_test.zig` with tests for:
 
@@ -155,7 +155,7 @@ Extend `resource_bounds_test.zig` with tests for:
 - `fx.runtime.Queue(u8).bounded(...).stats()` reporting length, capacity,
   remaining capacity, offer state, and take state.
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run:
 
@@ -165,7 +165,7 @@ Run:
 
 Expected: FAIL with missing mailbox options/stats and queue stats.
 
-- [ ] **Step 3: Implement mailbox bounds**
+- [x] **Step 3: Implement mailbox bounds**
 
 In `cluster/mailbox.zig` add:
 
@@ -193,7 +193,7 @@ accepting an offer, decrement `total_pending` on take, and implement `stats`.
 Export `LocalMailboxStoreOptions` and `LocalMailboxStats` through
 `cluster/root.zig` and `src/zigeffect.zig`.
 
-- [ ] **Step 4: Implement queue stats**
+- [x] **Step 4: Implement queue stats**
 
 In `runtime/coordination.zig` add:
 
@@ -210,7 +210,7 @@ pub const QueueStats = struct {
 Add `Queue.stats()` for each queue instance. Export `QueueStats` through the
 runtime namespace and top-level facade.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run:
 
@@ -236,7 +236,7 @@ git commit -m "feat(zigeffect): add mailbox and queue pressure stats"
 - Modify: `packages/zigeffect/src/cluster/observability.zig`
 - Modify: `packages/zigeffect/test/cluster_observability_test.zig`
 
-- [ ] **Step 1: Add failing metric assertions**
+- [x] **Step 1: Add failing metric assertions**
 
 Extend `cluster_observability_test.zig` so `collectClusterMetrics` asserts:
 
@@ -246,7 +246,7 @@ Extend `cluster_observability_test.zig` so `collectClusterMetrics` asserts:
 - `recordClusterMetrics` records `cluster.messages.backpressure` and
   `cluster.mailbox.lag.max`.
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run:
 
@@ -256,12 +256,12 @@ Run:
 
 Expected: FAIL with missing metric fields.
 
-- [ ] **Step 3: Implement metric fields**
+- [x] **Step 3: Implement metric fields**
 
 Add fields to `ClusterMetricsSnapshot`, compute them inside
 `collectClusterMetrics`, and record gauges in `recordClusterMetrics`.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
@@ -289,7 +289,7 @@ git commit -m "feat(zigeffect): add cluster backpressure metrics"
 - Modify: `packages/zigeffect/src/workflow/root.zig`
 - Modify: `packages/zigeffect/test/all_test.zig`
 
-- [ ] **Step 1: Add failing snapshot cadence tests**
+- [x] **Step 1: Add failing snapshot cadence tests**
 
 Create tests for:
 
@@ -301,7 +301,7 @@ Create tests for:
 
 Import the test from `all_test.zig`.
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run:
 
@@ -311,7 +311,7 @@ Run:
 
 Expected: FAIL with missing snapshot frequency declarations.
 
-- [ ] **Step 3: Implement snapshot frequency**
+- [x] **Step 3: Implement snapshot frequency**
 
 Add:
 
@@ -326,7 +326,7 @@ Add `snapshot_frequency: WorkflowSnapshotFrequency = .{}` to
 `FileJournalStoreOptions`, implement `snapshotDue`, and implement
 `writeReplaySnapshotIfDue`. Export through `workflow/root.zig`.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
@@ -356,7 +356,7 @@ git commit -m "feat(zigeffect): add replay snapshot frequency"
 - Modify: `packages/zigeffect/test/architecture_test.zig`
 - Modify: `packages/zigeffect/test/all_test.zig`
 
-- [ ] **Step 1: Add failing benchmark report tests**
+- [x] **Step 1: Add failing benchmark report tests**
 
 Create tests asserting:
 
@@ -370,7 +370,7 @@ Create tests asserting:
 Add facade assertions to `architecture_test.zig` and import
 `performance_benchmark_test.zig` from `all_test.zig`.
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run:
 
@@ -380,7 +380,7 @@ Run:
 
 Expected: FAIL with missing performance namespace declarations.
 
-- [ ] **Step 3: Implement performance module**
+- [x] **Step 3: Implement performance module**
 
 Create the performance root and benchmark module with schema constants, report
 types, threshold helpers, `runPerformanceBenchmarks`, `formatPerformanceBenchmarkText`,
@@ -395,13 +395,13 @@ Implementation rules:
 - Keep default thresholds permissive enough for default options and strict
   thresholds useful in tests.
 
-- [ ] **Step 4: Export the namespace**
+- [x] **Step 4: Export the namespace**
 
 Add `pub const performance = @import("performance/root.zig");` to
 `src/zigeffect.zig`, plus top-level aliases for report options, report types,
 runner, and formatters.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run:
 
@@ -427,7 +427,7 @@ git commit -m "feat(zigeffect): add deterministic performance reports"
 - Create: `packages/zigeffect/tools/performance_bench.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Add failing build-step checks**
+- [x] **Step 1: Add failing build-step checks**
 
 Run:
 
@@ -438,7 +438,7 @@ Run:
 
 Expected: both commands fail because the steps are absent.
 
-- [ ] **Step 2: Implement benchmark tool**
+- [x] **Step 2: Implement benchmark tool**
 
 Create `tools/performance_bench.zig` with:
 
@@ -450,7 +450,7 @@ Create `tools/performance_bench.zig` with:
 - `--entity-count N`;
 - tests for text, JSON, and invalid numeric arguments.
 
-- [ ] **Step 3: Wire build steps**
+- [x] **Step 3: Wire build steps**
 
 In `build.zig`:
 
@@ -463,7 +463,7 @@ In `build.zig`:
 - add tool tests to `examples_step`;
 - add focused test run artifacts to the main `test_step`.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
@@ -490,9 +490,10 @@ git commit -m "build(zigeffect): add performance benchmark steps"
 **Files:**
 
 - Modify: `packages/zigeffect/docs/architecture.md`
+- Modify: `packages/zigeffect/README.md`
 - Modify: `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`
 
-- [ ] **Step 1: Document M43 surfaces**
+- [x] **Step 1: Document M43 surfaces**
 
 Update architecture docs to mention:
 
@@ -504,7 +505,11 @@ Update architecture docs to mention:
 - cluster backpressure metrics;
 - `performance-bench` and `performance-bounds` build steps.
 
-- [ ] **Step 2: Mark M43 complete**
+Update README commands so local users can run the focused bounded-resource gate
+and print the benchmark report in text or JSON mode. Document the default
+thresholds beside those commands.
+
+- [x] **Step 2: Mark M43 complete**
 
 Update the M43 roadmap block:
 
@@ -522,7 +527,7 @@ and:
 - [x] Benchmarks have stable local output and documented thresholds.
 ```
 
-- [ ] **Step 3: Run full verification**
+- [x] **Step 3: Run full verification**
 
 Run:
 
@@ -580,12 +585,12 @@ git status --short
 Expected: build and test commands pass, format and diff checks pass, marker
 scan exits with no matches, and git status is clean after commits.
 
-- [ ] **Step 4: Commit docs**
+- [x] **Step 4: Commit docs**
 
 Commit:
 
 ```bash
-git add packages/zigeffect/docs/architecture.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md
+git add packages/zigeffect/docs/architecture.md packages/zigeffect/README.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md docs/superpowers/plans/2026-06-10-zigeffect-performance-bounded-resource.md
 git diff --cached --check
 git commit -m "docs(zigeffect): mark performance bounds complete"
 ```
