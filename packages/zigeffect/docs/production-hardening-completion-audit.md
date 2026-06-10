@@ -79,7 +79,11 @@ hardening sweep:
 The audit deliberately separates delivered contracts from missing evidence:
 
 - `load-test-observation-harness`: delivered local observation branch;
-- `production-telemetry-capture-design`: recommended next branch;
+- `production-telemetry-capture-design`: delivered;
+- `production-telemetry-capture-fixtures`: delivered;
+- `production-telemetry-readiness-review`: delivered;
+- `production-telemetry-implementation-proposal`: delivered;
+- `production-telemetry-exporter-boundary`: recommended next branch;
 - `reviewed-production-capacity-sizing`: future;
 - `live-alert-delivery`: future;
 - `live-rollout-automation`: future;
@@ -114,9 +118,10 @@ capacity-planning fixture plan and wall-clock baseline assumptions, then
 produces local observation records without live production telemetry,
 production load execution, or capacity claims.
 
-The telemetry capture design, fixture, and readiness-review branches are now
-delivered after this handoff. The current next branch is
-`codex/zigeffect-causal-production-telemetry-implementation-proposal`.
+The telemetry capture design, fixture, readiness-review, and
+implementation-proposal branches are now delivered after this handoff. The
+current next branch is
+`codex/zigeffect-causal-production-telemetry-exporter-boundary`.
 Reviewed production capacity sizing remains future until compatible
 observations, telemetry design, fixtures, readiness review, implementation
 proposal, and human review exist.

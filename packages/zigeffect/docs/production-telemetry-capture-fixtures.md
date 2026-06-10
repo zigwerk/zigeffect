@@ -86,8 +86,9 @@ and mutation claims.
 The readiness review branch is delivered through
 `causal-production-telemetry-readiness-review`. It consumes fixture JSON and
 emits `ready` or `blocked` artifacts before any implementation proposal branch.
-The next branch is
-`codex/zigeffect-causal-production-telemetry-implementation-proposal`.
+The implementation proposal branch is delivered through
+`causal-production-telemetry-implementation-proposal`. The current next branch
+is `codex/zigeffect-causal-production-telemetry-exporter-boundary`.
 
 ## Verification
 

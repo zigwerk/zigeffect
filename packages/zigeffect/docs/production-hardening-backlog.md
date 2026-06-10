@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-telemetry-implementation-proposal` means the
+The recommendation `start-production-telemetry-exporter-boundary` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -72,8 +72,13 @@ The production telemetry readiness review is also delivered: it consumes
 fixture JSON, records reviewer decision and reason, verifies coverage and
 authority boundaries, requires explicit verification command evidence, and
 emits ready or blocked artifacts before any implementation proposal branch.
+The production telemetry implementation proposal is also delivered: it consumes
+a ready readiness-review artifact, records proposer decision and reason,
+verifies readiness and proposal evidence, emits approved or blocked proposal
+artifacts, records implementation phases, and preserves non-live authority
+before any exporter-boundary branch.
 The next branch should be
-`codex/zigeffect-causal-production-telemetry-implementation-proposal`.
+`codex/zigeffect-causal-production-telemetry-exporter-boundary`.
 
 ## Dependency Order
 
@@ -100,6 +105,7 @@ The backlog currently orders future production-hardening branches as:
 19. `production-telemetry-capture-design` delivered
 20. `production-telemetry-capture-fixtures` delivered
 21. `production-telemetry-readiness-review` delivered
+22. `production-telemetry-implementation-proposal` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -253,11 +259,22 @@ boundaries, requires explicit verification command evidence, and preserves
 durable writes, disabled CI gates, NenDB-only durable direction, and SolidJS
 `zig-webui` workbench direction.
 
+Production telemetry implementation proposal is documented in
+[production-telemetry-implementation-proposal.md](production-telemetry-implementation-proposal.md).
+It emits
+`zigeffect.causal.production-telemetry-implementation-proposal.v1` through
+`zig build causal-production-telemetry-implementation-proposal`, consumes ready
+readiness-review JSON, records proposer decision and reason, verifies readiness
+and proposal command evidence, emits approved or blocked proposal artifacts,
+and preserves `applied=false`, `mutation_authority=none`, disabled live
+telemetry, disabled durable writes, disabled CI gates, NenDB-only durable
+direction, and SolidJS `zig-webui` workbench direction.
+
 The next branch is
-`codex/zigeffect-causal-production-telemetry-implementation-proposal`. It should
-use readiness artifacts to design a reviewed implementation proposal before any
-live ingestion, exporters, durable production writes, capacity claims, CI gates,
-or mutation authority are considered.
+`codex/zigeffect-causal-production-telemetry-exporter-boundary`. It should use
+approved proposal artifacts to define an exporter-neutral no-network boundary
+before any live ingestion, exporters, durable production writes, capacity
+claims, CI gates, or mutation authority are considered.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -321,6 +338,19 @@ zig build causal-production-telemetry-readiness-review -- \
   --from-fixtures ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json \
   reject \
   --reason "negative readiness path"
+zig build causal-production-telemetry-implementation-proposal -- \
+  --from-readiness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review.json \
+  approve \
+  --reason "ready evidence reviewed for exporter boundary planning" \
+  --verified-command "zig build causal-production-telemetry-readiness-review -- --from-fixtures ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json approve --reason \"fixtures reviewed for implementation proposal\" --verified-command \"zig build causal-production-telemetry-capture-fixtures -- validate --format json\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+zig build causal-production-telemetry-implementation-proposal -- \
+  --from-readiness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review.json \
+  reject \
+  --reason "negative proposal path"
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

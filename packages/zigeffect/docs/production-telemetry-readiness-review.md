@@ -87,10 +87,9 @@ Use `--out-prefix <path-prefix>` to choose a custom artifact prefix.
 
 ## Agent Guidance
 
-Agents may use a `ready` report to start a future
-`codex/zigeffect-causal-production-telemetry-implementation-proposal` branch.
-They must cite the readiness artifact, source fixture path, check names, and
-verified commands.
+Agents may use a `ready` report as input to
+`causal-production-telemetry-implementation-proposal`. They must cite the
+readiness artifact, source fixture path, check names, and verified commands.
 
 Agents must treat `blocked` reports as stop signs. Blocked readiness can guide
 fixture or design repairs, but it cannot justify implementation work.

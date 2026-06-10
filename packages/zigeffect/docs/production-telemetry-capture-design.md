@@ -108,8 +108,10 @@ use `blocked_claims` to avoid over-stating evidence.
 The fixture branch is now delivered through
 `causal-production-telemetry-capture-fixtures`. It models approved telemetry
 records without touching production systems. The readiness-review branch is now
-delivered through `causal-production-telemetry-readiness-review` and hands off
-to `codex/zigeffect-causal-production-telemetry-implementation-proposal`.
+delivered through `causal-production-telemetry-readiness-review`, and the
+implementation-proposal branch is now delivered through
+`causal-production-telemetry-implementation-proposal`. The current handoff is
+`codex/zigeffect-causal-production-telemetry-exporter-boundary`.
 
 ## Verification
 

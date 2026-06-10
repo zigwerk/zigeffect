@@ -308,6 +308,17 @@ configure exporters, send OTLP, write durable production storage, size
 capacity, fail CI, add non-NenDB adapter work, add alternate renderers, or grant
 mutation authority.
 
+- `zigeffect.causal.production-telemetry-implementation-proposal.v1`
+
+The production-telemetry-implementation-proposal report is a record-only,
+`implementation-proposal`, `no-live-ingestion` production hardening contract.
+It consumes a ready readiness-review artifact, records proposer decision and
+reason, verifies readiness evidence and proposal command evidence, emits
+`approved` or `blocked` artifacts, and hands off to the exporter-boundary
+branch. It does not ingest live production telemetry, configure exporters, send
+OTLP, write durable production storage, size capacity, fail CI, add non-NenDB
+adapter work, add alternate renderers, or grant mutation authority.
+
 ### Human-Agent Feedback
 
 - `zigeffect.causal.human-agent-feedback-loop.v1`

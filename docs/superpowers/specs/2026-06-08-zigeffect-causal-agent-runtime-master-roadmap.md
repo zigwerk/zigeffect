@@ -751,8 +751,19 @@ Status values:
      `mutation_authority=none`, NenDB-only, and SolidJS `zig-webui` aligned
      without touching production systems or claiming production capacity.
 17. `codex/zigeffect-causal-production-telemetry-implementation-proposal`
-   - Current next branch: use readiness artifacts to design a reviewed
-     implementation proposal before any live ingestion, exporters, durable
+   - Delivered: `causal-production-telemetry-implementation-proposal` emits
+     `zigeffect.causal.production-telemetry-implementation-proposal.v1` with
+     ready readiness-review JSON consumption, proposer decision and reason,
+     readiness and proposal verification checks, approved and blocked proposal
+     artifacts, proposal phases, and exporter-boundary handoff. It keeps
+     `applied=false`, `production_telemetry_ingestion=false`,
+     `live_exporter_enabled=false`, `durable_write_enabled=false`,
+     `ci_gate_enabled=false`, `mutation_authority=none`, NenDB-only, and
+     SolidJS `zig-webui` aligned without touching production systems or
+     claiming production capacity.
+18. `codex/zigeffect-causal-production-telemetry-exporter-boundary`
+   - Current next branch: use approved proposal artifacts to define an
+     exporter-neutral no-network boundary before any live ingestion, durable
      production writes, CI gates, capacity claims, or mutation authority are
      considered.
 

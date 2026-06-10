@@ -654,9 +654,10 @@ metrics, and traces.
   debugging, human-agent feedback-loop, rollout automation guardrails, and
   wall-clock benchmark baseline, production capacity planning, and
   production-hardening completion audit plus load-test observation harness,
-  production telemetry capture design, fixture, and readiness-review contracts,
-  milestones, non-goals, verification commands, and the current next branch
-  `codex/zigeffect-causal-production-telemetry-implementation-proposal`.
+  production telemetry capture design, fixture, readiness-review, and
+  implementation-proposal contracts, milestones, non-goals, verification
+  commands, and the current next branch
+  `codex/zigeffect-causal-production-telemetry-exporter-boundary`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
@@ -772,6 +773,18 @@ metrics, and traces.
   ready and blocked readiness artifacts, and the handoff to
   `codex/zigeffect-causal-production-telemetry-implementation-proposal`. It
   keeps `applied=false`, `production_telemetry_ingestion=false`,
+  `live_exporter_enabled=false`, `durable_write_enabled=false`,
+  `ci_gate_enabled=false`, `mutation_authority=none`, and does not implement
+  telemetry, write durable production storage, size capacity, fail CI, add
+  non-NenDB adapter work, add alternate frontend renderer support, or mutate
+  production state.
+- Delivered: `causal-production-telemetry-implementation-proposal` publishes
+  `zigeffect.causal.production-telemetry-implementation-proposal.v1` with ready
+  readiness-review JSON consumption, proposer decision and reason, readiness
+  and proposal verification checks, approved and blocked proposal artifacts,
+  proposal phases, and the handoff to
+  `codex/zigeffect-causal-production-telemetry-exporter-boundary`. It keeps
+  `applied=false`, `production_telemetry_ingestion=false`,
   `live_exporter_enabled=false`, `durable_write_enabled=false`,
   `ci_gate_enabled=false`, `mutation_authority=none`, and does not implement
   telemetry, write durable production storage, size capacity, fail CI, add

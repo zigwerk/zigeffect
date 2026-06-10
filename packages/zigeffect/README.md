@@ -336,6 +336,28 @@ work. It keeps `applied=false`, `mutation_authority=none`, live telemetry,
 exporters, durable writes, and CI gates disabled. The full policy is in
 [docs/production-telemetry-readiness-review.md](docs/production-telemetry-readiness-review.md).
 
+Draft the production telemetry implementation proposal:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-telemetry-implementation-proposal -- \
+  --from-readiness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review.json \
+  approve \
+  --reason "ready evidence reviewed for exporter boundary planning" \
+  --verified-command "zig build causal-production-telemetry-readiness-review -- --from-fixtures ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json approve --reason \"fixtures reviewed for implementation proposal\" --verified-command \"zig build causal-production-telemetry-capture-fixtures -- validate --format json\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The report uses schema
+`zigeffect.causal.production-telemetry-implementation-proposal.v1` and emits an
+`approved` or `blocked` proposal before any exporter-boundary branch starts. It
+keeps `applied=false`, `mutation_authority=none`, live telemetry, exporters,
+durable writes, and CI gates disabled. The full policy is in
+[docs/production-telemetry-implementation-proposal.md](docs/production-telemetry-implementation-proposal.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -361,8 +383,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-implementation-proposal` after the
-delivered production telemetry readiness review.
+`codex/zigeffect-causal-production-telemetry-exporter-boundary` after the
+delivered production telemetry implementation proposal.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in

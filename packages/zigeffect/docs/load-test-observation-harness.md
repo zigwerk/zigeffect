@@ -110,9 +110,11 @@ as `codex/zigeffect-causal-production-telemetry-capture-design`, the fixture
 handoff is delivered as
 `codex/zigeffect-causal-production-telemetry-capture-fixtures`, and the
 readiness-review handoff is delivered as
-`codex/zigeffect-causal-production-telemetry-readiness-review`. The current
-next branch is
-`codex/zigeffect-causal-production-telemetry-implementation-proposal`.
+`codex/zigeffect-causal-production-telemetry-readiness-review`. The
+implementation-proposal handoff is delivered as
+`codex/zigeffect-causal-production-telemetry-implementation-proposal`. The
+current next branch is
+`codex/zigeffect-causal-production-telemetry-exporter-boundary`.
 
 ## Verification
 
