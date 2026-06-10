@@ -388,6 +388,24 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_retry_exhaustion_example_tests = b.addRunArtifact(causal_retry_exhaustion_example_tests);
 
+    const workflow_approval_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/workflow_approval.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    workflow_approval_example_module.addImport("zigeffect", zigeffect);
+
+    const workflow_approval_example = b.addExecutable(.{
+        .name = "zigeffect-workflow-approval-example",
+        .root_module = workflow_approval_example_module,
+    });
+
+    const workflow_approval_example_tests = b.addTest(.{
+        .name = "zigeffect-workflow-approval-example-tests",
+        .root_module = workflow_approval_example_module,
+    });
+    const run_workflow_approval_example_tests = b.addRunArtifact(workflow_approval_example_tests);
+
     const scaffold_module = b.createModule(.{
         .root_source_file = b.path("tools/scaffold_module.zig"),
         .target = target,
@@ -1173,6 +1191,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_scoped_fiber_example_tests.step);
     examples_step.dependOn(&causal_retry_exhaustion_example.step);
     examples_step.dependOn(&run_causal_retry_exhaustion_example_tests.step);
+    examples_step.dependOn(&workflow_approval_example.step);
+    examples_step.dependOn(&run_workflow_approval_example_tests.step);
     examples_step.dependOn(&scaffold_tool.step);
     examples_step.dependOn(&run_scaffold_tool_tests.step);
     examples_step.dependOn(&causal_report_tool.step);

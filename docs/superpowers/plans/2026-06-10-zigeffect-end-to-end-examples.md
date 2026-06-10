@@ -67,7 +67,7 @@ examples_step.dependOn(&run_workflow_approval_example_tests.step);
 - Create: `packages/zigeffect/examples/workflow_approval.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Add the failing example shell and build wiring**
+- [x] **Step 1: Add the failing example shell and build wiring**
 
 Create `workflow_approval.zig` with:
 
@@ -123,7 +123,7 @@ Wire the module into `build.zig` using the shared build pattern with:
 - binary name: `zigeffect-workflow-approval-example`
 - test name: `zigeffect-workflow-approval-example-tests`
 
-- [ ] **Step 2: Run the failing example gate**
+- [x] **Step 2: Run the failing example gate**
 
 Run:
 
@@ -133,7 +133,7 @@ Run:
 
 Expected: FAIL from `error.ExpectedApprovalScenario` in the new example test.
 
-- [ ] **Step 3: Implement the approval scenario**
+- [x] **Step 3: Implement the approval scenario**
 
 Implement `runApprovalWorkflowExample` with:
 
@@ -160,7 +160,7 @@ _ = try journal.append(.{ .event = .{
 } });
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
