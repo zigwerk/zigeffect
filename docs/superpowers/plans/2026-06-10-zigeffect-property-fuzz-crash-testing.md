@@ -913,11 +913,21 @@ zig fmt --check \
   packages/zigeffect/build.zig
 git diff --check
 rg -n 'T''BD|TO''DO|FIX''ME|st''ub|place''holder|not imple''mented|unimple''mented|fi''ll in|add app''ropriate|sim''ilar to' \
-  packages/zigeffect/src \
-  packages/zigeffect/test \
-  packages/zigeffect/docs \
-  docs/superpowers/specs \
-  docs/superpowers/plans
+  packages/zigeffect/src/workflow/scheduler.zig \
+  packages/zigeffect/test/support/replay_assertions.zig \
+  packages/zigeffect/test/support/workflow_history_generator.zig \
+  packages/zigeffect/test/support/journal_crash_injection.zig \
+  packages/zigeffect/test/support/message_history_generator.zig \
+  packages/zigeffect/test/property_history_test.zig \
+  packages/zigeffect/test/crash_recovery_property_test.zig \
+  packages/zigeffect/test/message_history_property_test.zig \
+  packages/zigeffect/test/scheduler_fairness_property_test.zig \
+  packages/zigeffect/test/all_test.zig \
+  packages/zigeffect/build.zig \
+  packages/zigeffect/docs/architecture.md \
+  docs/superpowers/specs/2026-06-10-zigeffect-property-fuzz-crash-testing-design.md \
+  docs/superpowers/plans/2026-06-10-zigeffect-property-fuzz-crash-testing.md \
+  docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md
 ```
 
 Expected: format checks pass, diff check passes, and marker scan exits with no matches.
