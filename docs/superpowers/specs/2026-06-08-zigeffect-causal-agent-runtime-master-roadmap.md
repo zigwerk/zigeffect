@@ -973,8 +973,24 @@ Status values:
      NenDB writes, hosted dashboard claims, production cluster claims,
      alternate renderers, and mutation authority disabled.
 33. `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-readiness`
-   - Current next branch: evaluate required-status-check readiness from ready
-     advisory CI report publication policy artifacts before any CI telemetry
+   - Delivered:
+     `causal-production-telemetry-ci-gate-required-status-check-readiness`
+     emits
+     `zigeffect.causal.production-telemetry-ci-gate-required-status-check-readiness.v1`,
+     consumes ready advisory CI report publication-policy artifacts, records
+     candidate required-check profiles with activation disabled, records
+     activation guardrails and denied required-check or branch-protection
+     inferences, and hands off to
+     `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-application-boundary`
+     while keeping required checks, merge blocking, branch protection
+     mutation, GitHub API mutation, workflow mutation by the tool, artifact
+     upload execution by the tool, GitHub step summary writes by the tool,
+     pull request comments by the tool, live telemetry, durable writes, NenDB
+     writes, hosted dashboard claims, production cluster claims, alternate
+     renderers, and mutation authority disabled.
+34. `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-application-boundary`
+   - Current next branch: evaluate guarded required-status-check application
+     boundary evidence from ready readiness artifacts before any CI telemetry
      gate enforcement or required status check activation is considered.
 
 ## Dual-Interface Causal Spine Expansion

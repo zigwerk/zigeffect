@@ -495,7 +495,7 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-readiness`
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-application-boundary`
 after the unified causal spine, deep runtime internals, app semantic trace API,
 bounded agent query surface, record-only encryption-at-rest policy,
 record-only alerting integrations, delivered live dashboard streaming
@@ -562,9 +562,10 @@ fixture, NenDB retention fixture, workbench read-only preview, CI artifact
 preview, CI harness boundary, CI archive application, CI archive evidence
 policy, CI gate readiness, CI gate application boundary, and CI gate dry-run
 policy, evaluator, advisory CI report, and advisory CI report application
-boundary, and advisory CI report publication policy milestones.
+boundary, advisory CI report publication policy, and required status check
+readiness milestones.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-readiness`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-application-boundary`.
 
 ## Production Telemetry Capture Design
 
@@ -1072,6 +1073,38 @@ configuration, OTLP serialization, NenDB writes, durable production writes,
 hosted dashboard readiness, production cluster readiness, non-NenDB adapter
 scope, alternate renderer scope, or production mutation authority.
 
+Run the CI gate required status check readiness review after a ready
+publication-policy artifact exists:
+
+```sh
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-gate-required-status-check-readiness -- \
+  --from-publication-policy ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-advisory-ci-report-publication-policy.json \
+  approve \
+  --reason "required status check readiness reviewed" \
+  --verified-command "zig build causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy" \
+  --verified-command "zig build causal-artifacts" \
+  --verified-command "zig build release-gate --summary none" \
+  --verified-command "zig build release-gate-report" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The CI gate required status check readiness review records schema
+`zigeffect.causal.production-telemetry-ci-gate-required-status-check-readiness.v1`.
+It consumes ready publication-policy artifacts, emits ready or blocked
+readiness evidence, defines candidate required-check profiles with activation
+disabled, and records activation guardrails. Do not treat it as a required
+status check, merge blocker, branch protection update, GitHub API mutation,
+workflow mutation by the tool, artifact upload execution, GitHub step summary
+write, pull request comment, runtime pipeline execution, live telemetry,
+network send, collector configuration, OTLP serialization, NenDB write,
+durable production write, hosted dashboard readiness, production cluster
+readiness, non-NenDB adapter scope, alternate renderer scope, or production
+mutation authority.
+
 ## Production Artifact Aggregation
 
 Run the production artifact aggregation contract before starting durable
@@ -1366,11 +1399,12 @@ workbench-readonly-preview, CI-artifact-preview, CI-harness-boundary,
 CI-archive-application, CI-archive-evidence-policy, CI-gate-readiness, and
 CI-gate-application-boundary, CI-gate-dry-run-policy, and
 CI-gate-dry-run-evaluator, CI-gate-advisory-ci-report, and
-CI-gate-advisory-ci-report-application-boundary, and
-CI-gate-advisory-ci-report-publication-policy
+CI-gate-advisory-ci-report-application-boundary,
+CI-gate-advisory-ci-report-publication-policy, and
+CI-gate-required-status-check-readiness
 reports are now delivered.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-readiness`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-application-boundary`.
 
 ## Production Gaps
 
