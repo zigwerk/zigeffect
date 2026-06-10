@@ -895,16 +895,16 @@ Goal: provide runnable examples that explain the system better than prose.
 
 Deliverables:
 
-- [ ] Add local approval workflow example.
-- [ ] Add durable queue worker example.
-- [ ] Add timer and signal workflow example.
-- [ ] Add local actor example.
-- [ ] Add multi-runner cluster example.
-- [ ] Add cluster workflow migration example.
+- [x] Add local approval workflow example.
+- [x] Add durable queue worker example.
+- [x] Add timer and signal workflow example.
+- [x] Add local actor example.
+- [x] Add multi-runner cluster example.
+- [x] Add cluster workflow migration example.
 
 Acceptance:
 
-- [ ] `zig build examples` compiles and runs all examples.
+- [x] `zig build examples` compiles and runs all examples.
 
 ## Milestone 45: Public API Review And Stabilization
 

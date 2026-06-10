@@ -635,7 +635,7 @@ git commit -m "example(zigeffect): add cluster workflow migration"
 - Modify: `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`
 - Modify: `docs/superpowers/plans/2026-06-10-zigeffect-end-to-end-examples.md`
 
-- [ ] **Step 1: Update README example list**
+- [x] **Step 1: Update README example list**
 
 Add the six new examples to the README docs list:
 
@@ -650,7 +650,7 @@ Add the six new examples to the README docs list:
 
 Keep the existing `zig build examples` command as the aggregate example gate.
 
-- [ ] **Step 2: Mark M44 complete**
+- [x] **Step 2: Mark M44 complete**
 
 Update the M44 roadmap block:
 
@@ -669,7 +669,7 @@ and:
 - [x] `zig build examples` compiles and runs all examples.
 ```
 
-- [ ] **Step 3: Run full verification**
+- [x] **Step 3: Run full verification**
 
 Run:
 
@@ -705,7 +705,7 @@ Expected: build and test commands pass, format and diff checks pass, marker
 scan exits with no matches, and only intentional docs remain uncommitted before
 the final docs commit.
 
-- [ ] **Step 4: Commit docs**
+- [x] **Step 4: Commit docs**
 
 Commit:
 
