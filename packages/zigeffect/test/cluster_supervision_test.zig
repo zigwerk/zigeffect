@@ -126,6 +126,79 @@ test "supervised cluster processing records local entity restart and keeps shard
     try std.testing.expectEqual(fx.MessageDeliveryStatus.claimed, retryable.status);
 }
 
+test "supervised entity escalation releases shard for another runner" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    const runner_storage = runner_storage_state.asRunnerStorage();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+
+    var lease_manager_a = try fx.LocalShardLeaseManager.init(
+        std.testing.allocator,
+        runner_storage,
+        fx.runnerAddress("machine-supervision", "runner-a"),
+        .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    );
+    defer lease_manager_a.deinit();
+    var runtime_a = try fx.ClusterRuntime.init(
+        std.testing.allocator,
+        message_storage,
+        &lease_manager_a,
+        .{
+            .shard_count = 8,
+            .entity_runtime_options = .{ .restart_intensity = .{ .max_restarts = 0, .within_ms = 1_000 } },
+        },
+    );
+    defer runtime_a.deinit();
+
+    const address = try addressForShard(0, 8);
+    _ = try runtime_a.acquireShard(0, 1_000);
+    const ref_a = try runtime_a.registerEntity(.{ .address = address, .name = "migrating-counter" }, 1_000);
+    var submitted = try ref_a.tell("text", "finish", "migrate-after-escalation");
+    defer submitted.deinit(std.testing.allocator);
+
+    const FailingHandler = struct {
+        pub fn handle(_: *fx.EntityScope, _: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            return error.Boom;
+        }
+    };
+
+    const failed = try runtime_a.processShardSupervised(0, FailingHandler, 1_100);
+    try std.testing.expectEqual(@as(usize, 1), failed.entity_escalations);
+    try std.testing.expectEqual(@as(usize, 1), failed.shard_releases);
+    try std.testing.expect(!runtime_a.ownsShard(0));
+    try std.testing.expect((try runner_storage.lease(0)) == null);
+
+    var lease_manager_b = try fx.LocalShardLeaseManager.init(
+        std.testing.allocator,
+        runner_storage,
+        fx.runnerAddress("machine-supervision", "runner-b"),
+        .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    );
+    defer lease_manager_b.deinit();
+    var runtime_b = try fx.ClusterRuntime.init(
+        std.testing.allocator,
+        message_storage,
+        &lease_manager_b,
+        .{ .shard_count = 8 },
+    );
+    defer runtime_b.deinit();
+
+    _ = try runtime_b.acquireShard(0, 1_200);
+    _ = try runtime_b.registerEntity(.{ .address = address, .name = "migrating-counter" }, 1_200);
+
+    const SuccessHandler = struct {
+        pub fn handle(_: *fx.EntityScope, _: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            return .noreply;
+        }
+    };
+
+    const recovered = try runtime_b.processShardSupervised(0, SuccessHandler, 1_300);
+    try std.testing.expectEqual(@as(usize, 1), recovered.acked);
+    try std.testing.expect((try message_storage.unprocessedById(submitted.envelope.id, std.testing.allocator)) == null);
+}
+
 fn addressForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.EntityAddress {
     var id: u64 = 1;
     while (id < 100_000) : (id += 1) {

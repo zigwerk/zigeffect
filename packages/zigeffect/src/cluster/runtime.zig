@@ -300,6 +300,11 @@ pub const ClusterRuntime = struct {
                 }
                 if (decision.escalated) {
                     report.entity_escalations += 1;
+                    if (self.supervision_policy.release_shard_on_escalation) {
+                        try self.releaseShard(shard_id, now_ms);
+                        report.shard_releases += 1;
+                        return report;
+                    }
                 }
                 continue;
             };
