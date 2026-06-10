@@ -188,8 +188,19 @@ pub fn isClusterEvent(kind: CausalEventKind) bool {
 }
 
 pub fn formatClusterCausalDot(allocator: Allocator, store: *const CausalStore) Allocator.Error![]const u8 {
-    _ = store;
-    return allocator.dupe(u8, "digraph zigeffect_cluster {\n}\n");
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "digraph zigeffect_cluster {\n");
+    try output.appendSlice(allocator, "  graph [rankdir=\"LR\", labelloc=\"t\", label=\"zigeffect cluster causal graph\"];\n");
+    try output.appendSlice(allocator, "  node [shape=\"box\", style=\"rounded,filled\", fontname=\"Menlo\", fontsize=\"10\"];\n");
+    try output.appendSlice(allocator, "  edge [fontname=\"Menlo\", fontsize=\"9\", color=\"#64748b\"];\n");
+    for (store.events.items) |event| {
+        if (!isClusterEvent(event.kind)) continue;
+        try causal_mod.appendCausalDotEvent(&output, allocator, event);
+    }
+    try output.appendSlice(allocator, "}\n");
+    return output.toOwnedSlice(allocator);
 }
 
 pub fn collectClusterMetrics(
@@ -199,12 +210,38 @@ pub fn collectClusterMetrics(
     shard_count: ShardCount,
     causal_store: ?*const CausalStore,
 ) !ClusterMetricsSnapshot {
-    _ = allocator;
-    _ = runner_store;
-    _ = message_store;
-    _ = shard_count;
-    _ = causal_store;
-    return .{};
+    var snapshot = ClusterMetricsSnapshot{};
+
+    var leases = try runner_store.leases(allocator);
+    defer leases.deinit();
+    snapshot.active_leases = leases.leases.len;
+
+    var shard_id: ShardId = 0;
+    while (shard_id < @as(ShardId, shard_count)) : (shard_id += 1) {
+        var batch = try message_store.unprocessedByShard(shard_id, allocator);
+        defer batch.deinit();
+        snapshot.mailbox_lag += batch.records.len;
+        for (batch.records) |record| {
+            if (record.envelope.attempt > 0) {
+                snapshot.message_retries += 1;
+            }
+        }
+    }
+
+    if (causal_store) |store| {
+        const report = try clusterCausalReport(store);
+        snapshot.failures = report.failures;
+        for (store.events.items) |event| {
+            switch (event.kind) {
+                .cluster_shard_handoff_started,
+                .cluster_shard_recovery_completed,
+                => snapshot.migrations += 1,
+                else => {},
+            }
+        }
+    }
+
+    return snapshot;
 }
 
 pub fn recordClusterMetrics(metrics: *Metrics, snapshot: ClusterMetricsSnapshot) Allocator.Error!void {

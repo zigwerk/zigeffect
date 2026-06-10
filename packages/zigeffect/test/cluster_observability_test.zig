@@ -151,6 +151,77 @@ test "cluster failure report identifies runner shard message entity and cause" {
     try expectContains(text, "cause=Boom");
 }
 
+test "cluster causal dot renders only cluster graph" {
+    var causal = fx.CausalStore.init(std.testing.allocator);
+    defer causal.deinit();
+    const root = try causal.record(.{ .kind = .cluster_runner_registered, .label = "runner-a", .status = "running" });
+    _ = try causal.record(.{ .kind = .cluster_message_submitted, .parent_id = root, .label = "message-1", .status = "pending" });
+    _ = try causal.record(.{ .kind = .run_started, .label = "non-cluster" });
+
+    const dot = try fx.formatClusterCausalDot(std.testing.allocator, &causal);
+    defer std.testing.allocator.free(dot);
+    try expectContains(dot, "digraph zigeffect_cluster");
+    try expectContains(dot, "cluster_runner_registered");
+    try expectContains(dot, "cluster_message_submitted");
+    try expectContains(dot, "event_1 -> event_2");
+    try std.testing.expect(std.mem.indexOf(u8, dot, "non-cluster") == null);
+}
+
+test "cluster metrics collect leases lag retries migrations and failures" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    const runner_storage = runner_storage_state.asRunnerStorage();
+    _ = try runner_storage.acquire(.{
+        .shard_id = 0,
+        .owner = fx.runnerAddress("machine-observe", "runner-a"),
+        .now_ms = 1_000,
+        .ttl_ms = 1_000,
+    });
+
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const address = try observedAddressForShard(0, 4);
+    const message_storage = message_storage_state.asMessageStorage();
+    var submitted = try message_storage.submit(.{
+        .shard_id = 0,
+        .envelope = .{
+            .kind = .tell,
+            .address = address,
+            .idempotency_key = "metric-message",
+            .payload_type_name = "text",
+            .payload = "work",
+        },
+    });
+    defer submitted.deinit(std.testing.allocator);
+    const claimed = try message_storage.claim(.{ .shard_id = 0, .message_id = submitted.envelope.id, .now_ms = 1_100 });
+    defer fx.deinitMessageEnvelope(std.testing.allocator, claimed);
+
+    var causal = fx.CausalStore.init(std.testing.allocator);
+    defer causal.deinit();
+    _ = try causal.record(.{ .kind = .cluster_shard_recovery_completed, .status = "recovered" });
+    _ = try causal.record(.{ .kind = .cluster_entity_failed, .status = "failure" });
+
+    const snapshot = try fx.collectClusterMetrics(
+        std.testing.allocator,
+        runner_storage,
+        message_storage,
+        4,
+        &causal,
+    );
+    try std.testing.expectEqual(@as(usize, 1), snapshot.active_leases);
+    try std.testing.expectEqual(@as(usize, 1), snapshot.mailbox_lag);
+    try std.testing.expectEqual(@as(usize, 1), snapshot.message_retries);
+    try std.testing.expectEqual(@as(usize, 1), snapshot.migrations);
+    try std.testing.expectEqual(@as(usize, 1), snapshot.failures);
+
+    var metrics = fx.Metrics.init(std.testing.allocator);
+    defer metrics.deinit();
+    try fx.recordClusterMetrics(&metrics, snapshot);
+    try std.testing.expectEqual(@as(i64, 1), metrics.get("cluster.leases.active"));
+    try std.testing.expectEqual(@as(i64, 1), metrics.get("cluster.mailbox.lag"));
+    try std.testing.expectEqual(@as(i64, 1), metrics.get("cluster.messages.retries"));
+}
+
 fn expectClusterEvent(snapshot: fx.CausalSnapshot, kind: fx.CausalEventKind) !void {
     for (snapshot.events) |event| {
         if (event.kind == kind) return;
