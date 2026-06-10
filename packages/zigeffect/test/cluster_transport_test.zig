@@ -415,6 +415,110 @@ test "loopback http transport stops after retry limit" {
     try std.testing.expectEqual(@as(usize, 0), by_shard.records.len);
 }
 
+test "production transport rejects invalid limits on init" {
+    var storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asMessageStorage();
+
+    try std.testing.expectError(error.InvalidTransportLimits, fx.ProductionHttpClusterTransport.init(std.testing.allocator, storage, .{
+        .shard_count = 4,
+        .limits = .{ .max_envelope_bytes = 0, .max_chunk_bytes = 1, .max_in_flight = 1 },
+    }));
+    try std.testing.expectError(error.InvalidTransportLimits, fx.ProductionHttpClusterTransport.init(std.testing.allocator, storage, .{
+        .shard_count = 4,
+        .limits = .{ .max_envelope_bytes = 8, .max_chunk_bytes = 0, .max_in_flight = 1 },
+    }));
+    try std.testing.expectError(error.InvalidTransportLimits, fx.ProductionHttpClusterTransport.init(std.testing.allocator, storage, .{
+        .shard_count = 4,
+        .limits = .{ .max_envelope_bytes = 8, .max_chunk_bytes = 9, .max_in_flight = 1 },
+    }));
+    try std.testing.expectError(error.InvalidTransportLimits, fx.ProductionHttpClusterTransport.init(std.testing.allocator, storage, .{
+        .shard_count = 4,
+        .limits = .{ .max_envelope_bytes = 8, .max_chunk_bytes = 8, .max_in_flight = 0 },
+    }));
+}
+
+test "production transport auth rejects before durable submission" {
+    var storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asMessageStorage();
+    var transport_state = try fx.ProductionHttpClusterTransport.init(std.testing.allocator, storage, .{
+        .shard_count = 4,
+        .auth = .{ .mode = .bearer_token, .credential = "secret-token" },
+    });
+    defer transport_state.deinit();
+
+    const address = fx.entityAddress("counter", "production-auth-reject");
+    const shard_id = try fx.shardIdForAddress(address, 4);
+    try std.testing.expectError(error.TransportUnauthorized, transport_state.asClusterTransport().send(std.testing.allocator, .{
+        .kind = .tell,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "inc",
+        .redacted_detail = "auth failure",
+        .auth = .{ .mode = .bearer_token, .credential = "wrong-token" },
+    }));
+
+    var by_shard = try storage.unprocessedByShard(shard_id, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 0), by_shard.records.len);
+    const metrics = transport_state.snapshotMetrics();
+    try std.testing.expectEqual(@as(usize, 1), metrics.failures);
+    try std.testing.expectEqualStrings("TransportUnauthorized", metrics.last_error_name);
+}
+
+test "production transport limit and backpressure reject before durable submission" {
+    var storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asMessageStorage();
+    var transport_state = try fx.ProductionHttpClusterTransport.init(std.testing.allocator, storage, .{
+        .shard_count = 4,
+        .limits = .{ .max_envelope_bytes = 4, .max_chunk_bytes = 4, .max_in_flight = 1 },
+    });
+    defer transport_state.deinit();
+
+    const address = fx.entityAddress("counter", "production-limit-reject");
+    const shard_id = try fx.shardIdForAddress(address, 4);
+    try std.testing.expectError(error.TransportPayloadTooLarge, transport_state.asClusterTransport().send(std.testing.allocator, .{
+        .kind = .tell,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "12345",
+        .redacted_detail = "too large",
+    }));
+
+    transport_state.lifecycle.in_flight = 1;
+    try std.testing.expectError(error.TransportBackpressured, transport_state.asClusterTransport().send(std.testing.allocator, .{
+        .kind = .tell,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "inc",
+        .redacted_detail = "backpressure",
+    }));
+
+    var by_shard = try storage.unprocessedByShard(shard_id, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 0), by_shard.records.len);
+    const metrics = transport_state.snapshotMetrics();
+    try std.testing.expectEqual(@as(usize, 2), metrics.failures);
+    try std.testing.expectEqual(@as(usize, 1), metrics.backpressured);
+}
+
+test "transport failure report formats without secrets" {
+    const report = fx.ClusterTransportFailureReport{
+        .transport = .production_http,
+        .retryable = true,
+        .attempts = 3,
+        .error_name = "TransportUnavailable",
+        .redacted_detail = "mode=bearer_token",
+    };
+    const text = try fx.formatClusterTransportFailureReport(std.testing.allocator, report);
+    defer std.testing.allocator.free(text);
+    try std.testing.expect(std.mem.indexOf(u8, text, "TransportUnavailable") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "production_http") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "secret") == null);
+}
+
 test "cluster runner processes ask sent through in-process transport" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

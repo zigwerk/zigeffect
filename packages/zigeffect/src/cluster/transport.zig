@@ -361,7 +361,99 @@ pub const ProductionHttpClusterTransportOptions = struct {
     failures_before_success: usize = 0,
 };
 
-pub const ProductionHttpClusterTransport = struct {};
+pub const ProductionHttpClusterTransport = struct {
+    handler: InProcessClusterTransport,
+    auth: ClusterTransportAuth = .{},
+    limits: ClusterTransportLimits = .{},
+    failures_before_success: usize = 0,
+    lifecycle: ClusterTransportLifecycleState = .{},
+    last_failure: ?ClusterTransportFailureReport = null,
+
+    pub fn init(allocator: Allocator, storage: MessageStorage, options: ProductionHttpClusterTransportOptions) ClusterTransportError!ProductionHttpClusterTransport {
+        try validateTransportLimits(options.limits);
+        return .{
+            .handler = try InProcessClusterTransport.init(allocator, storage, .{ .shard_count = options.shard_count }),
+            .auth = options.auth,
+            .limits = options.limits,
+            .failures_before_success = options.failures_before_success,
+        };
+    }
+
+    pub fn deinit(self: *ProductionHttpClusterTransport) void {
+        self.handler.deinit();
+    }
+
+    pub fn asClusterTransport(self: *ProductionHttpClusterTransport) ClusterTransport {
+        return .{
+            .ptr = self,
+            .vtable = &.{
+                .send = sendOpaque,
+            },
+        };
+    }
+
+    pub fn snapshotMetrics(self: *const ProductionHttpClusterTransport) ClusterTransportMetricsSnapshot {
+        return self.lifecycle;
+    }
+
+    pub fn stop(self: *ProductionHttpClusterTransport) void {
+        self.lifecycle.started = false;
+        self.lifecycle.stopped = true;
+    }
+
+    pub fn lastFailure(self: *const ProductionHttpClusterTransport) ?ClusterTransportFailureReport {
+        return self.last_failure;
+    }
+
+    pub fn send(self: *ProductionHttpClusterTransport, allocator: Allocator, request: ClusterTransportRequest) !ClusterTransportResponse {
+        self.lifecycle.sends += 1;
+        try self.preflight(request);
+
+        self.lifecycle.in_flight += 1;
+        defer self.lifecycle.in_flight -= 1;
+
+        var response = self.handler.sendWithAttempts(request, 1, .production_http) catch |err| {
+            self.recordFailure(1, err, "durable submit failed");
+            return err;
+        };
+        errdefer response.deinit(allocator);
+
+        self.lifecycle.successes += 1;
+        return response;
+    }
+
+    fn preflight(self: *ProductionHttpClusterTransport, request: ClusterTransportRequest) ClusterTransportError!void {
+        if (self.lifecycle.stopped) {
+            self.recordFailure(1, error.TransportUnavailable, "transport stopped");
+            return error.TransportUnavailable;
+        }
+        if (request.policy.timeout_ms == 0) {
+            self.recordFailure(1, error.TransportTimeout, "timeout before submit");
+            return error.TransportTimeout;
+        }
+        validateTransportAuth(self.auth, request.auth) catch |err| {
+            self.recordFailure(1, err, "auth rejected");
+            return err;
+        };
+        validateTransportEnvelopeLimits(request, self.limits) catch |err| {
+            self.recordFailure(1, err, "envelope limits rejected");
+            return err;
+        };
+        if (self.lifecycle.in_flight >= self.limits.max_in_flight) {
+            self.recordFailure(1, error.TransportBackpressured, "max in-flight reached");
+            return error.TransportBackpressured;
+        }
+    }
+
+    fn recordFailure(self: *ProductionHttpClusterTransport, attempts: usize, err: anyerror, detail: []const u8) void {
+        recordTransportFailure(&self.lifecycle, &self.last_failure, .production_http, attempts, err, detail);
+    }
+
+    fn sendOpaque(ptr: *anyopaque, allocator: Allocator, request: ClusterTransportRequest) anyerror!ClusterTransportResponse {
+        const self: *ProductionHttpClusterTransport = @ptrCast(@alignCast(ptr));
+        return self.send(allocator, request);
+    }
+};
 
 pub const ProductionSocketClusterTransportOptions = ProductionHttpClusterTransportOptions;
 
@@ -612,6 +704,58 @@ pub fn formatClusterTransportFailureReport(allocator: Allocator, report: Cluster
             report.redacted_detail,
         },
     );
+}
+
+fn validateTransportLimits(limits: ClusterTransportLimits) ClusterTransportError!void {
+    if (limits.max_envelope_bytes == 0) return error.InvalidTransportLimits;
+    if (limits.max_chunk_bytes == 0) return error.InvalidTransportLimits;
+    if (limits.max_chunk_bytes > limits.max_envelope_bytes) return error.InvalidTransportLimits;
+    if (limits.max_in_flight == 0) return error.InvalidTransportLimits;
+}
+
+fn validateTransportAuth(required: ClusterTransportAuth, provided: ClusterTransportAuth) ClusterTransportError!void {
+    if (required.mode != provided.mode) return error.TransportUnauthorized;
+    switch (required.mode) {
+        .none => {
+            if (provided.credential != null) return error.TransportUnauthorized;
+        },
+        .bearer_token, .shared_secret => {
+            const required_credential = required.credential orelse return error.TransportUnauthorized;
+            const provided_credential = provided.credential orelse return error.TransportUnauthorized;
+            if (required_credential.len == 0 or provided_credential.len == 0) return error.TransportUnauthorized;
+            if (!std.mem.eql(u8, required_credential, provided_credential)) return error.TransportUnauthorized;
+        },
+    }
+}
+
+fn validateTransportEnvelopeLimits(request: ClusterTransportRequest, limits: ClusterTransportLimits) ClusterTransportError!void {
+    if (request.payload.len > limits.max_envelope_bytes) return error.TransportPayloadTooLarge;
+}
+
+fn isRetryableTransportError(err: anyerror) bool {
+    return err == error.TransportUnavailable or
+        err == error.TransportBackpressured or
+        err == error.TransportTimeout;
+}
+
+fn recordTransportFailure(
+    lifecycle: *ClusterTransportLifecycleState,
+    last_failure: *?ClusterTransportFailureReport,
+    kind: ClusterTransportKind,
+    attempts: usize,
+    err: anyerror,
+    detail: []const u8,
+) void {
+    lifecycle.failures += 1;
+    if (err == error.TransportBackpressured) lifecycle.backpressured += 1;
+    lifecycle.last_error_name = @errorName(err);
+    last_failure.* = .{
+        .transport = kind,
+        .retryable = isRetryableTransportError(err),
+        .attempts = attempts,
+        .error_name = @errorName(err),
+        .redacted_detail = detail,
+    };
 }
 
 fn validateIngressKind(kind: MessageEnvelopeKind) ClusterTransportError!void {
