@@ -894,10 +894,24 @@ Status values:
      NenDB writes, hosted dashboard claims, production cluster claims,
      alternate renderers, and mutation authority disabled.
 27. `codex/zigeffect-causal-production-telemetry-ci-gate-application-boundary`
-   - Current next branch: design the reviewed application boundary for future
-     CI telemetry gates without yet enforcing gates, mutating workflows, running
-     live telemetry, writing durable production storage, claiming production
-     cluster readiness, or granting mutation authority.
+   - Delivered: `causal-production-telemetry-ci-gate-application-boundary`
+     emits
+     `zigeffect.causal.production-telemetry-ci-gate-application-boundary.v1`,
+     consumes ready CI gate readiness artifacts, records planned, applied, or
+     blocked application boundary evidence, only records `applied=true` when
+     reviewed workflow-change evidence, before evidence, after evidence,
+     after-workflow content, safe after-workflow checks, and post-application
+     verification commands exist, and hands off to
+     `codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-policy`
+     while keeping CI gate enforcement, required status checks, workflow
+     mutation by the tool, artifact upload execution, live telemetry, durable
+     writes, NenDB writes, hosted dashboard claims, production cluster claims,
+     alternate renderers, and mutation authority disabled.
+28. `codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-policy`
+   - Current next branch: define advisory dry-run policy evaluation for the CI
+     gate candidate signals without required status checks, workflow mutation,
+     live telemetry, durable production storage, production cluster readiness
+     claims, or mutation authority.
 
 ## Dual-Interface Causal Spine Expansion
 

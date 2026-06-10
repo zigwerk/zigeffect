@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-telemetry-ci-gate-application-boundary` means the
+The recommendation `start-production-telemetry-ci-gate-dry-run-policy` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -151,8 +151,11 @@ execution, runtime pipeline execution, live telemetry, network send, collector
 endpoint, OTLP serialization, durable writes, NenDB writes, hosted dashboard
 claims, production cluster claims, alternate renderer scope, and mutation
 authority before any gate application boundary branch.
+The production telemetry CI gate application boundary branch is also delivered:
+it consumes ready gate readiness artifacts and records planned or blocked
+boundary evidence before dry-run policy work.
 The next branch should be
-`codex/zigeffect-causal-production-telemetry-ci-gate-application-boundary`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-policy`.
 
 ## Dependency Order
 
@@ -189,6 +192,7 @@ The backlog currently orders future production-hardening branches as:
 29. `production-telemetry-ci-archive-application` delivered
 30. `production-telemetry-ci-archive-evidence-policy` delivered
 31. `production-telemetry-ci-gate-readiness` delivered
+32. `production-telemetry-ci-gate-application-boundary` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -491,11 +495,26 @@ configuration, disabled OTLP serialization, disabled runtime pipeline
 execution, disabled durable writes, disabled NenDB writes, NenDB-only durable
 direction, and SolidJS `zig-webui` workbench direction.
 
-The next branch should use ready CI gate readiness artifacts to design the gate
-application boundary before any CI telemetry gate enforcement, required status
-checks, workflow mutation, durable production writes, live ingestion,
-exporters, capacity claims, production cluster claims, or mutation authority
-are considered.
+Production telemetry CI gate application boundary is documented in
+[production-telemetry-ci-gate-application-boundary.md](production-telemetry-ci-gate-application-boundary.md).
+It emits
+`zigeffect.causal.production-telemetry-ci-gate-application-boundary.v1`
+through `zig build causal-production-telemetry-ci-gate-application-boundary`,
+consumes ready CI gate readiness artifacts, records planned or blocked
+application boundary evidence, and only records `applied=true` when reviewed
+workflow-change evidence, before evidence, after evidence, after-workflow
+content, safe after-workflow checks, and all post-application verification
+commands exist. It preserves disabled CI gate enforcement, disabled required
+status checks, disabled workflow mutation by the tool, disabled artifact upload
+execution, disabled live telemetry, disabled durable writes, disabled NenDB
+writes, NenDB-only durable direction, and SolidJS `zig-webui` workbench
+direction.
+
+The next branch should use planned or applied CI gate application boundary
+artifacts to define CI gate dry-run policy before any CI telemetry gate
+enforcement, required status checks, live telemetry, durable production writes,
+capacity claims, production cluster claims, or mutation authority are
+considered.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -705,6 +724,15 @@ zig build causal-production-telemetry-ci-gate-readiness -- \
   reject \
   --reason "negative CI gate readiness path" \
   --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-readiness-negative
+zig build causal-production-telemetry-ci-gate-application-boundary -- \
+  --from-gate-readiness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary-ci-gate-readiness.json \
+  plan \
+  --reason "CI gate application boundary planned"
+zig build causal-production-telemetry-ci-gate-application-boundary -- \
+  --from-gate-readiness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary-ci-gate-readiness.json \
+  record-applied \
+  --reason "negative CI gate application boundary path" \
+  --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-application-boundary-negative
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

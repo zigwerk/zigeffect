@@ -129,8 +129,10 @@ policy handoff is now delivered through
 `causal-production-telemetry-ci-archive-evidence-policy`.
 The CI gate readiness handoff is now delivered through
 `causal-production-telemetry-ci-gate-readiness`.
+The CI gate application boundary handoff is now delivered through
+`causal-production-telemetry-ci-gate-application-boundary`.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-application-boundary`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-policy`.
 
 ## Verification
 

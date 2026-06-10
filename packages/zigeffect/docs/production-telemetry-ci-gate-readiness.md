@@ -86,6 +86,10 @@ workflow mutation, artifact upload execution, live telemetry, runtime
 pipelines, NenDB writes, durable writes, hosted dashboards, production cluster
 claims, or mutation authority.
 
+That application boundary is now delivered by
+`causal-production-telemetry-ci-gate-application-boundary`. The current next
+branch is `codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-policy`.
+
 ## Verification
 
 ```sh

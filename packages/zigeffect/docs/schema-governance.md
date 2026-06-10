@@ -474,6 +474,24 @@ endpoints, write NenDB records, write durable production storage, host a
 production dashboard, orchestrate production clusters, add non-NenDB adapter
 work, add alternate renderers, or grant mutation authority.
 
+- `zigeffect.causal.production-telemetry-ci-gate-application-boundary.v1`
+
+The production-telemetry-ci-gate-application-boundary report is a record-only,
+gate-application-boundary, plan-or-record-applied,
+before-after-verification, `cluster-release-gate-aware`,
+`mutation-authority-none`, `no-live-ingestion`, `no-network`,
+`no-durable-write`, `no-nendb-write`, `no-ci-gate-enforcement`, and
+`no-tool-workflow-mutation` production hardening contract. It consumes ready CI
+gate readiness artifacts and emits `planned`, `applied`, or `blocked`
+application boundary artifacts. It only records `applied=true` when reviewed
+workflow-change evidence, before evidence, after evidence, after-workflow
+content, safe after-workflow checks, and all post-application verification
+commands are present. It does not mutate workflows, enable CI gate
+enforcement, create required status checks, execute artifact uploads, ingest
+live telemetry, write NenDB, write durable production storage, host a
+production dashboard, orchestrate production clusters, add non-NenDB adapter
+work, add alternate renderers, or grant production mutation authority.
+
 ### Human-Agent Feedback
 
 - `zigeffect.causal.human-agent-feedback-loop.v1`

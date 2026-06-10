@@ -588,6 +588,27 @@ upload execution, live telemetry, NenDB writes, durable writes, or mutation
 authority. The full policy is in
 [docs/production-telemetry-ci-gate-readiness.md](docs/production-telemetry-ci-gate-readiness.md).
 
+Record the production telemetry CI gate application boundary:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-gate-application-boundary -- \
+  --from-gate-readiness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary-ci-gate-readiness.json \
+  plan \
+  --reason "CI gate application boundary planned"
+```
+
+The report uses schema
+`zigeffect.causal.production-telemetry-ci-gate-application-boundary.v1`,
+consumes ready CI gate readiness artifacts, records planned, applied, or
+blocked application boundary evidence, and only records `applied=true` when
+reviewed workflow-change evidence, before evidence, after evidence,
+after-workflow content, safe after-workflow checks, and post-application
+verification exist. It does not enable CI gates, required status checks,
+workflow mutation by the tool, artifact upload execution, live telemetry,
+NenDB writes, durable writes, or mutation authority. The full policy is in
+[docs/production-telemetry-ci-gate-application-boundary.md](docs/production-telemetry-ci-gate-application-boundary.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -613,8 +634,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-ci-gate-application-boundary`
-after the delivered production telemetry CI gate readiness.
+`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-policy` after the
+delivered production telemetry CI gate application boundary.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in
