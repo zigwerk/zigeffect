@@ -18,6 +18,7 @@ import {
   type ChainSourceStep,
   type VisualGraphLayoutMode,
   type VisualGraphModel,
+  type VisualGraphPerspective,
   causePathForEvent,
   deriveGovernanceModel,
   deriveGraphModel,
@@ -67,6 +68,8 @@ export function App() {
   const [status, setStatus] = createSignal("all");
   const [copiedCommand, setCopiedCommand] = createSignal<string | null>(null);
   const [layoutMode, setLayoutMode] = createSignal<VisualGraphLayoutMode>("dagre");
+  const [graphPerspective, setGraphPerspective] = createSignal<VisualGraphPerspective>("cause");
+  const [selectedGraphNodeId, setSelectedGraphNodeId] = createSignal<string | null>(null);
 
   const parsed = createMemo(() => {
     const loaded = payload();
@@ -115,7 +118,12 @@ export function App() {
     if (!current || !graph) {
       return null;
     }
-    return deriveVisualGraphModel(current, graph, layoutMode(), liveDashboard());
+    return deriveVisualGraphModel(current, graph, {
+      layoutMode: layoutMode(),
+      perspective: graphPerspective(),
+      selectedEventId: selectedId(),
+      liveDashboard: liveDashboard(),
+    });
   });
   const visibleEvents = createMemo(() => {
     const current = model();
@@ -259,10 +267,17 @@ export function App() {
                     <VisualGraphView
                       model={visualGraph()}
                       layoutMode={layoutMode()}
+                      perspective={graphPerspective()}
+                      selectedNodeId={selectedGraphNodeId()}
                       selected={selectedEvent()}
                       events={current().events}
                       onLayoutMode={setLayoutMode}
-                      onSelect={setSelectedId}
+                      onPerspective={(perspective) => {
+                        setGraphPerspective(perspective);
+                        setSelectedGraphNodeId(null);
+                      }}
+                      onSelectEvent={setSelectedId}
+                      onSelectNode={setSelectedGraphNodeId}
                     />
                   </Match>
                   <Match when={activeTab() === "chain"}>
@@ -1013,12 +1028,22 @@ function LiveGuardrails(props: { guardrails: string[]; warnings: string[] }) {
 function VisualGraphView(props: {
   model: VisualGraphModel | null;
   layoutMode: VisualGraphLayoutMode;
+  perspective: VisualGraphPerspective;
+  selectedNodeId: string | null;
   selected: CausalEvent | null;
   events: CausalEvent[];
   onLayoutMode: (mode: VisualGraphLayoutMode) => void;
-  onSelect: (id: string) => void;
+  onPerspective: (perspective: VisualGraphPerspective) => void;
+  onSelectEvent: (id: string) => void;
+  onSelectNode: (id: string) => void;
 }) {
   const modes: VisualGraphLayoutMode[] = ["dagre", "force", "radial"];
+  const perspectives: Array<{ id: VisualGraphPerspective; label: string }> = [
+    { id: "cause", label: "Cause" },
+    { id: "topology", label: "Topology" },
+    { id: "ownership", label: "Ownership" },
+    { id: "lineage", label: "Lineage" },
+  ];
   const causePath = createMemo(() => (
     props.selected ? causePathForEvent(props.events, props.selected.idText) : []
   ));
@@ -1027,18 +1052,33 @@ function VisualGraphView(props: {
     <div class="view-stack">
       <div class="view-heading visual-heading">
         <h2>Visual Graph</h2>
-        <div class="segmented-control" aria-label="Visual graph layout">
-          <For each={modes}>
-            {(mode) => (
-              <button
-                type="button"
-                classList={{ active: props.layoutMode === mode }}
-                onClick={() => props.onLayoutMode(mode)}
-              >
-                {mode}
-              </button>
-            )}
-          </For>
+        <div class="visual-control-stack">
+          <div class="segmented-control" aria-label="Visual graph perspective">
+            <For each={perspectives}>
+              {(perspective) => (
+                <button
+                  type="button"
+                  classList={{ active: props.perspective === perspective.id }}
+                  onClick={() => props.onPerspective(perspective.id)}
+                >
+                  {perspective.label}
+                </button>
+              )}
+            </For>
+          </div>
+          <div class="segmented-control" aria-label="Visual graph layout">
+            <For each={modes}>
+              {(mode) => (
+                <button
+                  type="button"
+                  classList={{ active: props.layoutMode === mode }}
+                  onClick={() => props.onLayoutMode(mode)}
+                >
+                  {mode}
+                </button>
+              )}
+            </For>
+          </div>
         </div>
       </div>
 
@@ -1046,6 +1086,7 @@ function VisualGraphView(props: {
         {(model) => (
           <>
             <div class="visual-graph-summary">
+              <Metric label="perspective" value={model().perspective} />
               <Metric label="layout" value={model().layoutMode} />
               <Metric label="nodes" value={String(model().nodes.length)} />
               <Metric label="edges" value={String(model().edges.length)} />
@@ -1057,8 +1098,29 @@ function VisualGraphView(props: {
                 <VisualGraphCanvas model={model()} />
               </Suspense>
             </div>
-            <CausePath path={causePath()} selected={props.selected} onSelect={props.onSelect} />
-            <VisualGraphFallback model={model()} selected={props.selected} onSelect={props.onSelect} />
+            <div class="visual-debug-grid">
+              <VisualGraphDetail
+                model={model()}
+                selectedNodeId={props.selectedNodeId}
+                selectedEvent={props.selected}
+              />
+              <section class="visual-detail-panel">
+                <div class="lane-section-head">
+                  <h3>Legend</h3>
+                  <span>{model().legend.length}</span>
+                </div>
+                <VisualGraphLegend model={model()} />
+              </section>
+              <VisualGraphWarnings warnings={model().warnings} />
+            </div>
+            <CausePath path={causePath()} selected={props.selected} onSelect={props.onSelectEvent} />
+            <VisualGraphFallback
+              model={model()}
+              selectedNodeId={props.selectedNodeId}
+              selected={props.selected}
+              onSelectEvent={props.onSelectEvent}
+              onSelectNode={props.onSelectNode}
+            />
           </>
         )}
       </Show>
@@ -1066,11 +1128,83 @@ function VisualGraphView(props: {
   );
 }
 
+function VisualGraphDetail(props: {
+  model: VisualGraphModel;
+  selectedNodeId: string | null;
+  selectedEvent: CausalEvent | null;
+}) {
+  const selectedNode = createMemo(() => (
+    props.model.nodes.find((node) => node.id === props.selectedNodeId)
+    ?? props.model.nodes.find((node) => node.eventId === props.selectedEvent?.idText)
+    ?? null
+  ));
+
+  return (
+    <section class="visual-detail-panel">
+      <div class="lane-section-head">
+        <h3>Selection</h3>
+        <span>{selectedNode()?.group ?? "none"}</span>
+      </div>
+      <Show when={selectedNode()} fallback={<EmptyState label="No graph node selected" compact />}>
+        {(node) => (
+          <div class="visual-detail-body">
+            <strong>{node().label}</strong>
+            <span>{node().detail}</span>
+            <small>{node().kind} / {node().status}</small>
+            <small>{node().lane} / {node().priority}</small>
+          </div>
+        )}
+      </Show>
+    </section>
+  );
+}
+
+function VisualGraphLegend(props: { model: VisualGraphModel }) {
+  return (
+    <div class="visual-legend-grid">
+      <For each={props.model.legend}>
+        {(entry) => (
+          <span class={`visual-legend-item ${entry.tone}`}>
+            <strong>{entry.label}</strong>
+            <small>{entry.detail}</small>
+          </span>
+        )}
+      </For>
+    </div>
+  );
+}
+
+function VisualGraphWarnings(props: { warnings: string[] }) {
+  return (
+    <Show when={props.warnings.length > 0}>
+      <section class="warning-panel">
+        <div class="lane-section-head">
+          <h3>Warnings</h3>
+          <span>{props.warnings.length}</span>
+        </div>
+        <ul>
+          <For each={props.warnings}>{(warning) => <li>{warning}</li>}</For>
+        </ul>
+      </section>
+    </Show>
+  );
+}
+
 function VisualGraphFallback(props: {
   model: VisualGraphModel;
+  selectedNodeId: string | null;
   selected: CausalEvent | null;
-  onSelect: (id: string) => void;
+  onSelectEvent: (id: string) => void;
+  onSelectNode: (id: string) => void;
 }) {
+  const selectNode = (nodeId: string) => {
+    const node = props.model.nodes.find((candidate) => candidate.id === nodeId);
+    props.onSelectNode(nodeId);
+    if (node?.eventId) {
+      props.onSelectEvent(node.eventId);
+    }
+  };
+
   return (
     <div class="visual-fallback-grid">
       <section class="live-panel">
@@ -1085,15 +1219,15 @@ function VisualGraphFallback(props: {
                 type="button"
                 classList={{
                   "visual-node-row": true,
-                  selected: props.selected?.idText === node.id,
+                  selected: props.selectedNodeId === node.id || props.selected?.idText === node.eventId,
                   failure: node.tone === "failure",
                   warning: node.tone === "warning",
                 }}
-                onClick={() => props.onSelect(node.id)}
+                onClick={() => selectNode(node.id)}
               >
-                <span>#{node.id}</span>
-                <strong>{node.kind}</strong>
-                <small>{node.status}</small>
+                <span>{node.group}</span>
+                <strong>{node.label}</strong>
+                <small>{node.kind} / {node.status}</small>
               </button>
             )}
           </For>
@@ -1107,9 +1241,10 @@ function VisualGraphFallback(props: {
         <div class="relationship-list">
           <For each={props.model.edges} fallback={<EmptyState label="No visual edges" compact />}>
             {(edge) => (
-              <button type="button" class="relationship-row" onClick={() => props.onSelect(edge.target)}>
+              <button type="button" class="relationship-row" onClick={() => selectNode(edge.target)}>
                 <span>#{edge.source} -&gt; #{edge.target}</span>
                 <strong>{edge.label}</strong>
+                <small>{edge.kind}</small>
               </button>
             )}
           </For>
