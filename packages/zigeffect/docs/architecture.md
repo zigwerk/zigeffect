@@ -338,6 +338,9 @@ Owns Erlang-style distributed runtime surfaces:
 - `fencing.zig`: shard lease fence tokens, stale epoch validation, and
   diagnostics that make outdated shard owners harmless before mailbox or
   workflow journal mutation.
+- `supervision.zig`: cluster supervision policies, reports, runner restart
+  intensity state, workflow-worker classification, and shard-release
+  escalation vocabulary.
 - `shard_lease.zig`: local shard lease manager with bounded TTLs, refresh
   cadence, owned-lease tracking, graceful handoff, dead-runner recovery, and
   causal shard ownership events.

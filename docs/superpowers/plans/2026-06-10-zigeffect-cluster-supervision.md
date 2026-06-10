@@ -37,7 +37,7 @@ Modify:
 
 ## Task 1: Public Supervision Surface
 
-- [ ] **Step 1: Write failing export and runner policy tests**
+- [x] **Step 1: Write failing export and runner policy tests**
 
 Create `packages/zigeffect/test/cluster_supervision_test.zig` with:
 
@@ -95,7 +95,7 @@ comptime {
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -106,7 +106,7 @@ zig build test-raw --summary all
 Expected: failure because `cluster.supervision`, runner/shard child kinds, and
 cluster supervision types are absent.
 
-- [ ] **Step 3: Implement public surface**
+- [x] **Step 3: Implement public surface**
 
 Add `packages/zigeffect/src/cluster/supervision.zig`:
 
@@ -215,7 +215,7 @@ pub const SupervisorChildKind = enum { fiber, workflow_worker, queue_worker, ent
 
 Export the module and types in `cluster/root.zig` and `zigeffect.zig`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -224,7 +224,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/src/cluster/supervision.zig packages/zigeffect/src/runtime/supervisor.zig packages/zigeffect/src/cluster/root.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/test/cluster_supervision_test.zig packages/zigeffect/test/all_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/cluster/supervision.zig packages/zigeffect/src/runtime/supervisor.zig packages/zigeffect/src/cluster/root.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/test/cluster_supervision_test.zig packages/zigeffect/test/all_test.zig
@@ -233,7 +233,7 @@ git commit -m "feat(zigeffect): add cluster supervision surface"
 
 ## Task 2: Entity Supervisor Decision Surface
 
-- [ ] **Step 1: Write failing entity decision test**
+- [x] **Step 1: Write failing entity decision test**
 
 Append to `cluster_supervision_test.zig`:
 
@@ -269,7 +269,7 @@ test "entity runtime exposes last supervisor decision after handler failure" {
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -279,7 +279,7 @@ zig build test-raw --summary all
 
 Expected: failure because `lastSupervisorDecision` is absent.
 
-- [ ] **Step 3: Store and expose supervisor decisions**
+- [x] **Step 3: Store and expose supervisor decisions**
 
 In `cluster/entity.zig`, add a field to `EntityInstance`:
 
@@ -309,7 +309,7 @@ result:
 instance.last_supervisor_decision = null;
 ```
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -318,7 +318,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/src/cluster/entity.zig packages/zigeffect/test/cluster_supervision_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/cluster/entity.zig packages/zigeffect/test/cluster_supervision_test.zig
@@ -327,7 +327,7 @@ git commit -m "feat(zigeffect): expose entity supervisor decisions"
 
 ## Task 3: Supervised Runtime Local Restarts
 
-- [ ] **Step 1: Write failing supervised restart test**
+- [x] **Step 1: Write failing supervised restart test**
 
 Append to `cluster_supervision_test.zig`:
 
@@ -402,7 +402,7 @@ fn addressForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.EntityA
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -412,7 +412,7 @@ zig build test-raw --summary all
 
 Expected: failure because `processShardSupervised` is absent.
 
-- [ ] **Step 3: Implement supervised processing for local restarts**
+- [x] **Step 3: Implement supervised processing for local restarts**
 
 In `cluster/runtime.zig`, import supervision:
 
@@ -465,7 +465,7 @@ var result = self.local_runtime.processEnvelope(entity_envelope, handler, now_ms
 Keep reply storage and ack logic identical to `processShard` after successful
 handler processing.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -474,7 +474,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/src/cluster/runtime.zig packages/zigeffect/test/cluster_supervision_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/cluster/runtime.zig packages/zigeffect/test/cluster_supervision_test.zig
@@ -483,7 +483,7 @@ git commit -m "feat(zigeffect): supervise cluster entity restarts"
 
 ## Task 4: Escalation Releases Shards And Allows Migration
 
-- [ ] **Step 1: Write failing escalation and migration test**
+- [x] **Step 1: Write failing escalation and migration test**
 
 Append to `cluster_supervision_test.zig`:
 
@@ -562,7 +562,7 @@ test "supervised entity escalation releases shard for another runner" {
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -573,7 +573,7 @@ zig build test-raw --summary all
 Expected: failure because escalation is reported but the shard is still owned,
 or because the released-shard count is absent.
 
-- [ ] **Step 3: Release shard on escalation**
+- [x] **Step 3: Release shard on escalation**
 
 In `processShardSupervised`, extend the failure branch:
 
@@ -590,7 +590,7 @@ if (decision.escalated) {
 
 Make sure this branch does not acknowledge the claimed message.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -599,7 +599,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/src/cluster/runtime.zig packages/zigeffect/test/cluster_supervision_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/cluster/runtime.zig packages/zigeffect/test/cluster_supervision_test.zig
@@ -608,7 +608,7 @@ git commit -m "feat(zigeffect): release shards on supervised escalation"
 
 ## Task 5: Workflow Worker And Runner Supervision Aggregation
 
-- [ ] **Step 1: Write failing workflow worker and runner tick tests**
+- [x] **Step 1: Write failing workflow worker and runner tick tests**
 
 Append to `cluster_supervision_test.zig`:
 
@@ -712,7 +712,7 @@ fn executionIdForWorkflowShard(shard_id: fx.ShardId, shard_count: fx.ShardCount)
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -723,7 +723,7 @@ zig build test-raw --summary all
 Expected: failure because workflow worker counters and `tickSupervised` are
 absent.
 
-- [ ] **Step 3: Classify workflow workers and aggregate runner tick reports**
+- [x] **Step 3: Classify workflow workers and aggregate runner tick reports**
 
 In `processShardSupervised`, when a handler failure has a decision:
 
@@ -787,7 +787,7 @@ pub fn tickSupervised(self: *LocalClusterRunner, handler: anytype, now_ms: u64) 
 
 Keep the existing `tick` method unchanged.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -796,7 +796,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/src/cluster/runtime.zig packages/zigeffect/src/cluster/local_cluster.zig packages/zigeffect/test/cluster_supervision_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/cluster/runtime.zig packages/zigeffect/src/cluster/local_cluster.zig packages/zigeffect/test/cluster_supervision_test.zig
@@ -805,7 +805,7 @@ git commit -m "feat(zigeffect): aggregate workflow and runner supervision"
 
 ## Task 6: Docs, Roadmap, And Full Gate
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Add `supervision.zig` to the `src/cluster/` module list in
 `packages/zigeffect/docs/architecture.md` with:
@@ -816,14 +816,14 @@ Add `supervision.zig` to the `src/cluster/` module list in
   escalation vocabulary.
 ```
 
-- [ ] **Step 2: Mark M39 complete in roadmap and plan**
+- [x] **Step 2: Mark M39 complete in roadmap and plan**
 
 In `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`,
 mark every M39 deliverable and acceptance checkbox complete.
 
 In this plan, mark completed task steps with `- [x]` as each task finishes.
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -840,7 +840,7 @@ rg "TO""DO|FIX""ME|st""ub|place""holder|not imple""mented|unimple""mented" packa
 Expected: all tests pass, examples build, CLI help prints, formatting passes,
 whitespace check passes, and marker scan finds no matches.
 
-- [ ] **Step 4: Commit docs**
+- [x] **Step 4: Commit docs**
 
 ```bash
 git add packages/zigeffect/docs/architecture.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md docs/superpowers/plans/2026-06-10-zigeffect-cluster-supervision.md

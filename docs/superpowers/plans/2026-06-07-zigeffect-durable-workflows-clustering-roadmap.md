@@ -813,15 +813,15 @@ Goal: make supervision work across entity and runner failures.
 
 Deliverables:
 
-- [ ] Add shard supervisor.
-- [ ] Add entity supervisor.
-- [ ] Add workflow worker supervisor.
-- [ ] Add runner-level restart policy.
-- [ ] Add escalation to shard release when local recovery fails.
+- [x] Add shard supervisor.
+- [x] Add entity supervisor.
+- [x] Add workflow worker supervisor.
+- [x] Add runner-level restart policy.
+- [x] Add escalation to shard release when local recovery fails.
 
 Acceptance:
 
-- [ ] Failures restart locally when possible and migrate when necessary.
+- [x] Failures restart locally when possible and migrate when necessary.
 
 ## Milestone 40: Cluster Observability And Causal Queries
 
