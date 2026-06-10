@@ -11,7 +11,7 @@ pub const SupervisorChildId = u64;
 
 pub const SupervisorStrategy = enum { one_for_one, one_for_all, rest_for_one };
 pub const SupervisorRestartMode = enum { permanent, transient, temporary };
-pub const SupervisorChildKind = enum { fiber, workflow_worker, queue_worker, entity };
+pub const SupervisorChildKind = enum { fiber, workflow_worker, queue_worker, entity, runner, shard };
 pub const SupervisorChildStatus = enum { idle, running, restarting, stopped, failed, escalated };
 
 pub const SupervisorError = error{
