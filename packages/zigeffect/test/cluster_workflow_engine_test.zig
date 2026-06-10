@@ -304,6 +304,91 @@ test "cluster workflow queue commands resume suspended workflow" {
     try expectHelperCommand(.queue);
 }
 
+test "workflow started on runner a resumes and completes on runner b" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var runner_storage_a = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer runner_storage_a.deinit();
+    var runner_storage_b = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer runner_storage_b.deinit();
+    var message_storage_a = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_a.deinit();
+    var message_storage_b = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_b.deinit();
+    var journal_state = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    var runner_a = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = fx.runnerAddress("machine-workflow", "runner-a"),
+        .runner_storage = runner_storage_a.asRunnerStorage(),
+        .message_storage = message_storage_a.asMessageStorage(),
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 1,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    });
+    defer runner_a.deinit();
+    var plan_a = try runner_a.acquireBalancedShards(1_000);
+    defer plan_a.deinit();
+
+    var transport_state = try fx.InProcessClusterTransport.init(std.testing.allocator, message_storage_a.asMessageStorage(), .{ .shard_count = 8 });
+    defer transport_state.deinit();
+    var engine = fx.ClusterWorkflowEngine.init(std.testing.allocator, transport_state.asClusterTransport());
+    defer engine.deinit();
+
+    const workflow_id = fx.workflow.workflowId("approval");
+    const execution_id = fx.workflow.executionId("approval", "migration");
+    var registry_a = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry_a.deinit();
+    _ = try registry_a.registerExecution(&runner_a, journal_store, workflow_id, execution_id, 1_000);
+
+    var started = try engine.start("approval", "migration");
+    defer started.deinit(std.testing.allocator);
+    var start_result = try processWorkflowSubmission(&runner_a, message_storage_a.asMessageStorage(), started, 1_100);
+    defer start_result.deinit(std.testing.allocator);
+    try std.testing.expect(start_result.appended);
+
+    var started_events = try journal_store.readAll(std.testing.allocator);
+    defer started_events.deinit();
+    try std.testing.expectEqual(@as(usize, 1), started_events.events.len);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_started, started_events.events[0].kind);
+
+    _ = try runner_a.shutdown(1_200);
+
+    var runner_b = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = fx.runnerAddress("machine-workflow", "runner-b"),
+        .runner_storage = runner_storage_b.asRunnerStorage(),
+        .message_storage = message_storage_b.asMessageStorage(),
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 1,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    });
+    defer runner_b.deinit();
+    var plan_b = try runner_b.acquireBalancedShards(1_300);
+    defer plan_b.deinit();
+    var registry_b = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry_b.deinit();
+    const recovery = try registry_b.recoverOwnedExecutions(&runner_b, journal_store, 1_300);
+    try std.testing.expectEqual(@as(usize, 1), recovery.scanned);
+    try std.testing.expectEqual(@as(usize, 1), recovery.registered);
+
+    var completed = try engine.complete(workflow_id, execution_id, "value=approved-after-migration");
+    defer completed.deinit(std.testing.allocator);
+    var complete_result = try processWorkflowSubmission(&runner_b, message_storage_b.asMessageStorage(), completed, 1_400);
+    defer complete_result.deinit(std.testing.allocator);
+    try std.testing.expect(complete_result.appended);
+    try std.testing.expectEqualStrings("completed", complete_result.status);
+
+    var state = try journal_store.latestState(std.testing.allocator);
+    defer state.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowStatus.completed, state.workflow_status);
+    try std.testing.expectEqual(workflow_id, state.workflow_id.?);
+    try std.testing.expectEqual(execution_id, state.execution_id.?);
+}
+
 fn executionIdForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.workflow.ExecutionId {
     var id: fx.workflow.ExecutionId = 1;
     while (id < 100_000) : (id += 1) {
