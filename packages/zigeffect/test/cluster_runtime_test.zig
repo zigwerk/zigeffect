@@ -80,3 +80,78 @@ test "cluster runtime acquire and release shard update runtime and leases" {
     try std.testing.expect(!lease_manager.ownsShard(4));
     try std.testing.expect((try runner_storage.lease(4)) == null);
 }
+
+test "cluster entity ref submits durable tell and ask messages for owned shard" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    const runner_storage = runner_storage_state.asRunnerStorage();
+    const owner = fx.runnerAddress("machine-a", "runner-a");
+    var lease_manager = try fx.LocalShardLeaseManager.init(
+        std.testing.allocator,
+        runner_storage,
+        owner,
+        .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    );
+    defer lease_manager.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+
+    var runtime = try fx.ClusterRuntime.init(
+        std.testing.allocator,
+        message_storage,
+        &lease_manager,
+        .{ .shard_count = 16 },
+    );
+    defer runtime.deinit();
+
+    const address = fx.entityAddress("counter", "durable-ref");
+    const shard_id = try fx.shardIdForAddress(address, 16);
+    _ = try runtime.acquireShard(shard_id, 1_000);
+    const ref = try runtime.registerEntity(.{ .address = address, .name = "counter-durable-ref" }, 1_000);
+
+    var tell = try ref.tell("text", "inc", "first command");
+    defer tell.deinit(std.testing.allocator);
+    try std.testing.expectEqual(fx.MessageEnvelopeKind.tell, tell.envelope.kind);
+
+    var ask = try ref.ask("text", "get", "read current value");
+    defer ask.deinit(std.testing.allocator);
+    try std.testing.expectEqual(fx.MessageEnvelopeKind.request, ask.envelope.kind);
+    try std.testing.expect(ask.correlation_id != 0);
+
+    var by_shard = try message_storage.unprocessedByShard(shard_id, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 2), by_shard.records.len);
+    try std.testing.expectEqual(fx.MessageEnvelopeKind.tell, by_shard.records[0].envelope.kind);
+    try std.testing.expectEqual(fx.MessageEnvelopeKind.request, by_shard.records[1].envelope.kind);
+}
+
+test "cluster entity ref rejects durable submission for unowned shard" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    const runner_storage = runner_storage_state.asRunnerStorage();
+    const owner = fx.runnerAddress("machine-a", "runner-a");
+    var lease_manager = try fx.LocalShardLeaseManager.init(
+        std.testing.allocator,
+        runner_storage,
+        owner,
+        .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    );
+    defer lease_manager.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+
+    var runtime = try fx.ClusterRuntime.init(
+        std.testing.allocator,
+        message_storage_state.asMessageStorage(),
+        &lease_manager,
+        .{ .shard_count = 16 },
+    );
+    defer runtime.deinit();
+
+    const address = fx.entityAddress("counter", "unowned");
+    const ref = try runtime.registerEntity(.{ .address = address, .name = "counter-unowned" }, 1_000);
+
+    try std.testing.expectError(error.ShardNotOwned, ref.tell("text", "inc", "first command"));
+    try std.testing.expectError(error.ShardNotOwned, ref.ask("text", "get", "read current value"));
+}

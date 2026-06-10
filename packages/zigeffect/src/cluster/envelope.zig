@@ -9,6 +9,7 @@ pub const MessageCorrelationId = u64;
 pub const MessageAttempt = u32;
 
 pub const MessageEnvelopeKind = enum {
+    tell,
     request,
     reply,
     ack,
