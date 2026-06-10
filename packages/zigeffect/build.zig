@@ -876,6 +876,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_alerting_integrations_tool_tests = b.addRunArtifact(causal_alerting_integrations_tool_tests);
     test_step.dependOn(&run_causal_alerting_integrations_tool_tests.step);
 
+    const causal_live_dashboard_streaming_workbench_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_live_dashboard_streaming_workbench.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_live_dashboard_streaming_workbench_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-live-dashboard-streaming-workbench",
+        .root_module = causal_live_dashboard_streaming_workbench_tool_module,
+    });
+    const run_causal_live_dashboard_streaming_workbench_tool = b.addRunArtifact(causal_live_dashboard_streaming_workbench_tool);
+    if (b.args) |args| run_causal_live_dashboard_streaming_workbench_tool.addArgs(args);
+    const causal_live_dashboard_streaming_workbench_step = b.step("causal-live-dashboard-streaming-workbench", "Print causal live dashboard streaming workbench report");
+    causal_live_dashboard_streaming_workbench_step.dependOn(&run_causal_live_dashboard_streaming_workbench_tool.step);
+
+    const causal_live_dashboard_streaming_workbench_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-live-dashboard-streaming-workbench-tests",
+        .root_module = causal_live_dashboard_streaming_workbench_tool_module,
+    });
+    const run_causal_live_dashboard_streaming_workbench_tool_tests = b.addRunArtifact(causal_live_dashboard_streaming_workbench_tool_tests);
+    test_step.dependOn(&run_causal_live_dashboard_streaming_workbench_tool_tests.step);
+
     const causal_unified_spine_contract_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_unified_spine_contract.zig"),
         .target = target,
