@@ -252,6 +252,41 @@ pub const LocalShardLeaseManager = struct {
         };
     }
 
+    pub fn auditOwnedLeases(self: *LocalShardLeaseManager, allocator: Allocator, now_ms: u64) !ShardLeaseAuditReport {
+        var entries: std.ArrayList(ShardLeaseAuditEntry) = .empty;
+        errdefer entries.deinit(allocator);
+
+        var report = ShardLeaseAuditReport{
+            .allocator = allocator,
+            .scanned = self.owned_leases.items.len,
+        };
+
+        for (self.owned_leases.items) |local| {
+            const current = try self.storage.lease(local.shard_id);
+            const entry = auditEntry(local, current, self.options, now_ms);
+            countAuditEntry(&report, entry.status);
+            try entries.append(allocator, entry);
+        }
+
+        report.entries = try entries.toOwnedSlice(allocator);
+        return report;
+    }
+
+    pub fn forceReleaseStaleShard(self: *LocalShardLeaseManager, shard_id: ShardId, now_ms: u64) !ShardLeaseForceReleaseReport {
+        const current = (try self.storage.lease(shard_id)) orelse return error.LeaseNotFound;
+        if (!shardLeaseExpiredForRecovery(current, self.options, now_ms)) return error.RunnerStillAlive;
+        try self.storage.release(.{
+            .shard_id = shard_id,
+            .owner = current.owner,
+        });
+        return .{
+            .shard_id = shard_id,
+            .released_owner = current.owner,
+            .released_epoch = current.epoch,
+            .released_at_ms = now_ms,
+        };
+    }
+
     pub fn fenceForShard(self: *const LocalShardLeaseManager, shard_id: ShardId) !ShardLeaseFence {
         const index = self.findOwnedIndex(shard_id) orelse return error.ShardNotOwned;
         return fencing.fenceFromLease(self.owned_leases.items[index]);
@@ -377,4 +412,49 @@ fn validateOptions(options: ShardLeaseManagerOptions) ShardLeaseManagerError!voi
 
 fn effectiveRenewalDeadlineMs(options: ShardLeaseManagerOptions) u64 {
     return if (options.renewal_deadline_ms == 0) options.ttl_ms else options.renewal_deadline_ms;
+}
+
+fn auditEntry(local: ShardLease, current: ?ShardLease, options: ShardLeaseManagerOptions, now_ms: u64) ShardLeaseAuditEntry {
+    const lease = current orelse return .{
+        .shard_id = local.shard_id,
+        .local_owner = local.owner,
+        .local_epoch = local.epoch,
+        .expires_at_ms = local.expires_at_ms,
+        .status = .missing,
+    };
+
+    var status = ShardLeaseAuditStatus.valid;
+    if (!lease.owner.eql(local.owner)) {
+        status = .stale_owner;
+    } else if (lease.epoch != local.epoch) {
+        status = .stale_epoch;
+    } else if (shardLeaseExpiredForRecovery(lease, options, now_ms)) {
+        status = .expired;
+    } else if (now_ms >= shardLeaseRenewalDeadlineAt(lease, options)) {
+        status = .renewal_deadline_missed;
+    } else if (shardLeaseRefreshDue(lease, options, now_ms)) {
+        status = .refresh_due;
+    }
+
+    return .{
+        .shard_id = local.shard_id,
+        .local_owner = local.owner,
+        .local_epoch = local.epoch,
+        .current_owner = lease.owner,
+        .current_epoch = lease.epoch,
+        .expires_at_ms = lease.expires_at_ms,
+        .status = status,
+    };
+}
+
+fn countAuditEntry(report: *ShardLeaseAuditReport, status: ShardLeaseAuditStatus) void {
+    switch (status) {
+        .valid => report.valid += 1,
+        .refresh_due => report.refresh_due += 1,
+        .renewal_deadline_missed => report.renewal_deadline_missed += 1,
+        .expired => report.expired += 1,
+        .missing => report.missing += 1,
+        .stale_owner => report.stale_owner += 1,
+        .stale_epoch => report.stale_epoch += 1,
+    }
 }
