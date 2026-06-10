@@ -1,6 +1,7 @@
 const std = @import("std");
 const fx = @import("zigeffect");
 const journal_conformance = @import("support/journal_store_conformance.zig");
+const message_conformance = @import("support/message_storage_conformance.zig");
 const runner_conformance = @import("support/runner_storage_conformance.zig");
 
 test "in-memory journal store passes shared conformance" {
@@ -64,4 +65,45 @@ test "file runner storage shared conformance survives reopen" {
     const lease = (try reopened.asRunnerStorage().lease(44)).?;
     try std.testing.expect(lease.owner.eql(owner));
     try std.testing.expectEqual(@as(u64, 1_500), lease.expires_at_ms);
+}
+
+test "in-memory message storage passes shared conformance" {
+    var store_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer store_state.deinit();
+    try message_conformance.expectMessageStorageConformance(store_state.asMessageStorage());
+}
+
+test "file message storage passes shared conformance" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var store_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer store_state.deinit();
+    try message_conformance.expectMessageStorageConformance(store_state.asMessageStorage());
+}
+
+test "file message storage shared conformance survives reopen" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const address = fx.entityAddress("storage-message", "reopen");
+    var message_id: fx.MessageId = 0;
+
+    {
+        var first = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer first.deinit();
+        var submitted = try first.asMessageStorage().submit(.{
+            .shard_id = 6,
+            .now_ms = 2_000,
+            .envelope = .{ .kind = .tell, .address = address, .idempotency_key = "message-reopen", .payload = "work" },
+        });
+        defer submitted.deinit(std.testing.allocator);
+        message_id = submitted.envelope.id;
+    }
+
+    var reopened = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer reopened.deinit();
+    var found = (try reopened.asMessageStorage().unprocessedById(message_id, std.testing.allocator)).?;
+    defer found.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(fx.ShardId, 6), found.shard_id);
+    try std.testing.expectEqualStrings("work", found.envelope.payload);
 }
