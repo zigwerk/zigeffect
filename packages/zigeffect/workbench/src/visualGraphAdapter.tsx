@@ -1,3 +1,4 @@
+import { Show } from "solid-js";
 import { Graph, createGraphData, createGraphLayout } from "@dschz/solid-g6";
 import type { VisualGraphModel, VisualGraphNodeTone } from "./causalArtifact";
 
@@ -9,12 +10,16 @@ export const visualGraphAdapterMetadata = {
 
 export function VisualGraphCanvas(props: { model: VisualGraphModel }) {
   return (
-    <Graph
-      data={solidG6Data(props.model)}
-      layout={solidG6Layout(props.model)}
-      behaviors={["drag-canvas", "zoom-canvas"]}
-      style={{ width: "100%", height: "100%" }}
-    />
+    <Show when={props.model} keyed>
+      {(model) => (
+        <Graph
+          data={solidG6Data(model)}
+          layout={solidG6Layout(model)}
+          behaviors={["drag-canvas", "zoom-canvas"]}
+          style={{ width: "100%", height: "100%" }}
+        />
+      )}
+    </Show>
   );
 }
 

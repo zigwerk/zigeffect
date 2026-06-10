@@ -21,3 +21,10 @@ test("visual graph adapter layout is perspective-aware", () => {
   expect(source).toContain('type: "radial"');
   expect(source).toContain('unitRadius: model.perspective === "ownership" ? 120 : 90');
 });
+
+test("visual graph adapter remounts G6 when perspective node sets change", () => {
+  const source = adapterSource();
+
+  expect(source).toContain("import { Show } from \"solid-js\"");
+  expect(source).toContain("<Show when={props.model} keyed>");
+});
