@@ -59,6 +59,8 @@ mapping, or agent handoff, also update [operations.md](operations.md).
 - `planning-only`: deterministic planning assumptions and missing-evidence
   gates only; not production sizing, telemetry, load testing, or mutation
   authority.
+- `completion-audit`: deterministic milestone closure evidence with explicit
+  remaining gaps and no production mutation authority.
 
 ## New Schema Checklist
 
@@ -250,6 +252,17 @@ fixture plans, concurrency assumptions, readiness gates, and negative capacity
 fixtures. It does not ingest telemetry, run load tests, size production
 capacity, provision infrastructure, write durable storage, introduce non-NenDB
 adapter work, add alternate workbench renderers, or grant mutation authority.
+
+- `zigeffect.causal.production-hardening-completion-audit.v1`
+
+The production-hardening-completion-audit report is a record-only,
+`completion-audit` production hardening contract. It verifies delivered
+hardening milestones, confirms record-only, `mutation_authority=none`,
+NenDB-only, and SolidJS `zig-webui` boundaries, records remaining evidence
+gaps, blocks over-claims, and hands off to the local load-test observation
+harness. It does not ingest telemetry, execute load tests, size production
+capacity, write durable storage, add non-NenDB adapter work, add alternate
+workbench renderers, or grant mutation authority.
 
 ### Human-Agent Feedback
 

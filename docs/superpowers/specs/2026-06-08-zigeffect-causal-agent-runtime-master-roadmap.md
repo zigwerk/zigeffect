@@ -704,9 +704,19 @@ Status values:
      size production capacity, provision infrastructure, or grant mutation
      authority.
 12. `codex/zigeffect-causal-production-hardening-completion-audit`
-   - Current next branch: audit the delivered production-hardening reports,
-     confirm record-only and NenDB-only boundaries, and choose the next
-     evidence-producing branch without claiming capacity from planning records.
+   - Delivered: `causal-production-hardening-completion-audit` emits
+     `zigeffect.causal.production-hardening-completion-audit.v1` with delivered
+     milestone checks, record-only/NenDB/SolidJS boundary checks, remaining
+     evidence gaps, negative audit fixtures, and the handoff to
+     `codex/zigeffect-causal-load-test-observation-harness`. It keeps
+     `mutation_authority=none` and does not ingest telemetry, run load tests,
+     size production capacity, add non-NenDB adapter work, add alternate
+     frontend renderer support, or mutate production state.
+13. `codex/zigeffect-causal-load-test-observation-harness`
+   - Current next branch: consume capacity-planning fixture families and
+     wall-clock baseline assumptions to emit local observation records without
+     live production telemetry, production load execution, or capacity sizing
+     claims.
 
 ## Dual-Interface Causal Spine Expansion
 

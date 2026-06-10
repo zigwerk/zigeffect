@@ -637,9 +637,10 @@ metrics, and traces.
   production-hardening branch queue, NenDB-only durable direction, SolidJS plus
   `webui-dev/zig-webui` workbench direction, the delivered graph visual
   debugging, human-agent feedback-loop, rollout automation guardrails, and
-  wall-clock benchmark baseline and production capacity planning contracts
-  milestones, non-goals, verification commands, and the current next branch
-  `codex/zigeffect-causal-production-hardening-completion-audit`.
+  wall-clock benchmark baseline, production capacity planning, and
+  production-hardening completion audit contracts, milestones, non-goals,
+  verification commands, and the current next branch
+  `codex/zigeffect-causal-load-test-observation-harness`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
@@ -711,6 +712,14 @@ metrics, and traces.
   record-only, planning-only, NenDB-only, and does not ingest telemetry, run
   load tests, size production capacity, provision infrastructure, or grant
   mutation authority.
+- Delivered: `causal-production-hardening-completion-audit` publishes
+  `zigeffect.causal.production-hardening-completion-audit.v1` with delivered
+  milestone checks, record-only/NenDB/SolidJS boundary checks, remaining
+  evidence gaps, negative over-claim fixtures, and the handoff to
+  `codex/zigeffect-causal-load-test-observation-harness`. It keeps
+  `mutation_authority=none` and does not ingest telemetry, execute load tests,
+  size production capacity, add non-NenDB adapter work, add alternate frontend
+  renderer support, or mutate production state.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,

@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-hardening-completion-audit` means the
+The recommendation `start-load-test-observation-harness` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -52,8 +52,12 @@ capacity domains, storage assumptions, load-test fixture plans, workbench and
 graph concurrency assumptions, readiness gates, negative capacity fixtures, and
 completion-audit handoff without running load tests or claiming production
 capacity.
+The production-hardening completion audit is also delivered: it verifies the
+delivered hardening milestones, preserves record-only, `mutation_authority=none`,
+NenDB-only, and SolidJS `zig-webui` boundaries, records remaining evidence
+gaps, and blocks over-claims before any evidence-producing follow-up branch.
 The next branch should be
-`codex/zigeffect-causal-production-hardening-completion-audit`.
+`codex/zigeffect-causal-load-test-observation-harness`.
 
 ## Dependency Order
 
@@ -75,6 +79,7 @@ The backlog currently orders future production-hardening branches as:
 14. `rollout-automation-guardrails` delivered
 15. `wall-clock-benchmark-baselines` delivered
 16. `production-capacity-planning` delivered
+17. `production-hardening-completion-audit` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -186,11 +191,18 @@ storage assumptions, load-test fixture plans, dashboard and graph concurrency
 assumptions, agent guidance, readiness gates, and negative capacity fixtures
 record-only.
 
+Production hardening completion audit is documented in
+[production-hardening-completion-audit.md](production-hardening-completion-audit.md).
+It emits `zigeffect.causal.production-hardening-completion-audit.v1` through
+`zig build causal-production-hardening-completion-audit`, audits the delivered
+production-hardening report sequence, records remaining evidence gaps, and
+keeps every authority boundary explicit.
+
 The next branch is
-`codex/zigeffect-causal-production-hardening-completion-audit`. It should audit
-the delivered production-hardening reports, confirm the record-only and
-NenDB-only boundaries, and decide the next evidence-producing branch without
-claiming production capacity from planning records.
+`codex/zigeffect-causal-load-test-observation-harness`. It should consume the
+capacity-planning fixture plan and wall-clock baseline assumptions, emit local
+observation records, and avoid live production telemetry, production load
+execution, capacity sizing claims, and mutation authority.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -227,6 +239,8 @@ zig build causal-wall-clock-benchmark-baselines
 zig build causal-wall-clock-benchmark-baselines -- --format json
 zig build causal-production-capacity-planning
 zig build causal-production-capacity-planning -- --format json
+zig build causal-production-hardening-completion-audit
+zig build causal-production-hardening-completion-audit -- --format json
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

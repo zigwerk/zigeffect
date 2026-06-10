@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-production-hardening-completion-audit";
-pub const recommended_next_branch = "codex/zigeffect-causal-production-hardening-completion-audit";
+pub const recommendation = "start-load-test-observation-harness";
+pub const recommended_next_branch = "codex/zigeffect-causal-load-test-observation-harness";
 
 const OutputFormat = enum { text, json };
 
@@ -450,6 +450,32 @@ const backlog_items: []const BacklogItem = &.{
         .branch = "codex/zigeffect-causal-production-capacity-planning",
         .agent_guidance = "Use causal-production-capacity-planning for formula-only capacity domains, storage assumptions, load-test fixture planning, concurrency assumptions, readiness gates, and negative capacity fixtures; do not claim production capacity or grant mutation authority.",
     },
+    .{
+        .id = "production-hardening-completion-audit",
+        .title = "Production Hardening Completion Audit",
+        .gap_id = "production-hardening-completion-audit",
+        .priority = "P5",
+        .status = "delivered",
+        .summary = "Audits the delivered production-hardening report sequence, preserves record-only/NenDB/SolidJS boundaries, records remaining evidence gaps, and hands off to a local load-test observation harness.",
+        .depends_on = &.{ "production-capacity-planning", "wall-clock-benchmark-baselines", "rollout-automation-guardrails", "human-agent-feedback-loop" },
+        .deliverables = &.{
+            "milestone completion checks",
+            "authority and direction boundary checks",
+            "remaining evidence gap inventory",
+            "negative over-claim audit fixtures",
+            "load-test observation harness handoff",
+        },
+        .evidence_sources = &.{
+            "docs/superpowers/specs/2026-06-10-zigeffect-causal-production-hardening-completion-audit-design.md",
+            "docs/superpowers/plans/2026-06-10-zigeffect-causal-production-hardening-completion-audit-implementation.md",
+            "packages/zigeffect/tools/causal_production_hardening_completion_audit.zig",
+            "packages/zigeffect/docs/production-hardening-completion-audit.md",
+            "packages/zigeffect/docs/production-capacity-planning.md",
+            "packages/zigeffect/docs/production-hardening-backlog.md",
+        },
+        .branch = "codex/zigeffect-causal-production-hardening-completion-audit",
+        .agent_guidance = "Use causal-production-hardening-completion-audit to close the static hardening sweep, cite remaining gaps explicitly, and start local observation work without claiming production capacity or mutation authority.",
+    },
 };
 
 const dependency_order: []const []const u8 = &.{
@@ -469,6 +495,7 @@ const dependency_order: []const []const u8 = &.{
     "rollout-automation-guardrails",
     "wall-clock-benchmark-baselines",
     "production-capacity-planning",
+    "production-hardening-completion-audit",
 };
 
 const verification_commands: []const []const u8 = &.{
@@ -491,6 +518,8 @@ const verification_commands: []const []const u8 = &.{
     "zig build causal-wall-clock-benchmark-baselines -- --format json",
     "zig build causal-production-capacity-planning",
     "zig build causal-production-capacity-planning -- --format json",
+    "zig build causal-production-hardening-completion-audit",
+    "zig build causal-production-hardening-completion-audit -- --format json",
     "zig build causal-production-deployment-runbooks",
     "zig build causal-production-deployment-runbooks -- --format json",
     "zig build causal-durable-production-retention",
@@ -763,11 +792,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-production-hardening-completion-audit",
+        "start-load-test-observation-harness",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-production-hardening-completion-audit",
+        "codex/zigeffect-causal-load-test-observation-harness",
         recommended_next_branch,
     );
 }
@@ -796,6 +825,8 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItemStatus("wall-clock-benchmark-baselines", "delivered");
     try expectBacklogItem("production-capacity-planning");
     try expectBacklogItemStatus("production-capacity-planning", "delivered");
+    try expectBacklogItem("production-hardening-completion-audit");
+    try expectBacklogItemStatus("production-hardening-completion-audit", "delivered");
 }
 
 test "production hardening backlog preserves user constraints" {
@@ -814,7 +845,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-production-hardening-completion-audit") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-load-test-observation-harness") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -823,6 +854,8 @@ test "production hardening backlog text mentions dependency order and next branc
     try std.testing.expect(std.mem.indexOf(u8, report, "agent-query-interface") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-capacity-planning") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-capacity-planning") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "production-hardening-completion-audit") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-hardening-completion-audit") != null);
 }
 
 test "production hardening backlog JSON is agent-readable" {
@@ -831,7 +864,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-production-hardening-completion-audit\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-load-test-observation-harness\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);
@@ -843,6 +876,9 @@ test "production hardening backlog JSON is agent-readable" {
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"production-capacity-planning\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-production-capacity-planning\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-production-capacity-planning -- --format json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"production-hardening-completion-audit\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-production-hardening-completion-audit\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-production-hardening-completion-audit -- --format json") != null);
 }
 
 test "production hardening backlog parses supported formats" {

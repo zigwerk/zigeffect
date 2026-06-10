@@ -102,6 +102,8 @@ zig build causal-wall-clock-benchmark-baselines
 zig build causal-wall-clock-benchmark-baselines -- --format json
 zig build causal-production-capacity-planning
 zig build causal-production-capacity-planning -- --format json
+zig build causal-production-hardening-completion-audit
+zig build causal-production-hardening-completion-audit -- --format json
 zig build causal-m9-completion-audit
 zig build causal-m9-completion-audit -- --format json
 zig build causal-production-hardening-backlog
@@ -422,6 +424,11 @@ assumptions, load-test fixtures, concurrency assumptions, readiness gates, and
 negative capacity fixtures without running load tests or claiming production
 capacity.
 
+Use `causal-production-hardening-completion-audit` after capacity planning to
+close the static hardening sweep, confirm the record-only/NenDB/SolidJS
+boundaries, list remaining evidence gaps, and hand off to the local load-test
+observation harness without claiming production readiness.
+
 Add release notes whenever a causal runtime change alters retention, string
 bounds, sampling, backend emission, artifact schemas, workbench bounds or
 bridge behavior, CI upload globs, or CI retention.
@@ -460,16 +467,40 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-production-hardening-completion-audit` after the
+`codex/zigeffect-causal-load-test-observation-harness` after the
 unified causal spine, deep runtime internals, app semantic trace API, bounded
 agent query surface, record-only encryption-at-rest policy, record-only
 alerting integrations, delivered live dashboard streaming workbench, delivered
 graph visual debugging, delivered human-agent feedback loop, delivered rollout
 automation guardrails, delivered wall-clock benchmark baseline contract, and
-delivered production capacity planning contract.
+delivered production capacity planning and completion-audit contracts.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
+
+## Production Hardening Completion Audit
+
+Run the production-hardening completion audit after capacity planning and
+before starting local observation work:
+
+```sh
+cd packages/zigeffect
+zig build causal-production-hardening-completion-audit
+zig build causal-production-hardening-completion-audit -- --format json
+```
+
+The audit records schema
+`zigeffect.causal.production-hardening-completion-audit.v1`, verifies the
+delivered production-hardening milestones, preserves the record-only,
+`mutation_authority=none`, NenDB-only, and SolidJS `zig-webui` boundaries,
+records remaining evidence gaps, and recommends
+`codex/zigeffect-causal-load-test-observation-harness`.
+
+Use it as closure evidence for the static hardening sweep. Do not use it to
+claim production telemetry, load-test execution, capacity sizing, live alert
+delivery, rollout execution, RBAC enforcement, encrypted bytes, production
+dashboard hosting, durable writes, non-NenDB adapter work, alternate frontend
+renderer support, or production mutation authority.
 
 ## Production Artifact Aggregation
 
@@ -729,8 +760,8 @@ state, or grant production authority.
 ## Production Capacity Planning
 
 Run the production capacity planning contract after the source evidence
-contracts are present and before starting a completion audit or future load-test
-harness design:
+contracts are present and before starting the completion audit or future
+load-test harness design:
 
 ```sh
 cd packages/zigeffect
@@ -754,6 +785,13 @@ durable stores, introduce non-NenDB adapter work, add alternate workbench
 renderers, mutate source/config/app/registry/deployment/rollout/alert state, or
 grant production authority.
 
+## Completion-Audit Handoff
+
+Run `causal-production-hardening-completion-audit` after capacity planning to
+confirm the delivered hardening sequence and choose the next evidence-producing
+branch. The current next branch is
+`codex/zigeffect-causal-load-test-observation-harness`.
+
 ## Production Gaps
 
 The current operating model does not provide:
@@ -773,5 +811,6 @@ The current operating model does not provide:
   capacity sizing.
 
 Those belong to future production hardening. Use
-`zig build causal-production-hardening-backlog` as the branch queue before
-starting one of those systems.
+`zig build causal-production-hardening-backlog` and
+`zig build causal-production-hardening-completion-audit` before starting one of
+those systems.

@@ -163,10 +163,12 @@ The report rejects over-claims such as:
 
 ## Handoff
 
-The next branch is
+The completion-audit branch is
 `codex/zigeffect-causal-production-hardening-completion-audit`.
 
-That audit should verify every delivered production-hardening report, confirm
-that capacity planning stayed record-only, and decide which future branch should
-turn planning evidence into an observed load-test harness, production telemetry
-capture design, or production readiness review.
+That audit verifies every delivered production-hardening report, confirms that
+capacity planning stayed record-only, and chooses
+`codex/zigeffect-causal-load-test-observation-harness` as the next
+evidence-producing branch. The observation harness should turn planning
+evidence into local observations without live production telemetry, production
+load execution, or capacity sizing claims.

@@ -194,6 +194,22 @@ and negative capacity fixtures. It is record-only, planning-only, NenDB-only,
 and does not run load tests or claim production capacity. The full policy is in
 [docs/production-capacity-planning.md](docs/production-capacity-planning.md).
 
+Print the causal production-hardening completion audit:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-hardening-completion-audit
+zig build causal-production-hardening-completion-audit -- --format json
+```
+
+The audit uses schema
+`zigeffect.causal.production-hardening-completion-audit.v1`, verifies the
+delivered production-hardening milestones, preserves record-only/NenDB/SolidJS
+boundaries, records remaining evidence gaps, and recommends
+`codex/zigeffect-causal-load-test-observation-harness` as the next
+evidence-producing branch. The full policy is in
+[docs/production-hardening-completion-audit.md](docs/production-hardening-completion-audit.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -219,8 +235,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-hardening-completion-audit` after the
-delivered production capacity planning contract.
+`codex/zigeffect-causal-load-test-observation-harness` after the delivered
+production-hardening completion audit.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in
