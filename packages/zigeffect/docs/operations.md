@@ -104,6 +104,9 @@ zig build causal-production-capacity-planning
 zig build causal-production-capacity-planning -- --format json
 zig build causal-production-hardening-completion-audit
 zig build causal-production-hardening-completion-audit -- --format json
+zig build causal-load-test-observation-harness
+zig build causal-load-test-observation-harness -- --format json
+zig build causal-load-test-observation-harness -- observe app-request-trace --iterations 1 --format json
 zig build causal-m9-completion-audit
 zig build causal-m9-completion-audit -- --format json
 zig build causal-production-hardening-backlog
@@ -426,8 +429,15 @@ capacity.
 
 Use `causal-production-hardening-completion-audit` after capacity planning to
 close the static hardening sweep, confirm the record-only/NenDB/SolidJS
-boundaries, list remaining evidence gaps, and hand off to the local load-test
-observation harness without claiming production readiness.
+boundaries, list remaining evidence gaps, and cite the delivered local
+load-test observation harness without claiming production readiness.
+
+Use `causal-load-test-observation-harness` for approved local observation
+families after the completion audit. The catalog is deterministic by default;
+the opt-in `observe` subcommand runs bounded local commands from curated argv
+arrays and records advisory median/p95 timings with capped output snippets.
+Do not use it for production load, telemetry ingestion, capacity sizing, CI
+timing gates, shell execution, durable writes, or mutation authority.
 
 Add release notes whenever a causal runtime change alters retention, string
 bounds, sampling, backend emission, artifact schemas, workbench bounds or
@@ -467,21 +477,22 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-load-test-observation-harness` after the
+`codex/zigeffect-causal-production-telemetry-capture-design` after the
 unified causal spine, deep runtime internals, app semantic trace API, bounded
 agent query surface, record-only encryption-at-rest policy, record-only
 alerting integrations, delivered live dashboard streaming workbench, delivered
 graph visual debugging, delivered human-agent feedback loop, delivered rollout
 automation guardrails, delivered wall-clock benchmark baseline contract, and
-delivered production capacity planning and completion-audit contracts.
+delivered production capacity planning, completion-audit, and load-test
+observation harness contracts.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
 
 ## Production Hardening Completion Audit
 
-Run the production-hardening completion audit after capacity planning and
-before starting local observation work:
+Run the production-hardening completion audit after capacity planning and use
+it as the static hardening closure record:
 
 ```sh
 cd packages/zigeffect
@@ -494,13 +505,35 @@ The audit records schema
 delivered production-hardening milestones, preserves the record-only,
 `mutation_authority=none`, NenDB-only, and SolidJS `zig-webui` boundaries,
 records remaining evidence gaps, and recommends
-`codex/zigeffect-causal-load-test-observation-harness`.
+the delivered `codex/zigeffect-causal-load-test-observation-harness` handoff.
 
 Use it as closure evidence for the static hardening sweep. Do not use it to
 claim production telemetry, load-test execution, capacity sizing, live alert
 delivery, rollout execution, RBAC enforcement, encrypted bytes, production
 dashboard hosting, durable writes, non-NenDB adapter work, alternate frontend
 renderer support, or production mutation authority.
+
+## Load-Test Observation Harness
+
+Run the load-test observation harness after the completion audit when local
+observation evidence is useful:
+
+```sh
+cd packages/zigeffect
+zig build causal-load-test-observation-harness
+zig build causal-load-test-observation-harness -- --format json
+zig build causal-load-test-observation-harness -- observe app-request-trace --iterations 1 --format json
+```
+
+The harness records schema
+`zigeffect.causal.load-test-observation-harness.v1`. It catalogs app request,
+background job, artifact formatting, agent query, comparison, dev-loop,
+workbench, and future CI scenario families. Observation mode is explicit and
+bounded: curated argv arrays only, no shell, no production telemetry, no
+production load, no capacity claim, and `mutation_authority=none`.
+
+The current next branch after the delivered harness is
+`codex/zigeffect-causal-production-telemetry-capture-design`.
 
 ## Production Artifact Aggregation
 
@@ -789,8 +822,9 @@ grant production authority.
 
 Run `causal-production-hardening-completion-audit` after capacity planning to
 confirm the delivered hardening sequence and choose the next evidence-producing
-branch. The current next branch is
-`codex/zigeffect-causal-load-test-observation-harness`.
+branch. The load-test observation harness is now delivered, and the current
+next branch is
+`codex/zigeffect-causal-production-telemetry-capture-design`.
 
 ## Production Gaps
 
@@ -806,8 +840,8 @@ The current operating model does not provide:
   streams;
 - automated source/config mutation authority;
 - gradual rollout, canary, or circuit-breaker automation;
-- dynamic benchmark observation harnesses or wall-clock CI gates;
-- production telemetry capture, load-test execution, or reviewed production
+- wall-clock CI timing gates;
+- production telemetry capture, production load execution, or reviewed production
   capacity sizing.
 
 Those belong to future production hardening. Use

@@ -169,6 +169,7 @@ The completion-audit branch is
 That audit verifies every delivered production-hardening report, confirms that
 capacity planning stayed record-only, and chooses
 `codex/zigeffect-causal-load-test-observation-harness` as the next
-evidence-producing branch. The observation harness should turn planning
-evidence into local observations without live production telemetry, production
-load execution, or capacity sizing claims.
+evidence-producing branch. That observation harness is now delivered: it turns
+planning evidence into local observations without live production telemetry,
+production load execution, or capacity sizing claims, and hands off to
+`codex/zigeffect-causal-production-telemetry-capture-design`.

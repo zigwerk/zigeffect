@@ -264,6 +264,17 @@ harness. It does not ingest telemetry, execute load tests, size production
 capacity, write durable storage, add non-NenDB adapter work, add alternate
 workbench renderers, or grant mutation authority.
 
+- `zigeffect.causal.load-test-observation-harness.v1`
+
+The load-test-observation-harness report is a record-only,
+`local-observation` production hardening contract. It catalogs approved local
+scenario families and can opt in to bounded local observations with curated
+argv arrays, warmup and measured iteration counts, median and p95 timings,
+bounded stdout/stderr snippets, and advisory review gates. It does not run
+production load, ingest production telemetry, fail CI, size production
+capacity, execute shell strings, write durable storage, add non-NenDB adapter
+work, add alternate workbench renderers, or grant mutation authority.
+
 ### Human-Agent Feedback
 
 - `zigeffect.causal.human-agent-feedback-loop.v1`

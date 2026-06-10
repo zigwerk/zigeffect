@@ -766,6 +766,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_production_hardening_completion_audit_tool_tests = b.addRunArtifact(causal_production_hardening_completion_audit_tool_tests);
     test_step.dependOn(&run_causal_production_hardening_completion_audit_tool_tests.step);
 
+    const causal_load_test_observation_harness_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_load_test_observation_harness.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_load_test_observation_harness_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-load-test-observation-harness",
+        .root_module = causal_load_test_observation_harness_tool_module,
+    });
+    const run_causal_load_test_observation_harness_tool = b.addRunArtifact(causal_load_test_observation_harness_tool);
+    if (b.args) |args| run_causal_load_test_observation_harness_tool.addArgs(args);
+    const causal_load_test_observation_harness_step = b.step("causal-load-test-observation-harness", "Print or run causal load-test observation harness");
+    causal_load_test_observation_harness_step.dependOn(&run_causal_load_test_observation_harness_tool.step);
+
+    const causal_load_test_observation_harness_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-load-test-observation-harness-tests",
+        .root_module = causal_load_test_observation_harness_tool_module,
+    });
+    const run_causal_load_test_observation_harness_tool_tests = b.addRunArtifact(causal_load_test_observation_harness_tool_tests);
+    test_step.dependOn(&run_causal_load_test_observation_harness_tool_tests.step);
+
     const causal_m9_completion_audit_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_m9_completion_audit.zig"),
         .target = target,

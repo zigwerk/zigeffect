@@ -205,10 +205,27 @@ zig build causal-production-hardening-completion-audit -- --format json
 The audit uses schema
 `zigeffect.causal.production-hardening-completion-audit.v1`, verifies the
 delivered production-hardening milestones, preserves record-only/NenDB/SolidJS
-boundaries, records remaining evidence gaps, and recommends
-`codex/zigeffect-causal-load-test-observation-harness` as the next
-evidence-producing branch. The full policy is in
+boundaries, records remaining evidence gaps, and hands off to the delivered
+local observation harness. The full policy is in
 [docs/production-hardening-completion-audit.md](docs/production-hardening-completion-audit.md).
+
+Print the causal load-test observation harness catalog or run a bounded local
+observation:
+
+```bash
+cd packages/zigeffect
+zig build causal-load-test-observation-harness
+zig build causal-load-test-observation-harness -- --format json
+zig build causal-load-test-observation-harness -- observe app-request-trace --iterations 1 --format json
+```
+
+The harness uses schema
+`zigeffect.causal.load-test-observation-harness.v1`, catalogs approved scenario
+families, and can emit local observation records with median/p95 timings,
+bounded snippets, and advisory review gates. It is record-only,
+`mutation_authority=none`, and does not run production load, ingest production
+telemetry, fail CI, or claim production capacity. The full policy is in
+[docs/load-test-observation-harness.md](docs/load-test-observation-harness.md).
 
 Print the M9 operating-model completion audit:
 
@@ -235,8 +252,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-load-test-observation-harness` after the delivered
-production-hardening completion audit.
+`codex/zigeffect-causal-production-telemetry-capture-design` after the
+delivered load-test observation harness.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in

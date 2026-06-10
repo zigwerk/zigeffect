@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-load-test-observation-harness` means the
+The recommendation `start-production-telemetry-capture-design` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -56,8 +56,12 @@ The production-hardening completion audit is also delivered: it verifies the
 delivered hardening milestones, preserves record-only, `mutation_authority=none`,
 NenDB-only, and SolidJS `zig-webui` boundaries, records remaining evidence
 gaps, and blocks over-claims before any evidence-producing follow-up branch.
+The load-test observation harness is also delivered: it catalogs approved local
+scenario families, runs bounded local observations from curated argv arrays,
+emits median/p95 records with bounded snippets, and keeps observations
+advisory, local-only, and record-only.
 The next branch should be
-`codex/zigeffect-causal-load-test-observation-harness`.
+`codex/zigeffect-causal-production-telemetry-capture-design`.
 
 ## Dependency Order
 
@@ -80,6 +84,7 @@ The backlog currently orders future production-hardening branches as:
 15. `wall-clock-benchmark-baselines` delivered
 16. `production-capacity-planning` delivered
 17. `production-hardening-completion-audit` delivered
+18. `load-test-observation-harness` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -198,11 +203,19 @@ It emits `zigeffect.causal.production-hardening-completion-audit.v1` through
 production-hardening report sequence, records remaining evidence gaps, and
 keeps every authority boundary explicit.
 
+Load-test observation harness is documented in
+[load-test-observation-harness.md](load-test-observation-harness.md). It emits
+`zigeffect.causal.load-test-observation-harness.v1` through
+`zig build causal-load-test-observation-harness`, catalogs approved local
+scenario families, and can run bounded local observations without production
+load, production telemetry, capacity claims, shell execution, or mutation
+authority.
+
 The next branch is
-`codex/zigeffect-causal-load-test-observation-harness`. It should consume the
-capacity-planning fixture plan and wall-clock baseline assumptions, emit local
-observation records, and avoid live production telemetry, production load
-execution, capacity sizing claims, and mutation authority.
+`codex/zigeffect-causal-production-telemetry-capture-design`. It should design
+privacy-safe telemetry capture for future production evidence while preserving
+local observation boundaries, NenDB-only durable direction, SolidJS `zig-webui`
+workbench direction, and `mutation_authority=none`.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -241,6 +254,9 @@ zig build causal-production-capacity-planning
 zig build causal-production-capacity-planning -- --format json
 zig build causal-production-hardening-completion-audit
 zig build causal-production-hardening-completion-audit -- --format json
+zig build causal-load-test-observation-harness
+zig build causal-load-test-observation-harness -- --format json
+zig build causal-load-test-observation-harness -- observe app-request-trace --iterations 1 --format json
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

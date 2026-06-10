@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-load-test-observation-harness";
-pub const recommended_next_branch = "codex/zigeffect-causal-load-test-observation-harness";
+pub const recommendation = "start-production-telemetry-capture-design";
+pub const recommended_next_branch = "codex/zigeffect-causal-production-telemetry-capture-design";
 
 const OutputFormat = enum { text, json };
 
@@ -476,6 +476,31 @@ const backlog_items: []const BacklogItem = &.{
         .branch = "codex/zigeffect-causal-production-hardening-completion-audit",
         .agent_guidance = "Use causal-production-hardening-completion-audit to close the static hardening sweep, cite remaining gaps explicitly, and start local observation work without claiming production capacity or mutation authority.",
     },
+    .{
+        .id = "load-test-observation-harness",
+        .title = "Load-Test Observation Harness",
+        .gap_id = "local-load-test-observation-harness",
+        .priority = "P5",
+        .status = "delivered",
+        .summary = "Defines a schema-governed, record-only local observation harness that catalogs approved scenario families and can run bounded local observations without production load, live telemetry, capacity claims, shell execution, or mutation authority.",
+        .depends_on = &.{ "production-hardening-completion-audit", "production-capacity-planning", "wall-clock-benchmark-baselines" },
+        .deliverables = &.{
+            "scenario catalog for app request background job artifact query comparison dev loop workbench and CI families",
+            "bounded observe subcommand with curated argv arrays",
+            "observation record schema with median p95 snippets and review gates",
+            "negative fixtures for production load capacity telemetry arbitrary command CI gate environment adapter renderer and mutation over-claims",
+            "production telemetry capture design handoff",
+        },
+        .evidence_sources = &.{
+            "docs/superpowers/specs/2026-06-10-zigeffect-causal-load-test-observation-harness-design.md",
+            "docs/superpowers/plans/2026-06-10-zigeffect-causal-load-test-observation-harness-implementation.md",
+            "packages/zigeffect/tools/causal_load_test_observation_harness.zig",
+            "packages/zigeffect/docs/load-test-observation-harness.md",
+            "packages/zigeffect/docs/production-hardening-completion-audit.md",
+        },
+        .branch = "codex/zigeffect-causal-load-test-observation-harness",
+        .agent_guidance = "Use causal-load-test-observation-harness for local advisory observations only; keep production telemetry, load generation, capacity sizing, mutation authority, non-NenDB adapters, and alternate renderers out of scope.",
+    },
 };
 
 const dependency_order: []const []const u8 = &.{
@@ -496,6 +521,7 @@ const dependency_order: []const []const u8 = &.{
     "wall-clock-benchmark-baselines",
     "production-capacity-planning",
     "production-hardening-completion-audit",
+    "load-test-observation-harness",
 };
 
 const verification_commands: []const []const u8 = &.{
@@ -520,6 +546,9 @@ const verification_commands: []const []const u8 = &.{
     "zig build causal-production-capacity-planning -- --format json",
     "zig build causal-production-hardening-completion-audit",
     "zig build causal-production-hardening-completion-audit -- --format json",
+    "zig build causal-load-test-observation-harness",
+    "zig build causal-load-test-observation-harness -- --format json",
+    "zig build causal-load-test-observation-harness -- observe app-request-trace --iterations 1 --format json",
     "zig build causal-production-deployment-runbooks",
     "zig build causal-production-deployment-runbooks -- --format json",
     "zig build causal-durable-production-retention",
@@ -792,11 +821,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-load-test-observation-harness",
+        "start-production-telemetry-capture-design",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-load-test-observation-harness",
+        "codex/zigeffect-causal-production-telemetry-capture-design",
         recommended_next_branch,
     );
 }
@@ -827,6 +856,8 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItemStatus("production-capacity-planning", "delivered");
     try expectBacklogItem("production-hardening-completion-audit");
     try expectBacklogItemStatus("production-hardening-completion-audit", "delivered");
+    try expectBacklogItem("load-test-observation-harness");
+    try expectBacklogItemStatus("load-test-observation-harness", "delivered");
 }
 
 test "production hardening backlog preserves user constraints" {
@@ -845,7 +876,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-load-test-observation-harness") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-production-telemetry-capture-design") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -856,6 +887,8 @@ test "production hardening backlog text mentions dependency order and next branc
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-capacity-planning") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-hardening-completion-audit") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-hardening-completion-audit") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "load-test-observation-harness") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "causal-load-test-observation-harness") != null);
 }
 
 test "production hardening backlog JSON is agent-readable" {
@@ -864,7 +897,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-load-test-observation-harness\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-production-telemetry-capture-design\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);
@@ -879,6 +912,9 @@ test "production hardening backlog JSON is agent-readable" {
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"production-hardening-completion-audit\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-production-hardening-completion-audit\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-production-hardening-completion-audit -- --format json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"load-test-observation-harness\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-load-test-observation-harness\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-load-test-observation-harness -- observe app-request-trace --iterations 1 --format json") != null);
 }
 
 test "production hardening backlog parses supported formats" {

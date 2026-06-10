@@ -3,7 +3,8 @@
 `causal-production-hardening-completion-audit` is the deterministic,
 record-only audit that closes the static production-hardening contract sweep.
 It verifies the delivered reports, preserves the authority boundaries, records
-remaining evidence gaps, and hands off to the first evidence-producing branch:
+remaining evidence gaps, and hands off to the first evidence-producing branch,
+which is now delivered as
 `codex/zigeffect-causal-load-test-observation-harness`.
 
 ## Command
@@ -77,8 +78,8 @@ hardening sweep:
 
 The audit deliberately separates delivered contracts from missing evidence:
 
-- `load-test-observation-harness`: recommended next branch;
-- `production-telemetry-capture-design`: future;
+- `load-test-observation-harness`: delivered local observation branch;
+- `production-telemetry-capture-design`: recommended next branch;
 - `reviewed-production-capacity-sizing`: future;
 - `live-alert-delivery`: future;
 - `live-rollout-automation`: future;
@@ -108,14 +109,16 @@ The audit blocks common over-claims:
 
 ## Handoff
 
-The next branch is
-`codex/zigeffect-causal-load-test-observation-harness`.
+The load-test observation harness handoff is delivered. It consumes the
+capacity-planning fixture plan and wall-clock baseline assumptions, then
+produces local observation records without live production telemetry,
+production load execution, or capacity claims.
 
-That branch should consume the capacity-planning fixture plan and wall-clock
-baseline assumptions, then produce local observation records without live
-production telemetry, production load execution, or capacity claims. Reviewed
-production capacity sizing remains future until compatible observations and
-human review exist.
+The current next branch is
+`codex/zigeffect-causal-production-telemetry-capture-design`. That branch
+should design privacy-safe production telemetry capture separately from local
+observations. Reviewed production capacity sizing remains future until
+compatible observations, telemetry design, and human review exist.
 
 ## Verification
 
@@ -124,6 +127,8 @@ cd packages/zigeffect
 zig test tools/causal_production_hardening_completion_audit.zig
 zig build causal-production-hardening-completion-audit
 zig build causal-production-hardening-completion-audit -- --format json
+zig build causal-load-test-observation-harness
+zig build causal-load-test-observation-harness -- --format json
 zig build causal-schema-governance -- --format json
 zig build causal-production-hardening-backlog -- --format json
 zig build examples

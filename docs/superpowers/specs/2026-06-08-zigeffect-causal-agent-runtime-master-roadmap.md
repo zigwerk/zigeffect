@@ -713,10 +713,19 @@ Status values:
      size production capacity, add non-NenDB adapter work, add alternate
      frontend renderer support, or mutate production state.
 13. `codex/zigeffect-causal-load-test-observation-harness`
-   - Current next branch: consume capacity-planning fixture families and
-     wall-clock baseline assumptions to emit local observation records without
-     live production telemetry, production load execution, or capacity sizing
-     claims.
+   - Delivered: `causal-load-test-observation-harness` emits
+     `zigeffect.causal.load-test-observation-harness.v1` with approved local
+     scenario families, curated argv arrays, bounded opt-in observations,
+     median/p95 records, capped output snippets, advisory review gates, and
+     negative over-claim fixtures. It keeps observations local, record-only,
+     `mutation_authority=none`, NenDB-only, and SolidJS `zig-webui` aligned,
+     without production telemetry, production load execution, CI timing gates,
+     or capacity sizing claims.
+14. `codex/zigeffect-causal-production-telemetry-capture-design`
+   - Current next branch: design privacy-safe production telemetry capture that
+     can later complement local observations without granting mutation
+     authority, writing non-NenDB durable stores, or claiming production
+     capacity.
 
 ## Dual-Interface Causal Spine Expansion
 
