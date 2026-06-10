@@ -83,11 +83,13 @@ reviewed application work.
 
 Ready or advisory report artifacts hand off to
 `codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary`.
-That branch should decide whether and how a reviewed CI report update can be
-recorded as applied with before/after evidence. It must still preserve disabled
-workflow mutation by the tool, artifact upload execution until reviewed,
-required checks, live telemetry, durable writes, NenDB writes, production
-cluster claims, and mutation authority.
+That branch is now delivered and records planned, applied, or blocked report
+publication boundary evidence. Applied boundary artifacts hand off to
+`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy`.
+Publication policy work must still preserve disabled workflow mutation by the
+tool, artifact upload execution by the tool, required checks, live telemetry,
+durable writes, NenDB writes, production cluster claims, and mutation
+authority.
 
 ## Verification
 

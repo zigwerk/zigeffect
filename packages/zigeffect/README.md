@@ -676,6 +676,28 @@ live telemetry, writing NenDB, writing durable storage, or granting mutation
 authority. The full policy is in
 [docs/production-telemetry-ci-gate-advisory-ci-report.md](docs/production-telemetry-ci-gate-advisory-ci-report.md).
 
+Record the production telemetry CI gate advisory CI report application
+boundary:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary -- \
+  --from-report ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary-ci-gate-advisory-ci-report.json \
+  plan \
+  --reason "CI advisory report application boundary planned"
+```
+
+The boundary uses schema
+`zigeffect.causal.production-telemetry-ci-gate-advisory-ci-report-application-boundary.v1`,
+consumes ready or advisory CI report artifacts, records planned, applied, or
+blocked report publication boundary evidence, and only records `applied=true`
+when reviewed publication-change evidence, before evidence, after evidence,
+safe report-after content, and post-application verification exist. It does
+not publish CI reports, upload artifacts, write GitHub summaries, post PR
+comments, create required checks, enable live telemetry, write NenDB, write
+durable storage, or grant mutation authority. The full policy is in
+[docs/production-telemetry-ci-gate-advisory-ci-report-application-boundary.md](docs/production-telemetry-ci-gate-advisory-ci-report-application-boundary.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -701,8 +723,9 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary`
-after the delivered production telemetry CI gate advisory CI report.
+`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy`
+after the delivered production telemetry CI gate advisory CI report
+application boundary.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in

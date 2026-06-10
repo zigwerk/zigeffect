@@ -534,6 +534,22 @@ networks, write NenDB, write durable production storage, host a production
 dashboard, orchestrate production clusters, add non-NenDB adapter work, add
 alternate renderers, or grant production mutation authority.
 
+- `zigeffect.causal.production-telemetry-ci-gate-advisory-ci-report-application-boundary.v1`
+
+The production-telemetry-ci-gate-advisory-ci-report-application-boundary report
+is a record-only, plan-or-record-applied publication boundary contract. It
+consumes ready or advisory CI report artifacts, validates disabled authority
+and source publication boundaries, records planned, applied, or blocked
+publication evidence, and only records `applied=true` when reviewed
+publication-change evidence, before evidence, after evidence, safe
+report-after content, and post-application verification commands are present.
+It does not enable CI gate enforcement, create required status checks, mutate
+workflows, execute CI uploads, write GitHub step summaries, post pull request
+comments, ingest live telemetry, call networks, write NenDB, write durable
+production storage, host a production dashboard, orchestrate production
+clusters, add non-NenDB adapter work, add alternate renderers, or grant
+production mutation authority.
+
 ### Human-Agent Feedback
 
 - `zigeffect.causal.human-agent-feedback-loop.v1`

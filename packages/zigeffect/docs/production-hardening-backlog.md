@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-telemetry-ci-gate-advisory-ci-report-application-boundary` means the
+The recommendation `start-production-telemetry-ci-gate-advisory-ci-report-publication-policy` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -174,8 +174,16 @@ execution, GitHub step summary writes, pull request comments, live telemetry,
 network send, durable writes, NenDB writes, hosted dashboard claims,
 production cluster claims, alternate renderer scope, and mutation authority
 before any report application boundary branch.
+The production telemetry CI gate advisory CI report application boundary branch
+is also delivered: it consumes ready or advisory CI report artifacts, records
+planned, applied, or blocked report publication boundary evidence, and
+preserves disabled report publication by the tool, CI uploads, GitHub step
+summary writes, pull request comments, required checks, workflow mutation, live
+telemetry, network send, durable writes, NenDB writes, hosted dashboard claims,
+production cluster claims, alternate renderer scope, and mutation authority
+before any publication policy branch.
 The next branch should be
-`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy`.
 
 ## Dependency Order
 
@@ -216,6 +224,7 @@ The backlog currently orders future production-hardening branches as:
 33. `production-telemetry-ci-gate-dry-run-policy` delivered
 34. `production-telemetry-ci-gate-dry-run-evaluator` delivered
 35. `production-telemetry-ci-gate-advisory-ci-report` delivered
+36. `production-telemetry-ci-gate-advisory-ci-report-application-boundary` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -580,10 +589,26 @@ request comments, disabled live telemetry, disabled durable writes, disabled
 NenDB writes, NenDB-only durable direction, and SolidJS `zig-webui` workbench
 direction.
 
-The next branch should use ready or advisory CI report artifacts to define a
-guarded report application boundary before any CI telemetry gate enforcement,
-required status checks, live telemetry, durable production writes, capacity
-claims, production cluster claims, or mutation authority are considered.
+Production telemetry CI gate advisory CI report application boundary is
+documented in
+[production-telemetry-ci-gate-advisory-ci-report-application-boundary.md](production-telemetry-ci-gate-advisory-ci-report-application-boundary.md).
+It emits
+`zigeffect.causal.production-telemetry-ci-gate-advisory-ci-report-application-boundary.v1`
+through
+`zig build causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary`,
+consumes ready or advisory CI report artifacts, records planned, applied, or
+blocked publication boundary evidence, and hands off to publication policy
+work. It preserves disabled report publication by the tool, disabled CI
+uploads, disabled GitHub step summary writes, disabled pull request comments,
+disabled required checks, disabled workflow mutation by the tool, disabled
+live telemetry, disabled durable writes, disabled NenDB writes, NenDB-only
+durable direction, and SolidJS `zig-webui` workbench direction.
+
+The next branch should use applied advisory CI report application boundary
+artifacts to define publication interpretation policy before any CI telemetry
+gate enforcement, required status checks, live telemetry, durable production
+writes, capacity claims, production cluster claims, or mutation authority are
+considered.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -840,6 +865,15 @@ zig build causal-production-telemetry-ci-gate-advisory-ci-report -- \
   summarize \
   --reason "negative CI advisory report path" \
   --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-advisory-ci-report-negative
+zig build causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary -- \
+  --from-report ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary-ci-gate-advisory-ci-report.json \
+  plan \
+  --reason "CI advisory report application boundary planned"
+zig build causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary -- \
+  --from-report ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-advisory-ci-report-negative.json \
+  record-applied \
+  --reason "negative CI advisory report application boundary path" \
+  --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-advisory-ci-report-application-boundary-negative
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

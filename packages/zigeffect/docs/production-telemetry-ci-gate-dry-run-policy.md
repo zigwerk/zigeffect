@@ -81,6 +81,8 @@ Evaluator artifacts then hand off to
 reviewer-facing CI report presentation. That report is now delivered and hands
 off to
 `codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary`.
+That application boundary is now delivered and hands off to
+`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy`.
 
 ## Verification
 

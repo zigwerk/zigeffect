@@ -144,8 +144,10 @@ branch now records bounded evidence classifications, observed signals,
 advisory findings, blocked findings, and next queries before advisory CI report
 work. The advisory CI report branch now renders local JSON/text reviewer
 guidance and publication-channel evidence before report application boundary
-work. The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary`.
+work. The advisory CI report application boundary branch now records planned,
+applied, or blocked report publication boundary evidence before publication
+policy work. The current next branch is
+`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy`.
 Reviewed production capacity sizing remains future until compatible
 observations, telemetry design, fixtures, readiness review, implementation
 proposal, exporter boundary, local pipeline fixture evidence, NenDB retention
