@@ -359,6 +359,10 @@ Owns Erlang-style distributed runtime surfaces:
   execution shards, filters terminal and duplicate timer records, and reports
   late due timers before the workflow entity fires them through the durable
   clock.
+- `queue.zig`: journal-backed cluster queue work index that rebuilds owned
+  queue items after shard acquisition, folds durable queue status by sequence,
+  reports claimable and expired work, and applies runner and per-queue selection
+  limits before claims are routed through the workflow entity.
 
 Entity identity, actor references, message envelopes, durable message storage,
 shard ids, runner ids, runner storage, leases, rebalancing, transports,

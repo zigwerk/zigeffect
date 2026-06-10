@@ -781,15 +781,15 @@ Goal: make durable queues work across runner boundaries.
 
 Deliverables:
 
-- [ ] Shard queue ids.
-- [ ] Store queue claims durably.
-- [ ] Add claim lease expiration.
-- [ ] Route worker completions to owning shard.
-- [ ] Add concurrency limits per queue and per runner.
+- [x] Shard queue ids.
+- [x] Store queue claims durably.
+- [x] Add claim lease expiration.
+- [x] Route worker completions to owning shard.
+- [x] Add concurrency limits per queue and per runner.
 
 Acceptance:
 
-- [ ] Queue worker crash returns claimed work to the cluster.
+- [x] Queue worker crash returns claimed work to the cluster.
 
 ## Milestone 38: Split-Brain And Lease Safety
 

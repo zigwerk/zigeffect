@@ -42,7 +42,7 @@ Modify:
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 - Modify: `packages/zigeffect/test/all_test.zig`
 
-- [ ] **Step 1: Write failing public export test**
+- [x] **Step 1: Write failing public export test**
 
 Add:
 
@@ -59,7 +59,7 @@ test "cluster queue public exports are available" {
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -69,12 +69,12 @@ zig build test-raw --summary all
 
 Expected: compile failure for missing cluster queue declarations.
 
-- [ ] **Step 3: Add minimal module and exports**
+- [x] **Step 3: Add minimal module and exports**
 
 Implement status, item, batch, report, limits, and index types with `init` and
 `deinit`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -83,7 +83,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/src/cluster/queue.zig packages/zigeffect/src/cluster/root.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/test/cluster_queue_test.zig packages/zigeffect/test/all_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/cluster/queue.zig packages/zigeffect/src/cluster/root.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/test/cluster_queue_test.zig packages/zigeffect/test/all_test.zig
@@ -97,7 +97,7 @@ git commit -m "feat(zigeffect): add cluster queue index surface"
 - Modify: `packages/zigeffect/src/cluster/queue.zig`
 - Modify: `packages/zigeffect/test/cluster_queue_test.zig`
 
-- [ ] **Step 1: Write failing rebuild tests**
+- [x] **Step 1: Write failing rebuild tests**
 
 Add tests:
 
@@ -109,7 +109,7 @@ Add tests:
 Seed journal rows directly with `queue_offered`, `queue_claimed`,
 `queue_retry_scheduled`, `queue_completed`, `queue_failed`, and `queue_acked`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -119,7 +119,7 @@ zig build test-raw --summary all
 
 Expected: compile or assertion failure for missing rebuild behavior.
 
-- [ ] **Step 3: Implement rebuild**
+- [x] **Step 3: Implement rebuild**
 
 Add:
 
@@ -135,7 +135,7 @@ The method clears prior items, scans sequence order, computes shard ownership
 from workflow execution address, clones queue name and offered payload, updates
 status and claim metadata, skips unowned items, and counts scanned/indexed rows.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -144,7 +144,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/src/cluster/queue.zig packages/zigeffect/test/cluster_queue_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/cluster/queue.zig packages/zigeffect/test/cluster_queue_test.zig
@@ -158,7 +158,7 @@ git commit -m "feat(zigeffect): rebuild owned cluster queue work"
 - Modify: `packages/zigeffect/src/cluster/queue.zig`
 - Modify: `packages/zigeffect/test/cluster_queue_test.zig`
 
-- [ ] **Step 1: Write failing selection tests**
+- [x] **Step 1: Write failing selection tests**
 
 Add tests:
 
@@ -168,7 +168,7 @@ Add tests:
 Use `ClusterQueueClaimLimits{ .max_per_runner = 2, .max_per_queue = 1 }` and
 claimed rows with deadlines before and after `now_ms`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -176,7 +176,7 @@ Run:
 zig build test-raw --summary all
 ```
 
-- [ ] **Step 3: Implement selection**
+- [x] **Step 3: Implement selection**
 
 Add:
 
@@ -187,7 +187,7 @@ pub fn expiredClaims(self: *const ClusterQueueIndex, allocator: Allocator, now_m
 
 Both methods clone returned item strings and return owned batches.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -196,7 +196,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/src/cluster/queue.zig packages/zigeffect/test/cluster_queue_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/cluster/queue.zig packages/zigeffect/test/cluster_queue_test.zig
@@ -211,7 +211,7 @@ git commit -m "feat(zigeffect): select cluster queue work by limits"
 - Modify: `packages/zigeffect/test/cluster_queue_test.zig`
 - Modify: `packages/zigeffect/test/cluster_workflow_engine_test.zig`
 
-- [ ] **Step 1: Write failing command tests**
+- [x] **Step 1: Write failing command tests**
 
 Add tests:
 
@@ -222,7 +222,7 @@ Add tests:
 Submit commands through `ClusterWorkflowEngine`, process the runner with
 `ClusterWorkflowEntityHandler`, parse replies, and inspect journal events.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -230,21 +230,21 @@ Run:
 zig build test-raw --summary all
 ```
 
-- [ ] **Step 3: Extend command protocol**
+- [x] **Step 3: Extend command protocol**
 
 Add command kinds `claim_queue` and `retry_expired_queues`, JSON fields
 `worker_id`, `claim_timeout_ms`, and `max_concurrency`, result fields
 `queue_id`, `queue_attempt`, `queue_claimed`, and `queue_retried`, plus engine
 methods `claimQueue` and `retryExpiredQueues`.
 
-- [ ] **Step 4: Implement entity command application**
+- [x] **Step 4: Implement entity command application**
 
 For `claim_queue`, append `queue_claimed` only when the item status is
 `offered` or `retry_ready` and queue active claims are below `max_concurrency`.
 For `retry_expired_queues`, append `queue_retry_scheduled` for expired claimed
 items in the named queue.
 
-- [ ] **Step 5: Verify green**
+- [x] **Step 5: Verify green**
 
 Run:
 
@@ -253,7 +253,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/src/cluster/workflow_engine.zig packages/zigeffect/test/cluster_queue_test.zig packages/zigeffect/test/cluster_workflow_engine_test.zig
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/zigeffect/src/cluster/workflow_engine.zig packages/zigeffect/test/cluster_queue_test.zig packages/zigeffect/test/cluster_workflow_engine_test.zig
@@ -266,7 +266,7 @@ git commit -m "feat(zigeffect): route cluster queue claims through workflow enti
 
 - Modify: `packages/zigeffect/test/cluster_queue_test.zig`
 
-- [ ] **Step 1: Write failing migration acceptance test**
+- [x] **Step 1: Write failing migration acceptance test**
 
 Add:
 
@@ -279,7 +279,7 @@ test "queue worker crash returns claimed work to the cluster" {
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -287,13 +287,13 @@ Run:
 zig build test-raw --summary all
 ```
 
-- [ ] **Step 3: Complete helper flow**
+- [x] **Step 3: Complete helper flow**
 
 Use file-backed runner storage, message storage, and journal storage in one temp
 directory. Route all workflow mutation after registration through
 `ClusterWorkflowEngine`.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -302,7 +302,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/test/cluster_queue_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/test/cluster_queue_test.zig
@@ -317,15 +317,15 @@ git commit -m "test(zigeffect): prove cluster queue crash recovery"
 - Modify: `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`
 - Modify: `docs/superpowers/plans/2026-06-10-zigeffect-cluster-durable-queues.md`
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 Document `cluster/queue.zig` as the rebuilt shard-owned durable queue index.
 
-- [ ] **Step 2: Mark roadmap milestone complete**
+- [x] **Step 2: Mark roadmap milestone complete**
 
 Mark Milestone 37 checklist items complete after the verification gate passes.
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -339,7 +339,7 @@ git diff --check
 rg "TO""DO|FIX""ME|st""ub|place""holder|not imple""mented|unimple""mented" packages/zigeffect/src packages/zigeffect/test packages/zigeffect/docs docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md docs/superpowers/specs/2026-06-10-zigeffect-cluster-durable-queues-design.md docs/superpowers/plans/2026-06-10-zigeffect-cluster-durable-queues.md
 ```
 
-- [ ] **Step 4: Commit docs**
+- [x] **Step 4: Commit docs**
 
 ```bash
 git add packages/zigeffect/docs/architecture.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md docs/superpowers/plans/2026-06-10-zigeffect-cluster-durable-queues.md
