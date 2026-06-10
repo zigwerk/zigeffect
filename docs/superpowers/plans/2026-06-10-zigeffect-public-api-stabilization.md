@@ -71,14 +71,14 @@ Modify:
 
 ## Task 3: Write The Public API Review Artifact
 
-- [ ] Add `packages/zigeffect/docs/public-api-review.md`.
-- [ ] Cover namespace naming, stable durable workflow exports, stable cluster
+- [x] Add `packages/zigeffect/docs/public-api-review.md`.
+- [x] Cover namespace naming, stable durable workflow exports, stable cluster
   exports, ownership and allocator contracts, error-set and diagnostic policy,
   schema versioning, direct-style Zig clarity, and backend compatibility.
-- [ ] Include a review closeout table that records no unresolved naming or
+- [x] Include a review closeout table that records no unresolved naming or
   ownership issues.
-- [ ] Link the new document from `packages/zigeffect/README.md`.
-- [ ] Link the new document from `packages/zigeffect/docs/architecture.md`.
+- [x] Link the new document from `packages/zigeffect/README.md`.
+- [x] Link the new document from `packages/zigeffect/docs/architecture.md`.
 
 ## Task 4: Verify The Milestone
 

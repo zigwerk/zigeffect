@@ -25,6 +25,10 @@ verification gates. Domain namespaces also expose ergonomic aliases, for
 example `fx.effect.Effect`, `fx.runtime.Runtime`, `fx.layer.Layer`,
 `fx.services.Logger`, and `fx.data.Option`.
 
+See [Public API Review](public-api-review.md) for the stabilized durable
+workflow and cluster surface, ownership rules, schema versioning policy, and
+backend compatibility notes.
+
 Package users should keep importing the facade:
 
 ```zig

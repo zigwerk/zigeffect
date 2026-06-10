@@ -90,6 +90,7 @@ Docs:
 
 - [Usage](docs/usage.md)
 - [Architecture](docs/architecture.md)
+- [Public API Review](docs/public-api-review.md)
 - [Errors](docs/errors.md)
 - [Resource Ownership](docs/resource-ownership.md)
 - [Data](docs/data.md)
