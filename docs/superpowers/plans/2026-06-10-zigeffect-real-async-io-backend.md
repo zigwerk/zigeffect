@@ -147,14 +147,14 @@ pub const LocalAsyncBackendState = struct {
 
 ## Task 5: Integrate Cluster Transport Async Waits
 
-- [ ] Add `ClusterTransportAsyncWait` in `cluster/transport.zig` with request, suspension id, and submitted state.
-- [ ] Add `registerClusterTransportWait(allocator, backend, request, suspension_id)` that registers a network IO wait using request timeout and idempotency detail.
-- [ ] Add `completeClusterTransportWait(allocator, backend, transport, wait)` that completes IO, polls the wake, sends through existing `ClusterTransport.send`, and returns the response.
-- [ ] Preserve existing request/response JSON schemas and in-process/loopback behavior.
-- [ ] Export the helpers from `cluster/root.zig` and `zigeffect.zig`.
-- [ ] Run `cd packages/zigeffect && zig build test-raw`.
-- [ ] Confirm all raw package tests pass.
-- [ ] Commit with `feat(zigeffect): add async cluster transport waits`.
+- [x] Add `ClusterTransportAsyncWait` in `cluster/transport.zig` with request, suspension id, and submitted state.
+- [x] Add `registerClusterTransportWait(allocator, backend, request, suspension_id)` that registers a network IO wait using request timeout and idempotency detail.
+- [x] Add `completeClusterTransportWait(allocator, backend, transport, wait)` that completes IO, polls the wake, sends through existing `ClusterTransport.send`, and returns the response.
+- [x] Preserve existing request/response JSON schemas and in-process/loopback behavior.
+- [x] Export the helpers from `cluster/root.zig` and `zigeffect.zig`.
+- [x] Run `cd packages/zigeffect && zig build test-raw`.
+- [x] Confirm all raw package tests pass.
+- [x] Commit with `feat(zigeffect): add async cluster transport waits`.
 
 ## Task 6: Documentation And Roadmap Closeout
 

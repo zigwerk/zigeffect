@@ -3,8 +3,10 @@ const envelope = @import("envelope.zig");
 const identity = @import("identity.zig");
 const message_storage = @import("message_storage.zig");
 const routing = @import("routing.zig");
+const async_backend_mod = @import("../runtime/async_backend.zig");
 
 pub const Allocator = std.mem.Allocator;
+pub const AsyncBackend = async_backend_mod.AsyncBackend;
 pub const EntityAddress = identity.EntityAddress;
 pub const MessageCorrelationId = envelope.MessageCorrelationId;
 pub const MessageEnvelope = envelope.MessageEnvelope;
@@ -13,6 +15,7 @@ pub const MessageId = envelope.MessageId;
 pub const MessageStorage = message_storage.MessageStorage;
 pub const ShardCount = routing.ShardCount;
 pub const ShardId = routing.ShardId;
+pub const Suspension = async_backend_mod.Suspension;
 
 pub const transport_request_schema = "zigeffect.cluster.transport.request.v1";
 pub const transport_request_schema_version: u32 = 1;
@@ -72,6 +75,16 @@ pub const ClusterTransportResponse = struct {
     }
 };
 
+pub const ClusterTransportAsyncWait = struct {
+    request: ClusterTransportRequest,
+    suspension_id: u64,
+    submitted: bool = false,
+
+    pub fn deinit(self: *ClusterTransportAsyncWait, allocator: Allocator) void {
+        self.request.deinit(allocator);
+    }
+};
+
 pub const ClusterTransport = struct {
     ptr: *anyopaque,
     vtable: *const VTable,
@@ -84,6 +97,56 @@ pub const ClusterTransport = struct {
         return self.vtable.send(self.ptr, allocator, request);
     }
 };
+
+pub fn registerClusterTransportWait(
+    allocator: Allocator,
+    backend: AsyncBackend,
+    request: ClusterTransportRequest,
+    suspension_id: u64,
+) (Allocator.Error || async_backend_mod.AsyncBackendError)!ClusterTransportAsyncWait {
+    var owned_request = try cloneClusterTransportRequest(allocator, request);
+    errdefer owned_request.deinit(allocator);
+
+    try backend.registerIoWait(.{
+        .suspension = .{
+            .kind = .external,
+            .id = suspension_id,
+            .label = "cluster.transport",
+        },
+        .io_kind = .network,
+        .interest = .completion,
+        .reason = request.idempotency_key orelse request.redacted_detail,
+    });
+
+    return .{
+        .request = owned_request,
+        .suspension_id = suspension_id,
+    };
+}
+
+pub fn completeClusterTransportWait(
+    allocator: Allocator,
+    backend: AsyncBackend,
+    transport_value: ClusterTransport,
+    wait: *ClusterTransportAsyncWait,
+) anyerror!ClusterTransportResponse {
+    if (wait.submitted) return error.RetryLimitExceeded;
+
+    try backend.completeIo(.{
+        .suspension_id = wait.suspension_id,
+        .io_kind = .network,
+        .reason = "cluster transport ready",
+    });
+
+    const wake = (try backend.pollWake()) orelse return error.TransportUnavailable;
+    if (wake.suspension.id != wait.suspension_id) return error.TransportUnavailable;
+    if (wake.status != .ready) return error.TransportUnavailable;
+
+    var response = try transport_value.send(allocator, wait.request);
+    errdefer response.deinit(allocator);
+    wait.submitted = true;
+    return response;
+}
 
 pub const InProcessClusterTransportOptions = struct {
     shard_count: ShardCount,
@@ -421,6 +484,24 @@ fn validateIngressKind(kind: MessageEnvelopeKind) ClusterTransportError!void {
 fn dupeOrEmpty(allocator: Allocator, value: []const u8) Allocator.Error![]const u8 {
     if (value.len == 0) return "";
     return allocator.dupe(u8, value);
+}
+
+fn cloneClusterTransportRequest(allocator: Allocator, request: ClusterTransportRequest) Allocator.Error!ClusterTransportRequest {
+    var owned = ClusterTransportRequest{
+        .kind = request.kind,
+        .address = .{
+            .entity_type = .{ .name = try dupeOrEmpty(allocator, request.address.entity_type.name) },
+            .id = request.address.id,
+        },
+        .policy = request.policy,
+    };
+    errdefer owned.deinit(allocator);
+
+    owned.payload_type_name = try dupeOrEmpty(allocator, request.payload_type_name);
+    owned.payload = try dupeOrEmpty(allocator, request.payload);
+    owned.redacted_detail = try dupeOrEmpty(allocator, request.redacted_detail);
+    owned.idempotency_key = if (request.idempotency_key) |key| try dupeOrEmpty(allocator, key) else null;
+    return owned;
 }
 
 fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []const u8) Allocator.Error!void {
