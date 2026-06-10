@@ -123,3 +123,124 @@ test "mailbox envelopes carry lease epoch" {
     defer fx.deinitEntityEnvelope(std.testing.allocator, taken);
     try std.testing.expectEqual(@as(?fx.ShardLeaseEpoch, 9), taken.lease_epoch);
 }
+
+test "guarded message writes validate fence and stamp epoch" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    const runner_storage = runner_storage_state.asRunnerStorage();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+
+    const owner_a = fx.runnerAddress("machine", "runner-a");
+    const owner_b = fx.runnerAddress("machine", "runner-b");
+    const lease_a = try runner_storage.acquire(.{ .shard_id = 0, .owner = owner_a, .now_ms = 1_000, .ttl_ms = 100 });
+    const guard_a = fx.ShardLeaseWriteGuard.init(runner_storage, fx.fenceFromLease(lease_a), .message_submit);
+    const address = try addressForShard(0, 8);
+
+    var submitted = try fx.guardMessageSubmit(message_storage, .{
+        .guard = guard_a,
+        .request = .{
+            .shard_id = 0,
+            .now_ms = 1_010,
+            .envelope = .{
+                .kind = .request,
+                .address = address,
+                .idempotency_key = "guarded",
+                .payload = "ping",
+            },
+        },
+    });
+    defer submitted.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(?fx.ShardLeaseEpoch, 1), submitted.envelope.lease_epoch);
+    try std.testing.expectEqual(@as(?fx.ShardLeaseEpoch, 1), message_storage_state.messages.items[0].lease_epoch);
+
+    _ = try runner_storage.acquire(.{ .shard_id = 0, .owner = owner_b, .now_ms = 1_100, .ttl_ms = 100 });
+    try std.testing.expectError(error.StaleShardFence, fx.guardMessageClaim(message_storage, .{
+        .guard = fx.ShardLeaseWriteGuard.init(runner_storage, fx.fenceFromLease(lease_a), .message_claim),
+        .request = .{ .shard_id = 0, .message_id = submitted.envelope.id, .now_ms = 1_110 },
+    }));
+}
+
+test "guarded mailbox writes stamp epoch and reject stale fence" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    const runner_storage = runner_storage_state.asRunnerStorage();
+    var store = fx.LocalMailboxStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    const owner_a = fx.runnerAddress("machine", "runner-a");
+    const owner_b = fx.runnerAddress("machine", "runner-b");
+    const lease_a = try runner_storage.acquire(.{ .shard_id = 3, .owner = owner_a, .now_ms = 1_000, .ttl_ms = 100 });
+    const address = fx.entityAddress("guarded-mailbox", "one");
+    const guard_a = fx.ShardLeaseWriteGuard.init(runner_storage, fx.fenceFromLease(lease_a), .mailbox);
+
+    const offered = try fx.guardMailboxOffer(&store, guard_a, .{
+        .kind = .tell,
+        .address = address,
+        .payload = "hello",
+    });
+    defer fx.deinitEntityEnvelope(std.testing.allocator, offered);
+    try std.testing.expectEqual(@as(?fx.ShardLeaseEpoch, 1), offered.lease_epoch);
+
+    _ = try runner_storage.acquire(.{ .shard_id = 3, .owner = owner_b, .now_ms = 1_100, .ttl_ms = 100 });
+    try std.testing.expectError(error.StaleShardFence, fx.guardMailboxOffer(&store, guard_a, .{
+        .kind = .tell,
+        .address = address,
+        .payload = "stale",
+    }));
+}
+
+test "guarded journal store stamps lease epoch and rejects stale fence" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    const runner_storage = runner_storage_state.asRunnerStorage();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+
+    const owner_a = fx.runnerAddress("machine", "runner-a");
+    const owner_b = fx.runnerAddress("machine", "runner-b");
+    const lease_a = try runner_storage.acquire(.{ .shard_id = 1, .owner = owner_a, .now_ms = 1_000, .ttl_ms = 100 });
+    var guarded_store = fx.ShardLeaseGuardedJournalStore.init(
+        std.testing.allocator,
+        journal_state.asJournalStore(),
+        fx.ShardLeaseWriteGuard.init(runner_storage, fx.fenceFromLease(lease_a), .journal),
+    );
+    const journal_store = guarded_store.asJournalStore();
+
+    _ = try journal_store.append(.{ .expected_next_sequence = 1, .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "guarded",
+        .status = "running",
+        .redacted_detail = "start",
+        .idempotency_key = "guarded-start",
+    } });
+
+    var events = try journal_state.asJournalStore().readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(?fx.ShardLeaseEpoch, 1), fx.leaseEpochFromDetail(events.events[0].redacted_detail));
+
+    _ = try runner_storage.acquire(.{ .shard_id = 1, .owner = owner_b, .now_ms = 1_100, .ttl_ms = 100 });
+    try std.testing.expectError(error.StaleShardFence, journal_store.append(.{ .expected_next_sequence = 2, .event = .{
+        .sequence = 2,
+        .kind = .workflow_completed,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .status = "completed",
+        .idempotency_key = "guarded-complete",
+    } }));
+}
+
+fn addressForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.EntityAddress {
+    var id: u64 = 1;
+    while (id < 100_000) : (id += 1) {
+        var key_buf: [32]u8 = undefined;
+        const key = std.fmt.bufPrint(&key_buf, "entity-{d}", .{id}) catch unreachable;
+        const address = fx.entityAddress("production-lease", key);
+        if (try fx.shardIdForAddress(address, shard_count) == shard_id) return address;
+    }
+    return error.EntityShardNotFound;
+}
