@@ -107,3 +107,102 @@ test "cluster workflow command parser rejects incompatible schema" {
     ;
     try std.testing.expectError(error.IncompatibleClusterWorkflowCommandSchema, fx.parseClusterWorkflowCommandResultJson(std.testing.allocator, bad_result));
 }
+
+test "cluster workflow registry registers execution entity with journal service" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    var runner = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = fx.runnerAddress("machine-workflow", "runner-a"),
+        .runner_storage = runner_storage_state.asRunnerStorage(),
+        .message_storage = message_storage_state.asMessageStorage(),
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 1,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    });
+    defer runner.deinit();
+    var plan = try runner.acquireBalancedShards(1_000);
+    defer plan.deinit();
+
+    var registry = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    const result = try registry.registerExecution(&runner, journal_store, 7, 8, 1_000);
+    const address = fx.clusterWorkflowExecutionAddress(8);
+    try std.testing.expect(result.address.eql(address));
+    try std.testing.expect(result.registered);
+
+    const scope = try runner.entityScope(address);
+    const raw = (try scope.service(fx.cluster_workflow_entity_service_key)).?;
+    const services: *fx.ClusterWorkflowEntityServices = @ptrCast(@alignCast(raw));
+    try std.testing.expectEqual(@as(fx.workflow.WorkflowId, 7), services.workflow_id);
+    try std.testing.expectEqual(@as(fx.workflow.ExecutionId, 8), services.execution_id);
+    try std.testing.expect(services.journal_store.context == journal_store.context);
+}
+
+test "cluster workflow registry recovers owned executions from journal" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    const owned_execution = try executionIdForShard(0, 8);
+    const foreign_execution = try executionIdForShard(1, 8);
+    _ = try journal_store.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = owned_execution,
+        .name = "owned",
+        .status = "running",
+        .idempotency_key = "owned-start",
+    } });
+    _ = try journal_store.append(.{ .event = .{
+        .sequence = 2,
+        .kind = .workflow_started,
+        .workflow_id = 9,
+        .execution_id = foreign_execution,
+        .name = "foreign",
+        .status = "running",
+        .idempotency_key = "foreign-start",
+    } });
+
+    var runner = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = fx.runnerAddress("machine-workflow", "runner-recovery"),
+        .runner_storage = runner_storage_state.asRunnerStorage(),
+        .message_storage = message_storage_state.asMessageStorage(),
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 1,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    });
+    defer runner.deinit();
+    _ = try runner.runtime.acquireShard(0, 1_000);
+
+    var registry = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+    const report = try registry.recoverOwnedExecutions(&runner, journal_store, 1_000);
+
+    try std.testing.expectEqual(@as(usize, 2), report.scanned);
+    try std.testing.expectEqual(@as(usize, 1), report.registered);
+    _ = try runner.entityScope(fx.clusterWorkflowExecutionAddress(owned_execution));
+    try std.testing.expectError(error.EntityNotFound, runner.entityScope(fx.clusterWorkflowExecutionAddress(foreign_execution)));
+}
+
+fn executionIdForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.workflow.ExecutionId {
+    var id: fx.workflow.ExecutionId = 1;
+    while (id < 100_000) : (id += 1) {
+        const address = fx.clusterWorkflowExecutionAddress(id);
+        if (try fx.shardIdForAddress(address, shard_count) == shard_id) return id;
+    }
+    return error.ExecutionShardNotFound;
+}

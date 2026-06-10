@@ -1,9 +1,14 @@
 const std = @import("std");
 const identity = @import("identity.zig");
+const local_cluster = @import("local_cluster.zig");
+const routing = @import("routing.zig");
 const journal = @import("../workflow/journal.zig");
+const store = @import("../workflow/store.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const EntityAddress = identity.EntityAddress;
+pub const JournalStore = store.JournalStore;
+pub const LocalClusterRunner = local_cluster.LocalClusterRunner;
 pub const WorkflowId = journal.WorkflowId;
 pub const ExecutionId = journal.ExecutionId;
 pub const ActivityId = journal.ActivityId;
@@ -90,9 +95,132 @@ pub const ClusterWorkflowCommandResult = struct {
 };
 
 pub const ClusterWorkflowEngine = struct {};
-pub const ClusterWorkflowEntityServices = struct {};
-pub const ClusterWorkflowEntityRegistry = struct {};
+
+pub const ClusterWorkflowEntityServices = struct {
+    journal_store: JournalStore,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+};
+
+pub const ClusterWorkflowEntityRegistrationResult = struct {
+    address: EntityAddress,
+    registered: bool = false,
+};
+
+pub const ClusterWorkflowRecoveryReport = struct {
+    scanned: usize = 0,
+    registered: usize = 0,
+    skipped: usize = 0,
+};
+
+const RecoveredWorkflowExecution = struct {
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+};
+
+pub const ClusterWorkflowEntityRegistry = struct {
+    allocator: Allocator,
+    services: std.ArrayList(*ClusterWorkflowEntityServices) = .empty,
+
+    pub fn init(allocator: Allocator) ClusterWorkflowEntityRegistry {
+        return .{ .allocator = allocator };
+    }
+
+    pub fn deinit(self: *ClusterWorkflowEntityRegistry) void {
+        for (self.services.items) |services| {
+            self.allocator.destroy(services);
+        }
+        self.services.deinit(self.allocator);
+    }
+
+    pub fn registerExecution(
+        self: *ClusterWorkflowEntityRegistry,
+        runner: *LocalClusterRunner,
+        journal_store: JournalStore,
+        workflow_id: WorkflowId,
+        execution_id: ExecutionId,
+        now_ms: u64,
+    ) !ClusterWorkflowEntityRegistrationResult {
+        const address = clusterWorkflowExecutionAddress(execution_id);
+        const shard_id = try routing.shardIdForAddress(address, runner.shard_count);
+        if (!runner.runtime.ownsShard(shard_id)) return error.ShardNotOwned;
+
+        if (runner.entityScope(address)) |_| {
+            return .{ .address = address, .registered = false };
+        } else |err| switch (err) {
+            error.EntityNotFound => {},
+            else => return err,
+        }
+
+        _ = try runner.registerEntity(.{ .address = address, .name = cluster_workflow_entity_type }, now_ms);
+        const services = try self.allocator.create(ClusterWorkflowEntityServices);
+        errdefer self.allocator.destroy(services);
+        services.* = .{
+            .journal_store = journal_store,
+            .workflow_id = workflow_id,
+            .execution_id = execution_id,
+        };
+        errdefer services.* = undefined;
+
+        const scope = try runner.entityScope(address);
+        try scope.provideService(cluster_workflow_entity_service_key, services);
+        try self.services.append(self.allocator, services);
+
+        return .{ .address = address, .registered = true };
+    }
+
+    pub fn recoverOwnedExecutions(
+        self: *ClusterWorkflowEntityRegistry,
+        runner: *LocalClusterRunner,
+        journal_store: JournalStore,
+        now_ms: u64,
+    ) !ClusterWorkflowRecoveryReport {
+        var events = try journal_store.readAll(self.allocator);
+        defer events.deinit();
+
+        var executions = std.ArrayList(RecoveredWorkflowExecution).empty;
+        defer executions.deinit(self.allocator);
+
+        for (events.events) |event| {
+            if (findRecoveredExecution(executions.items, event.execution_id) != null) continue;
+            try executions.append(self.allocator, .{
+                .workflow_id = event.workflow_id,
+                .execution_id = event.execution_id,
+            });
+        }
+
+        var report = ClusterWorkflowRecoveryReport{ .scanned = executions.items.len };
+        for (executions.items) |execution| {
+            const address = clusterWorkflowExecutionAddress(execution.execution_id);
+            const shard_id = try routing.shardIdForAddress(address, runner.shard_count);
+            if (!runner.runtime.ownsShard(shard_id)) {
+                report.skipped += 1;
+                continue;
+            }
+            const registered = try self.registerExecution(
+                runner,
+                journal_store,
+                execution.workflow_id,
+                execution.execution_id,
+                now_ms,
+            );
+            if (registered.registered) {
+                report.registered += 1;
+            } else {
+                report.skipped += 1;
+            }
+        }
+        return report;
+    }
+};
 pub const ClusterWorkflowEntityHandler = struct {};
+
+fn findRecoveredExecution(executions: []const RecoveredWorkflowExecution, execution_id: ExecutionId) ?usize {
+    for (executions, 0..) |execution, index| {
+        if (execution.execution_id == execution_id) return index;
+    }
+    return null;
+}
 
 const ClusterWorkflowCommandJson = struct {
     schema: []const u8,
