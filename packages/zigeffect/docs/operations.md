@@ -107,6 +107,8 @@ zig build causal-artifact-access-control
 zig build causal-artifact-access-control -- --format json
 zig build causal-unified-spine-contract
 zig build causal-unified-spine-contract -- --format json
+zig build causal-human-agent-feedback-loop
+zig build causal-human-agent-feedback-loop -- --format json
 zig build causal-workbench -- <artifact.json>
 zig build causal-workbench -- --server-only <artifact.json>
 zig build causal-workbench-ui
@@ -345,7 +347,7 @@ Current adapters:
 
 NenDB support is currently a writer contract and adapter-test boundary. This
 branch does not add a direct production database integration and adds no
-Cockroach adapter.
+non-NenDB durable adapter.
 
 ## Scenario And Invariant Governance
 
@@ -423,7 +425,7 @@ The recommendation `deliver-m9-with-deferred-production-hardening` means the
 M0-M9 causal self-improvement roadmap is complete for local/CI operation and
 the documented production gaps should move to future hardening. It does not add
 production dashboards, access control, durable production retention, mutation
-authority, rollout automation, or a Cockroach adapter.
+authority, rollout automation, or a non-NenDB durable adapter.
 
 ## Production Hardening Backlog
 
@@ -439,10 +441,11 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-workbench-graph-visual-debugging` after the unified
-causal spine, deep runtime internals, app semantic trace API, bounded agent
-query surface, record-only encryption-at-rest policy, record-only alerting
-integrations, and delivered live dashboard streaming workbench.
+`codex/zigeffect-causal-rollout-automation-guardrails` after the unified causal
+spine, deep runtime internals, app semantic trace API, bounded agent query
+surface, record-only encryption-at-rest policy, record-only alerting
+integrations, delivered live dashboard streaming workbench, delivered graph
+visual debugging, and delivered human-agent feedback loop.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -488,7 +491,7 @@ TTL remains policy-only here because causal events do not carry wall-clock
 capture timestamps and deterministic tools do not inspect clocks. Recovery
 evidence must prove queryable causal lineage after restore. This contract does
 not scan artifacts, write durable production state, restore data, open
-dashboards, add Cockroach scope, or grant mutation authority.
+dashboards, add non-NenDB durable adapter scope, or grant mutation authority.
 
 ## Production Deployment Runbooks
 
@@ -511,7 +514,7 @@ post-action verification commands.
 
 Deployment and rollback execution stay outside zigeffect authority. This
 contract does not deploy services, roll back services, page humans, open live
-production telemetry, add Cockroach scope, or grant production mutation
+production telemetry, add non-NenDB durable adapter scope, or grant production mutation
 authority. Its immediate consumer is artifact access control.
 
 ## Artifact Access Control
@@ -556,8 +559,8 @@ mappings.
 
 This contract was the handoff into
 `codex/zigeffect-causal-deep-runtime-internals`. The later runtime and app
-semantic branches preserve the same boundaries: no Cockroach scope, no React
-workbench switch, and no production mutation authority.
+semantic branches preserve the same boundaries: no non-NenDB durable adapter
+scope, no React workbench switch, and no production mutation authority.
 
 ## Encryption At Rest Policy
 
@@ -580,7 +583,8 @@ boundaries.
 Redaction review precedes encryption-at-rest eligibility. Key ids are
 references, never key material. This contract does not encrypt bytes, decrypt
 bytes, generate keys, call a KMS, enforce live RBAC, modify the SolidJS
-workbench, add Cockroach scope, add React support, or grant mutation authority.
+workbench, add non-NenDB durable adapter scope, add React support, or grant
+mutation authority.
 
 ## Alerting Integrations
 
@@ -602,8 +606,8 @@ authority boundaries for Slack, Linear, Jira, SIEM, and paging handoffs.
 
 Every fixture is record-only. This contract does not send alerts, create
 tickets, forward SIEM events, page humans, call networks, read secrets, mutate
-external systems, ingest production telemetry, add Cockroach scope, add React
-support, or grant production mutation authority.
+external systems, ingest production telemetry, add non-NenDB durable adapter
+scope, add React support, or grant production mutation authority.
 
 ## Live Dashboard Streaming Workbench
 
@@ -625,8 +629,32 @@ lazy-loaded `@dschz/solid-g6` adapter over `@antv/g6`.
 
 The stream and UI are local evidence surfaces only. They do not ingest
 production telemetry, host a shared production dashboard, call networks, edit
-source, update registries, approve remediation, add Cockroach scope, add React
-support, or grant mutation authority.
+source, update registries, approve remediation, add non-NenDB durable adapter
+scope, add React support, or grant mutation authority.
+
+## Human-Agent Feedback Loop
+
+Run the human-agent feedback-loop contract after graph visual debugging when a
+human workbench selection, agent query report, before/after comparison,
+regression cluster, or guarded remediation handoff needs one shared record:
+
+```sh
+cd packages/zigeffect
+zig build causal-human-agent-feedback-loop
+zig build causal-human-agent-feedback-loop -- --format json
+```
+
+The contract records schema
+`zigeffect.causal.human-agent-feedback-loop.v1`. It names the
+failure-to-query, before/after trace comparison, regression clustering,
+guarded remediation handoff, and future NenDB durable-history handoff stages.
+It keeps `applied=false`, `mutation_authority=none`,
+`workbench_mutation=false`, and `agent_mutation=false`.
+
+Use it as an evidence index for local development agents and app-facing issue
+analysis. It does not run queries, write durable history, apply proposals, edit
+source, update registries, change app code, execute deployments, create alerts,
+or grant mutation authority.
 
 ## Production Gaps
 

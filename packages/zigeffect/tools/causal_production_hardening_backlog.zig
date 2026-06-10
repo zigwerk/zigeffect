@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-human-agent-feedback-loop";
-pub const recommended_next_branch = "codex/zigeffect-causal-human-agent-feedback-loop";
+pub const recommendation = "start-rollout-automation-guardrails";
+pub const recommended_next_branch = "codex/zigeffect-causal-rollout-automation-guardrails";
 
 const OutputFormat = enum { text, json };
 
@@ -33,7 +33,7 @@ const global_constraints: []const []const u8 = &.{
 };
 
 const non_goals: []const []const u8 = &.{
-    "Cockroach adapter work",
+    "non-NenDB durable adapter work",
     "React workbench support",
     "production mutation authority",
     "live production telemetry ingestion",
@@ -342,7 +342,7 @@ const backlog_items: []const BacklogItem = &.{
         .title = "Human And Agent Feedback Loop",
         .gap_id = "causal-self-improving-feedback-loop",
         .priority = "P3",
-        .status = "planned",
+        .status = "delivered",
         .summary = "Connect the human workbench and agent query interface into a self-improving development loop for zigeffect and apps built on it.",
         .depends_on = &.{ "agent-query-interface", "workbench-graph-visual-debugging", "durable-production-retention" },
         .deliverables = &.{
@@ -354,11 +354,15 @@ const backlog_items: []const BacklogItem = &.{
         },
         .evidence_sources = &.{
             "docs/superpowers/specs/2026-06-08-zigeffect-causal-agent-runtime-master-roadmap.md",
+            "docs/superpowers/specs/2026-06-10-zigeffect-causal-human-agent-feedback-loop-design.md",
+            "docs/superpowers/plans/2026-06-10-zigeffect-causal-human-agent-feedback-loop-implementation.md",
+            "packages/zigeffect/tools/causal_human_agent_feedback_loop.zig",
+            "packages/zigeffect/docs/human-agent-feedback-loop.md",
             "packages/zigeffect/docs/agent-observable-runtime.md",
             "packages/zigeffect/docs/operations.md",
         },
         .branch = "codex/zigeffect-causal-human-agent-feedback-loop",
-        .agent_guidance = "Close the loop with evidence and guarded proposals; do not grant autonomous mutation authority.",
+        .agent_guidance = "Use the delivered record-only loop to connect workbench selections, bounded queries, before/after comparisons, local regression clusters, guarded proposal handoffs, and future NenDB history handoff while mutation authority remains none.",
     },
     .{
         .id = "rollout-automation-guardrails",
@@ -456,6 +460,8 @@ const verification_commands: []const []const u8 = &.{
     "zig build causal-live-dashboard-streaming-workbench -- --format json",
     "zig build causal-unified-spine-contract",
     "zig build causal-unified-spine-contract -- --format json",
+    "zig build causal-human-agent-feedback-loop",
+    "zig build causal-human-agent-feedback-loop -- --format json",
     "zig build causal-production-deployment-runbooks",
     "zig build causal-production-deployment-runbooks -- --format json",
     "zig build causal-durable-production-retention",
@@ -728,11 +734,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-human-agent-feedback-loop",
+        "start-rollout-automation-guardrails",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-human-agent-feedback-loop",
+        "codex/zigeffect-causal-rollout-automation-guardrails",
         recommended_next_branch,
     );
 }
@@ -754,6 +760,7 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItem("workbench-graph-visual-debugging");
     try expectBacklogItemStatus("workbench-graph-visual-debugging", "delivered");
     try expectBacklogItem("human-agent-feedback-loop");
+    try expectBacklogItemStatus("human-agent-feedback-loop", "delivered");
     try expectBacklogItem("production-capacity-planning");
 }
 
@@ -762,7 +769,7 @@ test "production hardening backlog preserves user constraints" {
     try expectConstraint("workbench direction: SolidJS inside webui-dev/zig-webui");
     try expectConstraint("visual graph adapter starts with @dschz/solid-g6 over @antv/g6; solid-flow remains optional editor research");
     try expectConstraint("human workbench and agent query interface share one causal truth model but expose separate ergonomics");
-    try expectNonGoal("Cockroach adapter work");
+    try expectNonGoal("non-NenDB durable adapter work");
     try expectNonGoal("React workbench support");
     try expectNonGoal("production mutation authority");
 }
@@ -773,7 +780,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-human-agent-feedback-loop") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-rollout-automation-guardrails") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -788,10 +795,11 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-human-agent-feedback-loop\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-rollout-automation-guardrails\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-human-agent-feedback-loop\"") != null);
 }
 
 test "production hardening backlog parses supported formats" {

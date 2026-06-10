@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-human-agent-feedback-loop` means the
+The recommendation `start-rollout-automation-guardrails` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -36,8 +36,12 @@ Solid G6 visual graph adapter boundary. Graph visual debugging is also
 delivered: Visual Graph supports cause, topology, ownership, and lineage
 perspectives; `?sample=visual-graph` loads the graph debugging fixture; and
 browser verification covers desktop/mobile plus nonblank G6 canvas evidence.
+The human-agent feedback loop is also delivered: it connects workbench
+selection, bounded agent queries, before/after comparison, local regression
+clustering records, guarded remediation handoff, and future NenDB history
+handoff while preserving `mutation_authority=none`.
 The next branch should be
-`codex/zigeffect-causal-human-agent-feedback-loop`.
+`codex/zigeffect-causal-rollout-automation-guardrails`.
 
 ## Dependency Order
 
@@ -55,7 +59,7 @@ The backlog currently orders future production-hardening branches as:
 10. `alerting-integrations` delivered
 11. `live-dashboard-streaming-workbench` delivered
 12. `workbench-graph-visual-debugging` delivered
-13. `human-agent-feedback-loop`
+13. `human-agent-feedback-loop` delivered
 14. `rollout-automation-guardrails`
 15. `wall-clock-benchmark-baselines`
 16. `production-capacity-planning`
@@ -68,7 +72,7 @@ delivered, while cross-run comparison remains future work.
 ## Authority Boundaries
 
 Durable database work is NenDB adapter work only. Do not use this backlog to add
-Cockroach adapter scope to zigeffect causal production hardening.
+non-NenDB durable adapter scope to zigeffect causal production hardening.
 
 Durable retention is documented in
 [durable-production-retention.md](durable-production-retention.md). It defines
@@ -143,10 +147,16 @@ nonblank canvas verification. Treat `solid-flow` as optional later editor
 research for editable remediation planning, not as a default dashboard
 dependency.
 
+The human-agent feedback loop is documented in
+[human-agent-feedback-loop.md](human-agent-feedback-loop.md). It emits
+`zigeffect.causal.human-agent-feedback-loop.v1` through
+`zig build causal-human-agent-feedback-loop` and keeps the feedback loop
+record-only.
+
 The next branch is
-`codex/zigeffect-causal-human-agent-feedback-loop`. It should connect human
-Workbench selections and the agent query interface into the self-improving
-development loop while preserving `mutation_authority: none`.
+`codex/zigeffect-causal-rollout-automation-guardrails`. It should define canary,
+gradual rollout, circuit-breaker, and rollback evidence records without
+granting automated mutation authority.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -175,6 +185,8 @@ zig build causal-alerting-integrations
 zig build causal-alerting-integrations -- --format json
 zig build causal-live-dashboard-streaming-workbench
 zig build causal-live-dashboard-streaming-workbench -- --format json
+zig build causal-human-agent-feedback-loop
+zig build causal-human-agent-feedback-loop -- --format json
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

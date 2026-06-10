@@ -635,10 +635,10 @@ metrics, and traces.
 - Delivered: `causal-production-hardening-backlog` publishes
   `zigeffect.causal.production-hardening-backlog.v1` with the ordered
   production-hardening branch queue, NenDB-only durable direction, SolidJS plus
-  `webui-dev/zig-webui` workbench direction, the delivered
-  `workbench-graph-visual-debugging` milestone, non-goals, verification
+  `webui-dev/zig-webui` workbench direction, the delivered graph visual
+  debugging and human-agent feedback-loop milestones, non-goals, verification
   commands, and the current next branch
-  `codex/zigeffect-causal-human-agent-feedback-loop`.
+  `codex/zigeffect-causal-rollout-automation-guardrails`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
@@ -662,15 +662,16 @@ metrics, and traces.
   `zigeffect.causal.encryption-at-rest-policy.v1` with encryption domains, key
   owner labels, rotation evidence, encrypted artifact fixture metadata,
   redaction ordering, denied fixtures, and authority boundaries. It keeps
-  encryption implementation, KMS integration, live RBAC, Cockroach adapter
-  work, React workbench support, and mutation authority out of scope.
+  encryption implementation, KMS integration, live RBAC, non-NenDB durable
+  adapter work, React workbench support, and mutation authority out of scope.
 - Delivered: `causal-alerting-integrations` publishes
   `zigeffect.causal.alerting-integrations.v1` with record-only channel
   contracts, severity and routing policy, escalation gates, payload fields,
   preview fixtures, denied fixtures, and authority boundaries for Slack,
   Linear, Jira, SIEM, and paging handoffs. It keeps live alert delivery, ticket
   creation, SIEM forwarding, paging execution, network calls, secrets,
-  Cockroach adapter work, React support, and mutation authority out of scope.
+  non-NenDB durable adapter work, React support, and mutation authority out of
+  scope.
 - Delivered: `causal-live-dashboard-streaming-workbench` publishes
   `zigeffect.causal.live-dashboard-streaming-workbench.v1`, registers
   `zigeffect.causal.live-dashboard-stream.v1`, adds the local live stream
@@ -681,6 +682,13 @@ metrics, and traces.
   selection detail, legend/warning panels, richer Solid G6 adapter metadata, and
   desktop/mobile nonblank G6 canvas verification while mutation authority
   remains `none`.
+- Delivered: `causal-human-agent-feedback-loop` publishes
+  `zigeffect.causal.human-agent-feedback-loop.v1` with the record-only loop
+  that connects human workbench selections, bounded agent queries, before/after
+  comparison, local regression clustering records, guarded remediation handoff,
+  and future NenDB durable-history handoff. It keeps `applied=false`,
+  `mutation_authority=none`, `workbench_mutation=false`, and
+  `agent_mutation=false`.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,

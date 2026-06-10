@@ -920,6 +920,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_unified_spine_contract_tool_tests = b.addRunArtifact(causal_unified_spine_contract_tool_tests);
     test_step.dependOn(&run_causal_unified_spine_contract_tool_tests.step);
 
+    const causal_human_agent_feedback_loop_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_human_agent_feedback_loop.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_human_agent_feedback_loop_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-human-agent-feedback-loop",
+        .root_module = causal_human_agent_feedback_loop_tool_module,
+    });
+    const run_causal_human_agent_feedback_loop_tool = b.addRunArtifact(causal_human_agent_feedback_loop_tool);
+    if (b.args) |args| run_causal_human_agent_feedback_loop_tool.addArgs(args);
+    const causal_human_agent_feedback_loop_step = b.step("causal-human-agent-feedback-loop", "Print causal human-agent feedback loop report");
+    causal_human_agent_feedback_loop_step.dependOn(&run_causal_human_agent_feedback_loop_tool.step);
+
+    const causal_human_agent_feedback_loop_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-human-agent-feedback-loop-tests",
+        .root_module = causal_human_agent_feedback_loop_tool_module,
+    });
+    const run_causal_human_agent_feedback_loop_tool_tests = b.addRunArtifact(causal_human_agent_feedback_loop_tool_tests);
+    test_step.dependOn(&run_causal_human_agent_feedback_loop_tool_tests.step);
+
     const causal_workbench_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_workbench.zig"),
         .target = target,
@@ -1433,4 +1455,6 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_handoff_tool_tests.step);
     examples_step.dependOn(&causal_loop_tool.step);
     examples_step.dependOn(&run_causal_loop_tool_tests.step);
+    examples_step.dependOn(&causal_human_agent_feedback_loop_tool.step);
+    examples_step.dependOn(&run_causal_human_agent_feedback_loop_tool_tests.step);
 }

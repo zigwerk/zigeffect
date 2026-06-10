@@ -672,11 +672,16 @@ Status values:
      optional later research for editable remediation planning surfaces, not as
      a default dashboard dependency.
 8. `codex/zigeffect-causal-human-agent-feedback-loop`
-   - Current next branch: connect the human WebUI and the agent query interface
-     into a self-improving development loop: failure-to-query, before/after
-     trace comparison, regression clustering, guarded proposal records, and
-     durable history handoff. Mutation authority remains `none`.
+   - Delivered: `causal-human-agent-feedback-loop` emits
+     `zigeffect.causal.human-agent-feedback-loop.v1` as the record-only loop
+     contract connecting human workbench selections, bounded agent queries,
+     before/after trace comparison, local regression clustering records,
+     guarded remediation handoffs, and future NenDB durable-history handoff.
+     It keeps `applied=false`, `mutation_authority=none`,
+     `workbench_mutation=false`, and `agent_mutation=false`.
 9. `codex/zigeffect-causal-rollout-automation-guardrails`
+   - Current next branch: define canary, gradual rollout, circuit-breaker, and
+     rollback evidence records without granting automated mutation authority.
 10. `codex/zigeffect-causal-wall-clock-benchmark-baselines`
 11. `codex/zigeffect-causal-production-capacity-planning`
 

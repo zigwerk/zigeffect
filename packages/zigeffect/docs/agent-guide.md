@@ -1063,6 +1063,20 @@ zig build causal-compare -- .zig-cache/causal-artifacts/before.json .zig-cache/c
 Use the compare report to cite event deltas, finding deltas, added events,
 removed events, and changed events in the patch summary.
 
+Use the feedback-loop report to keep the human workbench and agent query paths
+on one record-only contract:
+
+```sh
+zig build causal-human-agent-feedback-loop
+zig build causal-human-agent-feedback-loop -- --format json
+```
+
+The JSON report uses `zigeffect.causal.human-agent-feedback-loop.v1`. It names
+the failure-to-query, before/after comparison, regression clustering, guarded
+handoff, and future NenDB durable-history handoff stages. Treat it as a plan
+and evidence index. It does not run the queries for you, does not apply
+remediation, and always keeps `applied=false` and `mutation_authority=none`.
+
 This is the Phase 0 self-improving feedback lane: agents use `zigeffect`'s own
 causal runtime as evidence while improving `zigeffect`, then rerun the harness
 and package tests to compare behavior.

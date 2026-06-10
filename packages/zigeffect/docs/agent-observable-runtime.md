@@ -1050,6 +1050,21 @@ limitations, and recommended next queries. Use `trace_data <data_subject_ref>`
 for semantic app data-lineage events; cross-artifact run comparison remains
 future work.
 
+`zig build causal-human-agent-feedback-loop` records the shared human and agent
+loop around those primitives. It emits
+`zigeffect.causal.human-agent-feedback-loop.v1` and names the five record-only
+stages: failure-to-query, before/after trace comparison, regression clustering
+records, guarded remediation proposal handoff, and future NenDB durable-history
+handoff. The report is a contract and evidence index. It keeps `applied=false`,
+`mutation_authority=none`, `workbench_mutation=false`, and
+`agent_mutation=false`; it does not execute queries, apply remediation, or write
+durable history.
+
+```sh
+zig build causal-human-agent-feedback-loop
+zig build causal-human-agent-feedback-loop -- --format json
+```
+
 The companion `zig build causal-check` command runs the same dogfood scenario in
 fail-on-findings mode. It writes artifacts first, then exits nonzero when
 findings exist. This is the first development-agent gate; real failing-test
