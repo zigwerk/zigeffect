@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-live-dashboard-streaming-workbench";
-pub const recommended_next_branch = "codex/zigeffect-causal-live-dashboard-streaming-workbench";
+pub const recommendation = "start-workbench-graph-visual-debugging";
+pub const recommended_next_branch = "codex/zigeffect-causal-workbench-graph-visual-debugging";
 
 const OutputFormat = enum { text, json };
 
@@ -279,8 +279,8 @@ const backlog_items: []const BacklogItem = &.{
         .title = "Live Dashboard And Streaming Workbench",
         .gap_id = "live-dashboards-streaming-workbench",
         .priority = "P3",
-        .status = "planned",
-        .summary = "Extend the read-only SolidJS plus zig-webui workbench toward bounded live artifact streams, production dashboard views, and the first visual graph adapter.",
+        .status = "delivered",
+        .summary = "Adds a record-only live dashboard stream contract, bounded local stream fixture, read-only SolidJS workbench dashboard, and first Solid G6 visual graph adapter boundary.",
         .depends_on = &.{ "production-artifact-aggregation", "durable-production-retention", "artifact-access-control", "unified-causal-spine-contract" },
         .deliverables = &.{
             "streaming artifact protocol",
@@ -292,12 +292,16 @@ const backlog_items: []const BacklogItem = &.{
             "SolidJS workbench verification",
         },
         .evidence_sources = &.{
+            "packages/zigeffect/tools/causal_live_dashboard_streaming_workbench.zig",
+            "packages/zigeffect/docs/live-dashboard-streaming-workbench.md",
             "packages/zigeffect/workbench/src/App.tsx",
+            "packages/zigeffect/workbench/src/causalArtifact.ts",
+            "packages/zigeffect/workbench/src/visualGraphAdapter.tsx",
             "packages/zigeffect/docs/operations.md",
             "packages/zigeffect/docs/performance-budget.md",
         },
         .branch = "codex/zigeffect-causal-live-dashboard-streaming-workbench",
-        .agent_guidance = "Start with @dschz/solid-g6 as the Solid adapter, keep the causal graph model as source of truth, and add direct @antv/g6 usage only for missing engine APIs.",
+        .agent_guidance = "Use the delivered stream contract and Live or Visual Graph tabs for bounded local evidence; next deepen graph layouts and browser/canvas verification.",
     },
     .{
         .id = "workbench-graph-visual-debugging",
@@ -442,6 +446,8 @@ const verification_commands: []const []const u8 = &.{
     "zig build causal-encryption-at-rest-policy -- --format json",
     "zig build causal-alerting-integrations",
     "zig build causal-alerting-integrations -- --format json",
+    "zig build causal-live-dashboard-streaming-workbench",
+    "zig build causal-live-dashboard-streaming-workbench -- --format json",
     "zig build causal-unified-spine-contract",
     "zig build causal-unified-spine-contract -- --format json",
     "zig build causal-production-deployment-runbooks",
@@ -716,11 +722,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-live-dashboard-streaming-workbench",
+        "start-workbench-graph-visual-debugging",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-live-dashboard-streaming-workbench",
+        "codex/zigeffect-causal-workbench-graph-visual-debugging",
         recommended_next_branch,
     );
 }
@@ -738,7 +744,7 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItem("alerting-integrations");
     try expectBacklogItemStatus("alerting-integrations", "delivered");
     try expectBacklogItem("live-dashboard-streaming-workbench");
-    try expectBacklogItemStatus("live-dashboard-streaming-workbench", "planned");
+    try expectBacklogItemStatus("live-dashboard-streaming-workbench", "delivered");
     try expectBacklogItem("workbench-graph-visual-debugging");
     try expectBacklogItem("human-agent-feedback-loop");
     try expectBacklogItem("production-capacity-planning");
@@ -760,7 +766,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-live-dashboard-streaming-workbench") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-workbench-graph-visual-debugging") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -775,7 +781,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-live-dashboard-streaming-workbench\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-workbench-graph-visual-debugging\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);
