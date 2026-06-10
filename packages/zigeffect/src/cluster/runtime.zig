@@ -10,6 +10,7 @@ const fencing = @import("fencing.zig");
 const lease_guard = @import("lease_guard.zig");
 const supervision = @import("supervision.zig");
 const observability = @import("observability.zig");
+const runtime_supervisor = @import("../runtime/supervisor.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const EntityAddress = identity.EntityAddress;
@@ -46,6 +47,7 @@ pub const ClusterRuntimeOptions = struct {
     shard_count: ShardCount,
     entity_runtime_options: LocalEntityRuntimeOptions = .{},
     supervision_policy: ClusterSupervisionPolicy = .{},
+    shard_worker_restart_policy: supervision.ClusterServiceRestartPolicy = .{},
 };
 
 pub const ClusterProcessReport = struct {
@@ -116,6 +118,7 @@ pub const ClusterRuntime = struct {
     local_runtime: entity.LocalEntityRuntime,
     shard_count: ShardCount,
     supervision_policy: ClusterSupervisionPolicy = .{},
+    shard_worker_restart_state: supervision.ClusterServiceRestartState,
     causal_recorder: ?ClusterCausalRecorder = null,
     owned_shards: std.ArrayList(ShardId) = .empty,
     accepting_messages: bool = true,
@@ -135,11 +138,13 @@ pub const ClusterRuntime = struct {
             .local_runtime = entity.LocalEntityRuntime.init(allocator, options.entity_runtime_options),
             .shard_count = options.shard_count,
             .supervision_policy = options.supervision_policy,
+            .shard_worker_restart_state = supervision.ClusterServiceRestartState.init(allocator, options.shard_worker_restart_policy),
         };
     }
 
     pub fn deinit(self: *ClusterRuntime) void {
         self.owned_shards.deinit(self.allocator);
+        self.shard_worker_restart_state.deinit();
         self.local_runtime.deinit();
     }
 
@@ -441,6 +446,26 @@ pub const ClusterRuntime = struct {
             try self.recordMessageCausal(.cluster_message_acked, shard_id, claimed, "acked", claimed.redacted_detail);
         }
 
+        return report;
+    }
+
+    pub fn superviseShardWorkerExit(
+        self: *ClusterRuntime,
+        shard_id: ShardId,
+        exit: runtime_supervisor.SupervisorChildExit,
+        now_ms: u64,
+    ) !ClusterSupervisionReport {
+        if (!self.ownsShard(shard_id)) return error.ShardNotOwned;
+        switch (exit) {
+            .success => return .{},
+            .failure, .defect, .interrupted => {},
+        }
+
+        var report = try supervision.superviseShardWorkerFailure(&self.shard_worker_restart_state, shard_id, now_ms);
+        if (report.shard_worker_escalations > 0 and self.supervision_policy.release_shard_on_escalation) {
+            try self.releaseShard(shard_id, now_ms);
+            report.shard_releases += 1;
+        }
         return report;
     }
 

@@ -253,6 +253,42 @@ test "supervised entity escalation releases shard for another runner" {
     try std.testing.expect((try message_storage.unprocessedById(submitted.envelope.id, std.testing.allocator)) == null);
 }
 
+test "cluster runtime shard worker escalation releases owned shard" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    var lease_manager = try fx.LocalShardLeaseManager.init(
+        std.testing.allocator,
+        runner_storage_state.asRunnerStorage(),
+        fx.runnerAddress("machine-supervision", "runner-shard-worker"),
+        .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    );
+    defer lease_manager.deinit();
+
+    var runtime = try fx.ClusterRuntime.init(
+        std.testing.allocator,
+        message_storage_state.asMessageStorage(),
+        &lease_manager,
+        .{
+            .shard_count = 8,
+            .shard_worker_restart_policy = .{ .max_restarts = 1, .within_ms = 1_000 },
+        },
+    );
+    defer runtime.deinit();
+    _ = try runtime.acquireShard(0, 1_000);
+
+    const first = try runtime.superviseShardWorkerExit(0, .{ .failure = "poll failed" }, 1_100);
+    try std.testing.expectEqual(@as(usize, 1), first.shard_worker_restarts);
+    try std.testing.expect(runtime.ownsShard(0));
+
+    const second = try runtime.superviseShardWorkerExit(0, .{ .failure = "poll failed again" }, 1_200);
+    try std.testing.expectEqual(@as(usize, 1), second.shard_worker_escalations);
+    try std.testing.expectEqual(@as(usize, 1), second.shard_releases);
+    try std.testing.expect(!runtime.ownsShard(0));
+    try std.testing.expect((try runner_storage_state.asRunnerStorage().lease(0)) == null);
+}
+
 test "supervised workflow entity failure is reported as workflow worker restart" {
     var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
     defer runner_storage_state.deinit();
@@ -336,6 +372,35 @@ test "local cluster runner supervised tick aggregates supervision report" {
     try std.testing.expectEqual(@as(usize, 1), report.entity_failures);
     try std.testing.expectEqual(@as(usize, 1), report.entity_restarts);
     try std.testing.expectEqual(@as(usize, 0), report.runner_escalations);
+}
+
+test "local cluster runner records runner service restart and escalation" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+
+    var runner = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = fx.runnerAddress("machine-supervision", "runner-service"),
+        .runner_storage = runner_storage_state.asRunnerStorage(),
+        .message_storage = message_storage_state.asMessageStorage(),
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 1,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+        .runner_restart_policy = .{ .max_restarts = 1, .within_ms = 1_000 },
+    });
+    defer runner.deinit();
+
+    const first = try runner.superviseRunnerServiceFailure(1_000);
+    try std.testing.expectEqual(@as(usize, 1), first.runner_service_failures);
+    try std.testing.expectEqual(@as(usize, 1), first.runner_service_restarts);
+    try std.testing.expectEqual(@as(usize, 0), first.runner_service_escalations);
+
+    const second = try runner.superviseRunnerServiceFailure(1_100);
+    try std.testing.expectEqual(@as(usize, 1), second.runner_service_failures);
+    try std.testing.expectEqual(@as(usize, 0), second.runner_service_restarts);
+    try std.testing.expectEqual(@as(usize, 1), second.runner_service_escalations);
 }
 
 fn addressForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.EntityAddress {

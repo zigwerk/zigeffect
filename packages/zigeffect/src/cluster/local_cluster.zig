@@ -293,9 +293,13 @@ pub const LocalClusterRunner = struct {
     }
 
     pub fn tickSupervised(self: *LocalClusterRunner, handler: anytype, now_ms: u64) !ClusterSupervisionReport {
-        _ = try self.lease_manager.refreshOwnedLeases(now_ms);
-        _ = try self.runtime.loadOwnedShards();
-        return self.runtime.processOwnedShardsSupervised(handler, now_ms);
+        _ = self.lease_manager.refreshOwnedLeases(now_ms) catch return self.superviseRunnerServiceFailure(now_ms);
+        _ = self.runtime.loadOwnedShards() catch return self.superviseRunnerServiceFailure(now_ms);
+        return self.runtime.processOwnedShardsSupervised(handler, now_ms) catch return self.superviseRunnerServiceFailure(now_ms);
+    }
+
+    pub fn superviseRunnerServiceFailure(self: *LocalClusterRunner, now_ms: u64) !ClusterSupervisionReport {
+        return supervision.superviseRunnerServiceFailure(&self.runner_restart_state, now_ms);
     }
 
     pub fn shutdown(self: *LocalClusterRunner, now_ms: u64) !cluster_runtime.ClusterShutdownReport {
