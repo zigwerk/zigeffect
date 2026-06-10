@@ -143,32 +143,47 @@ const guarded_journal_vtable: JournalStore.VTable = .{
 
 pub fn guardMessageSubmit(storage: MessageStorage, request: GuardedMessageSubmit) !MessageSubmitResult {
     try request.guard.validate();
-    return storage.submit(request.request);
+    var submit_request = request.request;
+    submit_request.lease_epoch = request.guard.epoch();
+    submit_request.envelope.lease_epoch = request.guard.epoch();
+    return storage.submit(submit_request);
 }
 
 pub fn guardMessageClaim(storage: MessageStorage, request: GuardedMessageClaim) !MessageEnvelope {
     try request.guard.validate();
-    return storage.claim(request.request);
+    var claim_request = request.request;
+    claim_request.lease_epoch = request.guard.epoch();
+    return storage.claim(claim_request);
 }
 
 pub fn guardMessageAck(storage: MessageStorage, request: GuardedMessageAck) !void {
     try request.guard.validate();
-    try storage.ack(request.request);
+    var ack_request = request.request;
+    ack_request.shard_id = request.guard.fence.shard_id;
+    ack_request.lease_epoch = request.guard.epoch();
+    try storage.ack(ack_request);
 }
 
 pub fn guardMessageReply(storage: MessageStorage, request: GuardedMessageReply) !MessageEnvelope {
     try request.guard.validate();
-    return storage.storeReply(request.request);
+    var reply_request = request.request;
+    reply_request.lease_epoch = request.guard.epoch();
+    reply_request.envelope.lease_epoch = request.guard.epoch();
+    return storage.storeReply(reply_request);
 }
 
 pub fn guardMailboxOffer(store: *mailbox.LocalMailboxStore, guard: ShardLeaseWriteGuard, envelope: EntityEnvelope) !EntityEnvelope {
     try guard.validate();
-    return store.offer(envelope);
+    var guarded = envelope;
+    guarded.lease_epoch = guard.epoch();
+    return store.offer(guarded);
 }
 
 pub fn guardMailboxReply(store: *mailbox.LocalMailboxStore, guard: ShardLeaseWriteGuard, envelope: EntityEnvelope) !EntityEnvelope {
     try guard.validate();
-    return store.storeReply(envelope);
+    var guarded = envelope;
+    guarded.lease_epoch = guard.epoch();
+    return store.storeReply(guarded);
 }
 
 pub fn guardJournalAppend(allocator: Allocator, store: JournalStore, request: LeaseGuardedJournalAppend) !JournalSequence {
