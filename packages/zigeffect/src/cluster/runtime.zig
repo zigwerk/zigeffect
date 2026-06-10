@@ -235,6 +235,19 @@ pub const ClusterRuntime = struct {
         return report;
     }
 
+    pub fn shutdown(self: *ClusterRuntime, now_ms: u64) !ClusterShutdownReport {
+        self.accepting_messages = false;
+        var report = ClusterShutdownReport{};
+        while (self.owned_shards.items.len > 0) {
+            const index = self.owned_shards.items.len - 1;
+            const shard_id = self.owned_shards.items[index];
+            try self.lease_manager.releaseShard(shard_id, now_ms);
+            _ = self.owned_shards.orderedRemove(index);
+            report.released_shards += 1;
+        }
+        return report;
+    }
+
     fn submitEntityMessage(
         self: *ClusterRuntime,
         kind: MessageEnvelopeKind,

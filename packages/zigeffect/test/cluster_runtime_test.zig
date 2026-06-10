@@ -342,3 +342,129 @@ test "cluster runtime rejects processing unowned shard" {
 
     try std.testing.expectError(error.ShardNotOwned, runtime.processShard(6, Handler, 1_100));
 }
+
+test "cluster runtime shutdown releases owned shards and rejects new submissions" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    const runner_storage = runner_storage_state.asRunnerStorage();
+    const owner = fx.runnerAddress("machine-a", "runner-a");
+    var lease_manager = try fx.LocalShardLeaseManager.init(
+        std.testing.allocator,
+        runner_storage,
+        owner,
+        .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    );
+    defer lease_manager.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+
+    var runtime = try fx.ClusterRuntime.init(
+        std.testing.allocator,
+        message_storage_state.asMessageStorage(),
+        &lease_manager,
+        .{ .shard_count = 16 },
+    );
+    defer runtime.deinit();
+
+    const address = fx.entityAddress("counter", "shutdown");
+    const shard_id = try fx.shardIdForAddress(address, 16);
+    const other_shard: fx.ShardId = if (shard_id == 0) 1 else 0;
+    _ = try runtime.acquireShard(shard_id, 1_000);
+    _ = try runtime.acquireShard(other_shard, 1_000);
+    const ref = try runtime.registerEntity(.{ .address = address, .name = "counter-shutdown" }, 1_000);
+
+    const report = try runtime.shutdown(2_000);
+    try std.testing.expectEqual(@as(usize, 2), report.released_shards);
+    try std.testing.expectEqual(@as(usize, 0), runtime.ownedShardCount());
+    try std.testing.expect(!lease_manager.ownsShard(shard_id));
+    try std.testing.expect(!lease_manager.ownsShard(other_shard));
+    try std.testing.expect((try runner_storage.lease(shard_id)) == null);
+    try std.testing.expect((try runner_storage.lease(other_shard)) == null);
+    try std.testing.expectError(error.RuntimeShuttingDown, ref.tell("text", "inc", "after shutdown"));
+
+    const second = try runtime.shutdown(2_100);
+    try std.testing.expectEqual(@as(usize, 0), second.released_shards);
+}
+
+test "single process cluster runtime matches local tell ask behavior" {
+    const address = fx.entityAddress("counter", "single-process");
+
+    var local_runtime = fx.LocalEntityRuntime.init(std.testing.allocator, .{});
+    defer local_runtime.deinit();
+    const local_ref = try local_runtime.registerEntity(.{ .address = address, .name = "local-single-process" }, 1_000);
+    var local_seen = std.ArrayList([]u8).empty;
+    defer {
+        for (local_seen.items) |item| std.testing.allocator.free(item);
+        local_seen.deinit(std.testing.allocator);
+    }
+    try (try local_runtime.entityScope(address)).provideService("seen", &local_seen);
+
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    const runner_storage = runner_storage_state.asRunnerStorage();
+    const owner = fx.runnerAddress("machine-a", "runner-a");
+    var lease_manager = try fx.LocalShardLeaseManager.init(
+        std.testing.allocator,
+        runner_storage,
+        owner,
+        .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    );
+    defer lease_manager.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+    var cluster_runtime = try fx.ClusterRuntime.init(
+        std.testing.allocator,
+        message_storage,
+        &lease_manager,
+        .{ .shard_count = 16 },
+    );
+    defer cluster_runtime.deinit();
+    const shard_id = try fx.shardIdForAddress(address, 16);
+    _ = try cluster_runtime.acquireShard(shard_id, 1_000);
+    const cluster_ref = try cluster_runtime.registerEntity(.{ .address = address, .name = "cluster-single-process" }, 1_000);
+    var cluster_seen = std.ArrayList([]u8).empty;
+    defer {
+        for (cluster_seen.items) |item| std.testing.allocator.free(item);
+        cluster_seen.deinit(std.testing.allocator);
+    }
+    try (try cluster_runtime.entityScope(address)).provideService("seen", &cluster_seen);
+
+    const Handler = struct {
+        pub fn handle(entity_scope: *fx.EntityScope, envelope: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            const raw = (try entity_scope.service("seen")).?;
+            const seen_messages: *std.ArrayList([]u8) = @ptrCast(@alignCast(raw));
+            const owned_payload = try std.testing.allocator.dupe(u8, envelope.payload);
+            errdefer std.testing.allocator.free(owned_payload);
+            try seen_messages.append(std.testing.allocator, owned_payload);
+            if (envelope.kind == .ask) return .{ .reply = "value=1" };
+            return .noreply;
+        }
+    };
+
+    const local_tell = try local_ref.tell("text", "inc", "first command");
+    defer fx.deinitEntityEnvelope(std.testing.allocator, local_tell);
+    var local_ask = try local_ref.ask("text", "get", "read current value");
+    defer local_ask.deinit(std.testing.allocator);
+    var cluster_tell = try cluster_ref.tell("text", "inc", "first command");
+    defer cluster_tell.deinit(std.testing.allocator);
+    var cluster_ask = try cluster_ref.ask("text", "get", "read current value");
+    defer cluster_ask.deinit(std.testing.allocator);
+
+    var local_first = try local_runtime.processNext(address, Handler, 1_100);
+    defer local_first.deinit(std.testing.allocator);
+    var local_second = try local_runtime.processNext(address, Handler, 1_200);
+    defer local_second.deinit(std.testing.allocator);
+    const cluster_report = try cluster_runtime.processOwnedShards(Handler, 1_200);
+
+    try std.testing.expectEqual(@as(usize, 2), cluster_report.dispatched);
+    try std.testing.expectEqual(@as(usize, 2), cluster_seen.items.len);
+    try std.testing.expectEqualStrings(local_seen.items[0], cluster_seen.items[0]);
+    try std.testing.expectEqualStrings(local_seen.items[1], cluster_seen.items[1]);
+
+    const local_reply = try local_runtime.takeReply(local_ask.correlation_id);
+    defer fx.deinitEntityEnvelope(std.testing.allocator, local_reply);
+    const cluster_reply = (try message_storage.reply(cluster_ask.correlation_id, std.testing.allocator)).?;
+    defer fx.deinitMessageEnvelope(std.testing.allocator, cluster_reply);
+    try std.testing.expectEqualStrings(local_reply.payload, cluster_reply.payload);
+}
