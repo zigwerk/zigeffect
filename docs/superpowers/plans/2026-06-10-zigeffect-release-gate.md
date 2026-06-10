@@ -76,7 +76,7 @@ Modify:
 
 - [x] Update README with release-gate quickstart and docs links.
 - [x] Add `packages/zigeffect/docs/migration-to-durable-runtime.md`.
-- [ ] Add the Milestone 46 completion report under `docs/superpowers/reports/`.
+- [x] Add the Milestone 46 completion report under `docs/superpowers/reports/`.
 - [x] Update `.github/workflows/zigeffect-causal.yml` to run
   `zig build release-gate --summary none`.
 - [x] Add `.zig-cache/release-gate/*.txt` and `.zig-cache/release-gate/*.json`
@@ -93,11 +93,12 @@ bun run zig:test
 (cd packages/zigeffect && zig build examples)
 zig fmt --check packages/zigeffect/build.zig \
   packages/zigeffect/examples/workflow_crash_recovery.zig \
-  packages/zigeffect/tools/release_gate_report.zig
+  packages/zigeffect/tools/release_gate_report.zig \
+  packages/zigeffect/tools/causal_artifacts.zig
 git diff --check
 ```
 
-- [ ] Run a scoped marker scan over new and edited M46 files.
-- [ ] Mark Milestone 46 roadmap deliverables and acceptance complete.
-- [ ] Re-run the focused release gate and diff checks after the roadmap edit.
-- [ ] Commit the milestone with a clear message.
+- [x] Run a scoped marker scan over new and edited M46 files.
+- [x] Mark Milestone 46 roadmap deliverables and acceptance complete.
+- [x] Re-run the focused release gate and diff checks after the roadmap edit.
+- [x] Commit the milestone with a clear message.

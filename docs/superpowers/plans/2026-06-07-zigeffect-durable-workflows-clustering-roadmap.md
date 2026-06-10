@@ -930,19 +930,19 @@ foundation with a reproducible check.
 
 Deliverables:
 
-- [ ] Add one command that runs workflow and cluster conformance checks.
-- [ ] Add CI artifact paths for durable workflow and cluster reports.
-- [ ] Add README quickstart.
-- [ ] Add roadmap completion report.
-- [ ] Add migration notes from deterministic-only runtime to durable runtime.
+- [x] Add one command that runs workflow and cluster conformance checks.
+- [x] Add CI artifact paths for durable workflow and cluster reports.
+- [x] Add README quickstart.
+- [x] Add roadmap completion report.
+- [x] Add migration notes from deterministic-only runtime to durable runtime.
 
 Acceptance:
 
-- [ ] `bun run zigeffect:test` passes.
-- [ ] `bun run zig:test` passes.
-- [ ] `cd packages/zigeffect && zig build examples` passes.
-- [ ] Durable workflow crash recovery example passes.
-- [ ] Multi-runner cluster migration example passes.
+- [x] `bun run zigeffect:test` passes.
+- [x] `bun run zig:test` passes.
+- [x] `cd packages/zigeffect && zig build examples` passes.
+- [x] Durable workflow crash recovery example passes.
+- [x] Multi-runner cluster migration example passes.
 
 ## Milestone 47: Real Async IO Backend
 
