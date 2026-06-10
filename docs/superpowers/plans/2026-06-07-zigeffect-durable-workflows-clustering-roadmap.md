@@ -863,15 +863,15 @@ Goal: verify the system under generated histories and failure schedules.
 
 Deliverables:
 
-- [ ] Add generated workflow histories.
-- [ ] Add generated message histories.
-- [ ] Add crash point injection.
-- [ ] Add replay equivalence checks.
-- [ ] Add scheduler fairness checks.
+- [x] Add generated workflow histories.
+- [x] Add generated message histories.
+- [x] Add crash point injection.
+- [x] Add replay equivalence checks.
+- [x] Add scheduler fairness checks.
 
 Acceptance:
 
-- [ ] Generated tests find no replay divergence across memory and file stores.
+- [x] Generated tests find no replay divergence across memory and file stores.
 
 ## Milestone 43: Performance And Bounded Resource Work
 

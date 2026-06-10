@@ -279,7 +279,10 @@ belong here. Workflow code should consume `core`, `runtime`, `effect`, `layer`,
 workflow-specific behavior.
 
 Workflow storage conformance is shared through `src/storage/` metadata and the
-`test/support/*_conformance.zig` helpers.
+`test/support/*_conformance.zig` helpers. Generated workflow histories live in
+test support and verify replay equivalence across direct fold, incremental
+apply, in-memory journals, reopened file journals, and partial-tail file
+recovery.
 
 Workflow causal integration belongs in `src/workflow/causal.zig`, with the
 shared causal runtime remaining in `src/services/causal.zig`. Query tools and
@@ -306,9 +309,10 @@ compact completed workflows, or checkpoint-only compact completed workflows.
 The workflow scheduler is a local orchestration boundary over the journal,
 durable clock, and durable queues. It does not provide real async I/O or
 distributed execution; it fairly visits registered workflow workers, timer
-watches, and queue workers within explicit budgets and records durable progress
-through existing workflow events. Later cluster and supervision modules should
-reuse this boundary instead of bypassing the workflow journal.
+watches, queue retry workers, and queue claim workers within explicit budgets
+and records durable progress through existing workflow events. Later cluster
+and supervision modules should reuse this boundary instead of bypassing the
+workflow journal.
 
 ```text
 src/cluster/
@@ -384,7 +388,10 @@ and transports belong here. Cluster code should build on workflow and runtime
 contracts instead of making durable state depend on runner memory.
 
 Runner and message storage conformance is shared through `src/storage/`
-metadata and the `test/support/*_conformance.zig` helpers.
+metadata and the `test/support/*_conformance.zig` helpers. Generated message
+histories exercise duplicate submits, claims, replies, acknowledgements, shard
+queries, id lookups, and reopen behavior across in-memory and file-backed
+message storage.
 
 The local entity runtime is single-process and in-memory. It gives cluster
 concepts a deterministic local execution model, but durable message storage,
