@@ -5,6 +5,7 @@ import {
   deriveAppRemediationModel,
   deriveGovernanceModel,
   deriveLiveDashboardModel,
+  deriveProductionTelemetryPreviewModel,
   deriveVisualGraphModel,
   deriveWorkbenchModel,
   deriveGraphModel,
@@ -461,6 +462,58 @@ const sampleAppApplication = {
   guardrails: ["This command records application state; it does not silently mutate source or external systems."],
 };
 
+const sampleProductionTelemetryRetention = {
+  schema: "zigeffect.causal.production-telemetry-nendb-retention-fixtures.v1",
+  schema_version: 1,
+  source_local_pipeline: ".zig-cache/causal-artifacts/local-pipeline.json",
+  source_boundary: ".zig-cache/causal-artifacts/boundary.json",
+  source_proposal: ".zig-cache/causal-artifacts/proposal.json",
+  source_readiness: ".zig-cache/causal-artifacts/readiness.json",
+  source_fixtures: ".zig-cache/causal-artifacts/fixtures.json",
+  decision: "approve",
+  retention_fixture_status: "ready",
+  ready_for_next_branch: true,
+  recommendation: "start-production-telemetry-workbench-readonly-preview",
+  next_branch_if_ready: "codex/zigeffect-causal-production-telemetry-workbench-readonly-preview",
+  applied: false,
+  mutation_authority: "none",
+  production_telemetry_ingestion: false,
+  live_exporter_enabled: false,
+  network_send_enabled: false,
+  collector_endpoint_configured: false,
+  otlp_serialization_enabled: false,
+  runtime_pipeline_enabled: false,
+  durable_write_enabled: false,
+  nendb_write_enabled: false,
+  ci_gate_enabled: false,
+  checks: [
+    { name: "local-pipeline-schema", status: "pass", detail: "source local pipeline schema is supported" },
+    { name: "no-nendb-write", status: "pass", detail: "NenDB writes remain disabled" },
+  ],
+  nendb_mapping_fixtures: [
+    {
+      id: "nendb-runtime-event-node-fixture",
+      source_envelope: "runtime-span-normalized-envelope",
+      target_schema: "zigeffect.causal.nendb_node.v1",
+      label: "causal.telemetry.runtime_span",
+      retained_fields: ["event_id_ref", "trace_id_ref", "span_id_ref"],
+      blocked_fields: ["raw_payload", "credentials"],
+    },
+  ],
+  retention_validation_checks: ["nendb-write-disabled", "durable-write-disabled"],
+  implementation_gates: ["workbench read-only preview must be reviewed before UI work"],
+  non_goals: ["Live local or production pipeline execution", "React or alternate renderer work"],
+  blocked_claims: ["nendb-write-enabled", "mutation-authority-granted"],
+  required_verification_commands: [
+    "zig build causal-production-telemetry-local-pipeline-fixtures",
+    "zig build examples",
+  ],
+  verified_commands: [
+    "zig build causal-production-telemetry-local-pipeline-fixtures",
+    "zig build examples",
+  ],
+};
+
 test("parseArtifactJson parses causal artifacts", () => {
   const parsed = parseArtifactJson(sampleArtifact);
 
@@ -702,8 +755,9 @@ test("deriveVisualGraphModel creates lineage ref nodes from app semantic refs", 
         data_subject_ref: "tenant:acme",
         schema_ref: "Project.v1",
       },
-    ],
-  };
+  ],
+};
+
   const workbench = deriveWorkbenchModel(raw, { artifactPath: "lineage.json" });
   const graph = deriveGraphModel(workbench.events, workbench.findings);
   const visual = deriveVisualGraphModel(workbench, graph, {
@@ -956,6 +1010,44 @@ test("deriveGovernanceModel detects app application artifacts", () => {
   expect(governance?.summary).toContain("applied app application");
   expect(governance?.applied).toBe(true);
   expect(governance?.mutationAuthority).toBe("record-only");
+});
+
+test("deriveProductionTelemetryPreviewModel reads ready NenDB retention fixtures", () => {
+  const preview = deriveProductionTelemetryPreviewModel(sampleProductionTelemetryRetention, {
+    artifactPath: "retention.json",
+  });
+
+  expect(preview?.schema).toBe("zigeffect.causal.production-telemetry-nendb-retention-fixtures.v1");
+  expect(preview?.status).toBe("ready");
+  expect(preview?.readyForNextBranch).toBe(true);
+  expect(preview?.authority.nendbWriteEnabled).toBe(false);
+  expect(preview?.authority.durableWriteEnabled).toBe(false);
+  expect(preview?.sources.map((source) => source.kind)).toEqual([
+    "local-pipeline",
+    "boundary",
+    "proposal",
+    "readiness",
+    "fixtures",
+  ]);
+  expect(preview?.mappingFixtures.map((fixture) => fixture.id)).toContain("nendb-runtime-event-node-fixture");
+  expect(preview?.mappingFixtures[0]?.retainedFields).toContain("event_id_ref");
+  expect(preview?.validationChecks).toContain("nendb-write-disabled");
+  expect(preview?.verificationCommands).toContain("zig build causal-production-telemetry-local-pipeline-fixtures");
+  expect(preview?.nextBranch).toBe("codex/zigeffect-causal-production-telemetry-workbench-readonly-preview");
+});
+
+test("deriveProductionTelemetryPreviewModel reads blocked retention fixtures", () => {
+  const preview = deriveProductionTelemetryPreviewModel({
+    ...sampleProductionTelemetryRetention,
+    decision: "reject",
+    retention_fixture_status: "blocked",
+    ready_for_next_branch: false,
+    checks: [{ name: "decision-approved", status: "fail", detail: "reviewer rejected" }],
+  }, { artifactPath: "blocked-retention.json" });
+
+  expect(preview?.status).toBe("blocked");
+  expect(preview?.readyForNextBranch).toBe(false);
+  expect(preview?.checks[0]).toEqual({ name: "decision-approved", status: "fail", detail: "reviewer rejected" });
 });
 
 test("deriveAppRemediationModel reads app application evidence", () => {

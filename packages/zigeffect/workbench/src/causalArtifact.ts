@@ -213,7 +213,19 @@ export type GovernanceArtifactKind =
   | "registry-application"
   | "policy-decision";
 
-export type ChainSourceKind = "session" | "audit" | "decision" | "proposal" | "before" | "after" | "compare";
+export type ChainSourceKind =
+  | "session"
+  | "audit"
+  | "decision"
+  | "proposal"
+  | "before"
+  | "after"
+  | "compare"
+  | "local-pipeline"
+  | "boundary"
+  | "readiness"
+  | "fixtures"
+  | "retention";
 
 export type ChainSourceStep = {
   kind: ChainSourceKind;
@@ -333,6 +345,57 @@ export type GovernanceModel = {
   warnings: string[];
 };
 
+export type ProductionTelemetryMappingFixture = {
+  id: string;
+  sourceEnvelope: string;
+  targetSchema: string;
+  label: string;
+  retainedFields: string[];
+  blockedFields: string[];
+};
+
+export type ProductionTelemetryCheck = {
+  name: string;
+  status: string;
+  detail: string;
+};
+
+export type ProductionTelemetryAuthority = {
+  applied: boolean | null;
+  mutationAuthority: string | null;
+  liveTelemetryEnabled: boolean | null;
+  networkSendEnabled: boolean | null;
+  collectorEndpointConfigured: boolean | null;
+  otlpSerializationEnabled: boolean | null;
+  runtimePipelineEnabled: boolean | null;
+  durableWriteEnabled: boolean | null;
+  nendbWriteEnabled: boolean | null;
+  ciGateEnabled: boolean | null;
+};
+
+export type ProductionTelemetryPreviewModel = {
+  artifactPath: string;
+  schema: string;
+  schemaVersion: string;
+  status: string;
+  decision: string;
+  readyForNextBranch: boolean | null;
+  recommendation: string;
+  nextBranch: string;
+  sources: ChainSourceStep[];
+  authority: ProductionTelemetryAuthority;
+  checks: ProductionTelemetryCheck[];
+  mappingFixtures: ProductionTelemetryMappingFixture[];
+  validationChecks: string[];
+  implementationGates: string[];
+  nonGoals: string[];
+  blockedClaims: string[];
+  requiredCommands: string[];
+  verifiedCommands: string[];
+  verificationCommands: string[];
+  warnings: string[];
+};
+
 export type WorkbenchModel = {
   artifactPath: string;
   schema: string;
@@ -369,6 +432,8 @@ const graphWarningStatuses = new Set(["missing", "exhausted", "pending", "runnin
 const graphLaneKindOrder: GraphLaneKind[] = ["run", "scope", "fiber", "resource", "retry"];
 const auditChainSchema = "zigeffect.causal.audit-chain.v1";
 const liveDashboardStreamSchema = "zigeffect.causal.live-dashboard-stream.v1";
+const productionTelemetryRetentionSchema = "zigeffect.causal.production-telemetry-nendb-retention-fixtures.v1";
+const productionTelemetryWorkbenchPreviewSchema = "zigeffect.causal.production-telemetry-workbench-readonly-preview.v1";
 const defaultVisualGraphLayouts: VisualGraphLayoutMode[] = ["dagre", "force", "radial"];
 const liveDashboardSourceKinds = ["snapshot", "aggregation_bundle", "access_policy", "alert_preview", "compare"];
 const liveDashboardSourceLabels: Record<string, string> = {
@@ -387,6 +452,11 @@ const chainSourceLabels: Record<ChainSourceKind, string> = {
   before: "Before artifact",
   after: "After artifact",
   compare: "Compare report",
+  "local-pipeline": "Local pipeline fixtures",
+  boundary: "Exporter boundary",
+  readiness: "Readiness review",
+  fixtures: "Capture fixtures",
+  retention: "NenDB retention fixtures",
 };
 
 export function parseArtifactJson(json: string): unknown {
@@ -1000,6 +1070,62 @@ export function deriveAppRemediationModel(raw: unknown, options: WorkbenchOption
   };
 }
 
+export function deriveProductionTelemetryPreviewModel(raw: unknown, options: WorkbenchOptions): ProductionTelemetryPreviewModel | null {
+  const artifact = isRecord(raw) ? raw : {};
+  const schema = textValue(artifact.schema, "unknown");
+  if (schema !== productionTelemetryRetentionSchema && schema !== productionTelemetryWorkbenchPreviewSchema) {
+    return null;
+  }
+
+  const warnings: string[] = [];
+  const schemaVersion = textValue(artifact.schema_version, "unknown");
+  if (schemaVersion === "unknown") {
+    warnings.push("artifact schema_version is missing");
+  }
+
+  const requiredCommands = stringList(artifact.required_verification_commands);
+  const verifiedCommands = stringList(artifact.verified_commands);
+
+  return {
+    artifactPath: options.artifactPath,
+    schema,
+    schemaVersion,
+    status: textValue(artifact.preview_status, textValue(artifact.retention_fixture_status, "unknown")),
+    decision: textValue(artifact.decision, "unknown"),
+    readyForNextBranch: booleanValue(artifact.ready_for_next_branch),
+    recommendation: textValue(artifact.recommendation, "unknown"),
+    nextBranch: textValue(artifact.next_branch_if_ready, "unknown"),
+    sources: productionTelemetrySourceSteps(artifact),
+    authority: {
+      applied: booleanValue(artifact.applied),
+      mutationAuthority: nullableTextValue(artifact.mutation_authority),
+      liveTelemetryEnabled: booleanValue(artifact.live_exporter_enabled),
+      networkSendEnabled: booleanValue(artifact.network_send_enabled),
+      collectorEndpointConfigured: booleanValue(artifact.collector_endpoint_configured),
+      otlpSerializationEnabled: booleanValue(artifact.otlp_serialization_enabled),
+      runtimePipelineEnabled: booleanValue(artifact.runtime_pipeline_enabled),
+      durableWriteEnabled: booleanValue(artifact.durable_write_enabled),
+      nendbWriteEnabled: booleanValue(artifact.nendb_write_enabled),
+      ciGateEnabled: booleanValue(artifact.ci_gate_enabled),
+    },
+    checks: productionTelemetryChecks(artifact.checks),
+    mappingFixtures: productionTelemetryMappingFixtures(artifact.nendb_mapping_fixtures),
+    validationChecks: stringList(artifact.retention_validation_checks),
+    implementationGates: stringList(artifact.implementation_gates),
+    nonGoals: stringList(artifact.non_goals),
+    blockedClaims: stringList(artifact.blocked_claims),
+    requiredCommands,
+    verifiedCommands,
+    verificationCommands: uniqueInOrder([
+      ...requiredCommands,
+      ...verifiedCommands,
+      ...stringList(artifact.reviewed_verification_commands),
+      ...stringList(artifact.verification_commands),
+    ]),
+    warnings,
+  };
+}
+
 export function deriveGovernanceModel(raw: unknown, options: WorkbenchOptions): GovernanceModel | null {
   const artifact = isRecord(raw) ? raw : {};
   const schema = textValue(artifact.schema, "unknown");
@@ -1495,6 +1621,59 @@ function appSourceStep(field: string, label: string, source: UnknownRecord): Cha
     path,
     workbenchCommand: workbenchCommandForPath(path),
   };
+}
+
+function productionTelemetrySourceSteps(artifact: UnknownRecord): ChainSourceStep[] {
+  const definitions: Array<[ChainSourceKind, string, string]> = [
+    ["local-pipeline", "source_local_pipeline", "Local pipeline fixtures"],
+    ["boundary", "source_boundary", "Exporter boundary"],
+    ["proposal", "source_proposal", "Implementation proposal"],
+    ["readiness", "source_readiness", "Readiness review"],
+    ["fixtures", "source_fixtures", "Capture fixtures"],
+    ["retention", "source_retention", "NenDB retention fixtures"],
+  ];
+
+  return definitions
+    .map(([kind, field, label]) => {
+      const path = textValue(artifact[field], "");
+      if (!path) {
+        return null;
+      }
+      return {
+        kind,
+        label,
+        path,
+        workbenchCommand: workbenchCommandForPath(path),
+      };
+    })
+    .filter((step): step is ChainSourceStep => step !== null);
+}
+
+function productionTelemetryChecks(value: unknown): ProductionTelemetryCheck[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isRecord).map((check) => ({
+    name: textValue(check.name, "unknown"),
+    status: textValue(check.status, "unknown"),
+    detail: textValue(check.detail, ""),
+  }));
+}
+
+function productionTelemetryMappingFixtures(value: unknown): ProductionTelemetryMappingFixture[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isRecord).map((fixture) => ({
+    id: textValue(fixture.id, "unknown"),
+    sourceEnvelope: textValue(fixture.source_envelope, "unknown"),
+    targetSchema: textValue(fixture.target_schema, "unknown"),
+    label: textValue(fixture.label, "unknown"),
+    retainedFields: stringList(fixture.retained_fields),
+    blockedFields: stringList(fixture.blocked_fields),
+  }));
 }
 
 function appIncidents(value: unknown): AppIncidentModel[] {
