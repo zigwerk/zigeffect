@@ -25,12 +25,13 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-alerting-integrations` means the aggregation bundle
-contract, NenDB-only durable-retention contract, manual production deployment
-runbooks, record-only artifact access-control contract, unified causal spine
-contract, deep runtime internals, app semantic trace API, bounded agent query
-surface, and record-only encryption-at-rest policy now exist. The next branch
-should be `codex/zigeffect-causal-alerting-integrations`.
+The recommendation `start-live-dashboard-streaming-workbench` means the
+aggregation bundle contract, NenDB-only durable-retention contract, manual
+production deployment runbooks, record-only artifact access-control contract,
+unified causal spine contract, deep runtime internals, app semantic trace API,
+bounded agent query surface, record-only encryption-at-rest policy, and
+record-only alerting integrations now exist. The next branch should be
+`codex/zigeffect-causal-live-dashboard-streaming-workbench`.
 
 ## Dependency Order
 
@@ -45,7 +46,7 @@ The backlog currently orders future production-hardening branches as:
 7. `app-semantic-trace-api` delivered
 8. `agent-query-interface` partial
 9. `encryption-at-rest-policy` delivered
-10. `alerting-integrations`
+10. `alerting-integrations` delivered
 11. `live-dashboard-streaming-workbench`
 12. `workbench-graph-visual-debugging`
 13. `human-agent-feedback-loop`
@@ -86,6 +87,13 @@ encryption domains, key owner labels, rotation evidence, encrypted artifact
 fixture metadata, redaction ordering, denied fixtures, and authority boundaries
 without encrypting bytes, decrypting bytes, generating keys, calling a KMS,
 enforcing live RBAC, or granting production mutation authority.
+
+Alerting integrations are documented in
+[alerting-integrations.md](alerting-integrations.md). They define record-only
+channel contracts, severity and routing policy, escalation gates, payload
+fields, preview fixtures, denied fixtures, and authority boundaries without
+sending alerts, creating tickets, forwarding SIEM events, paging humans,
+calling networks, reading secrets, or granting production mutation authority.
 
 Workbench work remains SolidJS inside `webui-dev/zig-webui`. React remains a
 non-goal unless a later adapter proves a concrete need.
@@ -143,6 +151,8 @@ zig build causal-production-artifact-aggregation
 zig build causal-production-artifact-aggregation -- --format json
 zig build causal-encryption-at-rest-policy
 zig build causal-encryption-at-rest-policy -- --format json
+zig build causal-alerting-integrations
+zig build causal-alerting-integrations -- --format json
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

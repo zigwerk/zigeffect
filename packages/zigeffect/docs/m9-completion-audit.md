@@ -52,7 +52,8 @@ The audit originally kept these as explicit future hardening:
 
 - distributed artifact aggregation;
 - durable production retention beyond local files and CI uploads;
-- alerting, paging, Slack, Linear, Jira, or SIEM integrations;
+- alerting, paging, Slack, Linear, Jira, or SIEM integrations, with
+  record-only alerting now delivered and live delivery still future;
 - RBAC or access control over artifact bundles;
 - encryption-at-rest policy, implementation, and key rotation;
 - live dashboards or streaming workbench;
@@ -79,11 +80,12 @@ That report uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, keeps durable work on the
 NenDB adapter path, keeps workbench work on SolidJS inside
 `webui-dev/zig-webui`, and now recommends
-`codex/zigeffect-causal-alerting-integrations` after the production artifact
-aggregation, durable production retention, production deployment runbook,
-artifact access-control contract, unified causal spine contract, deep runtime
-internals, app semantic tracing, bounded agent query, and record-only
-encryption-at-rest policy branches.
+`codex/zigeffect-causal-live-dashboard-streaming-workbench` after the
+production artifact aggregation, durable production retention, production
+deployment runbook, artifact access-control contract, unified causal spine
+contract, deep runtime internals, app semantic tracing, bounded agent query,
+record-only encryption-at-rest policy, and record-only alerting integration
+branches.
 
 ## Verification Suite
 

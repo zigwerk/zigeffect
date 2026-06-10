@@ -194,6 +194,16 @@ denied fixtures, and authority boundaries. It does not encrypt bytes, decrypt
 bytes, generate keys, call a KMS, enforce live RBAC, or grant mutation
 authority.
 
+- `zigeffect.causal.alerting-integrations.v1`
+
+The alerting-integrations report is a record-only production hardening
+contract. It consumes aggregation, deployment-runbook, access-control,
+encryption-policy, and agent-query contracts, then defines channel contracts,
+severity/routing/escalation policy, payload fields, preview fixtures, negative
+fixtures, and authority boundaries. It does not send notifications, create
+tickets, forward SIEM events, page humans, read secrets, call networks, or
+mutate external systems.
+
 ### Agent Query
 
 - `zigeffect.causal.agent-query.v1`

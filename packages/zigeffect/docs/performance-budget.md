@@ -101,7 +101,7 @@ This budget report does not add:
 - throughput benchmarks;
 - production capacity planning;
 - production dashboards;
-- alerting or paging;
+- live alert delivery or paging execution;
 - live RBAC enforcement or encryption-at-rest implementation;
 - source or config mutation authority;
 - React workbench support;

@@ -129,7 +129,7 @@ const non_goals: []const []const u8 = &.{
     "throughput benchmarks",
     "production capacity planning",
     "production dashboards",
-    "alerting or paging",
+    "live alert delivery or paging execution",
     "live RBAC enforcement or encryption-at-rest implementation",
     "source or config mutation authority",
     "React workbench support",

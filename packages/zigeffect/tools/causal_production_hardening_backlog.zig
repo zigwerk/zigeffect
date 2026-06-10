@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-alerting-integrations";
-pub const recommended_next_branch = "codex/zigeffect-causal-alerting-integrations";
+pub const recommendation = "start-live-dashboard-streaming-workbench";
+pub const recommended_next_branch = "codex/zigeffect-causal-live-dashboard-streaming-workbench";
 
 const OutputFormat = enum { text, json };
 
@@ -257,21 +257,22 @@ const backlog_items: []const BacklogItem = &.{
         .title = "Alerting And Integrations",
         .gap_id = "alerting-paging-integrations",
         .priority = "P3",
-        .status = "planned",
-        .summary = "Design record-only alerting and external integration adapters for Slack, Linear, Jira, SIEM, and paging handoff.",
+        .status = "delivered",
+        .summary = "Defines record-only alerting and external integration event contracts, severity routing, escalation gates, preview fixtures, and negative fixtures for Slack, Linear, Jira, SIEM, and paging handoff.",
         .depends_on = &.{ "production-artifact-aggregation", "production-deployment-runbooks" },
         .deliverables = &.{
             "integration event contract",
-            "record-only Slack and Linear fixture",
+            "record-only Slack Linear Jira SIEM and paging fixtures",
             "SIEM forwarding contract",
             "alert escalation policy",
         },
         .evidence_sources = &.{
-            "packages/zigeffect/docs/operations.md",
-            "packages/zigeffect/src/services/causal.zig",
+            "packages/zigeffect/tools/causal_alerting_integrations.zig",
+            "packages/zigeffect/docs/alerting-integrations.md",
+            "packages/zigeffect/docs/schema-governance.md",
         },
         .branch = "codex/zigeffect-causal-alerting-integrations",
-        .agent_guidance = "Emit advisory records first; do not page humans from deterministic tests.",
+        .agent_guidance = "Use causal-alerting-integrations before live dashboard work; previews only and no messages tickets SIEM events or pages are sent.",
     },
     .{
         .id = "live-dashboard-streaming-workbench",
@@ -439,6 +440,8 @@ const verification_commands: []const []const u8 = &.{
     "zig build causal-artifact-access-control -- --format json",
     "zig build causal-encryption-at-rest-policy",
     "zig build causal-encryption-at-rest-policy -- --format json",
+    "zig build causal-alerting-integrations",
+    "zig build causal-alerting-integrations -- --format json",
     "zig build causal-unified-spine-contract",
     "zig build causal-unified-spine-contract -- --format json",
     "zig build causal-production-deployment-runbooks",
@@ -683,6 +686,16 @@ fn expectBacklogItem(id: []const u8) !void {
     return error.MissingBacklogItem;
 }
 
+fn expectBacklogItemStatus(id: []const u8, status: []const u8) !void {
+    for (backlogItems()) |item| {
+        if (std.mem.eql(u8, item.id, id)) {
+            try std.testing.expectEqualStrings(status, item.status);
+            return;
+        }
+    }
+    return error.MissingBacklogItem;
+}
+
 fn expectConstraint(value: []const u8) !void {
     for (globalConstraints()) |constraint| {
         if (std.mem.eql(u8, constraint, value)) return;
@@ -703,11 +716,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-alerting-integrations",
+        "start-live-dashboard-streaming-workbench",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-alerting-integrations",
+        "codex/zigeffect-causal-live-dashboard-streaming-workbench",
         recommended_next_branch,
     );
 }
@@ -723,7 +736,9 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItem("agent-query-interface");
     try expectBacklogItem("encryption-at-rest-policy");
     try expectBacklogItem("alerting-integrations");
+    try expectBacklogItemStatus("alerting-integrations", "delivered");
     try expectBacklogItem("live-dashboard-streaming-workbench");
+    try expectBacklogItemStatus("live-dashboard-streaming-workbench", "planned");
     try expectBacklogItem("workbench-graph-visual-debugging");
     try expectBacklogItem("human-agent-feedback-loop");
     try expectBacklogItem("production-capacity-planning");
@@ -745,7 +760,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-alerting-integrations") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-live-dashboard-streaming-workbench") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -760,7 +775,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-alerting-integrations\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-live-dashboard-streaming-workbench\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);

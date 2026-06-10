@@ -189,8 +189,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-deep-runtime-internals` as the next branch after the
-unified causal spine contract.
+`codex/zigeffect-causal-live-dashboard-streaming-workbench` as the next branch
+after the record-only alerting integrations contract.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in

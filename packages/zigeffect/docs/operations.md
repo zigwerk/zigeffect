@@ -439,9 +439,10 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-alerting-integrations` after the unified causal spine,
-deep runtime internals, app semantic trace API, bounded agent query surface,
-and record-only encryption-at-rest policy.
+`codex/zigeffect-causal-live-dashboard-streaming-workbench` after the unified
+causal spine, deep runtime internals, app semantic trace API, bounded agent
+query surface, record-only encryption-at-rest policy, and record-only alerting
+integrations.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -581,13 +582,37 @@ references, never key material. This contract does not encrypt bytes, decrypt
 bytes, generate keys, call a KMS, enforce live RBAC, modify the SolidJS
 workbench, add Cockroach scope, add React support, or grant mutation authority.
 
+## Alerting Integrations
+
+Run the alerting integrations contract after encryption-at-rest policy and
+before the live dashboard streaming workbench:
+
+```sh
+cd packages/zigeffect
+zig build causal-alerting-integrations
+zig build causal-alerting-integrations -- --format json
+```
+
+The contract records schema
+`zigeffect.causal.alerting-integrations.v1`, consumes aggregation,
+deployment-runbook, access-control, encryption-policy, and agent-query
+contracts, and defines channel contracts, severity and routing policy,
+escalation gates, payload fields, preview fixtures, denied fixtures, and
+authority boundaries for Slack, Linear, Jira, SIEM, and paging handoffs.
+
+Every fixture is record-only. This contract does not send alerts, create
+tickets, forward SIEM events, page humans, call networks, read secrets, mutate
+external systems, ingest production telemetry, add Cockroach scope, add React
+support, or grant production mutation authority.
+
 ## Production Gaps
 
 The current operating model does not provide:
 
 - distributed artifact aggregation;
 - durable production retention beyond local files and CI uploads;
-- alerting, paging, Slack, Linear, Jira, or SIEM integrations;
+- live alert delivery, live ticket creation, SIEM forwarding, or paging
+  execution;
 - live RBAC enforcement over artifact bundles;
 - encryption-at-rest implementation, KMS integration, or live key rotation;
 - live dashboards or streaming workbench;

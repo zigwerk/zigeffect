@@ -854,6 +854,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_encryption_at_rest_policy_tool_tests = b.addRunArtifact(causal_encryption_at_rest_policy_tool_tests);
     test_step.dependOn(&run_causal_encryption_at_rest_policy_tool_tests.step);
 
+    const causal_alerting_integrations_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_alerting_integrations.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_alerting_integrations_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-alerting-integrations",
+        .root_module = causal_alerting_integrations_tool_module,
+    });
+    const run_causal_alerting_integrations_tool = b.addRunArtifact(causal_alerting_integrations_tool);
+    if (b.args) |args| run_causal_alerting_integrations_tool.addArgs(args);
+    const causal_alerting_integrations_step = b.step("causal-alerting-integrations", "Print causal alerting integrations report");
+    causal_alerting_integrations_step.dependOn(&run_causal_alerting_integrations_tool.step);
+
+    const causal_alerting_integrations_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-alerting-integrations-tests",
+        .root_module = causal_alerting_integrations_tool_module,
+    });
+    const run_causal_alerting_integrations_tool_tests = b.addRunArtifact(causal_alerting_integrations_tool_tests);
+    test_step.dependOn(&run_causal_alerting_integrations_tool_tests.step);
+
     const causal_unified_spine_contract_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_unified_spine_contract.zig"),
         .target = target,

@@ -638,7 +638,7 @@ metrics, and traces.
   `webui-dev/zig-webui` workbench direction, the post-streaming
   `workbench-graph-visual-debugging` milestone, non-goals, verification
   commands, and the current next branch
-  `codex/zigeffect-causal-alerting-integrations`.
+  `codex/zigeffect-causal-live-dashboard-streaming-workbench`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
@@ -664,6 +664,13 @@ metrics, and traces.
   redaction ordering, denied fixtures, and authority boundaries. It keeps
   encryption implementation, KMS integration, live RBAC, Cockroach adapter
   work, React workbench support, and mutation authority out of scope.
+- Delivered: `causal-alerting-integrations` publishes
+  `zigeffect.causal.alerting-integrations.v1` with record-only channel
+  contracts, severity and routing policy, escalation gates, payload fields,
+  preview fixtures, denied fixtures, and authority boundaries for Slack,
+  Linear, Jira, SIEM, and paging handoffs. It keeps live alert delivery, ticket
+  creation, SIEM forwarding, paging execution, network calls, secrets,
+  Cockroach adapter work, React support, and mutation authority out of scope.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,
