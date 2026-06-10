@@ -349,6 +349,11 @@ Owns Erlang-style distributed runtime surfaces:
   vtable, versioned request/response JSON, HTTP-shaped loopback bytes,
   in-process transport, loopback HTTP transport, and timeout/retry policy
   metadata.
+- `workflow_engine.zig`: shard-owned durable workflow command layer that maps
+  execution ids to workflow execution entities, routes commands through cluster
+  transport, mutates `JournalStore` from the owning entity, rebuilds execution
+  entity registrations after shard migration, and exposes timer, deferred,
+  signal, and queue command paths through shard ownership.
 
 Entity identity, actor references, message envelopes, durable message storage,
 shard ids, runner ids, runner storage, leases, rebalancing, transports,

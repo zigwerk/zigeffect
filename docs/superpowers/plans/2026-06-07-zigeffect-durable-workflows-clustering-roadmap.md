@@ -749,15 +749,15 @@ Goal: run durable workflows as shard-owned cluster entities.
 
 Deliverables:
 
-- [ ] Add workflow execution entity type.
-- [ ] Route workflow commands by execution id.
-- [ ] Store workflow journal through the cluster-owned entity.
-- [ ] Run timers, deferreds, queues, and signals through shard ownership.
-- [ ] Resume workflow execution after shard migration.
+- [x] Add workflow execution entity type.
+- [x] Route workflow commands by execution id.
+- [x] Store workflow journal through the cluster-owned entity.
+- [x] Run timers, deferreds, queues, and signals through shard ownership.
+- [x] Resume workflow execution after shard migration.
 
 Acceptance:
 
-- [ ] Workflow started on runner A can resume and complete on runner B.
+- [x] Workflow started on runner A can resume and complete on runner B.
 
 ## Milestone 36: Distributed Timers And Wakeups
 
