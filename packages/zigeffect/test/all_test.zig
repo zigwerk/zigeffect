@@ -41,5 +41,6 @@ comptime {
     _ = @import("match_test.zig");
     _ = @import("pattern_test.zig");
     _ = @import("workflow_test.zig");
+    _ = @import("property_history_test.zig");
     _ = @import("workflow_scheduler_test.zig");
 }
