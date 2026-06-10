@@ -473,7 +473,127 @@ pub const ProductionHttpClusterTransport = struct {
 
 pub const ProductionSocketClusterTransportOptions = ProductionHttpClusterTransportOptions;
 
-pub const ProductionSocketClusterTransport = struct {};
+pub const ProductionSocketClusterTransport = struct {
+    handler: InProcessClusterTransport,
+    auth: ClusterTransportAuth = .{},
+    limits: ClusterTransportLimits = .{},
+    failures_before_success: usize = 0,
+    lifecycle: ClusterTransportLifecycleState = .{},
+    last_failure: ?ClusterTransportFailureReport = null,
+
+    pub fn init(allocator: Allocator, storage: MessageStorage, options: ProductionSocketClusterTransportOptions) ClusterTransportError!ProductionSocketClusterTransport {
+        try validateTransportLimits(options.limits);
+        return .{
+            .handler = try InProcessClusterTransport.init(allocator, storage, .{ .shard_count = options.shard_count }),
+            .auth = options.auth,
+            .limits = options.limits,
+            .failures_before_success = options.failures_before_success,
+        };
+    }
+
+    pub fn deinit(self: *ProductionSocketClusterTransport) void {
+        self.handler.deinit();
+    }
+
+    pub fn asClusterTransport(self: *ProductionSocketClusterTransport) ClusterTransport {
+        return .{
+            .ptr = self,
+            .vtable = &.{
+                .send = sendOpaque,
+            },
+        };
+    }
+
+    pub fn snapshotMetrics(self: *const ProductionSocketClusterTransport) ClusterTransportMetricsSnapshot {
+        return self.lifecycle;
+    }
+
+    pub fn stop(self: *ProductionSocketClusterTransport) void {
+        self.lifecycle.started = false;
+        self.lifecycle.stopped = true;
+    }
+
+    pub fn lastFailure(self: *const ProductionSocketClusterTransport) ?ClusterTransportFailureReport {
+        return self.last_failure;
+    }
+
+    pub fn send(self: *ProductionSocketClusterTransport, allocator: Allocator, request: ClusterTransportRequest) !ClusterTransportResponse {
+        self.lifecycle.sends += 1;
+        try self.preflight(request);
+
+        const max_attempts = request.policy.max_retries + 1;
+        self.lifecycle.in_flight += 1;
+        defer self.lifecycle.in_flight -= 1;
+
+        var attempts: usize = 0;
+        while (attempts < max_attempts) {
+            attempts += 1;
+            if (self.failures_before_success > 0) {
+                self.failures_before_success -= 1;
+                self.recordFailure(attempts, error.TransportUnavailable, "transient unavailable");
+                if (attempts >= max_attempts) {
+                    self.recordFailure(attempts, error.RetryLimitExceeded, "retry budget exhausted");
+                    return error.RetryLimitExceeded;
+                }
+                self.lifecycle.retries += 1;
+                continue;
+            }
+
+            const encoded = sendSocketBytes(allocator, &self.handler, request, attempts, .production_socket) catch |err| {
+                self.recordFailure(attempts, err, "encoded socket send failed");
+                if (isRetryableTransportError(err) and attempts < max_attempts) {
+                    self.lifecycle.retries += 1;
+                    continue;
+                }
+                if (isRetryableTransportError(err)) {
+                    self.recordFailure(attempts, error.RetryLimitExceeded, "retry budget exhausted");
+                    return error.RetryLimitExceeded;
+                }
+                return err;
+            };
+
+            self.lifecycle.bytes_sent += encoded.bytes_sent;
+            self.lifecycle.bytes_received += encoded.bytes_received;
+            self.lifecycle.successes += 1;
+            return encoded.response;
+        }
+
+        self.recordFailure(attempts, error.RetryLimitExceeded, "retry budget exhausted");
+        return error.RetryLimitExceeded;
+    }
+
+    fn preflight(self: *ProductionSocketClusterTransport, request: ClusterTransportRequest) ClusterTransportError!void {
+        if (self.lifecycle.stopped) {
+            self.recordFailure(1, error.TransportUnavailable, "transport stopped");
+            return error.TransportUnavailable;
+        }
+        if (request.policy.timeout_ms == 0) {
+            self.recordFailure(1, error.TransportTimeout, "timeout before submit");
+            return error.TransportTimeout;
+        }
+        validateTransportAuth(self.auth, request.auth) catch |err| {
+            self.recordFailure(1, err, "auth rejected");
+            return err;
+        };
+        validateTransportEnvelopeLimits(request, self.limits) catch |err| {
+            self.recordFailure(1, err, "envelope limits rejected");
+            return err;
+        };
+        if (self.lifecycle.in_flight >= self.limits.max_in_flight) {
+            self.recordFailure(1, error.TransportBackpressured, "max in-flight reached");
+            return error.TransportBackpressured;
+        }
+    }
+
+    fn recordFailure(self: *ProductionSocketClusterTransport, attempts: usize, err: anyerror, detail: []const u8) void {
+        recordTransportFailure(&self.lifecycle, &self.last_failure, .production_socket, attempts, err, detail);
+    }
+
+    fn sendOpaque(ptr: *anyopaque, allocator: Allocator, request: ClusterTransportRequest) anyerror!ClusterTransportResponse {
+        const self: *ProductionSocketClusterTransport = @ptrCast(@alignCast(ptr));
+        return self.send(allocator, request);
+    }
+};
 
 const ClusterTransportEncodedSend = struct {
     response: ClusterTransportResponse,
@@ -509,6 +629,37 @@ fn sendHttpBytes(
         .response = try parseClusterTransportResponseJson(allocator, response_body),
         .bytes_sent = http_request.len,
         .bytes_received = http_response.len,
+    };
+}
+
+fn sendSocketBytes(
+    allocator: Allocator,
+    handler: *InProcessClusterTransport,
+    request: ClusterTransportRequest,
+    attempts: usize,
+    transport_kind: ClusterTransportKind,
+) !ClusterTransportEncodedSend {
+    const request_json = try formatClusterTransportRequestJson(allocator, request);
+    defer allocator.free(request_json);
+    const request_frame = try formatClusterTransportSocketFrame(allocator, request_json);
+    defer allocator.free(request_frame);
+    const request_body = try clusterTransportSocketFrameBody(request_frame);
+
+    var parsed_request = try parseClusterTransportRequestJson(allocator, request_body);
+    defer parsed_request.deinit(allocator);
+
+    var handler_response = try handler.sendWithAttempts(parsed_request, attempts, transport_kind);
+    defer handler_response.deinit(allocator);
+
+    const response_json = try formatClusterTransportResponseJson(allocator, handler_response);
+    defer allocator.free(response_json);
+    const response_frame = try formatClusterTransportSocketFrame(allocator, response_json);
+    defer allocator.free(response_frame);
+    const response_body = try clusterTransportSocketFrameBody(response_frame);
+    return .{
+        .response = try parseClusterTransportResponseJson(allocator, response_body),
+        .bytes_sent = request_frame.len,
+        .bytes_received = response_frame.len,
     };
 }
 

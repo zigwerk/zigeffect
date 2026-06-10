@@ -615,6 +615,82 @@ test "production http transport stops after retry limit without durable submissi
     try std.testing.expectEqualStrings("RetryLimitExceeded", failure.error_name);
 }
 
+test "socket frame codec extracts framed body" {
+    const body = "{\"schema\":\"zigeffect.cluster.transport.request.v1\"}";
+    const frame = try fx.formatClusterTransportSocketFrame(std.testing.allocator, body);
+    defer std.testing.allocator.free(frame);
+    const parsed = try fx.clusterTransportSocketFrameBody(frame);
+    try std.testing.expectEqualStrings(body, parsed);
+    try std.testing.expectError(error.CorruptTransportMessage, fx.clusterTransportSocketFrameBody("BAD/1 3\nabc"));
+    try std.testing.expectError(error.CorruptTransportMessage, fx.clusterTransportSocketFrameBody("ZIGFX/1 5\nabc"));
+}
+
+test "production socket transport stores messages through framed request bytes" {
+    var storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asMessageStorage();
+    var transport_state = try fx.ProductionSocketClusterTransport.init(std.testing.allocator, storage, .{ .shard_count = 16 });
+    defer transport_state.deinit();
+
+    const address = fx.entityAddress("counter", "production-socket-store");
+    const shard_id = try fx.shardIdForAddress(address, 16);
+    var response = try transport_state.asClusterTransport().send(std.testing.allocator, .{
+        .kind = .request,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "get",
+        .redacted_detail = "read current value",
+        .idempotency_key = "production-socket-store-key",
+        .trace_id = 9101,
+        .span_id = 9102,
+        .chunk_index = 0,
+        .chunk_count = 1,
+    });
+    defer response.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(shard_id, response.shard_id);
+    try std.testing.expectEqual(fx.ClusterTransportKind.production_socket, response.transport);
+    try std.testing.expectEqual(@as(?u64, 9101), response.envelope.trace_id);
+    try std.testing.expectEqual(@as(?u64, 9102), response.envelope.span_id);
+    try std.testing.expectEqual(@as(?u32, 0), response.envelope.chunk_index);
+    try std.testing.expectEqual(@as(?u32, 1), response.envelope.chunk_count);
+
+    var by_shard = try storage.unprocessedByShard(shard_id, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 1), by_shard.records.len);
+
+    const metrics = transport_state.snapshotMetrics();
+    try std.testing.expect(metrics.bytes_sent > 0);
+    try std.testing.expect(metrics.bytes_received > 0);
+    try std.testing.expectEqual(@as(usize, 1), metrics.successes);
+}
+
+test "production socket transport retries transient unavailable attempts" {
+    var storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    var transport_state = try fx.ProductionSocketClusterTransport.init(std.testing.allocator, storage_state.asMessageStorage(), .{
+        .shard_count = 8,
+        .failures_before_success = 1,
+    });
+    defer transport_state.deinit();
+
+    var response = try transport_state.asClusterTransport().send(std.testing.allocator, .{
+        .kind = .tell,
+        .address = fx.entityAddress("counter", "production-socket-retry"),
+        .payload_type_name = "text",
+        .payload = "inc",
+        .redacted_detail = "increment",
+        .policy = .{ .timeout_ms = 500, .max_retries = 1 },
+    });
+    defer response.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 2), response.attempts);
+    try std.testing.expectEqual(fx.ClusterTransportKind.production_socket, response.transport);
+    const metrics = transport_state.snapshotMetrics();
+    try std.testing.expectEqual(@as(usize, 1), metrics.retries);
+    try std.testing.expectEqual(@as(usize, 1), metrics.successes);
+}
+
 test "cluster runner processes ask sent through in-process transport" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
