@@ -616,6 +616,28 @@ pub fn build(b: *std.Build) void {
     });
     const run_cluster_runner_tool_tests = b.addRunArtifact(cluster_runner_tool_tests);
 
+    const cluster_inspect_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/cluster_inspect.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cluster_inspect_tool_module.addImport("zigeffect", zigeffect);
+
+    const cluster_inspect_tool = b.addExecutable(.{
+        .name = "zigeffect-cluster-inspect",
+        .root_module = cluster_inspect_tool_module,
+    });
+    const run_cluster_inspect_tool = b.addRunArtifact(cluster_inspect_tool);
+    if (b.args) |args| run_cluster_inspect_tool.addArgs(args);
+    const cluster_inspect_step = b.step("cluster-inspect", "Inspect durable zigeffect cluster storage");
+    cluster_inspect_step.dependOn(&run_cluster_inspect_tool.step);
+
+    const cluster_inspect_tool_tests = b.addTest(.{
+        .name = "zigeffect-cluster-inspect-tests",
+        .root_module = cluster_inspect_tool_module,
+    });
+    const run_cluster_inspect_tool_tests = b.addRunArtifact(cluster_inspect_tool_tests);
+
     const storage_migrate_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/storage_migrate.zig"),
         .target = target,
@@ -892,6 +914,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_causal_graph_history_backend_tests.step);
     test_step.dependOn(&run_causal_nendb_storage_backend_tests.step);
     test_step.dependOn(&run_causal_async_stream_backend_tests.step);
+    test_step.dependOn(&run_cluster_inspect_tool_tests.step);
     test_step.dependOn(&run_storage_migrate_tool_tests.step);
     test_step.dependOn(&run_performance_bench_tool_tests.step);
     const causal_dev_test_step = b.step("causal-dev-test", "Run zigeffect tests with causal failure capture");
@@ -1357,6 +1380,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_test_tool_tests.step);
     examples_step.dependOn(&cluster_runner_tool.step);
     examples_step.dependOn(&run_cluster_runner_tool_tests.step);
+    examples_step.dependOn(&cluster_inspect_tool.step);
+    examples_step.dependOn(&run_cluster_inspect_tool_tests.step);
     examples_step.dependOn(&storage_migrate_tool.step);
     examples_step.dependOn(&run_storage_migrate_tool_tests.step);
     examples_step.dependOn(&performance_bench_tool.step);

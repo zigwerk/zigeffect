@@ -507,6 +507,32 @@ pub const RealClusterController = struct {
             .findings = try findings.toOwnedSlice(allocator),
         };
     }
+
+    pub fn inspectCluster(self: *RealClusterController, allocator: Allocator, now_ms: u64) !ClusterInspectionReport {
+        var members = try self.discoverRunners(allocator, now_ms);
+        errdefer members.deinit();
+
+        var leases = try self.runner_storage.leases(allocator);
+        errdefer leases.deinit();
+
+        const metrics = try observability.collectClusterMetrics(
+            allocator,
+            self.runner_storage,
+            self.message_storage,
+            self.options.shard_count,
+            null,
+        );
+
+        return .{
+            .allocator = allocator,
+            .generated_at_ms = now_ms,
+            .members = members,
+            .leases = leases,
+            .metrics = metrics,
+            .recent_rebalance_actions = self.recent_rebalance_actions,
+            .recent_failures = self.recent_failures,
+        };
+    }
 };
 
 fn clusterMembershipStateFromHealth(state: runner.RunnerHealthState) ClusterMembershipState {
@@ -533,12 +559,23 @@ fn findPlacementOwner(plan: ClusterPlacementPlan, shard_id: ShardId) ?RunnerAddr
 pub fn formatClusterInspectionText(allocator: Allocator, report: ClusterInspectionReport) Allocator.Error![]const u8 {
     return std.fmt.allocPrint(
         allocator,
-        "cluster inspection members={d} active={d} leases={d} lag={d} actions={d} failures={d}",
+        "schema: {s}\nschema_version: {d}\ngenerated_at_ms: {d}\nmembers.total: {d}\nmembers.active: {d}\nmembers.draining: {d}\nmembers.down: {d}\nleases.active: {d}\nmetrics.active_leases: {d}\nmetrics.mailbox_lag: {d}\nmetrics.max_shard_mailbox_lag: {d}\nmetrics.message_backpressure: {d}\nmetrics.message_retries: {d}\nmetrics.migrations: {d}\nmetrics.failures: {d}\nrebalance.actions.recent: {d}\nfailures.recent: {d}\n",
         .{
+            cluster_inspection_schema,
+            cluster_inspection_schema_version,
+            report.generated_at_ms,
             report.members.members.len,
             report.members.active,
+            report.members.draining,
+            report.members.down,
             report.leases.leases.len,
+            report.metrics.active_leases,
             report.metrics.mailbox_lag,
+            report.metrics.max_shard_mailbox_lag,
+            report.metrics.message_backpressure,
+            report.metrics.message_retries,
+            report.metrics.migrations,
+            report.metrics.failures,
             report.recent_rebalance_actions,
             report.recent_failures,
         },
@@ -548,15 +585,23 @@ pub fn formatClusterInspectionText(allocator: Allocator, report: ClusterInspecti
 pub fn formatClusterInspectionJson(allocator: Allocator, report: ClusterInspectionReport) Allocator.Error![]const u8 {
     return std.fmt.allocPrint(
         allocator,
-        "{{\"schema\":\"{s}\",\"schema_version\":{d},\"generated_at_ms\":{d},\"members\":{d},\"active\":{d},\"leases\":{d},\"lag\":{d},\"actions\":{d},\"failures\":{d}}}",
+        "{{\"schema\":\"{s}\",\"schema_version\":{d},\"generated_at_ms\":{d},\"members_total\":{d},\"members_active\":{d},\"members_draining\":{d},\"members_down\":{d},\"leases_active\":{d},\"active_leases\":{d},\"mailbox_lag\":{d},\"max_shard_mailbox_lag\":{d},\"message_backpressure\":{d},\"message_retries\":{d},\"migrations\":{d},\"metric_failures\":{d},\"recent_rebalance_actions\":{d},\"recent_failures\":{d}}}",
         .{
             cluster_inspection_schema,
             cluster_inspection_schema_version,
             report.generated_at_ms,
             report.members.members.len,
             report.members.active,
+            report.members.draining,
+            report.members.down,
             report.leases.leases.len,
+            report.metrics.active_leases,
             report.metrics.mailbox_lag,
+            report.metrics.max_shard_mailbox_lag,
+            report.metrics.message_backpressure,
+            report.metrics.message_retries,
+            report.metrics.migrations,
+            report.metrics.failures,
             report.recent_rebalance_actions,
             report.recent_failures,
         },

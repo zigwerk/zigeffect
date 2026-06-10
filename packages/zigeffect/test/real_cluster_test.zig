@@ -464,6 +464,60 @@ test "real cluster split brain report classifies missing owner and epoch drift" 
     try expectSplitBrainFinding(report, .missing_storage_lease, 3, runner_a, null, 1, null);
 }
 
+test "real cluster inspection reports membership leases and mailbox metrics" {
+    var registry = fx.LocalRunnerRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    const runner_storage = runner_storage_state.asRunnerStorage();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+    var controller = try testController(&registry, runner_storage, message_storage);
+
+    const runner_a = fx.runnerAddress("machine-real", "runner-a");
+    const runner_b = fx.runnerAddress("machine-real", "runner-b");
+    try admitActiveRunner(&controller, runner_a, "runner-a", 1_000);
+    try admitActiveRunner(&controller, runner_b, "runner-b", 1_000);
+
+    var placement = try controller.placementPlan(std.testing.allocator, 1_050);
+    defer placement.deinit();
+    var rebalance = try controller.rebalancePlan(std.testing.allocator, placement);
+    defer rebalance.deinit();
+    _ = try controller.applyRebalancePlan(rebalance, 1_100);
+
+    const queued_address = try addressForRealShard(0, 8);
+    var router = fx.LocalClusterRouter.init(std.testing.allocator, message_storage, .{ .shard_count = 8 });
+    var routed = try router.routeTell(
+        queued_address,
+        "text",
+        "inspect-me",
+        "queued inspection message",
+    );
+    defer routed.deinit(std.testing.allocator);
+
+    var report = try controller.inspectCluster(std.testing.allocator, 1_150);
+    defer report.deinit();
+    try std.testing.expectEqual(@as(usize, 2), report.members.members.len);
+    try std.testing.expectEqual(@as(usize, 2), report.members.active);
+    try std.testing.expectEqual(@as(usize, 8), report.leases.leases.len);
+    try std.testing.expectEqual(@as(usize, 8), report.metrics.active_leases);
+    try std.testing.expectEqual(@as(usize, 1), report.metrics.mailbox_lag);
+    try std.testing.expectEqual(@as(usize, 8), report.recent_rebalance_actions);
+
+    const text = try fx.formatClusterInspectionText(std.testing.allocator, report);
+    defer std.testing.allocator.free(text);
+    try std.testing.expect(std.mem.indexOf(u8, text, "schema: zigeffect.cluster.inspection.v1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "members.active: 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "metrics.mailbox_lag: 1") != null);
+
+    const json = try fx.formatClusterInspectionJson(std.testing.allocator, report);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.cluster.inspection.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"active_leases\":8") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"mailbox_lag\":1") != null);
+}
+
 fn testController(registry: *fx.LocalRunnerRegistry, runner_storage: fx.RunnerStorage, message_storage: fx.MessageStorage) !fx.RealClusterController {
     return fx.RealClusterController.init(std.testing.allocator, .{
         .runner_storage = runner_storage,
