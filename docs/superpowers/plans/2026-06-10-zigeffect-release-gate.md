@@ -43,33 +43,33 @@ Modify:
 
 ## Task 1: Add The Red Release Gate Wiring
 
-- [ ] Add build wiring for `examples/workflow_crash_recovery.zig`.
-- [ ] Add build wiring for `tools/release_gate_report.zig`.
-- [ ] Add `zig build release-gate` that depends on the package test gate,
+- [x] Add build wiring for `examples/workflow_crash_recovery.zig`.
+- [x] Add build wiring for `tools/release_gate_report.zig`.
+- [x] Add `zig build release-gate` that depends on the package test gate,
   public API review, storage conformance, property crash tests, performance
   bounds, examples, causal artifact generation, and release report generation.
-- [ ] Add `zigeffect:release` to `package.json`.
-- [ ] Run `(cd packages/zigeffect && zig build release-gate)` and confirm it
+- [x] Add `zigeffect:release` to `package.json`.
+- [x] Run `(cd packages/zigeffect && zig build release-gate)` and confirm it
   fails because the new example and report tool files are absent.
 
 ## Task 2: Implement The Crash Recovery Example
 
-- [ ] Create `packages/zigeffect/examples/workflow_crash_recovery.zig`.
-- [ ] Write a scenario that appends committed workflow events to
+- [x] Create `packages/zigeffect/examples/workflow_crash_recovery.zig`.
+- [x] Write a scenario that appends committed workflow events to
   `FileJournalStore`, appends a partial trailing JSON row, reopens the store,
   and reports recovered partial bytes plus replay state.
-- [ ] Add a test that asserts the committed state survives and the partial row
+- [x] Add a test that asserts the committed state survives and the partial row
   is trimmed.
-- [ ] Run `(cd packages/zigeffect && zig build examples)` and confirm the new
+- [x] Run `(cd packages/zigeffect && zig build examples)` and confirm the new
   example passes.
 
 ## Task 3: Implement The Release Report Tool
 
-- [ ] Create `packages/zigeffect/tools/release_gate_report.zig`.
-- [ ] Write text and JSON reports with schema, command, included gate names,
+- [x] Create `packages/zigeffect/tools/release_gate_report.zig`.
+- [x] Write text and JSON reports with schema, command, included gate names,
   proof labels, artifact paths, migration doc path, and completion report path.
-- [ ] Write tests for stable report paths and required content.
-- [ ] Run `(cd packages/zigeffect && zig build release-gate)` and confirm the
+- [x] Write tests for stable report paths and required content.
+- [x] Run `(cd packages/zigeffect && zig build release-gate)` and confirm the
   release gate passes.
 
 ## Task 4: Add Docs And CI Paths

@@ -457,6 +457,24 @@ pub fn build(b: *std.Build) void {
     });
     const run_workflow_timer_signal_example_tests = b.addRunArtifact(workflow_timer_signal_example_tests);
 
+    const workflow_crash_recovery_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/workflow_crash_recovery.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    workflow_crash_recovery_example_module.addImport("zigeffect", zigeffect);
+
+    const workflow_crash_recovery_example = b.addExecutable(.{
+        .name = "zigeffect-workflow-crash-recovery-example",
+        .root_module = workflow_crash_recovery_example_module,
+    });
+
+    const workflow_crash_recovery_example_tests = b.addTest(.{
+        .name = "zigeffect-workflow-crash-recovery-example-tests",
+        .root_module = workflow_crash_recovery_example_module,
+    });
+    const run_workflow_crash_recovery_example_tests = b.addRunArtifact(workflow_crash_recovery_example_tests);
+
     const local_actor_example_module = b.createModule(.{
         .root_source_file = b.path("examples/local_actor.zig"),
         .target = target,
@@ -641,6 +659,26 @@ pub fn build(b: *std.Build) void {
         .root_module = performance_bench_tool_module,
     });
     const run_performance_bench_tool_tests = b.addRunArtifact(performance_bench_tool_tests);
+
+    const release_gate_report_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/release_gate_report.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const release_gate_report_tool = b.addExecutable(.{
+        .name = "zigeffect-release-gate-report",
+        .root_module = release_gate_report_tool_module,
+    });
+    const run_release_gate_report_tool = b.addRunArtifact(release_gate_report_tool);
+    const release_gate_report_step = b.step("release-gate-report", "Write zigeffect release gate report artifacts");
+    release_gate_report_step.dependOn(&run_release_gate_report_tool.step);
+
+    const release_gate_report_tool_tests = b.addTest(.{
+        .name = "zigeffect-release-gate-report-tests",
+        .root_module = release_gate_report_tool_module,
+    });
+    const run_release_gate_report_tool_tests = b.addRunArtifact(release_gate_report_tool_tests);
 
     const causal_artifact_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_artifact.zig"),
@@ -1303,6 +1341,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_workflow_queue_worker_example_tests.step);
     examples_step.dependOn(&workflow_timer_signal_example.step);
     examples_step.dependOn(&run_workflow_timer_signal_example_tests.step);
+    examples_step.dependOn(&workflow_crash_recovery_example.step);
+    examples_step.dependOn(&run_workflow_crash_recovery_example_tests.step);
     examples_step.dependOn(&local_actor_example.step);
     examples_step.dependOn(&run_local_actor_example_tests.step);
     examples_step.dependOn(&multi_runner_cluster_example.step);
@@ -1321,6 +1361,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_storage_migrate_tool_tests.step);
     examples_step.dependOn(&performance_bench_tool.step);
     examples_step.dependOn(&run_performance_bench_tool_tests.step);
+    examples_step.dependOn(&release_gate_report_tool.step);
+    examples_step.dependOn(&run_release_gate_report_tool_tests.step);
     examples_step.dependOn(&run_causal_artifact_tool_tests.step);
     examples_step.dependOn(&run_workflow_tool_support_tests.step);
     examples_step.dependOn(&workflow_list_tool.step);
@@ -1374,4 +1416,19 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_handoff_tool_tests.step);
     examples_step.dependOn(&causal_loop_tool.step);
     examples_step.dependOn(&run_causal_loop_tool_tests.step);
+
+    const release_gate_step = b.step("release-gate", "Run complete durable workflow and cluster release gate");
+    release_gate_step.dependOn(test_step);
+    release_gate_step.dependOn(public_api_review_step);
+    release_gate_step.dependOn(storage_conformance_step);
+    release_gate_step.dependOn(property_crash_step);
+    release_gate_step.dependOn(performance_bounds_step);
+    release_gate_step.dependOn(examples_step);
+    release_gate_step.dependOn(causal_test_step);
+    release_gate_step.dependOn(causal_artifacts_step);
+    release_gate_step.dependOn(release_gate_report_step);
+    release_gate_step.dependOn(&run_release_gate_report_tool_tests.step);
+    release_gate_step.dependOn(&run_workflow_crash_recovery_example_tests.step);
+    release_gate_step.dependOn(&run_multi_runner_cluster_example_tests.step);
+    release_gate_step.dependOn(&run_cluster_workflow_migration_example_tests.step);
 }
