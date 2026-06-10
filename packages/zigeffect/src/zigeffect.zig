@@ -23,6 +23,15 @@ pub const findStorageSchema = storage.findStorageSchema;
 pub const classifyStorageSchema = storage.classifyStorageSchema;
 pub const formatStorageSchemaCatalogText = storage.formatStorageSchemaCatalogText;
 pub const formatStorageSchemaCatalogJson = storage.formatStorageSchemaCatalogJson;
+pub const storage_sql_plan_schema = storage.storage_sql_plan_schema;
+pub const storage_sql_plan_schema_version = storage.storage_sql_plan_schema_version;
+pub const SqlStorageDialect = storage.SqlStorageDialect;
+pub const SqlStorageStatementKind = storage.SqlStorageStatementKind;
+pub const SqlStorageStatement = storage.SqlStorageStatement;
+pub const SqlStorageMigrationPlan = storage.SqlStorageMigrationPlan;
+pub const sqlStorageMigrationPlan = storage.sqlStorageMigrationPlan;
+pub const formatSqlStorageMigrationPlanText = storage.formatSqlStorageMigrationPlanText;
+pub const formatSqlStorageMigrationPlanJson = storage.formatSqlStorageMigrationPlanJson;
 
 pub const core = struct {
     pub const result = @import("core/result.zig");

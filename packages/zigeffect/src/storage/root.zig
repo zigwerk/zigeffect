@@ -1,5 +1,6 @@
 pub const domain = "storage";
 pub const schema = @import("schema.zig");
+pub const sql = @import("sql.zig");
 
 pub const storage_catalog_schema = schema.storage_catalog_schema;
 pub const storage_catalog_schema_version = schema.storage_catalog_schema_version;
@@ -14,3 +15,12 @@ pub const findStorageSchema = schema.findStorageSchema;
 pub const classifyStorageSchema = schema.classifyStorageSchema;
 pub const formatStorageSchemaCatalogText = schema.formatStorageSchemaCatalogText;
 pub const formatStorageSchemaCatalogJson = schema.formatStorageSchemaCatalogJson;
+pub const storage_sql_plan_schema = sql.storage_sql_plan_schema;
+pub const storage_sql_plan_schema_version = sql.storage_sql_plan_schema_version;
+pub const SqlStorageDialect = sql.SqlStorageDialect;
+pub const SqlStorageStatementKind = sql.SqlStorageStatementKind;
+pub const SqlStorageStatement = sql.SqlStorageStatement;
+pub const SqlStorageMigrationPlan = sql.SqlStorageMigrationPlan;
+pub const sqlStorageMigrationPlan = sql.sqlStorageMigrationPlan;
+pub const formatSqlStorageMigrationPlanText = sql.formatSqlStorageMigrationPlanText;
+pub const formatSqlStorageMigrationPlanJson = sql.formatSqlStorageMigrationPlanJson;

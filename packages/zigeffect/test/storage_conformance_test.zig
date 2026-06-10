@@ -146,3 +146,36 @@ fn expectStorageSchema(catalog: fx.StorageSchemaCatalog, schema: []const u8) !vo
 fn expectContains(haystack: []const u8, needle: []const u8) !void {
     try std.testing.expect(std.mem.indexOf(u8, haystack, needle) != null);
 }
+
+test "sql storage migration plan describes durable tables" {
+    const plan = fx.sqlStorageMigrationPlan(.cockroachdb);
+    try std.testing.expectEqual(fx.SqlStorageDialect.cockroachdb, plan.dialect);
+    try std.testing.expect(plan.statements.len >= 6);
+    try expectSqlStatement(plan, "create_workflow_journal_events");
+    try expectSqlStatement(plan, "create_workflow_checkpoints");
+    try expectSqlStatement(plan, "create_workflow_snapshot_commits");
+    try expectSqlStatement(plan, "create_cluster_runner_leases");
+    try expectSqlStatement(plan, "create_cluster_messages");
+    try expectSqlStatement(plan, "create_cluster_replies");
+}
+
+test "sql storage migration plan formats text and json" {
+    const plan = fx.sqlStorageMigrationPlan(.postgresql);
+    const text = try fx.formatSqlStorageMigrationPlanText(std.testing.allocator, plan);
+    defer std.testing.allocator.free(text);
+    try expectContains(text, "zigeffect storage migration plan");
+    try expectContains(text, "postgresql");
+    try expectContains(text, "zigeffect_cluster_messages");
+
+    const json = try fx.formatSqlStorageMigrationPlanJson(std.testing.allocator, plan);
+    defer std.testing.allocator.free(json);
+    try expectContains(json, "\"schema\":\"zigeffect.storage.sql-plan.v1\"");
+    try expectContains(json, "create_cluster_runner_leases");
+}
+
+fn expectSqlStatement(plan: fx.SqlStorageMigrationPlan, name: []const u8) !void {
+    for (plan.statements) |statement| {
+        if (std.mem.eql(u8, statement.name, name)) return;
+    }
+    return error.ExpectedSqlStorageStatement;
+}
