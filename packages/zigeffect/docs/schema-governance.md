@@ -684,6 +684,22 @@ creation, live telemetry, durable writes, NenDB writes, non-NenDB adapter work,
 alternate renderer scope, production health, deployment success, customer
 impact, production cluster readiness, and mutation authority.
 
+- `zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary.v1`
+
+The production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary
+artifact is a record-only plan-or-record-applied boundary for enforcement
+report application evidence. It consumes ready or advisory enforcement report
+artifacts, records planned or externally applied evidence, requires
+application-change, before, after, after-report, and verification evidence
+before `applied=true`, and hands off to the future enforcement report policy
+branch. It denies GitHub API mutation by the tool, branch protection mutation
+by the tool, workflow mutation by the tool, check-run creation by the tool,
+required status check creation by the tool, CI upload execution, GitHub step
+summary writes, pull-request comments, live telemetry, durable writes, NenDB
+writes, non-NenDB adapter work, alternate renderer scope, production health,
+deployment success, customer impact, production cluster readiness, and
+mutation authority.
+
 ### Human-Agent Feedback
 
 - `zigeffect.causal.human-agent-feedback-loop.v1`

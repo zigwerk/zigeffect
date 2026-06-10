@@ -1102,9 +1102,27 @@ Status values:
      writes, non-NenDB durable adapter work, alternate renderers, production
      health claims, production cluster claims, and mutation authority disabled.
 41. `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary`
-   - Current next branch: consume report artifacts and only mark publication or
-     required-check application as applied after reviewed before/after evidence
-     exists.
+   - Delivered:
+     `causal-production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary`
+     publishes
+     `zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary.v1`,
+     consumes enforcement report artifacts, records planned or externally
+     applied application-boundary evidence, only sets `applied=true` with
+     application-change, before, after, after-report, and verification evidence,
+     and hands off to
+     `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy`
+     while keeping GitHub API mutation by the tool, branch-protection mutation
+     by the tool, workflow mutation by the tool, check-run creation by the
+     tool, required status check creation by the tool, artifact upload
+     execution by the tool, GitHub step summary writes by the tool, pull
+     request comments by the tool, live telemetry, durable writes, NenDB
+     writes, non-NenDB durable adapter work, alternate renderers, production
+     health claims, production cluster claims, and mutation authority disabled.
+42. `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy`
+   - Current next branch: define interpretation policy for externally reviewed
+     enforcement report application-boundary evidence before any workflow,
+     branch-protection, required-status-check, or production authority work can
+     cite it.
 
 ## Dual-Interface Causal Spine Expansion
 
