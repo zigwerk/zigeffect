@@ -61,6 +61,10 @@ mapping, or agent handoff, also update [operations.md](operations.md).
   authority.
 - `completion-audit`: deterministic milestone closure evidence with explicit
   remaining gaps and no production mutation authority.
+- `exporter-boundary`: no-network exporter boundary evidence only; not OTLP
+  serialization, collector configuration, live transport, or durable writes.
+- `no-network`: confirms an artifact cannot send to a collector or configure a
+  network transport.
 
 ## New Schema Checklist
 
@@ -318,6 +322,19 @@ reason, verifies readiness evidence and proposal command evidence, emits
 branch. It does not ingest live production telemetry, configure exporters, send
 OTLP, write durable production storage, size capacity, fail CI, add non-NenDB
 adapter work, add alternate renderers, or grant mutation authority.
+
+- `zigeffect.causal.production-telemetry-exporter-boundary.v1`
+
+The production-telemetry-exporter-boundary report is a record-only,
+`exporter-boundary`, `no-network`, `no-live-ingestion` production hardening
+contract. It consumes an approved implementation-proposal artifact, verifies
+proposal evidence and verification commands, records an exporter-neutral
+no-network boundary, records local envelope fixture names, and emits
+`approved` or `blocked` artifacts before future local pipeline fixtures. It
+does not ingest live production telemetry, configure exporters, send OTLP,
+configure collector endpoints, write durable production storage, size
+capacity, fail CI, add non-NenDB adapter work, add alternate renderers, or
+grant mutation authority.
 
 ### Human-Agent Feedback
 

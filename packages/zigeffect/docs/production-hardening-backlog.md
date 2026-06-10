@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-telemetry-exporter-boundary` means the
+The recommendation `start-production-telemetry-local-pipeline-fixtures` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -77,8 +77,15 @@ a ready readiness-review artifact, records proposer decision and reason,
 verifies readiness and proposal evidence, emits approved or blocked proposal
 artifacts, records implementation phases, and preserves non-live authority
 before any exporter-boundary branch.
+The production telemetry exporter boundary is also delivered: it consumes an
+approved implementation-proposal artifact, verifies source proposal evidence,
+records a no-network exporter boundary contract, local envelope fixture names,
+and required verification evidence, and preserves disabled network send,
+collector endpoint, OTLP serialization, live telemetry, durable writes, CI
+gates, non-NenDB adapter scope, alternate renderer scope, and mutation
+authority before any local pipeline fixture branch.
 The next branch should be
-`codex/zigeffect-causal-production-telemetry-exporter-boundary`.
+`codex/zigeffect-causal-production-telemetry-local-pipeline-fixtures`.
 
 ## Dependency Order
 
@@ -106,6 +113,7 @@ The backlog currently orders future production-hardening branches as:
 20. `production-telemetry-capture-fixtures` delivered
 21. `production-telemetry-readiness-review` delivered
 22. `production-telemetry-implementation-proposal` delivered
+23. `production-telemetry-exporter-boundary` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -271,10 +279,22 @@ telemetry, disabled durable writes, disabled CI gates, NenDB-only durable
 direction, and SolidJS `zig-webui` workbench direction.
 
 The next branch is
-`codex/zigeffect-causal-production-telemetry-exporter-boundary`. It should use
-approved proposal artifacts to define an exporter-neutral no-network boundary
-before any live ingestion, exporters, durable production writes, capacity
-claims, CI gates, or mutation authority are considered.
+`codex/zigeffect-causal-production-telemetry-local-pipeline-fixtures`.
+
+Production telemetry exporter boundary is documented in
+[production-telemetry-exporter-boundary.md](production-telemetry-exporter-boundary.md).
+It emits `zigeffect.causal.production-telemetry-exporter-boundary.v1` through
+`zig build causal-production-telemetry-exporter-boundary`, consumes approved
+implementation-proposal JSON, verifies proposal evidence, records
+exporter-neutral no-network boundaries and local envelope fixture names, and
+preserves `applied=false`, `mutation_authority=none`, disabled live telemetry,
+disabled network send, disabled collector endpoint configuration, disabled
+OTLP serialization, disabled durable writes, disabled CI gates, NenDB-only
+durable direction, and SolidJS `zig-webui` workbench direction.
+
+The next branch should use approved exporter-boundary artifacts to define local
+pipeline fixtures before any live ingestion, exporters, durable production
+writes, capacity claims, CI gates, or mutation authority are considered.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -351,6 +371,19 @@ zig build causal-production-telemetry-implementation-proposal -- \
   --from-readiness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review.json \
   reject \
   --reason "negative proposal path"
+zig build causal-production-telemetry-exporter-boundary -- \
+  --from-proposal ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal.json \
+  approve \
+  --reason "proposal evidence reviewed for local pipeline fixtures" \
+  --verified-command "zig build causal-production-telemetry-implementation-proposal -- --from-readiness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review.json approve --reason \"ready evidence reviewed for exporter boundary planning\" --verified-command \"zig build causal-production-telemetry-readiness-review -- --from-fixtures ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json approve --reason \\\"fixtures reviewed for implementation proposal\\\" --verified-command \\\"zig build causal-production-telemetry-capture-fixtures -- validate --format json\\\" --verified-command \\\"zig build causal-schema-governance -- --format json\\\" --verified-command \\\"zig build causal-production-hardening-backlog -- --format json\\\" --verified-command \\\"zig build examples\\\" --verified-command \\\"zig build test\\\"\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+zig build causal-production-telemetry-exporter-boundary -- \
+  --from-proposal ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal.json \
+  reject \
+  --reason "negative boundary path"
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

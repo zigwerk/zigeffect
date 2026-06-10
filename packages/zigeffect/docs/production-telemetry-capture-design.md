@@ -110,8 +110,10 @@ The fixture branch is now delivered through
 records without touching production systems. The readiness-review branch is now
 delivered through `causal-production-telemetry-readiness-review`, and the
 implementation-proposal branch is now delivered through
-`causal-production-telemetry-implementation-proposal`. The current handoff is
-`codex/zigeffect-causal-production-telemetry-exporter-boundary`.
+`causal-production-telemetry-implementation-proposal`, and the
+exporter-boundary branch is now delivered through
+`causal-production-telemetry-exporter-boundary`. The current handoff is
+`codex/zigeffect-causal-production-telemetry-local-pipeline-fixtures`.
 
 ## Verification
 

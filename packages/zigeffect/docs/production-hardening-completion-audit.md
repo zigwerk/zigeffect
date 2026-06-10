@@ -83,7 +83,8 @@ The audit deliberately separates delivered contracts from missing evidence:
 - `production-telemetry-capture-fixtures`: delivered;
 - `production-telemetry-readiness-review`: delivered;
 - `production-telemetry-implementation-proposal`: delivered;
-- `production-telemetry-exporter-boundary`: recommended next branch;
+- `production-telemetry-exporter-boundary`: delivered;
+- `production-telemetry-local-pipeline-fixtures`: recommended next branch;
 - `reviewed-production-capacity-sizing`: future;
 - `live-alert-delivery`: future;
 - `live-rollout-automation`: future;
@@ -118,13 +119,14 @@ capacity-planning fixture plan and wall-clock baseline assumptions, then
 produces local observation records without live production telemetry,
 production load execution, or capacity claims.
 
-The telemetry capture design, fixture, readiness-review, and
-implementation-proposal branches are now delivered after this handoff. The
-current next branch is
-`codex/zigeffect-causal-production-telemetry-exporter-boundary`.
+The telemetry capture design, fixture, readiness-review,
+implementation-proposal, and exporter-boundary branches are now delivered after
+this handoff. The current next branch is
+`codex/zigeffect-causal-production-telemetry-local-pipeline-fixtures`.
 Reviewed production capacity sizing remains future until compatible
 observations, telemetry design, fixtures, readiness review, implementation
-proposal, and human review exist.
+proposal, exporter boundary, local pipeline fixture evidence, and human review
+exist.
 
 ## Verification
 

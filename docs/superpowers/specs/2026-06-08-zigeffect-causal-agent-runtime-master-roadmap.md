@@ -762,10 +762,23 @@ Status values:
      SolidJS `zig-webui` aligned without touching production systems or
      claiming production capacity.
 18. `codex/zigeffect-causal-production-telemetry-exporter-boundary`
-   - Current next branch: use approved proposal artifacts to define an
-     exporter-neutral no-network boundary before any live ingestion, durable
-     production writes, CI gates, capacity claims, or mutation authority are
-     considered.
+   - Delivered: `causal-production-telemetry-exporter-boundary` emits
+     `zigeffect.causal.production-telemetry-exporter-boundary.v1` with approved
+     proposal consumption, proposal evidence checks, no-network exporter
+     boundary fields, local envelope fixture names, approved and blocked
+     boundary artifacts, and local-pipeline-fixtures handoff. It keeps
+     `applied=false`, `production_telemetry_ingestion=false`,
+     `live_exporter_enabled=false`, `network_send_enabled=false`,
+     `collector_endpoint_configured=false`, `otlp_serialization_enabled=false`,
+     `durable_write_enabled=false`, `ci_gate_enabled=false`,
+     `mutation_authority=none`, NenDB-only, and SolidJS `zig-webui` aligned
+     without touching production systems, sending over networks, configuring
+     collectors, serializing OTLP, or claiming production capacity.
+19. `codex/zigeffect-causal-production-telemetry-local-pipeline-fixtures`
+   - Current next branch: use approved exporter-boundary artifacts to define
+     local in-process pipeline fixtures for redaction, sampling, and envelope
+     shape checks before any live ingestion, durable production writes, CI
+     gates, capacity claims, or mutation authority are considered.
 
 ## Dual-Interface Causal Spine Expansion
 

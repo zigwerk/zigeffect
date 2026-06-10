@@ -655,9 +655,9 @@ metrics, and traces.
   wall-clock benchmark baseline, production capacity planning, and
   production-hardening completion audit plus load-test observation harness,
   production telemetry capture design, fixture, readiness-review, and
-  implementation-proposal contracts, milestones, non-goals, verification
-  commands, and the current next branch
-  `codex/zigeffect-causal-production-telemetry-exporter-boundary`.
+  implementation-proposal and exporter-boundary contracts, milestones,
+  non-goals, verification commands, and the current next branch
+  `codex/zigeffect-causal-production-telemetry-local-pipeline-fixtures`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
@@ -790,6 +790,20 @@ metrics, and traces.
   telemetry, write durable production storage, size capacity, fail CI, add
   non-NenDB adapter work, add alternate frontend renderer support, or mutate
   production state.
+- Delivered: `causal-production-telemetry-exporter-boundary` publishes
+  `zigeffect.causal.production-telemetry-exporter-boundary.v1` with approved
+  proposal consumption, proposal evidence checks, no-network exporter boundary
+  fields, local envelope fixture names, approved and blocked boundary
+  artifacts, and the handoff to
+  `codex/zigeffect-causal-production-telemetry-local-pipeline-fixtures`. It
+  keeps `applied=false`, `production_telemetry_ingestion=false`,
+  `live_exporter_enabled=false`, `network_send_enabled=false`,
+  `collector_endpoint_configured=false`, `otlp_serialization_enabled=false`,
+  `durable_write_enabled=false`, `ci_gate_enabled=false`,
+  `mutation_authority=none`, and does not implement telemetry, send to a
+  network, configure collectors, serialize OTLP, write durable production
+  storage, size capacity, fail CI, add non-NenDB adapter work, add alternate
+  frontend renderer support, or mutate production state.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,
