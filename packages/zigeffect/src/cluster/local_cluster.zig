@@ -9,6 +9,7 @@ const runner_storage = @import("runner_storage.zig");
 const routing = @import("routing.zig");
 const shard_lease = @import("shard_lease.zig");
 const supervision = @import("supervision.zig");
+const observability = @import("observability.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const ClusterRuntime = cluster_runtime.ClusterRuntime;
@@ -33,6 +34,7 @@ pub const ShardLeaseManagerOptions = shard_lease.ShardLeaseManagerOptions;
 pub const ClusterRunnerRestartPolicy = supervision.ClusterRunnerRestartPolicy;
 pub const ClusterRunnerRestartState = supervision.ClusterRunnerRestartState;
 pub const ClusterSupervisionReport = supervision.ClusterSupervisionReport;
+pub const CausalStore = observability.CausalStore;
 
 pub const LocalClusterError = error{
     InvalidShardCount,
@@ -202,6 +204,11 @@ pub const LocalClusterRunner = struct {
         self.lease_manager.deinit();
         self.runner_restart_state.deinit();
         self.allocator.destroy(self.lease_manager);
+    }
+
+    pub fn attachCausalStore(self: *LocalClusterRunner, store: *CausalStore, run_id: u64) void {
+        self.lease_manager.attachCausalStore(store, run_id);
+        self.runtime.attachCausalStore(store, run_id);
     }
 
     pub fn acquireBalancedShards(self: *LocalClusterRunner, now_ms: u64) !ShardBalancePlan {

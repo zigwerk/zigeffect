@@ -8,6 +8,7 @@ const routing = @import("routing.zig");
 const shard_lease = @import("shard_lease.zig");
 const fencing = @import("fencing.zig");
 const supervision = @import("supervision.zig");
+const observability = @import("observability.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const EntityAddress = identity.EntityAddress;
@@ -28,6 +29,9 @@ pub const EntityRuntimeError = entity.EntityRuntimeError;
 pub const LocalEntityRuntimeOptions = entity.LocalEntityRuntimeOptions;
 pub const ClusterSupervisionPolicy = supervision.ClusterSupervisionPolicy;
 pub const ClusterSupervisionReport = supervision.ClusterSupervisionReport;
+pub const ClusterTraceContext = observability.ClusterTraceContext;
+pub const ClusterCausalRecorder = observability.ClusterCausalRecorder;
+pub const CausalStore = observability.CausalStore;
 
 pub const ClusterRuntimeError = error{
     RuntimeShuttingDown,
@@ -75,8 +79,22 @@ pub const ClusterEntityRef = struct {
         return self.runtime.submitEntityMessage(.tell, self.address, payload_type_name, payload, redacted_detail);
     }
 
+    pub fn tellWithTrace(self: ClusterEntityRef, payload_type_name: []const u8, payload: []const u8, redacted_detail: []const u8, trace: ClusterTraceContext) !MessageSubmitResult {
+        return self.runtime.submitEntityMessageWithTrace(.tell, self.address, payload_type_name, payload, redacted_detail, trace);
+    }
+
     pub fn ask(self: ClusterEntityRef, payload_type_name: []const u8, payload: []const u8, redacted_detail: []const u8) !ClusterAsk {
         var submitted = try self.runtime.submitEntityMessage(.request, self.address, payload_type_name, payload, redacted_detail);
+        errdefer submitted.deinit(self.runtime.allocator);
+        return .{
+            .envelope = submitted.envelope,
+            .correlation_id = submitted.envelope.correlation_id.?,
+            .duplicate = submitted.duplicate,
+        };
+    }
+
+    pub fn askWithTrace(self: ClusterEntityRef, payload_type_name: []const u8, payload: []const u8, redacted_detail: []const u8, trace: ClusterTraceContext) !ClusterAsk {
+        var submitted = try self.runtime.submitEntityMessageWithTrace(.request, self.address, payload_type_name, payload, redacted_detail, trace);
         errdefer submitted.deinit(self.runtime.allocator);
         return .{
             .envelope = submitted.envelope,
@@ -97,6 +115,7 @@ pub const ClusterRuntime = struct {
     local_runtime: entity.LocalEntityRuntime,
     shard_count: ShardCount,
     supervision_policy: ClusterSupervisionPolicy = .{},
+    causal_recorder: ?ClusterCausalRecorder = null,
     owned_shards: std.ArrayList(ShardId) = .empty,
     accepting_messages: bool = true,
     next_message_sequence: u64 = 1,
@@ -121,6 +140,10 @@ pub const ClusterRuntime = struct {
     pub fn deinit(self: *ClusterRuntime) void {
         self.owned_shards.deinit(self.allocator);
         self.local_runtime.deinit();
+    }
+
+    pub fn attachCausalStore(self: *ClusterRuntime, store: *CausalStore, run_id: u64) void {
+        self.causal_recorder = ClusterCausalRecorder.init(store, run_id);
     }
 
     pub fn loadOwnedShards(self: *ClusterRuntime) Allocator.Error!usize {
@@ -164,6 +187,7 @@ pub const ClusterRuntime = struct {
         now_ms: u64,
     ) !ClusterEntityRef {
         const local_ref = try self.local_runtime.registerEntity(registration, now_ms);
+        try self.recordEntityCausal(.cluster_entity_registered, local_ref.address, "registered", registration.name, null);
         return .{
             .address = local_ref.address,
             .runtime = self,
@@ -231,21 +255,26 @@ pub const ClusterRuntime = struct {
             });
             defer envelope.deinitMessageEnvelope(self.allocator, claimed);
             report.claimed += 1;
+            try self.recordMessageCausal(.cluster_message_claimed, shard_id, claimed, "claimed", record.envelope.redacted_detail);
 
             const entity_envelope = try messageToEntityEnvelope(self.allocator, claimed);
             var result = self.local_runtime.processEnvelope(entity_envelope, handler, now_ms) catch |err| {
                 report.failed += 1;
+                try self.recordEntityCausal(.cluster_entity_failed, claimed.address, "failed", @errorName(err), traceContextFromMessage(claimed));
                 return err;
             };
             defer result.deinit(self.allocator);
             report.dispatched += 1;
+            try self.recordEntityCausal(.cluster_entity_processed, claimed.address, "processed", claimed.redacted_detail, traceContextFromMessage(claimed));
 
             if (result.replied) {
                 const correlation_id = result.envelope.correlation_id orelse return error.MissingReply;
                 const local_reply = try self.local_runtime.takeReply(correlation_id);
                 defer mailbox.deinitEntityEnvelope(self.allocator, local_reply);
-                const durable_reply = try entityReplyToMessageEnvelope(self.allocator, local_reply);
+                var durable_reply = try entityReplyToMessageEnvelope(self.allocator, local_reply);
                 defer envelope.deinitMessageEnvelope(self.allocator, durable_reply);
+                durable_reply.trace_id = claimed.trace_id;
+                durable_reply.span_id = claimed.span_id;
                 const stored_reply = try self.message_storage.storeReply(.{
                     .shard_id = shard_id,
                     .envelope = durable_reply,
@@ -253,6 +282,7 @@ pub const ClusterRuntime = struct {
                 });
                 defer envelope.deinitMessageEnvelope(self.allocator, stored_reply);
                 report.replied += 1;
+                try self.recordMessageCausal(.cluster_message_replied, shard_id, claimed, "replied", stored_reply.redacted_detail);
             }
 
             try self.message_storage.ack(.{
@@ -260,6 +290,7 @@ pub const ClusterRuntime = struct {
                 .now_ms = now_ms,
             });
             report.acked += 1;
+            try self.recordMessageCausal(.cluster_message_acked, shard_id, claimed, "acked", claimed.redacted_detail);
         }
 
         return report;
@@ -289,11 +320,13 @@ pub const ClusterRuntime = struct {
             });
             defer envelope.deinitMessageEnvelope(self.allocator, claimed);
             report.claimed += 1;
+            try self.recordMessageCausal(.cluster_message_claimed, shard_id, claimed, "claimed", record.envelope.redacted_detail);
 
             const entity_envelope = try messageToEntityEnvelope(self.allocator, claimed);
             var result = self.local_runtime.processEnvelope(entity_envelope, handler, now_ms) catch |err| {
                 report.failed += 1;
                 report.entity_failures += 1;
+                try self.recordEntityCausal(.cluster_entity_failed, claimed.address, "failed", @errorName(err), traceContextFromMessage(claimed));
                 const decision = (try self.local_runtime.lastSupervisorDecision(record.envelope.address)) orelse return err;
                 const is_workflow_worker = std.mem.eql(
                     u8,
@@ -321,13 +354,16 @@ pub const ClusterRuntime = struct {
             };
             defer result.deinit(self.allocator);
             report.dispatched += 1;
+            try self.recordEntityCausal(.cluster_entity_processed, claimed.address, "processed", claimed.redacted_detail, traceContextFromMessage(claimed));
 
             if (result.replied) {
                 const correlation_id = result.envelope.correlation_id orelse return error.MissingReply;
                 const local_reply = try self.local_runtime.takeReply(correlation_id);
                 defer mailbox.deinitEntityEnvelope(self.allocator, local_reply);
-                const durable_reply = try entityReplyToMessageEnvelope(self.allocator, local_reply);
+                var durable_reply = try entityReplyToMessageEnvelope(self.allocator, local_reply);
                 defer envelope.deinitMessageEnvelope(self.allocator, durable_reply);
+                durable_reply.trace_id = claimed.trace_id;
+                durable_reply.span_id = claimed.span_id;
                 const stored_reply = try self.message_storage.storeReply(.{
                     .shard_id = shard_id,
                     .envelope = durable_reply,
@@ -335,6 +371,7 @@ pub const ClusterRuntime = struct {
                 });
                 defer envelope.deinitMessageEnvelope(self.allocator, stored_reply);
                 report.replied += 1;
+                try self.recordMessageCausal(.cluster_message_replied, shard_id, claimed, "replied", stored_reply.redacted_detail);
             }
 
             try self.message_storage.ack(.{
@@ -342,6 +379,7 @@ pub const ClusterRuntime = struct {
                 .now_ms = now_ms,
             });
             report.acked += 1;
+            try self.recordMessageCausal(.cluster_message_acked, shard_id, claimed, "acked", claimed.redacted_detail);
         }
 
         return report;
@@ -368,6 +406,30 @@ pub const ClusterRuntime = struct {
         payload: []const u8,
         redacted_detail: []const u8,
     ) !MessageSubmitResult {
+        return self.submitEntityMessageWithOptionalTrace(kind, address, payload_type_name, payload, redacted_detail, null);
+    }
+
+    fn submitEntityMessageWithTrace(
+        self: *ClusterRuntime,
+        kind: MessageEnvelopeKind,
+        address: EntityAddress,
+        payload_type_name: []const u8,
+        payload: []const u8,
+        redacted_detail: []const u8,
+        trace: ClusterTraceContext,
+    ) !MessageSubmitResult {
+        return self.submitEntityMessageWithOptionalTrace(kind, address, payload_type_name, payload, redacted_detail, trace);
+    }
+
+    fn submitEntityMessageWithOptionalTrace(
+        self: *ClusterRuntime,
+        kind: MessageEnvelopeKind,
+        address: EntityAddress,
+        payload_type_name: []const u8,
+        payload: []const u8,
+        redacted_detail: []const u8,
+        trace: ?ClusterTraceContext,
+    ) !MessageSubmitResult {
         if (!self.accepting_messages) return error.RuntimeShuttingDown;
         const shard_id = try routing.shardIdForAddress(address, self.shard_count);
         if (!self.ownsShard(shard_id)) return error.ShardNotOwned;
@@ -384,17 +446,32 @@ pub const ClusterRuntime = struct {
         const idempotency_key = std.fmt.bufPrint(&idempotency_buf, "cluster:{d}", .{self.next_message_sequence}) catch unreachable;
         self.next_message_sequence += 1;
 
-        return self.message_storage.submit(.{
+        var submitted = try self.message_storage.submit(.{
             .shard_id = shard_id,
             .envelope = .{
                 .kind = kind,
                 .address = address,
                 .idempotency_key = idempotency_key,
+                .trace_id = if (trace) |value| value.trace_id else null,
+                .span_id = if (trace) |value| value.span_id else null,
                 .payload_type_name = payload_type_name,
                 .payload = payload,
                 .redacted_detail = redacted_detail,
             },
         });
+        errdefer submitted.deinit(self.allocator);
+
+        try self.recordMessageCausal(
+            .cluster_message_submitted,
+            shard_id,
+            submitted.envelope,
+            if (submitted.duplicate) "duplicate" else "submitted",
+            redacted_detail,
+        );
+        if (trace != null) {
+            try self.recordTracePropagationCausal(shard_id, submitted.envelope);
+        }
+        return submitted;
     }
 
     fn validateShardFence(self: *ClusterRuntime, shard_id: ShardId) !void {
@@ -418,7 +495,44 @@ pub const ClusterRuntime = struct {
         }
         return null;
     }
+
+    fn recordMessageCausal(
+        self: *ClusterRuntime,
+        kind: observability.CausalEventKind,
+        shard_id: ShardId,
+        message: MessageEnvelope,
+        status: []const u8,
+        detail: []const u8,
+    ) Allocator.Error!void {
+        const recorder = self.causal_recorder orelse return;
+        try recorder.recordMessage(kind, shard_id, message, status, detail);
+    }
+
+    fn recordEntityCausal(
+        self: *ClusterRuntime,
+        kind: observability.CausalEventKind,
+        address: EntityAddress,
+        status: []const u8,
+        detail: []const u8,
+        trace: ?ClusterTraceContext,
+    ) Allocator.Error!void {
+        const recorder = self.causal_recorder orelse return;
+        try recorder.recordEntity(kind, address, status, detail, trace);
+    }
+
+    fn recordTracePropagationCausal(self: *ClusterRuntime, shard_id: ShardId, message: MessageEnvelope) Allocator.Error!void {
+        const recorder = self.causal_recorder orelse return;
+        try recorder.recordTracePropagation(shard_id, message);
+    }
 };
+
+fn traceContextFromMessage(message: MessageEnvelope) ?ClusterTraceContext {
+    const trace_id = message.trace_id orelse return null;
+    return .{
+        .trace_id = trace_id,
+        .span_id = message.span_id,
+    };
+}
 
 fn messageToEntityEnvelope(allocator: Allocator, message: MessageEnvelope) !EntityEnvelope {
     const kind: mailbox.EntityEnvelopeKind = switch (message.kind) {

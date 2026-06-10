@@ -61,3 +61,74 @@ test "message envelope trace context clones and survives json round trip" {
     try std.testing.expectEqual(@as(?u64, 700), parsed.envelope.trace_id);
     try std.testing.expectEqual(@as(?u64, 701), parsed.envelope.span_id);
 }
+
+test "cluster runtime records message entity and failure causal events" {
+    var causal = fx.CausalStore.init(std.testing.allocator);
+    defer causal.deinit();
+    const run_id = causal.nextRunId();
+
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    const runner_storage = runner_storage_state.asRunnerStorage();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+
+    var lease_manager = try fx.LocalShardLeaseManager.init(
+        std.testing.allocator,
+        runner_storage,
+        fx.runnerAddress("machine-observe", "runner-a"),
+        .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    );
+    defer lease_manager.deinit();
+    var runtime = try fx.ClusterRuntime.init(
+        std.testing.allocator,
+        message_storage,
+        &lease_manager,
+        .{
+            .shard_count = 8,
+            .entity_runtime_options = .{ .restart_intensity = .{ .max_restarts = 1, .within_ms = 1_000 } },
+        },
+    );
+    defer runtime.deinit();
+    runtime.attachCausalStore(&causal, run_id);
+
+    const address = try observedAddressForShard(0, 8);
+    _ = try runtime.acquireShard(0, 1_000);
+    const ref = try runtime.registerEntity(.{ .address = address, .name = "observed-counter" }, 1_000);
+    var submitted = try ref.tellWithTrace("text", "boom", "observed-failure", .{ .trace_id = 11, .span_id = 12 });
+    defer submitted.deinit(std.testing.allocator);
+
+    const Handler = struct {
+        pub fn handle(_: *fx.EntityScope, _: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            return error.Boom;
+        }
+    };
+    _ = try runtime.processShardSupervised(0, Handler, 1_100);
+
+    var snapshot = try causal.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try expectClusterEvent(snapshot, .cluster_entity_registered);
+    try expectClusterEvent(snapshot, .cluster_message_submitted);
+    try expectClusterEvent(snapshot, .cluster_trace_propagated);
+    try expectClusterEvent(snapshot, .cluster_message_claimed);
+    try expectClusterEvent(snapshot, .cluster_entity_failed);
+}
+
+fn expectClusterEvent(snapshot: fx.CausalSnapshot, kind: fx.CausalEventKind) !void {
+    for (snapshot.events) |event| {
+        if (event.kind == kind) return;
+    }
+    return error.ExpectedClusterEvent;
+}
+
+fn observedAddressForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.EntityAddress {
+    var id: u64 = 1;
+    while (id < 100_000) : (id += 1) {
+        var key_buf: [32]u8 = undefined;
+        const key = std.fmt.bufPrint(&key_buf, "observed-{d}", .{id}) catch unreachable;
+        const address = fx.entityAddress("observed", key);
+        if (try fx.shardIdForAddress(address, shard_count) == shard_id) return address;
+    }
+    return error.EntityShardNotFound;
+}

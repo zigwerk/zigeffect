@@ -30,6 +30,68 @@ pub const ClusterTraceContext = struct {
 pub const ClusterCausalRecorder = struct {
     store: *CausalStore,
     run_id: ?u64 = null,
+
+    pub fn init(store: *CausalStore, run_id: ?u64) ClusterCausalRecorder {
+        return .{ .store = store, .run_id = run_id };
+    }
+
+    pub fn recordMessage(
+        self: ClusterCausalRecorder,
+        kind: CausalEventKind,
+        shard_id: ShardId,
+        message: message_storage.MessageEnvelope,
+        status: []const u8,
+        detail: []const u8,
+    ) Allocator.Error!void {
+        const label = try std.fmt.allocPrint(self.store.allocator, "message-{d}", .{message.id});
+        defer self.store.allocator.free(label);
+        const redacted_detail = try std.fmt.allocPrint(
+            self.store.allocator,
+            "shard={d} attempt={d} {s}",
+            .{ shard_id, message.attempt, detail },
+        );
+        defer self.store.allocator.free(redacted_detail);
+        _ = try self.store.record(.{
+            .kind = kind,
+            .run_id = self.run_id,
+            .trace_id = message.trace_id,
+            .span_id = message.span_id,
+            .label = label,
+            .type_name = "cluster.message",
+            .status = status,
+            .redacted_detail = redacted_detail,
+        });
+    }
+
+    pub fn recordEntity(
+        self: ClusterCausalRecorder,
+        kind: CausalEventKind,
+        address: EntityAddress,
+        status: []const u8,
+        detail: []const u8,
+        trace: ?ClusterTraceContext,
+    ) Allocator.Error!void {
+        const label = try std.fmt.allocPrint(self.store.allocator, "{s}/{d}", .{ address.entity_type.name, address.id });
+        defer self.store.allocator.free(label);
+        _ = try self.store.record(.{
+            .kind = kind,
+            .run_id = self.run_id,
+            .trace_id = if (trace) |value| value.trace_id else null,
+            .span_id = if (trace) |value| value.span_id else null,
+            .label = label,
+            .type_name = address.entity_type.name,
+            .status = status,
+            .redacted_detail = detail,
+        });
+    }
+
+    pub fn recordTracePropagation(
+        self: ClusterCausalRecorder,
+        shard_id: ShardId,
+        message: message_storage.MessageEnvelope,
+    ) Allocator.Error!void {
+        try self.recordMessage(.cluster_trace_propagated, shard_id, message, "propagated", "trace context propagated");
+    }
 };
 
 pub const ClusterCausalReport = struct {
