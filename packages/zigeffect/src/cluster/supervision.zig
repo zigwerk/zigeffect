@@ -1,5 +1,6 @@
 const std = @import("std");
 const routing = @import("routing.zig");
+const transport = @import("transport.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const ShardId = routing.ShardId;
@@ -57,6 +58,10 @@ pub const ClusterRunnerRestartState = struct {
     }
 };
 
+pub const ClusterServiceRestartPolicy = ClusterRunnerRestartPolicy;
+pub const ClusterServiceRestartDecision = ClusterRunnerRestartDecision;
+pub const ClusterServiceRestartState = ClusterRunnerRestartState;
+
 pub const ClusterSupervisionReport = struct {
     scanned: usize = 0,
     claimed: usize = 0,
@@ -73,6 +78,18 @@ pub const ClusterSupervisionReport = struct {
     shard_releases: usize = 0,
     runner_restarts: usize = 0,
     runner_escalations: usize = 0,
+    shard_worker_failures: usize = 0,
+    shard_worker_restarts: usize = 0,
+    shard_worker_escalations: usize = 0,
+    transport_failures: usize = 0,
+    transport_restarts: usize = 0,
+    transport_escalations: usize = 0,
+    runner_service_failures: usize = 0,
+    runner_service_restarts: usize = 0,
+    runner_service_escalations: usize = 0,
+    runner_drains: usize = 0,
+    runner_drain_releases: usize = 0,
+    runner_drain_reassignments: usize = 0,
 
     pub fn add(self: *ClusterSupervisionReport, other: ClusterSupervisionReport) void {
         self.scanned += other.scanned;
@@ -90,5 +107,59 @@ pub const ClusterSupervisionReport = struct {
         self.shard_releases += other.shard_releases;
         self.runner_restarts += other.runner_restarts;
         self.runner_escalations += other.runner_escalations;
+        self.shard_worker_failures += other.shard_worker_failures;
+        self.shard_worker_restarts += other.shard_worker_restarts;
+        self.shard_worker_escalations += other.shard_worker_escalations;
+        self.transport_failures += other.transport_failures;
+        self.transport_restarts += other.transport_restarts;
+        self.transport_escalations += other.transport_escalations;
+        self.runner_service_failures += other.runner_service_failures;
+        self.runner_service_restarts += other.runner_service_restarts;
+        self.runner_service_escalations += other.runner_service_escalations;
+        self.runner_drains += other.runner_drains;
+        self.runner_drain_releases += other.runner_drain_releases;
+        self.runner_drain_reassignments += other.runner_drain_reassignments;
     }
 };
+
+pub fn superviseTransportFailure(
+    state: *ClusterServiceRestartState,
+    failure: transport.ClusterTransportFailureReport,
+    now_ms: u64,
+) Allocator.Error!ClusterSupervisionReport {
+    _ = failure;
+    const decision = try state.recordFailure(now_ms);
+    return .{
+        .transport_failures = 1,
+        .transport_restarts = if (decision.restart_allowed) 1 else 0,
+        .transport_escalations = if (decision.escalated) 1 else 0,
+    };
+}
+
+pub fn superviseShardWorkerFailure(
+    state: *ClusterServiceRestartState,
+    shard_id: ShardId,
+    now_ms: u64,
+) Allocator.Error!ClusterSupervisionReport {
+    _ = shard_id;
+    const decision = try state.recordFailure(now_ms);
+    return .{
+        .shard_worker_failures = 1,
+        .shard_worker_restarts = if (decision.restart_allowed) 1 else 0,
+        .shard_worker_escalations = if (decision.escalated) 1 else 0,
+    };
+}
+
+pub fn superviseRunnerServiceFailure(
+    state: *ClusterServiceRestartState,
+    now_ms: u64,
+) Allocator.Error!ClusterSupervisionReport {
+    const decision = try state.recordFailure(now_ms);
+    return .{
+        .runner_service_failures = 1,
+        .runner_service_restarts = if (decision.restart_allowed) 1 else 0,
+        .runner_service_escalations = if (decision.escalated) 1 else 0,
+        .runner_restarts = if (decision.restart_allowed) 1 else 0,
+        .runner_escalations = if (decision.escalated) 1 else 0,
+    };
+}

@@ -11,6 +11,16 @@ test "cluster supervision public exports are available" {
     try std.testing.expect(@hasDecl(fx, "ClusterSupervisionReport"));
 }
 
+test "cluster service supervision public exports are available" {
+    try std.testing.expect(@hasDecl(fx.cluster, "ClusterServiceRestartPolicy"));
+    try std.testing.expect(@hasDecl(fx.cluster, "ClusterServiceRestartState"));
+    try std.testing.expect(@hasDecl(fx.cluster, "ClusterServiceRestartDecision"));
+    try std.testing.expect(@hasDecl(fx.cluster, "superviseTransportFailure"));
+    try std.testing.expect(@hasDecl(fx.cluster, "superviseShardWorkerFailure"));
+    try std.testing.expect(@hasDecl(fx, "ClusterServiceRestartState"));
+    try std.testing.expect(@hasDecl(fx, "superviseTransportFailure"));
+}
+
 test "supervisor child kinds cover runner shard entity and workflow worker" {
     try std.testing.expectEqual(fx.SupervisorChildKind.runner, fx.SupervisorChildKind.runner);
     try std.testing.expectEqual(fx.SupervisorChildKind.shard, fx.SupervisorChildKind.shard);
@@ -40,6 +50,50 @@ test "cluster runner restart state escalates after intensity budget" {
     const fourth = try state.recordFailure(2_300);
     try std.testing.expect(fourth.restart_allowed);
     try std.testing.expect(!fourth.escalated);
+}
+
+test "transport failure supervision restarts then escalates" {
+    var state = fx.ClusterServiceRestartState.init(std.testing.allocator, .{
+        .max_restarts = 1,
+        .within_ms = 1_000,
+    });
+    defer state.deinit();
+
+    const failure = fx.ClusterTransportFailureReport{
+        .transport = .production_http,
+        .retryable = true,
+        .attempts = 2,
+        .error_name = "TransportUnavailable",
+        .redacted_detail = "runner-a to runner-b",
+    };
+
+    const first = try fx.superviseTransportFailure(&state, failure, 1_000);
+    try std.testing.expectEqual(@as(usize, 1), first.transport_failures);
+    try std.testing.expectEqual(@as(usize, 1), first.transport_restarts);
+    try std.testing.expectEqual(@as(usize, 0), first.transport_escalations);
+
+    const second = try fx.superviseTransportFailure(&state, failure, 1_100);
+    try std.testing.expectEqual(@as(usize, 1), second.transport_failures);
+    try std.testing.expectEqual(@as(usize, 0), second.transport_restarts);
+    try std.testing.expectEqual(@as(usize, 1), second.transport_escalations);
+}
+
+test "shard worker supervision reports restart and escalation" {
+    var state = fx.ClusterServiceRestartState.init(std.testing.allocator, .{
+        .max_restarts = 1,
+        .within_ms = 1_000,
+    });
+    defer state.deinit();
+
+    const first = try fx.superviseShardWorkerFailure(&state, 3, 1_000);
+    try std.testing.expectEqual(@as(usize, 1), first.shard_worker_failures);
+    try std.testing.expectEqual(@as(usize, 1), first.shard_worker_restarts);
+    try std.testing.expectEqual(@as(usize, 0), first.shard_worker_escalations);
+
+    const second = try fx.superviseShardWorkerFailure(&state, 3, 1_100);
+    try std.testing.expectEqual(@as(usize, 1), second.shard_worker_failures);
+    try std.testing.expectEqual(@as(usize, 0), second.shard_worker_restarts);
+    try std.testing.expectEqual(@as(usize, 1), second.shard_worker_escalations);
 }
 
 test "entity runtime exposes last supervisor decision after handler failure" {
