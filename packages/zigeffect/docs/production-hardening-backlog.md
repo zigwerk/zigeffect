@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-telemetry-ci-gate-advisory-ci-report-publication-policy` means the
+The recommendation `start-production-telemetry-ci-gate-required-status-check-readiness` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -182,8 +182,13 @@ summary writes, pull request comments, required checks, workflow mutation, live
 telemetry, network send, durable writes, NenDB writes, hosted dashboard claims,
 production cluster claims, alternate renderer scope, and mutation authority
 before any publication policy branch.
+The production telemetry CI gate advisory CI report publication policy branch
+is also delivered: it consumes applied application-boundary artifacts, records
+allowed and denied interpretations for externally published advisory reports,
+and preserves non-blocking advisory semantics before any required-status-check
+readiness branch.
 The next branch should be
-`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-readiness`.
 
 ## Dependency Order
 
@@ -225,6 +230,7 @@ The backlog currently orders future production-hardening branches as:
 34. `production-telemetry-ci-gate-dry-run-evaluator` delivered
 35. `production-telemetry-ci-gate-advisory-ci-report` delivered
 36. `production-telemetry-ci-gate-advisory-ci-report-application-boundary` delivered
+37. `production-telemetry-ci-gate-advisory-ci-report-publication-policy` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -604,8 +610,24 @@ disabled required checks, disabled workflow mutation by the tool, disabled
 live telemetry, disabled durable writes, disabled NenDB writes, NenDB-only
 durable direction, and SolidJS `zig-webui` workbench direction.
 
-The next branch should use applied advisory CI report application boundary
-artifacts to define publication interpretation policy before any CI telemetry
+Production telemetry CI gate advisory CI report publication policy is
+documented in
+[production-telemetry-ci-gate-advisory-ci-report-publication-policy.md](production-telemetry-ci-gate-advisory-ci-report-publication-policy.md).
+It emits
+`zigeffect.causal.production-telemetry-ci-gate-advisory-ci-report-publication-policy.v1`
+through
+`zig build causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy`,
+consumes applied advisory CI report application-boundary artifacts, records
+allowed and denied interpretations for externally published advisory reports,
+and hands off to required-status-check readiness work. It preserves
+non-blocking advisory semantics, disabled report publication by the tool,
+disabled CI uploads, disabled GitHub step summary writes, disabled pull
+request comments, disabled required checks, disabled workflow mutation by the
+tool, disabled live telemetry, disabled durable writes, disabled NenDB writes,
+NenDB-only durable direction, and SolidJS `zig-webui` workbench direction.
+
+The next branch should use ready advisory CI report publication policy
+artifacts to evaluate required-status-check readiness before any CI telemetry
 gate enforcement, required status checks, live telemetry, durable production
 writes, capacity claims, production cluster claims, or mutation authority are
 considered.

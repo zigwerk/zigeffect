@@ -86,10 +86,12 @@ Ready or advisory report artifacts hand off to
 That branch is now delivered and records planned, applied, or blocked report
 publication boundary evidence. Applied boundary artifacts hand off to
 `codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy`.
-Publication policy work must still preserve disabled workflow mutation by the
-tool, artifact upload execution by the tool, required checks, live telemetry,
-durable writes, NenDB writes, production cluster claims, and mutation
-authority.
+That publication policy is now delivered and hands off to
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-readiness`.
+Required-status-check readiness work must still preserve disabled workflow
+mutation by the tool, artifact upload execution by the tool, required checks,
+live telemetry, durable writes, NenDB writes, production cluster claims, and
+mutation authority.
 
 ## Verification
 

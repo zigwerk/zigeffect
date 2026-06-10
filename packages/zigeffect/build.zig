@@ -1659,6 +1659,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_production_telemetry_ci_gate_advisory_ci_report_application_boundary_tool_tests = b.addRunArtifact(causal_production_telemetry_ci_gate_advisory_ci_report_application_boundary_tool_tests);
     test_step.dependOn(&run_causal_production_telemetry_ci_gate_advisory_ci_report_application_boundary_tool_tests.step);
 
+    const causal_production_telemetry_ci_gate_advisory_ci_report_publication_policy_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_production_telemetry_ci_gate_advisory_ci_report_publication_policy.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_production_telemetry_ci_gate_advisory_ci_report_publication_policy_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy",
+        .root_module = causal_production_telemetry_ci_gate_advisory_ci_report_publication_policy_tool_module,
+    });
+    const run_causal_production_telemetry_ci_gate_advisory_ci_report_publication_policy_tool = b.addRunArtifact(causal_production_telemetry_ci_gate_advisory_ci_report_publication_policy_tool);
+    if (b.args) |args| run_causal_production_telemetry_ci_gate_advisory_ci_report_publication_policy_tool.addArgs(args);
+    const causal_production_telemetry_ci_gate_advisory_ci_report_publication_policy_step = b.step("causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy", "Review production telemetry CI gate advisory CI report publication policy");
+    causal_production_telemetry_ci_gate_advisory_ci_report_publication_policy_step.dependOn(&run_causal_production_telemetry_ci_gate_advisory_ci_report_publication_policy_tool.step);
+
+    const causal_production_telemetry_ci_gate_advisory_ci_report_publication_policy_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy-tests",
+        .root_module = causal_production_telemetry_ci_gate_advisory_ci_report_publication_policy_tool_module,
+    });
+    const run_causal_production_telemetry_ci_gate_advisory_ci_report_publication_policy_tool_tests = b.addRunArtifact(causal_production_telemetry_ci_gate_advisory_ci_report_publication_policy_tool_tests);
+    test_step.dependOn(&run_causal_production_telemetry_ci_gate_advisory_ci_report_publication_policy_tool_tests.step);
+
     const causal_m9_completion_audit_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_m9_completion_audit.zig"),
         .target = target,

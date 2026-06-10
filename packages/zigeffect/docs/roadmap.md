@@ -967,6 +967,20 @@ metrics, and traces.
   by the tool, pull request comments by the tool, live telemetry, durable
   writes, NenDB writes, hosted dashboard claims, production cluster claims,
   alternate renderers, and production mutation disabled.
+- Delivered:
+  `causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy`
+  publishes
+  `zigeffect.causal.production-telemetry-ci-gate-advisory-ci-report-publication-policy.v1`,
+  consumes applied advisory CI report application-boundary artifacts, records
+  allowed and denied interpretations for externally published advisory
+  reports, and hands off to
+  `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-readiness`.
+  It keeps advisory reports non-blocking and keeps CI gate enforcement,
+  required status checks, workflow mutation by the tool, artifact upload
+  execution by the tool, GitHub step summary writes by the tool, pull request
+  comments by the tool, live telemetry, durable writes, NenDB writes, hosted
+  dashboard claims, production cluster claims, alternate renderers, and
+  production mutation disabled.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,

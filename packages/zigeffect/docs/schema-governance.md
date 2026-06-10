@@ -550,6 +550,21 @@ production storage, host a production dashboard, orchestrate production
 clusters, add non-NenDB adapter work, add alternate renderers, or grant
 production mutation authority.
 
+- `zigeffect.causal.production-telemetry-ci-gate-advisory-ci-report-publication-policy.v1`
+
+The production-telemetry-ci-gate-advisory-ci-report-publication-policy report
+is a record-only interpretation policy for externally published advisory CI
+reports. It consumes applied advisory CI report application-boundary artifacts,
+records allowed reviewer/agent/readiness interpretations, records denied
+inference rules, and hands off to required-status-check readiness work only
+after reviewer approval and post-policy verification commands are present. It
+does not publish reports, enable CI gate enforcement, create required status
+checks, mutate workflows, execute CI uploads, write GitHub step summaries, post
+pull request comments, ingest live telemetry, call networks, write NenDB, write
+durable production storage, host a production dashboard, orchestrate production
+clusters, add non-NenDB adapter work, add alternate renderers, or grant
+production mutation authority.
+
 ### Human-Agent Feedback
 
 - `zigeffect.causal.human-agent-feedback-loop.v1`

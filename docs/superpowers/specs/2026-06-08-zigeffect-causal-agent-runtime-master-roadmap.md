@@ -958,9 +958,24 @@ Status values:
      production cluster claims, alternate renderers, and mutation authority
      disabled.
 32. `codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy`
-   - Current next branch: define interpretation policy for externally
-     published advisory CI report artifacts before any CI telemetry gate
-     enforcement or required status check work is considered.
+   - Delivered:
+     `causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy`
+     emits
+     `zigeffect.causal.production-telemetry-ci-gate-advisory-ci-report-publication-policy.v1`,
+     consumes applied advisory CI report application-boundary artifacts,
+     records allowed and denied interpretations for externally published
+     advisory reports, and hands off to
+     `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-readiness`
+     while keeping advisory reports non-blocking and keeping CI gate
+     enforcement, required status checks, workflow mutation by the tool,
+     artifact upload execution by the tool, GitHub step summary writes by the
+     tool, pull request comments by the tool, live telemetry, durable writes,
+     NenDB writes, hosted dashboard claims, production cluster claims,
+     alternate renderers, and mutation authority disabled.
+33. `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-readiness`
+   - Current next branch: evaluate required-status-check readiness from ready
+     advisory CI report publication policy artifacts before any CI telemetry
+     gate enforcement or required status check activation is considered.
 
 ## Dual-Interface Causal Spine Expansion
 

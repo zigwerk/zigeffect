@@ -698,6 +698,35 @@ comments, create required checks, enable live telemetry, write NenDB, write
 durable storage, or grant mutation authority. The full policy is in
 [docs/production-telemetry-ci-gate-advisory-ci-report-application-boundary.md](docs/production-telemetry-ci-gate-advisory-ci-report-application-boundary.md).
 
+Review the production telemetry CI gate advisory CI report publication policy:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy -- \
+  --from-application ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-advisory-ci-report-application-boundary-applied.json \
+  approve \
+  --reason "CI advisory report publication policy reviewed" \
+  --verified-command "zig build causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary" \
+  --verified-command "zig build causal-artifacts" \
+  --verified-command "zig build release-gate --summary none" \
+  --verified-command "zig build release-gate-report" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The publication policy uses schema
+`zigeffect.causal.production-telemetry-ci-gate-advisory-ci-report-publication-policy.v1`,
+consumes applied application-boundary artifacts, and defines allowed and
+denied interpretations for externally published advisory CI reports. It keeps
+advisory reports useful for reviewer and agent triage while denying required
+checks, merge blocking, workflow mutation, artifact upload proof, GitHub
+summary proof by this tool, PR comment proof by this tool, production health,
+cluster readiness, live telemetry coverage, durable writes, NenDB writes, and
+mutation authority. The full policy is in
+[docs/production-telemetry-ci-gate-advisory-ci-report-publication-policy.md](docs/production-telemetry-ci-gate-advisory-ci-report-publication-policy.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -723,9 +752,9 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy`
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-readiness`
 after the delivered production telemetry CI gate advisory CI report
-application boundary.
+publication policy.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in
