@@ -248,6 +248,7 @@ pub const ClusterRebalanceAction = real_cluster.ClusterRebalanceAction;
 pub const ClusterRebalancePlan = real_cluster.ClusterRebalancePlan;
 pub const ClusterDrainPlan = real_cluster.ClusterDrainPlan;
 pub const ClusterNodeDownRecoveryPlan = real_cluster.ClusterNodeDownRecoveryPlan;
+pub const ClusterSplitBrainFindingKind = real_cluster.ClusterSplitBrainFindingKind;
 pub const ClusterSplitBrainFinding = real_cluster.ClusterSplitBrainFinding;
 pub const ClusterSplitBrainReport = real_cluster.ClusterSplitBrainReport;
 pub const ClusterInspectionReport = real_cluster.ClusterInspectionReport;

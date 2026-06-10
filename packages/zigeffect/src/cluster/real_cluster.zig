@@ -124,7 +124,14 @@ pub const ClusterNodeDownRecoveryPlan = struct {
     reassigned: usize,
 };
 
+pub const ClusterSplitBrainFindingKind = enum {
+    missing_storage_lease,
+    owner_mismatch,
+    epoch_mismatch,
+};
+
 pub const ClusterSplitBrainFinding = struct {
+    kind: ClusterSplitBrainFindingKind,
     shard_id: ShardId,
     local_owner: RunnerAddress,
     storage_owner: ?RunnerAddress = null,
@@ -404,6 +411,100 @@ pub const RealClusterController = struct {
             .runner = address,
             .released = released,
             .reassigned = reassigned,
+        };
+    }
+
+    pub fn recoverNodeDown(self: *RealClusterController, dead_runner: RunnerAddress, recovered_by: RunnerAddress, now_ms: u64) !ClusterNodeDownRecoveryPlan {
+        const snapshot = try self.inspector.inspectRunner(self.registry, dead_runner, now_ms);
+        switch (snapshot.state) {
+            .unhealthy, .stopped => {},
+            .starting, .healthy, .degraded => return error.RunnerStillAlive,
+        }
+
+        var leases = try self.runner_storage.leases(self.allocator);
+        defer leases.deinit();
+
+        var dead_shards = std.ArrayList(ShardId).empty;
+        defer dead_shards.deinit(self.allocator);
+        for (leases.leases) |lease| {
+            if (!lease.owner.eql(dead_runner)) continue;
+            try dead_shards.append(self.allocator, lease.shard_id);
+        }
+
+        var placement = try self.placementPlan(self.allocator, now_ms);
+        defer placement.deinit();
+
+        var released: usize = 0;
+        var reassigned: usize = 0;
+        for (dead_shards.items) |shard_id| {
+            try self.runner_storage.release(.{
+                .shard_id = shard_id,
+                .owner = dead_runner,
+            });
+            released += 1;
+
+            const owner = findPlacementOwner(placement, shard_id) orelse continue;
+            _ = try self.runner_storage.acquire(.{
+                .shard_id = shard_id,
+                .owner = owner,
+                .now_ms = now_ms,
+                .ttl_ms = self.options.lease_ttl_ms,
+            });
+            reassigned += 1;
+        }
+
+        self.recent_rebalance_actions += released + reassigned;
+        return .{
+            .dead_runner = dead_runner,
+            .recovered_by = recovered_by,
+            .released = released,
+            .reassigned = reassigned,
+        };
+    }
+
+    pub fn detectSplitBrain(self: *RealClusterController, allocator: Allocator, local_snapshots: []const RunnerLeaseBatch) !ClusterSplitBrainReport {
+        var findings = std.ArrayList(ClusterSplitBrainFinding).empty;
+        errdefer findings.deinit(allocator);
+
+        for (local_snapshots) |snapshot| {
+            for (snapshot.leases) |local| {
+                const storage = try self.runner_storage.lease(local.shard_id);
+                if (storage) |current| {
+                    if (!current.owner.eql(local.owner)) {
+                        try findings.append(allocator, .{
+                            .kind = .owner_mismatch,
+                            .shard_id = local.shard_id,
+                            .local_owner = local.owner,
+                            .storage_owner = current.owner,
+                            .local_epoch = local.epoch,
+                            .storage_epoch = current.epoch,
+                        });
+                    } else if (current.epoch != local.epoch) {
+                        try findings.append(allocator, .{
+                            .kind = .epoch_mismatch,
+                            .shard_id = local.shard_id,
+                            .local_owner = local.owner,
+                            .storage_owner = current.owner,
+                            .local_epoch = local.epoch,
+                            .storage_epoch = current.epoch,
+                        });
+                    }
+                } else {
+                    try findings.append(allocator, .{
+                        .kind = .missing_storage_lease,
+                        .shard_id = local.shard_id,
+                        .local_owner = local.owner,
+                        .storage_owner = null,
+                        .local_epoch = local.epoch,
+                        .storage_epoch = null,
+                    });
+                }
+            }
+        }
+
+        return .{
+            .allocator = allocator,
+            .findings = try findings.toOwnedSlice(allocator),
         };
     }
 };

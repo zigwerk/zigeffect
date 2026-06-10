@@ -598,6 +598,7 @@ pub const ClusterRebalanceAction = cluster.ClusterRebalanceAction;
 pub const ClusterRebalancePlan = cluster.ClusterRebalancePlan;
 pub const ClusterDrainPlan = cluster.ClusterDrainPlan;
 pub const ClusterNodeDownRecoveryPlan = cluster.ClusterNodeDownRecoveryPlan;
+pub const ClusterSplitBrainFindingKind = cluster.ClusterSplitBrainFindingKind;
 pub const ClusterSplitBrainFinding = cluster.ClusterSplitBrainFinding;
 pub const ClusterSplitBrainReport = cluster.ClusterSplitBrainReport;
 pub const ClusterInspectionReport = cluster.ClusterInspectionReport;
