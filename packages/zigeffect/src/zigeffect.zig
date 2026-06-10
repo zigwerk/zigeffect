@@ -428,6 +428,13 @@ pub const formatStoredMessageRecordJson = cluster.formatStoredMessageRecordJson;
 pub const parseStoredMessageRecordJson = cluster.parseStoredMessageRecordJson;
 pub const formatStoredReplyRecordJson = cluster.formatStoredReplyRecordJson;
 pub const parseStoredReplyRecordJson = cluster.parseStoredReplyRecordJson;
+pub const ClusterRuntimeError = cluster.ClusterRuntimeError;
+pub const ClusterRuntimeOptions = cluster.ClusterRuntimeOptions;
+pub const ClusterProcessReport = cluster.ClusterProcessReport;
+pub const ClusterShutdownReport = cluster.ClusterShutdownReport;
+pub const ClusterAsk = cluster.ClusterAsk;
+pub const ClusterEntityRef = cluster.ClusterEntityRef;
+pub const ClusterRuntime = cluster.ClusterRuntime;
 
 pub const ServiceSet = dependency.service_sets.ServiceSet;
 pub const DependencyIssueKind = dependency.report.DependencyIssueKind;
