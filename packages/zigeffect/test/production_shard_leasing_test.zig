@@ -319,6 +319,109 @@ test "cluster runtime stamps epochs and rejects stale owner after reacquisition"
     try std.testing.expectEqual(@as(?fx.ShardLeaseEpoch, 2), message_storage_state.messages.items[0].lease_epoch);
 }
 
+test "cluster workflow commands stamp journal epoch and stale timer fire is rejected" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    const runner_storage = runner_storage_state.asRunnerStorage();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    const execution_id = try executionIdForWorkflowShard(0, 8);
+    const workflow_id = fx.workflow.workflowId("lease-workflow");
+    const address = fx.clusterWorkflowExecutionAddress(execution_id);
+
+    var runner_a = try clusterRunner(runner_storage, message_storage, "runner-a");
+    defer runner_a.deinit();
+    _ = try runner_a.runtime.acquireShard(0, 1_000);
+    var registry_a = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry_a.deinit();
+    _ = try registry_a.registerExecution(&runner_a, journal_store, workflow_id, execution_id, 1_000);
+    const scope = try runner_a.entityScope(address);
+
+    const start_payload = try fx.formatClusterWorkflowCommandJson(std.testing.allocator, .{
+        .kind = .start,
+        .workflow_id = workflow_id,
+        .execution_id = execution_id,
+        .workflow_name = "lease-workflow",
+        .name = "lease-workflow",
+        .status = "running",
+        .idempotency_key = "workflow-started",
+    });
+    defer std.testing.allocator.free(start_payload);
+
+    _ = try fx.ClusterWorkflowEntityHandler.handle(scope, .{
+        .id = 1,
+        .sequence = 1,
+        .kind = .ask,
+        .address = address,
+        .correlation_id = 1,
+        .payload_type_name = fx.cluster_workflow_command_payload_type,
+        .payload = start_payload,
+    });
+
+    const timer_id = fx.workflow.timerId("wake");
+    const schedule_payload = try fx.formatClusterWorkflowCommandJson(std.testing.allocator, .{
+        .kind = .append_event,
+        .event_kind = .timer_scheduled,
+        .workflow_id = workflow_id,
+        .execution_id = execution_id,
+        .workflow_name = "lease-workflow",
+        .name = "wake",
+        .status = "scheduled",
+        .redacted_detail = "fire_at_ms=1500",
+        .timer_id = timer_id,
+        .idempotency_key = "timer-scheduled",
+    });
+    defer std.testing.allocator.free(schedule_payload);
+
+    _ = try fx.ClusterWorkflowEntityHandler.handle(scope, .{
+        .id = 2,
+        .sequence = 2,
+        .kind = .ask,
+        .address = address,
+        .correlation_id = 2,
+        .payload_type_name = fx.cluster_workflow_command_payload_type,
+        .payload = schedule_payload,
+    });
+
+    var events = try journal_store.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(?fx.ShardLeaseEpoch, 1), fx.leaseEpochFromDetail(events.events[0].redacted_detail));
+    try std.testing.expectEqual(@as(?fx.ShardLeaseEpoch, 1), fx.leaseEpochFromDetail(events.events[1].redacted_detail));
+
+    var wakeups = fx.ClusterTimerWakeupIndex.init(std.testing.allocator);
+    defer wakeups.deinit();
+    const wakeup_report = try wakeups.rebuildOwned(&runner_a, journal_store);
+    try std.testing.expectEqual(@as(usize, 1), wakeup_report.indexed);
+
+    var runner_b = try clusterRunner(runner_storage, message_storage, "runner-b");
+    defer runner_b.deinit();
+    _ = try runner_b.runtime.acquireShard(0, 1_100);
+
+    const fire_payload = try fx.formatClusterWorkflowCommandJson(std.testing.allocator, .{
+        .kind = .fire_due_timers,
+        .workflow_id = workflow_id,
+        .execution_id = execution_id,
+        .now_ms = 1_500,
+        .idempotency_key = "fire-stale",
+    });
+    defer std.testing.allocator.free(fire_payload);
+
+    try std.testing.expectError(error.StaleShardFence, fx.ClusterWorkflowEntityHandler.handle(scope, .{
+        .id = 3,
+        .sequence = 3,
+        .kind = .ask,
+        .address = address,
+        .correlation_id = 3,
+        .payload_type_name = fx.cluster_workflow_command_payload_type,
+        .payload = fire_payload,
+    }));
+}
+
 const NoopEntityHandler = struct {
     pub fn handle(_: *fx.EntityScope, _: fx.EntityEnvelope) !fx.EntityHandlerResult {
         return .noreply;
@@ -369,4 +472,25 @@ fn runtimeFor(runner_storage: fx.RunnerStorage, message_storage: fx.MessageStora
         .manager = manager,
         .runtime = runtime,
     };
+}
+
+fn executionIdForWorkflowShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.workflow.ExecutionId {
+    var id: fx.workflow.ExecutionId = 1;
+    while (id < 100_000) : (id += 1) {
+        const address = fx.clusterWorkflowExecutionAddress(id);
+        if (try fx.shardIdForAddress(address, shard_count) == shard_id) return id;
+    }
+    return error.ExecutionShardNotFound;
+}
+
+fn clusterRunner(runner_storage: fx.RunnerStorage, message_storage: fx.MessageStorage, runner_name: []const u8) !fx.LocalClusterRunner {
+    return fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = fx.runnerAddress("machine-workflow", runner_name),
+        .runner_storage = runner_storage,
+        .message_storage = message_storage,
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 1,
+        .lease_options = .{ .ttl_ms = 100, .refresh_interval_ms = 20 },
+    });
 }
