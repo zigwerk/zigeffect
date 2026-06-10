@@ -8,6 +8,21 @@ pub const match = @import("match/root.zig");
 pub const pattern = @import("pattern/root.zig");
 pub const workflow = @import("workflow/root.zig");
 pub const cluster = @import("cluster/root.zig");
+pub const storage = @import("storage/root.zig");
+
+pub const storage_catalog_schema = storage.storage_catalog_schema;
+pub const storage_catalog_schema_version = storage.storage_catalog_schema_version;
+pub const StorageAdapterKind = storage.StorageAdapterKind;
+pub const StorageRecordKind = storage.StorageRecordKind;
+pub const StorageSchemaDescriptor = storage.StorageSchemaDescriptor;
+pub const StorageSchemaCompatibility = storage.StorageSchemaCompatibility;
+pub const StorageSchemaCompatibilityReport = storage.StorageSchemaCompatibilityReport;
+pub const StorageSchemaCatalog = storage.StorageSchemaCatalog;
+pub const storageSchemaCatalog = storage.storageSchemaCatalog;
+pub const findStorageSchema = storage.findStorageSchema;
+pub const classifyStorageSchema = storage.classifyStorageSchema;
+pub const formatStorageSchemaCatalogText = storage.formatStorageSchemaCatalogText;
+pub const formatStorageSchemaCatalogJson = storage.formatStorageSchemaCatalogJson;
 
 pub const core = struct {
     pub const result = @import("core/result.zig");

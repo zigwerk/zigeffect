@@ -107,3 +107,42 @@ test "file message storage shared conformance survives reopen" {
     try std.testing.expectEqual(@as(fx.ShardId, 6), found.shard_id);
     try std.testing.expectEqualStrings("work", found.envelope.payload);
 }
+
+test "storage schema catalog exposes durable record schemas" {
+    const catalog = fx.storageSchemaCatalog();
+    try std.testing.expect(catalog.items.len >= 6);
+    try expectStorageSchema(catalog, fx.workflow.workflow_journal_event_schema);
+    try expectStorageSchema(catalog, fx.workflow.workflow_checkpoint_schema);
+    try expectStorageSchema(catalog, fx.workflow.workflow_snapshot_commit_schema);
+    try expectStorageSchema(catalog, fx.runner_lease_schema);
+    try expectStorageSchema(catalog, fx.message_record_schema);
+    try expectStorageSchema(catalog, fx.message_reply_schema);
+
+    const current = fx.classifyStorageSchema(fx.message_record_schema, fx.message_record_schema_version);
+    try std.testing.expectEqual(fx.StorageSchemaCompatibility.current, current.compatibility);
+    const newer = fx.classifyStorageSchema(fx.message_record_schema, fx.message_record_schema_version + 1);
+    try std.testing.expectEqual(fx.StorageSchemaCompatibility.newer, newer.compatibility);
+    const unknown = fx.classifyStorageSchema("zigeffect.unknown.v1", 1);
+    try std.testing.expectEqual(fx.StorageSchemaCompatibility.unknown, unknown.compatibility);
+}
+
+test "storage schema catalog formats text and json" {
+    const text = try fx.formatStorageSchemaCatalogText(std.testing.allocator, fx.storageSchemaCatalog());
+    defer std.testing.allocator.free(text);
+    try expectContains(text, "zigeffect storage schema catalog");
+    try expectContains(text, fx.message_record_schema);
+
+    const json = try fx.formatStorageSchemaCatalogJson(std.testing.allocator, fx.storageSchemaCatalog());
+    defer std.testing.allocator.free(json);
+    try expectContains(json, "\"schema\":\"zigeffect.storage.catalog.v1\"");
+    try expectContains(json, fx.runner_lease_schema);
+}
+
+fn expectStorageSchema(catalog: fx.StorageSchemaCatalog, schema: []const u8) !void {
+    try std.testing.expect(catalog.find(schema) != null);
+    try std.testing.expect(fx.findStorageSchema(schema) != null);
+}
+
+fn expectContains(haystack: []const u8, needle: []const u8) !void {
+    try std.testing.expect(std.mem.indexOf(u8, haystack, needle) != null);
+}
