@@ -1,6 +1,7 @@
 const std = @import("std");
 const envelope = @import("envelope.zig");
 const identity = @import("identity.zig");
+const message_storage = @import("message_storage.zig");
 const routing = @import("routing.zig");
 
 pub const Allocator = std.mem.Allocator;
@@ -9,6 +10,7 @@ pub const MessageCorrelationId = envelope.MessageCorrelationId;
 pub const MessageEnvelope = envelope.MessageEnvelope;
 pub const MessageEnvelopeKind = envelope.MessageEnvelopeKind;
 pub const MessageId = envelope.MessageId;
+pub const MessageStorage = message_storage.MessageStorage;
 pub const ShardCount = routing.ShardCount;
 pub const ShardId = routing.ShardId;
 
@@ -83,7 +85,87 @@ pub const ClusterTransport = struct {
     }
 };
 
-pub const InProcessClusterTransport = struct {};
+pub const InProcessClusterTransportOptions = struct {
+    shard_count: ShardCount,
+};
+
+pub const InProcessClusterTransport = struct {
+    message_storage: MessageStorage,
+    shard_count: ShardCount,
+    next_message_sequence: u64 = 1,
+
+    pub fn init(allocator: Allocator, storage: MessageStorage, options: InProcessClusterTransportOptions) ClusterTransportError!InProcessClusterTransport {
+        _ = allocator;
+        if (options.shard_count == 0) return error.InvalidShardCount;
+        return .{
+            .message_storage = storage,
+            .shard_count = options.shard_count,
+        };
+    }
+
+    pub fn deinit(self: *InProcessClusterTransport) void {
+        _ = self;
+    }
+
+    pub fn asClusterTransport(self: *InProcessClusterTransport) ClusterTransport {
+        return .{
+            .ptr = self,
+            .vtable = &.{
+                .send = sendOpaque,
+            },
+        };
+    }
+
+    pub fn send(self: *InProcessClusterTransport, allocator: Allocator, request: ClusterTransportRequest) !ClusterTransportResponse {
+        _ = allocator;
+        return self.sendWithAttempts(request, 1, .in_process);
+    }
+
+    fn sendWithAttempts(
+        self: *InProcessClusterTransport,
+        request: ClusterTransportRequest,
+        attempts: usize,
+        transport_kind: ClusterTransportKind,
+    ) !ClusterTransportResponse {
+        try validateIngressKind(request.kind);
+        if (request.policy.timeout_ms == 0) return error.TransportTimeout;
+
+        const shard_id = try routing.shardIdForAddress(request.address, self.shard_count);
+        var idempotency_buf: [48]u8 = undefined;
+        const idempotency_key = request.idempotency_key orelse blk: {
+            const key = std.fmt.bufPrint(&idempotency_buf, "transport-inprocess:{d}", .{self.next_message_sequence}) catch unreachable;
+            self.next_message_sequence += 1;
+            break :blk key;
+        };
+
+        var submitted = try self.message_storage.submit(.{
+            .shard_id = shard_id,
+            .envelope = .{
+                .kind = request.kind,
+                .address = request.address,
+                .idempotency_key = idempotency_key,
+                .payload_type_name = request.payload_type_name,
+                .payload = request.payload,
+                .redacted_detail = request.redacted_detail,
+            },
+        });
+        errdefer submitted.deinit(std.heap.page_allocator);
+
+        return .{
+            .shard_id = shard_id,
+            .envelope = submitted.envelope,
+            .correlation_id = submitted.envelope.correlation_id,
+            .duplicate = submitted.duplicate,
+            .attempts = attempts,
+            .transport = transport_kind,
+        };
+    }
+
+    fn sendOpaque(ptr: *anyopaque, allocator: Allocator, request: ClusterTransportRequest) anyerror!ClusterTransportResponse {
+        const self: *InProcessClusterTransport = @ptrCast(@alignCast(ptr));
+        return self.send(allocator, request);
+    }
+};
 
 pub const LoopbackHttpClusterTransport = struct {};
 

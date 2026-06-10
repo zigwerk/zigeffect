@@ -94,3 +94,119 @@ test "transport parser rejects incompatible schemas" {
     ;
     try std.testing.expectError(error.IncompatibleTransportSchema, fx.parseClusterTransportResponseJson(std.testing.allocator, bad_response));
 }
+
+test "in-process transport writes tell ask and interrupt messages" {
+    var storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asMessageStorage();
+    var transport_state = try fx.InProcessClusterTransport.init(std.testing.allocator, storage, .{ .shard_count = 16 });
+    defer transport_state.deinit();
+    const transport = transport_state.asClusterTransport();
+
+    const address = fx.entityAddress("counter", "in-process-writes");
+    const shard_id = try fx.shardIdForAddress(address, 16);
+
+    var tell = try transport.send(std.testing.allocator, .{
+        .kind = .tell,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "inc",
+        .redacted_detail = "increment",
+    });
+    defer tell.deinit(std.testing.allocator);
+
+    var ask = try transport.send(std.testing.allocator, .{
+        .kind = .request,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "get",
+        .redacted_detail = "read current value",
+    });
+    defer ask.deinit(std.testing.allocator);
+
+    var interrupt = try transport.send(std.testing.allocator, .{
+        .kind = .interrupt,
+        .address = address,
+        .payload_type_name = "interrupt",
+        .payload = "cancel",
+        .redacted_detail = "cancel",
+    });
+    defer interrupt.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(shard_id, tell.shard_id);
+    try std.testing.expectEqual(fx.ClusterTransportKind.in_process, tell.transport);
+    try std.testing.expectEqual(@as(usize, 1), tell.attempts);
+    try std.testing.expectEqual(fx.MessageEnvelopeKind.request, ask.envelope.kind);
+    try std.testing.expect(ask.correlation_id != null);
+    try std.testing.expectEqual(fx.MessageEnvelopeKind.interrupt, interrupt.envelope.kind);
+
+    var by_shard = try storage.unprocessedByShard(shard_id, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 3), by_shard.records.len);
+}
+
+test "in-process transport preserves duplicate idempotency keys" {
+    var storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asMessageStorage();
+    var transport_state = try fx.InProcessClusterTransport.init(std.testing.allocator, storage, .{ .shard_count = 8 });
+    defer transport_state.deinit();
+    const transport = transport_state.asClusterTransport();
+
+    const address = fx.entityAddress("counter", "in-process-duplicate");
+    const shard_id = try fx.shardIdForAddress(address, 8);
+
+    var first = try transport.send(std.testing.allocator, .{
+        .kind = .request,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "first",
+        .redacted_detail = "first request",
+        .idempotency_key = "same-key",
+    });
+    defer first.deinit(std.testing.allocator);
+
+    var duplicate = try transport.send(std.testing.allocator, .{
+        .kind = .request,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "second",
+        .redacted_detail = "second request",
+        .idempotency_key = "same-key",
+    });
+    defer duplicate.deinit(std.testing.allocator);
+
+    try std.testing.expect(!first.duplicate);
+    try std.testing.expect(duplicate.duplicate);
+    try std.testing.expectEqual(first.envelope.id, duplicate.envelope.id);
+    try std.testing.expectEqualStrings("first", duplicate.envelope.payload);
+
+    var by_shard = try storage.unprocessedByShard(shard_id, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 1), by_shard.records.len);
+}
+
+test "in-process timeout policy rejects before durable submission" {
+    var storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asMessageStorage();
+    var transport_state = try fx.InProcessClusterTransport.init(std.testing.allocator, storage, .{ .shard_count = 4 });
+    defer transport_state.deinit();
+    const transport = transport_state.asClusterTransport();
+
+    const address = fx.entityAddress("counter", "in-process-timeout");
+    const shard_id = try fx.shardIdForAddress(address, 4);
+
+    try std.testing.expectError(error.TransportTimeout, transport.send(std.testing.allocator, .{
+        .kind = .tell,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "inc",
+        .redacted_detail = "increment",
+        .policy = .{ .timeout_ms = 0 },
+    }));
+
+    var by_shard = try storage.unprocessedByShard(shard_id, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 0), by_shard.records.len);
+}

@@ -445,6 +445,7 @@ pub const ClusterTransportPolicy = cluster.ClusterTransportPolicy;
 pub const ClusterTransportRequest = cluster.ClusterTransportRequest;
 pub const ClusterTransportResponse = cluster.ClusterTransportResponse;
 pub const ClusterTransport = cluster.ClusterTransport;
+pub const InProcessClusterTransportOptions = cluster.InProcessClusterTransportOptions;
 pub const InProcessClusterTransport = cluster.InProcessClusterTransport;
 pub const LoopbackHttpClusterTransport = cluster.LoopbackHttpClusterTransport;
 pub const formatClusterTransportRequestJson = cluster.formatClusterTransportRequestJson;

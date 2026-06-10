@@ -148,6 +148,7 @@ pub const ClusterTransportPolicy = transport.ClusterTransportPolicy;
 pub const ClusterTransportRequest = transport.ClusterTransportRequest;
 pub const ClusterTransportResponse = transport.ClusterTransportResponse;
 pub const ClusterTransport = transport.ClusterTransport;
+pub const InProcessClusterTransportOptions = transport.InProcessClusterTransportOptions;
 pub const InProcessClusterTransport = transport.InProcessClusterTransport;
 pub const LoopbackHttpClusterTransport = transport.LoopbackHttpClusterTransport;
 pub const formatClusterTransportRequestJson = transport.formatClusterTransportRequestJson;
