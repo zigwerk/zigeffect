@@ -335,6 +335,155 @@ test "cluster workflow retry expired queues appends retry rows through owning en
     try std.testing.expectEqualStrings("claim_sequence=3 attempt=1", events.events[3].redacted_detail);
 }
 
+test "queue worker crash returns claimed work to the cluster" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var runner_storage_a = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer runner_storage_a.deinit();
+    var runner_storage_b = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer runner_storage_b.deinit();
+    var message_storage_a = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_a.deinit();
+    var message_storage_b = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_b.deinit();
+    var journal_state = try fx.workflow.FileJournalStore.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    var runner_a = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = fx.runnerAddress("machine-queue", "runner-a"),
+        .runner_storage = runner_storage_a.asRunnerStorage(),
+        .message_storage = message_storage_a.asMessageStorage(),
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 1,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    });
+    defer runner_a.deinit();
+    var plan_a = try runner_a.acquireBalancedShards(1_000);
+    defer plan_a.deinit();
+
+    var transport_state = try fx.InProcessClusterTransport.init(std.testing.allocator, message_storage_a.asMessageStorage(), .{ .shard_count = 8 });
+    defer transport_state.deinit();
+    var engine = fx.ClusterWorkflowEngine.init(std.testing.allocator, transport_state.asClusterTransport());
+    defer engine.deinit();
+
+    const workflow_id = fx.workflow.workflowId("approval");
+    const execution_id = fx.workflow.executionId("approval", "queue-crash");
+    const queue_id = fx.workflow.queueItemId("email", "crash-item");
+    var registry_a = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry_a.deinit();
+    _ = try registry_a.registerExecution(&runner_a, journal_store, workflow_id, execution_id, 1_000);
+
+    var started = try engine.start("approval", "queue-crash");
+    defer started.deinit(std.testing.allocator);
+    var start_result = try processWorkflowSubmission(&runner_a, message_storage_a.asMessageStorage(), started, 1_025);
+    defer start_result.deinit(std.testing.allocator);
+    try std.testing.expect(start_result.appended);
+
+    var offered = try engine.appendEvent(.{
+        .kind = .append_event,
+        .event_kind = .queue_offered,
+        .workflow_id = workflow_id,
+        .execution_id = execution_id,
+        .name = "email",
+        .status = "offered",
+        .redacted_detail = "42",
+        .idempotency_key = "queue-crash-offered",
+        .queue_id = queue_id,
+    });
+    defer offered.deinit(std.testing.allocator);
+    var offer_result = try processWorkflowSubmission(&runner_a, message_storage_a.asMessageStorage(), offered, 1_050);
+    defer offer_result.deinit(std.testing.allocator);
+    try std.testing.expect(offer_result.appended);
+
+    var suspended = try engine.appendEvent(.{
+        .kind = .append_event,
+        .event_kind = .workflow_suspended,
+        .workflow_id = workflow_id,
+        .execution_id = execution_id,
+        .name = "email",
+        .status = "waiting",
+        .redacted_detail = "queue",
+        .idempotency_key = "queue-crash-suspended",
+        .queue_id = queue_id,
+    });
+    defer suspended.deinit(std.testing.allocator);
+    var suspend_result = try processWorkflowSubmission(&runner_a, message_storage_a.asMessageStorage(), suspended, 1_075);
+    defer suspend_result.deinit(std.testing.allocator);
+    try std.testing.expect(suspend_result.appended);
+
+    var claimed_a = try engine.claimQueue(workflow_id, execution_id, "email", queue_id, "worker-a", 1_100, 200, 1);
+    defer claimed_a.deinit(std.testing.allocator);
+    var claim_a_result = try processWorkflowSubmission(&runner_a, message_storage_a.asMessageStorage(), claimed_a, 1_100);
+    defer claim_a_result.deinit(std.testing.allocator);
+    try std.testing.expect(claim_a_result.queue_claimed);
+    try std.testing.expectEqual(@as(u32, 1), claim_a_result.queue_attempt);
+
+    _ = try runner_a.shutdown(1_150);
+
+    var runner_b = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = fx.runnerAddress("machine-queue", "runner-b"),
+        .runner_storage = runner_storage_b.asRunnerStorage(),
+        .message_storage = message_storage_b.asMessageStorage(),
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 1,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    });
+    defer runner_b.deinit();
+    var plan_b = try runner_b.acquireBalancedShards(1_500);
+    defer plan_b.deinit();
+
+    var registry_b = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry_b.deinit();
+    const recovery = try registry_b.recoverOwnedExecutions(&runner_b, journal_store, 1_500);
+    try std.testing.expectEqual(@as(usize, 1), recovery.scanned);
+    try std.testing.expectEqual(@as(usize, 1), recovery.registered);
+
+    var index = fx.ClusterQueueIndex.init(std.testing.allocator);
+    defer index.deinit();
+    _ = try index.rebuildOwned(&runner_b, journal_store);
+    var expired = try index.expiredClaims(std.testing.allocator, 1_500);
+    defer expired.deinit();
+    try std.testing.expectEqual(@as(usize, 1), expired.items.len);
+    try std.testing.expectEqual(queue_id, expired.items[0].queue_id);
+
+    var retried = try engine.retryExpiredQueues(workflow_id, execution_id, "email", 1_500);
+    defer retried.deinit(std.testing.allocator);
+    var retry_result = try processWorkflowSubmission(&runner_b, message_storage_b.asMessageStorage(), retried, 1_500);
+    defer retry_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), retry_result.queue_retried);
+
+    _ = try index.rebuildOwned(&runner_b, journal_store);
+    var claimable = try index.claimable(std.testing.allocator, .{ .max_per_runner = 1, .max_per_queue = 1 });
+    defer claimable.deinit();
+    try std.testing.expectEqual(@as(usize, 1), claimable.items.len);
+    try std.testing.expectEqual(fx.ClusterQueueStatus.retry_ready, claimable.items[0].status);
+
+    var claimed_b = try engine.claimQueue(workflow_id, execution_id, "email", queue_id, "worker-b", 1_525, 200, 1);
+    defer claimed_b.deinit(std.testing.allocator);
+    var claim_b_result = try processWorkflowSubmission(&runner_b, message_storage_b.asMessageStorage(), claimed_b, 1_525);
+    defer claim_b_result.deinit(std.testing.allocator);
+    try std.testing.expect(claim_b_result.queue_claimed);
+    try std.testing.expectEqual(@as(u32, 2), claim_b_result.queue_attempt);
+
+    var completed = try engine.completeQueue(workflow_id, execution_id, "email", queue_id, "done");
+    defer completed.deinit(std.testing.allocator);
+    var complete_result = try processWorkflowSubmission(&runner_b, message_storage_b.asMessageStorage(), completed, 1_550);
+    defer complete_result.deinit(std.testing.allocator);
+    try std.testing.expect(complete_result.appended);
+
+    try std.testing.expectEqual(@as(usize, 1), try countEvents(journal_store, .queue_retry_scheduled));
+    try std.testing.expectEqual(@as(usize, 2), try countEvents(journal_store, .queue_claimed));
+    try std.testing.expectEqual(@as(usize, 1), try countEvents(journal_store, .queue_completed));
+    try std.testing.expectEqual(@as(usize, 1), try countEvents(journal_store, .workflow_resumed));
+    var state = try journal_store.latestState(std.testing.allocator);
+    defer state.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowStatus.running, state.workflow_status);
+}
+
 fn executionIdForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.workflow.ExecutionId {
     var id: fx.workflow.ExecutionId = 1;
     while (id < 100_000) : (id += 1) {
