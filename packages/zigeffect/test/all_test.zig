@@ -15,6 +15,7 @@ comptime {
     _ = @import("cluster_queue_test.zig");
     _ = @import("cluster_fencing_test.zig");
     _ = @import("cluster_supervision_test.zig");
+    _ = @import("cluster_observability_test.zig");
     _ = @import("cluster_runtime_test.zig");
     _ = @import("multi_runner_cluster_test.zig");
     _ = @import("routing_test.zig");

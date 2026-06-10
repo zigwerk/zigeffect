@@ -69,6 +69,16 @@ pub const CausalEventKind = enum {
     cluster_shard_handoff_started,
     cluster_shard_recovery_started,
     cluster_shard_recovery_completed,
+    cluster_runner_registered,
+    cluster_runner_heartbeat,
+    cluster_message_submitted,
+    cluster_message_claimed,
+    cluster_message_acked,
+    cluster_message_replied,
+    cluster_entity_registered,
+    cluster_entity_processed,
+    cluster_entity_failed,
+    cluster_trace_propagated,
 };
 
 pub const CausalEventTaxonomy = struct {
@@ -106,6 +116,16 @@ pub fn causalEventTaxonomy(kind: CausalEventKind) CausalEventTaxonomy {
         .cluster_shard_handoff_started,
         .cluster_shard_recovery_started,
         .cluster_shard_recovery_completed,
+        .cluster_runner_registered,
+        .cluster_runner_heartbeat,
+        .cluster_message_submitted,
+        .cluster_message_claimed,
+        .cluster_message_acked,
+        .cluster_message_replied,
+        .cluster_entity_registered,
+        .cluster_entity_processed,
+        .cluster_entity_failed,
+        .cluster_trace_propagated,
         => .{
             .structural = true,
             .finding_evidence = true,
