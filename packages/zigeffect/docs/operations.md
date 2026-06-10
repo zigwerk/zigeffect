@@ -113,6 +113,7 @@ zig build causal-production-telemetry-capture-fixtures
 zig build causal-production-telemetry-capture-fixtures -- --format json
 zig build causal-production-telemetry-capture-fixtures -- emit runtime-trace-span-event --format json
 zig build causal-production-telemetry-capture-fixtures -- validate --format json
+zig build causal-production-telemetry-readiness-review -- --from-fixtures ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json approve --reason "fixtures reviewed for implementation proposal" --verified-command "zig build causal-production-telemetry-capture-fixtures -- validate --format json" --verified-command "zig build causal-schema-governance -- --format json" --verified-command "zig build causal-production-hardening-backlog -- --format json" --verified-command "zig build examples" --verified-command "zig build test"
 zig build causal-m9-completion-audit
 zig build causal-m9-completion-audit -- --format json
 zig build causal-production-hardening-backlog
@@ -490,14 +491,15 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-production-telemetry-readiness-review` after the
+`codex/zigeffect-causal-production-telemetry-implementation-proposal` after the
 unified causal spine, deep runtime internals, app semantic trace API, bounded
 agent query surface, record-only encryption-at-rest policy, record-only
 alerting integrations, delivered live dashboard streaming workbench, delivered
 graph visual debugging, delivered human-agent feedback loop, delivered rollout
 automation guardrails, delivered wall-clock benchmark baseline contract, and
-delivered production capacity planning, completion-audit, and load-test
-observation harness and production telemetry capture design contracts.
+delivered production capacity planning, completion-audit, load-test observation
+harness, production telemetry capture design, fixture, and readiness-review
+contracts.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -546,8 +548,8 @@ bounded: curated argv arrays only, no shell, no production telemetry, no
 production load, no capacity claim, and `mutation_authority=none`.
 
 The harness has now been consumed by the delivered telemetry design and fixture
-milestones. The current next branch is
-`codex/zigeffect-causal-production-telemetry-readiness-review`.
+milestones plus the delivered readiness review. The current next branch is
+`codex/zigeffect-causal-production-telemetry-implementation-proposal`.
 
 ## Production Telemetry Capture Design
 
@@ -595,9 +597,39 @@ forwarding, production capacity claims, non-NenDB storage, alternate renderers,
 CI gates, and mutation authority.
 
 Use it as the handoff into
-`codex/zigeffect-causal-production-telemetry-readiness-review`. Do not treat
-fixtures as live telemetry, durable writes, CI gates, or production capacity
-evidence.
+`causal-production-telemetry-readiness-review`. Do not treat fixtures as live
+telemetry, durable writes, CI gates, or production capacity evidence.
+
+## Production Telemetry Readiness Review
+
+Run the readiness review after writing fixture JSON:
+
+```sh
+cd packages/zigeffect
+mkdir -p ../../.zig-cache/causal-artifacts
+zig build causal-production-telemetry-capture-fixtures -- --format json \
+  2> ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json
+zig build causal-production-telemetry-readiness-review -- \
+  --from-fixtures ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json \
+  approve \
+  --reason "fixtures reviewed for implementation proposal" \
+  --verified-command "zig build causal-production-telemetry-capture-fixtures -- validate --format json" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The report records schema
+`zigeffect.causal.production-telemetry-readiness-review.v1`. It consumes the
+fixture catalog, records reviewer decision and reason, verifies coverage and
+authority boundaries, requires explicit verification command evidence, and
+emits `ready` or `blocked` artifacts.
+
+Use a `ready` report as the handoff into
+`codex/zigeffect-causal-production-telemetry-implementation-proposal`. Do not
+treat readiness as live telemetry, exporter authority, durable writes, CI gates,
+production capacity evidence, or mutation authority.
 
 ## Production Artifact Aggregation
 
@@ -887,8 +919,9 @@ grant production authority.
 Run `causal-production-hardening-completion-audit` after capacity planning to
 confirm the delivered hardening sequence and choose the next evidence-producing
 branch. The load-test observation harness and production telemetry capture
-design and fixture reports are now delivered, and the current next branch is
-`codex/zigeffect-causal-production-telemetry-readiness-review`.
+design, fixture, and readiness-review reports are now delivered, and the
+current next branch is
+`codex/zigeffect-causal-production-telemetry-implementation-proposal`.
 
 ## Production Gaps
 

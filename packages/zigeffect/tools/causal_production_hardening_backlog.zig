@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-production-telemetry-readiness-review";
-pub const recommended_next_branch = "codex/zigeffect-causal-production-telemetry-readiness-review";
+pub const recommendation = "start-production-telemetry-implementation-proposal";
+pub const recommended_next_branch = "codex/zigeffect-causal-production-telemetry-implementation-proposal";
 
 const OutputFormat = enum { text, json };
 
@@ -551,6 +551,30 @@ const backlog_items: []const BacklogItem = &.{
         .branch = "codex/zigeffect-causal-production-telemetry-capture-fixtures",
         .agent_guidance = "Use causal-production-telemetry-capture-fixtures for safe example records and validation evidence; do not infer live telemetry, durable writes, CI gates, capacity evidence, non-NenDB adapters, alternate renderers, or mutation authority.",
     },
+    .{
+        .id = "production-telemetry-readiness-review",
+        .title = "Production Telemetry Readiness Review",
+        .gap_id = "production-telemetry-readiness-review",
+        .priority = "P5",
+        .status = "delivered",
+        .summary = "Consumes production telemetry capture fixture JSON and emits ready or blocked review artifacts before any implementation proposal work.",
+        .depends_on = &.{ "production-telemetry-capture-fixtures", "production-telemetry-capture-design" },
+        .deliverables = &.{
+            "fixture JSON readiness review",
+            "reviewer decision and reason recording",
+            "required verification command evidence",
+            "ready and blocked readiness artifacts",
+            "implementation proposal handoff",
+        },
+        .evidence_sources = &.{
+            "docs/superpowers/specs/2026-06-10-zigeffect-causal-production-telemetry-readiness-review-design.md",
+            "docs/superpowers/plans/2026-06-10-zigeffect-causal-production-telemetry-readiness-review-implementation.md",
+            "packages/zigeffect/tools/causal_production_telemetry_readiness_review.zig",
+            "packages/zigeffect/docs/production-telemetry-readiness-review.md",
+        },
+        .branch = "codex/zigeffect-causal-production-telemetry-readiness-review",
+        .agent_guidance = "Use readiness review artifacts to decide whether a future implementation-proposal branch may start; do not infer live telemetry or mutation authority.",
+    },
 };
 
 const dependency_order: []const []const u8 = &.{
@@ -574,6 +598,7 @@ const dependency_order: []const []const u8 = &.{
     "load-test-observation-harness",
     "production-telemetry-capture-design",
     "production-telemetry-capture-fixtures",
+    "production-telemetry-readiness-review",
 };
 
 const verification_commands: []const []const u8 = &.{
@@ -607,6 +632,10 @@ const verification_commands: []const []const u8 = &.{
     "zig build causal-production-telemetry-capture-fixtures -- --format json",
     "zig build causal-production-telemetry-capture-fixtures -- emit runtime-trace-span-event --format json",
     "zig build causal-production-telemetry-capture-fixtures -- validate --format json",
+    "mkdir -p ../../.zig-cache/causal-artifacts",
+    "zig build causal-production-telemetry-capture-fixtures -- --format json 2> ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json",
+    "zig build causal-production-telemetry-readiness-review -- --from-fixtures ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json approve --reason \"fixtures reviewed for implementation proposal\" --verified-command \"zig build causal-production-telemetry-capture-fixtures -- validate --format json\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"",
+    "zig build causal-production-telemetry-readiness-review -- --from-fixtures ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json reject --reason \"negative readiness path\"",
     "zig build causal-production-deployment-runbooks",
     "zig build causal-production-deployment-runbooks -- --format json",
     "zig build causal-durable-production-retention",
@@ -879,11 +908,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-production-telemetry-readiness-review",
+        "start-production-telemetry-implementation-proposal",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-production-telemetry-readiness-review",
+        "codex/zigeffect-causal-production-telemetry-implementation-proposal",
         recommended_next_branch,
     );
 }
@@ -920,6 +949,8 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItemStatus("production-telemetry-capture-design", "delivered");
     try expectBacklogItem("production-telemetry-capture-fixtures");
     try expectBacklogItemStatus("production-telemetry-capture-fixtures", "delivered");
+    try expectBacklogItem("production-telemetry-readiness-review");
+    try expectBacklogItemStatus("production-telemetry-readiness-review", "delivered");
 }
 
 test "production hardening backlog preserves user constraints" {
@@ -938,7 +969,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-production-telemetry-readiness-review") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-production-telemetry-implementation-proposal") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -955,6 +986,8 @@ test "production hardening backlog text mentions dependency order and next branc
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-telemetry-capture-design") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-telemetry-capture-fixtures") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-telemetry-capture-fixtures") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "production-telemetry-readiness-review") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-telemetry-readiness-review") != null);
 }
 
 test "production hardening backlog JSON is agent-readable" {
@@ -963,7 +996,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-production-telemetry-readiness-review\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-production-telemetry-implementation-proposal\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);
@@ -987,6 +1020,9 @@ test "production hardening backlog JSON is agent-readable" {
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"production-telemetry-capture-fixtures\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-production-telemetry-capture-fixtures\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-production-telemetry-capture-fixtures -- validate --format json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"production-telemetry-readiness-review\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-production-telemetry-readiness-review\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-production-telemetry-readiness-review") != null);
 }
 
 test "production hardening backlog parses supported formats" {

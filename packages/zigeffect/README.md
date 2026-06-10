@@ -311,6 +311,31 @@ capacity claims, non-NenDB adapters, alternate renderers, or mutation
 authority. The full policy is in
 [docs/production-telemetry-capture-fixtures.md](docs/production-telemetry-capture-fixtures.md).
 
+Review production telemetry fixture readiness:
+
+```bash
+cd packages/zigeffect
+mkdir -p ../../.zig-cache/causal-artifacts
+zig build causal-production-telemetry-capture-fixtures -- --format json \
+  2> ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json
+zig build causal-production-telemetry-readiness-review -- \
+  --from-fixtures ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json \
+  approve \
+  --reason "fixtures reviewed for implementation proposal" \
+  --verified-command "zig build causal-production-telemetry-capture-fixtures -- validate --format json" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The report uses schema
+`zigeffect.causal.production-telemetry-readiness-review.v1` and emits a
+reviewer-owned `ready` or `blocked` artifact before any implementation proposal
+work. It keeps `applied=false`, `mutation_authority=none`, live telemetry,
+exporters, durable writes, and CI gates disabled. The full policy is in
+[docs/production-telemetry-readiness-review.md](docs/production-telemetry-readiness-review.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -336,8 +361,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-readiness-review` after the
-delivered production telemetry capture fixtures report.
+`codex/zigeffect-causal-production-telemetry-implementation-proposal` after the
+delivered production telemetry readiness review.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in

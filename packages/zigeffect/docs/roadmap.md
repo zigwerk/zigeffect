@@ -653,10 +653,10 @@ metrics, and traces.
   `webui-dev/zig-webui` workbench direction, the delivered graph visual
   debugging, human-agent feedback-loop, rollout automation guardrails, and
   wall-clock benchmark baseline, production capacity planning, and
-  production-hardening completion audit plus load-test observation harness
-  and production telemetry capture design and fixture contracts, milestones,
-  non-goals, verification commands, and the current next branch
-  `codex/zigeffect-causal-production-telemetry-readiness-review`.
+  production-hardening completion audit plus load-test observation harness,
+  production telemetry capture design, fixture, and readiness-review contracts,
+  milestones, non-goals, verification commands, and the current next branch
+  `codex/zigeffect-causal-production-telemetry-implementation-proposal`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
@@ -760,12 +760,23 @@ metrics, and traces.
   `zigeffect.causal.production-telemetry-capture-fixtures.v1` with safe
   example records, selected fixture output, negative fixtures, validation
   checks, and the handoff to
-  `codex/zigeffect-causal-production-telemetry-readiness-review`. It keeps
+  `causal-production-telemetry-readiness-review`. It keeps
   `production_telemetry_ingestion=false`, `live_exporter_enabled=false`,
   `durable_write_enabled=false`, `ci_gate_enabled=false`,
   `mutation_authority=none`, and does not write durable production storage,
   size capacity, fail CI, add non-NenDB adapter work, add alternate frontend
   renderer support, or mutate production state.
+- Delivered: `causal-production-telemetry-readiness-review` publishes
+  `zigeffect.causal.production-telemetry-readiness-review.v1` with fixture JSON
+  review, reviewer decision and reason, required verification command evidence,
+  ready and blocked readiness artifacts, and the handoff to
+  `codex/zigeffect-causal-production-telemetry-implementation-proposal`. It
+  keeps `applied=false`, `production_telemetry_ingestion=false`,
+  `live_exporter_enabled=false`, `durable_write_enabled=false`,
+  `ci_gate_enabled=false`, `mutation_authority=none`, and does not implement
+  telemetry, write durable production storage, size capacity, fail CI, add
+  non-NenDB adapter work, add alternate frontend renderer support, or mutate
+  production state.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,

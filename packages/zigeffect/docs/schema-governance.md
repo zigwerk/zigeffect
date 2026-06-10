@@ -291,10 +291,22 @@ authority.
 The production-telemetry-capture-fixtures report is a record-only,
 `fixtures-only`, `no-live-ingestion` production hardening contract. It emits
 safe example records, selected fixture output, negative telemetry fixtures, and
-validation checks for future production telemetry readiness review. It does not
+validation checks for the production telemetry readiness review. It does not
 ingest live production telemetry, configure exporters, send OTLP, write durable
 production storage, size capacity, fail CI, add non-NenDB adapter work, add
 alternate renderers, or grant mutation authority.
+
+- `zigeffect.causal.production-telemetry-readiness-review.v1`
+
+The production-telemetry-readiness-review report is a record-only,
+`readiness-review`, `no-live-ingestion` production hardening contract. It
+consumes capture fixture JSON, records reviewer decision and reason, verifies
+coverage and authority boundaries, requires explicit verification command
+evidence, and emits `ready` or `blocked` artifacts before a future
+implementation proposal. It does not ingest live production telemetry,
+configure exporters, send OTLP, write durable production storage, size
+capacity, fail CI, add non-NenDB adapter work, add alternate renderers, or grant
+mutation authority.
 
 ### Human-Agent Feedback
 

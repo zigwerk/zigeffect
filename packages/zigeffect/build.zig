@@ -1307,6 +1307,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_production_telemetry_capture_fixtures_tool_tests = b.addRunArtifact(causal_production_telemetry_capture_fixtures_tool_tests);
     test_step.dependOn(&run_causal_production_telemetry_capture_fixtures_tool_tests.step);
 
+    const causal_production_telemetry_readiness_review_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_production_telemetry_readiness_review.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_production_telemetry_readiness_review_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-production-telemetry-readiness-review",
+        .root_module = causal_production_telemetry_readiness_review_tool_module,
+    });
+    const run_causal_production_telemetry_readiness_review_tool = b.addRunArtifact(causal_production_telemetry_readiness_review_tool);
+    if (b.args) |args| run_causal_production_telemetry_readiness_review_tool.addArgs(args);
+    const causal_production_telemetry_readiness_review_step = b.step("causal-production-telemetry-readiness-review", "Review production telemetry fixture readiness");
+    causal_production_telemetry_readiness_review_step.dependOn(&run_causal_production_telemetry_readiness_review_tool.step);
+
+    const causal_production_telemetry_readiness_review_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-production-telemetry-readiness-review-tests",
+        .root_module = causal_production_telemetry_readiness_review_tool_module,
+    });
+    const run_causal_production_telemetry_readiness_review_tool_tests = b.addRunArtifact(causal_production_telemetry_readiness_review_tool_tests);
+    test_step.dependOn(&run_causal_production_telemetry_readiness_review_tool_tests.step);
+
     const causal_m9_completion_audit_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_m9_completion_audit.zig"),
         .target = target,
@@ -2123,6 +2145,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_production_telemetry_capture_design_tool_tests.step);
     examples_step.dependOn(&causal_production_telemetry_capture_fixtures_tool.step);
     examples_step.dependOn(&run_causal_production_telemetry_capture_fixtures_tool_tests.step);
+    examples_step.dependOn(&causal_production_telemetry_readiness_review_tool.step);
+    examples_step.dependOn(&run_causal_production_telemetry_readiness_review_tool_tests.step);
 
     const release_gate_step = b.step("release-gate", "Run complete durable workflow and cluster release gate");
     release_gate_step.dependOn(test_step);

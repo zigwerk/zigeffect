@@ -60,7 +60,7 @@
 ```sh
 cd packages/zigeffect
 zig build causal-production-telemetry-capture-fixtures -- --format json \
-  > ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json
+  2> ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json
 zig build causal-production-telemetry-readiness-review -- \
   --from-fixtures ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json \
   approve \
@@ -533,7 +533,7 @@ Run:
 cd packages/zigeffect
 mkdir -p ../../.zig-cache/causal-artifacts
 zig build causal-production-telemetry-capture-fixtures -- --format json \
-  > ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json
+  2> ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json
 zig build causal-production-telemetry-readiness-review -- \
   --from-fixtures ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json \
   approve \

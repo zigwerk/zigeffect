@@ -122,7 +122,7 @@ Default invocation:
 ```sh
 cd packages/zigeffect
 zig build causal-production-telemetry-capture-fixtures -- --format json \
-  > .zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json
+  2> .zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json
 zig build causal-production-telemetry-readiness-review -- \
   --from-fixtures .zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json \
   approve \
@@ -298,7 +298,7 @@ guide fixture or design repairs, but it cannot justify implementation work.
 cd packages/zigeffect
 zig test tools/causal_production_telemetry_readiness_review.zig
 zig build causal-production-telemetry-capture-fixtures -- --format json \
-  > ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json
+  2> ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json
 zig build causal-production-telemetry-readiness-review -- \
   --from-fixtures ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json \
   approve \

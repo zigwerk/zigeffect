@@ -83,8 +83,11 @@ proposing future telemetry work. They should use the negative fixtures to
 reject raw payload, endpoint, credential, unbounded, non-NenDB, CI, renderer,
 and mutation claims.
 
+The readiness review branch is delivered through
+`causal-production-telemetry-readiness-review`. It consumes fixture JSON and
+emits `ready` or `blocked` artifacts before any implementation proposal branch.
 The next branch is
-`codex/zigeffect-causal-production-telemetry-readiness-review`.
+`codex/zigeffect-causal-production-telemetry-implementation-proposal`.
 
 ## Verification
 
@@ -95,6 +98,15 @@ zig build causal-production-telemetry-capture-fixtures
 zig build causal-production-telemetry-capture-fixtures -- --format json
 zig build causal-production-telemetry-capture-fixtures -- emit runtime-trace-span-event --format json
 zig build causal-production-telemetry-capture-fixtures -- validate --format json
+zig build causal-production-telemetry-readiness-review -- \
+  --from-fixtures ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json \
+  approve \
+  --reason "fixtures reviewed for implementation proposal" \
+  --verified-command "zig build causal-production-telemetry-capture-fixtures -- validate --format json" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
 zig build causal-schema-governance -- --format json
 zig build causal-production-hardening-backlog -- --format json
 zig build examples

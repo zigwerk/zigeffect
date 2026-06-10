@@ -741,10 +741,20 @@ Status values:
      SolidJS `zig-webui` aligned without touching production systems or
      claiming production capacity.
 16. `codex/zigeffect-causal-production-telemetry-readiness-review`
-   - Current next branch: audit fixture coverage and readiness before any
-     later telemetry implementation proposal can discuss live ingestion,
-     exporters, durable production writes, CI gates, capacity claims, or
-     mutation authority.
+   - Delivered: `causal-production-telemetry-readiness-review` emits
+     `zigeffect.causal.production-telemetry-readiness-review.v1` with fixture
+     JSON review, reviewer decision and reason, required verification command
+     evidence, ready and blocked readiness artifacts, and implementation
+     proposal handoff. It keeps `applied=false`,
+     `production_telemetry_ingestion=false`, `live_exporter_enabled=false`,
+     `durable_write_enabled=false`, `ci_gate_enabled=false`,
+     `mutation_authority=none`, NenDB-only, and SolidJS `zig-webui` aligned
+     without touching production systems or claiming production capacity.
+17. `codex/zigeffect-causal-production-telemetry-implementation-proposal`
+   - Current next branch: use readiness artifacts to design a reviewed
+     implementation proposal before any live ingestion, exporters, durable
+     production writes, CI gates, capacity claims, or mutation authority are
+     considered.
 
 ## Dual-Interface Causal Spine Expansion
 

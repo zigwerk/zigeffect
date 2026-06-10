@@ -106,10 +106,13 @@ count, median, p95, and review gate.
 Agents must compare only compatible scenario ids, environment classes, optimize
 modes, and artifact shapes. They must not convert local observations into
 production capacity claims. The telemetry capture design handoff is delivered
-as `codex/zigeffect-causal-production-telemetry-capture-design`, and the
-fixture handoff is delivered as
-`codex/zigeffect-causal-production-telemetry-capture-fixtures`. The current
-next branch is `codex/zigeffect-causal-production-telemetry-readiness-review`.
+as `codex/zigeffect-causal-production-telemetry-capture-design`, the fixture
+handoff is delivered as
+`codex/zigeffect-causal-production-telemetry-capture-fixtures`, and the
+readiness-review handoff is delivered as
+`codex/zigeffect-causal-production-telemetry-readiness-review`. The current
+next branch is
+`codex/zigeffect-causal-production-telemetry-implementation-proposal`.
 
 ## Verification
 
