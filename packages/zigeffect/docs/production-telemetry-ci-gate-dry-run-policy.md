@@ -69,12 +69,16 @@ Every candidate signal has `evaluation_mode="dry-run"`,
 
 ## Handoff
 
-Ready dry-run policy artifacts hand off to
-`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-evaluator`. The
-evaluator may inspect bounded local or CI artifacts and emit advisory findings,
-but it still must not create required checks, mutate workflows, ingest live
-telemetry, write durable stores, write NenDB, claim production cluster
-readiness, or grant mutation authority.
+Ready dry-run policy artifacts hand off to the delivered
+`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-evaluator`
+branch. The evaluator inspects bounded local or CI artifacts and emits ready,
+advisory, or blocked findings, but it still must not create required checks,
+mutate workflows, ingest live telemetry, write durable stores, write NenDB,
+claim production cluster readiness, or grant mutation authority.
+
+Evaluator artifacts then hand off to
+`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report` for
+reviewer-facing CI report presentation.
 
 ## Verification
 

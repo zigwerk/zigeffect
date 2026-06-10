@@ -135,8 +135,10 @@ CI gate application boundary handoff is delivered as
 `codex/zigeffect-causal-production-telemetry-ci-gate-application-boundary`. The
 CI gate dry-run policy handoff is delivered as
 `codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-policy`. The
+CI gate dry-run evaluator handoff is delivered as
+`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-evaluator`. The
 current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-evaluator`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report`.
 
 ## Verification
 

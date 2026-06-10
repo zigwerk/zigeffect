@@ -139,9 +139,12 @@ semantics, release-gate verification evidence, and negative fixtures. The
 CI gate application boundary branch now records planned or blocked boundary
 evidence before dry-run policy work. The CI gate dry-run policy branch now
 records advisory candidate signal policies, bounded evidence requirements,
-and negative fixtures before evaluator work. The
+and negative fixtures before evaluator work. The CI gate dry-run evaluator
+branch now records bounded evidence classifications, observed signals,
+advisory findings, blocked findings, and next queries before advisory CI report
+work. The
 current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-evaluator`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report`.
 Reviewed production capacity sizing remains future until compatible
 observations, telemetry design, fixtures, readiness review, implementation
 proposal, exporter boundary, local pipeline fixture evidence, NenDB retention

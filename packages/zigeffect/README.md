@@ -637,6 +637,25 @@ workflow mutation by the tool, artifact upload execution, live telemetry,
 NenDB writes, durable writes, or mutation authority. The full policy is in
 [docs/production-telemetry-ci-gate-dry-run-policy.md](docs/production-telemetry-ci-gate-dry-run-policy.md).
 
+Evaluate dry-run policy evidence before advisory CI report work:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-gate-dry-run-evaluator -- \
+  --from-dry-run-policy ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary-ci-gate-dry-run-policy.json \
+  evaluate \
+  --reason "CI gate dry-run evidence evaluated" \
+  --evidence .zig-cache/release-gate/zigeffect-release-gate.json \
+  --evidence .zig-cache/causal-artifacts/zigeffect-causal-causal-scoped-fiber.json
+```
+
+The evaluator uses schema
+`zigeffect.causal.production-telemetry-ci-gate-dry-run-evaluator.v1`, consumes
+ready dry-run policy artifacts and explicit bounded local or CI evidence,
+records ready, advisory, or blocked findings, and hands off to the advisory CI
+report branch. The full policy is in
+[docs/production-telemetry-ci-gate-dry-run-evaluator.md](docs/production-telemetry-ci-gate-dry-run-evaluator.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -662,8 +681,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-evaluator` after
-the delivered production telemetry CI gate dry-run policy.
+`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report` after
+the delivered production telemetry CI gate dry-run evaluator.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in

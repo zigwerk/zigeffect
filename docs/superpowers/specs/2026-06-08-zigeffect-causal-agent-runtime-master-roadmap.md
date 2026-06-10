@@ -920,11 +920,21 @@ Status values:
      writes, NenDB writes, hosted dashboard claims, production cluster claims,
      alternate renderers, and mutation authority disabled.
 29. `codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-evaluator`
-   - Current next branch: implement the bounded advisory evaluator that
-     consumes ready dry-run policy artifacts and local or CI causal evidence,
-     emits advisory findings and next queries, and still avoids required status
-     checks, workflow mutation, live telemetry, durable production storage,
-     NenDB writes, production cluster readiness claims, or mutation authority.
+   - Delivered: `causal-production-telemetry-ci-gate-dry-run-evaluator` emits
+     `zigeffect.causal.production-telemetry-ci-gate-dry-run-evaluator.v1`,
+     consumes ready dry-run policy artifacts and explicit bounded local or CI
+     evidence, records observed signals, advisory findings, blocked findings,
+     and next queries, and hands off to
+     `codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report`
+     while keeping CI gate enforcement, required status checks, workflow
+     mutation by the tool, artifact upload execution, live telemetry, durable
+     writes, NenDB writes, hosted dashboard claims, production cluster claims,
+     alternate renderers, and mutation authority disabled.
+30. `codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report`
+   - Current next branch: present evaluator outputs as bounded reviewer-facing
+     CI artifact/report guidance while still avoiding required checks, workflow
+     mutation, live telemetry, durable production storage, NenDB writes,
+     production cluster readiness claims, or mutation authority.
 
 ## Dual-Interface Causal Spine Expansion
 

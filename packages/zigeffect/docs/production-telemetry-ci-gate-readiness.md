@@ -89,8 +89,10 @@ claims, or mutation authority.
 That application boundary is now delivered by
 `causal-production-telemetry-ci-gate-application-boundary`. The dry-run policy
 is now delivered by `causal-production-telemetry-ci-gate-dry-run-policy`. The
+dry-run evaluator is now delivered by
+`causal-production-telemetry-ci-gate-dry-run-evaluator`. The
 current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-dry-run-evaluator`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-advisory-ci-report`.
 
 ## Verification
 
