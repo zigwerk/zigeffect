@@ -88,6 +88,11 @@ const domain_expectations: []const DomainExpectation = &.{
         .status = .covered,
         .note = "causal readiness records log, metric, and span observability events",
     },
+    .{
+        .domain = .workflow,
+        .status = .covered,
+        .note = "workflow crash recovery records durable suspend, resume, retry, and failure evidence",
+    },
 };
 
 fn scenarioCovers(scenario: causal_run.Scenario, domain: causal_run.CausalCoverageDomain) bool {
@@ -108,6 +113,7 @@ fn invariantMatchesDomain(invariant: causal_run.Invariant, domain: causal_run.Ca
         .resource => invariant.subsystem == .scope_lifecycle,
         .cause => invariant.finding_kind != null,
         .observability => invariant.subsystem == .observability,
+        .workflow => invariant.subsystem == .workflow_runtime,
     };
 }
 
@@ -267,7 +273,7 @@ test "matrix builds requested coverage domains from the scenario registry" {
     const matrix = try buildMatrix(std.testing.allocator);
     defer matrix.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(@as(usize, 10), matrix.rows.len);
+    try std.testing.expectEqual(@as(usize, 11), matrix.rows.len);
     try std.testing.expect(rowByDomain(matrix, .service) != null);
     try std.testing.expect(rowByDomain(matrix, .layer) != null);
     try std.testing.expect(rowByDomain(matrix, .scope) != null);
@@ -278,10 +284,16 @@ test "matrix builds requested coverage domains from the scenario registry" {
     try std.testing.expect(rowByDomain(matrix, .retry) != null);
     try std.testing.expect(rowByDomain(matrix, .cause) != null);
     try std.testing.expect(rowByDomain(matrix, .observability) != null);
+    try std.testing.expect(rowByDomain(matrix, .workflow) != null);
 
     const observability = rowByDomain(matrix, .observability).?;
     try std.testing.expectEqual(CoverageStatus.covered, observability.status);
     try std.testing.expect(contains(observability.scenarios, "causal-readiness"));
+
+    const workflow = rowByDomain(matrix, .workflow).?;
+    try std.testing.expectEqual(CoverageStatus.covered, workflow.status);
+    try std.testing.expect(contains(workflow.scenarios, "workflow-crash-recovery"));
+    try std.testing.expect(contains(workflow.invariants, "workflow-crash-recovery-preserves-durable-evidence"));
 }
 
 test "matrix formatter prints schema statuses scenarios and invariants" {
@@ -299,6 +311,9 @@ test "matrix formatter prints schema statuses scenarios and invariants" {
     try std.testing.expect(std.mem.indexOf(u8, text, "causal-readiness") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "invariants:") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "observability-events-are-sampleable") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "- domain workflow") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "workflow-crash-recovery") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "workflow-crash-recovery-preserves-durable-evidence") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "- domain config") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "status: partial") != null);
 }

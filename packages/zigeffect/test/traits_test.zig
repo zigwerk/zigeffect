@@ -49,3 +49,42 @@ test "traits honor custom implementations and expose formatting redaction helper
     try std.testing.expectEqualStrings("7", rendered);
     try std.testing.expectEqualStrings("[REDACTED]", fx.traits.redaction_marker);
 }
+
+test "codec encodes and decodes values through allocator explicit callbacks" {
+    const U64Codec = fx.Codec(u64);
+    const codec = U64Codec{
+        .encode = struct {
+            fn run(allocator: std.mem.Allocator, value: u64) anyerror![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{value});
+            }
+        }.run,
+        .decode = struct {
+            fn run(_: std.mem.Allocator, bytes: []const u8) anyerror!u64 {
+                return std.fmt.parseInt(u64, bytes, 10);
+            }
+        }.run,
+    };
+
+    const encoded = try codec.encodeValue(std.testing.allocator, 42);
+    defer std.testing.allocator.free(encoded);
+
+    try std.testing.expectEqualStrings("42", encoded);
+    try std.testing.expectEqual(@as(u64, 42), try codec.decodeValue(std.testing.allocator, encoded));
+}
+
+test "codec preserves decode errors" {
+    const codec = fx.Codec(u64){
+        .encode = struct {
+            fn run(allocator: std.mem.Allocator, value: u64) anyerror![]const u8 {
+                return std.fmt.allocPrint(allocator, "{d}", .{value});
+            }
+        }.run,
+        .decode = struct {
+            fn run(_: std.mem.Allocator, bytes: []const u8) anyerror!u64 {
+                return std.fmt.parseInt(u64, bytes, 10);
+            }
+        }.run,
+    };
+
+    try std.testing.expectError(error.InvalidCharacter, codec.decodeValue(std.testing.allocator, "not-a-number"));
+}

@@ -147,11 +147,40 @@ surface:
 - `Deferred`, `Queue`, and `Semaphore` as deterministic coordination
   primitives, including queue shutdown and scoped semaphore permits
 
-The current core runtime is deterministic and run-to-completion on `join`; it is
-not a real green-thread scheduler. True suspension, task groups, cancellation
-against blocking IO, and `std.Io` integration are deferred to the optional zio
-backend adapter. The deterministic backend is exposed through
-`BackendCapabilities` so future backends have a compatibility boundary.
+The core runtime remains deterministic and run-to-completion on `join` by
+default. `LocalAsyncBackendState` now provides the first real async backend
+surface for backend-owned suspension, timer wakeups, typed network/file waits,
+and cancellation wakeups. Direct-style effects opt into that surface through
+`RuntimeDecision.suspended` or context async backend helpers; stackful coroutine
+lowering and task groups can target the same backend contract without changing
+the deterministic compatibility suite.
+
+### Durable Workflows And Cluster
+
+EffectTS workflow and cluster packages combine durable execution with entity
+identity, sharding, runners, message storage, and lease-protected ownership.
+`zigeffect` mirrors that production shape with local-first Zig modules:
+
+- `WorkflowEngine`, `DurableClock`, durable queues, lifecycle controls, and an
+  append-only `JournalStore`.
+- Cluster entities, routing, runner storage, message storage, shard leases,
+  lease fencing, and workflow command entities.
+- Storage-backed `ShardLeaseWriteGuard` checks for message, mailbox, queue,
+  timer, and journal writes.
+- Lease epoch metadata on message records and journal details so recovery can
+  explain which ownership epoch performed a durable mutation.
+- Renewal jitter, renewal deadlines, clock-skew-tolerant expiry, owned-lease
+  audit reports, and forced stale shard release for local runner recovery.
+- Production-shaped HTTP and socket-frame cluster transports with auth hooks,
+  envelope limits, backpressure, retry evidence, lifecycle metrics, and
+  trace/chunk propagation through durable message storage.
+- Real cluster control-plane APIs for runner admission and discovery,
+  deterministic shard placement, durable rebalancing, graceful drain,
+  node-down recovery, split-brain evidence, and operator inspection reports.
+
+This now covers the Effect-style workflow and cluster substrate inside a local
+durable runtime, including a real shared-storage cluster control plane. Full
+supervision trees remain the next Erlang-style runtime milestone.
 
 ### Schedule
 
@@ -182,7 +211,7 @@ bundles:
 
 - fake `Clock`
 - in-memory filesystem
-- stub logger
+- minimal logger
 - config map
 - counters/gauges
 - tracing events/spans
@@ -196,7 +225,7 @@ schedule delays.
 ### Logger, Config, Metrics, Tracing
 
 EffectTS observability/config is substantially more mature than the current
-stubs. The first `zigeffect` parity line is service shape, deterministic tests,
+draft services. The first `zigeffect` parity line is service shape, deterministic tests,
 and useful names:
 
 - Logger has level-aware structured entries with fields; timestamps and richer
@@ -227,12 +256,12 @@ diagnostic surface for the same family of questions:
   graph queries, durable history, and future async streams
 
 This is not EffectTS's full runtime inspector or a durable workflow engine. It
-is the deterministic Zig core that future async backends, production adapters,
-and agent tools can build on.
+is the deterministic Zig core plus a local async wait backend that production
+adapters and agent tools can build on.
 
 ## Next Parity Priorities
 
-1. Zio backend adapter for real fibers, cancellation, and `std.Io`.
+1. Coroutine lowering and task groups on top of the async backend contract.
 2. Production causal adapters for JSON Lines, OpenTelemetry, embedded graph
    queries, and durable history.
 3. Deterministic replay/forking for selected effect inputs.

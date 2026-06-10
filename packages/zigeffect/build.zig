@@ -33,6 +33,21 @@ pub fn build(b: *std.Build) void {
     const raw_test_step = b.step("test-raw", "Run zigeffect tests without causal wrapping");
     raw_test_step.dependOn(&run_unit_tests.step);
 
+    const public_api_stability_test_module = b.createModule(.{
+        .root_source_file = b.path("test/public_api_stability_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    public_api_stability_test_module.addImport("zigeffect", zigeffect);
+
+    const public_api_stability_tests = b.addTest(.{
+        .name = "zigeffect-public-api-stability-tests",
+        .root_module = public_api_stability_test_module,
+    });
+    const run_public_api_stability_tests = b.addRunArtifact(public_api_stability_tests);
+    const public_api_review_step = b.step("public-api-review", "Run public API stability review tests");
+    public_api_review_step.dependOn(&run_public_api_stability_tests.step);
+
     const causal_backend_conformance_test_module = b.createModule(.{
         .root_source_file = b.path("test/causal_backend_conformance_test.zig"),
         .target = target,
@@ -47,6 +62,137 @@ pub fn build(b: *std.Build) void {
     const run_causal_backend_conformance_tests = b.addRunArtifact(causal_backend_conformance_tests);
     const causal_backend_conformance_step = b.step("causal-backend-conformance", "Run causal backend conformance contract tests");
     causal_backend_conformance_step.dependOn(&run_causal_backend_conformance_tests.step);
+
+    const storage_conformance_test_module = b.createModule(.{
+        .root_source_file = b.path("test/storage_conformance_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    storage_conformance_test_module.addImport("zigeffect", zigeffect);
+
+    const storage_conformance_tests = b.addTest(.{
+        .name = "zigeffect-storage-conformance-tests",
+        .root_module = storage_conformance_test_module,
+    });
+    const run_storage_conformance_tests = b.addRunArtifact(storage_conformance_tests);
+    const storage_conformance_step = b.step("storage-conformance", "Run workflow and cluster storage conformance contract tests");
+    storage_conformance_step.dependOn(&run_storage_conformance_tests.step);
+
+    const property_history_test_module = b.createModule(.{
+        .root_source_file = b.path("test/property_history_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    property_history_test_module.addImport("zigeffect", zigeffect);
+
+    const property_history_tests = b.addTest(.{
+        .name = "zigeffect-property-history-tests",
+        .root_module = property_history_test_module,
+    });
+    const run_property_history_tests = b.addRunArtifact(property_history_tests);
+
+    const crash_recovery_property_test_module = b.createModule(.{
+        .root_source_file = b.path("test/crash_recovery_property_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    crash_recovery_property_test_module.addImport("zigeffect", zigeffect);
+
+    const crash_recovery_property_tests = b.addTest(.{
+        .name = "zigeffect-crash-recovery-property-tests",
+        .root_module = crash_recovery_property_test_module,
+    });
+    const run_crash_recovery_property_tests = b.addRunArtifact(crash_recovery_property_tests);
+
+    const message_history_property_test_module = b.createModule(.{
+        .root_source_file = b.path("test/message_history_property_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    message_history_property_test_module.addImport("zigeffect", zigeffect);
+
+    const message_history_property_tests = b.addTest(.{
+        .name = "zigeffect-message-history-property-tests",
+        .root_module = message_history_property_test_module,
+    });
+    const run_message_history_property_tests = b.addRunArtifact(message_history_property_tests);
+
+    const scheduler_fairness_property_test_module = b.createModule(.{
+        .root_source_file = b.path("test/scheduler_fairness_property_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    scheduler_fairness_property_test_module.addImport("zigeffect", zigeffect);
+
+    const scheduler_fairness_property_tests = b.addTest(.{
+        .name = "zigeffect-scheduler-fairness-property-tests",
+        .root_module = scheduler_fairness_property_test_module,
+    });
+    const run_scheduler_fairness_property_tests = b.addRunArtifact(scheduler_fairness_property_tests);
+
+    const property_crash_step = b.step("property-crash", "Run generated workflow, message, crash, and scheduler property tests");
+    property_crash_step.dependOn(&run_property_history_tests.step);
+    property_crash_step.dependOn(&run_crash_recovery_property_tests.step);
+    property_crash_step.dependOn(&run_message_history_property_tests.step);
+    property_crash_step.dependOn(&run_scheduler_fairness_property_tests.step);
+
+    const performance_benchmark_test_module = b.createModule(.{
+        .root_source_file = b.path("test/performance_benchmark_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    performance_benchmark_test_module.addImport("zigeffect", zigeffect);
+
+    const performance_benchmark_tests = b.addTest(.{
+        .name = "zigeffect-performance-benchmark-tests",
+        .root_module = performance_benchmark_test_module,
+    });
+    const run_performance_benchmark_tests = b.addRunArtifact(performance_benchmark_tests);
+
+    const resource_bounds_test_module = b.createModule(.{
+        .root_source_file = b.path("test/resource_bounds_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    resource_bounds_test_module.addImport("zigeffect", zigeffect);
+
+    const resource_bounds_tests = b.addTest(.{
+        .name = "zigeffect-resource-bounds-tests",
+        .root_module = resource_bounds_test_module,
+    });
+    const run_resource_bounds_tests = b.addRunArtifact(resource_bounds_tests);
+
+    const workflow_snapshot_frequency_test_module = b.createModule(.{
+        .root_source_file = b.path("test/workflow_snapshot_frequency_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    workflow_snapshot_frequency_test_module.addImport("zigeffect", zigeffect);
+
+    const workflow_snapshot_frequency_tests = b.addTest(.{
+        .name = "zigeffect-workflow-snapshot-frequency-tests",
+        .root_module = workflow_snapshot_frequency_test_module,
+    });
+    const run_workflow_snapshot_frequency_tests = b.addRunArtifact(workflow_snapshot_frequency_tests);
+
+    const cluster_observability_test_module = b.createModule(.{
+        .root_source_file = b.path("test/cluster_observability_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cluster_observability_test_module.addImport("zigeffect", zigeffect);
+
+    const cluster_observability_tests = b.addTest(.{
+        .name = "zigeffect-cluster-observability-tests",
+        .root_module = cluster_observability_test_module,
+    });
+    const run_cluster_observability_tests = b.addRunArtifact(cluster_observability_tests);
+
+    const performance_bounds_step = b.step("performance-bounds", "Run performance benchmark and bounded resource tests");
+    performance_bounds_step.dependOn(&run_performance_benchmark_tests.step);
+    performance_bounds_step.dependOn(&run_resource_bounds_tests.step);
+    performance_bounds_step.dependOn(&run_workflow_snapshot_frequency_tests.step);
+    performance_bounds_step.dependOn(&run_cluster_observability_tests.step);
 
     const causal_jsonl_backend_test_module = b.createModule(.{
         .root_source_file = b.path("test/causal_jsonl_backend_test.zig"),
@@ -300,6 +446,132 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_retry_exhaustion_example_tests = b.addRunArtifact(causal_retry_exhaustion_example_tests);
 
+    const workflow_approval_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/workflow_approval.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    workflow_approval_example_module.addImport("zigeffect", zigeffect);
+
+    const workflow_approval_example = b.addExecutable(.{
+        .name = "zigeffect-workflow-approval-example",
+        .root_module = workflow_approval_example_module,
+    });
+
+    const workflow_approval_example_tests = b.addTest(.{
+        .name = "zigeffect-workflow-approval-example-tests",
+        .root_module = workflow_approval_example_module,
+    });
+    const run_workflow_approval_example_tests = b.addRunArtifact(workflow_approval_example_tests);
+
+    const workflow_queue_worker_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/workflow_queue_worker.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    workflow_queue_worker_example_module.addImport("zigeffect", zigeffect);
+
+    const workflow_queue_worker_example = b.addExecutable(.{
+        .name = "zigeffect-workflow-queue-worker-example",
+        .root_module = workflow_queue_worker_example_module,
+    });
+
+    const workflow_queue_worker_example_tests = b.addTest(.{
+        .name = "zigeffect-workflow-queue-worker-example-tests",
+        .root_module = workflow_queue_worker_example_module,
+    });
+    const run_workflow_queue_worker_example_tests = b.addRunArtifact(workflow_queue_worker_example_tests);
+
+    const workflow_timer_signal_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/workflow_timer_signal.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    workflow_timer_signal_example_module.addImport("zigeffect", zigeffect);
+
+    const workflow_timer_signal_example = b.addExecutable(.{
+        .name = "zigeffect-workflow-timer-signal-example",
+        .root_module = workflow_timer_signal_example_module,
+    });
+
+    const workflow_timer_signal_example_tests = b.addTest(.{
+        .name = "zigeffect-workflow-timer-signal-example-tests",
+        .root_module = workflow_timer_signal_example_module,
+    });
+    const run_workflow_timer_signal_example_tests = b.addRunArtifact(workflow_timer_signal_example_tests);
+
+    const workflow_crash_recovery_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/workflow_crash_recovery.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    workflow_crash_recovery_example_module.addImport("zigeffect", zigeffect);
+
+    const workflow_crash_recovery_example = b.addExecutable(.{
+        .name = "zigeffect-workflow-crash-recovery-example",
+        .root_module = workflow_crash_recovery_example_module,
+    });
+
+    const workflow_crash_recovery_example_tests = b.addTest(.{
+        .name = "zigeffect-workflow-crash-recovery-example-tests",
+        .root_module = workflow_crash_recovery_example_module,
+    });
+    const run_workflow_crash_recovery_example_tests = b.addRunArtifact(workflow_crash_recovery_example_tests);
+
+    const local_actor_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/local_actor.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    local_actor_example_module.addImport("zigeffect", zigeffect);
+
+    const local_actor_example = b.addExecutable(.{
+        .name = "zigeffect-local-actor-example",
+        .root_module = local_actor_example_module,
+    });
+
+    const local_actor_example_tests = b.addTest(.{
+        .name = "zigeffect-local-actor-example-tests",
+        .root_module = local_actor_example_module,
+    });
+    const run_local_actor_example_tests = b.addRunArtifact(local_actor_example_tests);
+
+    const multi_runner_cluster_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/multi_runner_cluster.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    multi_runner_cluster_example_module.addImport("zigeffect", zigeffect);
+
+    const multi_runner_cluster_example = b.addExecutable(.{
+        .name = "zigeffect-multi-runner-cluster-example",
+        .root_module = multi_runner_cluster_example_module,
+    });
+
+    const multi_runner_cluster_example_tests = b.addTest(.{
+        .name = "zigeffect-multi-runner-cluster-example-tests",
+        .root_module = multi_runner_cluster_example_module,
+    });
+    const run_multi_runner_cluster_example_tests = b.addRunArtifact(multi_runner_cluster_example_tests);
+
+    const cluster_workflow_migration_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/cluster_workflow_migration.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cluster_workflow_migration_example_module.addImport("zigeffect", zigeffect);
+
+    const cluster_workflow_migration_example = b.addExecutable(.{
+        .name = "zigeffect-cluster-workflow-migration-example",
+        .root_module = cluster_workflow_migration_example_module,
+    });
+
+    const cluster_workflow_migration_example_tests = b.addTest(.{
+        .name = "zigeffect-cluster-workflow-migration-example-tests",
+        .root_module = cluster_workflow_migration_example_module,
+    });
+    const run_cluster_workflow_migration_example_tests = b.addRunArtifact(cluster_workflow_migration_example_tests);
+
     const scaffold_module = b.createModule(.{
         .root_source_file = b.path("tools/scaffold_module.zig"),
         .target = target,
@@ -365,6 +637,114 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_test_tool_tests = b.addRunArtifact(causal_test_tool_tests);
 
+    const cluster_runner_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/cluster_runner.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cluster_runner_tool_module.addImport("zigeffect", zigeffect);
+
+    const cluster_runner_tool = b.addExecutable(.{
+        .name = "zigeffect-cluster-runner",
+        .root_module = cluster_runner_tool_module,
+    });
+    const run_cluster_runner_tool = b.addRunArtifact(cluster_runner_tool);
+    if (b.args) |args| run_cluster_runner_tool.addArgs(args);
+    const cluster_runner_step = b.step("cluster-runner", "Run a local zigeffect cluster runner");
+    cluster_runner_step.dependOn(&run_cluster_runner_tool.step);
+
+    const cluster_runner_tool_tests = b.addTest(.{
+        .name = "zigeffect-cluster-runner-tests",
+        .root_module = cluster_runner_tool_module,
+    });
+    const run_cluster_runner_tool_tests = b.addRunArtifact(cluster_runner_tool_tests);
+
+    const cluster_inspect_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/cluster_inspect.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cluster_inspect_tool_module.addImport("zigeffect", zigeffect);
+
+    const cluster_inspect_tool = b.addExecutable(.{
+        .name = "zigeffect-cluster-inspect",
+        .root_module = cluster_inspect_tool_module,
+    });
+    const run_cluster_inspect_tool = b.addRunArtifact(cluster_inspect_tool);
+    if (b.args) |args| run_cluster_inspect_tool.addArgs(args);
+    const cluster_inspect_step = b.step("cluster-inspect", "Inspect durable zigeffect cluster storage");
+    cluster_inspect_step.dependOn(&run_cluster_inspect_tool.step);
+
+    const cluster_inspect_tool_tests = b.addTest(.{
+        .name = "zigeffect-cluster-inspect-tests",
+        .root_module = cluster_inspect_tool_module,
+    });
+    const run_cluster_inspect_tool_tests = b.addRunArtifact(cluster_inspect_tool_tests);
+
+    const storage_migrate_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/storage_migrate.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    storage_migrate_tool_module.addImport("zigeffect", zigeffect);
+
+    const storage_migrate_tool = b.addExecutable(.{
+        .name = "zigeffect-storage-migrate",
+        .root_module = storage_migrate_tool_module,
+    });
+    const run_storage_migrate_tool = b.addRunArtifact(storage_migrate_tool);
+    if (b.args) |args| run_storage_migrate_tool.addArgs(args);
+    const storage_migrate_step = b.step("storage-migrate", "Print zigeffect storage schema and SQL migration plans");
+    storage_migrate_step.dependOn(&run_storage_migrate_tool.step);
+
+    const storage_migrate_tool_tests = b.addTest(.{
+        .name = "zigeffect-storage-migrate-tests",
+        .root_module = storage_migrate_tool_module,
+    });
+    const run_storage_migrate_tool_tests = b.addRunArtifact(storage_migrate_tool_tests);
+
+    const performance_bench_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/performance_bench.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    performance_bench_tool_module.addImport("zigeffect", zigeffect);
+
+    const performance_bench_tool = b.addExecutable(.{
+        .name = "zigeffect-performance-bench",
+        .root_module = performance_bench_tool_module,
+    });
+    const run_performance_bench_tool = b.addRunArtifact(performance_bench_tool);
+    if (b.args) |args| run_performance_bench_tool.addArgs(args);
+    const performance_bench_step = b.step("performance-bench", "Print deterministic zigeffect performance benchmark report");
+    performance_bench_step.dependOn(&run_performance_bench_tool.step);
+
+    const performance_bench_tool_tests = b.addTest(.{
+        .name = "zigeffect-performance-bench-tests",
+        .root_module = performance_bench_tool_module,
+    });
+    const run_performance_bench_tool_tests = b.addRunArtifact(performance_bench_tool_tests);
+
+    const release_gate_report_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/release_gate_report.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const release_gate_report_tool = b.addExecutable(.{
+        .name = "zigeffect-release-gate-report",
+        .root_module = release_gate_report_tool_module,
+    });
+    const run_release_gate_report_tool = b.addRunArtifact(release_gate_report_tool);
+    const release_gate_report_step = b.step("release-gate-report", "Write zigeffect release gate report artifacts");
+    release_gate_report_step.dependOn(&run_release_gate_report_tool.step);
+
+    const release_gate_report_tool_tests = b.addTest(.{
+        .name = "zigeffect-release-gate-report-tests",
+        .root_module = release_gate_report_tool_module,
+    });
+    const run_release_gate_report_tool_tests = b.addRunArtifact(release_gate_report_tool_tests);
+
     const causal_artifact_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_artifact.zig"),
         .target = target,
@@ -375,6 +755,88 @@ pub fn build(b: *std.Build) void {
         .root_module = causal_artifact_tool_module,
     });
     const run_causal_artifact_tool_tests = b.addRunArtifact(causal_artifact_tool_tests);
+
+    const workflow_tool_support_module = b.createModule(.{
+        .root_source_file = b.path("tools/workflow_tool_support.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    workflow_tool_support_module.addImport("zigeffect", zigeffect);
+
+    const workflow_tool_support_tests = b.addTest(.{
+        .name = "zigeffect-workflow-tool-support-tests",
+        .root_module = workflow_tool_support_module,
+    });
+    const run_workflow_tool_support_tests = b.addRunArtifact(workflow_tool_support_tests);
+
+    const workflow_list_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/workflow_list.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    workflow_list_tool_module.addImport("zigeffect", zigeffect);
+    workflow_list_tool_module.addImport("workflow_tool_support", workflow_tool_support_module);
+
+    const workflow_list_tool = b.addExecutable(.{
+        .name = "zigeffect-workflow-list",
+        .root_module = workflow_list_tool_module,
+    });
+    const run_workflow_list_tool = b.addRunArtifact(workflow_list_tool);
+    if (b.args) |args| run_workflow_list_tool.addArgs(args);
+    const workflow_list_step = b.step("workflow-list", "List durable workflow executions from a workflow journal");
+    workflow_list_step.dependOn(&run_workflow_list_tool.step);
+
+    const workflow_list_tool_tests = b.addTest(.{
+        .name = "zigeffect-workflow-list-tests",
+        .root_module = workflow_list_tool_module,
+    });
+    const run_workflow_list_tool_tests = b.addRunArtifact(workflow_list_tool_tests);
+
+    const workflow_replay_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/workflow_replay.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    workflow_replay_tool_module.addImport("zigeffect", zigeffect);
+    workflow_replay_tool_module.addImport("workflow_tool_support", workflow_tool_support_module);
+
+    const workflow_replay_tool = b.addExecutable(.{
+        .name = "zigeffect-workflow-replay",
+        .root_module = workflow_replay_tool_module,
+    });
+    const run_workflow_replay_tool = b.addRunArtifact(workflow_replay_tool);
+    if (b.args) |args| run_workflow_replay_tool.addArgs(args);
+    const workflow_replay_step = b.step("workflow-replay", "Replay durable workflow state from a workflow journal");
+    workflow_replay_step.dependOn(&run_workflow_replay_tool.step);
+
+    const workflow_replay_tool_tests = b.addTest(.{
+        .name = "zigeffect-workflow-replay-tests",
+        .root_module = workflow_replay_tool_module,
+    });
+    const run_workflow_replay_tool_tests = b.addRunArtifact(workflow_replay_tool_tests);
+
+    const workflow_journal_inspect_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/workflow_journal_inspect.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    workflow_journal_inspect_tool_module.addImport("zigeffect", zigeffect);
+    workflow_journal_inspect_tool_module.addImport("workflow_tool_support", workflow_tool_support_module);
+
+    const workflow_journal_inspect_tool = b.addExecutable(.{
+        .name = "zigeffect-workflow-journal-inspect",
+        .root_module = workflow_journal_inspect_tool_module,
+    });
+    const run_workflow_journal_inspect_tool = b.addRunArtifact(workflow_journal_inspect_tool);
+    if (b.args) |args| run_workflow_journal_inspect_tool.addArgs(args);
+    const workflow_journal_inspect_step = b.step("workflow-journal-inspect", "Inspect durable workflow journal events");
+    workflow_journal_inspect_step.dependOn(&run_workflow_journal_inspect_tool.step);
+
+    const workflow_journal_inspect_tool_tests = b.addTest(.{
+        .name = "zigeffect-workflow-journal-inspect-tests",
+        .root_module = workflow_journal_inspect_tool_module,
+    });
+    const run_workflow_journal_inspect_tool_tests = b.addRunArtifact(workflow_journal_inspect_tool_tests);
 
     const causal_query_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_query.zig"),
@@ -553,6 +1015,16 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_causal_package_test_tool.step);
     test_step.dependOn(&run_causal_artifact_tool_tests.step);
     test_step.dependOn(&run_causal_backend_conformance_tests.step);
+    test_step.dependOn(&run_storage_conformance_tests.step);
+    test_step.dependOn(&run_property_history_tests.step);
+    test_step.dependOn(&run_crash_recovery_property_tests.step);
+    test_step.dependOn(&run_message_history_property_tests.step);
+    test_step.dependOn(&run_scheduler_fairness_property_tests.step);
+    test_step.dependOn(&run_performance_benchmark_tests.step);
+    test_step.dependOn(&run_resource_bounds_tests.step);
+    test_step.dependOn(&run_workflow_snapshot_frequency_tests.step);
+    test_step.dependOn(&run_cluster_observability_tests.step);
+    test_step.dependOn(&run_public_api_stability_tests.step);
     test_step.dependOn(&run_causal_jsonl_backend_tests.step);
     test_step.dependOn(&run_causal_dot_backend_tests.step);
     test_step.dependOn(&run_causal_otel_backend_tests.step);
@@ -564,6 +1036,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_causal_app_patch_proposal_tool_tests.step);
     test_step.dependOn(&run_causal_app_application_readiness_tool_tests.step);
     test_step.dependOn(&run_causal_app_apply_tool_tests.step);
+    test_step.dependOn(&run_cluster_inspect_tool_tests.step);
+    test_step.dependOn(&run_storage_migrate_tool_tests.step);
+    test_step.dependOn(&run_performance_bench_tool_tests.step);
     const causal_dev_test_step = b.step("causal-dev-test", "Run zigeffect tests with causal failure capture");
     causal_dev_test_step.dependOn(&run_causal_package_test_tool.step);
 
@@ -1497,13 +1972,44 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_scoped_fiber_example_tests.step);
     examples_step.dependOn(&causal_retry_exhaustion_example.step);
     examples_step.dependOn(&run_causal_retry_exhaustion_example_tests.step);
+    examples_step.dependOn(&workflow_approval_example.step);
+    examples_step.dependOn(&run_workflow_approval_example_tests.step);
+    examples_step.dependOn(&workflow_queue_worker_example.step);
+    examples_step.dependOn(&run_workflow_queue_worker_example_tests.step);
+    examples_step.dependOn(&workflow_timer_signal_example.step);
+    examples_step.dependOn(&run_workflow_timer_signal_example_tests.step);
+    examples_step.dependOn(&workflow_crash_recovery_example.step);
+    examples_step.dependOn(&run_workflow_crash_recovery_example_tests.step);
+    examples_step.dependOn(&local_actor_example.step);
+    examples_step.dependOn(&run_local_actor_example_tests.step);
+    examples_step.dependOn(&multi_runner_cluster_example.step);
+    examples_step.dependOn(&run_multi_runner_cluster_example_tests.step);
+    examples_step.dependOn(&cluster_workflow_migration_example.step);
+    examples_step.dependOn(&run_cluster_workflow_migration_example_tests.step);
     examples_step.dependOn(&scaffold_tool.step);
     examples_step.dependOn(&run_scaffold_tool_tests.step);
     examples_step.dependOn(&causal_report_tool.step);
     examples_step.dependOn(&run_causal_report_tool_tests.step);
     examples_step.dependOn(&causal_test_tool.step);
     examples_step.dependOn(&run_causal_test_tool_tests.step);
+    examples_step.dependOn(&cluster_runner_tool.step);
+    examples_step.dependOn(&run_cluster_runner_tool_tests.step);
+    examples_step.dependOn(&cluster_inspect_tool.step);
+    examples_step.dependOn(&run_cluster_inspect_tool_tests.step);
+    examples_step.dependOn(&storage_migrate_tool.step);
+    examples_step.dependOn(&run_storage_migrate_tool_tests.step);
+    examples_step.dependOn(&performance_bench_tool.step);
+    examples_step.dependOn(&run_performance_bench_tool_tests.step);
+    examples_step.dependOn(&release_gate_report_tool.step);
+    examples_step.dependOn(&run_release_gate_report_tool_tests.step);
     examples_step.dependOn(&run_causal_artifact_tool_tests.step);
+    examples_step.dependOn(&run_workflow_tool_support_tests.step);
+    examples_step.dependOn(&workflow_list_tool.step);
+    examples_step.dependOn(&run_workflow_list_tool_tests.step);
+    examples_step.dependOn(&workflow_replay_tool.step);
+    examples_step.dependOn(&run_workflow_replay_tool_tests.step);
+    examples_step.dependOn(&workflow_journal_inspect_tool.step);
+    examples_step.dependOn(&run_workflow_journal_inspect_tool_tests.step);
     examples_step.dependOn(&causal_query_tool.step);
     examples_step.dependOn(&run_causal_query_tool_tests.step);
     examples_step.dependOn(&causal_advice_tool.step);
@@ -1569,4 +2075,19 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_human_agent_feedback_loop_tool_tests.step);
     examples_step.dependOn(&causal_rollout_automation_guardrails_tool.step);
     examples_step.dependOn(&run_causal_rollout_automation_guardrails_tool_tests.step);
+
+    const release_gate_step = b.step("release-gate", "Run complete durable workflow and cluster release gate");
+    release_gate_step.dependOn(test_step);
+    release_gate_step.dependOn(public_api_review_step);
+    release_gate_step.dependOn(storage_conformance_step);
+    release_gate_step.dependOn(property_crash_step);
+    release_gate_step.dependOn(performance_bounds_step);
+    release_gate_step.dependOn(examples_step);
+    release_gate_step.dependOn(causal_test_step);
+    release_gate_step.dependOn(causal_artifacts_step);
+    release_gate_step.dependOn(release_gate_report_step);
+    release_gate_step.dependOn(&run_release_gate_report_tool_tests.step);
+    release_gate_step.dependOn(&run_workflow_crash_recovery_example_tests.step);
+    release_gate_step.dependOn(&run_multi_runner_cluster_example_tests.step);
+    release_gate_step.dependOn(&run_cluster_workflow_migration_example_tests.step);
 }

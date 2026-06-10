@@ -78,6 +78,7 @@ const known_causal_event_kinds = [_][]const u8{
     "metric_recorded",
     "span_recorded",
     "assertion_recorded",
+    "workflow_event_recorded",
 };
 
 pub fn isKnownCausalEventKind(kind: []const u8) bool {
@@ -171,6 +172,7 @@ test "known causal event kind helper covers current taxonomy strings" {
     try std.testing.expect(isKnownCausalEventKind("run_started"));
     try std.testing.expect(isKnownCausalEventKind("service_required"));
     try std.testing.expect(isKnownCausalEventKind("span_recorded"));
+    try std.testing.expect(isKnownCausalEventKind("workflow_event_recorded"));
     try std.testing.expect(!isKnownCausalEventKind("effect_suspended"));
 }
 

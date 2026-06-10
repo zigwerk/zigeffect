@@ -67,15 +67,23 @@ Included in this package:
 - `CausalStore` / `CausalBackend`: deterministic causal event storage, query
   helpers, report/JSON/DOT/CI formatters, and optional adapter sinks for JSON
   Lines, DOT, OpenTelemetry, embedded graph, and bounded async streams.
+- `PerformanceBenchmarkReport`: deterministic journal append/replay and mailbox
+  dispatch benchmark reports with threshold verdicts, text output, and JSON
+  output.
 - `TestEnv`: fake clock, memory filesystem, logger, config, metrics, tracing,
   runtime helpers, assertion helpers, and readable assertion report formatters.
 - `Clock`: fake/system time service used by schedules and tests.
+- `LocalAsyncBackendState`: local async wait registry for runtime suspension,
+  timer wakeups, typed network/file waits, cancellation, and wake polling.
 - `serviceNotFound`: rich compile-time diagnostics for missing environment
   services.
 
-The core fiber runtime is semantic-first and deterministic. It does not claim
-real green-thread suspension; a future optional zio adapter will provide the
-stackful coroutine and `std.Io` backend.
+The core fiber runtime is semantic-first and deterministic by default. Attach
+`LocalAsyncBackendState.backend()` to `Runtime`, `FiberRuntime`, workflow
+schedulers, or cluster transport waits when code needs backend-owned
+suspension, timer wakeups, typed network/file waits, or cancellation wakeups.
+Direct-style effects stay synchronous unless they explicitly return
+`RuntimeDecision.suspended` or call an async backend helper from context.
 
 `zigeffect` now includes the first deterministic agent-observable causal
 runtime surface: attach a `CausalStore` to a runtime, fiber runtime, layer
@@ -87,6 +95,8 @@ Docs:
 
 - [Usage](docs/usage.md)
 - [Architecture](docs/architecture.md)
+- [Public API Review](docs/public-api-review.md)
+- [Migration To Durable Runtime](docs/migration-to-durable-runtime.md)
 - [Errors](docs/errors.md)
 - [Resource Ownership](docs/resource-ownership.md)
 - [Data](docs/data.md)
@@ -104,6 +114,13 @@ Docs:
 - [Causal Scoped Fiber Scenario](examples/causal_scoped_fiber.zig)
 - [Causal Retry Exhaustion Scenario](examples/causal_retry_exhaustion.zig)
 - [Data And Matching Example](examples/data_and_matching.zig)
+- [Workflow Approval Example](examples/workflow_approval.zig)
+- [Workflow Queue Worker Example](examples/workflow_queue_worker.zig)
+- [Workflow Timer Signal Example](examples/workflow_timer_signal.zig)
+- [Workflow Crash Recovery Example](examples/workflow_crash_recovery.zig)
+- [Local Actor Example](examples/local_actor.zig)
+- [Multi-Runner Cluster Example](examples/multi_runner_cluster.zig)
+- [Cluster Workflow Migration Example](examples/cluster_workflow_migration.zig)
 - [Agent Guide](docs/agent-guide.md)
 - [Devex Review](docs/devex-review.md)
 - [Roadmap](docs/roadmap.md)
@@ -114,12 +131,42 @@ Run tests:
 bun run zigeffect:test
 ```
 
+Run the durable workflow and cluster release gate:
+
+```bash
+bun run zigeffect:release
+```
+
+The release gate runs package tests, storage conformance, property crash tests,
+bounded-resource checks, public API review, causal artifact generation, and all
+examples. It writes release reports under
+`packages/zigeffect/.zig-cache/release-gate/`.
+
 Compile and test the package examples:
 
 ```bash
 cd packages/zigeffect
 zig build examples
 ```
+
+Run the performance and bounded-resource gate:
+
+```bash
+cd packages/zigeffect
+zig build performance-bounds
+```
+
+Print the deterministic performance benchmark report:
+
+```bash
+cd packages/zigeffect
+zig build performance-bench
+zig build performance-bench -- --json
+```
+
+Default benchmark thresholds are 1,024 journal events, 1,000,000 serialized
+journal bytes, 4,096 offered mailbox messages, and 4,096 peak pending mailbox
+messages.
 
 Print a sample causal CI report:
 
@@ -976,7 +1023,7 @@ scenario registry.
 `*-registry-patch.json`, `*-registry-patch.txt`, and `*-registry-patch.zig`.
 The JSON schema is `zigeffect.causal.registry-patch.v1`. The Zig file is a
 review draft only; the command never edits `tools/causal_run.zig`, and its
-placeholder argv must be replaced with the smallest reproducing command before
+draft argv must be replaced with the smallest reproducing command before
 any manual registry change is treated as coverage.
 `causal-registry-application-readiness` reads that registry patch draft, records
 an explicit `approve` or `reject` review decision, and writes
@@ -984,7 +1031,7 @@ an explicit `approve` or `reject` review decision, and writes
 `*-registry-application-readiness.txt` with schema
 `zigeffect.causal.registry-application-readiness.v1`. Its status is
 `applicable`, `blocked`, or `not-applicable`; it verifies reviewer intent,
-registry state, placeholder argv replacement, invariant catalog consistency,
+registry state, draft argv replacement, invariant catalog consistency,
 scenario docs, and required verification commands. The gate remains
 non-mutating and always reports `applied=false`.
 `causal-registry-apply` reads the readiness report and writes

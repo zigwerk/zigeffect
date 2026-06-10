@@ -238,11 +238,11 @@ fn evaluateReadiness(allocator: std.mem.Allocator, input: ReadinessInput) !Readi
     const scenario = if (scenario_slug.len == 0) null else scenarioBySlug(scenario_slug);
     if (scenario) |current| {
         try appendCheck(allocator, &checks, "scenario-present", .pass, "scenario exists in causal_run registry");
-        const placeholder_status: CheckStatus = if (scenarioHasPlaceholderArgv(current)) .fail else .pass;
-        try appendCheck(allocator, &checks, "placeholder-argv-replaced", placeholder_status, "scenario argv is not the generated placeholder");
+        const template_status: CheckStatus = if (scenarioHasTemplateArgv(current)) .fail else .pass;
+        try appendCheck(allocator, &checks, "template-argv-replaced", template_status, "scenario argv is not the generated template");
     } else {
         try appendCheck(allocator, &checks, "scenario-present", .fail, "scenario is not present in causal_run registry");
-        try appendCheck(allocator, &checks, "placeholder-argv-replaced", .skipped, "scenario argv cannot be checked until the scenario exists");
+        try appendCheck(allocator, &checks, "template-argv-replaced", .skipped, "scenario argv cannot be checked until the scenario exists");
     }
 
     const conflict_status: CheckStatus = if (parsed.value.scenario_conflict) .fail else .pass;
@@ -313,7 +313,7 @@ fn scenarioBySlug(slug: []const u8) ?causal_run.Scenario {
     return causal_run.scenarioByName(slug) catch null;
 }
 
-fn scenarioHasPlaceholderArgv(scenario: causal_run.Scenario) bool {
+fn scenarioHasTemplateArgv(scenario: causal_run.Scenario) bool {
     return scenario.argv.len == 3 and
         std.mem.eql(u8, scenario.argv[0], "zig") and
         std.mem.eql(u8, scenario.argv[1], "build") and
@@ -641,7 +641,7 @@ const sample_add_registry_patch_json =
     \\  "scenario_conflict": false,
     \\  "known_invariant_ids": [],
     \\  "new_invariant_ids": ["service-resolution-errors-are-causal"],
-    \\  "review_checklist": ["Replace placeholder argv with the smallest reproducing command."],
+    \\  "review_checklist": ["Replace template argv with the smallest reproducing command."],
     \\  "guardrails": ["This registry patch is generated from evidence but requires explicit review."]
     \\}
 ;
@@ -814,7 +814,7 @@ test "registry readiness approves existing refined scenario with evidence" {
 
     try std.testing.expectEqual(ReadinessStatus.applicable, result.status);
     try std.testing.expect(checkPassed(result.checks, "scenario-present"));
-    try std.testing.expect(checkPassed(result.checks, "placeholder-argv-replaced"));
+    try std.testing.expect(checkPassed(result.checks, "template-argv-replaced"));
     try std.testing.expect(checkPassed(result.checks, "invariant-catalog-consistent"));
     try std.testing.expect(checkPassed(result.checks, "required-verification-recorded"));
 }

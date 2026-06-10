@@ -30,6 +30,13 @@ What is real today:
   contract.
 - Deterministic fiber lifecycle semantics exist for `fork`, `join`,
   `interrupt`, scoped leases, and coordination primitives.
+- Durable workflow and cluster prerequisites now have explicit contracts for
+  codecs, deterministic id generation, suspension/cancellation vocabulary,
+  expanded backend capability labels, and causal extension domains.
+- Durable clustering now includes production shard leasing, production-shaped
+  HTTP/socket transports, and a real shared-storage control plane for
+  membership, placement, rebalancing, drain, node-down recovery,
+  split-brain evidence, and inspection.
 - Tests cover these paths.
 
 Current boundary decisions:
@@ -59,6 +66,12 @@ Current boundary decisions:
   make Effect composition more ergonomic without cloning EffectTS, harden the
   deterministic core as the compatibility suite, then design and prototype the
   async backend boundary.
+- The durable workflows and clustering execution roadmap is captured in
+  [`../../../docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`](../../../docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md):
+  add the small core prerequisites for durability, then build local durable
+  workflow journals, workflow execution, durable timers/deferreds/queues,
+  entity actors, sharding, multi-runner clustering, real async IO, production
+  leases, transports, real clustering, and full supervision.
 
 ## Engine Integration Invariants
 
@@ -155,6 +168,8 @@ Every deeper engine change should preserve these rules:
 - Queue shutdown and scoped semaphore permit cleanup.
 - Deterministic queue producer/consumer workflow coverage under fibers.
 - Explicit deterministic backend capability boundary for future async runtimes.
+- Durable-local, async-local, and clustered backend capability labels are named
+  without changing the deterministic runtime implementation.
 
 ### Layers And DI
 

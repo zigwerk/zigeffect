@@ -18,6 +18,8 @@ test "root facade exposes domain namespaces and compatibility aliases" {
     try std.testing.expect(fx.Tracing == fx.services.Tracing);
     try std.testing.expect(fx.MemoryFileSystem == fx.services.MemoryFileSystem);
     try std.testing.expect(fx.Clock == fx.services.Clock);
+    try std.testing.expect(fx.IdGenerator == fx.services.IdGenerator);
+    try std.testing.expect(fx.CausalExtensionDomain == fx.services.CausalExtensionDomain);
     try std.testing.expect(fx.TestEnv == fx.testing.TestEnv);
 }
 test "runtime backend boundary exposes deterministic capabilities" {
@@ -27,6 +29,26 @@ test "runtime backend boundary exposes deterministic capabilities" {
     try std.testing.expect(!backend.can_interrupt_blocking_io);
     try std.testing.expect(!backend.can_supervise);
     try std.testing.expect(!backend.can_parallel);
+    try std.testing.expect(!backend.can_persist);
+    try std.testing.expect(!backend.can_distribute);
+
+    const durable = fx.durableLocalBackend();
+    try std.testing.expectEqual(fx.BackendKind.durable_local, durable.kind);
+    try std.testing.expect(durable.can_suspend);
+    try std.testing.expect(durable.can_persist);
+    try std.testing.expect(!durable.can_distribute);
+
+    const async_backend = fx.asyncLocalBackend();
+    try std.testing.expectEqual(fx.BackendKind.async_local, async_backend.kind);
+    try std.testing.expect(async_backend.can_suspend);
+    try std.testing.expect(async_backend.can_interrupt_blocking_io);
+    try std.testing.expect(async_backend.can_parallel);
+
+    const clustered = fx.clusteredBackend();
+    try std.testing.expectEqual(fx.BackendKind.clustered, clustered.kind);
+    try std.testing.expect(clustered.can_suspend);
+    try std.testing.expect(clustered.can_persist);
+    try std.testing.expect(clustered.can_distribute);
 
     var env = try fx.TestEnv.init(std.testing.allocator);
     defer env.deinit();
@@ -46,7 +68,34 @@ test "root facade exposes data match pattern and trait namespaces" {
     try std.testing.expect(fx.BigDecimal == fx.data.BigDecimal);
     try std.testing.expect(fx.DateTime == fx.data.DateTime);
     try std.testing.expect(fx.Redacted([]const u8) == fx.data.Redacted([]const u8));
+    try std.testing.expect(fx.Codec(u8) == fx.traits.Codec(u8));
     try std.testing.expect(@hasDecl(fx, "traits"));
     try std.testing.expect(@hasDecl(fx, "match"));
     try std.testing.expect(@hasDecl(fx, "pattern"));
+}
+
+test "root facade exposes durable workflow and cluster namespaces" {
+    try std.testing.expect(@hasDecl(fx, "workflow"));
+    try std.testing.expect(@hasDecl(fx, "cluster"));
+    try std.testing.expect(@hasDecl(fx, "performance"));
+    try std.testing.expectEqualStrings("workflow", fx.workflow.domain);
+    try std.testing.expectEqualStrings("cluster", fx.cluster.domain);
+    try std.testing.expectEqualStrings("performance", fx.performance.domain);
+    try std.testing.expect(@hasDecl(fx.workflow, "journal"));
+    try std.testing.expect(fx.workflow.WorkflowEvent == fx.workflow.journal.WorkflowEvent);
+    try std.testing.expect(@hasDecl(fx.workflow, "replay"));
+    try std.testing.expect(fx.workflow.WorkflowReplayState == fx.workflow.replay.WorkflowReplayState);
+    try std.testing.expect(@hasDecl(fx.workflow, "store"));
+    try std.testing.expect(fx.workflow.InMemoryJournalStore == fx.workflow.store.InMemoryJournalStore);
+    try std.testing.expect(fx.workflow.FileJournalStore == fx.workflow.store.FileJournalStore);
+    try std.testing.expect(fx.PerformanceBenchmarkOptions == fx.performance.PerformanceBenchmarkOptions);
+    try std.testing.expect(@hasDecl(fx.performance, "runPerformanceBenchmarks"));
+    try std.testing.expect(@hasDecl(fx.workflow, "definition"));
+    try std.testing.expect(fx.workflow.WorkflowMetadata == fx.workflow.definition.WorkflowMetadata);
+    try std.testing.expect(@hasDecl(fx.workflow, "activity"));
+    try std.testing.expect(fx.workflow.ActivityMetadata == fx.workflow.activity.ActivityMetadata);
+    try std.testing.expect(@hasDecl(fx.workflow, "engine"));
+    try std.testing.expect(fx.workflow.WorkflowEngine == fx.workflow.engine.WorkflowEngine);
+    try std.testing.expect(@hasDecl(fx.workflow, "context"));
+    try std.testing.expect(fx.workflow.WorkflowContext == fx.workflow.context.WorkflowContext);
 }

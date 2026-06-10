@@ -1,10 +1,33 @@
 comptime {
     _ = @import("architecture_test.zig");
+    _ = @import("public_api_stability_test.zig");
     _ = @import("dependency_test.zig");
     _ = @import("effect_test.zig");
     _ = @import("scope_test.zig");
     _ = @import("runtime_test.zig");
     _ = @import("fiber_test.zig");
+    _ = @import("supervisor_test.zig");
+    _ = @import("entity_test.zig");
+    _ = @import("message_envelope_test.zig");
+    _ = @import("message_storage_test.zig");
+    _ = @import("storage_conformance_test.zig");
+    _ = @import("cluster_transport_test.zig");
+    _ = @import("cluster_workflow_engine_test.zig");
+    _ = @import("cluster_timer_wakeup_test.zig");
+    _ = @import("cluster_queue_test.zig");
+    _ = @import("cluster_fencing_test.zig");
+    _ = @import("production_shard_leasing_test.zig");
+    _ = @import("cluster_supervision_test.zig");
+    _ = @import("cluster_observability_test.zig");
+    _ = @import("cluster_runtime_test.zig");
+    _ = @import("multi_runner_cluster_test.zig");
+    _ = @import("real_cluster_test.zig");
+    _ = @import("routing_test.zig");
+    _ = @import("runner_test.zig");
+    _ = @import("runner_storage_test.zig");
+    _ = @import("shard_lease_test.zig");
+    _ = @import("backend_conformance_test.zig");
+    _ = @import("async_backend_test.zig");
     _ = @import("causal_backend_conformance_test.zig");
     _ = @import("causal_jsonl_backend_test.zig");
     _ = @import("causal_dot_backend_test.zig");
@@ -22,4 +45,13 @@ comptime {
     _ = @import("data_test.zig");
     _ = @import("match_test.zig");
     _ = @import("pattern_test.zig");
+    _ = @import("workflow_test.zig");
+    _ = @import("resource_bounds_test.zig");
+    _ = @import("workflow_snapshot_frequency_test.zig");
+    _ = @import("performance_benchmark_test.zig");
+    _ = @import("property_history_test.zig");
+    _ = @import("crash_recovery_property_test.zig");
+    _ = @import("message_history_property_test.zig");
+    _ = @import("workflow_scheduler_test.zig");
+    _ = @import("scheduler_fairness_property_test.zig");
 }

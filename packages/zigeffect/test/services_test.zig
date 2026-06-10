@@ -31,6 +31,33 @@ test "context resolves services and test environment captures state" {
     try env.expectTrace("compile.start");
     try env.expectMetric("compile.count", 1);
 }
+
+test "id generator produces deterministic monotonic ids" {
+    var ids = fx.IdGenerator.init(10);
+
+    try std.testing.expectEqual(@as(u64, 10), ids.peek());
+    try std.testing.expectEqual(@as(u64, 10), ids.next());
+    try std.testing.expectEqual(@as(u64, 11), ids.next());
+    ids.reset(99);
+    try std.testing.expectEqual(@as(u64, 99), ids.next());
+}
+
+test "test environment exposes id generator service through context" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    var ctx = env.context();
+    const ids = ctx.service(fx.IdGenerator);
+
+    try std.testing.expectEqual(@as(u64, 1), ids.next());
+    try std.testing.expectEqual(@as(u64, 2), ids.next());
+}
+
+test "causal extension domains reserve workflow and cluster names" {
+    try std.testing.expectEqualStrings("workflow", fx.causalExtensionDomainName(.workflow));
+    try std.testing.expectEqualStrings("cluster", fx.causalExtensionDomainName(.cluster));
+}
+
 test "logger config metrics tracing and memory fs support bootstrap helpers" {
     var env = try fx.TestEnv.init(std.testing.allocator);
     defer env.deinit();

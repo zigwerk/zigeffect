@@ -9,6 +9,18 @@ pub const causal_event_taxonomy_version: u32 = 1;
 pub const causal_redaction_marker = "<redacted>";
 pub const causal_truncation_marker = "<truncated>";
 
+pub const CausalExtensionDomain = enum {
+    workflow,
+    cluster,
+};
+
+pub fn causalExtensionDomainName(domain: CausalExtensionDomain) []const u8 {
+    return switch (domain) {
+        .workflow => "workflow",
+        .cluster => "cluster",
+    };
+}
+
 pub const CausalSamplingPolicy = struct {
     log_every_n: ?usize = null,
     metric_every_n: ?usize = null,
@@ -45,6 +57,28 @@ pub const CausalEventKind = enum {
     metric_recorded,
     span_recorded,
     assertion_recorded,
+    workflow_event_recorded,
+    supervisor_child_started,
+    supervisor_restart_decided,
+    supervisor_escalated,
+    supervisor_shutdown_ordered,
+    cluster_shard_lease_acquired,
+    cluster_shard_lease_refreshed,
+    cluster_shard_lease_released,
+    cluster_shard_lease_conflict,
+    cluster_shard_handoff_started,
+    cluster_shard_recovery_started,
+    cluster_shard_recovery_completed,
+    cluster_runner_registered,
+    cluster_runner_heartbeat,
+    cluster_message_submitted,
+    cluster_message_claimed,
+    cluster_message_acked,
+    cluster_message_replied,
+    cluster_entity_registered,
+    cluster_entity_processed,
+    cluster_entity_failed,
+    cluster_trace_propagated,
 };
 
 pub const CausalEventTaxonomy = struct {
@@ -70,6 +104,28 @@ pub fn causalEventTaxonomy(kind: CausalEventKind) CausalEventTaxonomy {
         .fiber_interrupted,
         .schedule_decision,
         .assertion_recorded,
+        .workflow_event_recorded,
+        .supervisor_child_started,
+        .supervisor_restart_decided,
+        .supervisor_escalated,
+        .supervisor_shutdown_ordered,
+        .cluster_shard_lease_acquired,
+        .cluster_shard_lease_refreshed,
+        .cluster_shard_lease_released,
+        .cluster_shard_lease_conflict,
+        .cluster_shard_handoff_started,
+        .cluster_shard_recovery_started,
+        .cluster_shard_recovery_completed,
+        .cluster_runner_registered,
+        .cluster_runner_heartbeat,
+        .cluster_message_submitted,
+        .cluster_message_claimed,
+        .cluster_message_acked,
+        .cluster_message_replied,
+        .cluster_entity_registered,
+        .cluster_entity_processed,
+        .cluster_entity_failed,
+        .cluster_trace_propagated,
         => .{
             .structural = true,
             .finding_evidence = true,

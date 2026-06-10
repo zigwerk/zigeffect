@@ -16,11 +16,18 @@ packages/zigeffect/src/zigeffect.zig
 
 That file is a facade. It exports domain namespaces such as `fx.core`,
 `fx.effect`, `fx.runtime`, `fx.layer`, `fx.services`, `fx.data`, `fx.match`,
-`fx.pattern`, and `fx.traits`, while preserving the existing top-level aliases
-such as `fx.Effect`, `fx.Context`, `fx.Scope`, `fx.Runtime`, `fx.Layer`,
-`fx.Schedule`, and `fx.TestEnv`. Domain namespaces also expose ergonomic
-aliases, for example `fx.effect.Effect`, `fx.runtime.Runtime`,
-`fx.layer.Layer`, `fx.services.Logger`, and `fx.data.Option`.
+`fx.pattern`, `fx.traits`, `fx.workflow`, and `fx.cluster`, while preserving
+the existing top-level aliases such as `fx.Effect`, `fx.Context`, `fx.Scope`,
+`fx.Runtime`, `fx.Layer`, `fx.Schedule`, and `fx.TestEnv`. It also exposes
+`fx.storage` for durable storage schema metadata and SQL migration plans, and
+`fx.performance` for deterministic benchmark reports and bounded-resource
+verification gates. Domain namespaces also expose ergonomic aliases, for
+example `fx.effect.Effect`, `fx.runtime.Runtime`, `fx.layer.Layer`,
+`fx.services.Logger`, and `fx.data.Option`.
+
+See [Public API Review](public-api-review.md) for the stabilized durable
+workflow and cluster surface, ownership rules, schema versioning policy, and
+backend compatibility notes.
 
 Package users should keep importing the facade:
 
@@ -83,11 +90,35 @@ Owns execution runtimes and deterministic concurrency primitives:
 - `runner.zig`: managed-scope run/exit helper shared by runtime, layer, and
   graph paths.
 - `fiber.zig`: `Fiber`, `FiberRuntime`, deterministic lifecycle semantics.
-- `coordination.zig`: `Deferred`, `Queue`, `Semaphore`.
+- `coordination.zig`: `Deferred`, `Queue`, `Semaphore`, queue wait states, and
+  queue capacity stats.
 - `backend.zig`: backend capability contract and deterministic backend marker.
+- `async_backend.zig`: async backend vtable plus the local backend state for
+  suspend, wake, timers, typed network/file waits, cancellation, wake polling,
+  and scope interruption finalizers.
+- `backend_diagnostics.zig`: backend capability requirements and formatted
+  diagnostics for unsupported runtime features.
+- `control.zig`: shared suspension and cooperative cancellation vocabulary.
+- `supervisor.zig`: local supervision definitions, child specs, restart modes,
+  one-for-one/one-for-all/rest-for-one strategies, restart intensity, shutdown
+  ordering, `Cause` evidence, and causal supervisor events.
 
-Runtime/scope/fiber cohesion, coordination backpressure, scoped permits, and
-future backend boundaries belong here.
+Runtime/scope/fiber cohesion, coordination backpressure, scoped permits,
+controlled suspension vocabulary, cooperative cancellation, and backend wait
+ownership belong here.
+
+Runtime backend capabilities include operation-specific async workflow flags for
+wake, timer scheduling, interruption, and durable suspension. The async backend
+vtable supports runtime suspension, wake polling, timer advancement, typed
+network/file waits, and interrupt requests. `LocalAsyncBackendState` implements
+that vtable for local execution and tests. Backend diagnostics format missing
+capability errors so workflow code can fail clearly before a deterministic
+backend attempts async-only behavior.
+
+Local supervision is a deterministic policy layer. It records child specs and
+restart decisions, preserves failure evidence through `Cause`, and emits causal
+events, but real async execution and distributed supervision remain separate
+backend and cluster milestones.
 
 ```text
 src/layer/
@@ -116,10 +147,11 @@ Owns built-in services:
 - `metrics.zig`
 - `tracing.zig`
 - `memory_file_system.zig`
+- `id_generator.zig`
 
-Production config, logger, metrics, tracing, and filesystem service contracts
-belong here. Keep these services layered on the core instead of adding
-observability complexity to `Effect` or `Runtime`.
+Production config, logger, metrics, tracing, filesystem, and id generation
+service contracts belong here. Keep these services layered on the core instead
+of adding observability or durable runtime complexity to `Effect` or `Runtime`.
 
 ```text
 src/traits/
@@ -132,9 +164,11 @@ Owns small typeclass-ish contracts used by data and pattern helpers:
 - `order.zig`
 - `show.zig`
 - `redaction.zig`
+- `codec.zig`
 
-Equality, hashing, ordering, formatting, and redaction marker behavior belong
-here when they need to compose across data structures.
+Equality, hashing, ordering, formatting, redaction marker behavior, and
+allocator-explicit encoding/decoding contracts belong here when they need to
+compose across data structures, durable payloads, snapshots, or messages.
 
 ```text
 src/data/
@@ -184,6 +218,278 @@ Wildcards, ranges, predicates, optionals, nested struct patterns, typed
 captures, and structural union arms belong here.
 
 ```text
+src/workflow/
+```
+
+Owns local durable workflow runtime surfaces:
+
+- `root.zig`: workflow namespace facade and ergonomic public aliases.
+- `definition.zig`: typed workflow definitions, metadata, idempotency key
+  callback validation, deterministic execution id derivation, and service
+  requirements.
+- `activity.zig`: typed activity definitions, metadata, idempotency key
+  callback validation, retry schedule attachment, timeout metadata,
+  compensation metadata, formatting, and service requirements.
+- `context.zig`: replay-aware workflow context, deterministic step and
+  activity sequence assignment, recorded outcome lookup, activity result codec
+  boundaries, attempt counters, retry schedule decisions, clock-backed retry
+  delays, timeout terminal events, durable compensation registration and
+  reverse-order execution, durable deferred awaits, durable `sleep` and
+  `sleepUntil` suspension, durable `waitForSignal` suspension and consumption,
+  durable queue offer/await/ack through `queue`, causal schedule mapping, and
+  `Exit`/`Cause` failure journaling.
+- `deferred.zig`: durable deferred await result type, stable deferred identity,
+  and external complete, fail, and cancel APIs.
+- `clock.zig`: stable timer identity, durable sleep result type, due timer
+  query, timer firing, timer cancellation, and journal-store-compatible wake-up
+  helpers for in-memory and append-only file stores.
+- `signal.zig`: named signal definitions, stable signal identity, durable wait
+  result type, external signal append API, idempotency keys, and suspended
+  workflow wake-up for signal receipt.
+- `queue.zig`: typed durable queue definitions, stable queue item identity,
+  idempotent offers, worker claims, concurrency limits, completion/failure,
+  expired-claim retry, ack state, and workflow wake-up for queue terminals.
+- `scheduler.zig`: local cooperative workflow scheduler, runnable workflow
+  worker registry, durable timer watches, typed durable queue workers, graceful
+  shutdown, fair cursors, and bounded tick/drain budgets.
+- `lifecycle.zig`: external suspend, resume, interrupt, and cancel controls
+  over `JournalStore`, including durable lifecycle rows, idempotent terminal
+  transitions, and explicit terminal rows for pending timers, deferreds,
+  queues, and activities during interrupt or cancellation.
+- `inspect.zig`: workflow journal execution grouping, replay report building,
+  pending-work summaries, last-failure extraction, and stable text/JSON report
+  formatting for humans and agents.
+- `causal.zig`: workflow journal to causal event mapping, workflow causal
+  store construction, workflow failure/retry/suspend/resume findings, and
+  reuse of shared causal report, JSON, and DOT rendering for durable histories.
+- `engine.zig`: workflow engine registration, provider requirement validation,
+  backend requirement checks, durable `workflow_started` appends, typed poll
+  results, execution inspection, duplicate execution checks, and in-memory
+  execution indexing.
+- `journal.zig`: workflow journal id aliases, event kinds, event envelope,
+  schema constants, version-aware compatibility classification, current-row
+  migration registry, unknown-event policy, event clone/free helpers, JSON
+  parser, and JSON/text formatters.
+- `replay.zig`: workflow replay status, state rows, malformed history errors,
+  and deterministic event-folding logic.
+- `store.zig`: journal store contract, append/read batches, optimistic
+  sequence checks, idempotency-key duplicate detection, in-memory store,
+  append-only file store, opt-in event bounds, capacity stats, segment naming,
+  lock guard, partial-write recovery, future-schema downgrade failure before
+  mutation, corruption reports, fsync policy, checkpoint JSON, replay snapshot
+  frequency controls, snapshot commit metadata, archive export, retention
+  policies, and completed-workflow compaction.
+
+Workflow definitions, activity definitions, journal events, replay state,
+journal stores, durable timers, durable deferreds, durable queues, durable
+compensations, signals, lifecycle controls, inspectors, and replay helpers
+belong here. Workflow code should consume `core`, `runtime`, `effect`, `layer`,
+`services`, and `traits` contracts instead of expanding those domains with
+workflow-specific behavior.
+
+Workflow storage conformance is shared through `src/storage/` metadata and the
+`test/support/*_conformance.zig` helpers. Generated workflow histories live in
+test support and verify replay equivalence across direct fold, incremental
+apply, in-memory journals, reopened file journals, and partial-tail file
+recovery.
+
+Workflow causal integration belongs in `src/workflow/causal.zig`, with the
+shared causal runtime remaining in `src/services/causal.zig`. Query tools and
+dogfood harnesses should consume workflow causal JSON/DOT/report helpers rather
+than re-parsing workflow journal rows ad hoc.
+
+### Workflow Snapshots, Archives, And Compaction
+
+The local workflow file store writes normal events to the active JSONL segment.
+Replay snapshots use `workflow-checkpoint-{sequence}.json`, and
+`workflow-snapshot-commit-{sequence}.json` is the commit point that makes a
+checkpoint eligible for recovery. Recovery loads the highest committed
+checkpoint and then replays only segment rows with a greater sequence.
+
+Completed workflow compaction exports acknowledged rows to
+`workflow-archive-{first}-{last}.jsonl`, commits a checkpoint, and truncates the
+active segment only after the commit marker exists. A crash before the commit
+falls back to full segment replay; a crash after the commit recovers from
+checkpoint plus tail. Retention policies can keep all rows, archive then
+compact completed workflows, or checkpoint-only compact completed workflows.
+`WorkflowSnapshotFrequency` can trigger explicit replay snapshots after a
+configured event interval, and the file store resets its in-memory replay tail
+after the committed checkpoint so long histories can run with bounded local
+memory.
+
+### Async-Aware Local Scheduling
+
+The workflow scheduler is a local orchestration boundary over the journal,
+durable clock, durable queues, and optional async backend. `tick` keeps the
+deterministic polling contract. `tickAsync` registers pending durable timers
+with the async backend, advances backend time from the scheduler clock, consumes
+ready wake events, fires due timers, processes queue workers, and wakes queue
+suspensions after terminal journal writes. Cluster and supervision modules
+should reuse this boundary instead of bypassing the workflow journal.
+
+```text
+src/cluster/
+```
+
+Owns Erlang-style distributed runtime surfaces:
+
+- `root.zig`: cluster namespace facade and ergonomic public aliases.
+- `identity.zig`: local entity type, id, address, and stable id derivation.
+- `mailbox.zig`: local in-memory entity envelopes, per-entity FIFO mailbox
+  storage, opt-in total/per-mailbox bounds, pressure stats, ask correlations,
+  reply storage, lease epoch metadata, and envelope ownership helpers.
+- `entity.zig`: local entity runtime, runtime-bound refs, entity scopes,
+  services, finalizers, idle shutdown, and supervisor-backed handler failure
+  recovery.
+- `envelope.zig`: durable cluster message protocol with message ids,
+  idempotency keys, request/reply/ack/interrupt/chunk-reply envelopes,
+  lease epoch metadata, at-least-once delivery tracking, duplicate reply
+  detection, and redacted diagnostics.
+- `message_storage.zig`: shard-aware durable message and reply storage
+  contract, in-memory storage, file-backed append/recovery semantics, and
+  stable JSON compatibility helpers with optional lease epoch persistence for
+  backward-compatible record replay.
+- `routing.zig`: deterministic shard ids, entity-id shard hashing,
+  configurable local shard routing tables, local route targets, and
+  snapshot/reload helpers for restart-stable routing.
+- `runner.zig`: stable runner and machine identity, startup registration,
+  heartbeat history, in-memory health events, and local runner health
+  inspection reports.
+- `runner_storage.zig`: runner storage contract, shard lease metadata,
+  in-memory lease table, file-backed per-shard lease files, and local atomic
+  acquire/refresh/release operations.
+- `fencing.zig`: shard lease fence tokens, stale epoch validation, and
+  diagnostics that make outdated shard owners harmless before mailbox or
+  workflow journal mutation.
+- `lease_guard.zig`: storage-backed write guards for message, mailbox, and
+  workflow journal mutations; guarded `JournalStore` wrapper; and
+  `lease_epoch` detail helpers for journal, queue, and timer events.
+- `supervision.zig`: cluster supervision policies, reports, runner restart
+  intensity state, workflow-worker classification, and shard-release
+  escalation vocabulary.
+- `observability.zig`: cluster causal query reports, failure summaries,
+  cluster-only DOT rendering, mailbox lag and message backpressure metrics,
+  metrics collection, and message trace context helpers.
+- `shard_lease.zig`: local shard lease manager with bounded TTLs, deterministic
+  renewal jitter, renewal deadlines, clock-skew-tolerant expiry, owned-lease
+  audit reports, forced stale release, graceful handoff, dead-runner recovery,
+  and causal shard ownership events.
+- `runtime.zig`: shard-owned cluster runtime that registers local entities,
+  accepts messages for owned shards, validates storage-backed lease guards
+  before durable message writes, dispatches durable envelopes, stores replies,
+  acknowledges processed messages, and releases owned shards on shutdown.
+- `local_cluster.zig`: local multi-runner composition for shared storage,
+  balanced shard acquisition, durable message routing, runner ticks, and
+  dead-runner shard recovery.
+- `real_cluster.zig`: real cluster control plane for runner admission,
+  membership discovery, deterministic shard placement, durable lease
+  rebalancing, graceful drain, node-down recovery, split-brain evidence, and
+  text/JSON inspection reports.
+- `transport.zig`: durable cluster transport boundary with a synchronous
+  vtable, versioned request/response JSON, in-process transport, loopback HTTP
+  transport, production HTTP transport, and production socket-frame transport.
+  Production transports enforce auth hooks, envelope limits, backpressure,
+  retry policy, trace/chunk propagation, lifecycle metrics, and secret-free
+  failure evidence before appending accepted ingress messages to
+  `MessageStorage`.
+- `workflow_engine.zig`: shard-owned durable workflow command layer that maps
+  execution ids to workflow execution entities, routes commands through cluster
+  transport, mutates `JournalStore` from the owning entity through a guarded
+  journal wrapper, rebuilds execution entity registrations after shard
+  migration, and exposes timer, deferred, signal, and queue command paths
+  through shard ownership.
+- `timer_wakeup.zig`: journal-backed cluster timer wakeup index that rebuilds
+  owned timers after shard acquisition, derives ownership from workflow
+  execution shards, filters terminal and duplicate timer records, and reports
+  late due timers before the workflow entity fires them through the durable
+  clock.
+- `queue.zig`: journal-backed cluster queue work index that rebuilds owned
+  queue items after shard acquisition, folds durable queue status by sequence,
+  reports claimable and expired work, and applies runner and per-queue selection
+  limits before claims are routed through the workflow entity.
+
+Entity identity, actor references, message envelopes, durable message storage,
+shard ids, runner ids, runner storage, leases, rebalancing, transports,
+cluster workflow integration, and supervision across entities, shards, runners,
+and transports belong here. Cluster code should build on workflow and runtime
+contracts instead of making durable state depend on runner memory.
+
+Runner and message storage conformance is shared through `src/storage/`
+metadata and the `test/support/*_conformance.zig` helpers. Generated message
+histories exercise duplicate submits, claims, replies, acknowledgements, shard
+queries, id lookups, and reopen behavior across in-memory and file-backed
+message storage.
+
+The local entity runtime remains single-process and in-memory, but the cluster
+boundary now has durable message storage, durable runner ownership, production
+transports, and a real control plane over shared stores. Runners call
+`syncOwnedShards` after a controller-driven rebalance, drain, or recovery before
+processing reassigned shards.
+
+```text
+src/performance/
+```
+
+Owns deterministic benchmark reporting and bounded-resource gates:
+
+- `root.zig`: performance namespace facade and public aliases.
+- `benchmark.zig`: stable journal append/replay and mailbox dispatch benchmark
+  report types, threshold verdicts, text formatter, JSON formatter, and local
+  runner.
+
+Performance reports intentionally use deterministic work counters instead of
+wall-clock timing. The focused `performance-bounds` build step checks the
+benchmark report shape, journal bounds, mailbox bounds, queue stats, replay
+snapshot frequency, and cluster backpressure metrics. The
+`performance-bench` command prints the default text report and supports
+`--json` for agent and CI consumers. Default thresholds are 1,024 journal
+events, 1,000,000 serialized journal bytes, 4,096 offered mailbox messages,
+and 4,096 peak pending mailbox messages.
+
+```text
+src/storage/
+```
+
+Owns durable storage adapter metadata:
+
+- `root.zig`: storage namespace facade and public aliases.
+- `schema.zig`: durable storage schema catalog, compatibility reports, and
+  text/JSON formatting.
+- `sql.zig`: SQL-shaped storage migration plans for PostgreSQL-compatible and
+  Cockroach-compatible deployments.
+
+Storage adapter metadata, schema compatibility, and migration planning belong
+here. Concrete workflow and cluster storage implementations remain in their
+own domain folders.
+
+```text
+tools/
+```
+
+Owns local developer and agent CLI entrypoints:
+
+- `workflow_tool_support.zig`: shared workflow CLI argument parsing and
+  fixture/file-journal event loading.
+- `workflow_list.zig`: `zig build workflow-list` execution summary command.
+- `workflow_replay.zig`: `zig build workflow-replay` selected execution replay
+  command.
+- `workflow_journal_inspect.zig`: `zig build workflow-journal-inspect` selected
+  execution event inspection command.
+- `cluster_inspect.zig`: `zig build cluster-inspect` durable cluster storage,
+  membership, lease, lag, rebalance, and failure inspection command.
+- `storage_migrate.zig`: `zig build storage-migrate` storage schema catalog and
+  SQL migration plan command.
+- `performance_bench.zig`: `zig build performance-bench` deterministic
+  performance threshold report command.
+
+Workflow tools should stay thin and delegate durable state interpretation to
+`src/workflow/inspect.zig`. Cluster tools should stay thin and delegate
+membership, lease, and metrics interpretation to `src/cluster/real_cluster.zig`.
+Storage tools should stay thin and delegate schema and migration planning to
+`src/storage/`. Performance tools should stay thin and delegate benchmark
+report construction to `src/performance/`.
+
+```text
 src/testing/
 ```
 
@@ -205,6 +511,9 @@ Implementation modules follow this direction:
   helpers only when sharing an execution path.
 - `services/*` imports `std` and service-local dependencies.
 - `testing/*` may import any public domain needed to assemble test services.
+- `workflow/*` may import core, dependency, effect, runtime, layer, services,
+  traits, and data modules, but not `cluster/*`.
+- `cluster/*` may import workflow and lower-level domains.
 - No implementation module imports `src/zigeffect.zig`.
 
 When adding a feature, start in the owning domain and pull in smaller contracts
@@ -235,6 +544,9 @@ It imports domain test files:
 - `data_test.zig`
 - `match_test.zig`
 - `pattern_test.zig`
+- `performance_benchmark_test.zig`
+- `resource_bounds_test.zig`
+- `workflow_snapshot_frequency_test.zig`
 
 Shared test-only helpers live in:
 
