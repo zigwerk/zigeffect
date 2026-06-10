@@ -9,6 +9,7 @@ comptime {
     _ = @import("entity_test.zig");
     _ = @import("message_envelope_test.zig");
     _ = @import("message_storage_test.zig");
+    _ = @import("storage_conformance_test.zig");
     _ = @import("cluster_transport_test.zig");
     _ = @import("cluster_workflow_engine_test.zig");
     _ = @import("cluster_timer_wakeup_test.zig");
