@@ -345,29 +345,69 @@ pub const FileMessageStorage = struct {
         return .{ .envelope = returned };
     }
 
-    pub fn claim(self: *FileMessageStorage, request: MessageStorageClaim) MessageStorageError!MessageEnvelope {
-        _ = self;
-        _ = request;
-        return error.MessageNotFound;
+    pub fn claim(self: *FileMessageStorage, request: MessageStorageClaim) !MessageEnvelope {
+        const name = try messageRecordFileName(self.allocator, self.options, request.message_id);
+        defer self.allocator.free(name);
+        var record = (try self.readMessageRecordWithAllocator(name, self.allocator)) orelse return error.MessageNotFound;
+        defer record.deinit(self.allocator);
+
+        if (record.shard_id != request.shard_id) return error.MessageNotFound;
+        if (!messageIsUnprocessed(record.status)) return error.MessageNotFound;
+
+        record.status = .claimed;
+        record.envelope.attempt += 1;
+        record.updated_at_ms = request.now_ms;
+        try self.writeMessageRecord(record);
+        return envelope_mod.cloneMessageEnvelope(self.allocator, record.envelope);
     }
 
-    pub fn ack(self: *FileMessageStorage, request: MessageStorageAck) MessageStorageError!void {
-        _ = self;
-        _ = request;
-        return error.MessageNotFound;
+    pub fn ack(self: *FileMessageStorage, request: MessageStorageAck) !void {
+        const name = try messageRecordFileName(self.allocator, self.options, request.message_id);
+        defer self.allocator.free(name);
+        var record = (try self.readMessageRecordWithAllocator(name, self.allocator)) orelse return error.MessageNotFound;
+        defer record.deinit(self.allocator);
+
+        record.status = .acknowledged;
+        record.updated_at_ms = request.now_ms;
+        try self.writeMessageRecord(record);
     }
 
-    pub fn storeReply(self: *FileMessageStorage, request: MessageStorageReply) MessageStorageError!MessageEnvelope {
-        _ = self;
-        _ = request;
-        return error.MissingRequest;
+    pub fn storeReply(self: *FileMessageStorage, request: MessageStorageReply) !MessageEnvelope {
+        const correlation_id = request.envelope.correlation_id orelse return error.MissingRequest;
+        const reply_name = try replyRecordFileName(self.allocator, self.options, correlation_id);
+        defer self.allocator.free(reply_name);
+        if (try self.readReplyRecordWithAllocator(reply_name, self.allocator)) |duplicate| {
+            var duplicate_reply = duplicate;
+            defer duplicate_reply.deinit(self.allocator);
+            return error.DuplicateReply;
+        }
+
+        var request_record = (try self.findRequestRecordByCorrelation(correlation_id)) orelse return error.MissingRequest;
+        defer request_record.deinit(self.allocator);
+
+        const owned = try prepareEnvelope(self.allocator, request.envelope);
+        errdefer envelope_mod.deinitMessageEnvelope(self.allocator, owned);
+        const returned = try envelope_mod.cloneMessageEnvelope(self.allocator, owned);
+        errdefer envelope_mod.deinitMessageEnvelope(self.allocator, returned);
+        var reply_record: StoredReplyRecord = .{
+            .shard_id = request.shard_id,
+            .envelope = owned,
+            .stored_at_ms = request.now_ms,
+        };
+        defer reply_record.deinit(self.allocator);
+
+        try self.writeReplyRecord(reply_record);
+        request_record.status = .replied;
+        request_record.updated_at_ms = request.now_ms;
+        try self.writeMessageRecord(request_record);
+        return returned;
     }
 
-    pub fn reply(self: *FileMessageStorage, correlation_id: MessageCorrelationId, allocator: Allocator) Allocator.Error!?MessageEnvelope {
-        _ = self;
-        _ = correlation_id;
-        _ = allocator;
-        return null;
+    pub fn reply(self: *FileMessageStorage, correlation_id: MessageCorrelationId, allocator: Allocator) !?MessageEnvelope {
+        const name = try replyRecordFileName(self.allocator, self.options, correlation_id);
+        defer self.allocator.free(name);
+        const record = (try self.readReplyRecordWithAllocator(name, allocator)) orelse return null;
+        return record.envelope;
     }
 
     pub fn unprocessedByShard(self: *FileMessageStorage, shard_id: ShardId, allocator: Allocator) !MessageRecordBatch {
@@ -431,10 +471,32 @@ pub const FileMessageStorage = struct {
         return null;
     }
 
+    fn findRequestRecordByCorrelation(self: *FileMessageStorage, correlation_id: MessageCorrelationId) !?StoredMessageRecord {
+        var iterator = self.dir.iterate();
+        while (try iterator.next(self.io)) |entry| {
+            if (messageIdFromFileName(self.options, entry.name) == null) continue;
+            var record = (try self.readMessageRecordWithAllocator(entry.name, self.allocator)) orelse continue;
+            if (record.envelope.kind == .request and record.envelope.correlation_id == correlation_id) {
+                return record;
+            }
+            record.deinit(self.allocator);
+        }
+        return null;
+    }
+
     fn writeMessageRecord(self: *FileMessageStorage, record: StoredMessageRecord) !void {
         const name = try messageRecordFileName(self.allocator, self.options, record.envelope.id);
         defer self.allocator.free(name);
         const content = try formatStoredMessageRecordJson(self.allocator, record);
+        defer self.allocator.free(content);
+        try self.writeAtomicFile(name, content);
+    }
+
+    fn writeReplyRecord(self: *FileMessageStorage, record: StoredReplyRecord) !void {
+        const correlation_id = record.envelope.correlation_id orelse return error.MissingRequest;
+        const name = try replyRecordFileName(self.allocator, self.options, correlation_id);
+        defer self.allocator.free(name);
+        const content = try formatStoredReplyRecordJson(self.allocator, record);
         defer self.allocator.free(content);
         try self.writeAtomicFile(name, content);
     }
@@ -453,6 +515,20 @@ pub const FileMessageStorage = struct {
         return try parseStoredMessageRecordJson(allocator, content);
     }
 
+    fn readReplyRecordWithAllocator(self: *FileMessageStorage, name: []const u8, allocator: Allocator) !?StoredReplyRecord {
+        const content = self.dir.readFileAlloc(
+            self.io,
+            name,
+            self.allocator,
+            std.Io.Limit.limited(self.options.max_record_bytes),
+        ) catch |err| switch (err) {
+            error.FileNotFound => return null,
+            else => return err,
+        };
+        defer self.allocator.free(content);
+        return try parseStoredReplyRecordJson(allocator, content);
+    }
+
     fn writeAtomicFile(self: *FileMessageStorage, name: []const u8, content: []const u8) !void {
         var file = try self.dir.createFileAtomic(self.io, name, .{ .replace = true });
         defer file.deinit(self.io);
@@ -468,6 +544,25 @@ const StoredMessageRecordJson = struct {
     status: []const u8,
     stored_at_ms: u64,
     updated_at_ms: u64,
+    id: MessageId,
+    kind: []const u8,
+    entity_type_name: []const u8,
+    entity_id: u64,
+    correlation_id: ?MessageCorrelationId = null,
+    idempotency_key: []const u8 = "",
+    attempt: envelope_mod.MessageAttempt = 0,
+    chunk_index: ?u32 = null,
+    chunk_count: ?u32 = null,
+    payload_type_name: []const u8 = "",
+    payload: []const u8 = "",
+    redacted_detail: []const u8 = "",
+};
+
+const StoredReplyRecordJson = struct {
+    schema: []const u8,
+    schema_version: u32,
+    shard_id: ShardId,
+    stored_at_ms: u64,
     id: MessageId,
     kind: []const u8,
     entity_type_name: []const u8,
@@ -546,6 +641,38 @@ pub fn parseStoredMessageRecordJson(allocator: Allocator, content: []const u8) (
     };
 }
 
+pub fn formatStoredReplyRecordJson(allocator: Allocator, record: StoredReplyRecord) Allocator.Error![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\"schema\":");
+    try appendJsonString(&output, allocator, message_reply_schema);
+    try output.print(allocator, ",\"schema_version\":{d}", .{message_reply_schema_version});
+    try output.print(allocator, ",\"shard_id\":{d}", .{record.shard_id});
+    try output.print(allocator, ",\"stored_at_ms\":{d}", .{record.stored_at_ms});
+    try appendEnvelopeJsonFields(&output, allocator, record.envelope);
+    try output.append(allocator, '}');
+    return output.toOwnedSlice(allocator);
+}
+
+pub fn parseStoredReplyRecordJson(allocator: Allocator, content: []const u8) (Allocator.Error || MessageStorageError)!StoredReplyRecord {
+    var parsed = std.json.parseFromSlice(StoredReplyRecordJson, allocator, content, .{ .ignore_unknown_fields = true }) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.CorruptMessageFile,
+    };
+    defer parsed.deinit();
+
+    if (!std.mem.eql(u8, parsed.value.schema, message_reply_schema)) return error.CorruptMessageFile;
+    if (parsed.value.schema_version != message_reply_schema_version) return error.CorruptMessageFile;
+    const kind = std.meta.stringToEnum(envelope_mod.MessageEnvelopeKind, parsed.value.kind) orelse return error.CorruptMessageFile;
+
+    return .{
+        .shard_id = parsed.value.shard_id,
+        .envelope = try envelopeFromJson(allocator, parsed.value, kind),
+        .stored_at_ms = parsed.value.stored_at_ms,
+    };
+}
+
 fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []const u8) Allocator.Error!void {
     try output.append(allocator, '"');
     for (value) |byte| {
@@ -593,7 +720,7 @@ fn appendEnvelopeJsonFields(output: *std.ArrayList(u8), allocator: Allocator, en
     try appendJsonString(output, allocator, envelope.redacted_detail);
 }
 
-fn envelopeFromJson(allocator: Allocator, value: StoredMessageRecordJson, kind: envelope_mod.MessageEnvelopeKind) Allocator.Error!MessageEnvelope {
+fn envelopeFromJson(allocator: Allocator, value: anytype, kind: envelope_mod.MessageEnvelopeKind) Allocator.Error!MessageEnvelope {
     const entity_type_name = try allocator.dupe(u8, value.entity_type_name);
     errdefer allocator.free(entity_type_name);
     const idempotency_key = if (value.idempotency_key.len == 0) "" else try allocator.dupe(u8, value.idempotency_key);

@@ -216,3 +216,124 @@ test "file message storage detects duplicate submissions after reopen" {
     defer duplicate.deinit(std.testing.allocator);
     try std.testing.expect(duplicate.duplicate);
 }
+
+test "file message storage recovers acked status after reopen" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const address = fx.entityAddress("counter", "file-ack");
+    var message_id: fx.MessageId = 0;
+
+    {
+        var file_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer file_state.deinit();
+        const storage = file_state.asMessageStorage();
+        var submitted = try storage.submit(.{
+            .shard_id = 8,
+            .now_ms = 4_000,
+            .envelope = .{ .kind = .request, .address = address, .idempotency_key = "file-ack", .payload = "inc" },
+        });
+        defer submitted.deinit(std.testing.allocator);
+        message_id = submitted.envelope.id;
+        const claimed = try storage.claim(.{ .shard_id = 8, .message_id = message_id, .now_ms = 4_010 });
+        defer fx.deinitMessageEnvelope(std.testing.allocator, claimed);
+        try storage.ack(.{ .message_id = message_id, .now_ms = 4_020 });
+    }
+
+    var reopened_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer reopened_state.deinit();
+    const reopened = reopened_state.asMessageStorage();
+    var by_shard = try reopened.unprocessedByShard(8, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 0), by_shard.records.len);
+    try std.testing.expect((try reopened.unprocessedById(message_id, std.testing.allocator)) == null);
+}
+
+test "file message storage recovers replies after reopen" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const address = fx.entityAddress("counter", "file-reply");
+    var correlation_id: fx.MessageCorrelationId = 0;
+
+    {
+        var file_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer file_state.deinit();
+        const storage = file_state.asMessageStorage();
+        var submitted = try storage.submit(.{
+            .shard_id = 8,
+            .now_ms = 4_000,
+            .envelope = .{ .kind = .request, .address = address, .idempotency_key = "file-reply", .payload = "get" },
+        });
+        defer submitted.deinit(std.testing.allocator);
+        correlation_id = submitted.envelope.correlation_id.?;
+        const stored_reply = try storage.storeReply(.{
+            .shard_id = 8,
+            .now_ms = 4_010,
+            .envelope = .{ .kind = .reply, .address = address, .correlation_id = correlation_id, .payload = "value=1" },
+        });
+        defer fx.deinitMessageEnvelope(std.testing.allocator, stored_reply);
+    }
+
+    var reopened_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer reopened_state.deinit();
+    const reopened = reopened_state.asMessageStorage();
+    const found_reply = (try reopened.reply(correlation_id, std.testing.allocator)).?;
+    defer fx.deinitMessageEnvelope(std.testing.allocator, found_reply);
+    try std.testing.expectEqualStrings("value=1", found_reply.payload);
+    try std.testing.expectError(error.DuplicateReply, reopened.storeReply(.{
+        .shard_id = 8,
+        .now_ms = 4_020,
+        .envelope = .{ .kind = .reply, .address = address, .correlation_id = correlation_id, .payload = "value=2" },
+    }));
+}
+
+test "file message storage recovery keeps unprocessed messages and replies" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const pending_address = fx.entityAddress("counter", "pending");
+    const claimed_address = fx.entityAddress("counter", "claimed");
+    const replied_address = fx.entityAddress("counter", "replied");
+    var reply_correlation_id: fx.MessageCorrelationId = 0;
+
+    {
+        var file_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+        defer file_state.deinit();
+        const storage = file_state.asMessageStorage();
+        var pending = try storage.submit(.{
+            .shard_id = 9,
+            .now_ms = 5_000,
+            .envelope = .{ .kind = .request, .address = pending_address, .idempotency_key = "pending", .payload = "one" },
+        });
+        defer pending.deinit(std.testing.allocator);
+        var claimed = try storage.submit(.{
+            .shard_id = 9,
+            .now_ms = 5_001,
+            .envelope = .{ .kind = .request, .address = claimed_address, .idempotency_key = "claimed", .payload = "two" },
+        });
+        defer claimed.deinit(std.testing.allocator);
+        const claimed_envelope = try storage.claim(.{ .shard_id = 9, .message_id = claimed.envelope.id, .now_ms = 5_010 });
+        defer fx.deinitMessageEnvelope(std.testing.allocator, claimed_envelope);
+        var replied = try storage.submit(.{
+            .shard_id = 9,
+            .now_ms = 5_002,
+            .envelope = .{ .kind = .request, .address = replied_address, .idempotency_key = "replied", .payload = "three" },
+        });
+        defer replied.deinit(std.testing.allocator);
+        reply_correlation_id = replied.envelope.correlation_id.?;
+        const stored_reply = try storage.storeReply(.{
+            .shard_id = 9,
+            .now_ms = 5_020,
+            .envelope = .{ .kind = .reply, .address = replied_address, .correlation_id = reply_correlation_id, .payload = "done" },
+        });
+        defer fx.deinitMessageEnvelope(std.testing.allocator, stored_reply);
+    }
+
+    var reopened_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer reopened_state.deinit();
+    const reopened = reopened_state.asMessageStorage();
+    var unprocessed = try reopened.unprocessedByShard(9, std.testing.allocator);
+    defer unprocessed.deinit();
+    try std.testing.expectEqual(@as(usize, 2), unprocessed.records.len);
+    const found_reply = (try reopened.reply(reply_correlation_id, std.testing.allocator)).?;
+    defer fx.deinitMessageEnvelope(std.testing.allocator, found_reply);
+    try std.testing.expectEqualStrings("done", found_reply.payload);
+}

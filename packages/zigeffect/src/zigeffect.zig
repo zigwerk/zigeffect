@@ -426,6 +426,8 @@ pub const messageRecordFileName = cluster.messageRecordFileName;
 pub const replyRecordFileName = cluster.replyRecordFileName;
 pub const formatStoredMessageRecordJson = cluster.formatStoredMessageRecordJson;
 pub const parseStoredMessageRecordJson = cluster.parseStoredMessageRecordJson;
+pub const formatStoredReplyRecordJson = cluster.formatStoredReplyRecordJson;
+pub const parseStoredReplyRecordJson = cluster.parseStoredReplyRecordJson;
 
 pub const ServiceSet = dependency.service_sets.ServiceSet;
 pub const DependencyIssueKind = dependency.report.DependencyIssueKind;
