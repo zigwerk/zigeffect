@@ -33,7 +33,7 @@ Run before milestone closeout:
 3. `bun run zig:test`
 4. `zig fmt --check` on touched Zig files
 5. `git diff --check`
-6. placeholder scan on touched source/tests/docs
+6. marker scan on touched source/tests/docs
 
 ## Task 1: Local Entity External Envelope Hook
 

@@ -699,16 +699,16 @@ Goal: run local entities through shard-owned durable message storage.
 
 Deliverables:
 
-- [ ] Add `ClusterRuntime`.
-- [ ] Load owned shards.
-- [ ] Pull unprocessed messages.
-- [ ] Dispatch envelopes to entity actors.
-- [ ] Store replies and acks.
-- [ ] Release shards on shutdown.
+- [x] Add `ClusterRuntime`.
+- [x] Load owned shards.
+- [x] Pull unprocessed messages.
+- [x] Dispatch envelopes to entity actors.
+- [x] Store replies and acks.
+- [x] Release shards on shutdown.
 
 Acceptance:
 
-- [ ] Single process cluster runtime behaves like the local entity runtime.
+- [x] Single process cluster runtime behaves like the local entity runtime.
 
 ## Milestone 33: Multi-Runner Local Cluster
 
