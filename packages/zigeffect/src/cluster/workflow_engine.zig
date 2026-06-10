@@ -66,6 +66,8 @@ pub const ClusterWorkflowCommandKind = enum {
     send_signal,
     complete_queue,
     fail_queue,
+    claim_queue,
+    retry_expired_queues,
 };
 
 pub const ClusterWorkflowCommand = struct {
@@ -78,7 +80,10 @@ pub const ClusterWorkflowCommand = struct {
     status: []const u8 = "",
     redacted_detail: []const u8 = "",
     idempotency_key: []const u8 = "",
+    worker_id: []const u8 = "",
     now_ms: u64 = 0,
+    claim_timeout_ms: ?u64 = null,
+    max_concurrency: usize = 0,
     activity_id: ?ActivityId = null,
     timer_id: ?TimerId = null,
     deferred_id: ?DeferredId = null,
@@ -92,6 +97,7 @@ pub const ClusterWorkflowCommand = struct {
         if (self.status.len > 0) allocator.free(self.status);
         if (self.redacted_detail.len > 0) allocator.free(self.redacted_detail);
         if (self.idempotency_key.len > 0) allocator.free(self.idempotency_key);
+        if (self.worker_id.len > 0) allocator.free(self.worker_id);
     }
 };
 
@@ -104,6 +110,10 @@ pub const ClusterWorkflowCommandResult = struct {
     last_sequence: JournalSequence = 0,
     status: []const u8 = "",
     timers_fired: usize = 0,
+    queue_id: ?QueueId = null,
+    queue_attempt: u32 = 0,
+    queue_claimed: bool = false,
+    queue_retried: usize = 0,
 
     pub fn deinit(self: *ClusterWorkflowCommandResult, allocator: Allocator) void {
         if (self.status.len > 0) allocator.free(self.status);
@@ -275,6 +285,48 @@ pub const ClusterWorkflowEngine = struct {
             .status = "failed",
             .redacted_detail = detail,
             .queue_id = queue_id,
+        });
+    }
+
+    pub fn claimQueue(
+        self: *ClusterWorkflowEngine,
+        workflow_id: WorkflowId,
+        execution_id: ExecutionId,
+        queue_name: []const u8,
+        queue_id: QueueId,
+        worker_id: []const u8,
+        now_ms: u64,
+        claim_timeout_ms: ?u64,
+        max_concurrency: usize,
+    ) !ClusterWorkflowCommandSubmission {
+        return self.submitWithGeneratedKeyAndIds(.{
+            .kind = .claim_queue,
+            .workflow_id = workflow_id,
+            .execution_id = execution_id,
+            .name = queue_name,
+            .status = "claimed",
+            .worker_id = worker_id,
+            .now_ms = now_ms,
+            .claim_timeout_ms = claim_timeout_ms,
+            .max_concurrency = max_concurrency,
+            .queue_id = queue_id,
+        });
+    }
+
+    pub fn retryExpiredQueues(
+        self: *ClusterWorkflowEngine,
+        workflow_id: WorkflowId,
+        execution_id: ExecutionId,
+        queue_name: []const u8,
+        now_ms: u64,
+    ) !ClusterWorkflowCommandSubmission {
+        return self.submitWithGeneratedKeyAndIds(.{
+            .kind = .retry_expired_queues,
+            .workflow_id = workflow_id,
+            .execution_id = execution_id,
+            .name = queue_name,
+            .status = "retry_ready",
+            .now_ms = now_ms,
         });
     }
 
@@ -505,7 +557,10 @@ const ClusterWorkflowCommandJson = struct {
     status: []const u8 = "",
     redacted_detail: []const u8 = "",
     idempotency_key: []const u8 = "",
+    worker_id: []const u8 = "",
     now_ms: u64 = 0,
+    claim_timeout_ms: ?u64 = null,
+    max_concurrency: usize = 0,
     activity_id: ?ActivityId = null,
     timer_id: ?TimerId = null,
     deferred_id: ?DeferredId = null,
@@ -525,6 +580,10 @@ const ClusterWorkflowCommandResultJson = struct {
     last_sequence: JournalSequence,
     status: []const u8 = "",
     timers_fired: usize = 0,
+    queue_id: ?QueueId = null,
+    queue_attempt: u32 = 0,
+    queue_claimed: bool = false,
+    queue_retried: usize = 0,
 };
 
 pub fn clusterWorkflowExecutionAddress(execution_id: ExecutionId) EntityAddress {
@@ -557,7 +616,12 @@ pub fn formatClusterWorkflowCommandJson(allocator: Allocator, command: ClusterWo
     try appendJsonString(&output, allocator, command.redacted_detail);
     try output.appendSlice(allocator, ",\"idempotency_key\":");
     try appendJsonString(&output, allocator, command.idempotency_key);
+    try output.appendSlice(allocator, ",\"worker_id\":");
+    try appendJsonString(&output, allocator, command.worker_id);
     try output.print(allocator, ",\"now_ms\":{d}", .{command.now_ms});
+    try output.appendSlice(allocator, ",\"claim_timeout_ms\":");
+    try appendOptionalJsonU64(&output, allocator, command.claim_timeout_ms);
+    try output.print(allocator, ",\"max_concurrency\":{d}", .{command.max_concurrency});
     try output.appendSlice(allocator, ",\"activity_id\":");
     try appendOptionalJsonU64(&output, allocator, command.activity_id);
     try output.appendSlice(allocator, ",\"timer_id\":");
@@ -600,7 +664,10 @@ pub fn parseClusterWorkflowCommandJson(allocator: Allocator, content: []const u8
         .status = try dupeOrEmpty(allocator, parsed.value.status),
         .redacted_detail = try dupeOrEmpty(allocator, parsed.value.redacted_detail),
         .idempotency_key = try dupeOrEmpty(allocator, parsed.value.idempotency_key),
+        .worker_id = try dupeOrEmpty(allocator, parsed.value.worker_id),
         .now_ms = parsed.value.now_ms,
+        .claim_timeout_ms = parsed.value.claim_timeout_ms,
+        .max_concurrency = parsed.value.max_concurrency,
         .activity_id = parsed.value.activity_id,
         .timer_id = parsed.value.timer_id,
         .deferred_id = parsed.value.deferred_id,
@@ -628,6 +695,11 @@ pub fn formatClusterWorkflowCommandResultJson(allocator: Allocator, result: Clus
     try output.appendSlice(allocator, ",\"status\":");
     try appendJsonString(&output, allocator, result.status);
     try output.print(allocator, ",\"timers_fired\":{d}", .{result.timers_fired});
+    try output.appendSlice(allocator, ",\"queue_id\":");
+    try appendOptionalJsonU64(&output, allocator, result.queue_id);
+    try output.print(allocator, ",\"queue_attempt\":{d}", .{result.queue_attempt});
+    try output.print(allocator, ",\"queue_claimed\":{}", .{result.queue_claimed});
+    try output.print(allocator, ",\"queue_retried\":{d}", .{result.queue_retried});
     try output.append(allocator, '}');
     return output.toOwnedSlice(allocator);
 }
@@ -652,6 +724,10 @@ pub fn parseClusterWorkflowCommandResultJson(allocator: Allocator, content: []co
         .last_sequence = parsed.value.last_sequence,
         .status = try dupeOrEmpty(allocator, parsed.value.status),
         .timers_fired = parsed.value.timers_fired,
+        .queue_id = parsed.value.queue_id,
+        .queue_attempt = parsed.value.queue_attempt,
+        .queue_claimed = parsed.value.queue_claimed,
+        .queue_retried = parsed.value.queue_retried,
     };
 }
 
@@ -685,6 +761,8 @@ fn applyClusterWorkflowCommand(
         .send_signal => appendHelperEventAndResume(allocator, journal_store, command, .signal_received, null, "received"),
         .complete_queue => appendHelperEventAndResume(allocator, journal_store, command, .queue_completed, command.queue_id orelse return error.CorruptClusterWorkflowCommand, "completed"),
         .fail_queue => appendHelperEventAndResume(allocator, journal_store, command, .queue_failed, command.queue_id orelse return error.CorruptClusterWorkflowCommand, "failed"),
+        .claim_queue => applyClaimQueueCommand(allocator, journal_store, command),
+        .retry_expired_queues => applyRetryExpiredQueuesCommand(allocator, journal_store, command),
     };
 }
 
@@ -752,6 +830,121 @@ fn applyFireDueTimersCommand(
     const fired = try durable_clock.fireDueTimers(command.now_ms);
     const sequence = if (fired > 0) try latestJournalSequence(allocator, journal_store) else null;
     return commandResultFromJournal(allocator, journal_store, command, fired > 0, sequence, "running", fired);
+}
+
+fn applyClaimQueueCommand(
+    allocator: Allocator,
+    journal_store: JournalStore,
+    command: ClusterWorkflowCommand,
+) !ClusterWorkflowCommandResult {
+    const queue_id = command.queue_id orelse return error.CorruptClusterWorkflowCommand;
+    var events = try journal_store.readAll(allocator);
+    defer events.deinit();
+
+    const status = latestQueueStatus(events.events, command.workflow_id, command.execution_id, queue_id);
+    const can_claim = status == .offered or status == .retry_ready;
+    const below_limit = command.max_concurrency != 0 and
+        activeQueueClaimCount(events.events, command.workflow_id, command.execution_id, command.name) < command.max_concurrency;
+    if (!can_claim or !below_limit) {
+        var result = try commandResultFromJournal(allocator, journal_store, command, false, null, "claimed", 0);
+        result.queue_id = queue_id;
+        result.queue_claimed = false;
+        return result;
+    }
+
+    const attempt = queueClaimAttempt(events.events, command.workflow_id, command.execution_id, queue_id) + 1;
+    const deadline_ms = claimDeadlineMs(command.now_ms, command.claim_timeout_ms);
+    const detail = try queueClaimDetail(allocator, command.worker_id, deadline_ms, attempt);
+    defer allocator.free(detail);
+
+    const sequence = try nextSequenceFromEvents(events.events);
+    _ = journal_store.append(.{
+        .expected_next_sequence = sequence,
+        .event = .{
+            .sequence = sequence,
+            .kind = .queue_claimed,
+            .workflow_id = command.workflow_id,
+            .execution_id = command.execution_id,
+            .queue_id = queue_id,
+            .attempt = attempt,
+            .name = command.name,
+            .status = "claimed",
+            .redacted_detail = detail,
+            .idempotency_key = command.idempotency_key,
+        },
+    }) catch |err| switch (err) {
+        error.DuplicateEvent => {
+            var duplicate = try commandResultFromJournal(allocator, journal_store, command, false, null, "claimed", 0);
+            duplicate.queue_id = queue_id;
+            duplicate.queue_attempt = attempt;
+            duplicate.queue_claimed = false;
+            return duplicate;
+        },
+        else => return err,
+    };
+
+    var result = try commandResultFromJournal(allocator, journal_store, command, true, sequence, "claimed", 0);
+    result.queue_id = queue_id;
+    result.queue_attempt = attempt;
+    result.queue_claimed = true;
+    return result;
+}
+
+fn applyRetryExpiredQueuesCommand(
+    allocator: Allocator,
+    journal_store: JournalStore,
+    command: ClusterWorkflowCommand,
+) !ClusterWorkflowCommandResult {
+    var events = try journal_store.readAll(allocator);
+    defer events.deinit();
+
+    var sequence = try nextSequenceFromEvents(events.events);
+    var retried: usize = 0;
+    var last_sequence: ?JournalSequence = null;
+
+    for (events.events) |event| {
+        if (!isQueueNameEvent(event, command.workflow_id, command.execution_id, command.name)) continue;
+        if (event.kind != .queue_claimed) continue;
+        const queue_id = event.queue_id.?;
+        if (latestQueueStatus(events.events, command.workflow_id, command.execution_id, queue_id) != .claimed) continue;
+        const deadline = parseClaimDeadlineMs(event.redacted_detail) orelse continue;
+        if (deadline > command.now_ms) continue;
+
+        const detail = try queueRetryDetail(allocator, event.sequence, event.attempt);
+        defer allocator.free(detail);
+        const key = try std.fmt.allocPrint(
+            allocator,
+            "cluster-workflow:queue-retry:{d}:{d}",
+            .{ queue_id, event.sequence },
+        );
+        defer allocator.free(key);
+
+        _ = journal_store.append(.{
+            .expected_next_sequence = sequence,
+            .event = .{
+                .sequence = sequence,
+                .kind = .queue_retry_scheduled,
+                .workflow_id = command.workflow_id,
+                .execution_id = command.execution_id,
+                .queue_id = queue_id,
+                .attempt = event.attempt,
+                .name = command.name,
+                .status = "retry_ready",
+                .redacted_detail = detail,
+                .idempotency_key = key,
+            },
+        }) catch |err| switch (err) {
+            error.DuplicateEvent => continue,
+            else => return err,
+        };
+        last_sequence = sequence;
+        retried += 1;
+        sequence = try sequenceAfter(sequence);
+    }
+
+    var result = try commandResultFromJournal(allocator, journal_store, command, retried > 0, last_sequence, "retry_ready", 0);
+    result.queue_retried = retried;
+    return result;
 }
 
 fn appendHelperEventAndResume(
@@ -863,6 +1056,13 @@ fn nextJournalSequence(allocator: Allocator, journal_store: JournalStore) !Journ
     return latest + 1;
 }
 
+fn nextSequenceFromEvents(events: []const journal.WorkflowEvent) !JournalSequence {
+    if (events.len == 0) return 1;
+    const latest = events[events.len - 1].sequence;
+    if (latest == std.math.maxInt(JournalSequence)) return error.SequenceOverflow;
+    return latest + 1;
+}
+
 fn sequenceAfter(sequence: JournalSequence) !JournalSequence {
     if (sequence == std.math.maxInt(JournalSequence)) return error.SequenceOverflow;
     return sequence + 1;
@@ -879,6 +1079,137 @@ fn latestJournalSequence(allocator: Allocator, journal_store: JournalStore) !Jou
     defer events.deinit();
     if (events.events.len == 0) return 0;
     return events.events[events.events.len - 1].sequence;
+}
+
+const QueueRuntimeStatus = enum {
+    unknown,
+    offered,
+    claimed,
+    retry_ready,
+    completed,
+    failed,
+    acked,
+};
+
+fn activeQueueClaimCount(
+    events: []const journal.WorkflowEvent,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    name: []const u8,
+) usize {
+    var count: usize = 0;
+    for (events) |event| {
+        if (!isQueueNameEvent(event, workflow_id, execution_id, name)) continue;
+        if (event.kind != .queue_offered) continue;
+        const queue_id = event.queue_id.?;
+        if (latestQueueStatus(events, workflow_id, execution_id, queue_id) == .claimed) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+fn latestQueueStatus(
+    events: []const journal.WorkflowEvent,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    queue_id: QueueId,
+) QueueRuntimeStatus {
+    var status = QueueRuntimeStatus.unknown;
+    for (events) |event| {
+        if (event.workflow_id != workflow_id or event.execution_id != execution_id) continue;
+        if (event.queue_id == null or event.queue_id.? != queue_id) continue;
+        status = switch (event.kind) {
+            .queue_offered => .offered,
+            .queue_claimed => .claimed,
+            .queue_retry_scheduled => .retry_ready,
+            .queue_completed => .completed,
+            .queue_failed => .failed,
+            .queue_acked => .acked,
+            else => status,
+        };
+    }
+    return status;
+}
+
+fn queueClaimAttempt(
+    events: []const journal.WorkflowEvent,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    queue_id: QueueId,
+) u32 {
+    var attempt: u32 = 0;
+    for (events) |event| {
+        if (event.workflow_id == workflow_id and
+            event.execution_id == execution_id and
+            event.queue_id != null and
+            event.queue_id.? == queue_id and
+            event.kind == .queue_claimed and
+            event.attempt > attempt)
+        {
+            attempt = event.attempt;
+        }
+    }
+    return attempt;
+}
+
+fn isQueueNameEvent(
+    event: journal.WorkflowEvent,
+    workflow_id: WorkflowId,
+    execution_id: ExecutionId,
+    name: []const u8,
+) bool {
+    return event.workflow_id == workflow_id and
+        event.execution_id == execution_id and
+        event.queue_id != null and
+        std.mem.eql(u8, event.name, name);
+}
+
+fn claimDeadlineMs(now_ms: u64, claim_timeout_ms: ?u64) ?u64 {
+    const timeout = claim_timeout_ms orelse return null;
+    return std.math.add(u64, now_ms, timeout) catch std.math.maxInt(u64);
+}
+
+fn queueClaimDetail(
+    allocator: Allocator,
+    worker_id: []const u8,
+    claim_deadline_ms: ?u64,
+    attempt: u32,
+) Allocator.Error![]const u8 {
+    if (claim_deadline_ms) |deadline| {
+        return std.fmt.allocPrint(
+            allocator,
+            "worker={s} claim_deadline_ms={d} attempt={d}",
+            .{ worker_id, deadline, attempt },
+        );
+    }
+    return std.fmt.allocPrint(
+        allocator,
+        "worker={s} claim_deadline_ms=null attempt={d}",
+        .{ worker_id, attempt },
+    );
+}
+
+fn queueRetryDetail(
+    allocator: Allocator,
+    claim_sequence: JournalSequence,
+    attempt: u32,
+) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "claim_sequence={d} attempt={d}",
+        .{ claim_sequence, attempt },
+    );
+}
+
+fn parseClaimDeadlineMs(detail: []const u8) ?u64 {
+    const prefix = "claim_deadline_ms=";
+    const start = std.mem.indexOf(u8, detail, prefix) orelse return null;
+    const value_start = start + prefix.len;
+    const value_end = std.mem.indexOfScalarPos(u8, detail, value_start, ' ') orelse detail.len;
+    const value = detail[value_start..value_end];
+    if (std.mem.eql(u8, value, "null")) return null;
+    return std.fmt.parseInt(u64, value, 10) catch null;
 }
 
 fn dupeOrEmpty(allocator: Allocator, value: []const u8) Allocator.Error![]const u8 {

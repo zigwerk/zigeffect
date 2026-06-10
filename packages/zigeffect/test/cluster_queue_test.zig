@@ -210,6 +210,131 @@ test "cluster queue expired claims require passed deadlines" {
     try std.testing.expectEqual(@as(?u64, 1_250), expired.items[0].claim_deadline_ms);
 }
 
+test "cluster workflow claim queue appends durable claim through owning entity" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    const workflow_id = fx.workflow.workflowId("approval");
+    const execution_id = try executionIdForShard(0, 8);
+    const queue_id = fx.workflow.queueItemId("email", "claim-1");
+    try seedStarted(journal_store, workflow_id, execution_id, "approval", "claim-start");
+    try seedQueueEvent(journal_store, .queue_offered, workflow_id, execution_id, queue_id, 2, "email", "42", "claim-offer", 0);
+
+    var runner = try runnerOwningShard(runner_storage_state.asRunnerStorage(), message_storage, 0);
+    defer runner.deinit();
+    var registry = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+    _ = try registry.registerExecution(&runner, journal_store, workflow_id, execution_id, 1_000);
+
+    var transport_state = try fx.InProcessClusterTransport.init(std.testing.allocator, message_storage, .{ .shard_count = 8 });
+    defer transport_state.deinit();
+    var engine = fx.ClusterWorkflowEngine.init(std.testing.allocator, transport_state.asClusterTransport());
+    defer engine.deinit();
+
+    var submission = try engine.claimQueue(workflow_id, execution_id, "email", queue_id, "worker-a", 1_000, 250, 1);
+    defer submission.deinit(std.testing.allocator);
+    var result = try processWorkflowSubmission(&runner, message_storage, submission, 1_010);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.queue_claimed);
+    try std.testing.expectEqual(queue_id, result.queue_id.?);
+    try std.testing.expectEqual(@as(u32, 1), result.queue_attempt);
+
+    var events = try journal_store.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_claimed, events.events[2].kind);
+    try std.testing.expectEqualStrings("worker=worker-a claim_deadline_ms=1250 attempt=1", events.events[2].redacted_detail);
+}
+
+test "cluster workflow claim queue respects max concurrency" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    const workflow_id = fx.workflow.workflowId("approval");
+    const execution_id = try executionIdForShard(0, 8);
+    const first_id = fx.workflow.queueItemId("email", "first");
+    const second_id = fx.workflow.queueItemId("email", "second");
+    try seedStarted(journal_store, workflow_id, execution_id, "approval", "concurrency-start");
+    try seedQueueEvent(journal_store, .queue_offered, workflow_id, execution_id, first_id, 2, "email", "1", "first-offer", 0);
+    try seedQueueEvent(journal_store, .queue_offered, workflow_id, execution_id, second_id, 3, "email", "2", "second-offer", 0);
+
+    var runner = try runnerOwningShard(runner_storage_state.asRunnerStorage(), message_storage, 0);
+    defer runner.deinit();
+    var registry = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+    _ = try registry.registerExecution(&runner, journal_store, workflow_id, execution_id, 1_000);
+
+    var transport_state = try fx.InProcessClusterTransport.init(std.testing.allocator, message_storage, .{ .shard_count = 8 });
+    defer transport_state.deinit();
+    var engine = fx.ClusterWorkflowEngine.init(std.testing.allocator, transport_state.asClusterTransport());
+    defer engine.deinit();
+
+    var first = try engine.claimQueue(workflow_id, execution_id, "email", first_id, "worker-a", 1_000, null, 1);
+    defer first.deinit(std.testing.allocator);
+    var first_result = try processWorkflowSubmission(&runner, message_storage, first, 1_010);
+    defer first_result.deinit(std.testing.allocator);
+    try std.testing.expect(first_result.queue_claimed);
+
+    var second = try engine.claimQueue(workflow_id, execution_id, "email", second_id, "worker-b", 1_020, null, 1);
+    defer second.deinit(std.testing.allocator);
+    var second_result = try processWorkflowSubmission(&runner, message_storage, second, 1_030);
+    defer second_result.deinit(std.testing.allocator);
+    try std.testing.expect(!second_result.queue_claimed);
+
+    try std.testing.expectEqual(@as(usize, 1), try countEvents(journal_store, .queue_claimed));
+}
+
+test "cluster workflow retry expired queues appends retry rows through owning entity" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    const workflow_id = fx.workflow.workflowId("approval");
+    const execution_id = try executionIdForShard(0, 8);
+    const queue_id = fx.workflow.queueItemId("email", "expired");
+    try seedStarted(journal_store, workflow_id, execution_id, "approval", "retry-start");
+    try seedQueueEvent(journal_store, .queue_offered, workflow_id, execution_id, queue_id, 2, "email", "42", "retry-offer", 0);
+    try seedQueueEvent(journal_store, .queue_claimed, workflow_id, execution_id, queue_id, 3, "email", "worker=worker-a claim_deadline_ms=1250 attempt=1", "retry-claim", 1);
+
+    var runner = try runnerOwningShard(runner_storage_state.asRunnerStorage(), message_storage, 0);
+    defer runner.deinit();
+    var registry = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+    _ = try registry.registerExecution(&runner, journal_store, workflow_id, execution_id, 1_000);
+
+    var transport_state = try fx.InProcessClusterTransport.init(std.testing.allocator, message_storage, .{ .shard_count = 8 });
+    defer transport_state.deinit();
+    var engine = fx.ClusterWorkflowEngine.init(std.testing.allocator, transport_state.asClusterTransport());
+    defer engine.deinit();
+
+    var submission = try engine.retryExpiredQueues(workflow_id, execution_id, "email", 1_500);
+    defer submission.deinit(std.testing.allocator);
+    var result = try processWorkflowSubmission(&runner, message_storage, submission, 1_500);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), result.queue_retried);
+
+    var events = try journal_store.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.queue_retry_scheduled, events.events[3].kind);
+    try std.testing.expectEqualStrings("claim_sequence=3 attempt=1", events.events[3].redacted_detail);
+}
+
 fn executionIdForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.workflow.ExecutionId {
     var id: fx.workflow.ExecutionId = 1;
     while (id < 100_000) : (id += 1) {
@@ -283,6 +408,54 @@ fn seedClaimedQueue(
     const detail = try std.fmt.allocPrint(std.testing.allocator, "worker={s} claim_deadline_ms={s} attempt=1", .{ worker, deadline });
     defer std.testing.allocator.free(detail);
     try seedQueueEvent(journal_store, .queue_claimed, workflow_id, execution_id, queue_id, first_sequence + 1, "email", detail, claim_key, 1);
+}
+
+fn seedStarted(
+    journal_store: fx.workflow.JournalStore,
+    workflow_id: fx.workflow.WorkflowId,
+    execution_id: fx.workflow.ExecutionId,
+    workflow_name: []const u8,
+    idempotency_key: []const u8,
+) !void {
+    _ = try journal_store.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = workflow_id,
+        .execution_id = execution_id,
+        .name = workflow_name,
+        .status = "running",
+        .idempotency_key = idempotency_key,
+    } });
+}
+
+fn processWorkflowSubmission(
+    runner: *fx.LocalClusterRunner,
+    message_storage: fx.MessageStorage,
+    submission: fx.ClusterWorkflowCommandSubmission,
+    now_ms: u64,
+) !fx.ClusterWorkflowCommandResult {
+    const report = try runner.tick(fx.ClusterWorkflowEntityHandler, now_ms);
+    try std.testing.expectEqual(@as(usize, 1), report.dispatched);
+    try std.testing.expectEqual(@as(usize, 1), report.replied);
+    try std.testing.expectEqual(@as(usize, 1), report.acked);
+
+    const reply = (try message_storage.reply(submission.correlation_id, std.testing.allocator)).?;
+    defer fx.deinitMessageEnvelope(std.testing.allocator, reply);
+    return fx.parseClusterWorkflowCommandResultFromReply(std.testing.allocator, reply);
+}
+
+fn countEvents(
+    journal_store: fx.workflow.JournalStore,
+    kind: fx.workflow.WorkflowEventKind,
+) !usize {
+    var events = try journal_store.readAll(std.testing.allocator);
+    defer events.deinit();
+
+    var count: usize = 0;
+    for (events.events) |event| {
+        if (event.kind == kind) count += 1;
+    }
+    return count;
 }
 
 fn queueItem(index: *const fx.ClusterQueueIndex, queue_id: fx.workflow.QueueId) !?fx.ClusterQueueItem {
