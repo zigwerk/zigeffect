@@ -420,6 +420,73 @@ test "cluster workflow commands stamp journal epoch and stale timer fire is reje
         .payload_type_name = fx.cluster_workflow_command_payload_type,
         .payload = fire_payload,
     }));
+
+    var registry_b = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry_b.deinit();
+    _ = try registry_b.registerExecution(&runner_b, journal_store, workflow_id, execution_id, 1_101);
+    const scope_b = try runner_b.entityScope(address);
+
+    const current_fire_payload = try fx.formatClusterWorkflowCommandJson(std.testing.allocator, .{
+        .kind = .fire_due_timers,
+        .workflow_id = workflow_id,
+        .execution_id = execution_id,
+        .now_ms = 1_500,
+        .idempotency_key = "fire-current",
+    });
+    defer std.testing.allocator.free(current_fire_payload);
+    const fired = try fx.ClusterWorkflowEntityHandler.handle(scope_b, .{
+        .id = 4,
+        .sequence = 4,
+        .kind = .ask,
+        .address = address,
+        .correlation_id = 4,
+        .payload_type_name = fx.cluster_workflow_command_payload_type,
+        .payload = current_fire_payload,
+    });
+    const fired_reply = switch (fired) {
+        .reply => |reply| reply,
+        else => return error.MissingWorkflowCommandReply,
+    };
+    var fired_result = try fx.parseClusterWorkflowCommandResultJson(std.testing.allocator, fired_reply);
+    defer fired_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), fired_result.timers_fired);
+
+    const duplicate_fire_payload = try fx.formatClusterWorkflowCommandJson(std.testing.allocator, .{
+        .kind = .fire_due_timers,
+        .workflow_id = workflow_id,
+        .execution_id = execution_id,
+        .now_ms = 1_500,
+        .idempotency_key = "fire-current-duplicate",
+    });
+    defer std.testing.allocator.free(duplicate_fire_payload);
+    const duplicate = try fx.ClusterWorkflowEntityHandler.handle(scope_b, .{
+        .id = 5,
+        .sequence = 5,
+        .kind = .ask,
+        .address = address,
+        .correlation_id = 5,
+        .payload_type_name = fx.cluster_workflow_command_payload_type,
+        .payload = duplicate_fire_payload,
+    });
+    const duplicate_reply = switch (duplicate) {
+        .reply => |reply| reply,
+        else => return error.MissingWorkflowCommandReply,
+    };
+    var duplicate_result = try fx.parseClusterWorkflowCommandResultJson(std.testing.allocator, duplicate_reply);
+    defer duplicate_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 0), duplicate_result.timers_fired);
+
+    var final_events = try journal_store.readAll(std.testing.allocator);
+    defer final_events.deinit();
+    var timer_fired_count: usize = 0;
+    var timer_fired_epoch: ?fx.ShardLeaseEpoch = null;
+    for (final_events.events) |event| {
+        if (event.kind != .timer_fired) continue;
+        timer_fired_count += 1;
+        timer_fired_epoch = fx.leaseEpochFromDetail(event.redacted_detail);
+    }
+    try std.testing.expectEqual(@as(usize, 1), timer_fired_count);
+    try std.testing.expectEqual(@as(?fx.ShardLeaseEpoch, 2), timer_fired_epoch);
 }
 
 const NoopEntityHandler = struct {
