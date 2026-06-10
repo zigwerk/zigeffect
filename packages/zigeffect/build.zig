@@ -322,6 +322,28 @@ pub fn build(b: *std.Build) void {
     });
     const run_causal_test_tool_tests = b.addRunArtifact(causal_test_tool_tests);
 
+    const cluster_runner_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/cluster_runner.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cluster_runner_tool_module.addImport("zigeffect", zigeffect);
+
+    const cluster_runner_tool = b.addExecutable(.{
+        .name = "zigeffect-cluster-runner",
+        .root_module = cluster_runner_tool_module,
+    });
+    const run_cluster_runner_tool = b.addRunArtifact(cluster_runner_tool);
+    if (b.args) |args| run_cluster_runner_tool.addArgs(args);
+    const cluster_runner_step = b.step("cluster-runner", "Run a local zigeffect cluster runner");
+    cluster_runner_step.dependOn(&run_cluster_runner_tool.step);
+
+    const cluster_runner_tool_tests = b.addTest(.{
+        .name = "zigeffect-cluster-runner-tests",
+        .root_module = cluster_runner_tool_module,
+    });
+    const run_cluster_runner_tool_tests = b.addRunArtifact(cluster_runner_tool_tests);
+
     const causal_artifact_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_artifact.zig"),
         .target = target,
@@ -971,6 +993,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_causal_report_tool_tests.step);
     examples_step.dependOn(&causal_test_tool.step);
     examples_step.dependOn(&run_causal_test_tool_tests.step);
+    examples_step.dependOn(&cluster_runner_tool.step);
+    examples_step.dependOn(&run_cluster_runner_tool_tests.step);
     examples_step.dependOn(&run_causal_artifact_tool_tests.step);
     examples_step.dependOn(&run_workflow_tool_support_tests.step);
     examples_step.dependOn(&workflow_list_tool.step);
