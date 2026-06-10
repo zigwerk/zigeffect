@@ -110,10 +110,38 @@ pub const ClusterTimerWakeupIndex = struct {
         return report;
     }
 
-    fn clear(self: *ClusterTimerWakeupIndex) void {
+    pub fn due(
+        self: *const ClusterTimerWakeupIndex,
+        allocator: Allocator,
+        now_ms: u64,
+    ) Allocator.Error!ClusterTimerWakeupBatch {
+        var due_wakeups = std.ArrayList(ClusterTimerWakeup).empty;
+        errdefer deinitWakeupItems(allocator, due_wakeups.items);
+        errdefer due_wakeups.deinit(allocator);
+
         for (self.wakeups.items) |wakeup| {
-            if (wakeup.name.len != 0) self.allocator.free(wakeup.name);
+            if (wakeup.fire_at_ms > now_ms) continue;
+            const name = try allocator.dupe(u8, wakeup.name);
+            errdefer allocator.free(name);
+            try due_wakeups.append(allocator, .{
+                .workflow_id = wakeup.workflow_id,
+                .execution_id = wakeup.execution_id,
+                .timer_id = wakeup.timer_id,
+                .shard_id = wakeup.shard_id,
+                .name = name,
+                .fire_at_ms = wakeup.fire_at_ms,
+                .late_by_ms = now_ms - wakeup.fire_at_ms,
+            });
         }
+
+        return .{
+            .allocator = allocator,
+            .wakeups = try due_wakeups.toOwnedSlice(allocator),
+        };
+    }
+
+    fn clear(self: *ClusterTimerWakeupIndex) void {
+        deinitWakeupItems(self.allocator, self.wakeups.items);
         self.wakeups.clearRetainingCapacity();
     }
 
@@ -129,6 +157,12 @@ pub const ClusterTimerWakeupIndex = struct {
         return false;
     }
 };
+
+fn deinitWakeupItems(allocator: Allocator, wakeups: []const ClusterTimerWakeup) void {
+    for (wakeups) |wakeup| {
+        if (wakeup.name.len != 0) allocator.free(wakeup.name);
+    }
+}
 
 fn timerHasTerminalEvent(
     events: []const workflow_journal.WorkflowEvent,

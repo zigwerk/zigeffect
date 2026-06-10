@@ -123,6 +123,58 @@ test "cluster timer wakeup rebuild collapses duplicate schedules" {
     try std.testing.expectEqual(@as(usize, 1), index.wakeups.items.len);
 }
 
+test "cluster timer wakeup due filters future timers" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    const workflow_id = fx.workflow.workflowId("approval");
+    const execution_id = try executionIdForShard(0, 8);
+    try seedScheduledTimer(journal_store, workflow_id, execution_id, fx.workflow.timerId("due-timeout"), 1, "due-timeout", 1_000, "due-timer");
+    try seedScheduledTimer(journal_store, workflow_id, execution_id, fx.workflow.timerId("future-timeout"), 2, "future-timeout", 2_000, "future-timer");
+
+    var runner = try runnerOwningShard(runner_storage_state.asRunnerStorage(), message_storage_state.asMessageStorage(), 0);
+    defer runner.deinit();
+    var index = fx.ClusterTimerWakeupIndex.init(std.testing.allocator);
+    defer index.deinit();
+    _ = try index.rebuildOwned(&runner, journal_store);
+
+    var due = try index.due(std.testing.allocator, 1_500);
+    defer due.deinit();
+    try std.testing.expectEqual(@as(usize, 1), due.wakeups.len);
+    try std.testing.expectEqualStrings("due-timeout", due.wakeups[0].name);
+    try std.testing.expectEqual(@as(u64, 1_000), due.wakeups[0].fire_at_ms);
+}
+
+test "cluster timer wakeup due reports late timers" {
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    const workflow_id = fx.workflow.workflowId("approval");
+    const execution_id = try executionIdForShard(0, 8);
+    try seedScheduledTimer(journal_store, workflow_id, execution_id, fx.workflow.timerId("approval-timeout"), 1, "approval-timeout", 1_000, "timer");
+
+    var runner = try runnerOwningShard(runner_storage_state.asRunnerStorage(), message_storage_state.asMessageStorage(), 0);
+    defer runner.deinit();
+    var index = fx.ClusterTimerWakeupIndex.init(std.testing.allocator);
+    defer index.deinit();
+    _ = try index.rebuildOwned(&runner, journal_store);
+
+    var due = try index.due(std.testing.allocator, 1_500);
+    defer due.deinit();
+    try std.testing.expectEqual(@as(usize, 1), due.wakeups.len);
+    try std.testing.expectEqual(@as(u64, 500), due.wakeups[0].late_by_ms);
+}
+
 fn executionIdForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.workflow.ExecutionId {
     var id: fx.workflow.ExecutionId = 1;
     while (id < 100_000) : (id += 1) {
