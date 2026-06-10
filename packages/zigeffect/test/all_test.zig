@@ -16,6 +16,7 @@ comptime {
     _ = @import("cluster_timer_wakeup_test.zig");
     _ = @import("cluster_queue_test.zig");
     _ = @import("cluster_fencing_test.zig");
+    _ = @import("production_shard_leasing_test.zig");
     _ = @import("cluster_supervision_test.zig");
     _ = @import("cluster_observability_test.zig");
     _ = @import("cluster_runtime_test.zig");
