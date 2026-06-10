@@ -912,16 +912,16 @@ Goal: turn the experimental runtime into a coherent public package surface.
 
 Deliverables:
 
-- [ ] Review public names.
-- [ ] Review ownership and allocator contracts.
-- [ ] Review error sets and diagnostics.
-- [ ] Review schema versioning guarantees.
-- [ ] Review docs for direct-style Zig clarity.
-- [ ] Add compatibility notes for future backend adapters.
+- [x] Review public names.
+- [x] Review ownership and allocator contracts.
+- [x] Review error sets and diagnostics.
+- [x] Review schema versioning guarantees.
+- [x] Review docs for direct-style Zig clarity.
+- [x] Add compatibility notes for future backend adapters.
 
 Acceptance:
 
-- [ ] Public API review produces no unresolved naming or ownership issues.
+- [x] Public API review produces no unresolved naming or ownership issues.
 
 ## Milestone 46: Release Gate
 

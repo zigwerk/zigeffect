@@ -82,7 +82,7 @@ Modify:
 
 ## Task 4: Verify The Milestone
 
-- [ ] Run:
+- [x] Run:
 
 ```bash
 (cd packages/zigeffect && zig build public-api-review)
@@ -96,8 +96,8 @@ zig fmt --check \
 git diff --check
 ```
 
-- [ ] Run a scoped marker scan over the new M45 files and edited roadmap lines.
-- [ ] Update the roadmap Milestone 45 deliverables and acceptance after the
+- [x] Run a scoped marker scan over the new M45 files and edited roadmap lines.
+- [x] Update the roadmap Milestone 45 deliverables and acceptance after the
   verification gate passes.
-- [ ] Re-run the focused gate and diff checks after the roadmap edit.
+- [x] Re-run the focused gate and diff checks after the roadmap edit.
 - [ ] Commit the milestone with a clear message.
