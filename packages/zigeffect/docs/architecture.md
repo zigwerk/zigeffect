@@ -18,8 +18,9 @@ That file is a facade. It exports domain namespaces such as `fx.core`,
 `fx.effect`, `fx.runtime`, `fx.layer`, `fx.services`, `fx.data`, `fx.match`,
 `fx.pattern`, `fx.traits`, `fx.workflow`, and `fx.cluster`, while preserving
 the existing top-level aliases such as `fx.Effect`, `fx.Context`, `fx.Scope`,
-`fx.Runtime`, `fx.Layer`, `fx.Schedule`, and `fx.TestEnv`. Domain namespaces
-also expose ergonomic aliases, for example `fx.effect.Effect`,
+`fx.Runtime`, `fx.Layer`, `fx.Schedule`, and `fx.TestEnv`. It also exposes
+`fx.storage` for durable storage schema metadata and SQL migration plans. Domain
+namespaces also expose ergonomic aliases, for example `fx.effect.Effect`,
 `fx.runtime.Runtime`, `fx.layer.Layer`, `fx.services.Logger`, and
 `fx.data.Option`.
 
@@ -277,6 +278,9 @@ belong here. Workflow code should consume `core`, `runtime`, `effect`, `layer`,
 `services`, and `traits` contracts instead of expanding those domains with
 workflow-specific behavior.
 
+Workflow storage conformance is shared through `src/storage/` metadata and the
+`test/support/*_conformance.zig` helpers.
+
 Workflow causal integration belongs in `src/workflow/causal.zig`, with the
 shared causal runtime remaining in `src/services/causal.zig`. Query tools and
 dogfood harnesses should consume workflow causal JSON/DOT/report helpers rather
@@ -379,9 +383,28 @@ cluster workflow integration, and supervision across entities, shards, runners,
 and transports belong here. Cluster code should build on workflow and runtime
 contracts instead of making durable state depend on runner memory.
 
+Runner and message storage conformance is shared through `src/storage/`
+metadata and the `test/support/*_conformance.zig` helpers.
+
 The local entity runtime is single-process and in-memory. It gives cluster
 concepts a deterministic local execution model, but durable message storage,
 runner ownership, and transport are separate milestones.
+
+```text
+src/storage/
+```
+
+Owns durable storage adapter metadata:
+
+- `root.zig`: storage namespace facade and public aliases.
+- `schema.zig`: durable storage schema catalog, compatibility reports, and
+  text/JSON formatting.
+- `sql.zig`: SQL-shaped storage migration plans for PostgreSQL-compatible and
+  Cockroach-compatible deployments.
+
+Storage adapter metadata, schema compatibility, and migration planning belong
+here. Concrete workflow and cluster storage implementations remain in their
+own domain folders.
 
 ```text
 tools/
@@ -396,9 +419,12 @@ Owns local developer and agent CLI entrypoints:
   command.
 - `workflow_journal_inspect.zig`: `zig build workflow-journal-inspect` selected
   execution event inspection command.
+- `storage_migrate.zig`: `zig build storage-migrate` storage schema catalog and
+  SQL migration plan command.
 
 Workflow tools should stay thin and delegate durable state interpretation to
-`src/workflow/inspect.zig`.
+`src/workflow/inspect.zig`. Storage tools should stay thin and delegate schema
+and migration planning to `src/storage/`.
 
 ```text
 src/testing/

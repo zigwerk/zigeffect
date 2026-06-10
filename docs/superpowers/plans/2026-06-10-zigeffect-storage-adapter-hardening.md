@@ -1,6 +1,6 @@
 # zigeffect Storage Adapter Hardening Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
 **Goal:** Add shared storage conformance suites, schema catalog APIs, SQL-shaped migration plans, and a local storage migration command for zigeffect durable stores.
 
@@ -40,7 +40,7 @@ Modify:
 
 ## Task 1: Journal Store Conformance
 
-- [ ] **Step 1: Write failing journal conformance tests**
+- [x] **Step 1: Write failing journal conformance tests**
 
 Create `packages/zigeffect/test/storage_conformance_test.zig`:
 
@@ -87,7 +87,7 @@ tests:
 _ = @import("storage_conformance_test.zig");
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -98,7 +98,7 @@ cd packages/zigeffect && zig build test-raw --summary all
 Expected: compile failure because `support/journal_store_conformance.zig` is
 absent.
 
-- [ ] **Step 3: Implement journal conformance helper**
+- [x] **Step 3: Implement journal conformance helper**
 
 Create `packages/zigeffect/test/support/journal_store_conformance.zig`:
 
@@ -162,7 +162,7 @@ pub fn expectJournalStoreConformance(store: fx.workflow.JournalStore) !void {
 }
 ```
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -171,7 +171,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/test/storage_conformance_test.zig packages/zigeffect/test/support/journal_store_conformance.zig packages/zigeffect/test/all_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/test/storage_conformance_test.zig packages/zigeffect/test/support/journal_store_conformance.zig packages/zigeffect/test/all_test.zig
@@ -180,7 +180,7 @@ git commit -m "test(zigeffect): add journal store conformance"
 
 ## Task 2: Runner Storage Conformance
 
-- [ ] **Step 1: Write failing runner conformance tests**
+- [x] **Step 1: Write failing runner conformance tests**
 
 Append to `packages/zigeffect/test/storage_conformance_test.zig`:
 
@@ -221,7 +221,7 @@ test "file runner storage shared conformance survives reopen" {
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -232,7 +232,7 @@ cd packages/zigeffect && zig build test-raw --summary all
 Expected: compile failure because `support/runner_storage_conformance.zig` is
 absent.
 
-- [ ] **Step 3: Implement runner conformance helper**
+- [x] **Step 3: Implement runner conformance helper**
 
 Create `packages/zigeffect/test/support/runner_storage_conformance.zig`:
 
@@ -289,7 +289,7 @@ pub fn expectRunnerStorageConformance(store: fx.RunnerStorage) !void {
 }
 ```
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -298,7 +298,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/test/storage_conformance_test.zig packages/zigeffect/test/support/runner_storage_conformance.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/test/storage_conformance_test.zig packages/zigeffect/test/support/runner_storage_conformance.zig
@@ -307,7 +307,7 @@ git commit -m "test(zigeffect): add runner storage conformance"
 
 ## Task 3: Message Storage Conformance
 
-- [ ] **Step 1: Write failing message conformance tests**
+- [x] **Step 1: Write failing message conformance tests**
 
 Append to `packages/zigeffect/test/storage_conformance_test.zig`:
 
@@ -356,7 +356,7 @@ test "file message storage shared conformance survives reopen" {
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -367,7 +367,7 @@ cd packages/zigeffect && zig build test-raw --summary all
 Expected: compile failure because `support/message_storage_conformance.zig` is
 absent.
 
-- [ ] **Step 3: Implement message conformance helper**
+- [x] **Step 3: Implement message conformance helper**
 
 Create `packages/zigeffect/test/support/message_storage_conformance.zig`:
 
@@ -448,7 +448,7 @@ pub fn expectMessageStorageConformance(store: fx.MessageStorage) !void {
 }
 ```
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -457,7 +457,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/test/storage_conformance_test.zig packages/zigeffect/test/support/message_storage_conformance.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/test/storage_conformance_test.zig packages/zigeffect/test/support/message_storage_conformance.zig
@@ -466,7 +466,7 @@ git commit -m "test(zigeffect): add message storage conformance"
 
 ## Task 4: Focused Storage Conformance Build Step
 
-- [ ] **Step 1: Write failing build-step expectation**
+- [x] **Step 1: Write failing build-step expectation**
 
 Run:
 
@@ -476,7 +476,7 @@ cd packages/zigeffect && zig build storage-conformance --summary all
 
 Expected: failure because no `storage-conformance` step exists.
 
-- [ ] **Step 2: Add storage conformance build step**
+- [x] **Step 2: Add storage conformance build step**
 
 Modify `packages/zigeffect/build.zig` near the causal backend conformance step:
 
@@ -503,7 +503,7 @@ Also add the focused tests to the regular causal-wrapped `test` step:
 test_step.dependOn(&run_storage_conformance_tests.step);
 ```
 
-- [ ] **Step 3: Verify green**
+- [x] **Step 3: Verify green**
 
 Run:
 
@@ -513,7 +513,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/build.zig
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/zigeffect/build.zig
@@ -522,7 +522,7 @@ git commit -m "build(zigeffect): add storage conformance step"
 
 ## Task 5: Storage Schema Catalog API
 
-- [ ] **Step 1: Write failing schema catalog tests**
+- [x] **Step 1: Write failing schema catalog tests**
 
 Append to `packages/zigeffect/test/storage_conformance_test.zig`:
 
@@ -567,7 +567,7 @@ fn expectContains(haystack: []const u8, needle: []const u8) !void {
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -578,7 +578,7 @@ cd packages/zigeffect && zig build test-raw --summary all
 Expected: compile failure because `fx.storageSchemaCatalog` and related storage
 types are absent.
 
-- [ ] **Step 3: Implement storage schema module**
+- [x] **Step 3: Implement storage schema module**
 
 Create `packages/zigeffect/src/storage/schema.zig`:
 
@@ -688,7 +688,7 @@ pub const storage = @import("storage/root.zig");
 
 Add top-level aliases listed in the spec.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -697,7 +697,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/src/storage/root.zig packages/zigeffect/src/storage/schema.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/test/storage_conformance_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/storage/root.zig packages/zigeffect/src/storage/schema.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/test/storage_conformance_test.zig
@@ -706,7 +706,7 @@ git commit -m "feat(zigeffect): add storage schema catalog"
 
 ## Task 6: SQL-Shaped Storage Migration Plan
 
-- [ ] **Step 1: Write failing SQL plan tests**
+- [x] **Step 1: Write failing SQL plan tests**
 
 Append to `packages/zigeffect/test/storage_conformance_test.zig`:
 
@@ -745,7 +745,7 @@ fn expectSqlStatement(plan: fx.SqlStorageMigrationPlan, name: []const u8) !void 
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
@@ -756,7 +756,7 @@ cd packages/zigeffect && zig build test-raw --summary all
 Expected: compile failure because SQL storage migration types and functions are
 absent.
 
-- [ ] **Step 3: Implement SQL storage module**
+- [x] **Step 3: Implement SQL storage module**
 
 Create `packages/zigeffect/src/storage/sql.zig`:
 
@@ -814,7 +814,7 @@ version, dialect, statement names, kinds, adapter names, and SQL text.
 Update `packages/zigeffect/src/storage/root.zig` and
 `packages/zigeffect/src/zigeffect.zig` to export SQL types and functions.
 
-- [ ] **Step 4: Verify green**
+- [x] **Step 4: Verify green**
 
 Run:
 
@@ -823,7 +823,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/src/storage/root.zig packages/zigeffect/src/storage/sql.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/test/storage_conformance_test.zig
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/src/storage/root.zig packages/zigeffect/src/storage/sql.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/test/storage_conformance_test.zig
@@ -832,7 +832,7 @@ git commit -m "feat(zigeffect): add sql storage migration plan"
 
 ## Task 7: Storage Migration CLI
 
-- [ ] **Step 1: Write failing storage migration tool tests**
+- [x] **Step 1: Write failing storage migration tool tests**
 
 Create `packages/zigeffect/tools/storage_migrate.zig`:
 
@@ -867,17 +867,17 @@ test "storage migrate plan command formats selected dialect" {
 }
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run:
 
 ```bash
-cd packages/zigeffect && zig test tools/storage_migrate.zig --dep zigeffect -Mzigeffect=src/zigeffect.zig
+cd packages/zigeffect && zig test --dep zigeffect -Mroot=tools/storage_migrate.zig -Mzigeffect=src/zigeffect.zig
 ```
 
 Expected: test failure from `StorageMigrateToolMissing`.
 
-- [ ] **Step 3: Implement storage migration tool**
+- [x] **Step 3: Implement storage migration tool**
 
 Replace the tool body with:
 
@@ -920,7 +920,7 @@ Add helpers `usage`, `parseFormat`, `parsePlanArgs`, `parseDialect`, and
 `main(init: std.process.Init) !void` following the simple style in
 `tools/workflow_journal_inspect.zig`.
 
-- [ ] **Step 4: Add build step**
+- [x] **Step 4: Add build step**
 
 Modify `packages/zigeffect/build.zig` near `cluster_runner_tool_module`:
 
@@ -951,7 +951,7 @@ test_step.dependOn(&run_storage_migrate_tool_tests.step);
 
 Add the tool and tests to `examples_step` so `zig build examples` compiles it.
 
-- [ ] **Step 5: Verify green**
+- [x] **Step 5: Verify green**
 
 Run:
 
@@ -962,7 +962,7 @@ bun run zigeffect:test
 zig fmt --check packages/zigeffect/tools/storage_migrate.zig packages/zigeffect/build.zig
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/zigeffect/tools/storage_migrate.zig packages/zigeffect/build.zig
@@ -971,7 +971,7 @@ git commit -m "feat(zigeffect): add storage migration cli"
 
 ## Task 8: Architecture Docs, Roadmap, And Full Gate
 
-- [ ] **Step 1: Update architecture docs**
+- [x] **Step 1: Update architecture docs**
 
 In `packages/zigeffect/docs/architecture.md`, add a `src/storage/` section:
 
@@ -995,14 +995,14 @@ Add one sentence to the `src/workflow/` and `src/cluster/` sections that
 storage conformance is shared through `src/storage/` metadata and
 `test/support/*_conformance.zig` helpers.
 
-- [ ] **Step 2: Mark M41 complete in roadmap and plan**
+- [x] **Step 2: Mark M41 complete in roadmap and plan**
 
 In `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`,
 mark the M41 deliverables and acceptance checked.
 
 In this plan, mark completed task steps with `- [x]`.
 
-- [ ] **Step 3: Run full verification gate**
+- [x] **Step 3: Run full verification gate**
 
 Run:
 
@@ -1019,7 +1019,7 @@ git diff --check
 rg "TO""DO|FIX""ME|st""ub|place""holder|not imple""mented|unimple""mented" packages/zigeffect/src packages/zigeffect/test packages/zigeffect/tools packages/zigeffect/docs docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md docs/superpowers/specs/2026-06-10-zigeffect-storage-adapter-hardening-design.md docs/superpowers/plans/2026-06-10-zigeffect-storage-adapter-hardening.md
 ```
 
-- [ ] **Step 4: Commit docs**
+- [x] **Step 4: Commit docs**
 
 ```bash
 git add packages/zigeffect/docs/architecture.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md docs/superpowers/plans/2026-06-10-zigeffect-storage-adapter-hardening.md

@@ -845,17 +845,17 @@ Goal: make storage pluggable enough for real deployments.
 
 Deliverables:
 
-- [ ] Add shared conformance suites for `JournalStore`, `RunnerStorage`, and
+- [x] Add shared conformance suites for `JournalStore`, `RunnerStorage`, and
   `MessageStorage`.
-- [ ] Add file-backed conformance tests.
-- [ ] Add SQL-shaped storage contract.
-- [ ] Add Cockroach/PostgreSQL adapter plan and implementation if a Zig driver
-  is selected in-repo.
-- [ ] Add migration and schema management commands.
+- [x] Add file-backed conformance tests.
+- [x] Add SQL-shaped storage contract.
+- [x] Add Cockroach/PostgreSQL adapter plan; no in-repo Zig driver is selected
+  for a live adapter in this milestone.
+- [x] Add migration and schema management commands.
 
 Acceptance:
 
-- [ ] All stores pass the same conformance suite.
+- [x] All stores pass the same conformance suite.
 
 ## Milestone 42: Property, Fuzz, And Crash Testing
 
