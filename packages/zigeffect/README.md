@@ -274,6 +274,23 @@ bounded snippets, and advisory review gates. It is record-only,
 telemetry, fail CI, or claim production capacity. The full policy is in
 [docs/load-test-observation-harness.md](docs/load-test-observation-harness.md).
 
+Print the causal production telemetry capture design report:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-telemetry-capture-design
+zig build causal-production-telemetry-capture-design -- --format json
+```
+
+The report uses schema
+`zigeffect.causal.production-telemetry-capture-design.v1` and defines future
+telemetry capture surfaces, field contracts, redaction, sampling, retention,
+access, encryption, and OTel bridge review gates. It is design-only,
+`mutation_authority=none`, and does not enable live telemetry ingestion,
+exporters, durable production writes, CI gates, or production capacity claims.
+The full policy is in
+[docs/production-telemetry-capture-design.md](docs/production-telemetry-capture-design.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -299,8 +316,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-capture-design` after the
-delivered load-test observation harness.
+`codex/zigeffect-causal-production-telemetry-capture-fixtures` after the
+delivered production telemetry capture design report.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in

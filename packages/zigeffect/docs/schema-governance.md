@@ -275,6 +275,17 @@ production load, ingest production telemetry, fail CI, size production
 capacity, execute shell strings, write durable storage, add non-NenDB adapter
 work, add alternate workbench renderers, or grant mutation authority.
 
+- `zigeffect.causal.production-telemetry-capture-design.v1`
+
+The production-telemetry-capture-design report is a record-only,
+`design-only`, `no-live-ingestion` production hardening contract. It defines
+future capture surfaces, telemetry field requirements, redaction, sampling,
+retention, access, encryption, OTel bridge, local-observation separation, and
+fixture handoff gates. It does not ingest live production telemetry, configure
+exporters, send OTLP, write durable production storage, size capacity, fail CI,
+add non-NenDB adapter work, add alternate renderers, or grant mutation
+authority.
+
 ### Human-Agent Feedback
 
 - `zigeffect.causal.human-agent-feedback-loop.v1`

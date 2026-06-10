@@ -105,9 +105,10 @@ count, median, p95, and review gate.
 
 Agents must compare only compatible scenario ids, environment classes, optimize
 modes, and artifact shapes. They must not convert local observations into
-production capacity claims. The next branch is
-`codex/zigeffect-causal-production-telemetry-capture-design`, which should
-design privacy-safe telemetry capture separately from local observations.
+production capacity claims. The telemetry capture design handoff is delivered
+as `codex/zigeffect-causal-production-telemetry-capture-design`; the next
+branch is `codex/zigeffect-causal-production-telemetry-capture-fixtures`, which
+should model approved telemetry records without touching production systems.
 
 ## Verification
 
@@ -117,6 +118,8 @@ zig test tools/causal_load_test_observation_harness.zig
 zig build causal-load-test-observation-harness
 zig build causal-load-test-observation-harness -- --format json
 zig build causal-load-test-observation-harness -- observe app-request-trace --iterations 1 --format json
+zig build causal-production-telemetry-capture-design
+zig build causal-production-telemetry-capture-design -- --format json
 zig build causal-schema-governance -- --format json
 zig build causal-production-hardening-backlog -- --format json
 zig build examples

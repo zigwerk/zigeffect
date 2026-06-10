@@ -722,10 +722,20 @@ Status values:
      without production telemetry, production load execution, CI timing gates,
      or capacity sizing claims.
 14. `codex/zigeffect-causal-production-telemetry-capture-design`
-   - Current next branch: design privacy-safe production telemetry capture that
-     can later complement local observations without granting mutation
-     authority, writing non-NenDB durable stores, or claiming production
-     capacity.
+   - Delivered: `causal-production-telemetry-capture-design` emits
+     `zigeffect.causal.production-telemetry-capture-design.v1` with runtime,
+     app-semantic, backend OTel, redaction/access, and local-observation
+     correlation capture surfaces, future telemetry field contracts, readiness
+     gates, negative fixtures, and fixture handoff. It keeps
+     `production_telemetry_ingestion=false`, `live_exporter_enabled=false`,
+     `mutation_authority=none`, NenDB-only, and SolidJS `zig-webui` aligned
+     without live exporters, durable production writes, CI gates, or capacity
+     claims.
+15. `codex/zigeffect-causal-production-telemetry-capture-fixtures`
+   - Current next branch: create safe production telemetry capture fixtures
+     from the design contract without touching production systems, granting
+     mutation authority, writing non-NenDB durable stores, or claiming
+     production capacity.
 
 ## Dual-Interface Causal Spine Expansion
 

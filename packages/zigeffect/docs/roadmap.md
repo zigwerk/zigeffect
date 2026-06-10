@@ -654,8 +654,9 @@ metrics, and traces.
   debugging, human-agent feedback-loop, rollout automation guardrails, and
   wall-clock benchmark baseline, production capacity planning, and
   production-hardening completion audit plus load-test observation harness
-  contracts, milestones, non-goals, verification commands, and the current next
-  branch `codex/zigeffect-causal-production-telemetry-capture-design`.
+  and production telemetry capture design contracts, milestones, non-goals,
+  verification commands, and the current next branch
+  `codex/zigeffect-causal-production-telemetry-capture-fixtures`.
 - Delivered: `causal-production-artifact-aggregation` publishes
   `zigeffect.causal.production-artifact-aggregation.v1` with the aggregation
   bundle contract, source provenance fields, privacy review gates, deterministic
@@ -744,6 +745,16 @@ metrics, and traces.
   observations local, advisory, record-only, `mutation_authority=none`, and
   does not run production load, ingest production telemetry, fail CI, size
   production capacity, add non-NenDB adapter work, add alternate frontend
+  renderer support, or mutate production state.
+- Delivered: `causal-production-telemetry-capture-design` publishes
+  `zigeffect.causal.production-telemetry-capture-design.v1` with runtime,
+  app-semantic, backend OTel, redaction/access, and local-observation
+  correlation capture surfaces, future telemetry field contracts, readiness
+  gates, negative fixtures, and the handoff to
+  `codex/zigeffect-causal-production-telemetry-capture-fixtures`. It keeps
+  `production_telemetry_ingestion=false`, `live_exporter_enabled=false`,
+  `mutation_authority=none`, and does not write durable production storage,
+  size capacity, fail CI, add non-NenDB adapter work, add alternate frontend
   renderer support, or mutate production state.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
