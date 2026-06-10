@@ -114,6 +114,64 @@ pub fn build(b: *std.Build) void {
     property_crash_step.dependOn(&run_message_history_property_tests.step);
     property_crash_step.dependOn(&run_scheduler_fairness_property_tests.step);
 
+    const performance_benchmark_test_module = b.createModule(.{
+        .root_source_file = b.path("test/performance_benchmark_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    performance_benchmark_test_module.addImport("zigeffect", zigeffect);
+
+    const performance_benchmark_tests = b.addTest(.{
+        .name = "zigeffect-performance-benchmark-tests",
+        .root_module = performance_benchmark_test_module,
+    });
+    const run_performance_benchmark_tests = b.addRunArtifact(performance_benchmark_tests);
+
+    const resource_bounds_test_module = b.createModule(.{
+        .root_source_file = b.path("test/resource_bounds_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    resource_bounds_test_module.addImport("zigeffect", zigeffect);
+
+    const resource_bounds_tests = b.addTest(.{
+        .name = "zigeffect-resource-bounds-tests",
+        .root_module = resource_bounds_test_module,
+    });
+    const run_resource_bounds_tests = b.addRunArtifact(resource_bounds_tests);
+
+    const workflow_snapshot_frequency_test_module = b.createModule(.{
+        .root_source_file = b.path("test/workflow_snapshot_frequency_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    workflow_snapshot_frequency_test_module.addImport("zigeffect", zigeffect);
+
+    const workflow_snapshot_frequency_tests = b.addTest(.{
+        .name = "zigeffect-workflow-snapshot-frequency-tests",
+        .root_module = workflow_snapshot_frequency_test_module,
+    });
+    const run_workflow_snapshot_frequency_tests = b.addRunArtifact(workflow_snapshot_frequency_tests);
+
+    const cluster_observability_test_module = b.createModule(.{
+        .root_source_file = b.path("test/cluster_observability_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cluster_observability_test_module.addImport("zigeffect", zigeffect);
+
+    const cluster_observability_tests = b.addTest(.{
+        .name = "zigeffect-cluster-observability-tests",
+        .root_module = cluster_observability_test_module,
+    });
+    const run_cluster_observability_tests = b.addRunArtifact(cluster_observability_tests);
+
+    const performance_bounds_step = b.step("performance-bounds", "Run performance benchmark and bounded resource tests");
+    performance_bounds_step.dependOn(&run_performance_benchmark_tests.step);
+    performance_bounds_step.dependOn(&run_resource_bounds_tests.step);
+    performance_bounds_step.dependOn(&run_workflow_snapshot_frequency_tests.step);
+    performance_bounds_step.dependOn(&run_cluster_observability_tests.step);
+
     const causal_jsonl_backend_test_module = b.createModule(.{
         .root_source_file = b.path("test/causal_jsonl_backend_test.zig"),
         .target = target,
@@ -439,6 +497,28 @@ pub fn build(b: *std.Build) void {
     });
     const run_storage_migrate_tool_tests = b.addRunArtifact(storage_migrate_tool_tests);
 
+    const performance_bench_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/performance_bench.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    performance_bench_tool_module.addImport("zigeffect", zigeffect);
+
+    const performance_bench_tool = b.addExecutable(.{
+        .name = "zigeffect-performance-bench",
+        .root_module = performance_bench_tool_module,
+    });
+    const run_performance_bench_tool = b.addRunArtifact(performance_bench_tool);
+    if (b.args) |args| run_performance_bench_tool.addArgs(args);
+    const performance_bench_step = b.step("performance-bench", "Print deterministic zigeffect performance benchmark report");
+    performance_bench_step.dependOn(&run_performance_bench_tool.step);
+
+    const performance_bench_tool_tests = b.addTest(.{
+        .name = "zigeffect-performance-bench-tests",
+        .root_module = performance_bench_tool_module,
+    });
+    const run_performance_bench_tool_tests = b.addRunArtifact(performance_bench_tool_tests);
+
     const causal_artifact_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_artifact.zig"),
         .target = target,
@@ -640,6 +720,10 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_crash_recovery_property_tests.step);
     test_step.dependOn(&run_message_history_property_tests.step);
     test_step.dependOn(&run_scheduler_fairness_property_tests.step);
+    test_step.dependOn(&run_performance_benchmark_tests.step);
+    test_step.dependOn(&run_resource_bounds_tests.step);
+    test_step.dependOn(&run_workflow_snapshot_frequency_tests.step);
+    test_step.dependOn(&run_cluster_observability_tests.step);
     test_step.dependOn(&run_causal_jsonl_backend_tests.step);
     test_step.dependOn(&run_causal_dot_backend_tests.step);
     test_step.dependOn(&run_causal_otel_backend_tests.step);
@@ -647,6 +731,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_causal_nendb_storage_backend_tests.step);
     test_step.dependOn(&run_causal_async_stream_backend_tests.step);
     test_step.dependOn(&run_storage_migrate_tool_tests.step);
+    test_step.dependOn(&run_performance_bench_tool_tests.step);
     const causal_dev_test_step = b.step("causal-dev-test", "Run zigeffect tests with causal failure capture");
     causal_dev_test_step.dependOn(&run_causal_package_test_tool.step);
 
@@ -1098,6 +1183,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_cluster_runner_tool_tests.step);
     examples_step.dependOn(&storage_migrate_tool.step);
     examples_step.dependOn(&run_storage_migrate_tool_tests.step);
+    examples_step.dependOn(&performance_bench_tool.step);
+    examples_step.dependOn(&run_performance_bench_tool_tests.step);
     examples_step.dependOn(&run_causal_artifact_tool_tests.step);
     examples_step.dependOn(&run_workflow_tool_support_tests.step);
     examples_step.dependOn(&workflow_list_tool.step);
