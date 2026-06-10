@@ -277,7 +277,7 @@ git commit -m "example(zigeffect): add durable queue worker"
 - Create: `packages/zigeffect/examples/workflow_timer_signal.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Add the failing example shell and build wiring**
+- [x] **Step 1: Add the failing example shell and build wiring**
 
 Create `workflow_timer_signal.zig` with:
 
@@ -312,7 +312,7 @@ Wire the module with:
 - binary name: `zigeffect-workflow-timer-signal-example`
 - test name: `zigeffect-workflow-timer-signal-example-tests`
 
-- [ ] **Step 2: Run the failing example gate**
+- [x] **Step 2: Run the failing example gate**
 
 Run:
 
@@ -322,7 +322,7 @@ Run:
 
 Expected: FAIL from `error.ExpectedTimerSignalScenario`.
 
-- [ ] **Step 3: Implement the timer and signal scenario**
+- [x] **Step 3: Implement the timer and signal scenario**
 
 Implement:
 
@@ -340,7 +340,7 @@ Implement:
 Count timer events from `.timer_scheduled` and `.timer_fired`, and signal
 events from `.signal_received`.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
