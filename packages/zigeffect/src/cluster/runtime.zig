@@ -2,12 +2,15 @@ const std = @import("std");
 const entity = @import("entity.zig");
 const envelope = @import("envelope.zig");
 const identity = @import("identity.zig");
+const mailbox = @import("mailbox.zig");
 const message_storage = @import("message_storage.zig");
 const routing = @import("routing.zig");
 const shard_lease = @import("shard_lease.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const EntityAddress = identity.EntityAddress;
+pub const EntityEnvelope = mailbox.EntityEnvelope;
+pub const EntityScope = entity.EntityScope;
 pub const MessageCorrelationId = envelope.MessageCorrelationId;
 pub const MessageEnvelope = envelope.MessageEnvelope;
 pub const MessageEnvelopeKind = envelope.MessageEnvelopeKind;
@@ -143,6 +146,10 @@ pub const ClusterRuntime = struct {
         return self.owned_shards.items.len;
     }
 
+    pub fn entityScope(self: *ClusterRuntime, address: EntityAddress) EntityRuntimeError!*EntityScope {
+        return self.local_runtime.entityScope(address);
+    }
+
     pub fn registerEntity(
         self: *ClusterRuntime,
         registration: EntityRegistration,
@@ -161,6 +168,71 @@ pub const ClusterRuntime = struct {
             .address = local_ref.address,
             .runtime = self,
         };
+    }
+
+    pub fn processOwnedShards(self: *ClusterRuntime, handler: anytype, now_ms: u64) !ClusterProcessReport {
+        var total = ClusterProcessReport{};
+        for (self.owned_shards.items) |shard_id| {
+            const report = try self.processShard(shard_id, handler, now_ms);
+            total.scanned += report.scanned;
+            total.claimed += report.claimed;
+            total.dispatched += report.dispatched;
+            total.replied += report.replied;
+            total.acked += report.acked;
+            total.failed += report.failed;
+            total.skipped += report.skipped;
+        }
+        return total;
+    }
+
+    pub fn processShard(self: *ClusterRuntime, shard_id: ShardId, handler: anytype, now_ms: u64) !ClusterProcessReport {
+        if (!self.ownsShard(shard_id)) return error.ShardNotOwned;
+
+        var report = ClusterProcessReport{};
+        var batch = try self.message_storage.unprocessedByShard(shard_id, self.allocator);
+        defer batch.deinit();
+
+        for (batch.records) |record| {
+            report.scanned += 1;
+            const claimed = try self.message_storage.claim(.{
+                .shard_id = shard_id,
+                .message_id = record.envelope.id,
+                .now_ms = now_ms,
+            });
+            defer envelope.deinitMessageEnvelope(self.allocator, claimed);
+            report.claimed += 1;
+
+            const entity_envelope = try messageToEntityEnvelope(self.allocator, claimed);
+            var result = self.local_runtime.processEnvelope(entity_envelope, handler, now_ms) catch |err| {
+                report.failed += 1;
+                return err;
+            };
+            defer result.deinit(self.allocator);
+            report.dispatched += 1;
+
+            if (result.replied) {
+                const correlation_id = result.envelope.correlation_id orelse return error.MissingReply;
+                const local_reply = try self.local_runtime.takeReply(correlation_id);
+                defer mailbox.deinitEntityEnvelope(self.allocator, local_reply);
+                const durable_reply = try entityReplyToMessageEnvelope(self.allocator, local_reply);
+                defer envelope.deinitMessageEnvelope(self.allocator, durable_reply);
+                const stored_reply = try self.message_storage.storeReply(.{
+                    .shard_id = shard_id,
+                    .envelope = durable_reply,
+                    .now_ms = now_ms,
+                });
+                defer envelope.deinitMessageEnvelope(self.allocator, stored_reply);
+                report.replied += 1;
+            }
+
+            try self.message_storage.ack(.{
+                .message_id = claimed.id,
+                .now_ms = now_ms,
+            });
+            report.acked += 1;
+        }
+
+        return report;
     }
 
     fn submitEntityMessage(
@@ -209,3 +281,35 @@ pub const ClusterRuntime = struct {
         return null;
     }
 };
+
+fn messageToEntityEnvelope(allocator: Allocator, message: MessageEnvelope) !EntityEnvelope {
+    const kind: mailbox.EntityEnvelopeKind = switch (message.kind) {
+        .tell => .tell,
+        .request => .ask,
+        .interrupt => .interrupt,
+        else => return error.UnsupportedMessageKind,
+    };
+
+    return mailbox.cloneEntityEnvelope(allocator, .{
+        .id = message.id,
+        .sequence = message.id,
+        .kind = kind,
+        .address = message.address,
+        .correlation_id = message.correlation_id,
+        .payload_type_name = message.payload_type_name,
+        .payload = message.payload,
+        .redacted_detail = message.redacted_detail,
+    });
+}
+
+fn entityReplyToMessageEnvelope(allocator: Allocator, reply: EntityEnvelope) !MessageEnvelope {
+    if (reply.kind != .reply) return error.UnsupportedMessageKind;
+    return envelope.cloneMessageEnvelope(allocator, .{
+        .kind = .reply,
+        .address = reply.address,
+        .correlation_id = reply.correlation_id,
+        .payload_type_name = reply.payload_type_name,
+        .payload = reply.payload,
+        .redacted_detail = reply.redacted_detail,
+    });
+}
