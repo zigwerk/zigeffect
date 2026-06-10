@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-telemetry-ci-archive-application` means the
+The recommendation `start-production-telemetry-ci-archive-evidence-policy` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -123,8 +123,18 @@ upload execution, CI gates, runtime pipeline execution, live telemetry, network
 send, collector endpoint, OTLP serialization, durable writes, NenDB writes,
 hosted dashboard claims, production cluster claims, alternate renderer scope,
 and mutation authority before any CI archive application branch.
+The production telemetry CI archive application is also delivered: it consumes
+ready CI harness boundary evidence and emits guarded planned, applied, or
+blocked archive application artifacts. It only records `applied=true` after
+workflow-change evidence, before evidence, after evidence, safe after-workflow
+checks, and post-application verification commands are present. It preserves
+disabled local workflow mutation, artifact upload execution, CI gates, runtime
+pipeline execution, live telemetry, network send, collector endpoint, OTLP
+serialization, durable writes, NenDB writes, hosted dashboard claims,
+production cluster claims, alternate renderer scope, and mutation authority
+before any archive evidence policy branch.
 The next branch should be
-`codex/zigeffect-causal-production-telemetry-ci-archive-application`.
+`codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy`.
 
 ## Dependency Order
 
@@ -158,6 +168,7 @@ The backlog currently orders future production-hardening branches as:
 26. `production-telemetry-workbench-readonly-preview` delivered
 27. `production-telemetry-ci-artifact-preview` delivered
 28. `production-telemetry-ci-harness-boundary` delivered
+29. `production-telemetry-ci-archive-application` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -408,10 +419,24 @@ disabled runtime pipeline execution, disabled durable writes, disabled NenDB
 writes, NenDB-only durable direction, and SolidJS `zig-webui` workbench
 direction.
 
-The next branch should use ready CI harness boundary artifacts to propose the
-smallest archive-only workflow application before CI telemetry gates, durable
-production writes, live ingestion, exporters, capacity claims, production
-cluster claims, or mutation authority are considered.
+Production telemetry CI archive application is documented in
+[production-telemetry-ci-archive-application.md](production-telemetry-ci-archive-application.md).
+It emits `zigeffect.causal.production-telemetry-ci-archive-application.v1`
+through `zig build causal-production-telemetry-ci-archive-application`,
+consumes a ready CI harness boundary artifact, records plan or record-applied
+application state, workflow-change evidence, before evidence, after evidence,
+safe after-workflow checks, blocked claims, and required verification
+commands, and preserves disabled local workflow mutation, disabled artifact
+upload execution, disabled CI gates, disabled live telemetry, disabled network
+send, disabled collector endpoint configuration, disabled OTLP serialization,
+disabled runtime pipeline execution, disabled durable writes, disabled NenDB
+writes, NenDB-only durable direction, and SolidJS `zig-webui` workbench
+direction.
+
+The next branch should use ready CI archive application artifacts to define
+archive evidence policy before CI telemetry gates, durable production writes,
+live ingestion, exporters, capacity claims, production cluster claims, or
+mutation authority are considered.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -576,6 +601,18 @@ zig build causal-production-telemetry-ci-harness-boundary -- \
   --workflow ../../.github/workflows/zigeffect-causal.yml \
   reject \
   --reason "negative CI harness boundary path"
+zig build causal-production-telemetry-ci-archive-application -- \
+  --from-harness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary.json \
+  plan \
+  --reason "CI archive application planned from reviewed harness boundary"
+zig build causal-production-telemetry-ci-archive-application -- \
+  --from-harness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary.json \
+  record-applied \
+  --reason "negative archive application path" \
+  --workflow-after ../../.github/workflows/zigeffect-causal.yml \
+  --workflow-change ".github/workflows/zigeffect-causal.yml" \
+  --before "source harness workflow digest" \
+  --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-archive-application-negative
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

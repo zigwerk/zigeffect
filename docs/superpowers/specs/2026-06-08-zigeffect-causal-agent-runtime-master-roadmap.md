@@ -856,11 +856,22 @@ Status values:
      claims, production cluster claims, alternate renderers, or production
      mutation.
 24. `codex/zigeffect-causal-production-telemetry-ci-archive-application`
-   - Current next branch: use ready CI harness boundary evidence to propose and
-     verify the smallest archive-only workflow application while keeping CI
+   - Delivered: `causal-production-telemetry-ci-archive-application` emits
+     `zigeffect.causal.production-telemetry-ci-archive-application.v1`,
+     consumes ready CI harness boundary evidence, records planned, applied, or
+     blocked archive application artifacts, and only records `applied=true`
+     when workflow-change evidence, before evidence, after evidence, safe
+     after-workflow checks, and post-application verification commands exist.
+     It hands off to
+     `codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy`
+     while keeping local workflow mutation, artifact upload execution, CI
      gates, live telemetry, durable writes, NenDB writes, hosted dashboard
      claims, production cluster claims, alternate renderers, and mutation
      authority disabled.
+25. `codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy`
+   - Current next branch: define the evidence policy for CI archive artifacts
+     before telemetry gates, production storage, live ingestion, hosted
+     dashboards, or mutation authority are considered.
 
 ## Dual-Interface Causal Spine Expansion
 

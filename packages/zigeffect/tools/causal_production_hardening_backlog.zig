@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-production-telemetry-ci-archive-application";
-pub const recommended_next_branch = "codex/zigeffect-causal-production-telemetry-ci-archive-application";
+pub const recommendation = "start-production-telemetry-ci-archive-evidence-policy";
+pub const recommended_next_branch = "codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy";
 
 const OutputFormat = enum { text, json };
 
@@ -745,6 +745,29 @@ const backlog_items: []const BacklogItem = &.{
         .branch = "codex/zigeffect-causal-production-telemetry-ci-harness-boundary",
         .agent_guidance = "Use approved CI harness boundary artifacts to start CI archive application work only; do not infer workflow mutation, artifact upload execution, CI gates, runtime ingestion, network transport, OTLP serialization, NenDB writes, durable writes, hosted dashboard readiness, alternate renderers, production cluster readiness, or mutation authority.",
     },
+    .{
+        .id = "production-telemetry-ci-archive-application",
+        .title = "Production Telemetry CI Archive Application",
+        .gap_id = "production-telemetry-ci-archive-application",
+        .priority = "P5",
+        .status = "delivered",
+        .summary = "Consumes ready CI harness boundary evidence and emits a guarded plan or record-applied archive application artifact that only sets applied=true with reviewed workflow-change before/after verification evidence.",
+        .depends_on = &.{ "production-telemetry-ci-harness-boundary", "artifact-access-control", "production-telemetry-nendb-retention-fixtures" },
+        .deliverables = &.{
+            "planned and blocked CI archive application artifacts",
+            "record-applied evidence gate",
+            "before and after workflow evidence contract",
+            "archive evidence policy handoff",
+        },
+        .evidence_sources = &.{
+            "docs/superpowers/specs/2026-06-10-zigeffect-causal-production-telemetry-ci-archive-application-design.md",
+            "docs/superpowers/plans/2026-06-10-zigeffect-causal-production-telemetry-ci-archive-application-implementation.md",
+            "packages/zigeffect/tools/causal_production_telemetry_ci_archive_application.zig",
+            "packages/zigeffect/docs/production-telemetry-ci-archive-application.md",
+        },
+        .branch = "codex/zigeffect-causal-production-telemetry-ci-archive-application",
+        .agent_guidance = "Use planned archive application artifacts to prepare reviewed workflow/archive patches only; use record-applied artifacts only when workflow changes before evidence after evidence and post-verification commands are present; do not infer CI gates live telemetry runtime ingestion durable writes NenDB writes hosted dashboard readiness production cluster readiness or mutation authority.",
+    },
 };
 
 const dependency_order: []const []const u8 = &.{
@@ -776,6 +799,7 @@ const dependency_order: []const []const u8 = &.{
     "production-telemetry-workbench-readonly-preview",
     "production-telemetry-ci-artifact-preview",
     "production-telemetry-ci-harness-boundary",
+    "production-telemetry-ci-archive-application",
 };
 
 const verification_commands: []const []const u8 = &.{
@@ -829,6 +853,8 @@ const verification_commands: []const []const u8 = &.{
     "zig build causal-production-telemetry-ci-artifact-preview -- --from-workbench ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview.json reject --reason \"negative CI artifact preview path\"",
     "zig build causal-production-telemetry-ci-harness-boundary -- --from-ci-preview ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview.json --workflow ../../.github/workflows/zigeffect-causal.yml approve --reason \"CI harness boundary reviewed\" --verified-command \"zig build causal-production-telemetry-ci-artifact-preview\" --verified-command \"zig build causal-artifacts\" --verified-command \"zig build release-gate --summary none\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"",
     "zig build causal-production-telemetry-ci-harness-boundary -- --from-ci-preview ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview.json --workflow ../../.github/workflows/zigeffect-causal.yml reject --reason \"negative CI harness boundary path\"",
+    "zig build causal-production-telemetry-ci-archive-application -- --from-harness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary.json plan --reason \"CI archive application planned from reviewed harness boundary\"",
+    "zig build causal-production-telemetry-ci-archive-application -- --from-harness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary.json record-applied --reason \"negative archive application path\" --workflow-after ../../.github/workflows/zigeffect-causal.yml --workflow-change \".github/workflows/zigeffect-causal.yml\" --before \"source harness workflow digest\" --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-archive-application-negative",
     "zig build causal-production-deployment-runbooks",
     "zig build causal-production-deployment-runbooks -- --format json",
     "zig build causal-durable-production-retention",
@@ -1101,11 +1127,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-production-telemetry-ci-archive-application",
+        "start-production-telemetry-ci-archive-evidence-policy",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-production-telemetry-ci-archive-application",
+        "codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy",
         recommended_next_branch,
     );
 }
@@ -1158,6 +1184,8 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItemStatus("production-telemetry-ci-artifact-preview", "delivered");
     try expectBacklogItem("production-telemetry-ci-harness-boundary");
     try expectBacklogItemStatus("production-telemetry-ci-harness-boundary", "delivered");
+    try expectBacklogItem("production-telemetry-ci-archive-application");
+    try expectBacklogItemStatus("production-telemetry-ci-archive-application", "delivered");
 }
 
 test "production hardening backlog preserves user constraints" {
@@ -1176,7 +1204,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-production-telemetry-ci-archive-application") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -1209,6 +1237,8 @@ test "production hardening backlog text mentions dependency order and next branc
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-telemetry-ci-artifact-preview") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-telemetry-ci-harness-boundary") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-telemetry-ci-harness-boundary") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "production-telemetry-ci-archive-application") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-telemetry-ci-archive-application") != null);
 }
 
 test "production hardening backlog JSON is agent-readable" {
@@ -1217,7 +1247,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-production-telemetry-ci-archive-application\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);
@@ -1265,6 +1295,9 @@ test "production hardening backlog JSON is agent-readable" {
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"production-telemetry-ci-harness-boundary\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-production-telemetry-ci-harness-boundary\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-production-telemetry-ci-harness-boundary") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"production-telemetry-ci-archive-application\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-production-telemetry-ci-archive-application\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-production-telemetry-ci-archive-application") != null);
 }
 
 test "production hardening backlog parses supported formats" {

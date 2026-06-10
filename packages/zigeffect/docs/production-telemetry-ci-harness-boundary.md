@@ -126,11 +126,17 @@ default output paths are:
 ## Agent Guidance
 
 Agents may use a `ready` CI harness boundary to start
-`codex/zigeffect-causal-production-telemetry-ci-archive-application`. They must
+`codex/zigeffect-causal-production-telemetry-ci-archive-application` and run
+`causal-production-telemetry-ci-archive-application` in `plan` mode. They must
 cite the source CI artifact preview, workflow path and digest, workflow
 required/prohibited checks, upload policy preview, clustering release-gate
 assumptions, authority boundary, required commands, recorded commands, and
 blocked claims.
+
+Plan mode does not prove a workflow/archive change was applied.
+`record-applied` requires workflow-change evidence, before evidence, after
+evidence, safe after-workflow checks, and post-application verification
+commands before `applied=true`.
 
 Agents must treat `blocked` CI harness boundaries as stop signs. Blocked
 artifacts can guide source preview or workflow-boundary repair, but they cannot
@@ -161,6 +167,10 @@ zig build causal-production-telemetry-ci-harness-boundary -- \
   reject \
   --reason "negative CI harness boundary path" \
   --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-harness-boundary-negative
+zig build causal-production-telemetry-ci-archive-application -- \
+  --from-harness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary.json \
+  plan \
+  --reason "CI archive application planned from reviewed harness boundary"
 zig build causal-schema-governance -- --format json
 zig build causal-production-hardening-backlog -- --format json
 zig build examples

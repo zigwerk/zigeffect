@@ -495,7 +495,7 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-production-telemetry-ci-archive-application` after
+`codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy` after
 the unified causal spine, deep runtime internals, app semantic trace API,
 bounded agent query surface, record-only encryption-at-rest policy,
 record-only alerting integrations, delivered live dashboard streaming
@@ -505,7 +505,8 @@ baseline contract, and delivered production capacity planning,
 completion-audit, load-test observation harness, production telemetry capture
 design, fixture, readiness-review, implementation-proposal, exporter-boundary,
 local-pipeline-fixtures, NenDB-retention-fixtures, workbench read-only
-preview, CI artifact preview, and CI harness boundary contracts.
+preview, CI artifact preview, CI harness boundary, and CI archive application
+contracts.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -556,9 +557,9 @@ production load, no capacity claim, and `mutation_authority=none`.
 The harness has now been consumed by the delivered telemetry design, fixture,
 readiness-review, implementation-proposal, exporter-boundary, local pipeline
 fixture, NenDB retention fixture, workbench read-only preview, CI artifact
-preview, and CI harness boundary milestones.
+preview, CI harness boundary, and CI archive application milestones.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-archive-application`.
+`codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy`.
 
 ## Production Telemetry Capture Design
 
@@ -830,6 +831,28 @@ enablement, runtime pipeline execution, live telemetry, network send,
 collector configuration, OTLP serialization, NenDB writes, durable production
 writes, hosted dashboard readiness, production cluster readiness, non-NenDB
 adapter scope, alternate renderer scope, or mutation authority.
+
+Record the CI archive application plan after CI harness boundary approval:
+
+```sh
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-archive-application -- \
+  --from-harness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview-ci-harness-boundary.json \
+  plan \
+  --reason "CI archive application planned from reviewed harness boundary"
+```
+
+The CI archive application report records schema
+`zigeffect.causal.production-telemetry-ci-archive-application.v1`. It consumes
+a ready CI harness boundary artifact and emits `planned`, `applied`, or
+`blocked` archive application artifacts. `record-applied` only records
+`applied=true` after workflow-change, before, after, safe after-workflow, and
+post-verification evidence are present. Do not treat plan mode as workflow
+mutation, artifact upload execution, CI gate enablement, runtime pipeline
+execution, live telemetry, network send, collector configuration, OTLP
+serialization, NenDB writes, durable production writes, hosted dashboard
+readiness, production cluster readiness, non-NenDB adapter scope, alternate
+renderer scope, or mutation authority.
 
 ## Production Artifact Aggregation
 
@@ -1121,10 +1144,11 @@ confirm the delivered hardening sequence and choose the next evidence-producing
 branch. The load-test observation harness and production telemetry capture
 design, fixture, readiness-review, implementation-proposal, and
 exporter-boundary, local-pipeline-fixtures, NenDB-retention-fixtures,
-workbench-readonly-preview, CI-artifact-preview, and CI-harness-boundary
+workbench-readonly-preview, CI-artifact-preview, CI-harness-boundary, and
+CI-archive-application
 reports are now delivered.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-archive-application`.
+`codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy`.
 
 ## Production Gaps
 

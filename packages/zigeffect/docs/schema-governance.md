@@ -420,6 +420,24 @@ collector endpoints, write NenDB records, write durable production storage,
 host a production dashboard, orchestrate production clusters, add non-NenDB
 adapter work, add alternate renderers, or grant mutation authority.
 
+- `zigeffect.causal.production-telemetry-ci-archive-application.v1`
+
+The production-telemetry-ci-archive-application report is a record-only,
+guarded application, workflow-evidence, before/after-verification,
+`cluster-release-gate-aware`, `no-tool-workflow-mutation`,
+`mutation-authority-none`, `no-live-ingestion`, `no-network`,
+`no-durable-write`, `no-nendb-write`, and `no-ci-gate` production hardening
+contract. It consumes a ready CI harness boundary artifact and emits `planned`,
+`applied`, or `blocked` archive application artifacts. It only records
+`applied=true` when a separately reviewed workflow/archive change, before
+evidence, after evidence, safe after-workflow checks, and required
+post-application verification commands are present. It does not modify GitHub
+Actions, execute artifact uploads, enable CI gates, ingest live telemetry, run
+a telemetry pipeline, configure exporters, send OTLP, configure collector
+endpoints, write NenDB records, write durable production storage, host a
+production dashboard, orchestrate production clusters, add non-NenDB adapter
+work, add alternate renderers, or grant mutation authority.
+
 ### Human-Agent Feedback
 
 - `zigeffect.causal.human-agent-feedback-loop.v1`

@@ -124,9 +124,11 @@ workbench read-only preview handoff is delivered as
 CI artifact preview handoff is delivered as
 `codex/zigeffect-causal-production-telemetry-ci-artifact-preview`. The CI
 harness boundary handoff is delivered as
-`codex/zigeffect-causal-production-telemetry-ci-harness-boundary`. The
+`codex/zigeffect-causal-production-telemetry-ci-harness-boundary`. The CI
+archive application handoff is delivered as
+`codex/zigeffect-causal-production-telemetry-ci-archive-application`. The
 current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-archive-application`.
+`codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy`.
 
 ## Verification
 

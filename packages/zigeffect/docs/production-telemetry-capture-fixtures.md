@@ -99,9 +99,11 @@ read-only preview handoff is delivered through
 preview handoff is delivered through
 `causal-production-telemetry-ci-artifact-preview`. The CI harness boundary
 handoff is delivered through
-`causal-production-telemetry-ci-harness-boundary`.
+`causal-production-telemetry-ci-harness-boundary`. The CI archive application
+handoff is delivered through
+`causal-production-telemetry-ci-archive-application`.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-archive-application`.
+`codex/zigeffect-causal-production-telemetry-ci-archive-evidence-policy`.
 
 ## Verification
 
