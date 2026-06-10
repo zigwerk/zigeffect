@@ -6,6 +6,7 @@ const mailbox = @import("mailbox.zig");
 const message_storage = @import("message_storage.zig");
 const routing = @import("routing.zig");
 const shard_lease = @import("shard_lease.zig");
+const fencing = @import("fencing.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const EntityAddress = identity.EntityAddress;
@@ -28,6 +29,7 @@ pub const LocalEntityRuntimeOptions = entity.LocalEntityRuntimeOptions;
 pub const ClusterRuntimeError = error{
     RuntimeShuttingDown,
     ShardNotOwned,
+    StaleShardFence,
     UnsupportedMessageKind,
     MissingReply,
 };
@@ -187,6 +189,14 @@ pub const ClusterRuntime = struct {
 
     pub fn processShard(self: *ClusterRuntime, shard_id: ShardId, handler: anytype, now_ms: u64) !ClusterProcessReport {
         if (!self.ownsShard(shard_id)) return error.ShardNotOwned;
+        self.validateShardFence(shard_id) catch |err| switch (err) {
+            error.StaleShardFence => {
+                self.removeOwnedShard(shard_id);
+                self.accepting_messages = false;
+                return err;
+            },
+            else => return err,
+        };
 
         var report = ClusterProcessReport{};
         var batch = try self.message_storage.unprocessedByShard(shard_id, self.allocator);
@@ -259,6 +269,14 @@ pub const ClusterRuntime = struct {
         if (!self.accepting_messages) return error.RuntimeShuttingDown;
         const shard_id = try routing.shardIdForAddress(address, self.shard_count);
         if (!self.ownsShard(shard_id)) return error.ShardNotOwned;
+        self.validateShardFence(shard_id) catch |err| switch (err) {
+            error.StaleShardFence => {
+                self.removeOwnedShard(shard_id);
+                self.accepting_messages = false;
+                return err;
+            },
+            else => return err,
+        };
 
         var idempotency_buf: [32]u8 = undefined;
         const idempotency_key = std.fmt.bufPrint(&idempotency_buf, "cluster:{d}", .{self.next_message_sequence}) catch unreachable;
@@ -275,6 +293,11 @@ pub const ClusterRuntime = struct {
                 .redacted_detail = redacted_detail,
             },
         });
+    }
+
+    fn validateShardFence(self: *ClusterRuntime, shard_id: ShardId) !void {
+        const fence = try self.lease_manager.fenceForShard(shard_id);
+        try fencing.validateShardFence(self.lease_manager.storage, fence);
     }
 
     fn recordOwnedShard(self: *ClusterRuntime, shard_id: ShardId) Allocator.Error!void {

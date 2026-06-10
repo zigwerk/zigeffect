@@ -1,5 +1,6 @@
 const std = @import("std");
 const causal_mod = @import("../services/causal.zig");
+const fencing = @import("fencing.zig");
 const runner = @import("runner.zig");
 const runner_storage = @import("runner_storage.zig");
 
@@ -9,6 +10,7 @@ pub const ShardId = runner_storage.ShardId;
 pub const RunnerStorage = runner_storage.RunnerStorage;
 pub const RunnerLeaseTtlMs = runner_storage.RunnerLeaseTtlMs;
 pub const ShardLease = runner_storage.ShardLease;
+pub const ShardLeaseFence = fencing.ShardLeaseFence;
 pub const RunnerLeaseBatch = runner_storage.RunnerLeaseBatch;
 
 pub const ShardLeaseManagerError = error{
@@ -199,6 +201,11 @@ pub const LocalShardLeaseManager = struct {
             .allocator = allocator,
             .leases = copied,
         };
+    }
+
+    pub fn fenceForShard(self: *const LocalShardLeaseManager, shard_id: ShardId) !ShardLeaseFence {
+        const index = self.findOwnedIndex(shard_id) orelse return error.ShardNotOwned;
+        return fencing.fenceFromLease(self.owned_leases.items[index]);
     }
 
     fn findOwnedIndex(self: *const LocalShardLeaseManager, shard_id: ShardId) ?usize {
