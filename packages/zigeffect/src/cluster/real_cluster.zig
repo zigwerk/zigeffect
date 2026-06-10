@@ -4,6 +4,7 @@ const observability = @import("observability.zig");
 const routing = @import("routing.zig");
 const runner = @import("runner.zig");
 const runner_storage = @import("runner_storage.zig");
+const supervision = @import("supervision.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const MessageStorage = message_storage.MessageStorage;
@@ -411,6 +412,16 @@ pub const RealClusterController = struct {
             .runner = address,
             .released = released,
             .reassigned = reassigned,
+        };
+    }
+
+    pub fn superviseRunnerDrain(self: *RealClusterController, address: RunnerAddress, now_ms: u64) !supervision.ClusterSupervisionReport {
+        const drain = try self.drainRunner(address, now_ms);
+        return .{
+            .runner_drains = 1,
+            .runner_drain_releases = drain.released,
+            .runner_drain_reassignments = drain.reassigned,
+            .shard_releases = drain.released,
         };
     }
 

@@ -403,6 +403,49 @@ test "local cluster runner records runner service restart and escalation" {
     try std.testing.expectEqual(@as(usize, 1), second.runner_service_escalations);
 }
 
+test "real cluster supervised runner drain reports distributed cleanup" {
+    var registry = fx.LocalRunnerRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    const runner_storage = runner_storage_state.asRunnerStorage();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+
+    var controller = try fx.RealClusterController.init(std.testing.allocator, .{
+        .runner_storage = runner_storage,
+        .message_storage = message_storage_state.asMessageStorage(),
+        .registry = &registry,
+        .options = .{
+            .shard_count = 8,
+            .lease_ttl_ms = 1_000,
+            .health_options = .{ .degraded_after_ms = 100, .unhealthy_after_ms = 300 },
+        },
+    });
+
+    const runner_a = fx.runnerAddress("machine-supervision", "runner-a");
+    const runner_b = fx.runnerAddress("machine-supervision", "runner-b");
+    _ = try controller.admitRunner(.{ .address = runner_a, .name = "runner-a", .started_at_ms = 1_000 });
+    _ = try controller.recordHeartbeat(.{ .address = runner_a, .sequence = 1, .observed_at_ms = 1_010 });
+    _ = try controller.admitRunner(.{ .address = runner_b, .name = "runner-b", .started_at_ms = 1_000 });
+    _ = try controller.recordHeartbeat(.{ .address = runner_b, .sequence = 1, .observed_at_ms = 1_010 });
+
+    var placement = try controller.placementPlan(std.testing.allocator, 1_050);
+    defer placement.deinit();
+    var rebalance = try controller.rebalancePlan(std.testing.allocator, placement);
+    defer rebalance.deinit();
+    _ = try controller.applyRebalancePlan(rebalance, 1_100);
+
+    const report = try controller.superviseRunnerDrain(runner_a, 1_200);
+    try std.testing.expectEqual(@as(usize, 1), report.runner_drains);
+    try std.testing.expectEqual(@as(usize, 4), report.runner_drain_releases);
+    try std.testing.expectEqual(@as(usize, 4), report.runner_drain_reassignments);
+
+    var leases = try runner_storage.leases(std.testing.allocator);
+    defer leases.deinit();
+    try std.testing.expectEqual(@as(usize, 8), leases.leases.len);
+}
+
 fn addressForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.EntityAddress {
     var id: u64 = 1;
     while (id < 100_000) : (id += 1) {
