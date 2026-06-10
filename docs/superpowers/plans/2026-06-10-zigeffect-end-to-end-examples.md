@@ -186,7 +186,7 @@ git commit -m "example(zigeffect): add approval workflow"
 - Create: `packages/zigeffect/examples/workflow_queue_worker.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Add the failing example shell and build wiring**
+- [x] **Step 1: Add the failing example shell and build wiring**
 
 Create `workflow_queue_worker.zig` with a report:
 
@@ -223,7 +223,7 @@ Wire the module with:
 - binary name: `zigeffect-workflow-queue-worker-example`
 - test name: `zigeffect-workflow-queue-worker-example-tests`
 
-- [ ] **Step 2: Run the failing example gate**
+- [x] **Step 2: Run the failing example gate**
 
 Run:
 
@@ -233,7 +233,7 @@ Run:
 
 Expected: FAIL from `error.ExpectedQueueWorkerScenario`.
 
-- [ ] **Step 3: Implement the durable queue scenario**
+- [x] **Step 3: Implement the durable queue scenario**
 
 Implement:
 
@@ -251,7 +251,7 @@ Implement:
 - third `WorkflowContext.queue` call returning the same `.completed` value;
 - a final read of journal events proving exactly one `queue_acked` event.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
