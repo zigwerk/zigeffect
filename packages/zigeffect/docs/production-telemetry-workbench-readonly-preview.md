@@ -100,9 +100,12 @@ authority.
 `ready_for_next_branch=true` means a later
 `codex/zigeffect-causal-production-telemetry-ci-artifact-preview` branch may be
 started; that branch is now delivered and hands off to
-`codex/zigeffect-causal-production-telemetry-ci-harness-boundary`. It does not
-approve live ingestion, a runtime pipeline, NenDB writes, durable writes,
-hosted dashboards, artifact upload execution, CI gates, or mutation authority.
+`codex/zigeffect-causal-production-telemetry-ci-harness-boundary`, which is
+also delivered and now hands off to
+`codex/zigeffect-causal-production-telemetry-ci-archive-application`. It does
+not approve live ingestion, a runtime pipeline, NenDB writes, durable writes,
+hosted dashboards, artifact upload execution, CI gates, workflow mutation,
+production cluster claims, or mutation authority.
 
 ## Output Paths
 

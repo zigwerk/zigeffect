@@ -482,6 +482,36 @@ OTLP serialization, runtime pipeline execution, durable writes, and NenDB
 writes disabled. The full policy is in
 [docs/production-telemetry-ci-artifact-preview.md](docs/production-telemetry-ci-artifact-preview.md).
 
+Review the production telemetry CI harness boundary:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-harness-boundary -- \
+  --from-ci-preview ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview.json \
+  --workflow ../../.github/workflows/zigeffect-causal.yml \
+  approve \
+  --reason "CI harness boundary reviewed" \
+  --verified-command "zig build causal-production-telemetry-ci-artifact-preview" \
+  --verified-command "zig build causal-artifacts" \
+  --verified-command "zig build release-gate --summary none" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The report uses schema
+`zigeffect.causal.production-telemetry-ci-harness-boundary.v1`, inspects the
+existing causal GitHub Actions workflow, records workflow required and
+prohibited feature checks, records clustering release-gate assumptions, and
+emits a `ready` or `blocked` CI harness boundary before archive application
+work starts. It keeps `applied=false`, `mutation_authority=none`, CI upload
+execution, workflow mutation, CI gates, live telemetry, network send,
+collector endpoints, OTLP serialization, runtime pipeline execution, durable
+writes, NenDB writes, hosted dashboard claims, and production cluster claims
+disabled. The full policy is in
+[docs/production-telemetry-ci-harness-boundary.md](docs/production-telemetry-ci-harness-boundary.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -507,8 +537,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-ci-harness-boundary` after the
-delivered production telemetry CI artifact preview.
+`codex/zigeffect-causal-production-telemetry-ci-archive-application` after the
+delivered production telemetry CI harness boundary.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in

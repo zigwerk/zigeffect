@@ -864,6 +864,23 @@ metrics, and traces.
   `mutation_authority=none`, and avoids artifact upload execution, workflow
   mutation, live telemetry, durable writes, CI gates, hosted dashboard claims,
   alternate renderers, or production mutation.
+- Delivered: `causal-production-telemetry-ci-harness-boundary` publishes
+  `zigeffect.causal.production-telemetry-ci-harness-boundary.v1`, consumes a
+  ready CI artifact preview artifact, inspects the existing causal GitHub
+  Actions workflow, records workflow required-feature checks, workflow
+  prohibited-feature checks, clustering release-gate assumptions, ready and
+  blocked CI harness boundary artifacts, and hands off to
+  `codex/zigeffect-causal-production-telemetry-ci-archive-application`. It
+  keeps `applied=false`, `production_telemetry_ingestion=false`,
+  `live_exporter_enabled=false`, `network_send_enabled=false`,
+  `collector_endpoint_configured=false`, `otlp_serialization_enabled=false`,
+  `runtime_pipeline_enabled=false`, `durable_write_enabled=false`,
+  `nendb_write_enabled=false`, `ci_upload_enabled=false`,
+  `ci_upload_execution_enabled=false`, `ci_workflow_mutation_enabled=false`,
+  `ci_gate_enabled=false`, `mutation_authority=none`, and avoids workflow
+  mutation, artifact upload execution, live telemetry, durable writes, CI
+  gates, hosted dashboard claims, production cluster claims, alternate
+  renderers, or production mutation.
 - Delivered: `causal-unified-spine-contract` publishes
   `zigeffect.causal.unified-spine-contract.v1` with canonical runtime ids, app
   semantic ids, relationship taxonomy, policy stages, derived index families,

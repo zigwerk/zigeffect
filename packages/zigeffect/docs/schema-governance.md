@@ -402,6 +402,24 @@ collector endpoints, write NenDB records, write durable production storage,
 host a production dashboard, add non-NenDB adapter work, add alternate
 renderers, or grant mutation authority.
 
+- `zigeffect.causal.production-telemetry-ci-harness-boundary.v1`
+
+The production-telemetry-ci-harness-boundary report is a record-only,
+`ci-harness-boundary`, `workflow-inspection`,
+`cluster-release-gate-aware`, `no-workflow-mutation`,
+`mutation-authority-none`, `no-live-ingestion`, `no-network`,
+`no-durable-write`, `no-nendb-write`, and `no-ci-gate` production hardening
+contract. It consumes a ready CI artifact preview, inspects the existing
+causal GitHub Actions workflow, records workflow required-feature checks,
+workflow prohibited-feature checks, clustering release-gate assumptions,
+blocked claims, and required verification commands, and emits `ready` or
+`blocked` artifacts before future CI archive application work. It does not
+modify GitHub Actions, execute artifact upload changes, fail CI, ingest live
+telemetry, run a telemetry pipeline, configure exporters, send OTLP, configure
+collector endpoints, write NenDB records, write durable production storage,
+host a production dashboard, orchestrate production clusters, add non-NenDB
+adapter work, add alternate renderers, or grant mutation authority.
+
 ### Human-Agent Feedback
 
 - `zigeffect.causal.human-agent-feedback-loop.v1`

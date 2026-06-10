@@ -495,7 +495,7 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-production-telemetry-ci-harness-boundary` after
+`codex/zigeffect-causal-production-telemetry-ci-archive-application` after
 the unified causal spine, deep runtime internals, app semantic trace API,
 bounded agent query surface, record-only encryption-at-rest policy,
 record-only alerting integrations, delivered live dashboard streaming
@@ -505,7 +505,7 @@ baseline contract, and delivered production capacity planning,
 completion-audit, load-test observation harness, production telemetry capture
 design, fixture, readiness-review, implementation-proposal, exporter-boundary,
 local-pipeline-fixtures, NenDB-retention-fixtures, workbench read-only
-preview, and CI artifact preview contracts.
+preview, CI artifact preview, and CI harness boundary contracts.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -555,9 +555,10 @@ production load, no capacity claim, and `mutation_authority=none`.
 
 The harness has now been consumed by the delivered telemetry design, fixture,
 readiness-review, implementation-proposal, exporter-boundary, local pipeline
-fixture, NenDB retention fixture, and workbench read-only preview milestones.
+fixture, NenDB retention fixture, workbench read-only preview, CI artifact
+preview, and CI harness boundary milestones.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-harness-boundary`.
+`codex/zigeffect-causal-production-telemetry-ci-archive-application`.
 
 ## Production Telemetry Capture Design
 
@@ -797,6 +798,37 @@ the preview as artifact upload execution, GitHub Actions mutation, CI gate
 enablement, runtime pipeline execution, live telemetry, network send,
 collector configuration, OTLP serialization, NenDB writes, durable production
 writes, hosted dashboard readiness, production capacity evidence, non-NenDB
+adapter scope, alternate renderer scope, or mutation authority.
+
+Run the CI harness boundary after CI artifact preview approval:
+
+```sh
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-harness-boundary -- \
+  --from-ci-preview ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures-nendb-retention-fixtures-workbench-readonly-preview-ci-artifact-preview.json \
+  --workflow ../../.github/workflows/zigeffect-causal.yml \
+  approve \
+  --reason "CI harness boundary reviewed" \
+  --verified-command "zig build causal-production-telemetry-ci-artifact-preview" \
+  --verified-command "zig build causal-artifacts" \
+  --verified-command "zig build release-gate --summary none" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The CI harness boundary report records schema
+`zigeffect.causal.production-telemetry-ci-harness-boundary.v1`. It consumes a
+ready CI artifact preview artifact, inspects the existing causal GitHub Actions
+workflow, emits `ready` or `blocked` CI harness boundary artifacts, records
+workflow required-feature checks, workflow prohibited-feature checks, and
+clustering release-gate assumptions, and hands off to
+`codex/zigeffect-causal-production-telemetry-ci-archive-application`. Do not
+treat the boundary as workflow mutation, artifact upload execution, CI gate
+enablement, runtime pipeline execution, live telemetry, network send,
+collector configuration, OTLP serialization, NenDB writes, durable production
+writes, hosted dashboard readiness, production cluster readiness, non-NenDB
 adapter scope, alternate renderer scope, or mutation authority.
 
 ## Production Artifact Aggregation
@@ -1088,10 +1120,11 @@ Run `causal-production-hardening-completion-audit` after capacity planning to
 confirm the delivered hardening sequence and choose the next evidence-producing
 branch. The load-test observation harness and production telemetry capture
 design, fixture, readiness-review, implementation-proposal, and
-exporter-boundary, local-pipeline-fixtures, NenDB-retention-fixtures, and
-workbench-readonly-preview and CI-artifact-preview reports are now delivered.
+exporter-boundary, local-pipeline-fixtures, NenDB-retention-fixtures,
+workbench-readonly-preview, CI-artifact-preview, and CI-harness-boundary
+reports are now delivered.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-harness-boundary`.
+`codex/zigeffect-causal-production-telemetry-ci-archive-application`.
 
 ## Production Gaps
 

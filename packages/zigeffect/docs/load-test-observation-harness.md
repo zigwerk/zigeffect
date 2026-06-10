@@ -122,9 +122,11 @@ NenDB retention fixture handoff is delivered as
 workbench read-only preview handoff is delivered as
 `codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`. The
 CI artifact preview handoff is delivered as
-`codex/zigeffect-causal-production-telemetry-ci-artifact-preview`. The
+`codex/zigeffect-causal-production-telemetry-ci-artifact-preview`. The CI
+harness boundary handoff is delivered as
+`codex/zigeffect-causal-production-telemetry-ci-harness-boundary`. The
 current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-harness-boundary`.
+`codex/zigeffect-causal-production-telemetry-ci-archive-application`.
 
 ## Verification
 

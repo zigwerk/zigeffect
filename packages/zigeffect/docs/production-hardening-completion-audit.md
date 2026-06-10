@@ -125,13 +125,15 @@ production load execution, or capacity claims.
 
 The telemetry capture design, fixture, readiness-review,
 implementation-proposal, exporter-boundary, local-pipeline-fixtures,
-NenDB-retention-fixtures, workbench-readonly-preview, and CI-artifact-preview
-branches are now delivered after this handoff. The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-harness-boundary`.
+NenDB-retention-fixtures, workbench-readonly-preview, CI-artifact-preview, and
+CI-harness-boundary branches are now delivered after this handoff. The current
+next branch is
+`codex/zigeffect-causal-production-telemetry-ci-archive-application`.
 Reviewed production capacity sizing remains future until compatible
 observations, telemetry design, fixtures, readiness review, implementation
 proposal, exporter boundary, local pipeline fixture evidence, NenDB retention
-fixture evidence, workbench preview evidence, and human review exist.
+fixture evidence, workbench preview evidence, CI artifact preview evidence, CI
+harness boundary evidence, and human review exist.
 
 ## Verification
 

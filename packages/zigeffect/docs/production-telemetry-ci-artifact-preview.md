@@ -124,6 +124,12 @@ cite the source workbench preview, source retention artifact, upload policy
 preview, artifact candidates, authority boundary, checks, required commands,
 recorded commands, and blocked claims.
 
+That harness boundary is now delivered. Later agents should consume the
+resulting `zigeffect.causal.production-telemetry-ci-harness-boundary.v1`
+artifact before starting
+`codex/zigeffect-causal-production-telemetry-ci-archive-application`; a CI
+artifact preview alone does not approve workflow application.
+
 Agents must treat `blocked` CI artifact previews as stop signs. Blocked
 artifacts can guide evidence or policy repair, but they cannot justify CI
 upload configuration, CI gate work, live telemetry, durable writes, hosted

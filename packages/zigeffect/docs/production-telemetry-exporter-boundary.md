@@ -147,10 +147,12 @@ fixtures branch is now delivered through
 read-only preview is now delivered through
 `causal-production-telemetry-workbench-readonly-preview`. The CI artifact
 preview is now delivered through
-`causal-production-telemetry-ci-artifact-preview`. The current handoff is
-`codex/zigeffect-causal-production-telemetry-ci-harness-boundary`, which must
-consume ready CI artifact preview evidence rather than treating this boundary
-report as runtime telemetry or CI upload authority.
+`causal-production-telemetry-ci-artifact-preview`. The CI harness boundary is
+now delivered through `causal-production-telemetry-ci-harness-boundary`. The
+current handoff is
+`codex/zigeffect-causal-production-telemetry-ci-archive-application`, which
+must consume ready CI harness boundary evidence rather than treating this
+boundary report as runtime telemetry or CI upload authority.
 
 ## Verification
 

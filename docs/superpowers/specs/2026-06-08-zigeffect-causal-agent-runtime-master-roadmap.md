@@ -837,10 +837,30 @@ Status values:
      mutation, live telemetry, durable writes, CI gates, hosted dashboard
      claims, alternate renderers, or production mutation.
 23. `codex/zigeffect-causal-production-telemetry-ci-harness-boundary`
-   - Current next branch: use ready CI artifact preview evidence to define the
-     CI harness boundary before enabling artifact upload execution, CI gates,
-     durable writes, live telemetry ingestion, hosted dashboard claims,
-     capacity claims, alternate renderers, or mutation authority.
+   - Delivered: `causal-production-telemetry-ci-harness-boundary` emits
+     `zigeffect.causal.production-telemetry-ci-harness-boundary.v1`, consumes
+     ready CI artifact preview artifacts, inspects the existing causal GitHub
+     Actions workflow, records workflow required-feature checks, workflow
+     prohibited-feature checks, clustering release-gate assumptions, and ready
+     or blocked CI harness boundary artifacts, and hands off to
+     `codex/zigeffect-causal-production-telemetry-ci-archive-application`. It
+     keeps `applied=false`, `production_telemetry_ingestion=false`,
+     `live_exporter_enabled=false`, `network_send_enabled=false`,
+     `collector_endpoint_configured=false`, `otlp_serialization_enabled=false`,
+     `runtime_pipeline_enabled=false`, `durable_write_enabled=false`,
+     `nendb_write_enabled=false`, `ci_upload_enabled=false`,
+     `ci_upload_execution_enabled=false`,
+     `ci_workflow_mutation_enabled=false`, `ci_gate_enabled=false`,
+     `mutation_authority=none`, and avoids workflow mutation, artifact upload
+     execution, live telemetry, durable writes, CI gates, hosted dashboard
+     claims, production cluster claims, alternate renderers, or production
+     mutation.
+24. `codex/zigeffect-causal-production-telemetry-ci-archive-application`
+   - Current next branch: use ready CI harness boundary evidence to propose and
+     verify the smallest archive-only workflow application while keeping CI
+     gates, live telemetry, durable writes, NenDB writes, hosted dashboard
+     claims, production cluster claims, alternate renderers, and mutation
+     authority disabled.
 
 ## Dual-Interface Causal Spine Expansion
 
