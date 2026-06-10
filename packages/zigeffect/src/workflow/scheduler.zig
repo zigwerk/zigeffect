@@ -212,6 +212,7 @@ pub const WorkflowScheduler = struct {
     timer_watches: std.ArrayList(TimerWatch) = .empty,
     timer_cursor: usize = 0,
     queue_workers: std.ArrayList(RegisteredQueueWorker) = .empty,
+    queue_retry_cursor: usize = 0,
     queue_cursor: usize = 0,
     shutdown_requested: bool = false,
 
@@ -320,11 +321,15 @@ pub const WorkflowScheduler = struct {
     }
 
     fn retryExpiredQueueClaims(self: *WorkflowScheduler, max_workers: usize, result: *WorkflowSchedulerTickResult) anyerror!void {
-        if (max_workers == 0) return;
-        const visits = @min(max_workers, self.queue_workers.items.len);
+        const len = self.queue_workers.items.len;
+        if (len == 0 or max_workers == 0) return;
+
+        const visits = @min(max_workers, len);
         var count: usize = 0;
         while (count < visits) : (count += 1) {
-            result.queue_retries += try self.queue_workers.items[count].retryExpired();
+            const index = self.queue_retry_cursor % len;
+            self.queue_retry_cursor = (index + 1) % len;
+            result.queue_retries += try self.queue_workers.items[index].retryExpired();
         }
     }
 
