@@ -210,3 +210,130 @@ test "in-process timeout policy rejects before durable submission" {
     defer by_shard.deinit();
     try std.testing.expectEqual(@as(usize, 0), by_shard.records.len);
 }
+
+test "http codec extracts request and response bodies" {
+    const address = fx.entityAddress("counter", "http-codec");
+    const request = fx.ClusterTransportRequest{
+        .kind = .tell,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "inc",
+        .redacted_detail = "increment",
+        .idempotency_key = "http-codec-key",
+    };
+    const request_json = try fx.formatClusterTransportRequestJson(std.testing.allocator, request);
+    defer std.testing.allocator.free(request_json);
+    const http_request = try fx.formatClusterTransportHttpRequest(std.testing.allocator, request_json);
+    defer std.testing.allocator.free(http_request);
+    const request_body = try fx.clusterTransportHttpBody(http_request);
+    try std.testing.expectEqualStrings(request_json, request_body);
+
+    const response = fx.ClusterTransportResponse{
+        .shard_id = 1,
+        .envelope = .{
+            .id = 123,
+            .kind = .tell,
+            .address = address,
+            .idempotency_key = "http-codec-key",
+            .payload_type_name = "text",
+            .payload = "inc",
+            .redacted_detail = "increment",
+        },
+        .attempts = 1,
+        .transport = .loopback_http,
+    };
+    const response_json = try fx.formatClusterTransportResponseJson(std.testing.allocator, response);
+    defer std.testing.allocator.free(response_json);
+    const http_response = try fx.formatClusterTransportHttpResponse(std.testing.allocator, response_json);
+    defer std.testing.allocator.free(http_response);
+    const response_body = try fx.clusterTransportHttpBody(http_response);
+    try std.testing.expectEqualStrings(response_json, response_body);
+}
+
+test "loopback http transport stores messages through encoded request bytes" {
+    var storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asMessageStorage();
+    var transport_state = try fx.LoopbackHttpClusterTransport.init(std.testing.allocator, storage, .{ .shard_count = 16 });
+    defer transport_state.deinit();
+    const transport = transport_state.asClusterTransport();
+
+    const address = fx.entityAddress("counter", "loopback-store");
+    const shard_id = try fx.shardIdForAddress(address, 16);
+    var response = try transport.send(std.testing.allocator, .{
+        .kind = .request,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "get",
+        .redacted_detail = "read current value",
+        .idempotency_key = "loopback-store-key",
+    });
+    defer response.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(shard_id, response.shard_id);
+    try std.testing.expectEqual(fx.ClusterTransportKind.loopback_http, response.transport);
+    try std.testing.expectEqual(@as(usize, 1), response.attempts);
+    try std.testing.expect(response.correlation_id != null);
+
+    var by_shard = try storage.unprocessedByShard(shard_id, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 1), by_shard.records.len);
+    try std.testing.expectEqualStrings("loopback-store-key", by_shard.records[0].envelope.idempotency_key);
+}
+
+test "loopback http transport retries transient unavailable attempts" {
+    var storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asMessageStorage();
+    var transport_state = try fx.LoopbackHttpClusterTransport.init(std.testing.allocator, storage, .{
+        .shard_count = 8,
+        .failures_before_success = 2,
+    });
+    defer transport_state.deinit();
+    const transport = transport_state.asClusterTransport();
+
+    const address = fx.entityAddress("counter", "loopback-retry");
+    const shard_id = try fx.shardIdForAddress(address, 8);
+    var response = try transport.send(std.testing.allocator, .{
+        .kind = .tell,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "inc",
+        .redacted_detail = "increment",
+        .policy = .{ .timeout_ms = 500, .max_retries = 2 },
+    });
+    defer response.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 3), response.attempts);
+    try std.testing.expectEqual(fx.ClusterTransportKind.loopback_http, response.transport);
+    var by_shard = try storage.unprocessedByShard(shard_id, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 1), by_shard.records.len);
+}
+
+test "loopback http transport stops after retry limit" {
+    var storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asMessageStorage();
+    var transport_state = try fx.LoopbackHttpClusterTransport.init(std.testing.allocator, storage, .{
+        .shard_count = 8,
+        .failures_before_success = 2,
+    });
+    defer transport_state.deinit();
+    const transport = transport_state.asClusterTransport();
+
+    const address = fx.entityAddress("counter", "loopback-retry-limit");
+    const shard_id = try fx.shardIdForAddress(address, 8);
+    try std.testing.expectError(error.RetryLimitExceeded, transport.send(std.testing.allocator, .{
+        .kind = .tell,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "inc",
+        .redacted_detail = "increment",
+        .policy = .{ .timeout_ms = 500, .max_retries = 1 },
+    }));
+
+    var by_shard = try storage.unprocessedByShard(shard_id, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 0), by_shard.records.len);
+}

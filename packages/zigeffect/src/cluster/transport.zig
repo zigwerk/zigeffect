@@ -167,7 +167,74 @@ pub const InProcessClusterTransport = struct {
     }
 };
 
-pub const LoopbackHttpClusterTransport = struct {};
+pub const LoopbackHttpClusterTransportOptions = struct {
+    shard_count: ShardCount,
+    failures_before_success: usize = 0,
+};
+
+pub const LoopbackHttpClusterTransport = struct {
+    handler: InProcessClusterTransport,
+    failures_before_success: usize = 0,
+
+    pub fn init(allocator: Allocator, storage: MessageStorage, options: LoopbackHttpClusterTransportOptions) ClusterTransportError!LoopbackHttpClusterTransport {
+        return .{
+            .handler = try InProcessClusterTransport.init(allocator, storage, .{ .shard_count = options.shard_count }),
+            .failures_before_success = options.failures_before_success,
+        };
+    }
+
+    pub fn deinit(self: *LoopbackHttpClusterTransport) void {
+        self.handler.deinit();
+    }
+
+    pub fn asClusterTransport(self: *LoopbackHttpClusterTransport) ClusterTransport {
+        return .{
+            .ptr = self,
+            .vtable = &.{
+                .send = sendOpaque,
+            },
+        };
+    }
+
+    pub fn send(self: *LoopbackHttpClusterTransport, allocator: Allocator, request: ClusterTransportRequest) !ClusterTransportResponse {
+        const max_attempts = request.policy.max_retries + 1;
+        var attempts: usize = 0;
+        while (attempts < max_attempts) {
+            attempts += 1;
+            if (self.failures_before_success > 0) {
+                self.failures_before_success -= 1;
+                if (attempts >= max_attempts) return error.RetryLimitExceeded;
+                continue;
+            }
+
+            const request_json = try formatClusterTransportRequestJson(allocator, request);
+            defer allocator.free(request_json);
+            const http_request = try formatClusterTransportHttpRequest(allocator, request_json);
+            defer allocator.free(http_request);
+            const request_body = try clusterTransportHttpBody(http_request);
+
+            var parsed_request = try parseClusterTransportRequestJson(allocator, request_body);
+            defer parsed_request.deinit(allocator);
+
+            var handler_response = try self.handler.sendWithAttempts(parsed_request, attempts, .loopback_http);
+            defer handler_response.deinit(allocator);
+
+            const response_json = try formatClusterTransportResponseJson(allocator, handler_response);
+            defer allocator.free(response_json);
+            const http_response = try formatClusterTransportHttpResponse(allocator, response_json);
+            defer allocator.free(http_response);
+            const response_body = try clusterTransportHttpBody(http_response);
+            return try parseClusterTransportResponseJson(allocator, response_body);
+        }
+
+        return error.RetryLimitExceeded;
+    }
+
+    fn sendOpaque(ptr: *anyopaque, allocator: Allocator, request: ClusterTransportRequest) anyerror!ClusterTransportResponse {
+        const self: *LoopbackHttpClusterTransport = @ptrCast(@alignCast(ptr));
+        return self.send(allocator, request);
+    }
+};
 
 const ClusterTransportRequestJson = struct {
     schema: []const u8,
@@ -320,6 +387,28 @@ pub fn parseClusterTransportResponseJson(allocator: Allocator, content: []const 
         .attempts = parsed.value.attempts,
         .transport = transport_kind,
     };
+}
+
+pub fn formatClusterTransportHttpRequest(allocator: Allocator, body: []const u8) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "POST /cluster/messages HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: {d}\r\n\r\n{s}",
+        .{ body.len, body },
+    );
+}
+
+pub fn formatClusterTransportHttpResponse(allocator: Allocator, body: []const u8) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {d}\r\n\r\n{s}",
+        .{ body.len, body },
+    );
+}
+
+pub fn clusterTransportHttpBody(message: []const u8) ClusterTransportError![]const u8 {
+    const separator = "\r\n\r\n";
+    const index = std.mem.indexOf(u8, message, separator) orelse return error.CorruptTransportMessage;
+    return message[index + separator.len ..];
 }
 
 fn validateIngressKind(kind: MessageEnvelopeKind) ClusterTransportError!void {
