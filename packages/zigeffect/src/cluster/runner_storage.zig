@@ -7,6 +7,7 @@ pub const ShardId = routing.ShardId;
 pub const RunnerAddress = runner.RunnerAddress;
 pub const RunnerStorageLeaseId = u64;
 pub const RunnerLeaseTtlMs = u64;
+pub const ShardLeaseEpoch = u64;
 pub const runner_lease_schema = "zigeffect.cluster.runner-lease.v1";
 pub const runner_lease_schema_version: u32 = 1;
 
@@ -16,6 +17,7 @@ pub const ShardLease = struct {
     acquired_at_ms: u64,
     refreshed_at_ms: u64,
     expires_at_ms: u64,
+    epoch: ShardLeaseEpoch = 1,
     version: u64,
 };
 
@@ -129,6 +131,7 @@ pub const InMemoryRunnerStorage = struct {
                 .acquired_at_ms = request.now_ms,
                 .refreshed_at_ms = request.now_ms,
                 .expires_at_ms = expires_at_ms,
+                .epoch = current.epoch + 1,
                 .version = current.version + 1,
             };
             self.leases_list.items[index] = replacement;
@@ -142,6 +145,7 @@ pub const InMemoryRunnerStorage = struct {
             .acquired_at_ms = request.now_ms,
             .refreshed_at_ms = request.now_ms,
             .expires_at_ms = expires_at_ms,
+            .epoch = 1,
             .version = 1,
         };
         self.leases_list.appendAssumeCapacity(lease_record);
@@ -161,6 +165,7 @@ pub const InMemoryRunnerStorage = struct {
             .acquired_at_ms = current.acquired_at_ms,
             .refreshed_at_ms = request.now_ms,
             .expires_at_ms = expires_at_ms,
+            .epoch = current.epoch,
             .version = current.version + 1,
         };
         self.leases_list.items[index] = refreshed;
@@ -256,6 +261,7 @@ pub const FileRunnerStorage = struct {
             .acquired_at_ms = request.now_ms,
             .refreshed_at_ms = request.now_ms,
             .expires_at_ms = expires_at_ms,
+            .epoch = 1,
             .version = 1,
         };
 
@@ -279,6 +285,7 @@ pub const FileRunnerStorage = struct {
                 .acquired_at_ms = request.now_ms,
                 .refreshed_at_ms = request.now_ms,
                 .expires_at_ms = expires_at_ms,
+                .epoch = current.epoch + 1,
                 .version = current.version + 1,
             };
             self.writeLeaseFileExclusive(name, replacement) catch |err| switch (err) {
@@ -294,6 +301,7 @@ pub const FileRunnerStorage = struct {
             .acquired_at_ms = request.now_ms,
             .refreshed_at_ms = request.now_ms,
             .expires_at_ms = expires_at_ms,
+            .epoch = 1,
             .version = 1,
         };
         self.writeLeaseFileExclusive(name, candidate) catch |err| switch (err) {
@@ -318,6 +326,7 @@ pub const FileRunnerStorage = struct {
             .acquired_at_ms = current.acquired_at_ms,
             .refreshed_at_ms = request.now_ms,
             .expires_at_ms = expires_at_ms,
+            .epoch = current.epoch,
             .version = current.version + 1,
         };
         try self.writeLeaseFileAtomic(name, refreshed);
@@ -428,6 +437,7 @@ const ShardLeaseJson = struct {
     acquired_at_ms: u64,
     refreshed_at_ms: u64,
     expires_at_ms: u64,
+    epoch: ?ShardLeaseEpoch = null,
     version: u64,
 };
 
@@ -447,7 +457,7 @@ fn shardIdFromLeaseFileName(options: FileRunnerStorageOptions, name: []const u8)
 pub fn formatShardLeaseJson(allocator: Allocator, lease_record: ShardLease) Allocator.Error![]const u8 {
     return std.fmt.allocPrint(
         allocator,
-        "{{\"schema\":\"{s}\",\"schema_version\":{d},\"shard_id\":{d},\"machine_id\":{d},\"runner_id\":{d},\"acquired_at_ms\":{d},\"refreshed_at_ms\":{d},\"expires_at_ms\":{d},\"version\":{d}}}",
+        "{{\"schema\":\"{s}\",\"schema_version\":{d},\"shard_id\":{d},\"machine_id\":{d},\"runner_id\":{d},\"acquired_at_ms\":{d},\"refreshed_at_ms\":{d},\"expires_at_ms\":{d},\"epoch\":{d},\"version\":{d}}}",
         .{
             runner_lease_schema,
             runner_lease_schema_version,
@@ -457,6 +467,7 @@ pub fn formatShardLeaseJson(allocator: Allocator, lease_record: ShardLease) Allo
             lease_record.acquired_at_ms,
             lease_record.refreshed_at_ms,
             lease_record.expires_at_ms,
+            lease_record.epoch,
             lease_record.version,
         },
     );
@@ -480,6 +491,7 @@ pub fn parseShardLeaseJson(allocator: Allocator, content: []const u8) (Allocator
         .acquired_at_ms = parsed.value.acquired_at_ms,
         .refreshed_at_ms = parsed.value.refreshed_at_ms,
         .expires_at_ms = parsed.value.expires_at_ms,
+        .epoch = parsed.value.epoch orelse parsed.value.version,
         .version = parsed.value.version,
     };
 }
