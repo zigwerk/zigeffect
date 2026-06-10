@@ -445,6 +445,7 @@ pub const LocalClusterRunnerReport = cluster.LocalClusterRunnerReport;
 pub const LocalClusterRunner = cluster.LocalClusterRunner;
 pub const ShardRecoveryPlan = cluster.ShardRecoveryPlan;
 pub const balancedShardPlan = cluster.balancedShardPlan;
+pub const planDeadRunnerShardRecovery = cluster.planDeadRunnerShardRecovery;
 
 pub const ServiceSet = dependency.service_sets.ServiceSet;
 pub const DependencyIssueKind = dependency.report.DependencyIssueKind;

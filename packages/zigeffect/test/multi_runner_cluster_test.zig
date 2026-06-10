@@ -159,6 +159,94 @@ test "two local cluster runners split shards and process routed file-backed mess
     try std.testing.expectEqualStrings("value=ok", odd_reply.payload);
 }
 
+test "survivor runner recovers dead runner shards and processes pre-death messages" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var runner_storage_a = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer runner_storage_a.deinit();
+    var runner_storage_b = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer runner_storage_b.deinit();
+    var message_storage_a = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_a.deinit();
+    var message_storage_b = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_b.deinit();
+    const shared_messages = message_storage_a.asMessageStorage();
+
+    const dead_runner = fx.runnerAddress("machine-local", "runner-a");
+    const survivor_runner = fx.runnerAddress("machine-local", "runner-b");
+    var registry = fx.LocalRunnerRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+    _ = try registry.registerRunner(.{ .address = dead_runner, .name = "runner-a", .started_at_ms = 1_000 });
+    _ = try registry.registerRunner(.{ .address = survivor_runner, .name = "runner-b", .started_at_ms = 1_000 });
+    _ = try registry.recordHeartbeat(.{ .address = dead_runner, .sequence = 1, .observed_at_ms = 1_050 });
+    _ = try registry.recordHeartbeat(.{ .address = survivor_runner, .sequence = 1, .observed_at_ms = 1_050 });
+    const inspector = try fx.LocalRunnerHealthInspector.init(.{ .degraded_after_ms = 100, .unhealthy_after_ms = 300 });
+
+    var runner_a = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = dead_runner,
+        .runner_storage = runner_storage_a.asRunnerStorage(),
+        .message_storage = message_storage_a.asMessageStorage(),
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 2,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    });
+    defer runner_a.deinit();
+    var runner_b = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = survivor_runner,
+        .runner_storage = runner_storage_b.asRunnerStorage(),
+        .message_storage = message_storage_b.asMessageStorage(),
+        .shard_count = 8,
+        .runner_index = 1,
+        .runner_count = 2,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    });
+    defer runner_b.deinit();
+
+    var plan_a = try runner_a.acquireBalancedShards(1_000);
+    defer plan_a.deinit();
+    var plan_b = try runner_b.acquireBalancedShards(1_000);
+    defer plan_b.deinit();
+
+    const recovered_address = try addressForShard(0, 8);
+    var routed = try runner_b.router.routeAsk(recovered_address, "text", "recover-get", "read after recovery");
+    defer routed.deinit(std.testing.allocator);
+    _ = try runner_b.registerEntity(.{ .address = recovered_address, .name = "recovered" }, 1_000);
+    var seen = std.ArrayList([]u8).empty;
+    defer {
+        for (seen.items) |item| std.testing.allocator.free(item);
+        seen.deinit(std.testing.allocator);
+    }
+    try (try runner_b.entityScope(recovered_address)).provideService("seen", &seen);
+
+    var recovery = try runner_b.recoverDeadRunner(&registry, &inspector, dead_runner, 1_400);
+    defer recovery.deinit();
+    try std.testing.expectEqualSlices(fx.ShardId, &.{ 0, 2, 4, 6 }, recovery.shards);
+    try std.testing.expectEqual(@as(usize, 4), recovery.released);
+    try std.testing.expectEqual(@as(usize, 4), recovery.acquired);
+
+    const Handler = struct {
+        pub fn handle(entity_scope: *fx.EntityScope, envelope: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            const raw = (try entity_scope.service("seen")).?;
+            const seen_messages: *std.ArrayList([]u8) = @ptrCast(@alignCast(raw));
+            const owned_payload = try std.testing.allocator.dupe(u8, envelope.payload);
+            errdefer std.testing.allocator.free(owned_payload);
+            try seen_messages.append(std.testing.allocator, owned_payload);
+            if (envelope.kind == .ask) return .{ .reply = "value=recovered" };
+            return .noreply;
+        }
+    };
+
+    const report = try runner_b.tick(Handler, 1_401);
+    try std.testing.expectEqual(@as(usize, 1), report.dispatched);
+    try std.testing.expectEqualStrings("recover-get", seen.items[0]);
+
+    const reply = (try shared_messages.reply(routed.correlation_id.?, std.testing.allocator)).?;
+    defer fx.deinitMessageEnvelope(std.testing.allocator, reply);
+    try std.testing.expectEqualStrings("value=recovered", reply.payload);
+}
+
 fn addressForShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.EntityAddress {
     var index: usize = 0;
     while (index < 10_000) : (index += 1) {

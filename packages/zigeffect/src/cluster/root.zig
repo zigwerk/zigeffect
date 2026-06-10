@@ -147,3 +147,4 @@ pub const LocalClusterRunnerReport = local_cluster.LocalClusterRunnerReport;
 pub const LocalClusterRunner = local_cluster.LocalClusterRunner;
 pub const ShardRecoveryPlan = local_cluster.ShardRecoveryPlan;
 pub const balancedShardPlan = local_cluster.balancedShardPlan;
+pub const planDeadRunnerShardRecovery = local_cluster.planDeadRunnerShardRecovery;

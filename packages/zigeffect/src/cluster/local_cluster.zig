@@ -22,6 +22,8 @@ pub const MessageEnvelope = envelope.MessageEnvelope;
 pub const MessageEnvelopeKind = envelope.MessageEnvelopeKind;
 pub const MessageStorage = message_storage.MessageStorage;
 pub const MessageSubmitResult = envelope.MessageSubmitResult;
+pub const LocalRunnerHealthInspector = runner.LocalRunnerHealthInspector;
+pub const LocalRunnerRegistry = runner.LocalRunnerRegistry;
 pub const RunnerAddress = runner.RunnerAddress;
 pub const RunnerStorage = runner_storage.RunnerStorage;
 pub const ShardCount = routing.ShardCount;
@@ -238,6 +240,25 @@ pub const LocalClusterRunner = struct {
     pub fn shutdown(self: *LocalClusterRunner, now_ms: u64) !cluster_runtime.ClusterShutdownReport {
         return self.runtime.shutdown(now_ms);
     }
+
+    pub fn recoverDeadRunner(
+        self: *LocalClusterRunner,
+        registry: *LocalRunnerRegistry,
+        inspector: *const LocalRunnerHealthInspector,
+        dead_runner: RunnerAddress,
+        now_ms: u64,
+    ) !ShardRecoveryPlan {
+        var plan = try planDeadRunnerShardRecovery(self.allocator, self.lease_manager.storage, dead_runner);
+        errdefer plan.deinit();
+        const recovery = try self.lease_manager.recoverDeadRunner(registry, inspector, dead_runner, now_ms);
+        plan.released = recovery.released;
+        for (plan.shards) |shard_id| {
+            _ = try self.runtime.acquireShard(shard_id, now_ms);
+            plan.acquired += 1;
+        }
+        _ = try self.runtime.loadOwnedShards();
+        return plan;
+    }
 };
 
 pub const ShardRecoveryPlan = struct {
@@ -274,4 +295,30 @@ pub fn balancedShardPlan(
         .allocator = allocator,
         .shards = try shards.toOwnedSlice(allocator),
     };
+}
+
+pub fn planDeadRunnerShardRecovery(
+    allocator: Allocator,
+    storage: RunnerStorage,
+    dead_runner: RunnerAddress,
+) !ShardRecoveryPlan {
+    var leases = try storage.leases(allocator);
+    defer leases.deinit();
+    var shards = std.ArrayList(ShardId).empty;
+    errdefer shards.deinit(allocator);
+
+    for (leases.leases) |lease| {
+        if (!lease.owner.eql(dead_runner)) continue;
+        try shards.append(allocator, lease.shard_id);
+    }
+    std.mem.sort(ShardId, shards.items, {}, shardIdLessThan);
+
+    return .{
+        .allocator = allocator,
+        .shards = try shards.toOwnedSlice(allocator),
+    };
+}
+
+fn shardIdLessThan(_: void, left: ShardId, right: ShardId) bool {
+    return left < right;
 }
