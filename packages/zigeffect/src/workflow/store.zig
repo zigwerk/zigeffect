@@ -17,6 +17,7 @@ pub const JournalStoreError = error{
     SequenceConflict,
     DuplicateEvent,
     SequenceOverflow,
+    EventLimitExceeded,
 };
 
 pub const FileJournalStoreError = error{
@@ -65,6 +66,16 @@ pub const JournalEventBatch = struct {
         }
         self.allocator.free(self.events);
     }
+};
+
+pub const JournalCapacityStats = struct {
+    event_count: usize = 0,
+    max_events: ?usize = null,
+    remaining_events: ?usize = null,
+};
+
+pub const InMemoryJournalStoreOptions = struct {
+    max_events: ?usize = null,
 };
 
 pub fn segmentFileName(allocator: Allocator, first_sequence: JournalSequence) Allocator.Error![]const u8 {
@@ -488,11 +499,19 @@ pub const JournalStore = struct {
 
 pub const InMemoryJournalStore = struct {
     allocator: Allocator,
+    options: InMemoryJournalStoreOptions = .{},
     events: std.ArrayList(WorkflowEvent) = .empty,
     base_sequence: JournalSequence = 0,
 
     pub fn init(allocator: Allocator) InMemoryJournalStore {
-        return .{ .allocator = allocator };
+        return initBounded(allocator, .{});
+    }
+
+    pub fn initBounded(allocator: Allocator, options: InMemoryJournalStoreOptions) InMemoryJournalStore {
+        return .{
+            .allocator = allocator,
+            .options = options,
+        };
     }
 
     pub fn deinit(self: *InMemoryJournalStore) void {
@@ -524,6 +543,9 @@ pub const InMemoryJournalStore = struct {
         }
         if (request.event.sequence != next_sequence) return error.SequenceConflict;
         if (self.hasIdempotencyKey(request.event.idempotency_key)) return error.DuplicateEvent;
+        if (self.options.max_events) |max_events| {
+            if (self.events.items.len >= max_events) return error.EventLimitExceeded;
+        }
     }
 
     pub fn readAll(self: *const InMemoryJournalStore, allocator: Allocator) JournalStoreReadError!JournalEventBatch {
@@ -569,6 +591,18 @@ pub const InMemoryJournalStore = struct {
     pub fn resetFromSequence(self: *InMemoryJournalStore, sequence: JournalSequence) void {
         self.reset();
         self.base_sequence = sequence;
+    }
+
+    pub fn capacityStats(self: *const InMemoryJournalStore) JournalCapacityStats {
+        const event_count = self.events.items.len;
+        return .{
+            .event_count = event_count,
+            .max_events = self.options.max_events,
+            .remaining_events = if (self.options.max_events) |max_events|
+                if (event_count >= max_events) 0 else max_events - event_count
+            else
+                null,
+        };
     }
 
     fn nextSequence(self: *const InMemoryJournalStore) JournalStoreError!JournalSequence {
@@ -639,6 +673,7 @@ pub const FileJournalStoreOptions = struct {
     lock_name: []const u8 = "workflow.lock",
     owner_id: []const u8 = "zigeffect-local",
     max_segment_bytes: usize = 16 * 1024 * 1024,
+    max_in_memory_events: ?usize = null,
     retention_policy: WorkflowRetentionPolicy = .{},
 };
 
@@ -716,7 +751,7 @@ pub const FileJournalStore = struct {
             .dir = dir,
             .options = options,
             .segment_name = try segmentFileName(allocator, options.segment_first_sequence),
-            .memory = InMemoryJournalStore.init(allocator),
+            .memory = InMemoryJournalStore.initBounded(allocator, .{ .max_events = options.max_in_memory_events }),
         };
     }
 
