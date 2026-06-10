@@ -3,6 +3,7 @@ const scope_mod = @import("scope.zig");
 const result = @import("result.zig");
 const clock_mod = @import("../services/clock.zig");
 const causal_mod = @import("../services/causal.zig");
+const async_backend_mod = @import("../runtime/async_backend.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const Scope = scope_mod.Scope;
@@ -12,6 +13,11 @@ pub const FinalizerExit = result.FinalizerExit;
 pub const Clock = clock_mod.Clock;
 pub const CausalStore = causal_mod.CausalStore;
 pub const CausalEvent = causal_mod.CausalEvent;
+pub const AsyncBackend = async_backend_mod.AsyncBackend;
+pub const AsyncBackendError = async_backend_mod.AsyncBackendError;
+pub const Suspension = async_backend_mod.Suspension;
+pub const AsyncIoWaitKind = async_backend_mod.AsyncIoWaitKind;
+pub const AsyncIoInterest = async_backend_mod.AsyncIoInterest;
 
 pub fn serviceNotFound(comptime Env: type, comptime Service: type) noreturn {
     @compileError(
@@ -39,6 +45,7 @@ pub fn Context(comptime Env: type) type {
         span_id: ?u64 = null,
         causal_store: ?*CausalStore = null,
         causal_run_id: ?u64 = null,
+        async_backend: ?AsyncBackend = null,
 
         pub fn init(allocator: Allocator, env: *Env, scope: ?*Scope) Self {
             return .{
@@ -76,6 +83,40 @@ pub fn Context(comptime Env: type) type {
             owned.trace_id = owned.trace_id orelse self.trace_id;
             owned.span_id = owned.span_id orelse self.span_id;
             return store.record(owned) catch null;
+        }
+
+        pub fn requireAsyncBackend(self: *const Self) AsyncBackendError!AsyncBackend {
+            return self.async_backend orelse error.UnsupportedBackendCapability;
+        }
+
+        pub fn suspendRuntime(
+            self: *const Self,
+            suspension: Suspension,
+            reason: []const u8,
+        ) AsyncBackendError!void {
+            const backend = try self.requireAsyncBackend();
+            try backend.suspendRuntime(.{
+                .suspension = suspension,
+                .reason = reason,
+            });
+        }
+
+        pub fn registerIoWait(
+            self: *const Self,
+            suspension: Suspension,
+            io_kind: AsyncIoWaitKind,
+            interest: AsyncIoInterest,
+            descriptor: ?i64,
+            reason: []const u8,
+        ) AsyncBackendError!void {
+            const backend = try self.requireAsyncBackend();
+            try backend.registerIoWait(.{
+                .suspension = suspension,
+                .io_kind = io_kind,
+                .interest = interest,
+                .descriptor = descriptor,
+                .reason = reason,
+            });
         }
 
         pub fn addFinalizerFor(

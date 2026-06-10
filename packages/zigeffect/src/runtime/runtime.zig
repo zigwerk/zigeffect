@@ -7,6 +7,7 @@ const dep_services = @import("../dependency/services.zig");
 const dep_contracts = @import("../dependency/contracts.zig");
 const dep_validation = @import("../dependency/validation.zig");
 const backend_mod = @import("backend.zig");
+const async_backend_mod = @import("async_backend.zig");
 const runner_mod = @import("runner.zig");
 
 pub const Allocator = dep_services.Allocator;
@@ -19,6 +20,7 @@ pub const Clock = clock_mod.Clock;
 pub const CausalStore = causal_mod.CausalStore;
 pub const BackendCapabilities = backend_mod.BackendCapabilities;
 pub const deterministicBackend = backend_mod.deterministicBackend;
+pub const AsyncBackend = async_backend_mod.AsyncBackend;
 pub const runManagedScope = runner_mod.runManagedScope;
 pub const exitManagedScope = runner_mod.exitManagedScope;
 pub const runCallerOwnedScope = runner_mod.runCallerOwnedScope;
@@ -46,6 +48,7 @@ pub fn Runtime(comptime Env: type) type {
         span_id: ?u64 = null,
         causal_store: ?*CausalStore = null,
         backend: BackendCapabilities = deterministicBackend(),
+        async_backend: ?AsyncBackend = null,
         provided_builder: ServiceSetBuilder = emptyServiceSet,
         provided_provider: ?*const anyopaque = null,
         provided_provider_builder: ?ProviderServiceSetBuilder = null,
@@ -88,6 +91,13 @@ pub fn Runtime(comptime Env: type) type {
             return runtime;
         }
 
+        pub fn withAsyncBackend(self: Self, async_backend: AsyncBackend) Self {
+            var runtime = self;
+            runtime.async_backend = async_backend;
+            runtime.backend = async_backend.capabilities;
+            return runtime;
+        }
+
         pub fn backendCapabilities(self: *const Self) BackendCapabilities {
             return self.backend;
         }
@@ -120,6 +130,7 @@ pub fn Runtime(comptime Env: type) type {
             ctx.trace_id = self.trace_id;
             ctx.span_id = self.span_id;
             ctx.causal_store = self.causal_store;
+            ctx.async_backend = self.async_backend;
             return ctx;
         }
 

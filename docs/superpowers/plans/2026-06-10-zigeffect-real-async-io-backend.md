@@ -121,15 +121,15 @@ pub const LocalAsyncBackendState = struct {
 
 ## Task 3: Wire Runtime, Fiber Runtime, Context, And Scope Cleanup
 
-- [ ] Add `async_backend: ?AsyncBackend = null` to `Context`.
-- [ ] Add `Context.requireAsyncBackend`, `Context.suspendRuntime`, and `Context.registerIoWait`.
-- [ ] Add `async_backend: ?AsyncBackend = null` to `Runtime` and `FiberRuntime`.
-- [ ] Add `withAsyncBackend` to both runtime types and set `backend` from `backend.capabilities`.
-- [ ] Propagate `async_backend` in `Runtime.context` and `FiberRuntime.context`.
-- [ ] Add `attachAsyncInterruptFinalizer(scope, backend, suspension_id, reason)` in `runtime/async_backend.zig`.
-- [ ] Run `cd packages/zigeffect && zig build test-raw`.
-- [ ] Confirm runtime/context/scope tests pass while workflow/cluster red tests still fail.
-- [ ] Commit with `feat(zigeffect): propagate async backend through runtime contexts`.
+- [x] Add `async_backend: ?AsyncBackend = null` to `Context`.
+- [x] Add `Context.requireAsyncBackend`, `Context.suspendRuntime`, and `Context.registerIoWait`.
+- [x] Add `async_backend: ?AsyncBackend = null` to `Runtime` and `FiberRuntime`.
+- [x] Add `withAsyncBackend` to both runtime types and set `backend` from `backend.capabilities`.
+- [x] Propagate `async_backend` in `Runtime.context` and `FiberRuntime.context`.
+- [x] Add `attachAsyncInterruptFinalizer(scope, backend, suspension_id, reason)` in `runtime/async_backend.zig`.
+- [x] Run `cd packages/zigeffect && zig build test-raw`.
+- [x] Confirm runtime/context/scope tests pass while workflow/cluster red tests still fail.
+- [x] Commit with `feat(zigeffect): propagate async backend through runtime contexts`.
 
 ## Task 4: Integrate Workflow Scheduler, Durable Timers, And Durable Queues
 

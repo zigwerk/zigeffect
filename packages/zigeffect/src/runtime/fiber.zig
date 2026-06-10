@@ -8,6 +8,7 @@ const dep_services = @import("../dependency/services.zig");
 const dep_contracts = @import("../dependency/contracts.zig");
 const dep_validation = @import("../dependency/validation.zig");
 const backend_mod = @import("backend.zig");
+const async_backend_mod = @import("async_backend.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const Context = context_mod.Context;
@@ -22,6 +23,7 @@ pub const CausalStore = causal_mod.CausalStore;
 pub const CausalEvent = causal_mod.CausalEvent;
 pub const BackendCapabilities = backend_mod.BackendCapabilities;
 pub const deterministicBackend = backend_mod.deterministicBackend;
+pub const AsyncBackend = async_backend_mod.AsyncBackend;
 pub const ServiceSet = dep_services.ServiceSet;
 pub const ServiceSetBuilder = dep_services.ServiceSetBuilder;
 pub const ProviderServiceSetBuilder = dep_services.ProviderServiceSetBuilder;
@@ -262,6 +264,7 @@ pub fn FiberRuntime(comptime Env: type) type {
         causal_store: ?*CausalStore = null,
         causal_run_id: ?u64 = null,
         backend: BackendCapabilities = deterministicBackend(),
+        async_backend: ?AsyncBackend = null,
         provided_builder: ServiceSetBuilder = emptyServiceSet,
         provided_provider: ?*const anyopaque = null,
         provided_provider_builder: ?ProviderServiceSetBuilder = null,
@@ -307,6 +310,13 @@ pub fn FiberRuntime(comptime Env: type) type {
             return runtime;
         }
 
+        pub fn withAsyncBackend(self: Self, async_backend: AsyncBackend) Self {
+            var runtime = self;
+            runtime.async_backend = async_backend;
+            runtime.backend = async_backend.capabilities;
+            return runtime;
+        }
+
         pub fn backendCapabilities(self: *const Self) BackendCapabilities {
             return self.backend;
         }
@@ -348,6 +358,7 @@ pub fn FiberRuntime(comptime Env: type) type {
             ctx.span_id = self.span_id;
             ctx.causal_store = self.causal_store;
             ctx.causal_run_id = self.ensureCausalRunId();
+            ctx.async_backend = self.async_backend;
             return ctx;
         }
 
