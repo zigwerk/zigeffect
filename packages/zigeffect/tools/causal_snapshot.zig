@@ -613,7 +613,7 @@ fn appendReplayArtifactWarnings(output: *std.ArrayList(u8), allocator: std.mem.A
 fn appendReplayBlockingReasons(output: *std.ArrayList(u8), allocator: std.mem.Allocator, stats: ReplayFeasibilityStats) !void {
     try output.appendSlice(allocator, "blocking reasons:\n");
     try output.appendSlice(allocator, "- snapshot manifest references observed artifacts, not executable programs\n");
-    try output.appendSlice(allocator, "- replay engine is not implemented\n");
+    try output.appendSlice(allocator, "- replay engine is unavailable in artifact snapshots\n");
     try output.appendSlice(allocator, "- event records do not serialize service implementations, closures, resource constructors, scheduler state, clock transcripts, or external effects\n");
     if (stats.has_service_events) try output.appendSlice(allocator, "- service values/providers are not serialized\n");
     if (stats.has_resource_events) try output.appendSlice(allocator, "- resource constructors/finalizers are not serialized\n");

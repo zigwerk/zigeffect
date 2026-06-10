@@ -277,9 +277,9 @@ fn evaluateApplication(allocator: std.mem.Allocator, input: ApplicationInput) !A
         try appendCheck(
             allocator,
             &checks,
-            "source-placeholder-cleared",
-            if (scenarioHasPlaceholderArgv(current)) .fail else .pass,
-            "current scenario argv is not the generated placeholder",
+            "source-template-cleared",
+            if (scenarioHasTemplateArgv(current)) .fail else .pass,
+            "current scenario argv is not the generated template",
         );
         try appendCheck(
             allocator,
@@ -290,7 +290,7 @@ fn evaluateApplication(allocator: std.mem.Allocator, input: ApplicationInput) !A
         );
     } else {
         try appendCheck(allocator, &checks, "source-registry-present", .fail, "current source registry does not contain scenario slug");
-        try appendCheck(allocator, &checks, "source-placeholder-cleared", .skipped, "scenario argv cannot be checked until the scenario exists");
+        try appendCheck(allocator, &checks, "source-template-cleared", .skipped, "scenario argv cannot be checked until the scenario exists");
         try appendCheck(allocator, &checks, "source-invariants-known", .skipped, "scenario invariants cannot be checked until the scenario exists");
     }
 
@@ -355,7 +355,7 @@ fn scenarioBySlug(slug: []const u8) ?causal_run.Scenario {
     return causal_run.scenarioByName(slug) catch null;
 }
 
-fn scenarioHasPlaceholderArgv(scenario: causal_run.Scenario) bool {
+fn scenarioHasTemplateArgv(scenario: causal_run.Scenario) bool {
     return scenario.argv.len == 3 and
         std.mem.eql(u8, scenario.argv[0], "zig") and
         std.mem.eql(u8, scenario.argv[1], "build") and

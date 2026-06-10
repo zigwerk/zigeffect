@@ -353,7 +353,7 @@ fn formatRegistryPatchZig(
     try output.appendSlice(allocator, "};\n\n");
 
     try output.print(allocator, "const {s}_argv: []const []const u8 = &.{{\n", .{identifier});
-    try output.appendSlice(allocator, "    // REVIEW: replace this placeholder with the smallest reproducing command.\n");
+    try output.appendSlice(allocator, "    // REVIEW: replace this template with the smallest reproducing command.\n");
     try output.appendSlice(allocator, "    \"zig\",\n");
     try output.appendSlice(allocator, "    \"build\",\n");
     try output.appendSlice(allocator, "    \"examples\",\n");
@@ -384,7 +384,7 @@ fn reviewChecklist(validation: ValidationResult) []const []const u8 {
     }
     return &.{
         "Verify the proposed scenario slug does not conflict with existing scenarios.",
-        "Replace placeholder argv with the smallest reproducing command.",
+        "Replace template argv with the smallest reproducing command.",
         "Confirm invariant ids match the catalog or add reviewed invariant entries.",
         "Run the scenario after applying the registry patch.",
     };
@@ -397,7 +397,7 @@ fn guardrails(validation: ValidationResult) []const []const u8 {
     return &.{
         "This registry patch is generated from evidence but requires explicit review.",
         "Do not apply registry patches without verifying the minimal reproducing command.",
-        "Generated argv is a placeholder until a reviewer replaces it.",
+        "Generated argv is a template until a reviewer replaces it.",
     };
 }
 
@@ -739,7 +739,7 @@ test "registry patch formats add-scenario JSON text and Zig snippet" {
     try std.testing.expect(std.mem.indexOf(u8, reports.zig, "const learned_dogfood_service_resolution_invariants") != null);
     try std.testing.expect(std.mem.indexOf(u8, reports.zig, ".slug = \"learned-dogfood-service-resolution\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, reports.zig, ".owner = .service_resolution") != null);
-    try std.testing.expect(std.mem.indexOf(u8, reports.zig, "REVIEW: replace this placeholder") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.zig, "REVIEW: replace this template") != null);
 }
 
 test "registry patch formats none proposal as no-op" {
