@@ -116,13 +116,13 @@ their owning milestones add real modules and architecture tests:
 
 ## Execution Protocol
 
-- [ ] Start from Milestone 0 and proceed in order.
-- [ ] For each implementation milestone, write a focused design spec first.
-- [ ] For each focused spec, write a focused implementation plan.
-- [ ] Use test-driven development for code changes.
-- [ ] Run the milestone acceptance commands before marking it complete.
-- [ ] Update this roadmap after each completed milestone.
-- [ ] Keep public API changes in the `src/zigeffect.zig` facade explicit.
+- [x] Start from Milestone 0 and proceed in order.
+- [x] For each implementation milestone, write a focused design spec first.
+- [x] For each focused spec, write a focused implementation plan.
+- [x] Use test-driven development for code changes.
+- [x] Run the milestone acceptance commands before marking it complete.
+- [x] Update this roadmap after each completed milestone.
+- [x] Keep public API changes in the `src/zigeffect.zig` facade explicit.
 
 ## Milestone 0: Baseline Audit And Capability Inventory
 
@@ -1048,21 +1048,21 @@ services.
 
 Deliverables:
 
-- [ ] Add typed child specs for fibers, activities, workflow workers, queue
+- [x] Add typed child specs for fibers, activities, workflow workers, queue
   workers, entities, shard workers, transport servers, and runner services.
-- [ ] Implement permanent, transient, and temporary restart modes.
-- [ ] Implement one-for-one, one-for-all, rest-for-one, and dynamic supervisor
+- [x] Implement permanent, transient, and temporary restart modes.
+- [x] Implement one-for-one, one-for-all, rest-for-one, and dynamic supervisor
   strategies.
-- [ ] Add restart intensity windows and escalation.
-- [ ] Add supervisor state inspection.
-- [ ] Add distributed supervision behavior for shard release and runner drain.
-- [ ] Add causal events for supervisor decisions.
+- [x] Add restart intensity windows and escalation.
+- [x] Add supervisor state inspection.
+- [x] Add distributed supervision behavior for shard release and runner drain.
+- [x] Add causal events for supervisor decisions.
 
 Acceptance:
 
-- [ ] Supervision handles local child failure, repeated failure escalation,
+- [x] Supervision handles local child failure, repeated failure escalation,
   shard worker failure, transport failure, and runner drain.
-- [ ] Supervisor reports explain restart decisions, escalation causes, affected
+- [x] Supervisor reports explain restart decisions, escalation causes, affected
   children, and cleanup outcomes.
 
 ## Capability Matrix

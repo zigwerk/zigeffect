@@ -44,7 +44,7 @@
 - Modify: `packages/zigeffect/src/runtime/supervisor.zig`
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 
-- [ ] **Step 1: Write failing public surface and dynamic strategy tests**
+- [x] **Step 1: Write failing public surface and dynamic strategy tests**
 
 Append these tests to `packages/zigeffect/test/supervisor_test.zig`:
 
@@ -100,7 +100,7 @@ test "dynamic supervisor restarts removes and rejects missing dynamic children" 
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run from `packages/zigeffect`:
 
@@ -110,7 +110,7 @@ zig build test-raw --summary all
 
 Expected: FAIL with missing declarations, missing enum tags, or missing `stopChild` and `removeChild` methods.
 
-- [ ] **Step 3: Implement the minimal public surface and dynamic strategy**
+- [x] **Step 3: Implement the minimal public surface and dynamic strategy**
 
 In `packages/zigeffect/src/runtime/supervisor.zig`:
 
@@ -152,7 +152,7 @@ fn strategyAffects(strategy: SupervisorStrategy, failed_index: usize, candidate_
 }
 ```
 
-- [ ] **Step 4: Export new runtime declarations**
+- [x] **Step 4: Export new runtime declarations**
 
 In `packages/zigeffect/src/zigeffect.zig`, add runtime namespace and top-level exports for declarations introduced in this task and later tasks:
 
@@ -169,7 +169,7 @@ pub const formatSupervisorTreeInspectionText = supervisor.formatSupervisorTreeIn
 pub const formatSupervisorTreeInspectionJson = supervisor.formatSupervisorTreeInspectionJson;
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run from `packages/zigeffect`:
 
@@ -179,7 +179,7 @@ zig build test-raw --summary all
 
 Expected: PASS for existing tests and the new dynamic strategy tests after Task 2 declarations are present.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/zigeffect/test/supervisor_test.zig packages/zigeffect/src/runtime/supervisor.zig packages/zigeffect/src/zigeffect.zig
@@ -195,7 +195,7 @@ git commit -m "feat(zigeffect): add dynamic supervision surface"
 - Modify: `packages/zigeffect/src/runtime/supervisor.zig`
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 
-- [ ] **Step 1: Write failing inspection tests**
+- [x] **Step 1: Write failing inspection tests**
 
 Append this test to `packages/zigeffect/test/supervisor_test.zig`:
 
@@ -239,7 +239,7 @@ test "supervisor inspection reports children decisions escalation and shutdown o
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run from `packages/zigeffect`:
 
@@ -249,7 +249,7 @@ zig build test-raw --summary all
 
 Expected: FAIL with missing `inspect` method or missing inspection fields.
 
-- [ ] **Step 3: Implement decision record storage**
+- [x] **Step 3: Implement decision record storage**
 
 In `packages/zigeffect/src/runtime/supervisor.zig`, add:
 
@@ -280,7 +280,7 @@ When `reportChildExit` finishes each decision branch, append a
 `SupervisorDecisionRecord`. Use `restarted_children + stopped_children` for
 normal decisions and the escalated affected count for escalation.
 
-- [ ] **Step 4: Implement inspection report and formatters**
+- [x] **Step 4: Implement inspection report and formatters**
 
 Add:
 
@@ -314,7 +314,7 @@ name, strategy, child counts, decision count, and escalation count. The JSON
 output must include schema-free stable fields for ids, counts, strategy, and
 decision count.
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run from `packages/zigeffect`:
 
@@ -324,7 +324,7 @@ zig build test-raw --summary all
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/zigeffect/test/supervisor_test.zig packages/zigeffect/src/runtime/supervisor.zig packages/zigeffect/src/zigeffect.zig
@@ -340,7 +340,7 @@ git commit -m "feat(zigeffect): add supervisor inspection reports"
 - Modify: `packages/zigeffect/src/runtime/supervisor.zig`
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 
-- [ ] **Step 1: Write failing supervisor tree test**
+- [x] **Step 1: Write failing supervisor tree test**
 
 Append this test to `packages/zigeffect/test/supervisor_test.zig`:
 
@@ -390,7 +390,7 @@ test "supervisor tree inspects parent child supervisor nodes and escalations" {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run from `packages/zigeffect`:
 
@@ -400,7 +400,7 @@ zig build test-raw --summary all
 
 Expected: FAIL with missing `SupervisorTree` implementation or missing report fields.
 
-- [ ] **Step 3: Implement tree types**
+- [x] **Step 3: Implement tree types**
 
 In `packages/zigeffect/src/runtime/supervisor.zig`, add:
 
@@ -449,7 +449,7 @@ pub const SupervisorTreeInspectionReport = struct {
 };
 ```
 
-- [ ] **Step 4: Implement `SupervisorTree`**
+- [x] **Step 4: Implement `SupervisorTree`**
 
 Add a tree struct that owns node states:
 
@@ -476,13 +476,13 @@ pub const SupervisorTree = struct {
 
 Use each node's `Supervisor.inspect` internally when building the tree report.
 
-- [ ] **Step 5: Implement tree formatters**
+- [x] **Step 5: Implement tree formatters**
 
 Add `formatSupervisorTreeInspectionText` and `formatSupervisorTreeInspectionJson`
 with stable summary fields: tree id, name, node count, total children, total
 decisions, and total escalated children.
 
-- [ ] **Step 6: Run test to verify it passes**
+- [x] **Step 6: Run test to verify it passes**
 
 Run from `packages/zigeffect`:
 
@@ -492,7 +492,7 @@ zig build test-raw --summary all
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/zigeffect/test/supervisor_test.zig packages/zigeffect/src/runtime/supervisor.zig packages/zigeffect/src/zigeffect.zig
@@ -509,7 +509,7 @@ git commit -m "feat(zigeffect): add supervisor tree inspection"
 - Modify: `packages/zigeffect/src/cluster/root.zig`
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 
-- [ ] **Step 1: Write failing cluster service restart tests**
+- [x] **Step 1: Write failing cluster service restart tests**
 
 Append these tests to `packages/zigeffect/test/cluster_supervision_test.zig`:
 
@@ -569,7 +569,7 @@ test "shard worker supervision reports restart and escalation" {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run from `packages/zigeffect`:
 
@@ -579,7 +579,7 @@ zig build test-raw --summary all
 
 Expected: FAIL with missing cluster exports or missing counters.
 
-- [ ] **Step 3: Extend cluster supervision report**
+- [x] **Step 3: Extend cluster supervision report**
 
 In `packages/zigeffect/src/cluster/supervision.zig`, add service aliases:
 
@@ -606,7 +606,7 @@ runner_drain_releases: usize = 0,
 runner_drain_reassignments: usize = 0,
 ```
 
-- [ ] **Step 4: Implement helper functions**
+- [x] **Step 4: Implement helper functions**
 
 Add:
 
@@ -654,12 +654,12 @@ pub fn superviseRunnerServiceFailure(
 }
 ```
 
-- [ ] **Step 5: Export cluster helpers**
+- [x] **Step 5: Export cluster helpers**
 
 Add exports in `packages/zigeffect/src/cluster/root.zig` and top-level exports in
 `packages/zigeffect/src/zigeffect.zig`.
 
-- [ ] **Step 6: Run test to verify it passes**
+- [x] **Step 6: Run test to verify it passes**
 
 Run from `packages/zigeffect`:
 
@@ -669,7 +669,7 @@ zig build test-raw --summary all
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/zigeffect/test/cluster_supervision_test.zig packages/zigeffect/src/cluster/supervision.zig packages/zigeffect/src/cluster/root.zig packages/zigeffect/src/zigeffect.zig
@@ -685,7 +685,7 @@ git commit -m "feat(zigeffect): add cluster service supervision reports"
 - Modify: `packages/zigeffect/src/cluster/runtime.zig`
 - Modify: `packages/zigeffect/src/cluster/local_cluster.zig`
 
-- [ ] **Step 1: Write failing integration tests**
+- [x] **Step 1: Write failing integration tests**
 
 Append these tests to `packages/zigeffect/test/cluster_supervision_test.zig`:
 
@@ -756,7 +756,7 @@ test "local cluster runner records runner service restart and escalation" {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run from `packages/zigeffect`:
 
@@ -767,7 +767,7 @@ zig build test-raw --summary all
 Expected: FAIL with missing `shard_worker_restart_policy`,
 `superviseShardWorkerExit`, or `superviseRunnerServiceFailure`.
 
-- [ ] **Step 3: Add shard worker restart state to `ClusterRuntime`**
+- [x] **Step 3: Add shard worker restart state to `ClusterRuntime`**
 
 In `packages/zigeffect/src/cluster/runtime.zig`:
 
@@ -790,7 +790,7 @@ shard_worker_restart_state: supervision.ClusterServiceRestartState,
 
 Initialize it from options and deinitialize it in `ClusterRuntime.deinit`.
 
-- [ ] **Step 4: Implement `ClusterRuntime.superviseShardWorkerExit`**
+- [x] **Step 4: Implement `ClusterRuntime.superviseShardWorkerExit`**
 
 Add:
 
@@ -816,7 +816,7 @@ pub fn superviseShardWorkerExit(
 }
 ```
 
-- [ ] **Step 5: Add runner service helper to `LocalClusterRunner`**
+- [x] **Step 5: Add runner service helper to `LocalClusterRunner`**
 
 In `packages/zigeffect/src/cluster/local_cluster.zig`, add:
 
@@ -830,7 +830,7 @@ Wrap `tickSupervised` error branches by returning `superviseRunnerServiceFailure
 when lease refresh, shard loading, or processing fails before a normal report is
 available.
 
-- [ ] **Step 6: Run test to verify it passes**
+- [x] **Step 6: Run test to verify it passes**
 
 Run from `packages/zigeffect`:
 
@@ -840,7 +840,7 @@ zig build test-raw --summary all
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/zigeffect/test/cluster_supervision_test.zig packages/zigeffect/src/cluster/runtime.zig packages/zigeffect/src/cluster/local_cluster.zig
@@ -855,7 +855,7 @@ git commit -m "feat(zigeffect): supervise shard and runner services"
 - Modify: `packages/zigeffect/test/cluster_supervision_test.zig`
 - Modify: `packages/zigeffect/src/cluster/real_cluster.zig`
 
-- [ ] **Step 1: Write failing runner drain supervision test**
+- [x] **Step 1: Write failing runner drain supervision test**
 
 Append this test to `packages/zigeffect/test/cluster_supervision_test.zig`:
 
@@ -904,7 +904,7 @@ test "real cluster supervised runner drain reports distributed cleanup" {
 When implementing this test, store the leases batch in a variable and deinitialize
 it before the test exits.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run from `packages/zigeffect`:
 
@@ -914,7 +914,7 @@ zig build test-raw --summary all
 
 Expected: FAIL with missing `superviseRunnerDrain`.
 
-- [ ] **Step 3: Implement supervised runner drain**
+- [x] **Step 3: Implement supervised runner drain**
 
 In `packages/zigeffect/src/cluster/real_cluster.zig`, import supervision:
 
@@ -936,7 +936,7 @@ pub fn superviseRunnerDrain(self: *RealClusterController, address: RunnerAddress
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run from `packages/zigeffect`:
 
@@ -946,7 +946,7 @@ zig build test-raw --summary all
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/zigeffect/test/cluster_supervision_test.zig packages/zigeffect/src/cluster/real_cluster.zig
@@ -961,11 +961,11 @@ git commit -m "feat(zigeffect): add supervised runner drain reports"
 - Modify: `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`
 - Create: `docs/superpowers/reports/2026-06-10-zigeffect-milestone-51-completion.md`
 
-- [ ] **Step 1: Update roadmap completion**
+- [x] **Step 1: Update roadmap completion**
 
 In `docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md`, mark every Milestone 51 deliverable and acceptance checkbox complete.
 
-- [ ] **Step 2: Write completion report**
+- [x] **Step 2: Write completion report**
 
 Create `docs/superpowers/reports/2026-06-10-zigeffect-milestone-51-completion.md` with:
 
@@ -1002,7 +1002,7 @@ Milestone: 51 - Full Supervision Trees
 - Marker scan for unfinished work patterns
 ```
 
-- [ ] **Step 3: Run formatting**
+- [x] **Step 3: Run formatting**
 
 Run from `packages/zigeffect`:
 
@@ -1010,7 +1010,7 @@ Run from `packages/zigeffect`:
 zig fmt src/runtime/supervisor.zig src/cluster/supervision.zig src/cluster/root.zig src/cluster/runtime.zig src/cluster/local_cluster.zig src/cluster/real_cluster.zig src/zigeffect.zig test/supervisor_test.zig test/cluster_supervision_test.zig
 ```
 
-- [ ] **Step 4: Run full verification gate**
+- [x] **Step 4: Run full verification gate**
 
 Run:
 
@@ -1027,19 +1027,19 @@ from `packages/zigeffect`, then run from repo root:
 bun run zigeffect:test
 bun run zig:test
 git diff --check
-rg -n "T""BD|TO""DO|FIX""ME|st""ub|place""holder|not imple""mented|unimple""mented|fill ""in|add appro""priate|similar ""to" packages/zigeffect docs/superpowers
+rg -n "T""BD|TO""DO|FIX""ME|st""ub|place""holder|not imple""mented|unimple""mented|fill ""in|add appro""priate|similar ""to" packages/zigeffect/src packages/zigeffect/test packages/zigeffect/docs docs/superpowers/specs/2026-06-10-zigeffect-full-supervision-trees-design.md docs/superpowers/plans/2026-06-10-zigeffect-full-supervision-trees.md docs/superpowers/reports/2026-06-10-zigeffect-milestone-51-completion.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md
 ```
 
 Expected: all build and Bun commands pass; `rg` exits with code 1 because it finds no matches.
 
-- [ ] **Step 5: Commit completion docs**
+- [x] **Step 5: Commit completion docs**
 
 ```bash
 git add docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md docs/superpowers/reports/2026-06-10-zigeffect-milestone-51-completion.md
 git commit -m "docs(zigeffect): complete full supervision trees"
 ```
 
-- [ ] **Step 6: Final status**
+- [x] **Step 6: Final status**
 
 Run:
 
