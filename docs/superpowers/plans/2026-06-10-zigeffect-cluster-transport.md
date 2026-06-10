@@ -262,7 +262,7 @@ zig build cluster-runner -- --help
 bun run zig:test
 zig fmt --check packages/zigeffect/src/cluster/transport.zig packages/zigeffect/src/cluster/root.zig packages/zigeffect/src/zigeffect.zig packages/zigeffect/test/cluster_transport_test.zig packages/zigeffect/test/all_test.zig packages/zigeffect/docs/architecture.md
 git diff --check
-rg "TODO|FIXME|stub|placeholder|not implemented|unimplemented" packages/zigeffect/src/cluster/transport.zig packages/zigeffect/test/cluster_transport_test.zig packages/zigeffect/docs/architecture.md docs/superpowers/specs/2026-06-10-zigeffect-cluster-transport-design.md docs/superpowers/plans/2026-06-10-zigeffect-cluster-transport.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md
+rg "TO""DO|FIX""ME|st""ub|place""holder|not imple""mented|unimple""mented" packages/zigeffect/src/cluster/transport.zig packages/zigeffect/test/cluster_transport_test.zig packages/zigeffect/docs/architecture.md docs/superpowers/specs/2026-06-10-zigeffect-cluster-transport-design.md docs/superpowers/plans/2026-06-10-zigeffect-cluster-transport.md docs/superpowers/plans/2026-06-07-zigeffect-durable-workflows-clustering-roadmap.md
 ```
 
 Run `zig build examples` and `zig build cluster-runner -- --help` from

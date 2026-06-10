@@ -323,6 +323,9 @@ Owns Erlang-style distributed runtime surfaces:
   idempotency keys, request/reply/ack/interrupt/chunk-reply envelopes,
   at-least-once delivery tracking, duplicate reply detection, and redacted
   diagnostics.
+- `message_storage.zig`: shard-aware durable message and reply storage
+  contract, in-memory storage, file-backed append/recovery semantics, and
+  stable JSON compatibility helpers.
 - `routing.zig`: deterministic shard ids, entity-id shard hashing,
   configurable local shard routing tables, local route targets, and
   snapshot/reload helpers for restart-stable routing.
@@ -335,6 +338,17 @@ Owns Erlang-style distributed runtime surfaces:
 - `shard_lease.zig`: local shard lease manager with bounded TTLs, refresh
   cadence, owned-lease tracking, graceful handoff, dead-runner recovery, and
   causal shard ownership events.
+- `runtime.zig`: shard-owned cluster runtime that registers local entities,
+  accepts messages for owned shards, dispatches durable envelopes, stores
+  replies, acknowledges processed messages, and releases owned shards on
+  shutdown.
+- `local_cluster.zig`: local multi-runner composition for shared storage,
+  balanced shard acquisition, durable message routing, runner ticks, and
+  dead-runner shard recovery.
+- `transport.zig`: deterministic cluster transport boundary with a synchronous
+  vtable, versioned request/response JSON, HTTP-shaped loopback bytes,
+  in-process transport, loopback HTTP transport, and timeout/retry policy
+  metadata.
 
 Entity identity, actor references, message envelopes, durable message storage,
 shard ids, runner ids, runner storage, leases, rebalancing, transports,

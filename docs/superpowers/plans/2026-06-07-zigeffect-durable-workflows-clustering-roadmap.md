@@ -733,15 +733,15 @@ Goal: separate cluster protocol from file/local execution.
 
 Deliverables:
 
-- [ ] Add `ClusterTransport` contract.
-- [ ] Add in-process transport.
-- [ ] Add loopback HTTP transport.
-- [ ] Add message serialization and compatibility tests.
-- [ ] Add timeout and retry policy.
+- [x] Add `ClusterTransport` contract.
+- [x] Add in-process transport.
+- [x] Add loopback HTTP transport.
+- [x] Add message serialization and compatibility tests.
+- [x] Add timeout and retry policy.
 
 Acceptance:
 
-- [ ] Cluster tests pass through both in-process and HTTP loopback transport.
+- [x] Cluster tests pass through both in-process and HTTP loopback transport.
 
 ## Milestone 35: Cluster Workflow Engine
 
