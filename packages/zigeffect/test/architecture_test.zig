@@ -77,8 +77,10 @@ test "root facade exposes data match pattern and trait namespaces" {
 test "root facade exposes durable workflow and cluster namespaces" {
     try std.testing.expect(@hasDecl(fx, "workflow"));
     try std.testing.expect(@hasDecl(fx, "cluster"));
+    try std.testing.expect(@hasDecl(fx, "performance"));
     try std.testing.expectEqualStrings("workflow", fx.workflow.domain);
     try std.testing.expectEqualStrings("cluster", fx.cluster.domain);
+    try std.testing.expectEqualStrings("performance", fx.performance.domain);
     try std.testing.expect(@hasDecl(fx.workflow, "journal"));
     try std.testing.expect(fx.workflow.WorkflowEvent == fx.workflow.journal.WorkflowEvent);
     try std.testing.expect(@hasDecl(fx.workflow, "replay"));
@@ -86,6 +88,8 @@ test "root facade exposes durable workflow and cluster namespaces" {
     try std.testing.expect(@hasDecl(fx.workflow, "store"));
     try std.testing.expect(fx.workflow.InMemoryJournalStore == fx.workflow.store.InMemoryJournalStore);
     try std.testing.expect(fx.workflow.FileJournalStore == fx.workflow.store.FileJournalStore);
+    try std.testing.expect(fx.PerformanceBenchmarkOptions == fx.performance.PerformanceBenchmarkOptions);
+    try std.testing.expect(@hasDecl(fx.performance, "runPerformanceBenchmarks"));
     try std.testing.expect(@hasDecl(fx.workflow, "definition"));
     try std.testing.expect(fx.workflow.WorkflowMetadata == fx.workflow.definition.WorkflowMetadata);
     try std.testing.expect(@hasDecl(fx.workflow, "activity"));

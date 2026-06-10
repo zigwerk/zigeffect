@@ -9,6 +9,7 @@ pub const pattern = @import("pattern/root.zig");
 pub const workflow = @import("workflow/root.zig");
 pub const cluster = @import("cluster/root.zig");
 pub const storage = @import("storage/root.zig");
+pub const performance = @import("performance/root.zig");
 
 pub const storage_catalog_schema = storage.storage_catalog_schema;
 pub const storage_catalog_schema_version = storage.storage_catalog_schema_version;
@@ -32,6 +33,18 @@ pub const SqlStorageMigrationPlan = storage.SqlStorageMigrationPlan;
 pub const sqlStorageMigrationPlan = storage.sqlStorageMigrationPlan;
 pub const formatSqlStorageMigrationPlanText = storage.formatSqlStorageMigrationPlanText;
 pub const formatSqlStorageMigrationPlanJson = storage.formatSqlStorageMigrationPlanJson;
+pub const performance_benchmark_schema = performance.performance_benchmark_schema;
+pub const performance_benchmark_schema_version = performance.performance_benchmark_schema_version;
+pub const PerformanceThresholdViolationKind = performance.PerformanceThresholdViolationKind;
+pub const PerformanceThresholdViolation = performance.PerformanceThresholdViolation;
+pub const PerformanceThresholds = performance.PerformanceThresholds;
+pub const PerformanceBenchmarkOptions = performance.PerformanceBenchmarkOptions;
+pub const JournalBenchmarkReport = performance.JournalBenchmarkReport;
+pub const MailboxBenchmarkReport = performance.MailboxBenchmarkReport;
+pub const PerformanceBenchmarkReport = performance.PerformanceBenchmarkReport;
+pub const runPerformanceBenchmarks = performance.runPerformanceBenchmarks;
+pub const formatPerformanceBenchmarkText = performance.formatPerformanceBenchmarkText;
+pub const formatPerformanceBenchmarkJson = performance.formatPerformanceBenchmarkJson;
 
 pub const core = struct {
     pub const result = @import("core/result.zig");
