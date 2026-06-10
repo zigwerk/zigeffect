@@ -452,7 +452,7 @@ git commit -m "example(zigeffect): add local actor"
 - Create: `packages/zigeffect/examples/multi_runner_cluster.zig`
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Add the failing example shell and build wiring**
+- [x] **Step 1: Add the failing example shell and build wiring**
 
 Create `multi_runner_cluster.zig` with:
 
@@ -488,7 +488,7 @@ Wire the module with:
 - binary name: `zigeffect-multi-runner-cluster-example`
 - test name: `zigeffect-multi-runner-cluster-example-tests`
 
-- [ ] **Step 2: Run the failing example gate**
+- [x] **Step 2: Run the failing example gate**
 
 Run:
 
@@ -498,7 +498,7 @@ Run:
 
 Expected: FAIL from `error.ExpectedMultiRunnerScenario`.
 
-- [ ] **Step 3: Implement the multi-runner scenario**
+- [x] **Step 3: Implement the multi-runner scenario**
 
 Implement:
 
@@ -515,7 +515,7 @@ Implement:
 - `runner_a.tick(Handler, 1_100)` and `runner_b.tick(Handler, 1_100)`;
 - read replies from the shared message storage.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
