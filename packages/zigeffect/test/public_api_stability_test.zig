@@ -117,8 +117,16 @@ test "cluster namespace keeps actor runner storage and transport exports" {
         "ClusterRuntime",
         "ClusterEntityRef",
         "ClusterTransport",
+        "ClusterTransportAuthMode",
+        "ClusterTransportAuth",
+        "ClusterTransportLimits",
+        "ClusterTransportLifecycleState",
+        "ClusterTransportMetricsSnapshot",
+        "ClusterTransportFailureReport",
         "InProcessClusterTransport",
         "LoopbackHttpClusterTransport",
+        "ProductionHttpClusterTransport",
+        "ProductionSocketClusterTransport",
         "ClusterWorkflowEngine",
         "ClusterWorkflowEntityRegistry",
         "ClusterTimerWakeupIndex",
@@ -145,6 +153,8 @@ test "cluster namespace keeps actor runner storage and transport exports" {
     try std.testing.expect(fx.cluster.LocalShardLeaseManager == fx.cluster.shard_lease.LocalShardLeaseManager);
     try std.testing.expect(fx.cluster.ClusterRuntime == fx.cluster.runtime.ClusterRuntime);
     try std.testing.expect(fx.cluster.ClusterTransport == fx.cluster.transport.ClusterTransport);
+    try std.testing.expect(fx.cluster.ProductionHttpClusterTransport == fx.cluster.transport.ProductionHttpClusterTransport);
+    try std.testing.expect(fx.cluster.ProductionSocketClusterTransport == fx.cluster.transport.ProductionSocketClusterTransport);
     try std.testing.expect(fx.cluster.ClusterWorkflowEngine == fx.cluster.workflow_engine.ClusterWorkflowEngine);
     try std.testing.expect(fx.cluster.ClusterTimerWakeupIndex == fx.cluster.timer_wakeup.ClusterTimerWakeupIndex);
     try std.testing.expect(fx.cluster.ClusterQueueIndex == fx.cluster.queue.ClusterQueueIndex);
@@ -163,6 +173,8 @@ test "top level compatibility aliases point at namespace exports" {
     try std.testing.expect(fx.MessageStorage == fx.cluster.MessageStorage);
     try std.testing.expect(fx.RunnerStorage == fx.cluster.RunnerStorage);
     try std.testing.expect(fx.ClusterTransport == fx.cluster.ClusterTransport);
+    try std.testing.expect(fx.ProductionHttpClusterTransport == fx.cluster.ProductionHttpClusterTransport);
+    try std.testing.expect(fx.ProductionSocketClusterTransport == fx.cluster.ProductionSocketClusterTransport);
     try std.testing.expect(fx.ClusterWorkflowEngine == fx.cluster.ClusterWorkflowEngine);
     try std.testing.expect(fx.PerformanceBenchmarkReport == fx.performance.PerformanceBenchmarkReport);
 }
@@ -220,6 +232,10 @@ test "public error sets keep documented members" {
     const stale_fence: fx.cluster.ClusterRuntimeError = error.StaleShardFence;
     const shard_not_owned: fx.cluster.ClusterRuntimeError = error.ShardNotOwned;
     const transport_unavailable: fx.cluster.ClusterTransportError = error.TransportUnavailable;
+    const transport_unauthorized: fx.cluster.ClusterTransportError = error.TransportUnauthorized;
+    const transport_payload_too_large: fx.cluster.ClusterTransportError = error.TransportPayloadTooLarge;
+    const transport_backpressured: fx.cluster.ClusterTransportError = error.TransportBackpressured;
+    const invalid_transport_limits: fx.cluster.ClusterTransportError = error.InvalidTransportLimits;
     const local_invalid_runner: fx.cluster.LocalClusterError = error.InvalidRunnerIndex;
 
     const backend_missing: fx.BackendCapabilityError = error.UnsupportedBackendCapability;
@@ -239,6 +255,10 @@ test "public error sets keep documented members" {
     try std.testing.expect(stale_fence == error.StaleShardFence);
     try std.testing.expect(shard_not_owned == error.ShardNotOwned);
     try std.testing.expect(transport_unavailable == error.TransportUnavailable);
+    try std.testing.expect(transport_unauthorized == error.TransportUnauthorized);
+    try std.testing.expect(transport_payload_too_large == error.TransportPayloadTooLarge);
+    try std.testing.expect(transport_backpressured == error.TransportBackpressured);
+    try std.testing.expect(invalid_transport_limits == error.InvalidTransportLimits);
     try std.testing.expect(local_invalid_runner == error.InvalidRunnerIndex);
     try std.testing.expect(backend_missing == error.UnsupportedBackendCapability);
 }

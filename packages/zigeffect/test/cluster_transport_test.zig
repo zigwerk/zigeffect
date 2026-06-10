@@ -9,9 +9,22 @@ test "cluster transport public exports are available" {
     try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportRequest"));
     try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportResponse"));
     try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportError"));
+    try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportAuthMode"));
+    try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportAuth"));
+    try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportLimits"));
+    try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportLifecycleState"));
+    try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportMetricsSnapshot"));
+    try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportFailureReport"));
     try std.testing.expect(@hasDecl(fx.cluster, "InProcessClusterTransport"));
     try std.testing.expect(@hasDecl(fx.cluster, "LoopbackHttpClusterTransport"));
+    try std.testing.expect(@hasDecl(fx.cluster, "ProductionHttpClusterTransport"));
+    try std.testing.expect(@hasDecl(fx.cluster, "ProductionSocketClusterTransport"));
+    try std.testing.expect(@hasDecl(fx.cluster, "formatClusterTransportSocketFrame"));
+    try std.testing.expect(@hasDecl(fx.cluster, "clusterTransportSocketFrameBody"));
+    try std.testing.expect(@hasDecl(fx.cluster, "formatClusterTransportFailureReport"));
     try std.testing.expect(@hasDecl(fx, "ClusterTransport"));
+    try std.testing.expect(@hasDecl(fx, "ProductionHttpClusterTransport"));
+    try std.testing.expect(@hasDecl(fx, "ProductionSocketClusterTransport"));
 }
 
 test "transport request json round-trips" {
@@ -40,6 +53,36 @@ test "transport request json round-trips" {
     try std.testing.expectEqualStrings("transport-request-key", parsed.idempotency_key.?);
     try std.testing.expectEqual(@as(u64, 250), parsed.policy.timeout_ms);
     try std.testing.expectEqual(@as(usize, 2), parsed.policy.max_retries);
+}
+
+test "transport request json preserves auth trace and chunk metadata" {
+    const request = fx.ClusterTransportRequest{
+        .kind = .request,
+        .address = fx.entityAddress("counter", "transport-metadata"),
+        .payload_type_name = "text",
+        .payload = "get",
+        .redacted_detail = "metadata",
+        .idempotency_key = "transport-metadata-key",
+        .auth = .{ .mode = .bearer_token, .credential = "token-1" },
+        .trace_id = 7001,
+        .span_id = 7002,
+        .chunk_index = 0,
+        .chunk_count = 3,
+        .policy = .{ .timeout_ms = 250, .max_retries = 2 },
+    };
+
+    const json = try fx.formatClusterTransportRequestJson(std.testing.allocator, request);
+    defer std.testing.allocator.free(json);
+
+    var parsed = try fx.parseClusterTransportRequestJson(std.testing.allocator, json);
+    defer parsed.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(fx.ClusterTransportAuthMode.bearer_token, parsed.auth.mode);
+    try std.testing.expectEqualStrings("token-1", parsed.auth.credential.?);
+    try std.testing.expectEqual(@as(?u64, 7001), parsed.trace_id);
+    try std.testing.expectEqual(@as(?u64, 7002), parsed.span_id);
+    try std.testing.expectEqual(@as(?u32, 0), parsed.chunk_index);
+    try std.testing.expectEqual(@as(?u32, 3), parsed.chunk_count);
 }
 
 test "transport response json round-trips" {
@@ -81,6 +124,40 @@ test "transport response json round-trips" {
     try std.testing.expect(parsed.duplicate);
     try std.testing.expectEqual(@as(usize, 3), parsed.attempts);
     try std.testing.expectEqual(fx.ClusterTransportKind.loopback_http, parsed.transport);
+}
+
+test "transport response json preserves trace chunk and production kind" {
+    const response = fx.ClusterTransportResponse{
+        .shard_id = 2,
+        .envelope = .{
+            .id = 99,
+            .kind = .request,
+            .address = fx.entityAddress("counter", "transport-response-metadata"),
+            .correlation_id = 99,
+            .idempotency_key = "transport-response-metadata-key",
+            .trace_id = 8001,
+            .span_id = 8002,
+            .chunk_index = 1,
+            .chunk_count = 4,
+            .payload_type_name = "text",
+            .payload = "get",
+            .redacted_detail = "metadata",
+        },
+        .correlation_id = 99,
+        .attempts = 1,
+        .transport = .production_http,
+    };
+
+    const json = try fx.formatClusterTransportResponseJson(std.testing.allocator, response);
+    defer std.testing.allocator.free(json);
+    var parsed = try fx.parseClusterTransportResponseJson(std.testing.allocator, json);
+    defer parsed.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(fx.ClusterTransportKind.production_http, parsed.transport);
+    try std.testing.expectEqual(@as(?u64, 8001), parsed.envelope.trace_id);
+    try std.testing.expectEqual(@as(?u64, 8002), parsed.envelope.span_id);
+    try std.testing.expectEqual(@as(?u32, 1), parsed.envelope.chunk_index);
+    try std.testing.expectEqual(@as(?u32, 4), parsed.envelope.chunk_count);
 }
 
 test "transport parser rejects incompatible schemas" {

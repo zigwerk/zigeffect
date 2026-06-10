@@ -30,16 +30,63 @@ pub const ClusterTransportError = error{
     RetryLimitExceeded,
     CorruptTransportMessage,
     IncompatibleTransportSchema,
+    TransportUnauthorized,
+    TransportPayloadTooLarge,
+    TransportBackpressured,
+    InvalidTransportLimits,
 };
 
 pub const ClusterTransportKind = enum {
     in_process,
     loopback_http,
+    production_http,
+    production_socket,
 };
 
 pub const ClusterTransportPolicy = struct {
     timeout_ms: u64 = 30_000,
     max_retries: usize = 0,
+};
+
+pub const ClusterTransportAuthMode = enum {
+    none,
+    bearer_token,
+    shared_secret,
+};
+
+pub const ClusterTransportAuth = struct {
+    mode: ClusterTransportAuthMode = .none,
+    credential: ?[]const u8 = null,
+};
+
+pub const ClusterTransportLimits = struct {
+    max_envelope_bytes: usize = 1024 * 1024,
+    max_chunk_bytes: usize = 64 * 1024,
+    max_in_flight: usize = 1024,
+};
+
+pub const ClusterTransportLifecycleState = struct {
+    started: bool = true,
+    stopped: bool = false,
+    sends: usize = 0,
+    successes: usize = 0,
+    failures: usize = 0,
+    retries: usize = 0,
+    backpressured: usize = 0,
+    bytes_sent: usize = 0,
+    bytes_received: usize = 0,
+    in_flight: usize = 0,
+    last_error_name: []const u8 = "",
+};
+
+pub const ClusterTransportMetricsSnapshot = ClusterTransportLifecycleState;
+
+pub const ClusterTransportFailureReport = struct {
+    transport: ClusterTransportKind,
+    retryable: bool,
+    attempts: usize,
+    error_name: []const u8,
+    redacted_detail: []const u8 = "",
 };
 
 pub const ClusterTransportRequest = struct {
@@ -49,6 +96,11 @@ pub const ClusterTransportRequest = struct {
     payload: []const u8 = "",
     redacted_detail: []const u8 = "",
     idempotency_key: ?[]const u8 = null,
+    auth: ClusterTransportAuth = .{},
+    trace_id: ?u64 = null,
+    span_id: ?u64 = null,
+    chunk_index: ?u32 = null,
+    chunk_count: ?u32 = null,
     policy: ClusterTransportPolicy = .{},
 
     pub fn deinit(self: *ClusterTransportRequest, allocator: Allocator) void {
@@ -58,6 +110,9 @@ pub const ClusterTransportRequest = struct {
         if (self.redacted_detail.len > 0) allocator.free(self.redacted_detail);
         if (self.idempotency_key) |key| {
             if (key.len > 0) allocator.free(key);
+        }
+        if (self.auth.credential) |credential| {
+            if (credential.len > 0) allocator.free(credential);
         }
     }
 };
@@ -299,6 +354,19 @@ pub const LoopbackHttpClusterTransport = struct {
     }
 };
 
+pub const ProductionHttpClusterTransportOptions = struct {
+    shard_count: ShardCount,
+    auth: ClusterTransportAuth = .{},
+    limits: ClusterTransportLimits = .{},
+    failures_before_success: usize = 0,
+};
+
+pub const ProductionHttpClusterTransport = struct {};
+
+pub const ProductionSocketClusterTransportOptions = ProductionHttpClusterTransportOptions;
+
+pub const ProductionSocketClusterTransport = struct {};
+
 const ClusterTransportRequestJson = struct {
     schema: []const u8,
     schema_version: u32,
@@ -309,6 +377,12 @@ const ClusterTransportRequestJson = struct {
     payload: []const u8,
     redacted_detail: []const u8,
     idempotency_key: ?[]const u8,
+    auth_mode: []const u8 = "none",
+    auth_credential: ?[]const u8 = null,
+    trace_id: ?u64 = null,
+    span_id: ?u64 = null,
+    chunk_index: ?u32 = null,
+    chunk_count: ?u32 = null,
     timeout_ms: u64,
     max_retries: usize,
 };
@@ -326,6 +400,10 @@ const ClusterTransportResponseJson = struct {
     payload_type_name: []const u8,
     payload: []const u8,
     redacted_detail: []const u8,
+    trace_id: ?u64 = null,
+    span_id: ?u64 = null,
+    chunk_index: ?u32 = null,
+    chunk_count: ?u32 = null,
     duplicate: bool,
     attempts: usize,
     transport: []const u8,
@@ -351,6 +429,18 @@ pub fn formatClusterTransportRequestJson(allocator: Allocator, request: ClusterT
     try appendJsonString(&output, allocator, request.redacted_detail);
     try output.appendSlice(allocator, ",\"idempotency_key\":");
     try appendOptionalJsonString(&output, allocator, request.idempotency_key);
+    try output.appendSlice(allocator, ",\"auth_mode\":");
+    try appendJsonString(&output, allocator, @tagName(request.auth.mode));
+    try output.appendSlice(allocator, ",\"auth_credential\":");
+    try appendOptionalJsonString(&output, allocator, request.auth.credential);
+    try output.appendSlice(allocator, ",\"trace_id\":");
+    try appendOptionalJsonU64(&output, allocator, request.trace_id);
+    try output.appendSlice(allocator, ",\"span_id\":");
+    try appendOptionalJsonU64(&output, allocator, request.span_id);
+    try output.appendSlice(allocator, ",\"chunk_index\":");
+    try appendOptionalJsonU32(&output, allocator, request.chunk_index);
+    try output.appendSlice(allocator, ",\"chunk_count\":");
+    try appendOptionalJsonU32(&output, allocator, request.chunk_count);
     try output.print(allocator, ",\"timeout_ms\":{d}", .{request.policy.timeout_ms});
     try output.print(allocator, ",\"max_retries\":{d}", .{request.policy.max_retries});
     try output.append(allocator, '}');
@@ -367,6 +457,7 @@ pub fn parseClusterTransportRequestJson(allocator: Allocator, content: []const u
     if (!std.mem.eql(u8, parsed.value.schema, transport_request_schema)) return error.IncompatibleTransportSchema;
     if (parsed.value.schema_version != transport_request_schema_version) return error.IncompatibleTransportSchema;
     const kind = std.meta.stringToEnum(MessageEnvelopeKind, parsed.value.kind) orelse return error.CorruptTransportMessage;
+    const auth_mode = std.meta.stringToEnum(ClusterTransportAuthMode, parsed.value.auth_mode) orelse return error.CorruptTransportMessage;
     try validateIngressKind(kind);
 
     return .{
@@ -379,6 +470,14 @@ pub fn parseClusterTransportRequestJson(allocator: Allocator, content: []const u
         .payload = try dupeOrEmpty(allocator, parsed.value.payload),
         .redacted_detail = try dupeOrEmpty(allocator, parsed.value.redacted_detail),
         .idempotency_key = if (parsed.value.idempotency_key) |key| try dupeOrEmpty(allocator, key) else null,
+        .auth = .{
+            .mode = auth_mode,
+            .credential = if (parsed.value.auth_credential) |credential| try dupeOrEmpty(allocator, credential) else null,
+        },
+        .trace_id = parsed.value.trace_id,
+        .span_id = parsed.value.span_id,
+        .chunk_index = parsed.value.chunk_index,
+        .chunk_count = parsed.value.chunk_count,
         .policy = .{
             .timeout_ms = parsed.value.timeout_ms,
             .max_retries = parsed.value.max_retries,
@@ -410,6 +509,14 @@ pub fn formatClusterTransportResponseJson(allocator: Allocator, response: Cluste
     try appendJsonString(&output, allocator, response.envelope.payload);
     try output.appendSlice(allocator, ",\"redacted_detail\":");
     try appendJsonString(&output, allocator, response.envelope.redacted_detail);
+    try output.appendSlice(allocator, ",\"trace_id\":");
+    try appendOptionalJsonU64(&output, allocator, response.envelope.trace_id);
+    try output.appendSlice(allocator, ",\"span_id\":");
+    try appendOptionalJsonU64(&output, allocator, response.envelope.span_id);
+    try output.appendSlice(allocator, ",\"chunk_index\":");
+    try appendOptionalJsonU32(&output, allocator, response.envelope.chunk_index);
+    try output.appendSlice(allocator, ",\"chunk_count\":");
+    try appendOptionalJsonU32(&output, allocator, response.envelope.chunk_count);
     try output.print(allocator, ",\"duplicate\":{}", .{response.duplicate});
     try output.print(allocator, ",\"attempts\":{d}", .{response.attempts});
     try output.appendSlice(allocator, ",\"transport\":");
@@ -441,6 +548,10 @@ pub fn parseClusterTransportResponseJson(allocator: Allocator, content: []const 
             },
             .correlation_id = parsed.value.correlation_id,
             .idempotency_key = try dupeOrEmpty(allocator, parsed.value.idempotency_key),
+            .trace_id = parsed.value.trace_id,
+            .span_id = parsed.value.span_id,
+            .chunk_index = parsed.value.chunk_index,
+            .chunk_count = parsed.value.chunk_count,
             .payload_type_name = try dupeOrEmpty(allocator, parsed.value.payload_type_name),
             .payload = try dupeOrEmpty(allocator, parsed.value.payload),
             .redacted_detail = try dupeOrEmpty(allocator, parsed.value.redacted_detail),
@@ -474,6 +585,35 @@ pub fn clusterTransportHttpBody(message: []const u8) ClusterTransportError![]con
     return message[index + separator.len ..];
 }
 
+pub fn formatClusterTransportSocketFrame(allocator: Allocator, body: []const u8) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(allocator, "ZIGFX/1 {d}\n{s}", .{ body.len, body });
+}
+
+pub fn clusterTransportSocketFrameBody(frame: []const u8) ClusterTransportError![]const u8 {
+    const separator_index = std.mem.indexOfScalar(u8, frame, '\n') orelse return error.CorruptTransportMessage;
+    const header = frame[0..separator_index];
+    const body = frame[separator_index + 1 ..];
+    const prefix = "ZIGFX/1 ";
+    if (!std.mem.startsWith(u8, header, prefix)) return error.CorruptTransportMessage;
+    const expected_len = std.fmt.parseInt(usize, header[prefix.len..], 10) catch return error.CorruptTransportMessage;
+    if (body.len != expected_len) return error.CorruptTransportMessage;
+    return body;
+}
+
+pub fn formatClusterTransportFailureReport(allocator: Allocator, report: ClusterTransportFailureReport) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "cluster transport failure transport={s} retryable={} attempts={d} error={s} detail={s}",
+        .{
+            @tagName(report.transport),
+            report.retryable,
+            report.attempts,
+            report.error_name,
+            report.redacted_detail,
+        },
+    );
+}
+
 fn validateIngressKind(kind: MessageEnvelopeKind) ClusterTransportError!void {
     switch (kind) {
         .tell, .request, .interrupt => {},
@@ -494,6 +634,11 @@ fn cloneClusterTransportRequest(allocator: Allocator, request: ClusterTransportR
             .id = request.address.id,
         },
         .policy = request.policy,
+        .auth = .{ .mode = request.auth.mode },
+        .trace_id = request.trace_id,
+        .span_id = request.span_id,
+        .chunk_index = request.chunk_index,
+        .chunk_count = request.chunk_count,
     };
     errdefer owned.deinit(allocator);
 
@@ -501,6 +646,7 @@ fn cloneClusterTransportRequest(allocator: Allocator, request: ClusterTransportR
     owned.payload = try dupeOrEmpty(allocator, request.payload);
     owned.redacted_detail = try dupeOrEmpty(allocator, request.redacted_detail);
     owned.idempotency_key = if (request.idempotency_key) |key| try dupeOrEmpty(allocator, key) else null;
+    owned.auth.credential = if (request.auth.credential) |credential| try dupeOrEmpty(allocator, credential) else null;
     return owned;
 }
 
@@ -528,6 +674,14 @@ fn appendOptionalJsonString(output: *std.ArrayList(u8), allocator: Allocator, va
 }
 
 fn appendOptionalJsonU64(output: *std.ArrayList(u8), allocator: Allocator, value: ?u64) Allocator.Error!void {
+    if (value) |number| {
+        try output.print(allocator, "{d}", .{number});
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+}
+
+fn appendOptionalJsonU32(output: *std.ArrayList(u8), allocator: Allocator, value: ?u32) Allocator.Error!void {
     if (value) |number| {
         try output.print(allocator, "{d}", .{number});
     } else {
