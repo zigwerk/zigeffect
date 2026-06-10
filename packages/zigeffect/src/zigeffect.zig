@@ -435,6 +435,15 @@ pub const ClusterShutdownReport = cluster.ClusterShutdownReport;
 pub const ClusterAsk = cluster.ClusterAsk;
 pub const ClusterEntityRef = cluster.ClusterEntityRef;
 pub const ClusterRuntime = cluster.ClusterRuntime;
+pub const LocalClusterError = cluster.LocalClusterError;
+pub const ShardBalancePlan = cluster.ShardBalancePlan;
+pub const LocalClusterRouteResult = cluster.LocalClusterRouteResult;
+pub const LocalClusterRouter = cluster.LocalClusterRouter;
+pub const LocalClusterRunnerOptions = cluster.LocalClusterRunnerOptions;
+pub const LocalClusterRunnerReport = cluster.LocalClusterRunnerReport;
+pub const LocalClusterRunner = cluster.LocalClusterRunner;
+pub const ShardRecoveryPlan = cluster.ShardRecoveryPlan;
+pub const balancedShardPlan = cluster.balancedShardPlan;
 
 pub const ServiceSet = dependency.service_sets.ServiceSet;
 pub const DependencyIssueKind = dependency.report.DependencyIssueKind;
