@@ -404,6 +404,32 @@ network send, collector endpoints, OTLP serialization, runtime pipeline
 execution, durable writes, and CI gates disabled. The full policy is in
 [docs/production-telemetry-local-pipeline-fixtures.md](docs/production-telemetry-local-pipeline-fixtures.md).
 
+Review the production telemetry NenDB retention fixtures:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-telemetry-nendb-retention-fixtures -- \
+  --from-local-pipeline ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures.json \
+  approve \
+  --reason "approved local pipeline reviewed for NenDB retention fixtures" \
+  --verified-command "zig build causal-production-telemetry-local-pipeline-fixtures" \
+  --verified-command "zig build causal-nendb-storage-backend" \
+  --verified-command "zig build causal-durable-production-retention -- --format json" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The report uses schema
+`zigeffect.causal.production-telemetry-nendb-retention-fixtures.v1` and emits a
+`ready` or `blocked` fixture artifact before the read-only workbench preview
+branch starts. It keeps `applied=false`, `mutation_authority=none`, live
+telemetry, network send, collector endpoints, OTLP serialization, runtime
+pipeline execution, durable writes, NenDB writes, and CI gates disabled. The
+full policy is in
+[docs/production-telemetry-nendb-retention-fixtures.md](docs/production-telemetry-nendb-retention-fixtures.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -429,8 +455,8 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures` after
-the delivered production telemetry local pipeline fixtures.
+`codex/zigeffect-causal-production-telemetry-workbench-readonly-preview` after
+the delivered production telemetry NenDB retention fixtures.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in

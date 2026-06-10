@@ -789,11 +789,27 @@ Status values:
      without touching production systems, running a telemetry pipeline, writing
      NenDB, or claiming production capacity.
 20. `codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures`
-   - Current next branch: use ready local-pipeline-fixtures artifacts to define
-     NenDB retention fixture mapping, retention policy records, compaction
-     assumptions, and rejected non-NenDB scope before any durable production
-     writes, live ingestion, CI gates, capacity claims, or mutation authority
-     are considered.
+   - Delivered: `causal-production-telemetry-nendb-retention-fixtures` emits
+     `zigeffect.causal.production-telemetry-nendb-retention-fixtures.v1` with
+     ready local-pipeline-fixtures consumption, NenDB node and edge mapping
+     fixtures, retention policy constants, compaction markers, backup and
+     recovery markers, ready and blocked retention artifacts, and the handoff
+     to `codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`.
+     It keeps `applied=false`, `production_telemetry_ingestion=false`,
+     `live_exporter_enabled=false`, `network_send_enabled=false`,
+     `collector_endpoint_configured=false`, `otlp_serialization_enabled=false`,
+     `runtime_pipeline_enabled=false`, `durable_write_enabled=false`,
+     `nendb_write_enabled=false`, `ci_gate_enabled=false`,
+     `mutation_authority=none`, NenDB-only, and SolidJS `zig-webui` aligned
+     without touching production systems, running a telemetry pipeline, writing
+     NenDB, compacting records, running backup or recovery, or claiming
+     production capacity.
+21. `codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`
+   - Current next branch: use ready NenDB retention fixture artifacts to build
+     a read-only SolidJS `webui-dev/zig-webui` preview of production telemetry
+     evidence before any durable production writes, live ingestion, CI gates,
+     capacity claims, alternate renderers, or mutation authority are
+     considered.
 
 ## Dual-Interface Causal Spine Expansion
 

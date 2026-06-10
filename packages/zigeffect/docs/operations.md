@@ -117,6 +117,7 @@ zig build causal-production-telemetry-readiness-review -- --from-fixtures ../../
 zig build causal-production-telemetry-implementation-proposal -- --from-readiness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review.json approve --reason "ready evidence reviewed for exporter boundary planning" --verified-command "zig build causal-production-telemetry-readiness-review -- --from-fixtures ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json approve --reason \"fixtures reviewed for implementation proposal\" --verified-command \"zig build causal-production-telemetry-capture-fixtures -- validate --format json\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"" --verified-command "zig build causal-schema-governance -- --format json" --verified-command "zig build causal-production-hardening-backlog -- --format json" --verified-command "zig build examples" --verified-command "zig build test"
 zig build causal-production-telemetry-exporter-boundary -- --from-proposal ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal.json approve --reason "proposal evidence reviewed for local pipeline fixtures" --verified-command "zig build causal-production-telemetry-implementation-proposal -- --from-readiness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review.json approve --reason \"ready evidence reviewed for exporter boundary planning\" --verified-command \"zig build causal-production-telemetry-readiness-review -- --from-fixtures ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json approve --reason \\\"fixtures reviewed for implementation proposal\\\" --verified-command \\\"zig build causal-production-telemetry-capture-fixtures -- validate --format json\\\" --verified-command \\\"zig build causal-schema-governance -- --format json\\\" --verified-command \\\"zig build causal-production-hardening-backlog -- --format json\\\" --verified-command \\\"zig build examples\\\" --verified-command \\\"zig build test\\\"\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"" --verified-command "zig build causal-schema-governance -- --format json" --verified-command "zig build causal-production-hardening-backlog -- --format json" --verified-command "zig build examples" --verified-command "zig build test"
 zig build causal-production-telemetry-local-pipeline-fixtures -- --from-boundary ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary.json approve --reason "approved boundary reviewed for local pipeline fixtures" --verified-command "zig build causal-production-telemetry-exporter-boundary -- --from-proposal ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal.json approve --reason \"proposal evidence reviewed for local pipeline fixtures\" --verified-command \"zig build causal-production-telemetry-implementation-proposal -- --from-readiness ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review.json approve --reason \\\"ready evidence reviewed for exporter boundary planning\\\" --verified-command \\\"zig build causal-production-telemetry-readiness-review -- --from-fixtures ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures.json approve --reason \\\\\\\"fixtures reviewed for implementation proposal\\\\\\\" --verified-command \\\\\\\"zig build causal-production-telemetry-capture-fixtures -- validate --format json\\\\\\\" --verified-command \\\\\\\"zig build causal-schema-governance -- --format json\\\\\\\" --verified-command \\\\\\\"zig build causal-production-hardening-backlog -- --format json\\\\\\\" --verified-command \\\\\\\"zig build examples\\\\\\\" --verified-command \\\\\\\"zig build test\\\\\\\"\\\" --verified-command \\\"zig build causal-schema-governance -- --format json\\\" --verified-command \\\"zig build causal-production-hardening-backlog -- --format json\\\" --verified-command \\\"zig build examples\\\" --verified-command \\\"zig build test\\\"\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"" --verified-command "zig build causal-schema-governance -- --format json" --verified-command "zig build causal-production-hardening-backlog -- --format json" --verified-command "zig build examples" --verified-command "zig build test"
+zig build causal-production-telemetry-nendb-retention-fixtures -- --from-local-pipeline ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures.json approve --reason "approved local pipeline reviewed for NenDB retention fixtures" --verified-command "zig build causal-production-telemetry-local-pipeline-fixtures" --verified-command "zig build causal-nendb-storage-backend" --verified-command "zig build causal-durable-production-retention -- --format json" --verified-command "zig build causal-schema-governance -- --format json" --verified-command "zig build causal-production-hardening-backlog -- --format json" --verified-command "zig build examples" --verified-command "zig build test"
 zig build causal-m9-completion-audit
 zig build causal-m9-completion-audit -- --format json
 zig build causal-production-hardening-backlog
@@ -494,7 +495,7 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures` after
+`codex/zigeffect-causal-production-telemetry-workbench-readonly-preview` after
 the unified causal spine, deep runtime internals, app semantic trace API,
 bounded agent query surface, record-only encryption-at-rest policy,
 record-only alerting integrations, delivered live dashboard streaming
@@ -503,7 +504,7 @@ loop, delivered rollout automation guardrails, delivered wall-clock benchmark
 baseline contract, and delivered production capacity planning,
 completion-audit, load-test observation harness, production telemetry capture
 design, fixture, readiness-review, implementation-proposal, exporter-boundary,
-and local-pipeline-fixtures contracts.
+local-pipeline-fixtures, and NenDB-retention-fixtures contracts.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -552,9 +553,9 @@ bounded: curated argv arrays only, no shell, no production telemetry, no
 production load, no capacity claim, and `mutation_authority=none`.
 
 The harness has now been consumed by the delivered telemetry design, fixture,
-readiness-review, implementation-proposal, exporter-boundary, and local
-pipeline fixture milestones. The current next branch is
-`codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures`.
+readiness-review, implementation-proposal, exporter-boundary, local pipeline
+fixture, and NenDB retention fixture milestones. The current next branch is
+`codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`.
 
 ## Production Telemetry Capture Design
 
@@ -709,6 +710,35 @@ treat the fixtures as runtime pipeline execution, live telemetry, network send,
 collector configuration, OTLP serialization, NenDB writes, durable production
 writes, CI gates, production capacity evidence, non-NenDB adapter scope,
 alternate renderer scope, or mutation authority.
+
+Run the NenDB retention fixtures after local pipeline approval:
+
+```sh
+cd packages/zigeffect
+zig build causal-production-telemetry-nendb-retention-fixtures -- \
+  --from-local-pipeline ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures.json \
+  approve \
+  --reason "approved local pipeline reviewed for NenDB retention fixtures" \
+  --verified-command "zig build causal-production-telemetry-local-pipeline-fixtures" \
+  --verified-command "zig build causal-nendb-storage-backend" \
+  --verified-command "zig build causal-durable-production-retention -- --format json" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The retention fixture report records schema
+`zigeffect.causal.production-telemetry-nendb-retention-fixtures.v1`. It
+consumes a ready local-pipeline-fixtures artifact, emits `ready` or `blocked`
+NenDB retention fixture artifacts, records node, edge, retention policy,
+compaction, backup, and recovery mapping fixtures, and hands off to
+`codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`. Do
+not treat the fixtures as runtime pipeline execution, live telemetry, network
+send, collector configuration, OTLP serialization, NenDB writes, durable
+production writes, compaction execution, backup execution, restore execution,
+CI gates, production capacity evidence, non-NenDB adapter scope, alternate
+renderer scope, or mutation authority.
 
 ## Production Artifact Aggregation
 
@@ -999,9 +1029,9 @@ Run `causal-production-hardening-completion-audit` after capacity planning to
 confirm the delivered hardening sequence and choose the next evidence-producing
 branch. The load-test observation harness and production telemetry capture
 design, fixture, readiness-review, implementation-proposal, and
-exporter-boundary and local-pipeline-fixtures reports are now delivered. The
-current next branch is
-`codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures`.
+exporter-boundary, local-pipeline-fixtures, and NenDB-retention-fixtures
+reports are now delivered. The current next branch is
+`codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`.
 
 ## Production Gaps
 

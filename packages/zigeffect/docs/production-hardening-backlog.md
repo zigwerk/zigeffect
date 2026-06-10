@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-telemetry-nendb-retention-fixtures` means the
+The recommendation `start-production-telemetry-workbench-readonly-preview` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -91,8 +91,15 @@ preserve disabled runtime pipeline execution, live telemetry, network send,
 collector endpoint, OTLP serialization, durable writes, CI gates, non-NenDB
 adapter scope, alternate renderer scope, and mutation authority before any
 NenDB retention fixture branch.
+The production telemetry NenDB retention fixtures are also delivered: they
+consume ready local-pipeline-fixtures artifacts, record NenDB node and edge
+mapping fixtures, retention policy constants, compaction markers, backup and
+recovery markers, and preserve disabled runtime pipeline execution, live
+telemetry, network send, collector endpoint, OTLP serialization, durable writes,
+NenDB writes, CI gates, non-NenDB adapter scope, alternate renderer scope, and
+mutation authority before any workbench preview branch.
 The next branch should be
-`codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures`.
+`codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`.
 
 ## Dependency Order
 
@@ -122,6 +129,7 @@ The backlog currently orders future production-hardening branches as:
 22. `production-telemetry-implementation-proposal` delivered
 23. `production-telemetry-exporter-boundary` delivered
 24. `production-telemetry-local-pipeline-fixtures` delivered
+25. `production-telemetry-nendb-retention-fixtures` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -310,9 +318,23 @@ OTLP serialization, disabled runtime pipeline execution, disabled durable
 writes, disabled CI gates, NenDB-only durable direction, and SolidJS
 `zig-webui` workbench direction.
 
-The next branch should use ready local-pipeline-fixtures artifacts to define
-NenDB retention fixtures before any durable production writes, live ingestion,
-exporters, capacity claims, CI gates, or mutation authority are considered.
+Production telemetry NenDB retention fixtures are documented in
+[production-telemetry-nendb-retention-fixtures.md](production-telemetry-nendb-retention-fixtures.md).
+They emit
+`zigeffect.causal.production-telemetry-nendb-retention-fixtures.v1` through
+`zig build causal-production-telemetry-nendb-retention-fixtures`, consume ready
+local-pipeline-fixtures JSON, verify source local-pipeline evidence, record
+NenDB node, edge, retention, compaction, backup, and recovery mapping fixtures,
+and preserve `applied=false`, `mutation_authority=none`, disabled live
+telemetry, disabled network send, disabled collector endpoint configuration,
+disabled OTLP serialization, disabled runtime pipeline execution, disabled
+durable writes, disabled NenDB writes, disabled CI gates, NenDB-only durable
+direction, and SolidJS `zig-webui` workbench direction.
+
+The next branch should use ready NenDB retention fixture artifacts to define a
+read-only SolidJS `webui-dev/zig-webui` workbench preview before any durable
+production writes, live ingestion, exporters, capacity claims, CI gates, or
+mutation authority are considered.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
@@ -415,6 +437,21 @@ zig build causal-production-telemetry-local-pipeline-fixtures -- \
   --from-boundary ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary.json \
   reject \
   --reason "negative local pipeline fixture path"
+zig build causal-production-telemetry-nendb-retention-fixtures -- \
+  --from-local-pipeline ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures.json \
+  approve \
+  --reason "approved local pipeline reviewed for NenDB retention fixtures" \
+  --verified-command "zig build causal-production-telemetry-local-pipeline-fixtures" \
+  --verified-command "zig build causal-nendb-storage-backend" \
+  --verified-command "zig build causal-durable-production-retention -- --format json" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+zig build causal-production-telemetry-nendb-retention-fixtures -- \
+  --from-local-pipeline ../../.zig-cache/causal-artifacts/production-telemetry-capture-fixtures-readiness-review-implementation-proposal-exporter-boundary-local-pipeline-fixtures.json \
+  reject \
+  --reason "negative NenDB retention fixture path"
 zig build causal-production-hardening-backlog
 zig build causal-production-hardening-backlog -- --format json
 zig build causal-schema-governance

@@ -351,6 +351,21 @@ OTLP, configure collector endpoints, write NenDB records, write durable
 production storage, fail CI, add non-NenDB adapter work, add alternate
 renderers, or grant mutation authority.
 
+- `zigeffect.causal.production-telemetry-nendb-retention-fixtures.v1`
+
+The production-telemetry-nendb-retention-fixtures report is a record-only,
+`nendb-retention-fixtures`, `fixtures-only`, `no-network`,
+`no-live-ingestion`, `no-durable-write` production hardening contract. It
+consumes a ready local-pipeline-fixtures artifact, verifies source local
+pipeline evidence, records NenDB node and edge mapping fixtures, retention
+policy constants, compaction markers, backup markers, and recovery markers,
+and emits `ready` or `blocked` artifacts before the future read-only workbench
+preview. It does not ingest live telemetry, run a telemetry pipeline, configure
+exporters, send OTLP, configure collector endpoints, write NenDB records, write
+durable production storage, compact records, run backup or recovery, fail CI,
+add non-NenDB adapter work, add alternate renderers, or grant mutation
+authority.
+
 ### Human-Agent Feedback
 
 - `zigeffect.causal.human-agent-feedback-loop.v1`

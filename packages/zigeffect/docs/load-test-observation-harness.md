@@ -117,8 +117,10 @@ exporter-boundary handoff is delivered as
 `codex/zigeffect-causal-production-telemetry-exporter-boundary`. The local
 pipeline fixture handoff is delivered as
 `codex/zigeffect-causal-production-telemetry-local-pipeline-fixtures`. The
+NenDB retention fixture handoff is delivered as
+`codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures`. The
 current next branch is
-`codex/zigeffect-causal-production-telemetry-nendb-retention-fixtures`.
+`codex/zigeffect-causal-production-telemetry-workbench-readonly-preview`.
 
 ## Verification
 
