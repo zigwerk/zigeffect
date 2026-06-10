@@ -93,6 +93,38 @@ pub const DurableClock = struct {
         };
     }
 
+    pub fn pendingTimers(self: *const DurableClock) !DueTimerList {
+        var events = try self.journal_store.readAll(self.allocator);
+        defer events.deinit();
+
+        var timers = std.ArrayList(DueTimer).empty;
+        errdefer deinitDueTimerItems(self.allocator, timers.items);
+        errdefer timers.deinit(self.allocator);
+
+        for (events.events) |event| {
+            if (!isWorkflowEvent(event, self.workflow_id, self.execution_id)) continue;
+            if (event.kind != .timer_scheduled) continue;
+            const id = event.timer_id orelse continue;
+            if (timerHasTerminalEvent(events.events, self.workflow_id, self.execution_id, id)) continue;
+
+            const fire_at_ms = try parseTimerFireAt(event.redacted_detail);
+            const name = try cloneTimerName(self.allocator, event.name);
+            errdefer freeTimerName(self.allocator, name);
+            try timers.append(self.allocator, .{
+                .timer_id = id,
+                .workflow_id = event.workflow_id,
+                .execution_id = event.execution_id,
+                .name = name,
+                .fire_at_ms = fire_at_ms,
+            });
+        }
+
+        return .{
+            .allocator = self.allocator,
+            .timers = try timers.toOwnedSlice(self.allocator),
+        };
+    }
+
     pub fn fireDueTimers(self: *const DurableClock, now_ms: u64) !usize {
         var events = try self.journal_store.readAll(self.allocator);
         defer events.deinit();

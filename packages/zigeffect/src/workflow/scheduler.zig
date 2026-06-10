@@ -1,6 +1,7 @@
 const std = @import("std");
 const clock_service = @import("../services/clock.zig");
 const traits = @import("../traits/root.zig");
+const async_backend_mod = @import("../runtime/async_backend.zig");
 const clock_mod = @import("clock.zig");
 const journal_mod = @import("journal.zig");
 const queue_mod = @import("queue.zig");
@@ -8,6 +9,9 @@ const store_mod = @import("store.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const Clock = clock_service.Clock;
+pub const AsyncBackend = async_backend_mod.AsyncBackend;
+pub const AsyncBackendError = async_backend_mod.AsyncBackendError;
+pub const BackendWakeEvent = async_backend_mod.BackendWakeEvent;
 pub const JournalStore = store_mod.JournalStore;
 pub const WorkflowId = journal_mod.WorkflowId;
 pub const ExecutionId = journal_mod.ExecutionId;
@@ -215,6 +219,7 @@ pub const WorkflowScheduler = struct {
     queue_retry_cursor: usize = 0,
     queue_cursor: usize = 0,
     shutdown_requested: bool = false,
+    async_backend: ?AsyncBackend = null,
 
     pub fn init(allocator: Allocator, journal_store: JournalStore, clock: *Clock) WorkflowScheduler {
         return .{
@@ -222,6 +227,23 @@ pub const WorkflowScheduler = struct {
             .journal_store = journal_store,
             .clock = clock,
         };
+    }
+
+    pub fn initWithAsyncBackend(
+        allocator: Allocator,
+        journal_store: JournalStore,
+        clock: *Clock,
+        async_backend: AsyncBackend,
+    ) WorkflowScheduler {
+        var scheduler = WorkflowScheduler.init(allocator, journal_store, clock);
+        scheduler.async_backend = async_backend;
+        return scheduler;
+    }
+
+    pub fn withAsyncBackend(self: WorkflowScheduler, async_backend: AsyncBackend) WorkflowScheduler {
+        var scheduler = self;
+        scheduler.async_backend = async_backend;
+        return scheduler;
     }
 
     pub fn deinit(self: *WorkflowScheduler) void {
@@ -261,6 +283,23 @@ pub const WorkflowScheduler = struct {
         try self.fireDueTimers(budget.max_timers, &result);
         try self.retryExpiredQueueClaims(budget.max_queue_retries, &result);
         try self.processQueueClaims(budget.max_queue_claims, &result);
+        return result;
+    }
+
+    pub fn tickAsync(self: *WorkflowScheduler, budget: WorkflowSchedulerBudget) anyerror!WorkflowSchedulerTickResult {
+        const backend = self.async_backend orelse return self.tick(budget);
+        var result = WorkflowSchedulerTickResult{
+            .iterations = 1,
+            .shutdown_requested = self.shutdown_requested,
+        };
+        if (self.shutdown_requested) return result;
+
+        try self.registerPendingTimerWaits(backend, budget.max_timers);
+        _ = try backend.advanceTime(self.clock.nowMs());
+        try self.consumeBackendWakes(backend, budget, &result);
+        try self.retryExpiredQueueClaims(budget.max_queue_retries, &result);
+        try self.processQueueClaimsWithBackend(budget.max_queue_claims, &result, backend);
+        try self.pollWorkflowWorkers(budget.max_workflow_polls, &result);
         return result;
     }
 
@@ -320,6 +359,67 @@ pub const WorkflowScheduler = struct {
         }
     }
 
+    fn registerPendingTimerWaits(self: *WorkflowScheduler, backend: AsyncBackend, max_watches: usize) anyerror!void {
+        const len = self.timer_watches.items.len;
+        if (len == 0 or max_watches == 0) return;
+
+        const visits = @min(max_watches, len);
+        var count: usize = 0;
+        while (count < visits) : (count += 1) {
+            const index = self.timer_cursor % len;
+            self.timer_cursor = (index + 1) % len;
+            const watch = self.timer_watches.items[index];
+            var durable_clock = DurableClock.init(self.allocator, self.journal_store, watch.workflow_id, watch.execution_id);
+            var pending = try durable_clock.pendingTimers();
+            defer pending.deinit();
+
+            for (pending.timers) |timer| {
+                try backend.scheduleTimer(.{
+                    .suspension = .{ .kind = .timer, .id = timer.timer_id, .label = timer.name },
+                    .due_time_ms = timer.fire_at_ms,
+                    .now_ms = self.clock.nowMs(),
+                    .workflow_id = timer.workflow_id,
+                    .execution_id = timer.execution_id,
+                });
+            }
+        }
+    }
+
+    fn consumeBackendWakes(
+        self: *WorkflowScheduler,
+        backend: AsyncBackend,
+        budget: WorkflowSchedulerBudget,
+        result: *WorkflowSchedulerTickResult,
+    ) anyerror!void {
+        const max_wakes = budget.max_timers + budget.max_queue_claims + budget.max_workflow_polls;
+        var consumed: usize = 0;
+        while (consumed < max_wakes) : (consumed += 1) {
+            const maybe_wake = try backend.pollWake();
+            const wake = maybe_wake orelse return;
+            try self.handleBackendWake(wake, result);
+        }
+    }
+
+    fn handleBackendWake(
+        self: *WorkflowScheduler,
+        wake: BackendWakeEvent,
+        result: *WorkflowSchedulerTickResult,
+    ) anyerror!void {
+        switch (wake.suspension.kind) {
+            .timer => {
+                const workflow_id = wake.workflow_id orelse return;
+                const execution_id = wake.execution_id orelse return;
+                var durable_clock = DurableClock.init(self.allocator, self.journal_store, workflow_id, execution_id);
+                switch (wake.status) {
+                    .pending => {},
+                    .ready => result.timers_fired += try durable_clock.fireDueTimers(self.clock.nowMs()),
+                    .interrupted => _ = try durable_clock.cancel(wake.suspension.label),
+                }
+            },
+            else => {},
+        }
+    }
+
     fn retryExpiredQueueClaims(self: *WorkflowScheduler, max_workers: usize, result: *WorkflowSchedulerTickResult) anyerror!void {
         const len = self.queue_workers.items.len;
         if (len == 0 or max_workers == 0) return;
@@ -334,6 +434,15 @@ pub const WorkflowScheduler = struct {
     }
 
     fn processQueueClaims(self: *WorkflowScheduler, max_workers: usize, result: *WorkflowSchedulerTickResult) anyerror!void {
+        return self.processQueueClaimsWithBackend(max_workers, result, null);
+    }
+
+    fn processQueueClaimsWithBackend(
+        self: *WorkflowScheduler,
+        max_workers: usize,
+        result: *WorkflowSchedulerTickResult,
+        async_backend: ?AsyncBackend,
+    ) anyerror!void {
         const len = self.queue_workers.items.len;
         if (len == 0 or max_workers == 0) return;
 
@@ -345,15 +454,24 @@ pub const WorkflowScheduler = struct {
             const step = try self.queue_workers.items[index].processOne();
             switch (step) {
                 .idle => {},
-                .completed => {
+                .completed => |queue_id| {
                     result.queue_claims += 1;
                     result.queue_completions += 1;
+                    if (async_backend) |backend| try wakeQueueSuspension(backend, queue_id, "queue completed");
                 },
-                .failed => {
+                .failed => |queue_id| {
                     result.queue_claims += 1;
                     result.queue_failures += 1;
+                    if (async_backend) |backend| try wakeQueueSuspension(backend, queue_id, "queue failed");
                 },
             }
         }
     }
 };
+
+fn wakeQueueSuspension(backend: AsyncBackend, queue_id: QueueId, reason: []const u8) AsyncBackendError!void {
+    backend.wake(.{ .suspension_id = queue_id, .reason = reason }) catch |err| switch (err) {
+        error.UnknownSuspension => return,
+        else => return err,
+    };
+}

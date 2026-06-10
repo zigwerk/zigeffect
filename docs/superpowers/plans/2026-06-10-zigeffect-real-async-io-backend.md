@@ -133,17 +133,17 @@ pub const LocalAsyncBackendState = struct {
 
 ## Task 4: Integrate Workflow Scheduler, Durable Timers, And Durable Queues
 
-- [ ] Add `PendingTimerList` and `DurableClock.pendingTimers()` that returns scheduled non-terminal timers regardless of due time.
-- [ ] Add optional `async_backend: ?AsyncBackend` to `WorkflowScheduler`.
-- [ ] Add `WorkflowScheduler.initWithAsyncBackend` and `WorkflowScheduler.withAsyncBackend`.
-- [ ] Add `WorkflowScheduler.tickAsync` that registers pending timers, advances local backend time through the backend facade, polls wake events, fires due timers, cancels interrupted timers, processes queues, and wakes queue item suspensions after terminal queue writes.
-- [ ] Keep `WorkflowScheduler.tick` byte-for-byte behavior compatible except for shared helper extraction required by `tickAsync`.
-- [ ] Add a test that calls `WorkflowContext.sleep`, then `scheduler.tickAsync` before and after `LocalAsyncBackendState.advanceTo`, and asserts one `timer_fired` and one `workflow_resumed`.
-- [ ] Add a test that queue worker completion wakes the backend queue suspension after the journal terminal event.
-- [ ] Add a test that duplicate wakes after durable activity completion do not run the activity twice.
-- [ ] Run `cd packages/zigeffect && zig build test-raw`.
-- [ ] Confirm workflow tests pass while cluster wait red tests still fail.
-- [ ] Commit with `feat(zigeffect): wake durable workflows from async backend`.
+- [x] Add `PendingTimerList` and `DurableClock.pendingTimers()` that returns scheduled non-terminal timers regardless of due time.
+- [x] Add optional `async_backend: ?AsyncBackend` to `WorkflowScheduler`.
+- [x] Add `WorkflowScheduler.initWithAsyncBackend` and `WorkflowScheduler.withAsyncBackend`.
+- [x] Add `WorkflowScheduler.tickAsync` that registers pending timers, advances local backend time through the backend facade, polls wake events, fires due timers, cancels interrupted timers, processes queues, and wakes queue item suspensions after terminal queue writes.
+- [x] Keep `WorkflowScheduler.tick` byte-for-byte behavior compatible except for shared helper extraction required by `tickAsync`.
+- [x] Add a test that calls `WorkflowContext.sleep`, then `scheduler.tickAsync` before and after `LocalAsyncBackendState.advanceTo`, and asserts one `timer_fired` and one `workflow_resumed`.
+- [x] Add a test that queue worker completion wakes the backend queue suspension after the journal terminal event.
+- [x] Add a test that duplicate wakes after durable activity completion do not run the activity twice.
+- [x] Run `cd packages/zigeffect && zig build test-raw`.
+- [x] Confirm workflow tests compile while cluster wait red tests still fail.
+- [x] Commit with `feat(zigeffect): wake durable workflows from async backend`.
 
 ## Task 5: Integrate Cluster Transport Async Waits
 

@@ -59,6 +59,8 @@ pub const BackendTimerRequest = struct {
     suspension: Suspension,
     due_time_ms: u64,
     now_ms: u64 = 0,
+    workflow_id: ?u64 = null,
+    execution_id: ?u64 = null,
 };
 
 pub const BackendInterruptRequest = struct {
@@ -119,6 +121,7 @@ pub const AsyncBackend = struct {
         register_io_wait: *const fn (?*anyopaque, BackendIoWaitRequest) AsyncBackendError!void,
         complete_io: *const fn (?*anyopaque, BackendIoCompleteRequest) AsyncBackendError!void,
         poll_wake: *const fn (?*anyopaque) AsyncBackendError!?BackendWakeEvent,
+        advance_time: *const fn (?*anyopaque, u64) AsyncBackendError!usize,
         snapshot: *const fn (?*anyopaque) AsyncBackendSnapshot,
     };
 
@@ -148,6 +151,10 @@ pub const AsyncBackend = struct {
 
     pub fn pollWake(self: AsyncBackend) AsyncBackendError!?BackendWakeEvent {
         return self.vtable.poll_wake(self.context);
+    }
+
+    pub fn advanceTime(self: AsyncBackend, now_ms: u64) AsyncBackendError!usize {
+        return self.vtable.advance_time(self.context, now_ms);
     }
 
     pub fn snapshot(self: AsyncBackend) AsyncBackendSnapshot {
@@ -254,6 +261,8 @@ pub const LocalAsyncBackendState = struct {
             .suspension = request.suspension,
             .wait_kind = .timer,
             .reason = "timer scheduled",
+            .workflow_id = request.workflow_id,
+            .execution_id = request.execution_id,
             .due_time_ms = request.due_time_ms,
         });
         if (request.due_time_ms <= self.now_ms) {
@@ -483,6 +492,12 @@ fn unsupportedPollWake(context: ?*anyopaque) AsyncBackendError!?BackendWakeEvent
     return error.UnsupportedBackendCapability;
 }
 
+fn unsupportedAdvanceTime(context: ?*anyopaque, now_ms: u64) AsyncBackendError!usize {
+    _ = context;
+    _ = now_ms;
+    return error.UnsupportedBackendCapability;
+}
+
 fn unsupportedSnapshot(context: ?*anyopaque) AsyncBackendSnapshot {
     _ = context;
     return .{};
@@ -523,6 +538,11 @@ fn localPollWake(context: ?*anyopaque) AsyncBackendError!?BackendWakeEvent {
     return state.pollWake();
 }
 
+fn localAdvanceTime(context: ?*anyopaque, now_ms: u64) AsyncBackendError!usize {
+    const state: *LocalAsyncBackendState = @ptrCast(@alignCast(context.?));
+    return state.advanceTo(now_ms);
+}
+
 fn localSnapshot(context: ?*anyopaque) AsyncBackendSnapshot {
     const state: *LocalAsyncBackendState = @ptrCast(@alignCast(context.?));
     return state.snapshot();
@@ -536,6 +556,7 @@ const unsupported_vtable: AsyncBackend.VTable = .{
     .register_io_wait = unsupportedRegisterIoWait,
     .complete_io = unsupportedCompleteIo,
     .poll_wake = unsupportedPollWake,
+    .advance_time = unsupportedAdvanceTime,
     .snapshot = unsupportedSnapshot,
 };
 
@@ -547,5 +568,6 @@ const local_vtable: AsyncBackend.VTable = .{
     .register_io_wait = localRegisterIoWait,
     .complete_io = localCompleteIo,
     .poll_wake = localPollWake,
+    .advance_time = localAdvanceTime,
     .snapshot = localSnapshot,
 };
