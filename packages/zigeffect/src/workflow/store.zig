@@ -667,6 +667,17 @@ pub const WorkflowRetentionPolicy = struct {
     completed: WorkflowCompletedRetentionPolicy = .keep_all,
 };
 
+pub const WorkflowSnapshotFrequency = struct {
+    every_events: ?JournalSequence = null,
+
+    pub fn shouldSnapshot(self: WorkflowSnapshotFrequency, last_sequence: JournalSequence, base_sequence: JournalSequence) bool {
+        const every_events = self.every_events orelse return false;
+        if (every_events == 0) return false;
+        if (last_sequence <= base_sequence) return false;
+        return last_sequence - base_sequence >= every_events;
+    }
+};
+
 pub const FileJournalStoreOptions = struct {
     fsync_policy: JournalFsyncPolicy = .never,
     segment_first_sequence: JournalSequence = 1,
@@ -674,6 +685,7 @@ pub const FileJournalStoreOptions = struct {
     owner_id: []const u8 = "zigeffect-local",
     max_segment_bytes: usize = 16 * 1024 * 1024,
     max_in_memory_events: ?usize = null,
+    snapshot_frequency: WorkflowSnapshotFrequency = .{},
     retention_policy: WorkflowRetentionPolicy = .{},
 };
 
@@ -935,6 +947,27 @@ pub const FileJournalStore = struct {
         };
     }
 
+    pub fn snapshotDue(self: *const FileJournalStore) bool {
+        return self.options.snapshot_frequency.shouldSnapshot(self.latestSequence(), self.baseSequence());
+    }
+
+    pub fn writeReplaySnapshotIfDue(self: *FileJournalStore) !?WorkflowSnapshotPublication {
+        if (!self.snapshotDue()) return null;
+
+        var publication = try self.writeReplaySnapshot(null);
+        errdefer publication.deinit(self.allocator);
+
+        var state = try self.latestState(self.allocator);
+        errdefer state.deinit();
+        if (self.base_state) |*old_state| {
+            old_state.deinit();
+        }
+        self.base_state = state;
+        self.memory.resetFromSequence(state.last_sequence);
+
+        return publication;
+    }
+
     pub fn syncCount(self: *const FileJournalStore) u64 {
         return self.sync_count;
     }
@@ -1038,6 +1071,13 @@ pub const FileJournalStore = struct {
     fn baseSequence(self: *const FileJournalStore) JournalSequence {
         if (self.base_state) |state| return state.last_sequence;
         return 0;
+    }
+
+    fn latestSequence(self: *const FileJournalStore) JournalSequence {
+        if (self.memory.events.items.len != 0) {
+            return self.memory.events.items[self.memory.events.items.len - 1].sequence;
+        }
+        return self.baseSequence();
     }
 
     fn recoverLatestCommittedSnapshot(self: *FileJournalStore) !void {

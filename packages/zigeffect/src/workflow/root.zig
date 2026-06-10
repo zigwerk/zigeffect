@@ -89,6 +89,7 @@ pub const parseWorkflowSnapshotCommitJson = store.parseWorkflowSnapshotCommitJso
 pub const InMemoryJournalStore = store.InMemoryJournalStore;
 pub const WorkflowCompletedRetentionPolicy = store.WorkflowCompletedRetentionPolicy;
 pub const WorkflowRetentionPolicy = store.WorkflowRetentionPolicy;
+pub const WorkflowSnapshotFrequency = store.WorkflowSnapshotFrequency;
 pub const FileJournalStoreOptions = store.FileJournalStoreOptions;
 pub const WorkflowSnapshotPublication = store.WorkflowSnapshotPublication;
 pub const WorkflowArchiveExport = store.WorkflowArchiveExport;
