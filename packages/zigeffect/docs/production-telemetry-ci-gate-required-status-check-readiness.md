@@ -82,8 +82,9 @@ authority.
 
 Ready artifacts hand off to
 `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-policy`
-after the delivered application-boundary milestone. The readiness branch is
-not enforcement and does not apply branch protection.
+after the delivered application-boundary milestone. That policy branch is now
+delivered and hands off to enforcement-readiness. The readiness branch is not
+enforcement and does not apply branch protection.
 
 ## Verification
 

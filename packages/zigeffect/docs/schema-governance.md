@@ -596,6 +596,21 @@ production storage, host a production dashboard, orchestrate production
 clusters, add non-NenDB adapter work, add alternate renderers, or grant
 production mutation authority.
 
+- `zigeffect.causal.production-telemetry-ci-gate-required-status-check-policy.v1`
+
+The production-telemetry-ci-gate-required-status-check-policy report is a
+record-only interpretation policy artifact. It consumes planned or externally
+applied required-status-check application-boundary artifacts, preserves
+`source_applied` so agents can distinguish design input from reviewed external
+evidence, records denied GitHub mutation and merge-blocking inferences, and
+hands off toward enforcement-readiness work. It does not create required
+status checks, mutate branch protection, call GitHub APIs, mutate workflows,
+create check runs, execute CI uploads, write GitHub step summaries, post pull
+request comments, ingest live telemetry, call networks, write NenDB, write
+durable production storage, host a production dashboard, orchestrate
+production clusters, add non-NenDB adapter work, add alternate renderers, or
+grant production mutation authority.
+
 ### Human-Agent Feedback
 
 - `zigeffect.causal.human-agent-feedback-loop.v1`

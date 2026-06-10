@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-telemetry-ci-gate-required-status-check-policy` means the
+The recommendation `start-production-telemetry-ci-gate-required-status-check-enforcement-readiness` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -188,9 +188,15 @@ allowed and denied interpretations for externally published advisory reports,
 and preserves non-blocking advisory semantics before any required-status-check
 readiness branch. The required-status-check readiness branch is now delivered
 and records activation-disabled candidate checks plus guardrails before any
-application boundary.
+application boundary. The required-status-check application-boundary branch is
+also delivered and records planned or externally applied required-check
+boundary evidence. The required-status-check policy branch is also delivered:
+it consumes planned or applied application-boundary artifacts, preserves
+`source_applied`, records denied GitHub mutation and merge-blocking
+inferences, and hands off toward enforcement-readiness while keeping every
+tool-side mutation authority disabled.
 The next branch should be
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-policy`.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-readiness`.
 
 ## Dependency Order
 
@@ -235,6 +241,7 @@ The backlog currently orders future production-hardening branches as:
 37. `production-telemetry-ci-gate-advisory-ci-report-publication-policy` delivered
 38. `production-telemetry-ci-gate-required-status-check-readiness` delivered
 39. `production-telemetry-ci-gate-required-status-check-application-boundary` delivered
+40. `production-telemetry-ci-gate-required-status-check-policy` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -662,11 +669,26 @@ disabled CI uploads, disabled live telemetry, disabled durable writes,
 disabled NenDB writes, NenDB-only durable direction, and SolidJS `zig-webui`
 workbench direction.
 
-The next branch should define interpretation policy for externally applied
-required-status-check evidence before any CI telemetry gate enforcement,
-required status checks, branch protection mutation, live telemetry, durable
-production writes, capacity claims, production cluster claims, or mutation
-authority are considered.
+Production telemetry CI gate required status check policy is documented in
+[production-telemetry-ci-gate-required-status-check-policy.md](production-telemetry-ci-gate-required-status-check-policy.md).
+It emits
+`zigeffect.causal.production-telemetry-ci-gate-required-status-check-policy.v1`
+through
+`zig build causal-production-telemetry-ci-gate-required-status-check-policy`,
+consumes planned or externally applied required-status-check application
+boundary artifacts, records planned versus applied source interpretation,
+keeps `merge_blocker_claim_allowed=false`, and hands off to enforcement
+readiness. It preserves disabled GitHub API mutation by the tool, disabled
+branch-protection mutation by the tool, disabled workflow mutation by the tool,
+disabled check-run creation by the tool, disabled CI uploads, disabled live
+telemetry, disabled durable writes, disabled NenDB writes, NenDB-only durable
+direction, and SolidJS `zig-webui` workbench direction.
+
+The next branch should define enforcement-readiness evidence for externally
+applied required-status-check policy before any CI telemetry gate enforcement,
+active required status checks, branch protection mutation, live telemetry,
+durable production writes, capacity claims, production cluster claims, or
+mutation authority are considered.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,

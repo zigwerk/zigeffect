@@ -73,10 +73,11 @@ Planned or applied application-boundary artifacts hand off to:
 
 `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-policy`
 
-That branch should define interpretation policy for externally applied
-required-status-check evidence. It must still avoid inferring production
-health, deployment success, cluster readiness, durable writes, NenDB writes,
-alternate renderer scope, or mutation authority.
+That branch defines interpretation policy for planned or externally applied
+required-status-check evidence and hands off to enforcement-readiness. It must
+still avoid inferring active merge blocking, production health, deployment
+success, cluster readiness, durable writes, NenDB writes, alternate renderer
+scope, or mutation authority.
 
 ## Verification
 

@@ -777,6 +777,34 @@ gate enforcement, write NenDB, write durable storage, or grant mutation
 authority. The full policy is in
 [docs/production-telemetry-ci-gate-required-status-check-application-boundary.md](docs/production-telemetry-ci-gate-required-status-check-application-boundary.md).
 
+Review the production telemetry CI gate required status check policy:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-telemetry-ci-gate-required-status-check-policy -- \
+  --from-application-boundary ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-application-boundary.json \
+  approve \
+  --reason "required status check policy reviewed" \
+  --verified-command "zig build causal-production-telemetry-ci-gate-required-status-check-application-boundary" \
+  --verified-command "zig build causal-artifacts" \
+  --verified-command "zig build release-gate --summary none" \
+  --verified-command "zig build release-gate-report" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The policy artifact uses schema
+`zigeffect.causal.production-telemetry-ci-gate-required-status-check-policy.v1`,
+consumes planned or externally applied required-status-check application
+boundary artifacts, records planned versus applied interpretation, and hands
+off to the enforcement-readiness branch. It does not mutate GitHub branch
+protection, create check runs, call GitHub APIs, mutate workflows, enable CI
+gate enforcement, write NenDB, write durable storage, or grant mutation
+authority. The full policy is in
+[docs/production-telemetry-ci-gate-required-status-check-policy.md](docs/production-telemetry-ci-gate-required-status-check-policy.md).
+
 Print the M9 operating-model completion audit:
 
 ```bash
@@ -802,9 +830,9 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-policy`
-after the delivered production telemetry CI gate required status check
-application-boundary milestone.
+`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-readiness`
+after the delivered production telemetry CI gate required status check policy
+milestone.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in
