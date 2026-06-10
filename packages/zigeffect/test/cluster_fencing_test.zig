@@ -201,6 +201,40 @@ test "stale workflow entity rejects journal write after lease epoch moves" {
     try std.testing.expectEqual(@as(usize, 0), events.events.len);
 }
 
+test "shard fence diagnostic includes fenced and current lease details" {
+    const owner_a = fx.runnerAddress("machine", "runner-a");
+    const owner_b = fx.runnerAddress("machine", "runner-b");
+    const fence = fx.ShardLeaseFence{
+        .shard_id = 3,
+        .owner = owner_a,
+        .epoch = 7,
+    };
+    const current = fx.ShardLease{
+        .shard_id = 3,
+        .owner = owner_b,
+        .acquired_at_ms = 2_000,
+        .refreshed_at_ms = 2_050,
+        .expires_at_ms = 2_100,
+        .epoch = 8,
+        .version = 9,
+    };
+
+    const conflict = try fx.formatShardFenceDiagnostic(std.testing.allocator, fence, current);
+    defer std.testing.allocator.free(conflict);
+    try expectContains(conflict, "shard=3");
+    try expectContains(conflict, "fence_owner=");
+    try expectContains(conflict, "fence_epoch=7");
+    try expectContains(conflict, "current_owner=");
+    try expectContains(conflict, "current_epoch=8");
+
+    const missing = try fx.formatShardFenceDiagnostic(std.testing.allocator, fence, null);
+    defer std.testing.allocator.free(missing);
+    try expectContains(missing, "shard=3");
+    try expectContains(missing, "fence_epoch=7");
+    try expectContains(missing, "current_owner=none");
+    try expectContains(missing, "current_epoch=none");
+}
+
 const NoopEntityHandler = struct {
     pub fn handle(_: *fx.EntityScope, _: fx.EntityEnvelope) !fx.EntityHandlerResult {
         return .noreply;
@@ -225,4 +259,8 @@ fn executionIdForWorkflowShard(shard_id: fx.ShardId, shard_count: fx.ShardCount)
         if (try fx.shardIdForAddress(address, shard_count) == shard_id) return id;
     }
     return error.ExecutionShardNotFound;
+}
+
+fn expectContains(haystack: []const u8, needle: []const u8) !void {
+    try std.testing.expect(std.mem.indexOf(u8, haystack, needle) != null);
 }
