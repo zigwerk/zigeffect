@@ -112,6 +112,8 @@ pub const ClusterQueryReport = struct {
 pub const ClusterMetricsSnapshot = struct {
     active_leases: usize = 0,
     mailbox_lag: usize = 0,
+    max_shard_mailbox_lag: usize = 0,
+    message_backpressure: usize = 0,
     message_retries: usize = 0,
     migrations: usize = 0,
     failures: usize = 0,
@@ -220,7 +222,10 @@ pub fn collectClusterMetrics(
     while (shard_id < @as(ShardId, shard_count)) : (shard_id += 1) {
         var batch = try message_store.unprocessedByShard(shard_id, allocator);
         defer batch.deinit();
-        snapshot.mailbox_lag += batch.records.len;
+        const shard_lag = batch.records.len;
+        snapshot.mailbox_lag += shard_lag;
+        snapshot.max_shard_mailbox_lag = @max(snapshot.max_shard_mailbox_lag, shard_lag);
+        if (shard_lag > 0) snapshot.message_backpressure += 1;
         for (batch.records) |record| {
             if (record.envelope.attempt > 0) {
                 snapshot.message_retries += 1;
@@ -247,6 +252,8 @@ pub fn collectClusterMetrics(
 pub fn recordClusterMetrics(metrics: *Metrics, snapshot: ClusterMetricsSnapshot) Allocator.Error!void {
     try metrics.gauge("cluster.leases.active", @intCast(snapshot.active_leases));
     try metrics.gauge("cluster.mailbox.lag", @intCast(snapshot.mailbox_lag));
+    try metrics.gauge("cluster.mailbox.lag.max", @intCast(snapshot.max_shard_mailbox_lag));
+    try metrics.gauge("cluster.messages.backpressure", @intCast(snapshot.message_backpressure));
     try metrics.gauge("cluster.messages.retries", @intCast(snapshot.message_retries));
     try metrics.gauge("cluster.shards.migrations", @intCast(snapshot.migrations));
     try metrics.gauge("cluster.failures", @intCast(snapshot.failures));

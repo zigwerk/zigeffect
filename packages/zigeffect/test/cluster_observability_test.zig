@@ -210,6 +210,8 @@ test "cluster metrics collect leases lag retries migrations and failures" {
     );
     try std.testing.expectEqual(@as(usize, 1), snapshot.active_leases);
     try std.testing.expectEqual(@as(usize, 1), snapshot.mailbox_lag);
+    try std.testing.expectEqual(@as(usize, 1), snapshot.max_shard_mailbox_lag);
+    try std.testing.expectEqual(@as(usize, 1), snapshot.message_backpressure);
     try std.testing.expectEqual(@as(usize, 1), snapshot.message_retries);
     try std.testing.expectEqual(@as(usize, 1), snapshot.migrations);
     try std.testing.expectEqual(@as(usize, 1), snapshot.failures);
@@ -219,6 +221,8 @@ test "cluster metrics collect leases lag retries migrations and failures" {
     try fx.recordClusterMetrics(&metrics, snapshot);
     try std.testing.expectEqual(@as(i64, 1), metrics.get("cluster.leases.active"));
     try std.testing.expectEqual(@as(i64, 1), metrics.get("cluster.mailbox.lag"));
+    try std.testing.expectEqual(@as(i64, 1), metrics.get("cluster.mailbox.lag.max"));
+    try std.testing.expectEqual(@as(i64, 1), metrics.get("cluster.messages.backpressure"));
     try std.testing.expectEqual(@as(i64, 1), metrics.get("cluster.messages.retries"));
 }
 
