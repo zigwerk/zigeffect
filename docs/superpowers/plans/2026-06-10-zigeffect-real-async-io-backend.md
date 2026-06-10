@@ -40,7 +40,7 @@ Modify:
 
 ## Task 1: Red Tests For Async Backend Contract
 
-- [ ] Add `packages/zigeffect/test/async_backend_test.zig` with tests that reference these new declarations:
+- [x] Add `packages/zigeffect/test/async_backend_test.zig` with tests that reference these new declarations:
 
 ```zig
 const std = @import("std");
@@ -68,11 +68,11 @@ test "local async backend exposes snapshot and idempotent wake lifecycle" {
 }
 ```
 
-- [ ] Add tests for timer due behavior, typed network/file IO waits, interruption, async scope finalization, runtime/fiber context propagation, workflow scheduler `tickAsync`, queue wake, durable activity replay dedupe, and cluster transport async wait helpers.
-- [ ] Import the new test file from `packages/zigeffect/test/all_test.zig`.
-- [ ] Run `cd packages/zigeffect && zig build test-raw`.
-- [ ] Confirm the command fails because the new M47 declarations do not exist.
-- [ ] Commit the red tests with `test(zigeffect): specify real async backend`.
+- [x] Add tests for timer due behavior, typed network/file IO waits, interruption, async scope finalization, runtime/fiber context propagation, workflow scheduler `tickAsync`, queue wake, durable activity replay dedupe, and cluster transport async wait helpers.
+- [x] Import the new test file from `packages/zigeffect/test/all_test.zig`.
+- [x] Run `cd packages/zigeffect && zig build test-raw`.
+- [x] Confirm the command fails because the new M47 declarations do not exist.
+- [x] Commit the red tests with `test(zigeffect): specify real async backend`.
 
 ## Task 2: Implement Local Async Backend
 
