@@ -835,7 +835,7 @@ test "schema governance usage names command and formats" {
 
 test "schema governance inventory includes official schemas and excludes fake fixtures" {
     const entries = schemaEntries();
-    try std.testing.expectEqual(@as(usize, 59), entries.len);
+    try std.testing.expectEqual(@as(usize, 60), entries.len);
     try expectSchema(entries, "zigeffect.causal.v1");
     try expectSchema(entries, "zigeffect.causal.event.v1");
     try expectSchema(entries, "zigeffect.causal.app-application.v1");
@@ -956,7 +956,7 @@ test "schema governance json report is machine readable" {
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema_version\": 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"current_core_schema\": \"zigeffect.causal.v1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"current_event_taxonomy_version\": 1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"schema_count\": 59") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"schema_count\": 60") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schemas\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"compatibility\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.performance-budget.v1\"") != null);
