@@ -41,6 +41,21 @@ pub fn build(b: *std.Build) void {
     const causal_backend_conformance_step = b.step("causal-backend-conformance", "Run causal backend conformance contract tests");
     causal_backend_conformance_step.dependOn(&run_causal_backend_conformance_tests.step);
 
+    const storage_conformance_test_module = b.createModule(.{
+        .root_source_file = b.path("test/storage_conformance_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    storage_conformance_test_module.addImport("zigeffect", zigeffect);
+
+    const storage_conformance_tests = b.addTest(.{
+        .name = "zigeffect-storage-conformance-tests",
+        .root_module = storage_conformance_test_module,
+    });
+    const run_storage_conformance_tests = b.addRunArtifact(storage_conformance_tests);
+    const storage_conformance_step = b.step("storage-conformance", "Run workflow and cluster storage conformance contract tests");
+    storage_conformance_step.dependOn(&run_storage_conformance_tests.step);
+
     const causal_jsonl_backend_test_module = b.createModule(.{
         .root_source_file = b.path("test/causal_jsonl_backend_test.zig"),
         .target = target,
@@ -540,6 +555,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_causal_package_test_tool.step);
     test_step.dependOn(&run_causal_artifact_tool_tests.step);
     test_step.dependOn(&run_causal_backend_conformance_tests.step);
+    test_step.dependOn(&run_storage_conformance_tests.step);
     test_step.dependOn(&run_causal_jsonl_backend_tests.step);
     test_step.dependOn(&run_causal_dot_backend_tests.step);
     test_step.dependOn(&run_causal_otel_backend_tests.step);
