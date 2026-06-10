@@ -364,6 +364,48 @@ pub const RealClusterController = struct {
         self.recent_rebalance_actions += applied;
         return applied;
     }
+
+    pub fn drainRunner(self: *RealClusterController, address: RunnerAddress, now_ms: u64) !ClusterDrainPlan {
+        var leases = try self.runner_storage.leases(self.allocator);
+        defer leases.deinit();
+
+        var drained_shards = std.ArrayList(ShardId).empty;
+        defer drained_shards.deinit(self.allocator);
+        for (leases.leases) |lease| {
+            if (!lease.owner.eql(address)) continue;
+            try drained_shards.append(self.allocator, lease.shard_id);
+        }
+
+        try self.registry.markStopped(address, now_ms);
+        var placement = try self.placementPlan(self.allocator, now_ms);
+        defer placement.deinit();
+
+        var released: usize = 0;
+        var reassigned: usize = 0;
+        for (drained_shards.items) |shard_id| {
+            try self.runner_storage.release(.{
+                .shard_id = shard_id,
+                .owner = address,
+            });
+            released += 1;
+
+            const owner = findPlacementOwner(placement, shard_id) orelse continue;
+            _ = try self.runner_storage.acquire(.{
+                .shard_id = shard_id,
+                .owner = owner,
+                .now_ms = now_ms,
+                .ttl_ms = self.options.lease_ttl_ms,
+            });
+            reassigned += 1;
+        }
+
+        self.recent_rebalance_actions += released + reassigned;
+        return .{
+            .runner = address,
+            .released = released,
+            .reassigned = reassigned,
+        };
+    }
 };
 
 fn clusterMembershipStateFromHealth(state: runner.RunnerHealthState) ClusterMembershipState {
@@ -378,6 +420,13 @@ fn clusterMembershipStateFromHealth(state: runner.RunnerHealthState) ClusterMemb
 fn clusterMemberLessThan(_: void, left: ClusterMember, right: ClusterMember) bool {
     if (left.address.machine_id != right.address.machine_id) return left.address.machine_id < right.address.machine_id;
     return left.address.runner_id < right.address.runner_id;
+}
+
+fn findPlacementOwner(plan: ClusterPlacementPlan, shard_id: ShardId) ?RunnerAddress {
+    for (plan.placements) |placement| {
+        if (placement.shard_id == shard_id) return placement.owner;
+    }
+    return null;
 }
 
 pub fn formatClusterInspectionText(allocator: Allocator, report: ClusterInspectionReport) Allocator.Error![]const u8 {

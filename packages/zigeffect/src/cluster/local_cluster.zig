@@ -260,6 +260,11 @@ pub const LocalClusterRunner = struct {
         return self.runtime.loadOwnedShards();
     }
 
+    pub fn syncOwnedShards(self: *LocalClusterRunner) !usize {
+        _ = try self.lease_manager.syncOwnedLeasesFromStorage();
+        return self.runtime.loadOwnedShards();
+    }
+
     pub fn registerEntity(self: *LocalClusterRunner, registration: EntityRegistration, now_ms: u64) !cluster_runtime.ClusterEntityRef {
         return self.runtime.registerEntity(registration, now_ms);
     }

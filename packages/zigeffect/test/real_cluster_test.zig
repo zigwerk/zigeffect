@@ -214,6 +214,77 @@ test "real cluster handoff plan moves durable leases after adding runner" {
     try expectLeasesMatchPlacement(runner_storage, next_placement);
 }
 
+test "real cluster drain reassigns leases and synced runner processes queued messages" {
+    var registry = fx.LocalRunnerRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    const runner_storage = runner_storage_state.asRunnerStorage();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+    var controller = try testController(&registry, runner_storage, message_storage);
+
+    const runner_a_address = fx.runnerAddress("machine-real", "runner-a");
+    const runner_b_address = fx.runnerAddress("machine-real", "runner-b");
+    try admitActiveRunner(&controller, runner_a_address, "runner-a", 1_000);
+    try admitActiveRunner(&controller, runner_b_address, "runner-b", 1_000);
+
+    var runner_a = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = runner_a_address,
+        .runner_storage = runner_storage,
+        .message_storage = message_storage,
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 2,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    });
+    defer runner_a.deinit();
+    var runner_b = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = runner_b_address,
+        .runner_storage = runner_storage,
+        .message_storage = message_storage,
+        .shard_count = 8,
+        .runner_index = 1,
+        .runner_count = 2,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    });
+    defer runner_b.deinit();
+
+    var placement = try controller.placementPlan(std.testing.allocator, 1_050);
+    defer placement.deinit();
+    var rebalance = try controller.rebalancePlan(std.testing.allocator, placement);
+    defer rebalance.deinit();
+    _ = try controller.applyRebalancePlan(rebalance, 1_100);
+    try std.testing.expectEqual(@as(usize, 4), try runner_a.syncOwnedShards());
+    try std.testing.expectEqual(@as(usize, 4), try runner_b.syncOwnedShards());
+
+    const drained_address = try addressForRealShard(0, 8);
+    var routed = try runner_b.router.routeAsk(drained_address, "text", "drain-get", "read after drain");
+    defer routed.deinit(std.testing.allocator);
+
+    const drain = try controller.drainRunner(runner_a_address, 1_200);
+    try std.testing.expectEqual(@as(usize, 4), drain.released);
+    try std.testing.expectEqual(@as(usize, 4), drain.reassigned);
+    try std.testing.expectEqual(@as(usize, 0), try runner_a.syncOwnedShards());
+    try std.testing.expectEqual(@as(usize, 8), try runner_b.syncOwnedShards());
+
+    _ = try runner_b.registerEntity(.{ .address = drained_address, .name = "drained" }, 1_200);
+    const Handler = struct {
+        pub fn handle(_: *fx.EntityScope, envelope: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            try std.testing.expectEqual(fx.EntityEnvelopeKind.ask, envelope.kind);
+            try std.testing.expectEqualStrings("drain-get", envelope.payload);
+            return .{ .reply = "value=drained" };
+        }
+    };
+
+    const report = try runner_b.tick(Handler, 1_250);
+    try std.testing.expectEqual(@as(usize, 1), report.dispatched);
+    const reply = (try message_storage.reply(routed.correlation_id.?, std.testing.allocator)).?;
+    defer fx.deinitMessageEnvelope(std.testing.allocator, reply);
+    try std.testing.expectEqualStrings("value=drained", reply.payload);
+}
+
 fn testController(registry: *fx.LocalRunnerRegistry, runner_storage: fx.RunnerStorage, message_storage: fx.MessageStorage) !fx.RealClusterController {
     return fx.RealClusterController.init(std.testing.allocator, .{
         .runner_storage = runner_storage,
@@ -251,6 +322,17 @@ fn expectLeasesMatchPlacement(runner_storage: fx.RunnerStorage, plan: fx.Cluster
         const lease = (try runner_storage.lease(placement.shard_id)).?;
         try std.testing.expect(lease.owner.eql(placement.owner));
     }
+}
+
+fn addressForRealShard(shard_id: fx.ShardId, shard_count: fx.ShardCount) !fx.EntityAddress {
+    var index: usize = 0;
+    while (index < 10_000) : (index += 1) {
+        var key_buf: [32]u8 = undefined;
+        const key = try std.fmt.bufPrint(&key_buf, "real-{d}-{d}", .{ shard_id, index });
+        const address = fx.entityAddress("counter", key);
+        if (try fx.shardIdForAddress(address, shard_count) == shard_id) return address;
+    }
+    return error.ShardAddressNotFound;
 }
 
 fn expectMemberState(report: fx.ClusterMembershipReport, address: fx.RunnerAddress, state: fx.ClusterMembershipState) !void {

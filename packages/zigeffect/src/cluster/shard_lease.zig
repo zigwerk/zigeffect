@@ -252,6 +252,19 @@ pub const LocalShardLeaseManager = struct {
         };
     }
 
+    pub fn syncOwnedLeasesFromStorage(self: *LocalShardLeaseManager) !usize {
+        var leases = try self.storage.leases(self.allocator);
+        defer leases.deinit();
+
+        self.owned_leases.clearRetainingCapacity();
+        try self.owned_leases.ensureTotalCapacity(self.allocator, leases.leases.len);
+        for (leases.leases) |lease| {
+            if (!lease.owner.eql(self.owner)) continue;
+            self.owned_leases.appendAssumeCapacity(lease);
+        }
+        return self.owned_leases.items.len;
+    }
+
     pub fn auditOwnedLeases(self: *LocalShardLeaseManager, allocator: Allocator, now_ms: u64) !ShardLeaseAuditReport {
         var entries: std.ArrayList(ShardLeaseAuditEntry) = .empty;
         errdefer entries.deinit(allocator);
