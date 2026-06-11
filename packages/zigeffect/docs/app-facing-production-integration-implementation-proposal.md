@@ -54,6 +54,30 @@ zig build causal-app-facing-production-integration-implementation-proposal -- \
   --out-prefix ../../.zig-cache/causal-artifacts/app-facing-production-integration-implementation-proposal-negative
 ```
 
+## Boundary Handoff
+
+An approved proposal unlocks only the guarded boundary review. It must be
+consumed by `causal-app-facing-production-integration-boundary` before any
+local app-facing integration fixture branch starts:
+
+```sh
+zig build causal-app-facing-production-integration-boundary -- \
+  --from-proposal ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures-readiness-review-implementation-proposal.json \
+  approve \
+  --reason "proposal evidence reviewed for app-facing local fixtures" \
+  --verified-command "zig build causal-app-facing-production-integration-implementation-proposal -- --from-readiness ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures-readiness-review.json approve --reason \"ready evidence reviewed for app-facing integration planning\" --verified-command \"zig build causal-app-facing-production-integration-readiness-review -- --from-fixtures ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures.json approve --reason \\\"fixtures reviewed for implementation proposal\\\" --verified-command \\\"zig build causal-app-facing-production-integration-fixtures -- validate --format json\\\" --verified-command \\\"zig build causal-schema-governance -- --format json\\\" --verified-command \\\"zig build causal-production-hardening-backlog -- --format json\\\" --verified-command \\\"zig build examples\\\" --verified-command \\\"zig build test\\\"\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The boundary emits
+`zigeffect.causal.app-facing-production-integration-boundary.v1` and keeps
+app runtime refs, bounded agent-query projection, NenDB handoff refs, audit
+remediation review links, SolidJS read-only preview scope, and advisory CI
+artifact scope record-only.
+
 ## Required Evidence
 
 Approved proposals require these exact verification commands to be recorded:

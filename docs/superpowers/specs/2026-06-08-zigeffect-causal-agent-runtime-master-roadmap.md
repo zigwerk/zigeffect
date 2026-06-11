@@ -1201,10 +1201,23 @@ Status values:
      CI gates, no Cockroach scope, no alternate renderer scope, and no
      `applied=true`.
 50. `codex/zigeffect-causal-app-facing-production-integration-boundary`
-   - Next: consume an approved app-facing production integration
-     implementation-proposal artifact and define the guarded boundary for
-     app runtime refs, bounded agent-query projection, and NenDB handoff
-     without enabling production mutation authority.
+   - Delivered:
+     `causal-app-facing-production-integration-boundary` consumes an approved
+     app-facing production integration implementation-proposal artifact and
+     emits
+     `zigeffect.causal.app-facing-production-integration-boundary.v1`, defining
+     the guarded contract for app runtime refs, bounded agent-query projection,
+     NenDB handoff refs, audit/remediation evidence-only links, SolidJS
+     read-only preview scope, advisory CI artifact scope, and no app mutation,
+     raw payload capture, app config writes, app data writes, deployment
+     mutation, NenDB production writes, Cockroach scope, alternate renderer
+     scope, CI enforcement, or `applied=true`.
+51. `codex/zigeffect-causal-app-facing-production-integration-local-fixtures`
+   - Next: consume the approved guarded app-facing boundary artifact and build
+     local fixture reports for app runtime refs, bounded agent-query
+     projections, NenDB handoff refs, audit/remediation review links, and
+     SolidJS read-only workbench previews without production mutation
+     authority.
 
 ## Dual-Interface Causal Spine Expansion
 

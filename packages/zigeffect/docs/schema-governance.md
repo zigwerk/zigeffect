@@ -1,848 +1,721 @@
-# zigeffect Schema Governance
-
-`causal-schema-governance` is the authoritative registry for current causal
-artifact schemas. Use it before adding a new artifact family, changing an
-artifact shape, or teaching an agent to consume a causal report.
-
-## Command
-
-```sh
-cd packages/zigeffect
-zig build causal-schema-governance
-zig build causal-schema-governance -- --format json
-```
-
-The default text report is for humans. The JSON report uses schema
-`zigeffect.causal.schema-governance.v1` and is the machine-readable matrix for
-agents and CI checks.
-
-When a schema change affects retained artifacts, CI upload behavior, workbench
-mapping, or agent handoff, also update [operations.md](operations.md).
-
-## Versioning Policy
-
-- `schema` names the artifact family.
-- `schema_version` tracks the current shape inside that family.
-- `event_taxonomy_version` tracks event-kind role semantics.
-- Additive optional fields may keep the current version only when current
-  consumers ignore unknown fields and tests cover graceful behavior.
-- Required, renamed, removed, or semantically changed fields require a version
-  bump and compatibility tests.
-- New event kinds or role/sampleability changes require an event taxonomy
-  version bump.
-
-## Migration Policy
-
-- Legacy core causal artifacts without root schema metadata remain readable.
-- Current core tools warn, not crash, when future schema or taxonomy versions
-  can still provide event ids.
-- Strict governance artifacts fail closed on unsupported schema or version.
-- Rewrite tooling is deferred until a real v2 artifact exists.
-
-## Compatibility Postures
-
-- `legacy-tolerant`: accepts missing metadata and keeps event ids usable.
-- `warn-forward`: warns on newer schema/taxonomy while preserving known fields.
-- `strict-v1`: requires exact schema family and version `1`.
-- `sink-contract`: emitted for downstream backend/export systems.
-- `record-only`: records review/application state without mutating source.
-- `viewer-session`: read-only local workbench/session operating state.
-- `bounded-stream`: ordered dashboard frame records with declared truncation
-  and redaction state.
-- `local-fixture`: deterministic local evidence generated without production
-  inputs or production writes.
-- `spine-contract`: defines shared identity and relationship vocabulary without
-  changing source event emission.
-- `agent-query`: compact bounded graph slices for agents; read-only and
-  policy-aware.
-- `advisory-wall-clock`: observed timing evidence is comparable only when
-  environment metadata is compatible and cannot fail CI or claim capacity
-  without human review.
-- `planning-only`: deterministic planning assumptions and missing-evidence
-  gates only; not production sizing, telemetry, load testing, or mutation
-  authority.
-- `completion-audit`: deterministic milestone closure evidence with explicit
-  remaining gaps and no production mutation authority.
-- `exporter-boundary`: no-network exporter boundary evidence only; not OTLP
-  serialization, collector configuration, live transport, or durable writes.
-- `no-network`: confirms an artifact cannot send to a collector or configure a
-  network transport.
-- `local-pipeline-fixtures`: fixture-only local envelope shaping, redaction,
-  sampling, and correlation evidence; not runtime pipeline execution.
-- `workbench-readonly-preview`: human workbench evidence only; not live
-  telemetry, durable writes, CI gates, hosted dashboard readiness, or mutation
-  authority.
-- `solid-webui`: SolidJS inside `webui-dev/zig-webui` is the reviewed workbench
-  direction for this artifact family.
-- `nendb-only`: durable database work is limited to the NenDB adapter path.
-- `no-cockroach`: this artifact does not authorize Cockroach or other
-  non-NenDB durable adapter scope.
-- `no-mutation-authority`: the artifact grants no source, config, registry,
-  workflow, deployment, app, production, or external-system mutation authority.
-
-## New Schema Checklist
-
-- Add schema name and version.
-- Add producer tests.
-- Add consumer or compatibility tests.
-- Add a schema governance registry entry.
-- Add README or guide docs.
-- Add workbench mapping when user-facing.
-- Add artifact manifest entries when retained in `.zig-cache/causal-artifacts`.
-
-## Official Schema Matrix
-
-### Core Runtime
-
-- `zigeffect.causal.v1`
-  - Current version: `1`
-  - Producers: `formatCausalJson`
-  - Consumers: `causal-query`, `causal-compare`, `causal-loop`,
-    `causal-advice`, `causal-workbench`
-  - Compatibility: `legacy-tolerant`, `warn-forward`
-
-### Backend Export
-
-- `zigeffect.causal.event.v1`
-- `zigeffect.causal.otel_record.v1`
-- `zigeffect.causal.nendb_node.v1`
-- `zigeffect.causal.nendb_edge.v1`
-- `zigeffect.causal.nendb-retention-report.v1`
-- `zigeffect.causal.nendb-durable-history.v1`
-
-Backend export schemas are sink contracts. They are guarded by backend
-conformance, adapter, bounded-history, and redaction tests rather than by core
-causal query compatibility. The NenDB retention report is record-only evidence
-derived from adapter-owned history and policy, not a durable mutation command.
-The NenDB durable-history report adds writer, flush, redaction, and query
-evidence for agents while keeping Cockroach, live telemetry, network sends, and
-production mutation authority disabled.
-
-### App Runtime
-
-- `zigeffect.causal.app-runtime.v1`
-- `zigeffect.causal.app-facing-production-integration-fixtures.v1`
-- `zigeffect.causal.app-facing-production-integration-readiness-review.v1`
-- `zigeffect.causal.app-facing-production-integration-implementation-proposal.v1`
-
-App runtime artifacts remain record-only app evidence. User-facing mappings
-belong in the SolidJS workbench launched through `zig-webui`.
-The app-facing production integration fixture schema is fixture-only evidence
-for agents and reviewers. It connects app traces, agent queries, audit-chain
-comparison, app remediation governance, production telemetry fixture
-boundaries, and NenDB durable-history refs without granting live telemetry,
-durable writes, app mutation, CI gates, Cockroach scope, or alternate renderer
-scope.
-The app-facing production integration readiness-review schema consumes fixture
-JSON, records a reviewer decision and required verification command evidence,
-and emits `ready` or `blocked` before implementation-proposal work. It keeps
-the same no-live-telemetry, no-durable-write, no-app-mutation, no-Cockroach,
-SolidJS/webui-only, record-only boundaries.
-The app-facing production integration implementation-proposal schema consumes a
-ready readiness-review artifact, records proposer decision and verification
-evidence, emits `approved` or `blocked`, and hands off only to the guarded
-app-facing production integration boundary. It remains record-only,
-implementation-proposal, NenDB-only, no-Cockroach, no-live-telemetry, and
-no-production-mutation.
-
-### Dev Loop
-
-- `zigeffect.causal.dev-loop-verdict.v1`
-- `zigeffect.causal.dev-session.v1`
-- `zigeffect.causal.ci-verdict.v1`
-
-Dev-loop artifacts are agent handoff records. They should keep exact next
-query/advice commands and remain safe to attach to failed CI jobs after
-redaction review.
-
-### Workbench
-
-- `zigeffect.causal.workbench-session.v1`
-- `zigeffect.causal.live-dashboard-stream.v1`
-
-Workbench sessions are `viewer-session` artifacts. They are local read-only
-operating state, not remediation authority. The preferred UI path is SolidJS
-with `webui-dev/zig-webui`; alternate renderers should be introduced only for a
-specific future integration that cannot fit that path.
-
-Live dashboard stream artifacts are `record-only`, `bounded-stream`,
-`viewer-session` artifacts. They feed the Live tab and Visual Graph tab in the
-SolidJS workbench. The first visual graph adapter is `@dschz/solid-g6` over
-`@antv/g6`, with direct engine API usage reserved for future gaps.
-
-### Operating Model
-
-- `zigeffect.causal.performance-budget.v1`
-
-The performance-budget report is a record-only operating-model artifact. It
-names deterministic overhead budgets, release-review checks, and verification
-commands for causal runtime changes. It is not a wall-clock benchmark, mutation
-surface, production dashboard, or capacity plan.
-
-- `zigeffect.causal.m9-completion-audit.v1`
-
-The M9 completion audit is a record-only operating-model artifact. It proves
-the local/CI causal operating-model deliverables, records deferred production
-gaps, and gives agents a stable recommendation before the roadmap marks M9
-delivered.
-
-- `zigeffect.causal.production-hardening-backlog.v1`
-
-The production-hardening backlog is a record-only operating-model artifact. It
-turns the M9 deferred production gaps into an ordered future branch queue with
-dependencies, constraints, non-goals, verification commands, and the next
-recommended production-hardening branch. It does not grant production mutation
-authority, add production telemetry, or change the NenDB-only durable adapter
-direction.
-
-### Production Hardening
-
-- `zigeffect.causal.production-artifact-aggregation.v1`
-
-The production-artifact-aggregation report is a record-only production
-hardening contract. It defines aggregation bundle semantics, source provenance
-fields, privacy review gates, and a deterministic local/CI sample bundle for
-future durable retention, access control, workbench, integration, benchmark,
-and capacity planning branches. It does not ingest live production telemetry or
-write durable storage.
-
-- `zigeffect.causal.durable-production-retention.v1`
-
-The durable-production-retention report is a record-only production hardening
-contract. It consumes the production artifact aggregation schema and defines
-the NenDB-only TTL, compaction, backup, recovery, retained-bundle fixture, and
-verification expectations. It does not ingest live telemetry, enforce TTL from
-wall-clock time, restore production data, or grant mutation authority.
-
-- `zigeffect.causal.production-deployment-runbooks.v1`
-
-The production-deployment-runbooks report is a record-only production
-hardening contract. It consumes production artifact aggregation and durable
-retention contracts, then defines manual deployment, rollback, causal
-verification, and incident-response gates. It does not deploy services, roll
-back services, page humans, automate rollouts, or grant production mutation
-authority.
-
-- `zigeffect.causal.artifact-access-control.v1`
-
-The artifact-access-control report is a record-only production hardening
-contract. It consumes aggregation, durable-retention, and deployment-runbook
-contracts, then defines visibility classes, role labels, permissions, access
-decisions, denied-view fixtures, and access audit record fields. It does not
-authenticate users, enforce live RBAC, modify the workbench, or grant mutation
-authority.
-
-- `zigeffect.causal.unified-spine-contract.v1`
-
-The unified-spine-contract report is a record-only production hardening
-contract. It defines the canonical runtime ids, app semantic ids, relationship
-taxonomy, policy boundary, derived index families, and projection rules shared
-by deep runtime internals, app semantic traces, agent queries, the SolidJS
-`zig-webui` workbench, and NenDB adapter projections. It does not change live
-runtime emission, implement app trace APIs, write durable storage, or grant
-mutation authority.
-
-- `zigeffect.causal.encryption-at-rest-policy.v1`
-
-The encryption-at-rest-policy report is a record-only production hardening
-contract. It consumes aggregation, durable-retention, and artifact
-access-control contracts, then defines encryption domains, key owner labels,
-rotation evidence, encrypted artifact fixture metadata, redaction ordering,
-denied fixtures, and authority boundaries. It does not encrypt bytes, decrypt
-bytes, generate keys, call a KMS, enforce live RBAC, or grant mutation
-authority.
-
-- `zigeffect.causal.alerting-integrations.v1`
-
-The alerting-integrations report is a record-only production hardening
-contract. It consumes aggregation, deployment-runbook, access-control,
-encryption-policy, and agent-query contracts, then defines channel contracts,
-severity/routing/escalation policy, payload fields, preview fixtures, negative
-fixtures, and authority boundaries. It does not send notifications, create
-tickets, forward SIEM events, page humans, read secrets, call networks, or
-mutate external systems.
-
-- `zigeffect.causal.rollout-automation-guardrails.v1`
-
-The rollout-automation-guardrails report is a record-only production hardening
-contract. It consumes deployment runbooks, alerting integrations, and the
-human-agent feedback loop, then defines canary evidence, rollout progression
-gates, circuit-breaker decisions, rollback readiness gates, and negative
-automation fixtures. It does not shift traffic, mutate feature flags, execute
-rollbacks, send alerts, create tickets, page humans, or grant mutation
-authority.
-
-- `zigeffect.causal.wall-clock-benchmark-baselines.v1`
-
-The wall-clock-benchmark-baselines report is a record-only production
-hardening contract. It consumes the deterministic performance budget,
-production artifact aggregation direction, and production-hardening backlog,
-then defines local and CI benchmark scenario families, baseline record fields,
-environment metadata, calibration policy, advisory review gates, and agent
-guidance for future observation harnesses and capacity planning. It does not
-collect live timings, fail CI from timing, run load tests, size production
-capacity, write durable stores, or grant mutation authority.
-
-- `zigeffect.causal.production-capacity-planning.v1`
-
-The production-capacity-planning report is a record-only, `planning-only`
-production hardening contract. It consumes aggregation, NenDB retention,
-wall-clock benchmark baseline, live dashboard stream, visual graph, agent
-query, human-agent feedback, alerting, and rollout guardrail evidence, then
-records source contracts, capacity domains, storage assumptions, load-test
-fixture plans, concurrency assumptions, readiness gates, and negative capacity
-fixtures. It does not ingest telemetry, run load tests, size production
-capacity, provision infrastructure, write durable storage, introduce non-NenDB
-adapter work, add alternate workbench renderers, or grant mutation authority.
-
-- `zigeffect.causal.production-hardening-completion-audit.v1`
-
-The production-hardening-completion-audit report is a record-only,
-`completion-audit` production hardening contract. It verifies delivered
-hardening milestones, confirms record-only, `mutation_authority=none`,
-NenDB-only, and SolidJS `zig-webui` boundaries, records remaining evidence
-gaps, blocks over-claims, and hands off to the local load-test observation
-harness. It does not ingest telemetry, execute load tests, size production
-capacity, write durable storage, add non-NenDB adapter work, add alternate
-workbench renderers, or grant mutation authority.
-
-- `zigeffect.causal.load-test-observation-harness.v1`
-
-The load-test-observation-harness report is a record-only,
-`local-observation` production hardening contract. It catalogs approved local
-scenario families and can opt in to bounded local observations with curated
-argv arrays, warmup and measured iteration counts, median and p95 timings,
-bounded stdout/stderr snippets, and advisory review gates. It does not run
-production load, ingest production telemetry, fail CI, size production
-capacity, execute shell strings, write durable storage, add non-NenDB adapter
-work, add alternate workbench renderers, or grant mutation authority.
-
-- `zigeffect.causal.production-telemetry-capture-design.v1`
-
-The production-telemetry-capture-design report is a record-only,
-`design-only`, `no-live-ingestion` production hardening contract. It defines
-future capture surfaces, telemetry field requirements, redaction, sampling,
-retention, access, encryption, OTel bridge, local-observation separation, and
-fixture handoff gates. It does not ingest live production telemetry, configure
-exporters, send OTLP, write durable production storage, size capacity, fail CI,
-add non-NenDB adapter work, add alternate renderers, or grant mutation
-authority.
-
-- `zigeffect.causal.production-telemetry-capture-fixtures.v1`
-
-The production-telemetry-capture-fixtures report is a record-only,
-`fixtures-only`, `no-live-ingestion` production hardening contract. It emits
-safe example records, selected fixture output, negative telemetry fixtures, and
-validation checks for the production telemetry readiness review. It does not
-ingest live production telemetry, configure exporters, send OTLP, write durable
-production storage, size capacity, fail CI, add non-NenDB adapter work, add
-alternate renderers, or grant mutation authority.
-
-- `zigeffect.causal.production-telemetry-readiness-review.v1`
-
-The production-telemetry-readiness-review report is a record-only,
-`readiness-review`, `no-live-ingestion` production hardening contract. It
-consumes capture fixture JSON, records reviewer decision and reason, verifies
-coverage and authority boundaries, requires explicit verification command
-evidence, and emits `ready` or `blocked` artifacts before a future
-implementation proposal. It does not ingest live production telemetry,
-configure exporters, send OTLP, write durable production storage, size
-capacity, fail CI, add non-NenDB adapter work, add alternate renderers, or grant
-mutation authority.
-
-- `zigeffect.causal.production-telemetry-implementation-proposal.v1`
-
-The production-telemetry-implementation-proposal report is a record-only,
-`implementation-proposal`, `no-live-ingestion` production hardening contract.
-It consumes a ready readiness-review artifact, records proposer decision and
-reason, verifies readiness evidence and proposal command evidence, emits
-`approved` or `blocked` artifacts, and hands off to the exporter-boundary
-branch. It does not ingest live production telemetry, configure exporters, send
-OTLP, write durable production storage, size capacity, fail CI, add non-NenDB
-adapter work, add alternate renderers, or grant mutation authority.
-
-- `zigeffect.causal.production-telemetry-exporter-boundary.v1`
-
-The production-telemetry-exporter-boundary report is a record-only,
-`exporter-boundary`, `no-network`, `no-live-ingestion` production hardening
-contract. It consumes an approved implementation-proposal artifact, verifies
-proposal evidence and verification commands, records an exporter-neutral
-no-network boundary, records local envelope fixture names, and emits
-`approved` or `blocked` artifacts before future local pipeline fixtures. It
-does not ingest live production telemetry, configure exporters, send OTLP,
-configure collector endpoints, write durable production storage, size
-capacity, fail CI, add non-NenDB adapter work, add alternate renderers, or
-grant mutation authority.
-
-- `zigeffect.causal.production-telemetry-local-pipeline-fixtures.v1`
-
-The production-telemetry-local-pipeline-fixtures report is a record-only,
-`local-pipeline-fixtures`, `fixtures-only`, `no-network`, `no-live-ingestion`
-production hardening contract. It consumes an approved exporter-boundary
-artifact, verifies no-network evidence, records local envelope fixture records,
-redaction and access fixture checks, sampling fixture checks, and emits
-`ready` or `blocked` artifacts before future NenDB retention fixtures. It does
-not run a telemetry pipeline, ingest live telemetry, configure exporters, send
-OTLP, configure collector endpoints, write NenDB records, write durable
-production storage, fail CI, add non-NenDB adapter work, add alternate
-renderers, or grant mutation authority.
-
-- `zigeffect.causal.production-telemetry-nendb-retention-fixtures.v1`
-
-The production-telemetry-nendb-retention-fixtures report is a record-only,
-`nendb-retention-fixtures`, `fixtures-only`, `no-network`,
-`no-live-ingestion`, `no-durable-write` production hardening contract. It
-consumes a ready local-pipeline-fixtures artifact, verifies source local
-pipeline evidence, records NenDB node and edge mapping fixtures, retention
-policy constants, compaction markers, backup markers, and recovery markers,
-and emits `ready` or `blocked` artifacts before the future read-only workbench
-preview. It does not ingest live telemetry, run a telemetry pipeline, configure
-exporters, send OTLP, configure collector endpoints, write NenDB records, write
-durable production storage, compact records, run backup or recovery, fail CI,
-add non-NenDB adapter work, add alternate renderers, or grant mutation
-authority.
-
-- `zigeffect.causal.production-telemetry-workbench-readonly-preview.v1`
-
-The production-telemetry-workbench-readonly-preview report is a record-only,
-`workbench-readonly-preview`, `solid-webui`, `no-network`,
-`no-live-ingestion`, `no-durable-write`, and `no-nendb-write` production
-hardening contract. It consumes a ready NenDB-retention-fixtures artifact,
-backs the read-only SolidJS `Telemetry` workbench tab and development sample,
-records source checks, authority boundary evidence, mapping fixtures,
-validation checks, blocked claims, and required verification commands, and
-emits `ready` or `blocked` artifacts before future CI artifact preview work. It
-does not ingest live telemetry, run a telemetry pipeline, configure exporters,
-send OTLP, configure collector endpoints, write NenDB records, write durable
-production storage, fail CI, host a production dashboard, add non-NenDB adapter
-work, add alternate renderers, or grant mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-artifact-preview.v1`
-
-The production-telemetry-ci-artifact-preview report is a record-only,
-`ci-artifact-preview`, `preview-only`, `failure-attachment-catalog`,
-`no-network`, `no-live-ingestion`, `no-durable-write`, `no-nendb-write`, and
-`no-ci-gate` production hardening contract. It consumes a ready workbench
-read-only preview artifact, records source checks, authority boundary evidence,
-mapping fixture ids, upload policy preview, artifact candidates, blocked
-claims, and required verification commands, and emits `ready` or `blocked`
-artifacts before future CI harness boundary work. It does not mutate GitHub
-Actions, upload artifacts, configure CI retention, fail CI, ingest live
-telemetry, run a telemetry pipeline, configure exporters, send OTLP, configure
-collector endpoints, write NenDB records, write durable production storage,
-host a production dashboard, add non-NenDB adapter work, add alternate
-renderers, or grant mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-harness-boundary.v1`
-
-The production-telemetry-ci-harness-boundary report is a record-only,
-`ci-harness-boundary`, `workflow-inspection`,
-`cluster-release-gate-aware`, `no-workflow-mutation`,
-`mutation-authority-none`, `no-live-ingestion`, `no-network`,
-`no-durable-write`, `no-nendb-write`, and `no-ci-gate` production hardening
-contract. It consumes a ready CI artifact preview, inspects the existing
-causal GitHub Actions workflow, records workflow required-feature checks,
-workflow prohibited-feature checks, clustering release-gate assumptions,
-blocked claims, and required verification commands, and emits `ready` or
-`blocked` artifacts before future CI archive application work. It does not
-modify GitHub Actions, execute artifact upload changes, fail CI, ingest live
-telemetry, run a telemetry pipeline, configure exporters, send OTLP, configure
-collector endpoints, write NenDB records, write durable production storage,
-host a production dashboard, orchestrate production clusters, add non-NenDB
-adapter work, add alternate renderers, or grant mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-archive-application.v1`
-
-The production-telemetry-ci-archive-application report is a record-only,
-guarded application, workflow-evidence, before/after-verification,
-`cluster-release-gate-aware`, `no-tool-workflow-mutation`,
-`mutation-authority-none`, `no-live-ingestion`, `no-network`,
-`no-durable-write`, `no-nendb-write`, and `no-ci-gate` production hardening
-contract. It consumes a ready CI harness boundary artifact and emits `planned`,
-`applied`, or `blocked` archive application artifacts. It only records
-`applied=true` when a separately reviewed workflow/archive change, before
-evidence, after evidence, safe after-workflow checks, and required
-post-application verification commands are present. It does not modify GitHub
-Actions, execute artifact uploads, enable CI gates, ingest live telemetry, run
-a telemetry pipeline, configure exporters, send OTLP, configure collector
-endpoints, write NenDB records, write durable production storage, host a
-production dashboard, orchestrate production clusters, add non-NenDB adapter
-work, add alternate renderers, or grant mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-archive-evidence-policy.v1`
-
-The production-telemetry-ci-archive-evidence-policy report is a record-only,
-archive-evidence-policy, interpretation-policy,
-`cluster-release-gate-aware`, `mutation-authority-none`,
-`no-live-ingestion`, `no-network`, `no-durable-write`, `no-nendb-write`,
-`no-workflow-mutation`, and `no-ci-gate` production hardening contract. It
-consumes planned or applied CI archive application artifacts and emits `ready`
-or `blocked` policy artifacts that define allowed archive evidence classes,
-required provenance metadata, interpretation rules, denied claims, negative
-fixtures, blocked claims, and required verification commands before future CI
-gate readiness work. It does not modify GitHub Actions, execute artifact
-uploads, enable CI gates, ingest live telemetry, run a telemetry pipeline,
-configure exporters, send OTLP, configure collector endpoints, write NenDB
-records, write durable production storage, host a production dashboard,
-orchestrate production clusters, add non-NenDB adapter work, add alternate
-renderers, or grant mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-gate-readiness.v1`
-
-The production-telemetry-ci-gate-readiness report is a record-only,
-ci-gate-readiness, gate-semantics, `cluster-release-gate-aware`,
-`mutation-authority-none`, `no-live-ingestion`, `no-network`,
-`no-durable-write`, `no-nendb-write`, `no-ci-gate-enforcement`, and
-`no-workflow-mutation` production hardening contract. It consumes ready archive
-evidence policy artifacts and emits `ready` or `blocked` readiness artifacts
-with readiness dimensions, advisory candidate gate signals, limited gate
-semantics, release-gate verification evidence, negative fixtures, blocked
-claims, and required verification commands before future gate application
-boundary work. It does not modify GitHub Actions, execute artifact uploads,
-enable CI gates, create required status checks, ingest live telemetry, run a
-telemetry pipeline, configure exporters, send OTLP, configure collector
-endpoints, write NenDB records, write durable production storage, host a
-production dashboard, orchestrate production clusters, add non-NenDB adapter
-work, add alternate renderers, or grant mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-gate-application-boundary.v1`
-
-The production-telemetry-ci-gate-application-boundary report is a record-only,
-gate-application-boundary, plan-or-record-applied,
-before-after-verification, `cluster-release-gate-aware`,
-`mutation-authority-none`, `no-live-ingestion`, `no-network`,
-`no-durable-write`, `no-nendb-write`, `no-ci-gate-enforcement`, and
-`no-tool-workflow-mutation` production hardening contract. It consumes ready CI
-gate readiness artifacts and emits `planned`, `applied`, or `blocked`
-application boundary artifacts. It only records `applied=true` when reviewed
-workflow-change evidence, before evidence, after evidence, after-workflow
-content, safe after-workflow checks, and all post-application verification
-commands are present. It does not mutate workflows, enable CI gate
-enforcement, create required status checks, execute artifact uploads, ingest
-live telemetry, write NenDB, write durable production storage, host a
-production dashboard, orchestrate production clusters, add non-NenDB adapter
-work, add alternate renderers, or grant production mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-gate-dry-run-policy.v1`
-
-The production-telemetry-ci-gate-dry-run-policy report is a record-only,
-advisory-only, bounded-CI-artifact dry-run policy contract. It consumes
-planned or applied CI gate application boundary artifacts, records candidate
-signal policies, evidence requirements, negative fixtures, ready or blocked
-policy status, and a handoff to the future dry-run evaluator. Every candidate
-signal remains `evaluation_mode="dry-run"`, `enforcement_enabled=false`,
-`required_status_check_enabled=false`, and `failure_effect="advisory"`. It
-does not enable CI gate enforcement, create required status checks, mutate
-workflows, execute artifact uploads, ingest live telemetry, call networks,
-write NenDB, write durable production storage, host a production dashboard,
-orchestrate production clusters, add non-NenDB adapter work, add alternate
-renderers, or grant production mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-gate-dry-run-evaluator.v1`
-
-The production-telemetry-ci-gate-dry-run-evaluator report is a record-only,
-advisory evaluator contract. It consumes ready dry-run policy artifacts and
-explicit bounded local or CI evidence files, classifies evidence, validates the
-source policy boundary, records observed signals, advisory findings, blocked
-findings, and next queries, and hands off to the future advisory CI report
-branch. It does not enable CI gate enforcement, create required status checks,
-mutate workflows, execute artifact uploads, ingest live telemetry, call
-networks, write NenDB, write durable production storage, host a production
-dashboard, orchestrate production clusters, add non-NenDB adapter work, add
-alternate renderers, or grant production mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-gate-advisory-ci-report.v1`
-
-The production-telemetry-ci-gate-advisory-ci-report report is a record-only,
-local-artifact-only advisory CI report contract. It consumes ready or advisory
-dry-run evaluator artifacts, validates disabled authority, summarizes signals,
-advisory findings, checks, next queries, blocked claims, and publication
-channels, and hands off to the future report application boundary. It writes
-only local JSON and text artifacts. It does not enable CI gate enforcement,
-create required status checks, mutate workflows, execute CI uploads, write
-GitHub step summaries, post pull request comments, ingest live telemetry, call
-networks, write NenDB, write durable production storage, host a production
-dashboard, orchestrate production clusters, add non-NenDB adapter work, add
-alternate renderers, or grant production mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-gate-advisory-ci-report-application-boundary.v1`
-
-The production-telemetry-ci-gate-advisory-ci-report-application-boundary report
-is a record-only, plan-or-record-applied publication boundary contract. It
-consumes ready or advisory CI report artifacts, validates disabled authority
-and source publication boundaries, records planned, applied, or blocked
-publication evidence, and only records `applied=true` when reviewed
-publication-change evidence, before evidence, after evidence, safe
-report-after content, and post-application verification commands are present.
-It does not enable CI gate enforcement, create required status checks, mutate
-workflows, execute CI uploads, write GitHub step summaries, post pull request
-comments, ingest live telemetry, call networks, write NenDB, write durable
-production storage, host a production dashboard, orchestrate production
-clusters, add non-NenDB adapter work, add alternate renderers, or grant
-production mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-gate-advisory-ci-report-publication-policy.v1`
-
-The production-telemetry-ci-gate-advisory-ci-report-publication-policy report
-is a record-only interpretation policy for externally published advisory CI
-reports. It consumes applied advisory CI report application-boundary artifacts,
-records allowed reviewer/agent/readiness interpretations, records denied
-inference rules, and hands off to required-status-check readiness work only
-after reviewer approval and post-policy verification commands are present. It
-does not publish reports, enable CI gate enforcement, create required status
-checks, mutate workflows, execute CI uploads, write GitHub step summaries, post
-pull request comments, ingest live telemetry, call networks, write NenDB, write
-durable production storage, host a production dashboard, orchestrate production
-clusters, add non-NenDB adapter work, add alternate renderers, or grant
-production mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-gate-required-status-check-readiness.v1`
-
-The production-telemetry-ci-gate-required-status-check-readiness report is a
-record-only readiness artifact for future required status check application
-work. It consumes ready advisory CI report publication-policy artifacts,
-defines candidate required-check profiles with activation disabled, records
-activation guardrails, records denied required-check and branch-protection
-inferences, and hands off toward required-status-check policy work after the
-application-boundary milestone. It does
-not create required status checks, mutate branch protection, call GitHub APIs,
-mutate workflows, execute CI uploads, write GitHub step summaries, post pull
-request comments, ingest live telemetry, call networks, write NenDB, write
-durable production storage, host a production dashboard, orchestrate
-production clusters, add non-NenDB adapter work, add alternate renderers, or
-grant production mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-gate-required-status-check-application-boundary.v1`
-
-The production-telemetry-ci-gate-required-status-check-application-boundary
-report is a record-only, plan-or-record-applied boundary contract. It consumes
-ready required-status-check readiness artifacts, records planned or externally
-applied required-check boundary evidence, and only sets `applied=true` after
-reviewed branch-protection, workflow or check-run, before/after, after-state
-safety, and post-application verification evidence passes. It does not create
-required status checks, mutate branch protection, call GitHub APIs, mutate
-workflows, execute CI uploads, write GitHub step summaries, post pull request
-comments, ingest live telemetry, call networks, write NenDB, write durable
-production storage, host a production dashboard, orchestrate production
-clusters, add non-NenDB adapter work, add alternate renderers, or grant
-production mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-gate-required-status-check-policy.v1`
-
-The production-telemetry-ci-gate-required-status-check-policy report is a
-record-only interpretation policy artifact. It consumes planned or externally
-applied required-status-check application-boundary artifacts, preserves
-`source_applied` so agents can distinguish design input from reviewed external
-evidence, records denied GitHub mutation and merge-blocking inferences, and
-hands off toward enforcement-readiness work. It does not create required
-status checks, mutate branch protection, call GitHub APIs, mutate workflows,
-create check runs, execute CI uploads, write GitHub step summaries, post pull
-request comments, ingest live telemetry, call networks, write NenDB, write
-durable production storage, host a production dashboard, orchestrate
-production clusters, add non-NenDB adapter work, add alternate renderers, or
-grant production mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-readiness.v1`
-
-The production-telemetry-ci-gate-required-status-check-enforcement-readiness
-report is a record-only evidence gate. It consumes required-status-check
-policy artifacts, blocks planned policy sources from becoming ready, requires
-externally applied source policy plus required check names, branch-protection
-evidence, workflow or check-run evidence, failure-mode evidence, owner
-approval, rollback evidence, and verification commands before readiness can
-hand off to an enforcement application-boundary branch. It keeps active
-enforcement claims, merge-blocker claims, GitHub API mutation, branch
-protection mutation by the tool, workflow mutation by the tool, check-run
-creation by the tool, CI upload execution, live telemetry, durable writes,
-NenDB writes, non-NenDB adapter work, alternate renderer scope, and mutation
-authority denied.
-
-- `zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-application-boundary.v1`
-
-The production-telemetry-ci-gate-required-status-check-enforcement-application-boundary
-report is a record-only plan-or-record-applied boundary. It consumes ready
-required-status-check enforcement-readiness artifacts, records planned or
-externally applied active required-check enforcement evidence, and allows
-`applied=true` only with reviewed branch-protection before/after evidence,
-workflow or check-run evidence, failure-mode evidence, owner approval,
-rollback evidence, complete verification, and merge-blocking evidence when
-that claim is made. It denies GitHub API mutation by the tool, branch
-protection mutation by the tool, workflow mutation by the tool, check-run
-creation by the tool, CI upload execution, live telemetry, durable writes,
-NenDB writes, non-NenDB adapter work, alternate renderer scope, and mutation
-authority.
-
-- `zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-policy.v1`
-
-The production-telemetry-ci-gate-required-status-check-enforcement-policy
-report is a record-only interpretation artifact. It consumes planned or
-externally applied enforcement application-boundary artifacts, preserves source
-mode, source applied state, active-enforcement state, and merge-blocking state,
-and defines how agents may cite planned, active-enforcement, and merge-blocking
-evidence before the future enforcement evaluator branch. It denies GitHub API
-mutation by the tool, branch protection mutation by the tool, workflow mutation
-by the tool, check-run creation by the tool, CI upload execution, GitHub step
-summary writes, pull request comments, live telemetry, durable writes, NenDB
-writes, non-NenDB adapter work, alternate renderer scope, production health,
-deployment success, customer impact, production cluster readiness, and mutation
-authority.
-
-- `zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-evaluator.v1`
-
-The production-telemetry-ci-gate-required-status-check-enforcement-evaluator
-report is a record-only evidence evaluation artifact. It consumes ready
-enforcement-policy artifacts plus explicit bounded `.json` or `.txt` evidence
-files, classifies evidence, evaluates active-enforcement and merge-blocking
-signals, and emits ready, advisory, or blocked findings before the future
-enforcement report branch. It denies GitHub API mutation by the tool, branch
-protection mutation by the tool, workflow mutation by the tool, check-run
-creation by the tool, CI upload execution, live telemetry, durable writes,
-NenDB writes, non-NenDB adapter work, alternate renderer scope, production
-health, deployment success, customer impact, production cluster readiness,
-secret-shaped evidence, and mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-report.v1`
-
-The production-telemetry-ci-gate-required-status-check-enforcement-report is a
-record-only reviewer report artifact. It consumes enforcement evaluator
-artifacts, summarizes ready, advisory, and blocked findings, preserves blocked
-source findings, records local-only publication channels, and hands off to the
-future enforcement report application-boundary branch. It denies GitHub API
-mutation by the tool, branch protection mutation by the tool, workflow
-mutation by the tool, check-run creation by the tool, CI upload execution,
-GitHub step summary writes, pull-request comments, required status check
-creation, live telemetry, durable writes, NenDB writes, non-NenDB adapter work,
-alternate renderer scope, production health, deployment success, customer
-impact, production cluster readiness, and mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary.v1`
-
-The production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary
-artifact is a record-only plan-or-record-applied boundary for enforcement
-report application evidence. It consumes ready or advisory enforcement report
-artifacts, records planned or externally applied evidence, requires
-application-change, before, after, after-report, and verification evidence
-before `applied=true`, and hands off to the enforcement report policy
-branch. It denies GitHub API mutation by the tool, branch protection mutation
-by the tool, workflow mutation by the tool, check-run creation by the tool,
-required status check creation by the tool, CI upload execution, GitHub step
-summary writes, pull-request comments, live telemetry, durable writes, NenDB
-writes, non-NenDB adapter work, alternate renderer scope, production health,
-deployment success, customer impact, production cluster readiness, and
-mutation authority.
-
-- `zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-report-policy.v1`
-
-The production-telemetry-ci-gate-required-status-check-enforcement-report-policy
-artifact is a record-only interpretation policy for planned or externally
-applied report application-boundary evidence. It records
-`ready_for_next_branch` separately from `published_report_policy_ready` so
-planned sources can guide policy work without proving publication, while
-applied sources can record externally reviewed report evidence without claiming
-tool publication. It hands off to production hardening backlog refresh and
-denies GitHub API mutation by the tool, branch protection mutation by the tool,
-workflow mutation by the tool, check-run creation by the tool, required status
-check creation by the tool, CI upload execution, GitHub step summary writes,
-pull-request comments, live telemetry, durable writes, NenDB writes,
-non-NenDB adapter work, alternate renderer scope, production health, deployment
-success, customer impact, production cluster readiness, and mutation
-authority.
-
-- `zigeffect.causal.production-hardening-backlog-refresh.v1`
-
-The production-hardening-backlog-refresh artifact consumes production
-hardening backlog JSON, validates the terminal delivered report-policy item,
-records unresolved candidate branches, and selects
-`codex/zigeffect-causal-nendb-durable-history-hardening` as the next branch.
-It is read-only, NenDB-only, local-artifact-only evidence. It denies Cockroach
-and non-NenDB adapter scope, live telemetry, durable writes, NenDB writes,
-GitHub mutation, CI mutation, production health, deployment success, customer
-impact, production capacity, production cluster readiness, alternate renderer
-scope, and mutation authority.
-
-### Human-Agent Feedback
-
-- `zigeffect.causal.human-agent-feedback-loop.v1`
-
-The human-agent-feedback-loop report is a record-only bridge between the
-SolidJS `zig-webui` workbench and bounded agent query reports. It records the
-failure-to-query, before/after comparison, regression clustering, guarded
-handoff, and future NenDB history-handoff stages. It does not execute queries,
-apply remediation, write durable history, or grant mutation authority.
-
-### Agent Query
-
-- `zigeffect.causal.agent-query.v1`
-
-The agent-query response is emitted by `causal-query --agent`. It is a compact
-bounded graph slice for agents, with query name, arguments, selected events,
-derived relationships, policy metadata, compatibility warnings, limitations,
-and next-query hints. It is read-only evidence over the unified runtime spine.
-Version `1` covers runtime queries, app semantic `trace_data` slices, and
-bounded `compare_runs(left_run_id:right_run_id)` summaries across one artifact
-or two retained artifacts. Cross-run comparison is additive inside the existing
-envelope and does not grant mutation authority.
-
-### Test Coverage
-
-- `zigeffect.causal.test-matrix.v1`
-
-The matrix records causal scenario and invariant coverage. It is advisory
-coverage evidence for agents and docs.
-
-### Governance
-
-- `zigeffect.causal.remediation-audit.v1`
-- `zigeffect.causal.remediation-decision.v1`
-- `zigeffect.causal.patch-proposal.v1`
-- `zigeffect.causal.audit-chain.v1`
-- `zigeffect.causal.policy-decision.v1`
-
-Governance artifacts use strict v1 validation and record-only semantics. They
-can approve, reject, explain, or chain evidence, but they do not mutate source
-or external systems.
-
-### Registry
-
-- `zigeffect.causal.scenario-proposal.v1`
-- `zigeffect.causal.registry-patch.v1`
-- `zigeffect.causal.registry-application-readiness.v1`
-- `zigeffect.causal.registry-application.v1`
-
-Registry artifacts stay inside the reviewed scenario-registry boundary.
-`applied=true` may appear only after readiness, reviewed registry changes, and
-before/after verification evidence are recorded.
-
-### Snapshot Replay
-
-- `zigeffect.causal.snapshot-manifest.v1`
-- `zigeffect.causal.snapshot-compare.v1`
-- `zigeffect.causal.audit-chain-snapshot-compare.v1`
-- `zigeffect.causal.replay-feasibility.v1`
-- `zigeffect.causal.deterministic-replay.v1`
-- `zigeffect.causal.scenario-fork-proposal.v1`
-
-Snapshot and replay artifacts summarize named causal evidence. They may compare
-or replay registered scenarios, but arbitrary runtime memory forking remains
-out of scope.
-
-The audit-chain snapshot comparison report is emitted by
-`causal-snapshot audit-chain-compare`. It compares two retained snapshot
-manifests whose artifacts are `zigeffect.causal.audit-chain.v1` governance
-JSON, reports approval/applied posture and event-classification deltas, and
-blocks `applied=true` chains unless separate reviewed application evidence is
-available. It is record-only evidence and grants no mutation authority.
-
-### App Remediation
-
-- `zigeffect.causal.app-remediation-audit.v1`
-- `zigeffect.causal.app-policy-decision.v1`
-- `zigeffect.causal.app-human-review.v1`
-- `zigeffect.causal.app-patch-proposal.v1`
-- `zigeffect.causal.app-application-readiness.v1`
-- `zigeffect.causal.app-application.v1`
-
-App remediation artifacts are strict v1, record-only evidence until the guarded
-application record says otherwise. Workbench mappings should make the policy
-gates, human review, readiness checks, change evidence, and before/after
-verification easy to inspect without making the workbench a mutation surface.
+zigeffect causal schema governance
+schema: zigeffect.causal.schema-governance.v1
+schema_version: 1
+core schema: zigeffect.causal.v1 version 1
+event taxonomy version: 1
+schema count: 86
+
+versioning policy:
+- schema names the artifact family
+- schema_version tracks the current shape inside that family
+- event_taxonomy_version tracks event-kind role semantics
+
+migration policy:
+- legacy core artifacts without schema metadata remain readable
+- strict governance artifacts fail closed on unsupported schema/version
+- artifact rewrite tooling is deferred until a real v2 exists
+
+compatibility postures:
+- legacy-tolerant: accepts missing metadata and keeps event ids usable
+- warn-forward: warns on newer schema/taxonomy while preserving known fields
+- strict-v1: requires exact schema family and version 1
+- sink-contract: emitted for downstream backend/export systems
+- record-only: records review/application state without mutating source
+- viewer-session: read-only local workbench/session operating state
+- bounded-stream: ordered dashboard frame records with declared truncation and redaction state
+- spine-contract: defines shared identity and relationship vocabulary without changing source event emission
+- agent-query: compact bounded graph slices for agents
+- advisory-wall-clock: timing observations are advisory and require compatible environment metadata plus human review before blocking
+- planning-only: records deterministic planning assumptions and missing evidence without production sizing claims
+- completion-audit: deterministic milestone closure evidence with explicit remaining gaps and no production mutation authority
+- local-observation: bounded local command observation with advisory review gates and no production capacity claim
+
+schemas:
+- zigeffect.causal.v1
+  version: 1
+  category: core-runtime
+  status: current
+  compatibility: legacy-tolerant, warn-forward
+  emitted by: formatCausalJson
+  consumed by: causal-query, causal-compare, causal-loop, causal-advice, causal-workbench
+  governance requirements: compatibility tests, taxonomy warning tests, docs
+- zigeffect.causal.event.v1
+  version: 1
+  category: backend-export
+  status: current
+  compatibility: sink-contract
+  emitted by: CausalJsonlBackend
+  consumed by: jsonl readers, agents, external log processors
+  governance requirements: backend conformance tests, adapter docs, redaction tests
+- zigeffect.causal.otel_record.v1
+  version: 1
+  category: backend-export
+  status: current
+  compatibility: sink-contract
+  emitted by: CausalOtelBackend
+  consumed by: OpenTelemetry exporters, agents
+  governance requirements: backend conformance tests, adapter docs, redaction tests
+- zigeffect.causal.nendb_node.v1
+  version: 1
+  category: backend-export
+  status: current
+  compatibility: sink-contract
+  emitted by: CausalNenDbStorageBackend
+  consumed by: NenDB adapter, graph history queries, agents
+  governance requirements: NenDB adapter tests, bounded history tests, docs
+- zigeffect.causal.nendb_edge.v1
+  version: 1
+  category: backend-export
+  status: current
+  compatibility: sink-contract
+  emitted by: CausalNenDbStorageBackend
+  consumed by: NenDB adapter, graph history queries, agents
+  governance requirements: NenDB adapter tests, causal edge tests, docs
+- zigeffect.causal.nendb-retention-report.v1
+  version: 1
+  category: backend-export
+  status: current
+  compatibility: record-only
+  emitted by: CausalNenDbStorageBackend.retentionReport
+  consumed by: causal-durable-production-retention, NenDB adapter tests, agents
+  governance requirements: NenDB retention tests, durable retention docs, schema governance entry
+- zigeffect.causal.nendb-durable-history.v1
+  version: 1
+  category: backend-export
+  status: current
+  compatibility: strict-v1, nendb-only, local-fixture, record-only, no-cockroach, no-live-telemetry, no-network, no-production-mutation
+  emitted by: CausalNendbStorageBackendState.durableHistoryReport, causal-nendb-durable-history-hardening
+  consumed by: agents, reviewers, future cross-run query comparison, future audit-chain snapshot comparison, future app-facing production fixtures
+  governance requirements: runtime report tests, fixture tool tests, redaction evidence checks, query evidence checks, next branch handoff
+- zigeffect.causal.app-runtime.v1
+  version: 1
+  category: app-runtime
+  status: current
+  compatibility: warn-forward, record-only
+  emitted by: CausalAppRuntime
+  consumed by: app remediation tools, causal-workbench, agents
+  governance requirements: app runtime tests, redaction tests, workbench mapping, docs
+- zigeffect.causal.dev-loop-verdict.v1
+  version: 1
+  category: dev-loop
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-loop, causal-verdict
+  consumed by: causal-dev-agent, causal-diagnosis, agents
+  governance requirements: verdict tests, agent handoff docs, artifact manifest entry
+- zigeffect.causal.dev-session.v1
+  version: 1
+  category: dev-loop
+  status: current
+  compatibility: record-only
+  emitted by: causal-dev-session
+  consumed by: agents, causal-workbench
+  governance requirements: session tests, bounded memory tests, artifact manifest entry
+- zigeffect.causal.ci-verdict.v1
+  version: 1
+  category: dev-loop
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-verdict, causal-handoff
+  consumed by: CI agents, causal-dev-agent
+  governance requirements: CI verdict tests, artifact manifest entry, docs
+- zigeffect.causal.workbench-session.v1
+  version: 1
+  category: workbench
+  status: current
+  compatibility: viewer-session
+  emitted by: causal-workbench
+  consumed by: SolidJS workbench, zig-webui bridge
+  governance requirements: launcher tests, read-only bridge tests, UI build verification
+- zigeffect.causal.performance-budget.v1
+  version: 1
+  category: operating-model
+  status: current
+  compatibility: record-only
+  emitted by: causal-performance-budget
+  consumed by: agents, reviewers, CI docs
+  governance requirements: budget report tests, operations docs, release guidance
+- zigeffect.causal.m9-completion-audit.v1
+  version: 1
+  category: operating-model
+  status: current
+  compatibility: record-only
+  emitted by: causal-m9-completion-audit
+  consumed by: agents, reviewers, roadmap audit
+  governance requirements: completion audit tests, operations docs, roadmap update
+- zigeffect.causal.production-hardening-backlog.v1
+  version: 1
+  category: operating-model
+  status: current
+  compatibility: record-only
+  emitted by: causal-production-hardening-backlog
+  consumed by: agents, reviewers, future hardening branch workers
+  governance requirements: backlog report tests, operations docs, roadmap update
+- zigeffect.causal.production-artifact-aggregation.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: record-only
+  emitted by: causal-production-artifact-aggregation
+  consumed by: durable retention, access control, workbench, integrations, agents
+  governance requirements: aggregation contract tests, operations docs, roadmap update
+- zigeffect.causal.durable-production-retention.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: record-only
+  emitted by: causal-durable-production-retention
+  consumed by: deployment runbooks, artifact access control, workbench, agents
+  governance requirements: durable retention tests, NenDB retention fixture, operations docs, roadmap update
+- zigeffect.causal.production-deployment-runbooks.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: record-only
+  emitted by: causal-production-deployment-runbooks
+  consumed by: artifact access control, alerting integrations, rollout guardrails, agents
+  governance requirements: deployment runbook tests, operations docs, roadmap update
+- zigeffect.causal.artifact-access-control.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: record-only
+  emitted by: causal-artifact-access-control
+  consumed by: SolidJS workbench, agent query interface, live dashboard, integrations, future production hosts
+  governance requirements: access-control tests, negative fixtures, operations docs, roadmap update
+- zigeffect.causal.encryption-at-rest-policy.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: record-only
+  emitted by: causal-encryption-at-rest-policy
+  consumed by: durable retention, artifact access control, future encrypted storage adapters, agents
+  governance requirements: encryption policy tests, redaction interaction fixtures, operations docs, roadmap update
+- zigeffect.causal.alerting-integrations.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: record-only
+  emitted by: causal-alerting-integrations
+  consumed by: deployment runbooks, rollout guardrails, human-agent feedback loop, live dashboard planning, agents
+  governance requirements: alerting integration tests, negative fixtures, operations docs, roadmap update
+- zigeffect.causal.live-dashboard-stream.v1
+  version: 1
+  category: workbench
+  status: current
+  compatibility: record-only, bounded-stream, viewer-session
+  emitted by: causal-live-dashboard-streaming-workbench fixtures, future dashboard transports
+  consumed by: SolidJS workbench, Visual Graph tab, agents, future production dashboard hosts
+  governance requirements: stream model tests, bounded sample fixture, Solid G6 adapter boundary docs, workbench build verification
+- zigeffect.causal.unified-spine-contract.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: record-only, spine-contract
+  emitted by: causal-unified-spine-contract
+  consumed by: deep runtime internals, app semantic trace API, agent query interface, SolidJS workbench, NenDB adapter projection
+  governance requirements: contract tests, projection boundary docs, roadmap update
+- zigeffect.causal.agent-query.v1
+  version: 1
+  category: agent-query
+  status: current
+  compatibility: strict-v1, record-only, bounded cross-run comparison
+  emitted by: causal-query --agent
+  consumed by: agents, causal-dev-agent, future workbench graph slices, cross-run comparison
+  governance requirements: agent query tests, bounded response tests, cross-run comparison tests, policy metadata docs
+- zigeffect.causal.app-facing-production-integration-fixtures.v1
+  version: 1
+  category: app-runtime
+  status: current
+  compatibility: strict-v1, fixture-only, record-only, nendb-only, no-cockroach, no-live-telemetry, no-production-mutation
+  emitted by: causal-app-facing-production-integration-fixtures
+  consumed by: agents, reviewers, future app-facing production integration readiness review, future SolidJS workbench production app views
+  governance requirements: fixture tool tests, source contract coverage, redaction negative fixtures, backlog update, docs update
+- zigeffect.causal.app-facing-production-integration-readiness-review.v1
+  version: 1
+  category: app-runtime
+  status: current
+  compatibility: strict-v1, record-only, readiness-review, nendb-only, no-cockroach, no-live-telemetry, no-production-mutation
+  emitted by: causal-app-facing-production-integration-readiness-review
+  consumed by: agents, reviewers, production-hardening backlog, future app-facing production integration implementation proposal
+  governance requirements: readiness review tests, fixture evidence checks, verification command evidence, next-branch handoff, docs update
+- zigeffect.causal.app-facing-production-integration-implementation-proposal.v1
+  version: 1
+  category: app-runtime
+  status: current
+  compatibility: strict-v1, record-only, implementation-proposal, nendb-only, no-cockroach, no-live-telemetry, no-production-mutation
+  emitted by: causal-app-facing-production-integration-implementation-proposal
+  consumed by: agents, reviewers, production-hardening backlog, future app-facing production integration boundary
+  governance requirements: implementation proposal tests, readiness artifact checks, verification command evidence, next-branch handoff, docs update
+- zigeffect.causal.app-facing-production-integration-boundary.v1
+  version: 1
+  category: app-runtime
+  status: current
+  compatibility: strict-v1, record-only, guarded-boundary, nendb-only, no-cockroach, no-live-telemetry, no-production-mutation
+  emitted by: causal-app-facing-production-integration-boundary
+  consumed by: agents, reviewers, production-hardening backlog, future app-facing production integration local fixtures, future SolidJS workbench production app views
+  governance requirements: boundary tests, proposal artifact checks, verification command evidence, next-branch handoff, docs update
+- zigeffect.causal.human-agent-feedback-loop.v1
+  version: 1
+  category: human-agent-feedback
+  status: current
+  compatibility: strict-v1, record-only, mutation-authority-none
+  emitted by: causal-human-agent-feedback-loop
+  consumed by: agents, SolidJS workbench, causal-dev-loop, future NenDB adapter handoff
+  governance requirements: feedback-loop tests, guardrail tests, workflow docs, backlog handoff
+- zigeffect.causal.rollout-automation-guardrails.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, mutation-authority-none
+  emitted by: causal-rollout-automation-guardrails
+  consumed by: agents, reviewers, deployment runbooks, alerting integrations, future rollout hosts
+  governance requirements: rollout guardrail tests, negative automation fixtures, operations docs, roadmap update
+- zigeffect.causal.wall-clock-benchmark-baselines.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, mutation-authority-none, advisory-wall-clock
+  emitted by: causal-wall-clock-benchmark-baselines
+  consumed by: agents, reviewers, future benchmark observation harness, future production capacity planning
+  governance requirements: benchmark baseline tests, wall-clock caveat docs, environment metadata policy, capacity planning handoff
+- zigeffect.causal.production-capacity-planning.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, mutation-authority-none, planning-only
+  emitted by: causal-production-capacity-planning
+  consumed by: agents, reviewers, production-hardening completion audit, future load-test harnesses, future production planning
+  governance requirements: capacity planning tests, storage assumption docs, load-test fixture docs, completion audit handoff
+- zigeffect.causal.production-hardening-completion-audit.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, mutation-authority-none, completion-audit
+  emitted by: causal-production-hardening-completion-audit
+  consumed by: agents, reviewers, production-hardening backlog, load-test observation harness
+  governance requirements: completion audit tests, boundary docs, remaining gap docs, next-branch handoff
+- zigeffect.causal.load-test-observation-harness.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, mutation-authority-none, local-observation
+  emitted by: causal-load-test-observation-harness
+  consumed by: agents, reviewers, production telemetry capture design, future capacity sizing review
+  governance requirements: observation harness tests, bounded runner tests, redaction docs, next-branch handoff
+- zigeffect.causal.production-telemetry-capture-design.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, mutation-authority-none, design-only, no-live-ingestion
+  emitted by: causal-production-telemetry-capture-design
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry capture fixtures
+  governance requirements: telemetry capture design tests, redaction gate docs, negative telemetry fixtures, next-branch handoff
+- zigeffect.causal.production-telemetry-capture-fixtures.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, mutation-authority-none, fixtures-only, no-live-ingestion
+  emitted by: causal-production-telemetry-capture-fixtures
+  consumed by: agents, reviewers, production-hardening backlog, production telemetry readiness review
+  governance requirements: fixture catalog tests, validation report tests, negative telemetry fixtures, next-branch handoff
+- zigeffect.causal.production-telemetry-readiness-review.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, mutation-authority-none, readiness-review, no-live-ingestion
+  emitted by: causal-production-telemetry-readiness-review
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry implementation proposal
+  governance requirements: readiness review tests, fixture evidence checks, verification command evidence, next-branch handoff
+- zigeffect.causal.production-telemetry-implementation-proposal.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, mutation-authority-none, implementation-proposal, no-live-ingestion
+  emitted by: causal-production-telemetry-implementation-proposal
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry exporter boundary
+  governance requirements: proposal tests, readiness evidence checks, verification command evidence, next-branch handoff
+- zigeffect.causal.production-telemetry-exporter-boundary.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, mutation-authority-none, exporter-boundary, no-live-ingestion, no-network
+  emitted by: causal-production-telemetry-exporter-boundary
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry local pipeline fixtures
+  governance requirements: boundary tests, proposal evidence checks, no-network checks, next-branch handoff
+- zigeffect.causal.production-telemetry-local-pipeline-fixtures.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, mutation-authority-none, local-pipeline-fixtures, fixtures-only, no-live-ingestion, no-network
+  emitted by: causal-production-telemetry-local-pipeline-fixtures
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry NenDB retention fixtures
+  governance requirements: fixture catalog tests, boundary evidence checks, redaction and sampling fixture checks, next-branch handoff
+- zigeffect.causal.production-telemetry-nendb-retention-fixtures.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, mutation-authority-none, nendb-retention-fixtures, fixtures-only, no-live-ingestion, no-network, no-durable-write
+  emitted by: causal-production-telemetry-nendb-retention-fixtures
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry workbench read-only preview
+  governance requirements: NenDB mapping fixture tests, local pipeline evidence checks, retention policy checks, next-branch handoff
+- zigeffect.causal.production-telemetry-workbench-readonly-preview.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, mutation-authority-none, workbench-readonly-preview, solid-webui, no-live-ingestion, no-network, no-durable-write, no-nendb-write
+  emitted by: causal-production-telemetry-workbench-readonly-preview
+  consumed by: agents, reviewers, SolidJS webui workbench, production-hardening backlog, future production telemetry CI artifact preview
+  governance requirements: workbench tests, source retention evidence checks, read-only authority checks, next-branch handoff
+- zigeffect.causal.production-telemetry-ci-artifact-preview.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, mutation-authority-none, ci-artifact-preview, preview-only, failure-attachment-catalog, no-live-ingestion, no-network, no-durable-write, no-nendb-write, no-ci-gate
+  emitted by: causal-production-telemetry-ci-artifact-preview
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI harness boundary
+  governance requirements: source workbench preview evidence checks, artifact candidate allowlist checks, preview-only CI authority checks, next-branch handoff
+- zigeffect.causal.production-telemetry-ci-harness-boundary.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, mutation-authority-none, ci-harness-boundary, workflow-inspection, cluster-release-gate-aware, no-live-ingestion, no-network, no-durable-write, no-nendb-write, no-ci-gate, no-workflow-mutation
+  emitted by: causal-production-telemetry-ci-harness-boundary
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI archive application
+  governance requirements: source CI preview evidence checks, workflow required-feature checks, workflow prohibited-feature checks, cluster release-gate assumptions, next-branch handoff
+- zigeffect.causal.production-telemetry-ci-archive-application.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, guarded-application, plan-or-record-applied, workflow-evidence, before-after-verification, cluster-release-gate-aware, no-live-ingestion, no-network, no-durable-write, no-nendb-write, no-ci-gate, no-tool-workflow-mutation
+  emitted by: causal-production-telemetry-ci-archive-application
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI archive evidence policy
+  governance requirements: source CI harness boundary evidence checks, workflow change evidence checks, before/after evidence checks, post-application verification checks, next-branch handoff
+- zigeffect.causal.production-telemetry-ci-archive-evidence-policy.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, archive-evidence-policy, interpretation-policy, cluster-release-gate-aware, no-live-ingestion, no-network, no-durable-write, no-nendb-write, no-ci-gate, no-tool-workflow-mutation
+  emitted by: causal-production-telemetry-ci-archive-evidence-policy
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI gate readiness
+  governance requirements: source CI archive application evidence checks, evidence class catalog tests, interpretation rule tests, negative evidence fixtures, next-branch handoff
+- zigeffect.causal.production-telemetry-ci-gate-readiness.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, ci-gate-readiness, gate-semantics, cluster-release-gate-aware, no-live-ingestion, no-network, no-durable-write, no-nendb-write, no-ci-gate-enforcement, no-workflow-mutation
+  emitted by: causal-production-telemetry-ci-gate-readiness
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI gate application boundary
+  governance requirements: source archive evidence policy checks, candidate gate signal tests, release-gate verification checks, negative gate fixtures, next-branch handoff
+- zigeffect.causal.production-telemetry-ci-gate-application-boundary.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, gate-application-boundary, plan-or-record-applied, before-after-verification, cluster-release-gate-aware, no-live-ingestion, no-network, no-durable-write, no-nendb-write, no-ci-gate-enforcement, no-tool-workflow-mutation
+  emitted by: causal-production-telemetry-ci-gate-application-boundary
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI gate dry-run policy
+  governance requirements: source CI gate readiness evidence checks, workflow change evidence checks, before/after evidence checks, after-workflow safety checks, next-branch handoff
+- zigeffect.causal.production-telemetry-ci-gate-dry-run-policy.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, dry-run-policy, advisory-only, bounded-ci-artifacts, cluster-release-gate-aware, no-live-ingestion, no-network, no-durable-write, no-nendb-write, no-ci-gate-enforcement, no-required-status-check, no-tool-workflow-mutation
+  emitted by: causal-production-telemetry-ci-gate-dry-run-policy
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI gate dry-run evaluator
+  governance requirements: source gate application boundary checks, candidate signal policy tests, evidence requirement tests, negative dry-run fixtures, next-branch evaluator handoff
+- zigeffect.causal.production-telemetry-ci-gate-dry-run-evaluator.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, dry-run-evaluator, advisory-findings, bounded-explicit-evidence, cluster-release-gate-aware, no-live-ingestion, no-network, no-durable-write, no-nendb-write, no-ci-gate-enforcement, no-required-status-check, no-tool-workflow-mutation
+  emitted by: causal-production-telemetry-ci-gate-dry-run-evaluator
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI gate advisory CI report
+  governance requirements: source dry-run policy checks, explicit evidence boundary tests, advisory signal tests, denied evidence fixtures, next-branch advisory CI report handoff
+- zigeffect.causal.production-telemetry-ci-gate-advisory-ci-report.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, advisory-ci-report, reviewer-guidance, local-artifact-only, cluster-release-gate-aware, no-live-ingestion, no-network, no-durable-write, no-nendb-write, no-ci-gate-enforcement, no-required-status-check, no-tool-workflow-mutation, no-github-step-summary-write, no-pr-comment
+  emitted by: causal-production-telemetry-ci-gate-advisory-ci-report
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI gate advisory CI report application boundary
+  governance requirements: source evaluator checks, record-only publication channel tests, advisory rendering tests, negative blocked evaluator fixtures, next-branch report application boundary handoff
+- zigeffect.causal.production-telemetry-ci-gate-advisory-ci-report-application-boundary.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, report-application-boundary, plan-or-record-applied, before-after-verification, local-artifact-only, cluster-release-gate-aware, no-live-ingestion, no-network, no-durable-write, no-nendb-write, no-ci-gate-enforcement, no-required-status-check, no-tool-workflow-mutation, no-tool-ci-upload, no-tool-github-step-summary-write, no-tool-pr-comment
+  emitted by: causal-production-telemetry-ci-gate-advisory-ci-report-application-boundary
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI gate advisory CI report publication policy
+  governance requirements: source advisory CI report checks, publication evidence tests, before/after evidence tests, report safety tests, negative application fixtures, next-branch publication policy handoff
+- zigeffect.causal.production-telemetry-ci-gate-advisory-ci-report-publication-policy.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, publication-policy, interpretation-policy, non-blocking-advisory, cluster-release-gate-aware, no-live-ingestion, no-network, no-durable-write, no-nendb-write, no-ci-gate-enforcement, no-required-status-check, no-tool-workflow-mutation, no-tool-ci-upload, no-tool-github-step-summary-write, no-tool-pr-comment
+  emitted by: causal-production-telemetry-ci-gate-advisory-ci-report-publication-policy
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI gate required status check readiness
+  governance requirements: source application boundary checks, interpretation rule tests, denied inference tests, negative publication policy fixtures, next-branch required status check readiness handoff
+- zigeffect.causal.production-telemetry-ci-gate-required-status-check-readiness.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, required-status-check-readiness, gate-semantics, activation-guardrails, non-blocking-advisory-source, cluster-release-gate-aware, no-live-ingestion, no-network, no-durable-write, no-nendb-write, no-ci-gate-enforcement, no-required-status-check, no-branch-protection-mutation, no-github-api-mutation, no-tool-workflow-mutation, no-tool-ci-upload, no-tool-github-step-summary-write, no-tool-pr-comment
+  emitted by: causal-production-telemetry-ci-gate-required-status-check-readiness
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI gate required status check application boundary
+  governance requirements: source publication policy checks, candidate required-check profile tests, activation guardrail tests, denied inference tests, next-branch required status check application boundary handoff
+- zigeffect.causal.production-telemetry-ci-gate-required-status-check-application-boundary.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, required-status-check-application-boundary, plan-or-record-applied, before-after-verification, branch-protection-evidence, check-run-evidence, cluster-release-gate-aware, no-live-ingestion, no-network, no-durable-write, no-nendb-write, no-tool-github-api-mutation, no-tool-branch-protection-mutation, no-tool-workflow-mutation, no-tool-ci-upload, no-tool-github-step-summary-write, no-tool-pr-comment
+  emitted by: causal-production-telemetry-ci-gate-required-status-check-application-boundary
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI gate required status check policy
+  governance requirements: source readiness checks, branch-protection evidence checks, workflow or check-run evidence checks, after-state safety checks, next-branch required status check policy handoff
+- zigeffect.causal.production-telemetry-ci-gate-required-status-check-policy.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, required-status-check-policy, interpretation-policy, planned-or-applied-source, branch-protection-evidence, cluster-release-gate-aware, no-live-ingestion, no-network, no-durable-write, no-nendb-write, no-tool-github-api-mutation, no-tool-branch-protection-mutation, no-tool-workflow-mutation, no-tool-ci-upload, no-tool-github-step-summary-write, no-tool-pr-comment
+  emitted by: causal-production-telemetry-ci-gate-required-status-check-policy
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI gate required status check enforcement readiness
+  governance requirements: source application-boundary checks, planned source interpretation tests, applied source interpretation tests, denied inference tests, required-check surface policy tests, next-branch enforcement-readiness handoff
+- zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-readiness.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, required-status-check-enforcement-readiness, applied-source-required-for-ready, active-enforcement-claim-denied, merge-blocker-claim-denied, branch-protection-evidence, workflow-or-check-run-evidence, owner-approval, rollback-evidence, no-tool-github-api-mutation, no-tool-branch-protection-mutation, no-tool-workflow-mutation, no-tool-ci-upload, no-live-ingestion, no-durable-write, no-nendb-write
+  emitted by: causal-production-telemetry-ci-gate-required-status-check-enforcement-readiness
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI gate required status check enforcement application boundary
+  governance requirements: source policy checks, applied source checks, required check name evidence, branch-protection evidence, workflow or check-run evidence, failure-mode evidence, owner approval evidence, rollback evidence, active enforcement denied inference tests, next-branch enforcement application-boundary handoff
+- zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-application-boundary.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, required-status-check-enforcement-application-boundary, plan-or-record-applied, applied-external-enforcement-evidence, active-enforcement-record, merge-blocker-record, branch-protection-before-after, workflow-or-check-run-evidence, owner-approval, rollback-evidence, no-tool-github-api-mutation, no-tool-branch-protection-mutation, no-tool-workflow-mutation, no-tool-ci-upload, no-live-ingestion, no-durable-write, no-nendb-write
+  emitted by: causal-production-telemetry-ci-gate-required-status-check-enforcement-application-boundary
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI gate required status check enforcement policy
+  governance requirements: source enforcement-readiness checks, plan mode tests, record-applied external evidence tests, branch-protection before-after evidence, workflow or check-run evidence, active enforcement record tests, merge blocker record tests, denied mutation-by-tool inference tests, next-branch enforcement policy handoff
+- zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-policy.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, required-status-check-enforcement-policy, interpretation-policy, active-enforcement-interpretation, merge-blocker-interpretation, planned-or-applied-source, no-tool-github-api-mutation, no-tool-branch-protection-mutation, no-tool-workflow-mutation, no-tool-check-run-creation, no-tool-ci-upload, no-live-ingestion, no-durable-write, no-nendb-write
+  emitted by: causal-production-telemetry-ci-gate-required-status-check-enforcement-policy
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI gate required status check enforcement evaluator
+  governance requirements: source enforcement application-boundary checks, planned source interpretation tests, applied active-enforcement interpretation tests, merge-blocker evidence interpretation tests, denied mutation-by-tool inference tests, policy verification checks, next-branch enforcement evaluator handoff
+- zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-evaluator.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, required-status-check-enforcement-evaluator, bounded-explicit-evidence, active-enforcement-evaluation, merge-blocker-evaluation, advisory-findings, no-tool-github-api-mutation, no-tool-branch-protection-mutation, no-tool-workflow-mutation, no-tool-check-run-creation, no-tool-ci-upload, no-live-ingestion, no-durable-write, no-nendb-write
+  emitted by: causal-production-telemetry-ci-gate-required-status-check-enforcement-evaluator
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI gate required status check enforcement report
+  governance requirements: source enforcement policy checks, explicit bounded evidence classifier, active enforcement signal evaluation, merge blocker signal evaluation, denied mutation evidence tests, denied production evidence tests, next-branch enforcement report handoff
+- zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-report.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, required-status-check-enforcement-report, reviewer-guidance, local-artifact-only, blocked-finding-preserving, no-tool-github-api-mutation, no-tool-branch-protection-mutation, no-tool-workflow-mutation, no-tool-check-run-creation, no-tool-ci-upload, no-github-step-summary-write, no-pr-comment, no-live-ingestion, no-durable-write, no-nendb-write
+  emitted by: causal-production-telemetry-ci-gate-required-status-check-enforcement-report
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI gate required status check enforcement report application boundary
+  governance requirements: source enforcement evaluator checks, blocked finding preservation tests, publication boundary tests, denied authority tests, next-branch report application-boundary handoff
+- zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, report-application-boundary, plan-or-record-applied, before-after-verification, local-artifact-only, required-status-check-evidence, branch-protection-evidence, no-tool-github-api-mutation, no-tool-branch-protection-mutation, no-tool-workflow-mutation, no-tool-check-run-creation, no-tool-ci-upload, no-tool-github-step-summary-write, no-tool-pr-comment, no-live-ingestion, no-durable-write, no-nendb-write
+  emitted by: causal-production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary
+  consumed by: agents, reviewers, production-hardening backlog, future production telemetry CI gate required status check enforcement report policy
+  governance requirements: source report checks, plan mode tests, record-applied evidence tests, after-report safety tests, denied authority tests, next-branch report policy handoff
+- zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-report-policy.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, record-only, required-status-check-enforcement-report-policy, interpretation-policy, planned-or-applied-source, published-report-interpretation, local-artifact-only, no-tool-github-api-mutation, no-tool-branch-protection-mutation, no-tool-workflow-mutation, no-tool-check-run-creation, no-tool-ci-upload, no-tool-github-step-summary-write, no-tool-pr-comment, no-live-ingestion, no-durable-write, no-nendb-write
+  emitted by: causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy
+  consumed by: agents, reviewers, production-hardening backlog, future production hardening backlog refresh
+  governance requirements: source report application-boundary checks, planned source interpretation tests, applied source interpretation tests, denied publication inference tests, policy verification checks, next-branch backlog refresh handoff
+- zigeffect.causal.production-hardening-backlog-refresh.v1
+  version: 1
+  category: production-hardening
+  status: current
+  compatibility: strict-v1, read-only, nendb-only, local-artifact-only, no-cockroach, no-live-telemetry, no-durable-write, no-nendb-write, no-mutation-authority
+  emitted by: causal-production-hardening-backlog-refresh
+  consumed by: agents, reviewers, future NenDB durable history hardening
+  governance requirements: source backlog checks, terminal delivered item check, candidate selection checks, denied inference checks, next branch handoff
+- zigeffect.causal.test-matrix.v1
+  version: 1
+  category: test-coverage
+  status: current
+  compatibility: record-only
+  emitted by: causal-test-matrix
+  consumed by: agents, docs
+  governance requirements: matrix tests, scenario coverage docs, artifact manifest entry
+- zigeffect.causal.remediation-audit.v1
+  version: 1
+  category: governance
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-remediation-audit
+  consumed by: causal-remediation-decision, causal-patch-proposal, causal-audit-chain
+  governance requirements: schema validation tests, guardrail tests, docs
+- zigeffect.causal.remediation-decision.v1
+  version: 1
+  category: governance
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-remediation-decision
+  consumed by: causal-patch-proposal, causal-audit-chain
+  governance requirements: schema validation tests, decision gate tests, docs
+- zigeffect.causal.patch-proposal.v1
+  version: 1
+  category: governance
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-patch-proposal
+  consumed by: causal-audit-chain, agents
+  governance requirements: proposal guardrail tests, schema validation tests, docs
+- zigeffect.causal.audit-chain.v1
+  version: 1
+  category: governance
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-audit-chain
+  consumed by: causal-scenario-proposal, causal-policy-decision, agents
+  governance requirements: chain validation tests, before-after evidence tests, docs
+- zigeffect.causal.scenario-proposal.v1
+  version: 1
+  category: registry
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-scenario-proposal
+  consumed by: causal-scenario-registry-patch, causal-policy-decision, agents
+  governance requirements: scenario proposal tests, registry guardrail tests, docs
+- zigeffect.causal.registry-patch.v1
+  version: 1
+  category: registry
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-scenario-registry-patch
+  consumed by: causal-policy-decision, causal-registry-application-readiness
+  governance requirements: patch validation tests, policy gate tests, docs
+- zigeffect.causal.registry-application-readiness.v1
+  version: 1
+  category: registry
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-registry-application-readiness
+  consumed by: causal-registry-apply
+  governance requirements: readiness gate tests, policy citation tests, docs
+- zigeffect.causal.registry-application.v1
+  version: 1
+  category: registry
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-registry-apply
+  consumed by: causal-workbench, agents
+  governance requirements: applied-state tests, before-after verification tests, docs
+- zigeffect.causal.policy-decision.v1
+  version: 1
+  category: governance
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-policy-decision
+  consumed by: registry gates, agents, causal-workbench
+  governance requirements: policy gate tests, scenario ownership tests, docs
+- zigeffect.causal.snapshot-manifest.v1
+  version: 1
+  category: snapshot-replay
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-snapshot
+  consumed by: causal-snapshot compare, causal-snapshot audit-chain-compare, causal-snapshot replay-feasibility, agents
+  governance requirements: snapshot tests, manifest validation tests, docs
+- zigeffect.causal.snapshot-compare.v1
+  version: 1
+  category: snapshot-replay
+  status: current
+  compatibility: record-only
+  emitted by: causal-snapshot
+  consumed by: agents, causal-workbench
+  governance requirements: compare tests, before-after query tests, docs
+- zigeffect.causal.audit-chain-snapshot-compare.v1
+  version: 1
+  category: snapshot-replay
+  status: current
+  compatibility: strict-v1, record-only, local-artifact-only, no-mutation-authority
+  emitted by: causal-snapshot audit-chain-compare
+  consumed by: agents, reviewers, future workbench governance views, future app-facing production fixtures
+  governance requirements: audit-chain compare tests, applied-boundary tests, schema governance docs, backlog handoff
+- zigeffect.causal.replay-feasibility.v1
+  version: 1
+  category: snapshot-replay
+  status: current
+  compatibility: record-only
+  emitted by: causal-snapshot
+  consumed by: agents, reviewers
+  governance requirements: feasibility tests, non-goal tests, docs
+- zigeffect.causal.deterministic-replay.v1
+  version: 1
+  category: snapshot-replay
+  status: current
+  compatibility: record-only
+  emitted by: causal-snapshot
+  consumed by: agents, reviewers
+  governance requirements: registered scenario replay tests, determinism tests, docs
+- zigeffect.causal.scenario-fork-proposal.v1
+  version: 1
+  category: snapshot-replay
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-snapshot
+  consumed by: reviewers, agents
+  governance requirements: proposal tests, non-mutating guardrail tests, docs
+- zigeffect.causal.app-remediation-audit.v1
+  version: 1
+  category: app-remediation
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-app-remediation-audit
+  consumed by: causal-app-policy-decision
+  governance requirements: schema validation tests, app guardrail tests, docs, workbench mapping
+- zigeffect.causal.app-policy-decision.v1
+  version: 1
+  category: app-remediation
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-app-policy-decision
+  consumed by: causal-app-human-review, causal-app-patch-proposal
+  governance requirements: policy gate tests, human-review gate tests, docs, workbench mapping
+- zigeffect.causal.app-human-review.v1
+  version: 1
+  category: app-remediation
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-app-human-review
+  consumed by: causal-app-patch-proposal, causal-app-application-readiness
+  governance requirements: review evidence tests, approval gate tests, docs, workbench mapping
+- zigeffect.causal.app-patch-proposal.v1
+  version: 1
+  category: app-remediation
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-app-patch-proposal
+  consumed by: causal-app-application-readiness
+  governance requirements: proposal tests, mutation-authority tests, docs, workbench mapping
+- zigeffect.causal.app-application-readiness.v1
+  version: 1
+  category: app-remediation
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-app-application-readiness
+  consumed by: causal-app-apply
+  governance requirements: readiness tests, verification command tests, docs, workbench mapping
+- zigeffect.causal.app-application.v1
+  version: 1
+  category: app-remediation
+  status: current
+  compatibility: strict-v1, record-only
+  emitted by: causal-app-apply
+  consumed by: causal-workbench, agents
+  governance requirements: schema validation tests, applied-state tests, docs, workbench mapping
