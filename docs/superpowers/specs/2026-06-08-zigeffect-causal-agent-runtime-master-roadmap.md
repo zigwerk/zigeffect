@@ -1377,16 +1377,38 @@ Status values:
      execution, Cockroach scope, deployment authority, production health claims,
      alternate renderer scope, public artifact upload, or auto-apply.
 63. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-application-boundary`
-   - Next: record planned/applied/blocked local application-boundary evidence
-     for reviewed consumption-report use by agents, reviewers, non-blocking CI
-     advisory readers, and the SolidJS `webui-dev/zig-webui` workbench. Applied
-     records should require explicit before/after report application evidence,
-     safe after-report content, source report status, source evaluator refs, and
-     verification commands before setting any applied marker. The boundary must
-     still avoid mutation authority, runtime wiring, required CI, GitHub
-     mutation, app mutation, NenDB writes, NenDB adapter execution, Cockroach
-     scope, deployment authority, production health claims, alternate renderer
-     scope, public artifact upload, and auto-apply.
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-application-boundary`
+     consumes ready or advisory app-facing advisory remediation report
+     consumption-report artifacts and emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-application-boundary.v1`.
+     It records planned, applied, and blocked local application-boundary
+     evidence for reviewed consumption-report use by agents, reviewers,
+     non-blocking CI advisory readers, and the SolidJS `webui-dev/zig-webui`
+     workbench. Applied records require report application change evidence,
+     before evidence, after evidence, safe after-report content, source report
+     status, source evaluator/policy/boundary/readiness/publication refs,
+     local-only source publication channels, and verification commands before
+     setting `applied=true`, and even then only with
+     `mutation_authority="record-only"`. It still avoids runtime wiring,
+     required CI, GitHub mutation, workflow mutation, app mutation, app runtime
+     integration, live projection, raw prompt/response/payload capture, NenDB
+     writes, NenDB adapter execution, Cockroach scope, deployment authority,
+     production health claims, alternate renderer scope, public artifact upload,
+     auto-apply, and mutation authority beyond the record-only artifact marker.
+64. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-policy`
+   - Next: consume applied app-facing advisory remediation report
+     consumption-report application-boundary artifacts and emit a record-only
+     interpretation policy for how agents, reviewers, non-blocking CI advisory
+     readers, and the SolidJS `webui-dev/zig-webui` workbench can use applied
+     report evidence. It should preserve source report ids, application checks,
+     report application change evidence, before/after evidence, safe after-report
+     digest, denied claims, local publication channel limits, and verification
+     evidence while denying required CI, GitHub mutation, app mutation, app
+     runtime integration, live projection, raw payload capture, NenDB writes,
+     NenDB adapter execution, Cockroach scope, deployment authority, production
+     health claims, alternate renderer scope, public artifact upload,
+     auto-apply, and mutation authority.
 
 ## Dual-Interface Causal Spine Expansion
 

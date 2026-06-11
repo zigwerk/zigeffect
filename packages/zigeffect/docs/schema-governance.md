@@ -3,7 +3,7 @@ schema: zigeffect.causal.schema-governance.v1
 schema_version: 1
 core schema: zigeffect.causal.v1 version 1
 event taxonomy version: 1
-schema count: 98
+schema count: 99
 
 versioning policy:
 - schema names the artifact family
@@ -351,6 +351,14 @@ schemas:
   emitted by: causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report
   consumed by: agents, reviewers, non-blocking CI advisory readers, local SolidJS workbench, production-hardening backlog, future app-facing advisory report consumption report application boundary
   governance requirements: consumption report producer tests, ready advisory and blocked evaluator source checks, authority drift tests, local publication channel tests, parseable JSON tests, verification command evidence, next-branch consumption-report application-boundary handoff, docs update
+- zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-application-boundary.v1
+  version: 1
+  category: app-runtime
+  status: current
+  compatibility: strict-v1, record-only, advisory-only, consumption-report-application-boundary, plan-or-record-applied, reviewed-before-after-evidence, safe-after-report, read-only-consumption, bounded-explicit-evidence, app-facing, solid-webui, webui-dev/zig-webui, no-cockroach, no-ci-enforcement, no-required-status-check, no-workflow-mutation, no-github-api-mutation, no-app-mutation, no-app-runtime-integration, no-live-agent-projection, no-raw-payload-capture, no-deployment-mutation, no-production-mutation, no-nendb-write, no-nendb-adapter-execution, no-public-artifact-upload, no-mutation-authority
+  emitted by: causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-application-boundary
+  consumed by: agents, reviewers, non-blocking CI advisory readers, local SolidJS workbench, production-hardening backlog, future app-facing advisory report consumption report policy
+  governance requirements: consumption report application-boundary producer tests, ready advisory and blocked report source checks, plan mode tests, record-applied before/after evidence tests, after-report safety tests, authority drift tests, local publication channel tests, verification command evidence, next-branch consumption-report policy handoff, docs update
 - zigeffect.causal.human-agent-feedback-loop.v1
   version: 1
   category: human-agent-feedback
