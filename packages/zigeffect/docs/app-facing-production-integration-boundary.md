@@ -143,6 +143,31 @@ The boundary report evaluates:
 It does not mean production integration is implemented, applied, deployed,
 healthy, fixed, or approved for app mutation.
 
+## Local-Fixtures Handoff
+
+An approved boundary unlocks only the local-fixtures review. It must be
+consumed by `causal-app-facing-production-integration-local-fixtures` before
+any app-facing NenDB handoff fixture branch starts:
+
+```sh
+zig build causal-app-facing-production-integration-local-fixtures -- \
+  --from-boundary ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures-readiness-review-implementation-proposal-app-facing-boundary.json \
+  approve \
+  --reason "guarded boundary reviewed for local app-facing fixtures" \
+  --verified-command "zig build causal-app-facing-production-integration-boundary -- --from-proposal ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures-readiness-review-implementation-proposal.json approve --reason \"proposal evidence reviewed for app-facing local fixtures\" --verified-command \"zig build causal-app-facing-production-integration-implementation-proposal -- --from-readiness ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures-readiness-review.json approve --reason \\\"ready evidence reviewed for app-facing integration planning\\\" --verified-command \\\"zig build causal-app-facing-production-integration-readiness-review -- --from-fixtures ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures.json approve --reason \\\\\\\"fixtures reviewed for implementation proposal\\\\\\\" --verified-command \\\\\\\"zig build causal-app-facing-production-integration-fixtures -- validate --format json\\\\\\\" --verified-command \\\\\\\"zig build causal-schema-governance -- --format json\\\\\\\" --verified-command \\\\\\\"zig build causal-production-hardening-backlog -- --format json\\\\\\\" --verified-command \\\\\\\"zig build examples\\\\\\\" --verified-command \\\\\\\"zig build test\\\\\\\"\\\" --verified-command \\\"zig build causal-schema-governance -- --format json\\\" --verified-command \\\"zig build causal-production-hardening-backlog -- --format json\\\" --verified-command \\\"zig build examples\\\" --verified-command \\\"zig build test\\\"\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The local-fixtures artifact records concrete worker request refs, background
+job refs, bounded agent-query projections, NenDB handoff refs, audit/remediation
+review links, SolidJS read-only preview samples, and advisory CI artifact
+previews. It still keeps all app mutation, raw payload capture, production
+NenDB writes, CI enforcement, deployment mutation, and live workbench authority
+disabled.
+
 ## Blocked Claims
 
 The artifact explicitly blocks app mutation, raw payload capture, app config

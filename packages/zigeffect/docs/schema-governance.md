@@ -3,7 +3,7 @@ schema: zigeffect.causal.schema-governance.v1
 schema_version: 1
 core schema: zigeffect.causal.v1 version 1
 event taxonomy version: 1
-schema count: 86
+schema count: 87
 
 versioning policy:
 - schema names the artifact family
@@ -255,6 +255,14 @@ schemas:
   emitted by: causal-app-facing-production-integration-boundary
   consumed by: agents, reviewers, production-hardening backlog, future app-facing production integration local fixtures, future SolidJS workbench production app views
   governance requirements: boundary tests, proposal artifact checks, verification command evidence, next-branch handoff, docs update
+- zigeffect.causal.app-facing-production-integration-local-fixtures.v1
+  version: 1
+  category: app-runtime
+  status: current
+  compatibility: strict-v1, record-only, local-fixtures, fixture-only, nendb-only, no-cockroach, no-live-telemetry, no-production-mutation
+  emitted by: causal-app-facing-production-integration-local-fixtures
+  consumed by: agents, reviewers, production-hardening backlog, future app-facing NenDB handoff fixtures, future SolidJS workbench production app views
+  governance requirements: local fixture tests, boundary artifact checks, fixture validation checks, verification command evidence, next-branch handoff, docs update
 - zigeffect.causal.human-agent-feedback-loop.v1
   version: 1
   category: human-agent-feedback

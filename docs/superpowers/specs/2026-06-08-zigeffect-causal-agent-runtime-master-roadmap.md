@@ -1213,11 +1213,21 @@ Status values:
      mutation, NenDB production writes, Cockroach scope, alternate renderer
      scope, CI enforcement, or `applied=true`.
 51. `codex/zigeffect-causal-app-facing-production-integration-local-fixtures`
-   - Next: consume the approved guarded app-facing boundary artifact and build
-     local fixture reports for app runtime refs, bounded agent-query
-     projections, NenDB handoff refs, audit/remediation review links, and
-     SolidJS read-only workbench previews without production mutation
-     authority.
+   - Delivered:
+     `causal-app-facing-production-integration-local-fixtures` consumes an
+     approved guarded app-facing boundary artifact and emits
+     `zigeffect.causal.app-facing-production-integration-local-fixtures.v1`,
+     cataloging worker request runtime refs, background job refs, bounded
+     agent-query projections, NenDB handoff refs, audit/remediation review
+     links, SolidJS read-only preview handoff, and advisory CI artifact preview
+     without app runtime integration, raw payload capture, app mutation, NenDB
+     production writes, CI enforcement, deployment mutation, Cockroach scope,
+     alternate renderer scope, live workbench preview, or `applied=true`.
+52. `codex/zigeffect-causal-app-facing-production-integration-nendb-handoff-fixtures`
+   - Next: consume the ready app-facing local-fixtures artifact and build NenDB
+     handoff fixture records for app runtime refs, bounded agent-query
+     projection refs, audit/remediation evidence refs, SolidJS read-only
+     preview refs, and advisory CI artifact refs without production writes.
 
 ## Dual-Interface Causal Spine Expansion
 
