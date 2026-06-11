@@ -1725,9 +1725,17 @@ Status values:
      `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-policy.v1`
      for the matching evaluator branch.
 85. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluator`
-   - Next: consume approved five-level policy evidence plus bounded request and
-     support evidence, emit ready/advisory/blocked evaluator artifacts,
-     preserve no-mutation authority, and hand off to the matching report branch.
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluator`
+     consumes approved five-level policy evidence plus bounded request and
+     support evidence, emits ready/advisory/blocked evaluator artifacts,
+     preserves no-mutation authority, and emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluator.v1`
+     for the six-level report branch.
+86. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report`
+   - Next: consume ready or advisory five-level evaluator evidence, emit the
+     six-level local evaluation-report artifact, preserve no-mutation authority,
+     and hand off to the matching application-boundary branch.
 
 ## Dual-Interface Causal Spine Expansion
 
