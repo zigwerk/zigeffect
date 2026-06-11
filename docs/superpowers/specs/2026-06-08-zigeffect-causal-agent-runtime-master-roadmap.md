@@ -1267,12 +1267,26 @@ Status values:
      app mutation, NenDB writes, NenDB adapter execution, Cockroach scope,
      production health claims, or `applied=true`.
 56. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-application-boundary`
-   - Next: consume ready app-facing CI advisory remediation report artifacts and
-     define a reviewed application boundary for interpreting or publishing the
-     advisory report without required status check enforcement, workflow
-     mutation, GitHub API mutation, deployment mutation, app mutation, NenDB
-     writes, NenDB adapter execution, Cockroach scope, production health claims,
-     or `applied=true`.
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-application-boundary`
+     consumes ready app-facing CI advisory remediation report artifacts and
+     emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-application-boundary.v1`,
+     defining plan, record-applied, and blocked evidence for reviewed local
+     advisory report application. It records `applied=true` only in
+     `record-applied` mode after publication-change, before, after,
+     report-after, safe report-after content, source bridge, and verification
+     checks pass, and even then only grants `mutation_authority="record-only"`.
+     It does not create required status checks, enforce CI gates, mutate
+     workflows, call the GitHub API, publish CI reports, mutate apps, run a
+     NenDB adapter, write NenDB, deploy, prove production health, auto-apply, or
+     grant app runtime integration.
+57. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-publication-policy`
+   - Next: define the advisory report publication/consumption policy that can
+     use applied application-boundary evidence without creating required status
+     checks, CI enforcement, GitHub API mutation, app mutation, NenDB writes,
+     NenDB adapter execution, Cockroach scope, deployment mutation, production
+     health claims, auto-apply, or live dashboard authority.
 
 ## Dual-Interface Causal Spine Expansion
 
