@@ -1707,10 +1707,18 @@ Status values:
      `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report.v1`
      for the next application-boundary branch.
 83. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary`
-   - Next: consume ready or advisory evaluation-report evaluation-report
-     evaluation-report evaluation-report evaluation-report evidence, record
-     planned or reviewed local application-boundary evidence, preserve
-     no-mutation authority, and hand off to the matching policy branch.
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary`
+     consumes ready or advisory five-level evaluation-report evidence, records
+     planned or reviewed local application-boundary evidence, requires reviewed
+     before/after/after-report and verification evidence before applied state,
+     preserves no-mutation authority, and emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary.v1`
+     for the matching policy branch.
+84. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-policy`
+   - Next: consume planned or applied five-level application-boundary evidence,
+     define record-only interpretation policy, preserve no-mutation authority,
+     and hand off to the matching evaluator branch.
 
 ## Dual-Interface Causal Spine Expansion
 
