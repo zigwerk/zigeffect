@@ -3,7 +3,7 @@ schema: zigeffect.causal.schema-governance.v1
 schema_version: 1
 core schema: zigeffect.causal.v1 version 1
 event taxonomy version: 1
-schema count: 131
+schema count: 132
 
 versioning policy:
 - schema names the artifact family
@@ -615,6 +615,14 @@ schemas:
   emitted by: causal-app-facing-eight-level-application-boundary
   consumed by: agents, reviewers, non-blocking CI advisory readers, local SolidJS workbench, production-hardening backlog, future app-facing eight-level policy
   governance requirements: eight-level application-boundary producer tests, ready advisory and blocked source report checks, plan mode tests, record-applied before/after evidence tests, after-report safety tests, authority drift tests, local publication channel tests, verification command evidence, short alias branch and build step, next-branch eight-level policy handoff, docs update
+- zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-policy.v1
+  version: 1
+  category: app-runtime
+  status: current
+  compatibility: strict-v1, record-only, policy-only, source-eight-level-application-boundary, approve-reject-decision, local-publication-only, read-only-consumption, bounded-agent-context, app-facing, solid-webui, webui-dev/zig-webui, no-cockroach, no-ci-enforcement, no-required-status-check, no-workflow-mutation, no-github-api-mutation, no-app-mutation, no-app-runtime-integration, no-live-agent-projection, no-raw-payload-capture, no-deployment-mutation, no-production-mutation, no-nendb-write, no-nendb-adapter-execution, no-public-artifact-upload, no-hosted-live-dashboard, no-auto-apply, no-mutation-authority
+  emitted by: causal-app-facing-eight-level-policy
+  consumed by: agents, reviewers, non-blocking CI advisory readers, local SolidJS workbench, production-hardening backlog, future app-facing eight-level evaluator
+  governance requirements: eight-level policy producer tests, applied source application-boundary checks, approve reject decision tests, interpretation rule tests, consumption scope tests, negative fixture tests, denied inference rule tests, verification command evidence, short alias branch and build step, next-branch eight-level evaluator handoff, docs update
 - zigeffect.causal.human-agent-feedback-loop.v1
   version: 1
   category: human-agent-feedback

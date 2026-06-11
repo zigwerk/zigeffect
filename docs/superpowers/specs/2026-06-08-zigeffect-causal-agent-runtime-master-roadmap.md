@@ -1813,9 +1813,16 @@ Status values:
      GitHub, app runtime, storage, deployment, public upload, and mutation
      authority disabled.
 96. `codex/zigeffect-causal-app-facing-eight-level-policy`
-   - Next: consume applied eight-level application-boundary evidence, make a
-     record-only approve or reject decision, preserve no-mutation authority, and
-     hand off to the eight-level evaluator.
+   - Delivered:
+     `causal-app-facing-eight-level-policy` consumes applied eight-level
+     application-boundary evidence, makes a record-only approve or reject
+     decision, preserves no-mutation authority, and hands approved evidence to
+     the eight-level evaluator branch.
+97. `codex/zigeffect-causal-app-facing-eight-level-evaluator`
+   - Next: consume approved eight-level policy evidence plus bounded local
+     request and support evidence, emit ready advisory or blocked evaluator
+     findings, preserve no-mutation authority, and hand off to the next
+     eight-level report.
 
 ## Dual-Interface Causal Spine Expansion
 
