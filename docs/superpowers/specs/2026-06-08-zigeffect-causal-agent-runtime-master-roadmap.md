@@ -1682,10 +1682,19 @@ Status values:
      `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary.v1`
      and hands off to the policy branch.
 80. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-policy`
-   - Next: consume applied evaluation-report evaluation-report evaluation-report
-     evaluation-report application-boundary evidence, define record-only policy
-     interpretation rules, preserve no-mutation authority, and hand off to the
-     next evaluator branch.
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-policy`
+     consumes applied evaluation-report evaluation-report evaluation-report
+     evaluation-report application-boundary evidence, defines record-only
+     approve/reject interpretation rules, preserves no-mutation authority,
+     denied inference rules, SolidJS WebUI and NenDB-only guardrails, and emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-policy.v1`
+     for the evaluator branch.
+81. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluator`
+   - Next: consume ready evaluation-report evaluation-report evaluation-report
+     evaluation-report policy evidence, classify bounded request and support
+     evidence, preserve no-mutation authority, and hand off to the next
+     evaluation-report producer branch.
 
 ## Dual-Interface Causal Spine Expansion
 
