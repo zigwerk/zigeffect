@@ -1648,11 +1648,22 @@ Status values:
      negative fixtures, verification gates, and a handoff to the evaluator
      branch.
 77. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluator`
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluator`
+     consumes ready evaluation-report evaluation-report evaluation-report policy
+     evidence plus explicit local request and support evidence files,
+     classifies the next bounded evaluation-report consumption surface as
+     ready, advisory, or blocked, and continues preserving local-only SolidJS
+     `webui-dev/zig-webui` consumption with no mutation authority. It emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluator.v1`
+     with request/evidence summaries, checks, signal evaluations, findings,
+     denied claims, next-query guidance, and a handoff to the next report
+     branch.
+78. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report`
    - Next: consume ready evaluation-report evaluation-report evaluation-report
-     policy evidence plus explicit local request and support evidence files,
-     classify the next bounded evaluation-report consumption surface as ready,
-     advisory, or blocked, and continue preserving local-only SolidJS
-     `webui-dev/zig-webui` consumption with no mutation authority.
+     evaluator evidence, summarize the bounded request and policy findings for
+     agents/reviewers/non-blocking CI readers, and preserve the same local-only
+     SolidJS `webui-dev/zig-webui` read-only no-mutation posture.
 
 ## Dual-Interface Causal Spine Expansion
 
