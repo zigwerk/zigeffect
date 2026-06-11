@@ -1795,11 +1795,20 @@ Status values:
      preserves denied authority and redaction posture, and hands off to the
      eight-level app-facing evaluation-report producer.
 94. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report`
-   - Next: consume ready or advisory seven-level evaluator evidence, summarize
-     the eighth app-facing evaluation-report layer for agents reviewers
-     non-blocking CI advisory readers and the SolidJS webui, preserve local
-     publication only, and keep CI, GitHub, app runtime, storage, deployment,
-     public upload, and mutation authority disabled.
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report`
+     consumes ready or advisory seven-level evaluator evidence, summarizes the
+     eighth app-facing evaluation-report layer for agents reviewers
+     non-blocking CI advisory readers and the SolidJS webui, preserves local
+     publication only, and emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report.v1`
+     for the matching application-boundary branch.
+95. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary`
+   - Next: consume ready or advisory eight-level report artifacts, record
+     planned or reviewed local application-boundary evidence, require reviewed
+     before/after verification before applied state, preserve local publication
+     only, and keep CI, GitHub, app runtime, storage, deployment, public upload,
+     and mutation authority disabled.
 
 ## Dual-Interface Causal Spine Expansion
 
