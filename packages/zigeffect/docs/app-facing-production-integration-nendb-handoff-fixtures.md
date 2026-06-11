@@ -137,6 +137,32 @@ It does not mean app runtime integration, live agent projection, raw payload
 capture, production NenDB writes, NenDB adapter execution, app mutation, CI
 enforcement, deployment, or SolidJS live preview has been implemented.
 
+## Next Step
+
+Ready handoff artifacts feed the audit/remediation bridge:
+
+```sh
+cd packages/zigeffect
+zig build causal-app-facing-production-integration-audit-remediation-bridge -- \
+  --from-handoff ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures-readiness-review-implementation-proposal-app-facing-boundary-local-fixtures-nendb-handoff-fixtures.json \
+  approve \
+  --reason "ready app-facing NenDB handoff fixtures reviewed for audit remediation bridge" \
+  --verified-command "zig build causal-app-facing-production-integration-nendb-handoff-fixtures" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+That bridge branch is:
+
+`codex/zigeffect-causal-app-facing-production-integration-audit-remediation-bridge`
+
+It links audit-chain comparison refs and remediation review refs for agent
+reasoning only. It does not enable auto-apply, mutation proof, app writes,
+production health claims, NenDB writes, adapter execution, CI enforcement, or
+`applied=true`.
+
 ## Blocked Claims
 
 The artifact blocks app runtime integration, live agent-query projection,

@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-app-facing-production-integration-audit-remediation-bridge";
-pub const recommended_next_branch = "codex/zigeffect-causal-app-facing-production-integration-audit-remediation-bridge";
+pub const recommendation = "start-app-facing-production-integration-solid-webui-readonly-preview";
+pub const recommended_next_branch = "codex/zigeffect-causal-app-facing-production-integration-solid-webui-readonly-preview";
 
 const OutputFormat = enum { text, json };
 
@@ -1466,6 +1466,32 @@ const backlog_items: []const BacklogItem = &.{
         .branch = "codex/zigeffect-causal-app-facing-production-integration-nendb-handoff-fixtures",
         .agent_guidance = "Use ready NenDB handoff fixture artifacts to start the app-facing audit/remediation bridge only. Do not infer NenDB adapter execution, NenDB production writes, app runtime integration, live agent projection, raw payload capture, app mutation, Cockroach scope, CI enforcement, deployment mutation, or applied=true.",
     },
+    .{
+        .id = "app-facing-production-integration-audit-remediation-bridge",
+        .title = "App-Facing Production Integration Audit Remediation Bridge",
+        .gap_id = "app-facing-production-integration-audit-remediation-bridge",
+        .priority = "P1",
+        .status = "delivered",
+        .summary = "Consumes ready app-facing NenDB handoff fixtures and emits a record-only audit/remediation bridge linking audit-chain comparison refs, remediation review refs, runtime evidence refs, agent-query next-query refs, SolidJS read-only preview refs, and advisory CI refs without app writes or auto-apply authority.",
+        .depends_on = &.{ "app-facing-production-integration-nendb-handoff-fixtures", "app-facing-production-integration-local-fixtures", "audit-chain-snapshot-compare", "agent-query-interface", "nendb-durable-history-hardening" },
+        .deliverables = &.{
+            "audit-chain comparison review bridge",
+            "remediation review policy gate bridge",
+            "runtime-to-remediation evidence bridge",
+            "agent-query-to-remediation next-query bridge",
+            "SolidJS review preview bridge",
+            "CI advisory remediation report bridge",
+        },
+        .evidence_sources = &.{
+            "docs/superpowers/specs/2026-06-11-zigeffect-causal-app-facing-production-integration-audit-remediation-bridge-design.md",
+            "docs/superpowers/plans/2026-06-11-zigeffect-causal-app-facing-production-integration-audit-remediation-bridge-implementation.md",
+            "packages/zigeffect/tools/causal_app_facing_production_integration_audit_remediation_bridge.zig",
+            "packages/zigeffect/docs/app-facing-production-integration-audit-remediation-bridge.md",
+            "packages/zigeffect/docs/schema-governance.md",
+        },
+        .branch = "codex/zigeffect-causal-app-facing-production-integration-audit-remediation-bridge",
+        .agent_guidance = "Use ready audit/remediation bridge artifacts to start the app-facing SolidJS read-only preview only. Do not infer app runtime integration, live agent projection, raw payload capture, app mutation, NenDB production writes, NenDB adapter execution, Cockroach scope, CI enforcement, deployment mutation, production health, mutation proof, auto-apply, or applied=true.",
+    },
 };
 
 const dependency_order: []const []const u8 = &.{
@@ -1526,6 +1552,7 @@ const dependency_order: []const []const u8 = &.{
     "app-facing-production-integration-boundary",
     "app-facing-production-integration-local-fixtures",
     "app-facing-production-integration-nendb-handoff-fixtures",
+    "app-facing-production-integration-audit-remediation-bridge",
 };
 
 const verification_commands: []const []const u8 = &.{
@@ -1635,6 +1662,8 @@ const verification_commands: []const []const u8 = &.{
     "zig build causal-app-facing-production-integration-local-fixtures -- --from-boundary ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures-readiness-review-implementation-proposal-app-facing-boundary.json reject --reason \"negative local fixtures path\" --out-prefix ../../.zig-cache/causal-artifacts/app-facing-production-integration-local-fixtures-negative",
     "zig build causal-app-facing-production-integration-nendb-handoff-fixtures -- --from-local-fixtures ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures-readiness-review-implementation-proposal-app-facing-boundary-local-fixtures.json approve --reason \"ready local app-facing fixtures reviewed for NenDB handoff fixtures\" --verified-command \"zig build causal-app-facing-production-integration-local-fixtures\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"",
     "zig build causal-app-facing-production-integration-nendb-handoff-fixtures -- --from-local-fixtures ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures-readiness-review-implementation-proposal-app-facing-boundary-local-fixtures.json reject --reason \"negative nendb handoff path\" --out-prefix ../../.zig-cache/causal-artifacts/app-facing-production-integration-nendb-handoff-fixtures-negative",
+    "zig build causal-app-facing-production-integration-audit-remediation-bridge -- --from-handoff ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures-readiness-review-implementation-proposal-app-facing-boundary-local-fixtures-nendb-handoff-fixtures.json approve --reason \"ready app-facing NenDB handoff fixtures reviewed for audit remediation bridge\" --verified-command \"zig build causal-app-facing-production-integration-nendb-handoff-fixtures\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"",
+    "zig build causal-app-facing-production-integration-audit-remediation-bridge -- --from-handoff ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures-readiness-review-implementation-proposal-app-facing-boundary-local-fixtures-nendb-handoff-fixtures.json reject --reason \"negative audit remediation bridge path\" --out-prefix ../../.zig-cache/causal-artifacts/app-facing-production-integration-audit-remediation-bridge-negative",
     "zig test --dep causal_artifact -Mroot=tools/causal_query.zig -Mcausal_artifact=tools/causal_artifact.zig",
     "zig test --dep causal_artifact --dep causal_compare --dep causal_run -Mroot=tools/causal_snapshot.zig -Mcausal_artifact=tools/causal_artifact.zig --dep causal_artifact -Mcausal_compare=tools/causal_compare.zig -Mcausal_run=tools/causal_run.zig",
     "zig build causal-production-deployment-runbooks",
@@ -1909,11 +1938,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-app-facing-production-integration-audit-remediation-bridge",
+        "start-app-facing-production-integration-solid-webui-readonly-preview",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-app-facing-production-integration-audit-remediation-bridge",
+        "codex/zigeffect-causal-app-facing-production-integration-solid-webui-readonly-preview",
         recommended_next_branch,
     );
 }
@@ -2025,6 +2054,8 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItemStatus("app-facing-production-integration-local-fixtures", "delivered");
     try expectBacklogItem("app-facing-production-integration-nendb-handoff-fixtures");
     try expectBacklogItemStatus("app-facing-production-integration-nendb-handoff-fixtures", "delivered");
+    try expectBacklogItem("app-facing-production-integration-audit-remediation-bridge");
+    try expectBacklogItemStatus("app-facing-production-integration-audit-remediation-bridge", "delivered");
 }
 
 test "production hardening backlog preserves user constraints" {
@@ -2043,7 +2074,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-app-facing-production-integration-audit-remediation-bridge") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-app-facing-production-integration-solid-webui-readonly-preview") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -2134,6 +2165,8 @@ test "production hardening backlog text mentions dependency order and next branc
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-app-facing-production-integration-local-fixtures") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "app-facing-production-integration-nendb-handoff-fixtures") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-app-facing-production-integration-nendb-handoff-fixtures") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "app-facing-production-integration-audit-remediation-bridge") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "causal-app-facing-production-integration-audit-remediation-bridge") != null);
 }
 
 test "production hardening backlog JSON is agent-readable" {
@@ -2142,7 +2175,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-app-facing-production-integration-audit-remediation-bridge\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-app-facing-production-integration-solid-webui-readonly-preview\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);
@@ -2277,6 +2310,9 @@ test "production hardening backlog JSON is agent-readable" {
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"app-facing-production-integration-nendb-handoff-fixtures\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-app-facing-production-integration-nendb-handoff-fixtures\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-app-facing-production-integration-nendb-handoff-fixtures") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"app-facing-production-integration-audit-remediation-bridge\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-app-facing-production-integration-audit-remediation-bridge\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-app-facing-production-integration-audit-remediation-bridge") != null);
 }
 
 test "production hardening backlog parses supported formats" {

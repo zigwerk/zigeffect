@@ -1236,11 +1236,21 @@ Status values:
      deployment mutation, Cockroach scope, alternate renderer scope, or
      `applied=true`.
 53. `codex/zigeffect-causal-app-facing-production-integration-audit-remediation-bridge`
-   - Next: consume ready app-facing NenDB handoff fixtures and connect
-     audit-chain comparison refs plus remediation review refs into an
-     evidence-only bridge without mutation proof, auto-apply, deployment, app
-     writes, production health claims, NenDB writes, Cockroach scope, or
-     `applied=true`.
+   - Delivered:
+     `causal-app-facing-production-integration-audit-remediation-bridge`
+     consumes ready app-facing NenDB handoff fixture artifacts and emits
+     `zigeffect.causal.app-facing-production-integration-audit-remediation-bridge.v1`,
+     connecting audit-chain comparison refs, remediation review refs, runtime
+     evidence refs, bounded agent-query next-query refs, SolidJS read-only
+     preview refs, and advisory CI refs without mutation proof, auto-apply,
+     deployment, app writes, production health claims, NenDB writes, NenDB
+     adapter execution, Cockroach scope, or `applied=true`.
+54. `codex/zigeffect-causal-app-facing-production-integration-solid-webui-readonly-preview`
+   - Next: consume ready audit/remediation bridge artifacts and build a
+     read-only SolidJS preview model inside `webui-dev/zig-webui` without a
+     hosted live dashboard, React/alternate renderer work, app mutation
+     controls, CI enforcement, production writes, deployment mutation,
+     production health claims, or `applied=true`.
 
 ## Dual-Interface Causal Spine Expansion
 
