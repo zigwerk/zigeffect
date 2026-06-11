@@ -1671,10 +1671,21 @@ Status values:
      `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report.v1`
      and hands off to the application-boundary branch.
 79. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary`
-   - Next: consume ready or advisory evaluation-report evaluation-report
-     evaluation-report evaluation-report report evidence, record planned and
-     reviewed local application evidence, and only mark applied after explicit
-     before/after evidence and verification commands are present.
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary`
+     consumes ready or advisory evaluation-report evaluation-report
+     evaluation-report evaluation-report report evidence, records planned or
+     reviewed local application evidence, preserves current and inherited
+     source lineage, and only marks applied after reviewed application changes,
+     before/after evidence, safe after-report content, and verification
+     commands are present. It emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary.v1`
+     and hands off to the policy branch.
+80. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-policy`
+   - Next: consume applied evaluation-report evaluation-report evaluation-report
+     evaluation-report application-boundary evidence, define record-only policy
+     interpretation rules, preserve no-mutation authority, and hand off to the
+     next evaluator branch.
 
 ## Dual-Interface Causal Spine Expansion
 

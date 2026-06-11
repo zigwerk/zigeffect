@@ -3,7 +3,7 @@ schema: zigeffect.causal.schema-governance.v1
 schema_version: 1
 core schema: zigeffect.causal.v1 version 1
 event taxonomy version: 1
-schema count: 114
+schema count: 115
 
 versioning policy:
 - schema names the artifact family
@@ -479,6 +479,14 @@ schemas:
   emitted by: causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report
   consumed by: agents, reviewers, non-blocking CI advisory readers, local SolidJS workbench, production-hardening backlog, future app-facing advisory report consumption report evaluation report evaluation report evaluation report evaluation report application boundary
   governance requirements: consumption report evaluation-report evaluation-report evaluation-report evaluation-report producer tests, ready or advisory source evaluator checks, source evaluation-report evaluation-report evaluation-report policy evidence checks, source evaluation-report evaluation-report evaluation-report application evidence checks, inherited evaluation-report evaluation-report evidence checks, request and evidence summary carryover, ready advisory and blocked artifact tests, denied authority tests, local publication posture tests, verification command evidence, next-branch evaluation-report evaluation-report evaluation-report evaluation-report application-boundary handoff, docs update
+- zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary.v1
+  version: 1
+  category: app-runtime
+  status: current
+  compatibility: strict-v1, record-only, application-boundary, source-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report, guarded-record-applied, local-report-only, read-only-consumption, bounded-agent-context, app-facing, solid-webui, webui-dev/zig-webui, no-cockroach, no-ci-enforcement, no-required-status-check, no-workflow-mutation, no-github-api-mutation, no-app-mutation, no-app-runtime-integration, no-live-agent-projection, no-raw-payload-capture, no-deployment-mutation, no-production-mutation, no-nendb-write, no-nendb-adapter-execution, no-public-artifact-upload, no-hosted-live-dashboard, no-auto-apply, no-mutation-authority
+  emitted by: causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary
+  consumed by: agents, reviewers, non-blocking CI advisory readers, local SolidJS workbench, production-hardening backlog, future app-facing advisory report consumption report evaluation report evaluation report evaluation report evaluation report policy
+  governance requirements: consumption report evaluation-report evaluation-report evaluation-report evaluation-report application-boundary producer tests, ready advisory and blocked source report checks, plan mode tests, record-applied before/after evidence tests, after-report safety tests, authority drift tests, local publication channel tests, verification command evidence, next-branch evaluation-report evaluation-report evaluation-report evaluation-report policy handoff, docs update
 - zigeffect.causal.human-agent-feedback-loop.v1
   version: 1
   category: human-agent-feedback
