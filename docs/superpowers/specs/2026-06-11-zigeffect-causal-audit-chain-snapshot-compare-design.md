@@ -45,9 +45,10 @@ mutation authority.
 - Emit next-query hints that lead agents back to:
   - the left and right snapshot manifests;
   - the left and right audit-chain artifacts;
-  - ordinary `causal-snapshot -- compare` for underlying artifact metadata;
-  - `causal-query --agent compare_runs` only when a future audit-chain artifact
-    carries causal run ids.
+  - the audit-chain snapshot compare command for repeatable before/after
+    review;
+  - direct manifest inspection, because audit-chain governance JSON is not a
+    core causal event-run artifact.
 - Update schema governance, docs, roadmap, and production hardening backlog so
   this branch becomes the handoff into the next app-facing integration fixture.
 
@@ -207,14 +208,15 @@ guardrails:
 - Audit-chain snapshot comparison is evidence, not authorization.
 - applied=true requires a separate reviewed application artifact.
 next queries:
-- zig build causal-snapshot -- compare <left> <right>
-- zig build causal-query -- --file <left-audit-chain-artifact> snapshot
-- zig build causal-query -- --file <right-audit-chain-artifact> snapshot
+- zig build causal-snapshot -- audit-chain-compare <left> <right>
+- zig build causal-snapshot -- manifest <left-name> <left-artifact>
+- zig build causal-snapshot -- manifest <right-name> <right-artifact>
 ```
 
-The `causal-query snapshot` next queries are intentionally allowed even though
-the artifact is governance JSON, because `causal-query` will surface schema
-warnings and prevent accidental treatment as core runtime evidence.
+The report intentionally avoids `causal-query` next queries because audit-chain
+artifacts are governance JSON, not core event-run artifacts with an `events`
+array. Agents should treat this command as the read-only comparison surface for
+retained audit-chain evidence.
 
 ## Comparison Rules
 
