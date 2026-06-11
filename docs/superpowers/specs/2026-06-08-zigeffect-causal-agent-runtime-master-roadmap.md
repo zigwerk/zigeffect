@@ -1436,8 +1436,10 @@ Status values:
      consumption scope ids, denied claims, next queries, request/evidence file
      digests, redaction posture, and a handoff to the evaluation-report branch.
 66. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report`
-   - Next: consume ready or advisory app-facing advisory remediation report
-     consumption-report evaluator artifacts and emit a compact local
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report`
+     consumes ready, advisory, or blocked app-facing advisory remediation report
+     consumption-report evaluator artifacts and emits a compact local
      evaluation-report artifact for agents, reviewers, non-blocking CI advisory
      readers, and the SolidJS `webui-dev/zig-webui` workbench. It should
      preserve source report-policy refs, request/evidence summaries, blocked
@@ -1448,6 +1450,24 @@ Status values:
      capture, storage writes, NenDB adapter execution, Cockroach scope,
      deployment authority, production health claims, public upload, alternate
      renderer scope, auto-apply, and mutation authority.
+     It emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report.v1`
+     with source consumption-report evaluator evidence, local publication
+     channel limits, report checks, findings, verification commands, and a
+     handoff to the application-boundary branch.
+67. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-application-boundary`
+   - Next: consume ready or advisory app-facing advisory remediation report
+     consumption-report evaluation-report artifacts and emit guarded plan or
+     record-applied application-boundary evidence. It should only mark
+     applied=true after a reviewed local evaluation-report application update,
+     before/after evidence, verification commands, safe after-report content,
+     and explicit source authority checks. It must continue denying CI
+     enforcement, required status checks, GitHub mutation, workflow mutation,
+     app mutation, app runtime integration, live projection, raw payload
+     capture, storage writes, NenDB adapter execution, Cockroach scope,
+     deployment authority, production health claims, hosted live dashboards,
+     public upload, alternate renderer scope, auto-apply, and mutation
+     authority.
 
 ## Dual-Interface Causal Spine Expansion
 
