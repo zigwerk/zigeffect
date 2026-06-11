@@ -1135,10 +1135,20 @@ Status values:
      writes, non-NenDB durable adapter work, alternate renderers, production
      health claims, production cluster claims, and mutation authority disabled.
 43. `codex/zigeffect-causal-production-hardening-backlog-refresh`
-   - Current next branch: refresh the production hardening backlog and choose
-     the next unresolved roadmap item without treating CI report policy
-     readiness as production health, deployment success, customer impact, or
-     cluster readiness.
+   - Delivered: `causal-production-hardening-backlog-refresh` publishes
+     `zigeffect.causal.production-hardening-backlog-refresh.v1`, consumes
+     production-hardening backlog JSON, records unresolved candidate branches,
+     and selects
+     `codex/zigeffect-causal-nendb-durable-history-hardening` as the next
+     branch without treating CI report policy readiness as production health,
+     deployment success, customer impact, production capacity, cluster
+     readiness, live telemetry, durable writes, NenDB writes, Cockroach or
+     non-NenDB adapter scope, alternate renderer scope, or mutation authority.
+44. `codex/zigeffect-causal-nendb-durable-history-hardening`
+   - Current next branch: harden persisted causal history on the NenDB adapter
+     path before cross-run agent comparison, arbitrary audit-chain snapshot
+     comparison, app-facing production integration fixtures, or
+     self-improving agent memory depends on durable causal records.
 
 ## Dual-Interface Causal Spine Expansion
 

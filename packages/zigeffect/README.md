@@ -988,13 +988,28 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-hardening-backlog-refresh`
-after the delivered production telemetry CI gate required status check
-enforcement report policy milestone.
+`codex/zigeffect-causal-nendb-durable-history-hardening`
+after the delivered production hardening backlog refresh milestone.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in
 [docs/production-hardening-backlog.md](docs/production-hardening-backlog.md).
+
+Generate the backlog refresh handoff artifact:
+
+```bash
+cd packages/zigeffect
+zig build causal-production-hardening-backlog-refresh -- \
+  --from-backlog ../../.zig-cache/causal-artifacts/production-hardening-backlog.json \
+  refresh \
+  --reason "production hardening backlog refreshed after report policy"
+```
+
+The refresh uses schema
+`zigeffect.causal.production-hardening-backlog-refresh.v1`, selects
+`codex/zigeffect-causal-nendb-durable-history-hardening`, and grants no
+mutation authority. The full policy is in
+[docs/production-hardening-backlog-refresh.md](docs/production-hardening-backlog-refresh.md).
 
 Print the causal live dashboard streaming workbench contract:
 

@@ -1945,6 +1945,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_production_hardening_backlog_tool_tests = b.addRunArtifact(causal_production_hardening_backlog_tool_tests);
     test_step.dependOn(&run_causal_production_hardening_backlog_tool_tests.step);
 
+    const causal_production_hardening_backlog_refresh_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_production_hardening_backlog_refresh.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_production_hardening_backlog_refresh_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-production-hardening-backlog-refresh",
+        .root_module = causal_production_hardening_backlog_refresh_tool_module,
+    });
+    const run_causal_production_hardening_backlog_refresh_tool = b.addRunArtifact(causal_production_hardening_backlog_refresh_tool);
+    if (b.args) |args| run_causal_production_hardening_backlog_refresh_tool.addArgs(args);
+    const causal_production_hardening_backlog_refresh_step = b.step("causal-production-hardening-backlog-refresh", "Refresh production hardening backlog and select next unresolved branch");
+    causal_production_hardening_backlog_refresh_step.dependOn(&run_causal_production_hardening_backlog_refresh_tool.step);
+
+    const causal_production_hardening_backlog_refresh_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-production-hardening-backlog-refresh-tests",
+        .root_module = causal_production_hardening_backlog_refresh_tool_module,
+    });
+    const run_causal_production_hardening_backlog_refresh_tool_tests = b.addRunArtifact(causal_production_hardening_backlog_refresh_tool_tests);
+    test_step.dependOn(&run_causal_production_hardening_backlog_refresh_tool_tests.step);
+
     const causal_production_artifact_aggregation_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_production_artifact_aggregation.zig"),
         .target = target,

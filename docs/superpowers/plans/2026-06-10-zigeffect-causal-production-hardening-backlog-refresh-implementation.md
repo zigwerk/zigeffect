@@ -40,7 +40,7 @@
 **Files:**
 - Create: `packages/zigeffect/tools/causal_production_hardening_backlog_refresh.zig`
 
-- [ ] **Step 1: Add constants, fixtures, and tests first**
+- [x] **Step 1: Add constants, fixtures, and tests first**
 
 Create the file with enough code to compile tests but intentionally fail the selected next-branch assertion:
 
@@ -106,7 +106,7 @@ fn readySourceBacklogJson() []const u8 {
 }
 ```
 
-- [ ] **Step 2: Run the red test**
+- [x] **Step 2: Run the red test**
 
 Run:
 
@@ -122,7 +122,7 @@ Expected: fails with `error.NotImplemented`.
 **Files:**
 - Modify: `packages/zigeffect/tools/causal_production_hardening_backlog_refresh.zig`
 
-- [ ] **Step 1: Add CLI option parsing**
+- [x] **Step 1: Add CLI option parsing**
 
 Implement:
 
@@ -137,7 +137,7 @@ Required parser behavior:
 - `--verified-command` may be repeated.
 - `--out-prefix` controls both `.json` and `.txt` outputs.
 
-- [ ] **Step 2: Add source backlog structs**
+- [x] **Step 2: Add source backlog structs**
 
 Use `std.json.parseFromSlice` with `ignore_unknown_fields=true` and these fields:
 
@@ -158,7 +158,7 @@ const BacklogItem = struct {
 };
 ```
 
-- [ ] **Step 3: Add candidate and check models**
+- [x] **Step 3: Add candidate and check models**
 
 Define stable candidates:
 
@@ -196,7 +196,7 @@ Checks required for ready status:
 - mutation authority remains `none`;
 - no live telemetry or durable write flag is enabled.
 
-- [ ] **Step 4: Render text and JSON reports**
+- [x] **Step 4: Render text and JSON reports**
 
 Text report must include:
 
@@ -226,7 +226,7 @@ JSON report must include:
 }
 ```
 
-- [ ] **Step 5: Add negative tests**
+- [x] **Step 5: Add negative tests**
 
 Tests must cover:
 
@@ -237,7 +237,7 @@ Tests must cover:
 - selected candidate denies Cockroach and non-NenDB durable adapter claims;
 - JSON report includes `ready_for_next_branch`.
 
-- [ ] **Step 6: Run green focused tests**
+- [x] **Step 6: Run green focused tests**
 
 Run:
 
@@ -255,7 +255,7 @@ Expected: all tests pass.
 - Modify: `packages/zigeffect/tools/causal_schema_governance.zig`
 - Modify: `packages/zigeffect/docs/schema-governance.md`
 
-- [ ] **Step 1: Register build step and test dependency**
+- [x] **Step 1: Register build step and test dependency**
 
 In `build.zig`, add a module/executable/run step/test block near the other production hardening tools:
 
@@ -281,7 +281,7 @@ const run_causal_production_hardening_backlog_refresh_tool_tests = b.addRunArtif
 test_step.dependOn(&run_causal_production_hardening_backlog_refresh_tool_tests.step);
 ```
 
-- [ ] **Step 2: Add schema governance entry**
+- [x] **Step 2: Add schema governance entry**
 
 Add:
 
@@ -300,7 +300,7 @@ Add:
 
 Update schema-count tests from `79` to `80` and add assertions for the new schema.
 
-- [ ] **Step 3: Verify build help and schema governance**
+- [x] **Step 3: Verify build help and schema governance**
 
 Run:
 
@@ -326,7 +326,7 @@ Expected:
 - Modify: `packages/zigeffect/README.md`
 - Modify: `docs/superpowers/specs/2026-06-08-zigeffect-causal-agent-runtime-master-roadmap.md`
 
-- [ ] **Step 1: Advance backlog recommendation**
+- [x] **Step 1: Advance backlog recommendation**
 
 Change constants:
 
@@ -355,7 +355,7 @@ Add delivered item:
 
 Append `production-hardening-backlog-refresh` to `dependency_order` and add refresh build commands to `verification_commands`.
 
-- [ ] **Step 2: Update backlog tests**
+- [x] **Step 2: Update backlog tests**
 
 Update tests to expect:
 
@@ -364,7 +364,7 @@ Update tests to expect:
 - delivered item `production-hardening-backlog-refresh`;
 - JSON/text reports mention `causal-production-hardening-backlog-refresh`.
 
-- [ ] **Step 3: Write refresh docs**
+- [x] **Step 3: Write refresh docs**
 
 Create `packages/zigeffect/docs/production-hardening-backlog-refresh.md` with:
 
@@ -375,7 +375,7 @@ Create `packages/zigeffect/docs/production-hardening-backlog-refresh.md` with:
 - authority boundary;
 - verification commands.
 
-- [ ] **Step 4: Update roadmap and README docs**
+- [x] **Step 4: Update roadmap and README docs**
 
 Update docs so agents see:
 
@@ -384,7 +384,7 @@ Update docs so agents see:
 - no Cockroach or non-NenDB durable adapter work;
 - no live telemetry, durable write, production health, or mutation authority.
 
-- [ ] **Step 5: Run backlog tests**
+- [x] **Step 5: Run backlog tests**
 
 Run:
 
@@ -404,7 +404,7 @@ Expected:
 **Files:**
 - All modified files from Tasks 1 through 4.
 
-- [ ] **Step 1: Generate current backlog source artifact**
+- [x] **Step 1: Generate current backlog source artifact**
 
 Run:
 
@@ -416,7 +416,7 @@ zig build causal-production-hardening-backlog -- --format json 2> ../../.zig-cac
 
 Expected: JSON artifact exists and uses `zigeffect.causal.production-hardening-backlog.v1`.
 
-- [ ] **Step 2: Run refresh positive path**
+- [x] **Step 2: Run refresh positive path**
 
 Run:
 
@@ -438,7 +438,7 @@ Expected:
 - status is ready;
 - selected branch is `codex/zigeffect-causal-nendb-durable-history-hardening`.
 
-- [ ] **Step 3: Run refresh negative path**
+- [x] **Step 3: Run refresh negative path**
 
 Create a temporary unsupported-recommendation fixture and run it through the
 CLI:
@@ -472,7 +472,7 @@ zig build causal-production-hardening-backlog-refresh -- \
 
 Expected: blocked status, `ready_for_next_branch=false`, and no mutation authority.
 
-- [ ] **Step 4: Run focused and integration verification**
+- [x] **Step 4: Run focused and integration verification**
 
 Run:
 
@@ -496,7 +496,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Commit implementation**
+- [x] **Step 5: Commit implementation**
 
 Run:
 

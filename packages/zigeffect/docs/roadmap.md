@@ -1098,6 +1098,14 @@ metrics, and traces.
   live telemetry, durable writes, NenDB writes, hosted dashboard claims,
   production cluster claims, alternate renderers, and production mutation
   disabled.
+- Delivered: `causal-production-hardening-backlog-refresh` publishes
+  `zigeffect.causal.production-hardening-backlog-refresh.v1`, consumes
+  production-hardening backlog JSON, records unresolved candidate branches, and
+  selects `codex/zigeffect-causal-nendb-durable-history-hardening` as the next
+  branch. It keeps source, config, registry, workflow, branch-protection,
+  deployment, rollout, app, GitHub, CI, live telemetry, durable write, NenDB
+  write, Cockroach, non-NenDB adapter, alternate renderer, production health,
+  production cluster, and mutation authority disabled.
 - Delivered:
   `causal-production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary`
   publishes
@@ -1144,8 +1152,9 @@ metrics, and traces.
 - Delivered: the compact agent query interface returns bounded JSON for run
   summaries, failures, event explanations, cause traces, data lineage,
   findings, and recommended next queries. Cross-run comparison remains future.
-- Still future: production-grade app-facing integrations, durable history
-  hardening, and comparing arbitrary named audit-chain snapshots.
+- Next: NenDB durable history hardening.
+- Still future: production-grade app-facing integrations and comparing
+  arbitrary named audit-chain snapshots.
 - Still future: deeper runtime regression scenarios for partial config and
   cause coverage.
 - Extend the SolidJS `zig-webui` causal workbench when future UI branches need

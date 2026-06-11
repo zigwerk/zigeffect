@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `refresh-production-hardening-backlog` means the
+The recommendation `start-nendb-durable-history-hardening` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -249,9 +249,11 @@ it consumes report application-boundary artifacts, records planned or applied
 interpretation policy, separates `ready_for_next_branch` from
 `published_report_policy_ready`, and hands off to production hardening backlog
 refresh without granting publication, GitHub, CI gate, live telemetry, storage,
-or production mutation authority.
+or production mutation authority. The production hardening backlog refresh is
+also delivered and selects NenDB durable-history hardening as the next
+unresolved branch.
 The next branch should be
-`codex/zigeffect-causal-production-hardening-backlog-refresh`.
+`codex/zigeffect-causal-nendb-durable-history-hardening`.
 
 ## Dependency Order
 
@@ -304,6 +306,7 @@ The backlog currently orders future production-hardening branches as:
 45. `production-telemetry-ci-gate-required-status-check-enforcement-report` delivered
 46. `production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary` delivered
 47. `production-telemetry-ci-gate-required-status-check-enforcement-report-policy` delivered
+48. `production-hardening-backlog-refresh` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -866,8 +869,19 @@ disabled GitHub step summary writes, disabled pull-request comments, disabled
 live telemetry, disabled durable writes, disabled NenDB writes, NenDB-only
 durable direction, and SolidJS `zig-webui` workbench direction.
 
-The next branch should refresh this backlog and select the next unresolved
-roadmap item.
+The production hardening backlog refresh is documented in
+[production-hardening-backlog-refresh.md](production-hardening-backlog-refresh.md).
+It emits `zigeffect.causal.production-hardening-backlog-refresh.v1` through
+`zig build causal-production-hardening-backlog-refresh`, records unresolved
+candidate branches, and selects
+`codex/zigeffect-causal-nendb-durable-history-hardening` as the next branch.
+It preserves disabled source mutation, GitHub mutation, CI mutation, live
+telemetry, durable writes, NenDB writes, Cockroach and non-NenDB adapter scope,
+alternate renderer scope, production health claims, production cluster claims,
+and mutation authority.
+
+The next branch should harden NenDB durable history for persisted causal
+evidence.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,

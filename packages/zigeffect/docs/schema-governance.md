@@ -72,6 +72,11 @@ mapping, or agent handoff, also update [operations.md](operations.md).
   authority.
 - `solid-webui`: SolidJS inside `webui-dev/zig-webui` is the reviewed workbench
   direction for this artifact family.
+- `nendb-only`: durable database work is limited to the NenDB adapter path.
+- `no-cockroach`: this artifact does not authorize Cockroach or other
+  non-NenDB durable adapter scope.
+- `no-mutation-authority`: the artifact grants no source, config, registry,
+  workflow, deployment, app, production, or external-system mutation authority.
 
 ## New Schema Checklist
 
@@ -716,6 +721,18 @@ pull-request comments, live telemetry, durable writes, NenDB writes,
 non-NenDB adapter work, alternate renderer scope, production health, deployment
 success, customer impact, production cluster readiness, and mutation
 authority.
+
+- `zigeffect.causal.production-hardening-backlog-refresh.v1`
+
+The production-hardening-backlog-refresh artifact consumes production
+hardening backlog JSON, validates the terminal delivered report-policy item,
+records unresolved candidate branches, and selects
+`codex/zigeffect-causal-nendb-durable-history-hardening` as the next branch.
+It is read-only, NenDB-only, local-artifact-only evidence. It denies Cockroach
+and non-NenDB adapter scope, live telemetry, durable writes, NenDB writes,
+GitHub mutation, CI mutation, production health, deployment success, customer
+impact, production capacity, production cluster readiness, alternate renderer
+scope, and mutation authority.
 
 ### Human-Agent Feedback
 

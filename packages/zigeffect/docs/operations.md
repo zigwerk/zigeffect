@@ -495,7 +495,7 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-production-hardening-backlog-refresh`
+`codex/zigeffect-causal-nendb-durable-history-hardening`
 after the unified causal spine, deep runtime internals, app semantic trace API,
 bounded agent query surface, record-only encryption-at-rest policy,
 record-only alerting integrations, delivered live dashboard streaming
@@ -518,6 +518,31 @@ milestones.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
+
+Run the backlog refresh handoff before starting the NenDB durable-history
+branch:
+
+```sh
+cd packages/zigeffect
+mkdir -p ../../.zig-cache/causal-artifacts
+zig build causal-production-hardening-backlog -- --format json 2> ../../.zig-cache/causal-artifacts/production-hardening-backlog.json
+zig build causal-production-hardening-backlog-refresh -- \
+  --from-backlog ../../.zig-cache/causal-artifacts/production-hardening-backlog.json \
+  refresh \
+  --reason "production hardening backlog refreshed after report policy" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The refresh records schema
+`zigeffect.causal.production-hardening-backlog-refresh.v1`, selects
+`codex/zigeffect-causal-nendb-durable-history-hardening`, and keeps source,
+config, registry, workflow, branch-protection, deployment, rollout, app,
+GitHub, CI, live telemetry, durable write, NenDB write, Cockroach, non-NenDB
+adapter, alternate renderer, production health, production cluster, and
+mutation authority disabled.
 
 ## Production Hardening Completion Audit
 
@@ -574,7 +599,7 @@ check policy, enforcement-readiness, enforcement application-boundary,
 enforcement policy, enforcement evaluator, enforcement report, enforcement
 report application-boundary, and enforcement report policy milestones.
 The current next branch is
-`codex/zigeffect-causal-production-hardening-backlog-refresh`.
+`codex/zigeffect-causal-nendb-durable-history-hardening`.
 
 ## Production Telemetry Capture Design
 
@@ -1640,10 +1665,11 @@ CI-gate-required-status-check-enforcement-policy, and
 CI-gate-required-status-check-enforcement-evaluator, and
 CI-gate-required-status-check-enforcement-report,
 CI-gate-required-status-check-enforcement-report-application-boundary, and
-CI-gate-required-status-check-enforcement-report-policy
+CI-gate-required-status-check-enforcement-report-policy, and
+production-hardening-backlog-refresh
 reports are now delivered.
 The current next branch is
-`codex/zigeffect-causal-production-hardening-backlog-refresh`.
+`codex/zigeffect-causal-nendb-durable-history-hardening`.
 
 ## Production Gaps
 
