@@ -1596,17 +1596,35 @@ Status values:
      with request/evidence classification, inherited evidence, denied claims,
      verification gates, and a handoff to the evaluation-report branch.
 74. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report`
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report`
+     consumes ready or advisory evaluation-report evaluation-report evaluator
+     evidence and emits local evaluation-report evaluation-report
+     evaluation-report evidence for agents, reviewers, non-blocking CI
+     advisory readers, and the SolidJS `webui-dev/zig-webui` workbench. It
+     preserves source policy and application-boundary lineage, evaluator
+     findings, request/evidence classification, redaction posture, local-only
+     publication limits, and denied authority while continuing to reject CI
+     enforcement, GitHub mutation, app mutation, runtime integration, live
+     projection, raw payload capture, storage writes, NenDB adapter execution,
+     Cockroach scope, deployment authority, production health claims, public
+     upload, hosted dashboards, alternate renderer scope, auto-apply, and
+     mutation authority. It emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report.v1`
+     with source evaluator evidence, inherited evidence, denied claims,
+     verification gates, and a handoff to the application-boundary branch.
+75. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-application-boundary`
    - Next: consume ready or advisory evaluation-report evaluation-report
-     evaluator evidence and emit local evaluation-report evidence for agents,
-     reviewers, non-blocking CI advisory readers, and the SolidJS
-     `webui-dev/zig-webui` workbench. It should preserve source policy and
-     application-boundary lineage, evaluator findings, request/evidence
-     classification, redaction posture, local-only publication limits, and
-     denied authority while continuing to reject CI enforcement, GitHub
-     mutation, app mutation, runtime integration, live projection, raw payload
-     capture, storage writes, NenDB adapter execution, Cockroach scope,
-     deployment authority, production health claims, public upload, hosted
-     dashboards, alternate renderer scope, auto-apply, and mutation authority.
+     evaluation-report evidence and record reviewed local application-boundary
+     intent for agents, reviewers, non-blocking CI advisory readers, and the
+     SolidJS `webui-dev/zig-webui` workbench. It should only mark applied after
+     explicit reviewed local change evidence, before/after evidence, safe
+     after-report content, source report checks, and full verification command
+     evidence, while continuing to deny CI enforcement, GitHub mutation, app
+     mutation, runtime integration, live projection, raw payload capture,
+     storage writes, NenDB adapter execution, Cockroach scope, deployment
+     authority, production health claims, public upload, hosted dashboards,
+     alternate renderer scope, auto-apply, and mutation authority.
 
 ## Dual-Interface Causal Spine Expansion
 
