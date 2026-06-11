@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-app-facing-production-integration-implementation-proposal`
+The recommendation `start-app-facing-production-integration-boundary`
 means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
@@ -274,7 +274,7 @@ command evidence, publishes
 keeps app mutation, live telemetry, durable writes, CI gates, Cockroach scope,
 and alternate renderer work disabled.
 The next branch should be
-`codex/zigeffect-causal-app-facing-production-integration-implementation-proposal`.
+`codex/zigeffect-causal-app-facing-production-integration-boundary`.
 
 ## Dependency Order
 
@@ -333,6 +333,7 @@ The backlog currently orders future production-hardening branches as:
 51. `audit-chain-snapshot-compare` delivered
 52. `app-facing-production-integration-fixtures` delivered
 53. `app-facing-production-integration-readiness-review` delivered
+54. `app-facing-production-integration-implementation-proposal` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item now
@@ -348,6 +349,10 @@ Cockroach scope, or alternate renderer scope.
 The `app-facing-production-integration-readiness-review` item consumes those
 fixtures and emits ready or blocked review artifacts before implementation
 proposal work. A ready review grants only proposal-branch permission.
+The `app-facing-production-integration-implementation-proposal` item consumes a
+ready readiness-review artifact and emits approved or blocked proposal
+artifacts before guarded boundary work. An approved proposal grants only
+permission to start the guarded app-facing production integration boundary.
 
 ## Authority Boundaries
 
@@ -970,6 +975,30 @@ Ready review artifacts hand off to
 They do not grant app mutation, live telemetry ingestion, exporter setup,
 durable production writes, CI enforcement, Cockroach adapter work, or alternate
 renderer work.
+
+The app-facing implementation proposal is documented in
+[app-facing-production-integration-implementation-proposal.md](app-facing-production-integration-implementation-proposal.md).
+It emits
+`zigeffect.causal.app-facing-production-integration-implementation-proposal.v1`
+through:
+
+```sh
+zig build causal-app-facing-production-integration-implementation-proposal -- \
+  --from-readiness ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures-readiness-review.json \
+  approve \
+  --reason "ready evidence reviewed for app-facing integration planning" \
+  --verified-command "zig build causal-app-facing-production-integration-readiness-review -- --from-fixtures ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures.json approve --reason \"fixtures reviewed for implementation proposal\" --verified-command \"zig build causal-app-facing-production-integration-fixtures -- validate --format json\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+Approved proposal artifacts hand off to
+`codex/zigeffect-causal-app-facing-production-integration-boundary` only. They
+do not grant app mutation, raw payload capture, live telemetry ingestion,
+exporter setup, durable production writes, CI enforcement, Cockroach adapter
+work, alternate renderer work, production health claims, or `applied=true`.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,

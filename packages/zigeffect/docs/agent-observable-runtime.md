@@ -1253,6 +1253,19 @@ and keeps app mutation, live telemetry, durable writes, and CI gates disabled.
 only. It is not evidence that app code, config, data, deployments, telemetry,
 storage, or CI state changed.
 
+`zig build causal-app-facing-production-integration-implementation-proposal --
+--from-readiness <app-facing-readiness-json> approve --reason <reason>
+--verified-command <command>` emits
+`zigeffect.causal.app-facing-production-integration-implementation-proposal.v1`.
+It consumes a ready readiness-review artifact, verifies that readiness checks
+and verification commands are still cited, records a proposal decision, and
+hands off only to the guarded app-facing production integration boundary. The
+proposal phases cover app runtime refs, bounded agent-query projection,
+NenDB-history handoff, audit/remediation bridge, SolidJS webui read-only
+preview, and advisory CI artifacts. It keeps app mutation, raw payload access,
+live telemetry, durable writes, CI gates, Cockroach scope, alternate renderers,
+and `applied=true` outside proposal authority.
+
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around
 those pieces. The no-scenario form captures before/after dogfood evidence and

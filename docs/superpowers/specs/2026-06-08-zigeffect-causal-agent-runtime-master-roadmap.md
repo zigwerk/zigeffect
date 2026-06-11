@@ -1189,10 +1189,22 @@ Status values:
      `ready_for_implementation_proposal=true` only for a reviewed ready
      handoff.
 49. `codex/zigeffect-causal-app-facing-production-integration-implementation-proposal`
-   - Next: consume a ready app-facing production integration readiness-review
-     artifact and propose the implementation sequence without granting live
-     telemetry, durable writes, app mutation, CI gates, Cockroach scope, or
-     alternate renderer scope.
+   - Delivered:
+     `causal-app-facing-production-integration-implementation-proposal`
+     consumes a ready app-facing production integration readiness-review
+     artifact, emits
+     `zigeffect.causal.app-facing-production-integration-implementation-proposal.v1`,
+     records proposer decision and verification evidence, proposes the
+     app-runtime, agent-query, NenDB handoff, audit/remediation, SolidJS
+     read-only preview, and advisory CI artifact sequence, and preserves no raw
+     payload capture, no live telemetry, no durable writes, no app mutation, no
+     CI gates, no Cockroach scope, no alternate renderer scope, and no
+     `applied=true`.
+50. `codex/zigeffect-causal-app-facing-production-integration-boundary`
+   - Next: consume an approved app-facing production integration
+     implementation-proposal artifact and define the guarded boundary for
+     app runtime refs, bounded agent-query projection, and NenDB handoff
+     without enabling production mutation authority.
 
 ## Dual-Interface Causal Spine Expansion
 

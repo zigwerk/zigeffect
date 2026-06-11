@@ -123,6 +123,7 @@ production mutation authority disabled.
 - `zigeffect.causal.app-runtime.v1`
 - `zigeffect.causal.app-facing-production-integration-fixtures.v1`
 - `zigeffect.causal.app-facing-production-integration-readiness-review.v1`
+- `zigeffect.causal.app-facing-production-integration-implementation-proposal.v1`
 
 App runtime artifacts remain record-only app evidence. User-facing mappings
 belong in the SolidJS workbench launched through `zig-webui`.
@@ -137,6 +138,12 @@ JSON, records a reviewer decision and required verification command evidence,
 and emits `ready` or `blocked` before implementation-proposal work. It keeps
 the same no-live-telemetry, no-durable-write, no-app-mutation, no-Cockroach,
 SolidJS/webui-only, record-only boundaries.
+The app-facing production integration implementation-proposal schema consumes a
+ready readiness-review artifact, records proposer decision and verification
+evidence, emits `approved` or `blocked`, and hands off only to the guarded
+app-facing production integration boundary. It remains record-only,
+implementation-proposal, NenDB-only, no-Cockroach, no-live-telemetry, and
+no-production-mutation.
 
 ### Dev Loop
 

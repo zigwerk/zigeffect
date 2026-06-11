@@ -1349,6 +1349,31 @@ proposal branch. It does not grant app mutation, live telemetry, durable
 production writes, CI gates, Cockroach scope, or alternate renderer work. See
 [docs/app-facing-production-integration-readiness-review.md](docs/app-facing-production-integration-readiness-review.md).
 
+Draft the app-facing production integration implementation proposal:
+
+```bash
+cd packages/zigeffect
+zig build causal-app-facing-production-integration-implementation-proposal -- \
+  --from-readiness ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures-readiness-review.json \
+  approve \
+  --reason "ready evidence reviewed for app-facing integration planning" \
+  --verified-command "zig build causal-app-facing-production-integration-readiness-review -- --from-fixtures ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures.json approve --reason \"fixtures reviewed for implementation proposal\" --verified-command \"zig build causal-app-facing-production-integration-fixtures -- validate --format json\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The proposal uses schema
+`zigeffect.causal.app-facing-production-integration-implementation-proposal.v1`
+and writes `*-implementation-proposal.json` plus
+`*-implementation-proposal.txt`. `approved_for_next_branch=true` permits only
+`codex/zigeffect-causal-app-facing-production-integration-boundary`. It does
+not grant app mutation, raw payload capture, live telemetry, durable production
+writes, CI gates, Cockroach scope, alternate renderer work, production health
+claims, or `applied=true`. See
+[docs/app-facing-production-integration-implementation-proposal.md](docs/app-facing-production-integration-implementation-proposal.md).
+
 Print the causal artifact retention manifest for agents and CI:
 
 ```bash

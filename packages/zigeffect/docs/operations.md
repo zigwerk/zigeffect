@@ -495,7 +495,7 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-app-facing-production-integration-implementation-proposal`
+`codex/zigeffect-causal-app-facing-production-integration-boundary`
 after the unified causal spine, deep runtime internals, app semantic trace API,
 bounded agent query surface, record-only encryption-at-rest policy,
 record-only alerting integrations, delivered live dashboard streaming
@@ -564,6 +564,15 @@ zig build causal-app-facing-production-integration-readiness-review -- \
   --verified-command "zig build causal-production-hardening-backlog -- --format json" \
   --verified-command "zig build examples" \
   --verified-command "zig build test"
+zig build causal-app-facing-production-integration-implementation-proposal -- \
+  --from-readiness ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures-readiness-review.json \
+  approve \
+  --reason "ready evidence reviewed for app-facing integration planning" \
+  --verified-command "zig build causal-app-facing-production-integration-readiness-review -- --from-fixtures ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures.json approve --reason \"fixtures reviewed for implementation proposal\" --verified-command \"zig build causal-app-facing-production-integration-fixtures -- validate --format json\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
 ```
 
 The review records
@@ -572,6 +581,14 @@ The review records
 It does not grant app mutation, live telemetry ingestion, exporter setup,
 durable production writes, CI enforcement, Cockroach adapter work, or alternate
 renderer work.
+
+The proposal records
+`zigeffect.causal.app-facing-production-integration-implementation-proposal.v1`.
+`approved_for_next_branch=true` permits only
+`codex/zigeffect-causal-app-facing-production-integration-boundary`. It does
+not grant app mutation, raw payload capture, live telemetry ingestion, durable
+production writes, CI enforcement, Cockroach adapter work, alternate renderer
+work, production health claims, or `applied=true`.
 
 Run the NenDB durable-history hardening fixture before starting cross-run
 agent-query comparison:

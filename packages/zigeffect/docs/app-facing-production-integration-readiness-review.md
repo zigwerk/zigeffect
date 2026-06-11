@@ -98,6 +98,25 @@ scope for this milestone.
 
 `codex/zigeffect-causal-app-facing-production-integration-implementation-proposal`
 
+That proposal branch is now implemented by
+`causal-app-facing-production-integration-implementation-proposal`:
+
+```sh
+zig build causal-app-facing-production-integration-implementation-proposal -- \
+  --from-readiness ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures-readiness-review.json \
+  approve \
+  --reason "ready evidence reviewed for app-facing integration planning" \
+  --verified-command "zig build causal-app-facing-production-integration-readiness-review -- --from-fixtures ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures.json approve --reason \"fixtures reviewed for implementation proposal\" --verified-command \"zig build causal-app-facing-production-integration-fixtures -- validate --format json\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+An approved proposal hands off only to:
+
+`codex/zigeffect-causal-app-facing-production-integration-boundary`
+
 `blocked` means agents should cite the failed checks and repair fixture,
 verification, or boundary evidence first.
 
