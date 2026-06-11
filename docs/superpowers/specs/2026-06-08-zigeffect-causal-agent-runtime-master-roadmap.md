@@ -1577,11 +1577,13 @@ Status values:
      with interpretation rules, consumption scopes, denied claims, negative
      fixtures, verification gates, and a handoff to the evaluator branch.
 73. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluator`
-   - Next: consume ready evaluation-report evaluation-report policy evidence
-     plus explicit local request and support-evidence files, then classify
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluator`
+     consumes ready evaluation-report evaluation-report policy evidence plus
+     explicit local request and support-evidence files, then classifies
      evaluation-report evaluation-report consumption evidence as ready,
      advisory, or blocked for agents, reviewers, non-blocking CI advisory
-     readers, and the SolidJS `webui-dev/zig-webui` workbench. It should carry
+     readers, and the SolidJS `webui-dev/zig-webui` workbench. It carries
      forward source application-boundary evidence, interpretation rules,
      denied claims, verification posture, and local-only publication limits
      while denying CI enforcement, GitHub mutation, app mutation, runtime
@@ -1589,6 +1591,22 @@ Status values:
      adapter execution, Cockroach scope, deployment authority, production
      health claims, public upload, hosted dashboards, alternate renderer scope,
      auto-apply, and mutation authority.
+     It emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluator.v1`
+     with request/evidence classification, inherited evidence, denied claims,
+     verification gates, and a handoff to the evaluation-report branch.
+74. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report`
+   - Next: consume ready or advisory evaluation-report evaluation-report
+     evaluator evidence and emit local evaluation-report evidence for agents,
+     reviewers, non-blocking CI advisory readers, and the SolidJS
+     `webui-dev/zig-webui` workbench. It should preserve source policy and
+     application-boundary lineage, evaluator findings, request/evidence
+     classification, redaction posture, local-only publication limits, and
+     denied authority while continuing to reject CI enforcement, GitHub
+     mutation, app mutation, runtime integration, live projection, raw payload
+     capture, storage writes, NenDB adapter execution, Cockroach scope,
+     deployment authority, production health claims, public upload, hosted
+     dashboards, alternate renderer scope, auto-apply, and mutation authority.
 
 ## Dual-Interface Causal Spine Expansion
 
