@@ -54,7 +54,7 @@ existing schema governance/backlog tooling, Bun root verification.
 **Files:**
 - Modify: `packages/zigeffect/tools/causal_snapshot.zig`
 
-- [ ] **Step 1: Add audit-chain fixture JSON**
+- [x] **Step 1: Add audit-chain fixture JSON**
 
 Add two audit-chain fixtures near existing snapshot fixtures:
 
@@ -111,7 +111,7 @@ const audit_chain_right_json =
 Add a third fixture by replacing `"applied": false` with `"applied": true` in
 the right fixture inside the applied-boundary test.
 
-- [ ] **Step 2: Add manifest fixtures for audit-chain artifacts**
+- [x] **Step 2: Add manifest fixtures for audit-chain artifacts**
 
 Add:
 
@@ -157,7 +157,7 @@ const audit_chain_right_manifest_json =
 ;
 ```
 
-- [ ] **Step 3: Add failing formatter tests**
+- [x] **Step 3: Add failing formatter tests**
 
 Add tests:
 
@@ -196,7 +196,7 @@ Add a text report test that expects:
 - `deltas:`;
 - `next queries:`.
 
-- [ ] **Step 4: Add failing blocked/applied test**
+- [x] **Step 4: Add failing blocked/applied test**
 
 Use `std.mem.replaceOwned` to set `"applied": true` in the right audit-chain
 fixture. Assert the JSON report contains:
@@ -205,7 +205,7 @@ fixture. Assert the JSON report contains:
 - `"comparison":"inconclusive"`;
 - `right audit-chain applied=true requires reviewed application evidence`.
 
-- [ ] **Step 5: Add failing usage test**
+- [x] **Step 5: Add failing usage test**
 
 Extend the usage test to expect:
 
@@ -213,7 +213,7 @@ Extend the usage test to expect:
 "audit-chain-compare <left> <right>"
 ```
 
-- [ ] **Step 6: Verify RED**
+- [x] **Step 6: Verify RED**
 
 Run:
 
@@ -228,7 +228,7 @@ Expected: compile failures for missing formatter functions/constants.
 **Files:**
 - Modify: `packages/zigeffect/tools/causal_snapshot.zig`
 
-- [ ] **Step 1: Add schema constants and structs**
+- [x] **Step 1: Add schema constants and structs**
 
 Add constants:
 
@@ -240,7 +240,7 @@ pub const audit_chain_snapshot_compare_schema_version: u32 = 1;
 Add `AuditChainArtifactForCompare`, `AuditChainSnapshotSide`,
 `AuditChainSnapshotDeltas`, and enum/string helpers for status/comparison.
 
-- [ ] **Step 2: Add parser and warning helpers**
+- [x] **Step 2: Add parser and warning helpers**
 
 Parse audit-chain artifacts with `ignore_unknown_fields=true`.
 
@@ -251,7 +251,7 @@ Warnings should include:
 - target mismatch between manifest and audit-chain artifact;
 - manifest warnings already carried by each snapshot manifest.
 
-- [ ] **Step 3: Add summary and delta helpers**
+- [x] **Step 3: Add summary and delta helpers**
 
 Compute counts from array lengths and signed deltas with:
 
@@ -262,7 +262,7 @@ fn countDelta(after: usize, before: usize) isize
 Reuse the existing helper name if compatible; otherwise add a private helper
 near snapshot compare code.
 
-- [ ] **Step 4: Add comparison rules**
+- [x] **Step 4: Add comparison rules**
 
 Implement deterministic comparison:
 
@@ -276,16 +276,16 @@ Implement deterministic comparison:
 - equal counts and assessments -> `unchanged`;
 - fallback -> `inconclusive`.
 
-- [ ] **Step 5: Add JSON formatter**
+- [x] **Step 5: Add JSON formatter**
 
 Emit compact deterministic JSON. Do not pretty-print in this branch; existing
 snapshot manifest JSON is compact.
 
-- [ ] **Step 6: Add text formatter**
+- [x] **Step 6: Add text formatter**
 
 Emit the report shape from the design doc with signed deltas and next queries.
 
-- [ ] **Step 7: Verify GREEN**
+- [x] **Step 7: Verify GREEN**
 
 Run the focused Zig test command from Task 1.
 
@@ -296,7 +296,7 @@ Expected: all snapshot tests pass.
 **Files:**
 - Modify: `packages/zigeffect/tools/causal_snapshot.zig`
 
-- [ ] **Step 1: Update usage**
+- [x] **Step 1: Update usage**
 
 Add:
 
@@ -304,7 +304,7 @@ Add:
 zig build causal-snapshot -- audit-chain-compare <left> <right>
 ```
 
-- [ ] **Step 2: Implement CLI branch**
+- [x] **Step 2: Implement CLI branch**
 
 In `main`, add a branch before replay/fork commands:
 
@@ -319,7 +319,7 @@ Use `resolveSnapshotManifestReference`, read both manifests, read both
 `artifact.path` values, call `formatAuditChainSnapshotCompareText`, and print
 the report.
 
-- [ ] **Step 3: Smoke CLI with temporary files**
+- [x] **Step 3: Smoke CLI with temporary files**
 
 Create temporary manifest and audit-chain files outside source control, then run:
 
@@ -338,7 +338,7 @@ Expected output includes `comparison: improved`.
 - Modify: `packages/zigeffect/tools/causal_production_hardening_backlog.zig`
 - Modify: `packages/zigeffect/docs/production-hardening-backlog.md`
 
-- [ ] **Step 1: Register schema governance entry**
+- [x] **Step 1: Register schema governance entry**
 
 Add `zigeffect.causal.audit-chain-snapshot-compare.v1` with:
 
@@ -350,7 +350,7 @@ Add `zigeffect.causal.audit-chain-snapshot-compare.v1` with:
 
 Bump schema count from `81` to `82` in tests.
 
-- [ ] **Step 2: Update production hardening backlog**
+- [x] **Step 2: Update production hardening backlog**
 
 Add delivered item `audit-chain-snapshot-compare`.
 
@@ -363,7 +363,7 @@ pub const recommended_next_branch = "codex/zigeffect-causal-app-facing-productio
 
 Add tests for the new delivered item and next branch.
 
-- [ ] **Step 3: Verify governance tools**
+- [x] **Step 3: Verify governance tools**
 
 Run:
 
@@ -389,7 +389,7 @@ integration fixtures.
   `docs/superpowers/specs/2026-06-08-zigeffect-causal-agent-runtime-master-roadmap.md`
 - Modify this implementation plan checklist.
 
-- [ ] **Step 1: Add command examples**
+- [x] **Step 1: Add command examples**
 
 Document:
 
@@ -398,7 +398,7 @@ zig build causal-snapshot -- manifest left-chain .zig-cache/causal-artifacts/zig
 zig build causal-snapshot -- audit-chain-compare left-chain right-chain
 ```
 
-- [ ] **Step 2: Update roadmap handoff**
+- [x] **Step 2: Update roadmap handoff**
 
 Mark `codex/zigeffect-causal-audit-chain-snapshot-compare` delivered and add
 the next branch:
@@ -407,7 +407,7 @@ the next branch:
 codex/zigeffect-causal-app-facing-production-integration-fixtures
 ```
 
-- [ ] **Step 3: Complete checklist**
+- [x] **Step 3: Complete checklist**
 
 Flip this plan's completed implementation checkboxes to `[x]`.
 

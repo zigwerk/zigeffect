@@ -7,12 +7,16 @@ pub const snapshot_manifest_schema = "zigeffect.causal.snapshot-manifest.v1";
 pub const snapshot_manifest_schema_version: u32 = 1;
 pub const snapshot_compare_schema = "zigeffect.causal.snapshot-compare.v1";
 pub const snapshot_compare_schema_version: u32 = 1;
+pub const audit_chain_snapshot_compare_schema = "zigeffect.causal.audit-chain-snapshot-compare.v1";
+pub const audit_chain_snapshot_compare_schema_version: u32 = 1;
 pub const replay_feasibility_schema = "zigeffect.causal.replay-feasibility.v1";
 pub const replay_feasibility_schema_version: u32 = 1;
 pub const deterministic_replay_schema = "zigeffect.causal.deterministic-replay.v1";
 pub const deterministic_replay_schema_version: u32 = 1;
 pub const scenario_fork_proposal_schema = "zigeffect.causal.scenario-fork-proposal.v1";
 pub const scenario_fork_proposal_schema_version: u32 = 1;
+pub const audit_chain_artifact_schema = "zigeffect.causal.audit-chain.v1";
+pub const audit_chain_artifact_schema_version: u32 = 1;
 const replay_feasibility_event_sample_limit: usize = 20;
 
 pub const SnapshotManifestOptions = struct {
@@ -61,6 +65,10 @@ const Artifact = struct {
     events: []Event,
 };
 
+const ArtifactSchemaProbe = struct {
+    schema: ?[]const u8 = null,
+};
+
 const SnapshotManifestForCompare = struct {
     schema: ?[]const u8 = null,
     schema_version: ?u32 = null,
@@ -80,6 +88,38 @@ const SnapshotManifestArtifactForCompare = struct {
     first_event_id: ?u64 = null,
     last_event_id: ?u64 = null,
     findings: usize = 0,
+};
+
+const AuditChainArtifactForCompare = struct {
+    schema: ?[]const u8 = null,
+    schema_version: ?u32 = null,
+    mode: []const u8 = "",
+    target: []const u8 = "",
+    assessment: []const u8 = "",
+    proposal_status: []const u8 = "",
+    approval_status: []const u8 = "",
+    approved: bool = false,
+    applied: bool = false,
+    finding_delta: ?isize = null,
+    event_ids: []const u64 = &.{},
+    disappeared_event_ids: []const u64 = &.{},
+    persisting_event_ids: []const u64 = &.{},
+    appeared_event_ids: []const u64 = &.{},
+    missing_event_ids: []const u64 = &.{},
+    verification_commands: []const []const u8 = &.{},
+    claim_guardrails: []const []const u8 = &.{},
+    proposal_guardrails: []const []const u8 = &.{},
+    chain_guardrails: []const []const u8 = &.{},
+};
+
+const AuditChainSnapshotDeltas = struct {
+    event_ids_delta: isize,
+    disappeared_delta: isize,
+    persisting_delta: isize,
+    appeared_delta: isize,
+    missing_delta: isize,
+    finding_delta_delta: ?isize,
+    verification_command_delta: isize,
 };
 
 const ReplayFeasibilityStats = struct {
@@ -111,6 +151,16 @@ const Event = struct {
 };
 
 const replay_reason = "snapshot manifest references observed causal artifact only";
+const audit_chain_snapshot_compare_limitations = [_][]const u8{
+    "compares retained audit-chain artifacts only",
+    "does not prove source, registry, or app mutation",
+    "does not grant proposal application authority",
+};
+const audit_chain_snapshot_compare_guardrails = [_][]const u8{
+    "Audit-chain snapshot comparison is evidence, not authorization.",
+    "applied=true requires a separate reviewed application artifact.",
+    "Audit-chain governance JSON is not a core causal event-run artifact.",
+};
 
 pub fn validateSnapshotName(name: []const u8) error{InvalidSnapshotName}!void {
     if (name.len == 0 or name.len > 64) return error.InvalidSnapshotName;
@@ -243,6 +293,125 @@ pub fn formatSnapshotCompareText(
     try output.print(allocator, "- zig build causal-query -- --file {s} snapshot\n", .{left.artifact.path});
     try output.print(allocator, "- zig build causal-query -- --file {s} snapshot\n", .{right.artifact.path});
     try output.print(allocator, "- zig build causal-compare -- {s} {s}\n", .{ left.artifact.path, right.artifact.path });
+
+    return output.toOwnedSlice(allocator);
+}
+
+pub fn formatAuditChainSnapshotCompareJson(
+    allocator: std.mem.Allocator,
+    left_manifest_path: []const u8,
+    left_manifest_json: []const u8,
+    left_audit_chain_json: []const u8,
+    right_manifest_path: []const u8,
+    right_manifest_json: []const u8,
+    right_audit_chain_json: []const u8,
+) ![]const u8 {
+    var left_manifest_parsed = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, left_manifest_json, .{ .ignore_unknown_fields = true });
+    defer left_manifest_parsed.deinit();
+    var right_manifest_parsed = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, right_manifest_json, .{ .ignore_unknown_fields = true });
+    defer right_manifest_parsed.deinit();
+    var left_chain_parsed = try std.json.parseFromSlice(AuditChainArtifactForCompare, allocator, left_audit_chain_json, .{ .ignore_unknown_fields = true });
+    defer left_chain_parsed.deinit();
+    var right_chain_parsed = try std.json.parseFromSlice(AuditChainArtifactForCompare, allocator, right_audit_chain_json, .{ .ignore_unknown_fields = true });
+    defer right_chain_parsed.deinit();
+
+    const left_manifest = left_manifest_parsed.value;
+    const right_manifest = right_manifest_parsed.value;
+    const left_chain = left_chain_parsed.value;
+    const right_chain = right_chain_parsed.value;
+    const deltas = auditChainSnapshotDeltas(left_chain, right_chain);
+
+    var warnings = std.ArrayList([]const u8).empty;
+    defer freeOwnedStringList(allocator, &warnings);
+    var blocked = false;
+    try collectSnapshotManifestWarnings(allocator, &warnings, "left", left_manifest);
+    try collectSnapshotManifestWarnings(allocator, &warnings, "right", right_manifest);
+    try collectAuditChainSnapshotWarnings(allocator, &warnings, "left", left_manifest, left_chain, &blocked);
+    try collectAuditChainSnapshotWarnings(allocator, &warnings, "right", right_manifest, right_chain, &blocked);
+
+    const status = if (blocked) "blocked" else "ready";
+    const comparison = auditChainSnapshotComparison(status, left_chain, right_chain, deltas);
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+    try output.appendSlice(allocator, "{\"schema\":");
+    try appendJsonString(&output, allocator, audit_chain_snapshot_compare_schema);
+    try output.print(allocator, ",\"schema_version\":{d}", .{audit_chain_snapshot_compare_schema_version});
+    try output.appendSlice(allocator, ",\"status\":");
+    try appendJsonString(&output, allocator, status);
+    try output.appendSlice(allocator, ",\"comparison\":");
+    try appendJsonString(&output, allocator, comparison);
+    try output.appendSlice(allocator, ",\"left\":");
+    try appendAuditChainSnapshotSideJson(&output, allocator, left_manifest_path, left_manifest, left_chain);
+    try output.appendSlice(allocator, ",\"right\":");
+    try appendAuditChainSnapshotSideJson(&output, allocator, right_manifest_path, right_manifest, right_chain);
+    try output.appendSlice(allocator, ",\"deltas\":");
+    try appendAuditChainSnapshotDeltasJson(&output, allocator, deltas);
+    try output.appendSlice(allocator, ",\"warnings\":");
+    try appendStringListJson(&output, allocator, warnings.items);
+    try output.appendSlice(allocator, ",\"limitations\":");
+    try appendStringListJson(&output, allocator, &audit_chain_snapshot_compare_limitations);
+    try output.appendSlice(allocator, ",\"guardrails\":");
+    try appendStringListJson(&output, allocator, &audit_chain_snapshot_compare_guardrails);
+    try output.appendSlice(allocator, ",\"next_queries\":[");
+    try appendAuditChainSnapshotCompareNextQueriesJson(&output, allocator, left_manifest_path, right_manifest_path, left_manifest, right_manifest);
+    try output.appendSlice(allocator, "]}");
+
+    return output.toOwnedSlice(allocator);
+}
+
+pub fn formatAuditChainSnapshotCompareText(
+    allocator: std.mem.Allocator,
+    left_manifest_path: []const u8,
+    left_manifest_json: []const u8,
+    left_audit_chain_json: []const u8,
+    right_manifest_path: []const u8,
+    right_manifest_json: []const u8,
+    right_audit_chain_json: []const u8,
+) ![]const u8 {
+    var left_manifest_parsed = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, left_manifest_json, .{ .ignore_unknown_fields = true });
+    defer left_manifest_parsed.deinit();
+    var right_manifest_parsed = try std.json.parseFromSlice(SnapshotManifestForCompare, allocator, right_manifest_json, .{ .ignore_unknown_fields = true });
+    defer right_manifest_parsed.deinit();
+    var left_chain_parsed = try std.json.parseFromSlice(AuditChainArtifactForCompare, allocator, left_audit_chain_json, .{ .ignore_unknown_fields = true });
+    defer left_chain_parsed.deinit();
+    var right_chain_parsed = try std.json.parseFromSlice(AuditChainArtifactForCompare, allocator, right_audit_chain_json, .{ .ignore_unknown_fields = true });
+    defer right_chain_parsed.deinit();
+
+    const left_manifest = left_manifest_parsed.value;
+    const right_manifest = right_manifest_parsed.value;
+    const left_chain = left_chain_parsed.value;
+    const right_chain = right_chain_parsed.value;
+    const deltas = auditChainSnapshotDeltas(left_chain, right_chain);
+
+    var warnings = std.ArrayList([]const u8).empty;
+    defer freeOwnedStringList(allocator, &warnings);
+    var blocked = false;
+    try collectSnapshotManifestWarnings(allocator, &warnings, "left", left_manifest);
+    try collectSnapshotManifestWarnings(allocator, &warnings, "right", right_manifest);
+    try collectAuditChainSnapshotWarnings(allocator, &warnings, "left", left_manifest, left_chain, &blocked);
+    try collectAuditChainSnapshotWarnings(allocator, &warnings, "right", right_manifest, right_chain, &blocked);
+
+    const status = if (blocked) "blocked" else "ready";
+    const comparison = auditChainSnapshotComparison(status, left_chain, right_chain, deltas);
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+    try output.appendSlice(allocator, "zigeffect causal audit-chain snapshot compare report\n");
+    try output.print(allocator, "schema: {s}\n", .{audit_chain_snapshot_compare_schema});
+    try output.print(allocator, "schema version: {d}\n", .{audit_chain_snapshot_compare_schema_version});
+    try output.print(allocator, "status: {s}\n", .{status});
+    try output.print(allocator, "comparison: {s}\n", .{comparison});
+    try appendAuditChainSnapshotSideText(&output, allocator, "left", left_manifest_path, left_manifest, left_chain);
+    try appendAuditChainSnapshotSideText(&output, allocator, "right", right_manifest_path, right_manifest, right_chain);
+    try appendAuditChainSnapshotDeltasText(&output, allocator, deltas);
+    try appendOwnedWarningsText(&output, allocator, warnings.items);
+    try output.appendSlice(allocator, "limitations:\n");
+    try appendStringListText(&output, allocator, &audit_chain_snapshot_compare_limitations);
+    try output.appendSlice(allocator, "guardrails:\n");
+    try appendStringListText(&output, allocator, &audit_chain_snapshot_compare_guardrails);
+    try output.appendSlice(allocator, "next queries:\n");
+    try appendAuditChainSnapshotCompareNextQueriesText(&output, allocator, left_manifest_path, right_manifest_path, left_manifest, right_manifest);
 
     return output.toOwnedSlice(allocator);
 }
@@ -486,6 +655,10 @@ pub fn formatSnapshotManifestJson(
     options: SnapshotManifestOptions,
 ) ![]const u8 {
     try validateSnapshotName(options.name);
+    if (try artifactJsonLooksLikeAuditChain(allocator, artifact_json)) {
+        return formatAuditChainSnapshotManifestJson(allocator, artifact_json, options);
+    }
+
     var parsed = try std.json.parseFromSlice(Artifact, allocator, artifact_json, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
 
@@ -542,6 +715,10 @@ pub fn formatSnapshotManifestText(
     options: SnapshotManifestOptions,
 ) ![]const u8 {
     try validateSnapshotName(options.name);
+    if (try artifactJsonLooksLikeAuditChain(allocator, artifact_json)) {
+        return formatAuditChainSnapshotManifestText(allocator, artifact_json, options);
+    }
+
     var parsed = try std.json.parseFromSlice(Artifact, allocator, artifact_json, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
 
@@ -570,6 +747,114 @@ pub fn formatSnapshotManifestText(
     try output.appendSlice(allocator, "next queries:\n");
     try appendNextQueriesText(&output, allocator, options);
     try appendWarningsText(allocator, &output, metadata, events);
+
+    return output.toOwnedSlice(allocator);
+}
+
+fn artifactJsonLooksLikeAuditChain(allocator: std.mem.Allocator, artifact_json: []const u8) !bool {
+    var probe = try std.json.parseFromSlice(ArtifactSchemaProbe, allocator, artifact_json, .{ .ignore_unknown_fields = true });
+    defer probe.deinit();
+    const schema = probe.value.schema orelse return false;
+    return std.mem.eql(u8, schema, audit_chain_artifact_schema);
+}
+
+fn auditChainManifestFindingCount(chain: AuditChainArtifactForCompare) usize {
+    return chain.persisting_event_ids.len + chain.appeared_event_ids.len + chain.missing_event_ids.len;
+}
+
+fn formatAuditChainSnapshotManifestJson(
+    allocator: std.mem.Allocator,
+    artifact_json: []const u8,
+    options: SnapshotManifestOptions,
+) ![]const u8 {
+    var parsed = try std.json.parseFromSlice(AuditChainArtifactForCompare, allocator, artifact_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    const chain = parsed.value;
+
+    var warnings = std.ArrayList([]const u8).empty;
+    defer freeOwnedStringList(allocator, &warnings);
+    try collectAuditChainArtifactManifestWarnings(allocator, &warnings, chain);
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\"schema\":");
+    try appendJsonString(&output, allocator, snapshot_manifest_schema);
+    try output.print(allocator, ",\"schema_version\":{d}", .{snapshot_manifest_schema_version});
+    try output.appendSlice(allocator, ",\"name\":");
+    try appendJsonString(&output, allocator, options.name);
+    try output.appendSlice(allocator, ",\"target\":");
+    try appendJsonString(&output, allocator, options.target);
+    try output.appendSlice(allocator, ",\"phase\":");
+    try appendJsonString(&output, allocator, options.phase);
+    try output.appendSlice(allocator, ",\"artifact\":{\"path\":");
+    try appendJsonString(&output, allocator, options.artifact_path);
+    try output.appendSlice(allocator, ",\"schema\":");
+    try appendOptionalJsonString(&output, allocator, chain.schema);
+    try output.appendSlice(allocator, ",\"schema_version\":");
+    try appendOptionalJsonU32(&output, allocator, chain.schema_version);
+    try output.appendSlice(allocator, ",\"event_taxonomy_version\":null");
+    try output.print(allocator, ",\"events\":0,\"first_event_id\":null,\"last_event_id\":null,\"findings\":{d}", .{auditChainManifestFindingCount(chain)});
+    try output.appendSlice(allocator, "},\"related\":{\"baseline_path\":");
+    try appendOptionalJsonString(&output, allocator, options.baseline_path);
+    try output.appendSlice(allocator, ",\"compare_report_path\":");
+    try appendOptionalJsonString(&output, allocator, options.compare_report_path);
+    try output.appendSlice(allocator, ",\"query_report_path\":");
+    try appendOptionalJsonString(&output, allocator, options.query_report_path);
+    try output.appendSlice(allocator, ",\"advice_report_path\":");
+    try appendOptionalJsonString(&output, allocator, options.advice_report_path);
+    try output.appendSlice(allocator, "},\"replay\":{\"feasible\":false,\"reason\":");
+    try appendJsonString(&output, allocator, "audit-chain governance artifact is not replay input");
+    try output.appendSlice(allocator, "},\"next_queries\":[");
+    try appendAuditChainManifestNextQueriesJson(&output, allocator, options);
+    try output.appendSlice(allocator, "],\"warnings\":");
+    try appendStringListJson(&output, allocator, warnings.items);
+    try output.appendSlice(allocator, "}");
+
+    return output.toOwnedSlice(allocator);
+}
+
+fn formatAuditChainSnapshotManifestText(
+    allocator: std.mem.Allocator,
+    artifact_json: []const u8,
+    options: SnapshotManifestOptions,
+) ![]const u8 {
+    var parsed = try std.json.parseFromSlice(AuditChainArtifactForCompare, allocator, artifact_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    const chain = parsed.value;
+
+    var warnings = std.ArrayList([]const u8).empty;
+    defer freeOwnedStringList(allocator, &warnings);
+    try collectAuditChainArtifactManifestWarnings(allocator, &warnings, chain);
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "zigeffect causal snapshot manifest\n");
+    try output.print(allocator, "schema: {s}\n", .{snapshot_manifest_schema});
+    try output.print(allocator, "schema version: {d}\n", .{snapshot_manifest_schema_version});
+    try output.print(allocator, "name: {s}\n", .{options.name});
+    try output.print(allocator, "target: {s}\n", .{options.target});
+    try output.print(allocator, "phase: {s}\n", .{options.phase});
+    try output.print(allocator, "artifact: {s}\n", .{options.artifact_path});
+    try output.print(allocator, "artifact schema: {s}\n", .{chain.schema orelse "missing"});
+    if (chain.schema_version) |version| {
+        try output.print(allocator, "artifact schema version: {d}\n", .{version});
+    } else {
+        try output.appendSlice(allocator, "artifact schema version: missing\n");
+    }
+    try output.appendSlice(allocator, "events: 0\n");
+    try output.appendSlice(allocator, "event ids: none\n");
+    try output.print(allocator, "findings: {d}\n", .{auditChainManifestFindingCount(chain)});
+    if (options.baseline_path) |path| try output.print(allocator, "baseline: {s}\n", .{path});
+    if (options.compare_report_path) |path| try output.print(allocator, "compare report: {s}\n", .{path});
+    if (options.query_report_path) |path| try output.print(allocator, "query report: {s}\n", .{path});
+    if (options.advice_report_path) |path| try output.print(allocator, "advice report: {s}\n", .{path});
+    try output.appendSlice(allocator, "replay feasible: false\n");
+    try output.appendSlice(allocator, "replay reason: audit-chain governance artifact is not replay input\n");
+    try output.appendSlice(allocator, "next queries:\n");
+    try appendAuditChainManifestNextQueriesText(&output, allocator, options);
+    try appendOwnedWarningsText(&output, allocator, warnings.items);
 
     return output.toOwnedSlice(allocator);
 }
@@ -655,6 +940,316 @@ fn appendSnapshotManifestWarnings(
             wrote.* = true;
         }
     }
+}
+
+fn auditChainSnapshotDeltas(left: AuditChainArtifactForCompare, right: AuditChainArtifactForCompare) AuditChainSnapshotDeltas {
+    return .{
+        .event_ids_delta = countDelta(right.event_ids.len, left.event_ids.len),
+        .disappeared_delta = countDelta(right.disappeared_event_ids.len, left.disappeared_event_ids.len),
+        .persisting_delta = countDelta(right.persisting_event_ids.len, left.persisting_event_ids.len),
+        .appeared_delta = countDelta(right.appeared_event_ids.len, left.appeared_event_ids.len),
+        .missing_delta = countDelta(right.missing_event_ids.len, left.missing_event_ids.len),
+        .finding_delta_delta = optionalFindingDeltaDelta(left.finding_delta, right.finding_delta),
+        .verification_command_delta = countDelta(right.verification_commands.len, left.verification_commands.len),
+    };
+}
+
+fn optionalFindingDeltaDelta(left: ?isize, right: ?isize) ?isize {
+    if (left) |left_value| {
+        if (right) |right_value| return right_value - left_value;
+    }
+    return null;
+}
+
+fn assessmentRank(assessment: []const u8) i8 {
+    if (std.mem.eql(u8, assessment, "improved")) return 2;
+    if (std.mem.eql(u8, assessment, "unchanged")) return 1;
+    if (std.mem.eql(u8, assessment, "inconclusive")) return 0;
+    if (std.mem.eql(u8, assessment, "regressed")) return -1;
+    return 0;
+}
+
+fn auditChainSnapshotComparison(
+    status: []const u8,
+    left: AuditChainArtifactForCompare,
+    right: AuditChainArtifactForCompare,
+    deltas: AuditChainSnapshotDeltas,
+) []const u8 {
+    if (!std.mem.eql(u8, status, "ready")) return "inconclusive";
+
+    const left_rank = assessmentRank(left.assessment);
+    const right_rank = assessmentRank(right.assessment);
+    if (right_rank > left_rank) return "improved";
+    if (right_rank < left_rank) return "regressed";
+
+    if (deltas.finding_delta_delta) |finding_delta_delta| {
+        if (finding_delta_delta < 0) return "improved";
+        if (finding_delta_delta > 0) return "regressed";
+    }
+
+    if ((deltas.persisting_delta < 0 or deltas.missing_delta < 0) and deltas.appeared_delta <= 0) return "improved";
+    if (deltas.persisting_delta > 0 or deltas.missing_delta > 0 or deltas.appeared_delta > 0) return "regressed";
+    if (deltas.event_ids_delta == 0 and deltas.disappeared_delta == 0 and deltas.persisting_delta == 0 and deltas.appeared_delta == 0 and deltas.missing_delta == 0 and (deltas.finding_delta_delta orelse 0) == 0) return "unchanged";
+
+    return "inconclusive";
+}
+
+fn appendAuditChainSnapshotSideJson(
+    output: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    manifest_path: []const u8,
+    manifest: SnapshotManifestForCompare,
+    chain: AuditChainArtifactForCompare,
+) !void {
+    try output.append(allocator, '{');
+    try output.appendSlice(allocator, "\"snapshot\":");
+    try appendJsonString(output, allocator, manifest.name);
+    try output.appendSlice(allocator, ",\"manifest_path\":");
+    try appendJsonString(output, allocator, manifest_path);
+    try output.appendSlice(allocator, ",\"artifact_path\":");
+    try appendJsonString(output, allocator, manifest.artifact.path);
+    try output.appendSlice(allocator, ",\"target\":");
+    try appendJsonString(output, allocator, manifest.target);
+    try output.appendSlice(allocator, ",\"phase\":");
+    try appendJsonString(output, allocator, manifest.phase);
+    try output.appendSlice(allocator, ",\"mode\":");
+    try appendJsonString(output, allocator, chain.mode);
+    try output.appendSlice(allocator, ",\"assessment\":");
+    try appendJsonString(output, allocator, chain.assessment);
+    try output.appendSlice(allocator, ",\"proposal_status\":");
+    try appendJsonString(output, allocator, chain.proposal_status);
+    try output.appendSlice(allocator, ",\"approval_status\":");
+    try appendJsonString(output, allocator, chain.approval_status);
+    try output.print(allocator, ",\"approved\":{},\"applied\":{}", .{ chain.approved, chain.applied });
+    try output.appendSlice(allocator, ",\"finding_delta\":");
+    try appendOptionalJsonIsize(output, allocator, chain.finding_delta);
+    try output.print(
+        allocator,
+        ",\"event_id_count\":{d},\"disappeared_count\":{d},\"persisting_count\":{d},\"appeared_count\":{d},\"missing_count\":{d},\"verification_command_count\":{d}",
+        .{
+            chain.event_ids.len,
+            chain.disappeared_event_ids.len,
+            chain.persisting_event_ids.len,
+            chain.appeared_event_ids.len,
+            chain.missing_event_ids.len,
+            chain.verification_commands.len,
+        },
+    );
+    try output.append(allocator, '}');
+}
+
+fn appendAuditChainSnapshotDeltasJson(output: *std.ArrayList(u8), allocator: std.mem.Allocator, deltas: AuditChainSnapshotDeltas) !void {
+    try output.append(allocator, '{');
+    try output.appendSlice(allocator, "\"finding_delta_delta\":");
+    try appendOptionalJsonIsize(output, allocator, deltas.finding_delta_delta);
+    try output.print(
+        allocator,
+        ",\"event_ids_delta\":{d},\"disappeared_delta\":{d},\"persisting_delta\":{d},\"appeared_delta\":{d},\"missing_delta\":{d},\"verification_command_delta\":{d}",
+        .{
+            deltas.event_ids_delta,
+            deltas.disappeared_delta,
+            deltas.persisting_delta,
+            deltas.appeared_delta,
+            deltas.missing_delta,
+            deltas.verification_command_delta,
+        },
+    );
+    try output.append(allocator, '}');
+}
+
+fn appendAuditChainSnapshotSideText(
+    output: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    side: []const u8,
+    manifest_path: []const u8,
+    manifest: SnapshotManifestForCompare,
+    chain: AuditChainArtifactForCompare,
+) !void {
+    try output.print(allocator, "{s} snapshot: {s}\n", .{ side, manifest.name });
+    try output.print(allocator, "{s} manifest: {s}\n", .{ side, manifest_path });
+    try output.print(allocator, "{s} artifact: {s}\n", .{ side, manifest.artifact.path });
+    try output.print(allocator, "{s} target: {s}\n", .{ side, manifest.target });
+    try output.print(allocator, "{s} phase: {s}\n", .{ side, manifest.phase });
+    try output.print(allocator, "{s} mode: {s}\n", .{ side, chain.mode });
+    try output.print(allocator, "{s} assessment: {s}\n", .{ side, chain.assessment });
+    try output.print(allocator, "{s} proposal status: {s}\n", .{ side, chain.proposal_status });
+    try output.print(allocator, "{s} approval status: {s}\n", .{ side, chain.approval_status });
+    try output.print(allocator, "{s} approved: {}\n", .{ side, chain.approved });
+    try output.print(allocator, "{s} applied: {}\n", .{ side, chain.applied });
+    try output.print(allocator, "{s} finding delta: ", .{side});
+    try appendOptionalIsizeText(output, allocator, chain.finding_delta);
+    try output.print(
+        allocator,
+        "{s} counts: event_ids={d} disappeared={d} persisting={d} appeared={d} missing={d} verification_commands={d}\n",
+        .{
+            side,
+            chain.event_ids.len,
+            chain.disappeared_event_ids.len,
+            chain.persisting_event_ids.len,
+            chain.appeared_event_ids.len,
+            chain.missing_event_ids.len,
+            chain.verification_commands.len,
+        },
+    );
+}
+
+fn appendAuditChainSnapshotDeltasText(output: *std.ArrayList(u8), allocator: std.mem.Allocator, deltas: AuditChainSnapshotDeltas) !void {
+    try output.appendSlice(allocator, "deltas:\n");
+    try appendOptionalSignedDeltaListItem(output, allocator, "finding_delta_delta", deltas.finding_delta_delta);
+    try appendSignedDeltaListItem(output, allocator, "event_ids_delta", deltas.event_ids_delta);
+    try appendSignedDeltaListItem(output, allocator, "disappeared_delta", deltas.disappeared_delta);
+    try appendSignedDeltaListItem(output, allocator, "persisting_delta", deltas.persisting_delta);
+    try appendSignedDeltaListItem(output, allocator, "appeared_delta", deltas.appeared_delta);
+    try appendSignedDeltaListItem(output, allocator, "missing_delta", deltas.missing_delta);
+    try appendSignedDeltaListItem(output, allocator, "verification_command_delta", deltas.verification_command_delta);
+}
+
+fn collectSnapshotManifestWarnings(
+    allocator: std.mem.Allocator,
+    warnings: *std.ArrayList([]const u8),
+    side: []const u8,
+    manifest: SnapshotManifestForCompare,
+) !void {
+    if (manifest.schema) |schema| {
+        if (!std.mem.eql(u8, schema, snapshot_manifest_schema)) {
+            try appendOwnedWarningFmt(allocator, warnings, "warning: {s} manifest schema={s} unsupported; expected {s}", .{ side, schema, snapshot_manifest_schema });
+        }
+    } else {
+        try appendOwnedWarningFmt(allocator, warnings, "warning: {s} manifest schema missing; expected {s}", .{ side, snapshot_manifest_schema });
+    }
+
+    if (manifest.schema_version) |version| {
+        if (version > snapshot_manifest_schema_version) {
+            try appendOwnedWarningFmt(allocator, warnings, "warning: {s} manifest schema_version={d} newer than supported={d}", .{ side, version, snapshot_manifest_schema_version });
+        }
+    } else {
+        try appendOwnedWarningFmt(allocator, warnings, "warning: {s} manifest schema_version missing; expected {d}", .{ side, snapshot_manifest_schema_version });
+    }
+
+    if (manifest.warnings) |manifest_warnings| {
+        for (manifest_warnings) |warning| {
+            try appendOwnedWarningFmt(allocator, warnings, "{s} manifest: {s}", .{ side, warning });
+        }
+    }
+}
+
+fn collectAuditChainSnapshotWarnings(
+    allocator: std.mem.Allocator,
+    warnings: *std.ArrayList([]const u8),
+    side: []const u8,
+    manifest: SnapshotManifestForCompare,
+    chain: AuditChainArtifactForCompare,
+    blocked: *bool,
+) !void {
+    if (manifest.artifact.schema) |schema| {
+        if (!std.mem.eql(u8, schema, audit_chain_artifact_schema)) {
+            try appendOwnedWarningFmt(allocator, warnings, "warning: {s} snapshot artifact schema={s} is not audit-chain schema={s}", .{ side, schema, audit_chain_artifact_schema });
+            blocked.* = true;
+        }
+    }
+
+    if (chain.schema) |schema| {
+        if (!std.mem.eql(u8, schema, audit_chain_artifact_schema)) {
+            try appendOwnedWarningFmt(allocator, warnings, "warning: {s} audit-chain schema={s} unsupported; expected {s}", .{ side, schema, audit_chain_artifact_schema });
+            blocked.* = true;
+        }
+    } else {
+        try appendOwnedWarningFmt(allocator, warnings, "warning: {s} audit-chain schema missing; expected {s}", .{ side, audit_chain_artifact_schema });
+        blocked.* = true;
+    }
+
+    if (chain.schema_version) |version| {
+        if (version > audit_chain_artifact_schema_version) {
+            try appendOwnedWarningFmt(allocator, warnings, "warning: {s} audit-chain schema_version={d} newer than supported={d}", .{ side, version, audit_chain_artifact_schema_version });
+            blocked.* = true;
+        }
+    } else {
+        try appendOwnedWarningFmt(allocator, warnings, "warning: {s} audit-chain schema_version missing; expected {d}", .{ side, audit_chain_artifact_schema_version });
+        blocked.* = true;
+    }
+
+    if (chain.target.len > 0 and !std.mem.eql(u8, chain.target, manifest.target)) {
+        try appendOwnedWarningFmt(allocator, warnings, "warning: {s} manifest target={s} differs from audit-chain target={s}", .{ side, manifest.target, chain.target });
+    }
+
+    if (chain.applied) {
+        try appendOwnedWarningFmt(allocator, warnings, "{s} audit-chain applied=true requires reviewed application evidence", .{side});
+        blocked.* = true;
+    }
+}
+
+fn collectAuditChainArtifactManifestWarnings(
+    allocator: std.mem.Allocator,
+    warnings: *std.ArrayList([]const u8),
+    chain: AuditChainArtifactForCompare,
+) !void {
+    if (chain.schema) |schema| {
+        if (!std.mem.eql(u8, schema, audit_chain_artifact_schema)) {
+            try appendOwnedWarningFmt(allocator, warnings, "warning: artifact audit-chain schema={s} unsupported; expected {s}", .{ schema, audit_chain_artifact_schema });
+        }
+    } else {
+        try appendOwnedWarningFmt(allocator, warnings, "warning: artifact audit-chain schema missing; expected {s}", .{audit_chain_artifact_schema});
+    }
+
+    if (chain.schema_version) |version| {
+        if (version > audit_chain_artifact_schema_version) {
+            try appendOwnedWarningFmt(allocator, warnings, "warning: artifact audit-chain schema_version={d} newer than supported={d}", .{ version, audit_chain_artifact_schema_version });
+        }
+    } else {
+        try appendOwnedWarningFmt(allocator, warnings, "warning: artifact audit-chain schema_version missing; expected {d}", .{audit_chain_artifact_schema_version});
+    }
+}
+
+fn appendAuditChainManifestNextQueriesJson(output: *std.ArrayList(u8), allocator: std.mem.Allocator, options: SnapshotManifestOptions) !void {
+    const compare_query = try std.fmt.allocPrint(allocator, "zig build causal-snapshot -- audit-chain-compare {s} {s}", .{ options.name, options.name });
+    defer allocator.free(compare_query);
+    try appendJsonString(output, allocator, compare_query);
+
+    const inspection = try std.fmt.allocPrint(allocator, "inspect audit-chain artifact {s} from snapshot {s}", .{ options.artifact_path, options.name });
+    defer allocator.free(inspection);
+    try output.append(allocator, ',');
+    try appendJsonString(output, allocator, inspection);
+}
+
+fn appendAuditChainManifestNextQueriesText(output: *std.ArrayList(u8), allocator: std.mem.Allocator, options: SnapshotManifestOptions) !void {
+    try output.print(allocator, "- zig build causal-snapshot -- audit-chain-compare {s} {s}\n", .{ options.name, options.name });
+    try output.print(allocator, "- inspect audit-chain artifact: {s} (snapshot {s})\n", .{ options.artifact_path, options.name });
+}
+
+fn appendAuditChainSnapshotCompareNextQueriesJson(
+    output: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    left_manifest_path: []const u8,
+    right_manifest_path: []const u8,
+    left_manifest: SnapshotManifestForCompare,
+    right_manifest: SnapshotManifestForCompare,
+) !void {
+    const compare_query = try std.fmt.allocPrint(allocator, "zig build causal-snapshot -- audit-chain-compare {s} {s}", .{ left_manifest_path, right_manifest_path });
+    defer allocator.free(compare_query);
+    try appendJsonString(output, allocator, compare_query);
+
+    const left_inspection = try std.fmt.allocPrint(allocator, "inspect left audit-chain artifact {s} from snapshot {s}", .{ left_manifest.artifact.path, left_manifest.name });
+    defer allocator.free(left_inspection);
+    try output.append(allocator, ',');
+    try appendJsonString(output, allocator, left_inspection);
+
+    const right_inspection = try std.fmt.allocPrint(allocator, "inspect right audit-chain artifact {s} from snapshot {s}", .{ right_manifest.artifact.path, right_manifest.name });
+    defer allocator.free(right_inspection);
+    try output.append(allocator, ',');
+    try appendJsonString(output, allocator, right_inspection);
+}
+
+fn appendAuditChainSnapshotCompareNextQueriesText(
+    output: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    left_manifest_path: []const u8,
+    right_manifest_path: []const u8,
+    left_manifest: SnapshotManifestForCompare,
+    right_manifest: SnapshotManifestForCompare,
+) !void {
+    try output.print(allocator, "- zig build causal-snapshot -- audit-chain-compare {s} {s}\n", .{ left_manifest_path, right_manifest_path });
+    try output.print(allocator, "- inspect left audit-chain artifact: {s} (snapshot {s})\n", .{ left_manifest.artifact.path, left_manifest.name });
+    try output.print(allocator, "- inspect right audit-chain artifact: {s} (snapshot {s})\n", .{ right_manifest.artifact.path, right_manifest.name });
 }
 
 fn isStructuralEventKind(kind: []const u8) bool {
@@ -881,6 +1476,82 @@ fn appendOptionalJsonU64(output: *std.ArrayList(u8), allocator: std.mem.Allocato
     }
 }
 
+fn appendOptionalJsonIsize(output: *std.ArrayList(u8), allocator: std.mem.Allocator, value: ?isize) !void {
+    if (value) |number| {
+        try output.print(allocator, "{d}", .{number});
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+}
+
+fn appendOptionalIsizeText(output: *std.ArrayList(u8), allocator: std.mem.Allocator, value: ?isize) !void {
+    if (value) |number| {
+        try output.print(allocator, "{d}\n", .{number});
+    } else {
+        try output.appendSlice(allocator, "none\n");
+    }
+}
+
+fn appendSignedDeltaListItem(output: *std.ArrayList(u8), allocator: std.mem.Allocator, label: []const u8, delta: isize) !void {
+    if (delta >= 0) {
+        try output.print(allocator, "- {s}: +{d}\n", .{ label, delta });
+    } else {
+        try output.print(allocator, "- {s}: {d}\n", .{ label, delta });
+    }
+}
+
+fn appendOptionalSignedDeltaListItem(output: *std.ArrayList(u8), allocator: std.mem.Allocator, label: []const u8, delta: ?isize) !void {
+    if (delta) |value| {
+        try appendSignedDeltaListItem(output, allocator, label, value);
+    } else {
+        try output.print(allocator, "- {s}: none\n", .{label});
+    }
+}
+
+fn appendStringListJson(output: *std.ArrayList(u8), allocator: std.mem.Allocator, items: []const []const u8) !void {
+    try output.append(allocator, '[');
+    for (items, 0..) |item, index| {
+        if (index > 0) try output.append(allocator, ',');
+        try appendJsonString(output, allocator, item);
+    }
+    try output.append(allocator, ']');
+}
+
+fn appendStringListText(output: *std.ArrayList(u8), allocator: std.mem.Allocator, items: []const []const u8) !void {
+    if (items.len == 0) {
+        try output.appendSlice(allocator, "- none\n");
+        return;
+    }
+    for (items) |item| {
+        try output.print(allocator, "- {s}\n", .{item});
+    }
+}
+
+fn appendOwnedWarningsText(output: *std.ArrayList(u8), allocator: std.mem.Allocator, warnings: []const []const u8) !void {
+    try output.appendSlice(allocator, "warnings:\n");
+    if (warnings.len == 0) {
+        try output.appendSlice(allocator, "- none\n");
+        return;
+    }
+    try appendStringListText(output, allocator, warnings);
+}
+
+fn appendOwnedWarningFmt(
+    allocator: std.mem.Allocator,
+    warnings: *std.ArrayList([]const u8),
+    comptime fmt: []const u8,
+    args: anytype,
+) !void {
+    const warning = try std.fmt.allocPrint(allocator, fmt, args);
+    errdefer allocator.free(warning);
+    try warnings.append(allocator, warning);
+}
+
+fn freeOwnedStringList(allocator: std.mem.Allocator, items: *std.ArrayList([]const u8)) void {
+    for (items.items) |item| allocator.free(item);
+    items.deinit(allocator);
+}
+
 fn firstEventId(events: []const Event) ?u64 {
     if (events.len == 0) return null;
     return events[0].id;
@@ -1061,7 +1732,7 @@ const ManifestFormat = enum {
 };
 
 fn usage() []const u8 {
-    return "usage: zig build causal-snapshot -- manifest <name> <artifact.json> [--format json|text] [--target <target>] [--phase <phase>] [--baseline <path>] [--compare-report <path>] [--query-report <path>] [--advice-report <path>]\n       zig build causal-snapshot -- capture <name> [scenario]\n       zig build causal-snapshot -- compare <left> <right>\n       zig build causal-snapshot -- replay-feasibility <snapshot>\n       zig build causal-snapshot -- replay-scenario <snapshot> <scenario>\n       zig build causal-snapshot -- fork-proposal <snapshot> <scenario> <fork>\n";
+    return "usage: zig build causal-snapshot -- manifest <name> <artifact.json> [--format json|text] [--target <target>] [--phase <phase>] [--baseline <path>] [--compare-report <path>] [--query-report <path>] [--advice-report <path>]\n       zig build causal-snapshot -- capture <name> [scenario]\n       zig build causal-snapshot -- compare <left> <right>\n       zig build causal-snapshot -- audit-chain-compare <left> <right>\n       zig build causal-snapshot -- replay-feasibility <snapshot>\n       zig build causal-snapshot -- replay-scenario <snapshot> <scenario>\n       zig build causal-snapshot -- fork-proposal <snapshot> <scenario> <fork>\n";
 }
 
 fn failUsage(err: anyerror) noreturn {
@@ -1233,6 +1904,42 @@ pub fn main(init: std.process.Init) !void {
             right_manifest_ref.path,
             right_manifest_json,
             right_artifact_json,
+        );
+        defer allocator.free(report);
+        std.debug.print("{s}", .{report});
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "audit-chain-compare")) {
+        if (args.len != 4) failUsage(error.InvalidAuditChainSnapshotCompareArguments);
+        const left_manifest_ref = try resolveSnapshotManifestReference(allocator, args[2]);
+        defer left_manifest_ref.deinit(allocator);
+        const right_manifest_ref = try resolveSnapshotManifestReference(allocator, args[3]);
+        defer right_manifest_ref.deinit(allocator);
+
+        const left_manifest_json = try std.Io.Dir.cwd().readFileAlloc(init.io, left_manifest_ref.path, allocator, .limited(1024 * 1024));
+        defer allocator.free(left_manifest_json);
+        const right_manifest_json = try std.Io.Dir.cwd().readFileAlloc(init.io, right_manifest_ref.path, allocator, .limited(1024 * 1024));
+        defer allocator.free(right_manifest_json);
+
+        const left_audit_chain_path = try snapshotArtifactPathFromManifestJson(allocator, left_manifest_json);
+        defer allocator.free(left_audit_chain_path);
+        const right_audit_chain_path = try snapshotArtifactPathFromManifestJson(allocator, right_manifest_json);
+        defer allocator.free(right_audit_chain_path);
+
+        const left_audit_chain_json = try std.Io.Dir.cwd().readFileAlloc(init.io, left_audit_chain_path, allocator, .limited(1024 * 1024));
+        defer allocator.free(left_audit_chain_json);
+        const right_audit_chain_json = try std.Io.Dir.cwd().readFileAlloc(init.io, right_audit_chain_path, allocator, .limited(1024 * 1024));
+        defer allocator.free(right_audit_chain_json);
+
+        const report = try formatAuditChainSnapshotCompareText(
+            allocator,
+            left_manifest_ref.path,
+            left_manifest_json,
+            left_audit_chain_json,
+            right_manifest_ref.path,
+            right_manifest_json,
+            right_audit_chain_json,
         );
         defer allocator.free(report);
         std.debug.print("{s}", .{report});
@@ -1467,6 +2174,94 @@ const replay_manifest_json =
     \\}
 ;
 
+const audit_chain_left_manifest_json =
+    \\{
+    \\  "schema": "zigeffect.causal.snapshot-manifest.v1",
+    \\  "schema_version": 1,
+    \\  "name": "left-chain",
+    \\  "target": "dogfood",
+    \\  "phase": "audit-chain-baseline",
+    \\  "artifact": {
+    \\    "path": ".zig-cache/causal-artifacts/left-audit-chain.json",
+    \\    "schema": "zigeffect.causal.audit-chain.v1",
+    \\    "schema_version": 1,
+    \\    "events": 0,
+    \\    "first_event_id": null,
+    \\    "last_event_id": null,
+    \\    "findings": 1
+    \\  },
+    \\  "warnings": []
+    \\}
+;
+
+const audit_chain_right_manifest_json =
+    \\{
+    \\  "schema": "zigeffect.causal.snapshot-manifest.v1",
+    \\  "schema_version": 1,
+    \\  "name": "right-chain",
+    \\  "target": "dogfood",
+    \\  "phase": "audit-chain-after",
+    \\  "artifact": {
+    \\    "path": ".zig-cache/causal-artifacts/right-audit-chain.json",
+    \\    "schema": "zigeffect.causal.audit-chain.v1",
+    \\    "schema_version": 1,
+    \\    "events": 0,
+    \\    "first_event_id": null,
+    \\    "last_event_id": null,
+    \\    "findings": 0
+    \\  },
+    \\  "warnings": []
+    \\}
+;
+
+const audit_chain_left_json =
+    \\{
+    \\  "schema": "zigeffect.causal.audit-chain.v1",
+    \\  "schema_version": 1,
+    \\  "mode": "local",
+    \\  "target": "dogfood",
+    \\  "assessment": "unchanged",
+    \\  "proposal_status": "approved",
+    \\  "approval_status": "approved",
+    \\  "approved": true,
+    \\  "applied": false,
+    \\  "finding_delta": 0,
+    \\  "event_ids": [1, 2, 3, 5],
+    \\  "disappeared_event_ids": [1],
+    \\  "persisting_event_ids": [2],
+    \\  "appeared_event_ids": [3],
+    \\  "missing_event_ids": [5],
+    \\  "verification_commands": ["zig build examples"],
+    \\  "claim_guardrails": ["Do not claim a fix while evidence persists."],
+    \\  "proposal_guardrails": ["This proposal does not apply source changes."],
+    \\  "chain_guardrails": ["Chain comparison is evidence, not authorization to edit source."]
+    \\}
+;
+
+const audit_chain_right_json =
+    \\{
+    \\  "schema": "zigeffect.causal.audit-chain.v1",
+    \\  "schema_version": 1,
+    \\  "mode": "local",
+    \\  "target": "dogfood",
+    \\  "assessment": "improved",
+    \\  "proposal_status": "approved",
+    \\  "approval_status": "approved",
+    \\  "approved": true,
+    \\  "applied": false,
+    \\  "finding_delta": -1,
+    \\  "event_ids": [1, 2, 3],
+    \\  "disappeared_event_ids": [1, 2],
+    \\  "persisting_event_ids": [],
+    \\  "appeared_event_ids": [3],
+    \\  "missing_event_ids": [],
+    \\  "verification_commands": ["zig build examples", "zig build test"],
+    \\  "claim_guardrails": ["Do not claim a fix while evidence persists."],
+    \\  "proposal_guardrails": ["This proposal does not apply source changes."],
+    \\  "chain_guardrails": ["Chain comparison is evidence, not authorization to edit source."]
+    \\}
+;
+
 const replay_artifact_json =
     \\{
     \\  "schema": "zigeffect.causal.v1",
@@ -1534,6 +2329,38 @@ test "snapshot manifest warns for future artifact shape and unknown event kind" 
     try std.testing.expect(std.mem.indexOf(u8, manifest, "schema_version=2 newer than supported=1") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, "event_taxonomy_version=3 newer than supported=1") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, "event kind effect_suspended unknown") != null);
+}
+
+test "snapshot manifest json supports audit-chain artifacts" {
+    const manifest = try formatSnapshotManifestJson(std.testing.allocator, audit_chain_left_json, .{
+        .name = "left-chain",
+        .target = "dogfood",
+        .phase = "audit-chain-baseline",
+        .artifact_path = ".zig-cache/causal-artifacts/left-audit-chain.json",
+    });
+    defer std.testing.allocator.free(manifest);
+
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"schema\":\"zigeffect.causal.snapshot-manifest.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"name\":\"left-chain\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"schema\":\"zigeffect.causal.audit-chain.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"events\":0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "audit-chain-compare left-chain left-chain") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "causal-query -- --file") == null);
+}
+
+test "snapshot manifest text supports audit-chain artifacts" {
+    const report = try formatSnapshotManifestText(std.testing.allocator, audit_chain_left_json, .{
+        .name = "left-chain",
+        .target = "dogfood",
+        .phase = "audit-chain-baseline",
+        .artifact_path = ".zig-cache/causal-artifacts/left-audit-chain.json",
+    });
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "artifact schema: zigeffect.causal.audit-chain.v1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "events: 0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-snapshot -- audit-chain-compare left-chain left-chain") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "causal-query -- --file") == null);
 }
 
 test "snapshot names validate before path formatting" {
@@ -1683,6 +2510,10 @@ test "causal snapshot usage lists replay scenario command" {
     try std.testing.expect(std.mem.indexOf(u8, usage(), "replay-scenario <snapshot> <scenario>") != null);
 }
 
+test "causal snapshot usage lists audit-chain compare command" {
+    try std.testing.expect(std.mem.indexOf(u8, usage(), "audit-chain-compare <left> <right>") != null);
+}
+
 test "snapshot compare report names manifests and embeds causal compare" {
     const report = try formatSnapshotCompareText(
         std.testing.allocator,
@@ -1727,6 +2558,76 @@ test "snapshot compare report surfaces manifest warnings" {
     try std.testing.expect(std.mem.indexOf(u8, report, "manifest warnings:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "warning: right manifest schema_version=2 newer than supported=1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "right manifest: warning: artifact event kind effect_suspended unknown") != null);
+}
+
+test "audit-chain snapshot compare json summarizes two retained chain states" {
+    const json = try formatAuditChainSnapshotCompareJson(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-left-chain.json",
+        audit_chain_left_manifest_json,
+        audit_chain_left_json,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-right-chain.json",
+        audit_chain_right_manifest_json,
+        audit_chain_right_json,
+    );
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.audit-chain-snapshot-compare.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"status\":\"ready\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"comparison\":\"improved\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"finding_delta_delta\":-1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"persisting_delta\":-1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"missing_delta\":-1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"left-chain\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"right-chain\"") != null);
+}
+
+test "audit-chain snapshot compare text reports status deltas and next queries" {
+    const report = try formatAuditChainSnapshotCompareText(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-left-chain.json",
+        audit_chain_left_manifest_json,
+        audit_chain_left_json,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-right-chain.json",
+        audit_chain_right_manifest_json,
+        audit_chain_right_json,
+    );
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect causal audit-chain snapshot compare report") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.audit-chain-snapshot-compare.v1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "status: ready") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "comparison: improved") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "left snapshot: left-chain") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "right snapshot: right-chain") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "deltas:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "next queries:") != null);
+}
+
+test "audit-chain snapshot compare blocks already applied right chain" {
+    const applied_right = try std.mem.replaceOwned(
+        u8,
+        std.testing.allocator,
+        audit_chain_right_json,
+        "\"applied\": false",
+        "\"applied\": true",
+    );
+    defer std.testing.allocator.free(applied_right);
+
+    const json = try formatAuditChainSnapshotCompareJson(
+        std.testing.allocator,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-left-chain.json",
+        audit_chain_left_manifest_json,
+        audit_chain_left_json,
+        ".zig-cache/causal-artifacts/zigeffect-causal-snapshot-right-chain.json",
+        audit_chain_right_manifest_json,
+        applied_right,
+    );
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"status\":\"blocked\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"comparison\":\"inconclusive\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "right audit-chain applied=true requires reviewed application evidence") != null);
 }
 
 test "replay feasibility report refuses replay and counts event posture" {

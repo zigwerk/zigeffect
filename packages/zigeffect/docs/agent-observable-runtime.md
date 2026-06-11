@@ -1104,11 +1104,24 @@ compatibility warnings, replay feasibility, and next query commands, but it
 does not rerun tests or embed the event list. Use
 `zig build causal-snapshot -- manifest <name> <artifact.json> --format text`
 when you only want a stdout report for a specific artifact path.
+When `<artifact.json>` is an audit-chain artifact, the manifest records
+audit-chain metadata and emits audit-chain comparison hints instead of core
+event-run query commands.
 
 `zig build causal-snapshot -- compare <left> <right>` compares two snapshot
 manifests by name or path. It reports manifest identity, event/finding deltas,
 manifest warnings, and then embeds `causal-compare` output for the referenced
 causal JSON artifacts.
+
+`zig build causal-snapshot -- audit-chain-compare <left> <right>` compares two
+snapshot manifests whose referenced artifacts are
+`zigeffect.causal.audit-chain.v1` governance JSON. It emits
+`zigeffect.causal.audit-chain-snapshot-compare.v1`, reports approval/applied
+posture, finding-delta and evidence-classification deltas, manifest and
+audit-chain compatibility warnings, and safe next-query hints. It blocks
+`applied=true` chains unless separate reviewed application evidence exists.
+Because audit-chain artifacts do not contain core causal event arrays, this
+command is the read-only comparison surface for retained audit-chain evidence.
 
 `zig build causal-snapshot -- replay-feasibility <snapshot>` is a read-only M5
 report. It does not replay. It classifies event posture, counts blockers, keeps

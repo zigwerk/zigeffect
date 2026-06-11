@@ -1037,6 +1037,15 @@ The response stays within `zigeffect.causal.agent-query.v1`, reports per-side
 event and finding deltas, labels limitations for missing metadata or missing run
 evidence, and keeps mutation authority disabled.
 
+Compare retained audit-chain governance evidence with:
+
+```bash
+zig build causal-snapshot -- audit-chain-compare left-chain right-chain
+```
+
+This command is for audit-chain JSON, not core event-run JSON, and does not
+grant source, registry, app, production, or durable mutation authority.
+
 Print the causal live dashboard streaming workbench contract:
 
 ```bash
@@ -1588,6 +1597,7 @@ zig build causal-snapshot -- replay-scenario missing-service-baseline missing-se
 zig build causal-snapshot -- capture baseline
 zig build causal-snapshot -- manifest baseline .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json --format text
 zig build causal-snapshot -- compare baseline baseline
+zig build causal-snapshot -- audit-chain-compare left-chain right-chain
 zig build causal-snapshot -- replay-feasibility baseline
 ```
 
@@ -1595,6 +1605,9 @@ zig build causal-snapshot -- replay-feasibility baseline
 metadata for an existing causal JSON artifact. The manifest records the
 snapshot name, artifact path, event count, event id range, finding count, replay
 feasibility, warnings, and next query commands. It does not embed events.
+When the artifact is `zigeffect.causal.audit-chain.v1`, the manifest records
+audit-chain metadata and emits audit-chain comparison hints instead of core
+event-run query commands.
 `causal-snapshot replay-scenario` is the execution step: it reruns a registered
 scenario command, writes replay-specific `.txt`, `.json`, and `.dot` artifacts,
 compares the baseline artifact with the replay artifact, and prints
@@ -1612,6 +1625,13 @@ event-log replay, source mutation, and scenario registry mutation.
 `causal-snapshot compare` accepts snapshot names or manifest JSON paths. It
 reads each manifest's referenced causal JSON artifact, prints snapshot-level
 event and finding deltas, and embeds the existing `causal-compare` event diff.
+
+`causal-snapshot audit-chain-compare` accepts snapshot names or manifest JSON
+paths whose referenced artifacts are `zigeffect.causal.audit-chain.v1`
+governance JSON. It prints `zigeffect.causal.audit-chain-snapshot-compare.v1`
+evidence with approval/applied posture, finding-delta and event-classification
+deltas, warnings, guardrails, and next inspection hints. It is read-only and
+blocks `applied=true` chains without separate reviewed application evidence.
 
 `causal-snapshot replay-feasibility` reads a snapshot manifest and its causal
 JSON artifact, keeps `feasible: false`, and lists the blockers that must be

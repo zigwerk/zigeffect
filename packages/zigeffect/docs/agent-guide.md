@@ -590,6 +590,9 @@ JSON artifact already exists. It writes
 artifact, records event counts and finding posture, and prints stable next
 query commands. Snapshot manifests do not embed events and do not make replay
 feasible yet; keep citing the underlying causal JSON event ids.
+The `manifest` command can also name retained audit-chain JSON artifacts; in
+that case it records audit-chain metadata and emits audit-chain comparison
+hints instead of event-run query commands.
 
 Compare named snapshots with
 `zig build causal-snapshot -- compare <left> <right>`. Use names such as
@@ -597,6 +600,15 @@ Compare named snapshots with
 directory, or pass explicit manifest JSON paths when reviewing uploaded CI
 artifacts. Treat the report as a state-level summary; query the underlying
 causal JSON paths for event-level evidence.
+
+Compare retained audit-chain governance snapshots with
+`zig build causal-snapshot -- audit-chain-compare <left> <right>` when both
+snapshot manifests point at `zigeffect.causal.audit-chain.v1` artifacts. The
+report emits `zigeffect.causal.audit-chain-snapshot-compare.v1`, summarizes
+approval/applied posture and evidence-classification deltas, and blocks
+`applied=true` chains without separate reviewed application evidence. Do not
+feed audit-chain governance JSON to `causal-query`; it is not a core event-run
+artifact.
 
 Use `zig build causal-snapshot -- replay-feasibility <snapshot>` when an agent
 needs to know whether a named state can be replayed. Today the answer must
@@ -924,6 +936,10 @@ Use this report before claiming a remediation worked. Persisting or missing
 event ids mean the cited evidence is not resolved; appeared ids mean the patch
 may have introduced new evidence. The command does not approve, apply, edit
 source, or run verification.
+When comparing two retained audit-chain reports, wrap them in snapshot
+manifests and use
+`zig build causal-snapshot -- audit-chain-compare <left> <right>` rather than
+event-run queries.
 
 After the audit chain exists, ask whether the evidence should become scenario
 coverage:

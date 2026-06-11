@@ -1162,10 +1162,18 @@ Status values:
      limitations, and keeps live telemetry, durable writes, app mutation,
      source mutation, registry mutation, and production authority disabled.
 46. `codex/zigeffect-causal-audit-chain-snapshot-compare`
-   - Current next branch: build arbitrary named audit-chain snapshot comparison
-     on top of bounded run-level comparison before app-facing production
-     integration fixtures or self-improving agent memory depends on durable
-     causal records.
+   - Delivered: `causal-snapshot audit-chain-compare <left> <right>` compares
+     retained `zigeffect.causal.audit-chain.v1` governance snapshots by name or
+     manifest path, emits
+     `zigeffect.causal.audit-chain-snapshot-compare.v1`, reports
+     approval/applied posture and evidence-classification deltas, blocks
+     `applied=true` chains without separate reviewed application evidence, and
+     avoids treating audit-chain governance JSON as core event-run artifacts.
+47. `codex/zigeffect-causal-app-facing-production-integration-fixtures`
+   - Current next branch: add deterministic app-facing production integration
+     fixtures on top of app semantic traces, agent queries, retained
+     audit-chain comparison, and NenDB durable-history evidence without live
+     telemetry, production writes, app mutation, or Cockroach scope.
 
 ## Dual-Interface Causal Spine Expansion
 

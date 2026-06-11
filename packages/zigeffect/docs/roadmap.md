@@ -1162,9 +1162,14 @@ metrics, and traces.
   summaries, failures, event explanations, cause traces, data lineage,
   findings, recommended next queries, and bounded `compare_runs` before/after
   summaries across one artifact or two retained artifacts.
-- Next: audit-chain snapshot comparison.
-- Still future: production-grade app-facing integrations and comparing
-  arbitrary named audit-chain snapshots beyond the current run-level query.
+- Delivered: audit-chain snapshot comparison compares retained
+  `zigeffect.causal.audit-chain.v1` governance snapshots by name or manifest
+  path, reports approval/applied posture and evidence-classification deltas,
+  and blocks `applied=true` chains without separate reviewed application
+  evidence.
+- Next: app-facing production integration fixtures.
+- Still future: production-grade app-facing integrations beyond local
+  deterministic fixtures.
 - Still future: deeper runtime regression scenarios for partial config and
   cause coverage.
 - Extend the SolidJS `zig-webui` causal workbench when future UI branches need

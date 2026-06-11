@@ -209,14 +209,15 @@ guardrails:
 - applied=true requires a separate reviewed application artifact.
 next queries:
 - zig build causal-snapshot -- audit-chain-compare <left> <right>
-- zig build causal-snapshot -- manifest <left-name> <left-artifact>
-- zig build causal-snapshot -- manifest <right-name> <right-artifact>
+- inspect left audit-chain artifact: <left-audit-chain-artifact>
+- inspect right audit-chain artifact: <right-audit-chain-artifact>
 ```
 
 The report intentionally avoids `causal-query` next queries because audit-chain
 artifacts are governance JSON, not core event-run artifacts with an `events`
-array. Agents should treat this command as the read-only comparison surface for
-retained audit-chain evidence.
+array. It also avoids `causal-snapshot manifest` over those audit-chain
+artifacts for the same reason. Agents should treat this command as the
+read-only comparison surface for retained audit-chain evidence.
 
 ## Comparison Rules
 

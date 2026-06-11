@@ -797,6 +797,7 @@ before/after verification evidence are recorded.
 
 - `zigeffect.causal.snapshot-manifest.v1`
 - `zigeffect.causal.snapshot-compare.v1`
+- `zigeffect.causal.audit-chain-snapshot-compare.v1`
 - `zigeffect.causal.replay-feasibility.v1`
 - `zigeffect.causal.deterministic-replay.v1`
 - `zigeffect.causal.scenario-fork-proposal.v1`
@@ -804,6 +805,13 @@ before/after verification evidence are recorded.
 Snapshot and replay artifacts summarize named causal evidence. They may compare
 or replay registered scenarios, but arbitrary runtime memory forking remains
 out of scope.
+
+The audit-chain snapshot comparison report is emitted by
+`causal-snapshot audit-chain-compare`. It compares two retained snapshot
+manifests whose artifacts are `zigeffect.causal.audit-chain.v1` governance
+JSON, reports approval/applied posture and event-classification deltas, and
+blocks `applied=true` chains unless separate reviewed application evidence is
+available. It is record-only evidence and grants no mutation authority.
 
 ### App Remediation
 

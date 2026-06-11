@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-audit-chain-snapshot-compare` means the
+The recommendation `start-app-facing-production-integration-fixtures` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -259,8 +259,9 @@ lineage-query, and bounded-retention evidence, and keeps Cockroach, non-NenDB
 adapters, live telemetry, network sends, durable production writes, NenDB
 production write authority, compaction execution, backup/restore execution,
 TTL deletion, production health claims, and mutation authority disabled.
-The cross-run comparison branch is now delivered. The next branch should be
-`codex/zigeffect-causal-audit-chain-snapshot-compare`.
+The cross-run comparison branch and audit-chain snapshot comparison branch are
+now delivered. The next branch should be
+`codex/zigeffect-causal-app-facing-production-integration-fixtures`.
 
 ## Dependency Order
 
@@ -316,11 +317,15 @@ The backlog currently orders future production-hardening branches as:
 48. `production-hardening-backlog-refresh` delivered
 49. `nendb-durable-history-hardening` delivered
 50. `agent-query-cross-run-comparison` delivered
+51. `audit-chain-snapshot-compare` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item now
 covers runtime bounded JSON queries, app semantic `trace_data`, and bounded
 `compare_runs` evidence across one artifact or two retained artifacts.
+The `audit-chain-snapshot-compare` item compares retained audit-chain
+governance snapshots without granting source, registry, app, durable, or
+production mutation authority.
 
 ## Authority Boundaries
 
@@ -899,8 +904,10 @@ telemetry, network sends, durable production writes, NenDB production write
 authority, production health claims, and mutation authority.
 
 The cross-run agent comparison branch builds on this durable history evidence.
-The next branch should build audit-chain snapshot comparison on top of the
-bounded run-level comparison surface.
+Audit-chain snapshot comparison now builds on the bounded run-level comparison
+surface and records retained governance deltas. The next branch should add
+app-facing production integration fixtures without live telemetry ingestion or
+mutation authority.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
