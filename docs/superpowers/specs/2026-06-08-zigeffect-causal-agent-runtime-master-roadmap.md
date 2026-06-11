@@ -1282,11 +1282,27 @@ Status values:
      NenDB adapter, write NenDB, deploy, prove production health, auto-apply, or
      grant app runtime integration.
 57. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-publication-policy`
-   - Next: define the advisory report publication/consumption policy that can
-     use applied application-boundary evidence without creating required status
-     checks, CI enforcement, GitHub API mutation, app mutation, NenDB writes,
-     NenDB adapter execution, Cockroach scope, deployment mutation, production
-     health claims, auto-apply, or live dashboard authority.
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-publication-policy`
+     consumes applied record-only advisory report application-boundary artifacts
+     and emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-publication-policy.v1`.
+     It defines interpretation rules for reviewer triage, read-only agents,
+     non-blocking CI advisory context, SolidJS `webui-dev/zig-webui` read-only
+     views, before/after review, and future consumption-readiness input. It
+     denies required status checks, merge blocking, workflow mutation, GitHub API
+     mutation, app mutation, app runtime integration, live projections, raw
+     payload capture, NenDB writes, NenDB adapter execution, Cockroach scope,
+     non-NenDB durable scope, deployment mutation, production health claims,
+     auto-apply, alternate renderers, and mutation authority.
+58. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-readiness`
+   - Next: define read-only consumption readiness for app-facing advisory
+     remediation reports so agents and the SolidJS workbench can consume policy
+     evidence with bounded queries, source ids, redaction expectations, denied
+     claims, and next-step guidance without turning the report into runtime
+     integration, mutation authority, required CI enforcement, NenDB writes,
+     NenDB adapter execution, Cockroach scope, production health proof, or
+     deployment authority.
 
 ## Dual-Interface Causal Spine Expansion
 
