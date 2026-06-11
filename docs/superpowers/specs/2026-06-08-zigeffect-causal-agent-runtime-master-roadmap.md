@@ -1788,10 +1788,18 @@ Status values:
      publication only, and keeps CI, GitHub, app runtime, storage, deployment,
      public upload, and mutation authority disabled.
 93. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluator`
-   - Next: consume ready seven-level policy evidence plus bounded local request
-     and support evidence, emit ready advisory or blocked evaluator findings,
-     preserve denied authority and redaction posture, and hand off to the next
-     app-facing evaluation-report producer.
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluator`
+     consumes ready seven-level policy evidence plus bounded local request and
+     support evidence, emits ready advisory or blocked evaluator findings,
+     preserves denied authority and redaction posture, and hands off to the
+     eight-level app-facing evaluation-report producer.
+94. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report`
+   - Next: consume ready or advisory seven-level evaluator evidence, summarize
+     the eighth app-facing evaluation-report layer for agents reviewers
+     non-blocking CI advisory readers and the SolidJS webui, preserve local
+     publication only, and keep CI, GitHub, app runtime, storage, deployment,
+     public upload, and mutation authority disabled.
 
 ## Dual-Interface Causal Spine Expansion
 
