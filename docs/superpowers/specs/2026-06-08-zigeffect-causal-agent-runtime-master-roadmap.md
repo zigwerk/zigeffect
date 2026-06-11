@@ -1224,10 +1224,23 @@ Status values:
      production writes, CI enforcement, deployment mutation, Cockroach scope,
      alternate renderer scope, live workbench preview, or `applied=true`.
 52. `codex/zigeffect-causal-app-facing-production-integration-nendb-handoff-fixtures`
-   - Next: consume the ready app-facing local-fixtures artifact and build NenDB
-     handoff fixture records for app runtime refs, bounded agent-query
-     projection refs, audit/remediation evidence refs, SolidJS read-only
-     preview refs, and advisory CI artifact refs without production writes.
+   - Delivered:
+     `causal-app-facing-production-integration-nendb-handoff-fixtures` consumes
+     a ready app-facing local-fixtures artifact and emits
+     `zigeffect.causal.app-facing-production-integration-nendb-handoff-fixtures.v1`,
+     cataloging fixture-only NenDB node and edge handoff records for app
+     runtime refs, bounded agent-query refs, audit/remediation review refs,
+     SolidJS read-only preview refs, and advisory CI artifact refs without
+     NenDB adapter execution, NenDB production writes, durable writes, app
+     runtime integration, raw payload capture, app mutation, CI enforcement,
+     deployment mutation, Cockroach scope, alternate renderer scope, or
+     `applied=true`.
+53. `codex/zigeffect-causal-app-facing-production-integration-audit-remediation-bridge`
+   - Next: consume ready app-facing NenDB handoff fixtures and connect
+     audit-chain comparison refs plus remediation review refs into an
+     evidence-only bridge without mutation proof, auto-apply, deployment, app
+     writes, production health claims, NenDB writes, Cockroach scope, or
+     `applied=true`.
 
 ## Dual-Interface Causal Spine Expansion
 

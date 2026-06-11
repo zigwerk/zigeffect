@@ -133,6 +133,33 @@ It does not mean app runtime integration, live agent projection, raw payload
 capture, production NenDB writes, app mutation, CI enforcement, deployment, or
 SolidJS live preview has been implemented.
 
+## NenDB Handoff Fixtures
+
+A ready local-fixtures artifact can feed the record-only NenDB handoff fixture
+review:
+
+```sh
+zig build causal-app-facing-production-integration-nendb-handoff-fixtures -- \
+  --from-local-fixtures ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures-readiness-review-implementation-proposal-app-facing-boundary-local-fixtures.json \
+  approve \
+  --reason "ready local app-facing fixtures reviewed for NenDB handoff fixtures" \
+  --verified-command "zig build causal-app-facing-production-integration-local-fixtures" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The handoff tool emits
+`zigeffect.causal.app-facing-production-integration-nendb-handoff-fixtures.v1`
+with `nendb_handoff_fixture_mode=true`,
+`nendb_adapter_execution_enabled=false`, `nendb_write_enabled=false`, and
+`durable_write_enabled=false`. It creates fixture-only NenDB node and edge
+handoff records for runtime refs, bounded agent-query refs,
+audit/remediation review refs, SolidJS read-only preview refs, and advisory CI
+artifact refs. It still does not execute the NenDB adapter, write production
+history, integrate the app runtime, or mark `applied=true`.
+
 ## Blocked Claims
 
 The artifact blocks app runtime integration, live agent-query projection,

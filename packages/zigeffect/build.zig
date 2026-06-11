@@ -1417,6 +1417,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_app_facing_production_integration_local_fixtures_tool_tests = b.addRunArtifact(causal_app_facing_production_integration_local_fixtures_tool_tests);
     test_step.dependOn(&run_causal_app_facing_production_integration_local_fixtures_tool_tests.step);
 
+    const causal_app_facing_production_integration_nendb_handoff_fixtures_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_app_facing_production_integration_nendb_handoff_fixtures.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_app_facing_production_integration_nendb_handoff_fixtures_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-app-facing-production-integration-nendb-handoff-fixtures",
+        .root_module = causal_app_facing_production_integration_nendb_handoff_fixtures_tool_module,
+    });
+    const run_causal_app_facing_production_integration_nendb_handoff_fixtures_tool = b.addRunArtifact(causal_app_facing_production_integration_nendb_handoff_fixtures_tool);
+    if (b.args) |args| run_causal_app_facing_production_integration_nendb_handoff_fixtures_tool.addArgs(args);
+    const causal_app_facing_production_integration_nendb_handoff_fixtures_step = b.step("causal-app-facing-production-integration-nendb-handoff-fixtures", "Review app-facing production integration NenDB handoff fixtures");
+    causal_app_facing_production_integration_nendb_handoff_fixtures_step.dependOn(&run_causal_app_facing_production_integration_nendb_handoff_fixtures_tool.step);
+
+    const causal_app_facing_production_integration_nendb_handoff_fixtures_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-app-facing-production-integration-nendb-handoff-fixtures-tests",
+        .root_module = causal_app_facing_production_integration_nendb_handoff_fixtures_tool_module,
+    });
+    const run_causal_app_facing_production_integration_nendb_handoff_fixtures_tool_tests = b.addRunArtifact(causal_app_facing_production_integration_nendb_handoff_fixtures_tool_tests);
+    test_step.dependOn(&run_causal_app_facing_production_integration_nendb_handoff_fixtures_tool_tests.step);
+
     const causal_production_telemetry_readiness_review_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_production_telemetry_readiness_review.zig"),
         .target = target,
