@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-production-telemetry-ci-gate-required-status-check-enforcement-report-policy` means the
+The recommendation `refresh-production-hardening-backlog` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -244,8 +244,14 @@ tool, required status check creation by the tool, CI upload execution, step
 summary writes, pull-request comments, live telemetry, durable writes, NenDB
 writes, non-NenDB durable adapters, alternate renderers, production health,
 production cluster claims, and mutation authority.
+The required-status-check enforcement report policy branch is also delivered:
+it consumes report application-boundary artifacts, records planned or applied
+interpretation policy, separates `ready_for_next_branch` from
+`published_report_policy_ready`, and hands off to production hardening backlog
+refresh without granting publication, GitHub, CI gate, live telemetry, storage,
+or production mutation authority.
 The next branch should be
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy`.
+`codex/zigeffect-causal-production-hardening-backlog-refresh`.
 
 ## Dependency Order
 
@@ -297,6 +303,7 @@ The backlog currently orders future production-hardening branches as:
 44. `production-telemetry-ci-gate-required-status-check-enforcement-evaluator` delivered
 45. `production-telemetry-ci-gate-required-status-check-enforcement-report` delivered
 46. `production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary` delivered
+47. `production-telemetry-ci-gate-required-status-check-enforcement-report-policy` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -844,8 +851,23 @@ writes, disabled pull-request comments, disabled live telemetry, disabled
 durable writes, disabled NenDB writes, NenDB-only durable direction, and
 SolidJS `zig-webui` workbench direction.
 
-The next branch should define interpretation policy for externally reviewed
-report application-boundary evidence.
+The enforcement report policy is documented in
+[production-telemetry-ci-gate-required-status-check-enforcement-report-policy.md](production-telemetry-ci-gate-required-status-check-enforcement-report-policy.md).
+It emits
+`zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-report-policy.v1`
+through
+`zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy`,
+separates policy readiness from published report policy readiness, and hands
+off to a production hardening backlog refresh. It preserves disabled GitHub API
+mutation by the tool, disabled branch-protection mutation by the tool, disabled
+workflow mutation by the tool, disabled check-run creation by the tool,
+disabled required status check creation by the tool, disabled CI uploads,
+disabled GitHub step summary writes, disabled pull-request comments, disabled
+live telemetry, disabled durable writes, disabled NenDB writes, NenDB-only
+durable direction, and SolidJS `zig-webui` workbench direction.
+
+The next branch should refresh this backlog and select the next unresolved
+roadmap item.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,

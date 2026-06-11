@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-production-telemetry-ci-gate-required-status-check-enforcement-report-policy";
-pub const recommended_next_branch = "codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy";
+pub const recommendation = "refresh-production-hardening-backlog";
+pub const recommended_next_branch = "codex/zigeffect-causal-production-hardening-backlog-refresh";
 
 const OutputFormat = enum { text, json };
 
@@ -1183,6 +1183,30 @@ const backlog_items: []const BacklogItem = &.{
         .branch = "codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary",
         .agent_guidance = "Use applied report application-boundary artifacts only to start report policy work; applied=true requires external reviewed application change evidence, before evidence, after evidence, report-after content, and verification commands, and it still does not prove mutation by this tool, live telemetry, durable writes, NenDB writes, non-NenDB adapters, alternate renderers, production cluster readiness, production health, or mutation authority.",
     },
+    .{
+        .id = "production-telemetry-ci-gate-required-status-check-enforcement-report-policy",
+        .title = "Production Telemetry CI Gate Required Status Check Enforcement Report Policy",
+        .gap_id = "production-telemetry-ci-gate-required-status-check-enforcement-report-policy",
+        .priority = "P5",
+        .status = "delivered",
+        .summary = "Consumes required-status-check enforcement report application-boundary artifacts and emits record-only interpretation policy artifacts for planned or externally applied report evidence.",
+        .depends_on = &.{ "production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary", "artifact-access-control", "production-telemetry-nendb-retention-fixtures" },
+        .deliverables = &.{
+            "planned and applied source interpretation policy",
+            "published report policy readiness signal",
+            "denied publication and mutation inference catalog",
+            "local JSON and text policy artifacts",
+            "production hardening backlog refresh handoff",
+        },
+        .evidence_sources = &.{
+            "docs/superpowers/specs/2026-06-10-zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy-design.md",
+            "docs/superpowers/plans/2026-06-10-zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy-implementation.md",
+            "packages/zigeffect/tools/causal_production_telemetry_ci_gate_required_status_check_enforcement_report_policy.zig",
+            "packages/zigeffect/docs/production-telemetry-ci-gate-required-status-check-enforcement-report-policy.md",
+        },
+        .branch = "codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy",
+        .agent_guidance = "Use report policy artifacts as interpretation evidence only. Planned sources can be policy-ready without published report readiness; applied sources can record published report policy readiness but still do not prove GitHub mutation by the tool, branch-protection mutation by the tool, workflow mutation by the tool, check-run creation by the tool, CI upload execution by the tool, step-summary writes, pull-request comments, live telemetry, durable writes, NenDB writes, non-NenDB adapters, alternate renderers, production cluster readiness, production health, or mutation authority.",
+    },
 };
 
 const dependency_order: []const []const u8 = &.{
@@ -1232,6 +1256,7 @@ const dependency_order: []const []const u8 = &.{
     "production-telemetry-ci-gate-required-status-check-enforcement-evaluator",
     "production-telemetry-ci-gate-required-status-check-enforcement-report",
     "production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary",
+    "production-telemetry-ci-gate-required-status-check-enforcement-report-policy",
 };
 
 const verification_commands: []const []const u8 = &.{
@@ -1321,6 +1346,8 @@ const verification_commands: []const []const u8 = &.{
     "zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-report -- --from-evaluator ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-enforcement-evaluator-negative.json summarize --reason \"negative required status check enforcement report path\" --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-enforcement-report-negative",
     "zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary -- --from-report ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-enforcement-report.json plan --reason \"required status check enforcement report application boundary planned\"",
     "zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary -- --from-report ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-enforcement-report-negative.json record-applied --reason \"negative required status check enforcement report application boundary path\" --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary-negative",
+    "zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy -- --from-application-boundary ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary.json approve --reason \"required status check enforcement report policy reviewed\" --verified-command \"zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary\" --verified-command \"zig build causal-artifacts\" --verified-command \"zig build release-gate --summary none\" --verified-command \"zig build release-gate-report\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"",
+    "zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy -- --from-application-boundary ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary-negative.json reject --reason \"negative required status check enforcement report policy path\" --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-enforcement-report-policy-negative",
     "zig build causal-production-deployment-runbooks",
     "zig build causal-production-deployment-runbooks -- --format json",
     "zig build causal-durable-production-retention",
@@ -1593,11 +1620,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-production-telemetry-ci-gate-required-status-check-enforcement-report-policy",
+        "refresh-production-hardening-backlog",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy",
+        "codex/zigeffect-causal-production-hardening-backlog-refresh",
         recommended_next_branch,
     );
 }
@@ -1686,6 +1713,8 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItemStatus("production-telemetry-ci-gate-required-status-check-enforcement-report", "delivered");
     try expectBacklogItem("production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary");
     try expectBacklogItemStatus("production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary", "delivered");
+    try expectBacklogItem("production-telemetry-ci-gate-required-status-check-enforcement-report-policy");
+    try expectBacklogItemStatus("production-telemetry-ci-gate-required-status-check-enforcement-report-policy", "delivered");
 }
 
 test "production hardening backlog preserves user constraints" {
@@ -1704,7 +1733,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-production-hardening-backlog-refresh") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -1773,6 +1802,8 @@ test "production hardening backlog text mentions dependency order and next branc
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-telemetry-ci-gate-required-status-check-enforcement-report") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "production-telemetry-ci-gate-required-status-check-enforcement-report-policy") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy") != null);
 }
 
 test "production hardening backlog JSON is agent-readable" {
@@ -1781,7 +1812,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-production-hardening-backlog-refresh\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);
@@ -1883,6 +1914,9 @@ test "production hardening backlog JSON is agent-readable" {
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"production-telemetry-ci-gate-required-status-check-enforcement-report-policy\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy") != null);
 }
 
 test "production hardening backlog parses supported formats" {

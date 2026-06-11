@@ -40,7 +40,7 @@
 **Files:**
 - Create: `packages/zigeffect/tools/causal_production_telemetry_ci_gate_required_status_check_enforcement_report_policy.zig`
 
-- [ ] **Step 1: Add a test-first Zig file**
+- [x] **Step 1: Add a test-first Zig file**
 
 Create the file with constants, temporary type declarations, and tests that describe the full desired behavior. The implementation functions should be absent or return minimal blocked values so the tests fail for behavior, not syntax.
 
@@ -85,7 +85,7 @@ test "blocked reject missing verification failed checks and authority enabled so
 test "reports include required policy fields and guidance" {}
 ```
 
-- [ ] **Step 2: Run the failing tests**
+- [x] **Step 2: Run the failing tests**
 
 Run:
 
@@ -101,7 +101,7 @@ Expected: FAIL because `parseOptions`, `outputPathsForOptions`, `evaluatePolicy`
 **Files:**
 - Modify: `packages/zigeffect/tools/causal_production_telemetry_ci_gate_required_status_check_enforcement_report_policy.zig`
 
-- [ ] **Step 1: Add CLI model and parser**
+- [x] **Step 1: Add CLI model and parser**
 
 Implement:
 
@@ -147,7 +147,7 @@ Parser contract:
 
 with optional `--by`, `--policy`, repeated `--verified-command`, and `--out-prefix`.
 
-- [ ] **Step 2: Add source and result structs**
+- [x] **Step 2: Add source and result structs**
 
 Implement source structs with unknown-field tolerant parsing:
 
@@ -218,7 +218,7 @@ const PolicyResult = struct {
 };
 ```
 
-- [ ] **Step 3: Implement checks**
+- [x] **Step 3: Implement checks**
 
 `evaluatePolicy` must append these check names:
 
@@ -265,13 +265,13 @@ Applied source consistency:
 report_application_boundary_status == "applied"
 mode == "record-applied"
 applied == true
-mutation_authority == "none"
+mutation_authority == "record-only"
 application_changes.len > 0
 before_evidence.len > 0
 after_evidence.len > 0
 ```
 
-- [ ] **Step 4: Render JSON and text**
+- [x] **Step 4: Render JSON and text**
 
 JSON fields must include:
 
@@ -328,7 +328,7 @@ agent_guidance
 
 Text output must include human-readable equivalents and the check list.
 
-- [ ] **Step 5: Run the green tool tests**
+- [x] **Step 5: Run the green tool tests**
 
 Run:
 
@@ -344,7 +344,7 @@ Expected: PASS with all report-policy tests.
 **Files:**
 - Modify: `packages/zigeffect/build.zig`
 
-- [ ] **Step 1: Add the module, executable, run step, and tests**
+- [x] **Step 1: Add the module, executable, run step, and tests**
 
 Add the new tool near the report application-boundary registration:
 
@@ -372,7 +372,7 @@ const run_causal_production_telemetry_ci_gate_required_status_check_enforcement_
 test_step.dependOn(&run_causal_production_telemetry_ci_gate_required_status_check_enforcement_report_policy_tool_tests.step);
 ```
 
-- [ ] **Step 2: Verify build help**
+- [x] **Step 2: Verify build help**
 
 Run:
 
@@ -396,7 +396,7 @@ Expected: usage string for the new tool.
 - Modify: `packages/zigeffect/README.md`
 - Modify: `docs/superpowers/specs/2026-06-08-zigeffect-causal-agent-runtime-master-roadmap.md`
 
-- [ ] **Step 1: Add schema governance**
+- [x] **Step 1: Add schema governance**
 
 Add schema entry:
 
@@ -415,7 +415,7 @@ Add schema entry:
 
 Increase schema count by one and add tests for text and JSON output containing the new schema.
 
-- [ ] **Step 2: Add backlog item and recommendation**
+- [x] **Step 2: Add backlog item and recommendation**
 
 Add item id:
 
@@ -437,7 +437,7 @@ zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-
 zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy -- --from-application-boundary ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary-negative.json reject --reason "negative required status check enforcement report policy path" --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-enforcement-report-policy-negative
 ```
 
-- [ ] **Step 3: Update docs**
+- [x] **Step 3: Update docs**
 
 Write docs that state:
 
@@ -449,13 +449,12 @@ Write docs that state:
 - verification commands;
 - next branch is backlog refresh, not production rollout.
 
-- [ ] **Step 4: Run docs and governance checks**
+- [x] **Step 4: Run docs and governance checks**
 
 Run:
 
 ```sh
 cd packages/zigeffect
-zig test tools/causal_schema_governance.zig
 zig test tools/causal_production_hardening_backlog.zig
 zig build causal-schema-governance -- --format json
 zig build causal-production-hardening-backlog -- --format json
@@ -472,7 +471,7 @@ Expected:
 **Files:**
 - All modified files from Tasks 2 through 4.
 
-- [ ] **Step 1: Run positive and negative CLI paths**
+- [x] **Step 1: Run positive and negative CLI paths**
 
 Run positive path:
 
@@ -506,7 +505,7 @@ zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-
 
 Expected: blocked output with reviewer rejection and missing verification checks.
 
-- [ ] **Step 2: Run focused and full verification**
+- [x] **Step 2: Run focused and full verification**
 
 Run:
 
@@ -514,7 +513,6 @@ Run:
 cd packages/zigeffect
 zig test tools/causal_production_telemetry_ci_gate_required_status_check_enforcement_report_policy.zig
 zig test tools/causal_production_hardening_backlog.zig
-zig test tools/causal_schema_governance.zig
 zig build examples
 zig build test
 zig fmt --check build.zig \
@@ -529,7 +527,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 3: Commit implementation**
+- [x] **Step 3: Commit implementation**
 
 Run:
 

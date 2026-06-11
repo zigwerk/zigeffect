@@ -65,7 +65,7 @@ The policy reads the source artifact with unknown fields ignored, then evaluates
 - `report_application_boundary_status` is `planned` or `applied`, never `blocked`.
 - `mode`, `applied`, and `mutation_authority` are consistent:
   - planned source: `mode="plan"`, `applied=false`, `mutation_authority="none"`;
-  - applied source: `mode="record-applied"`, `applied=true`, `mutation_authority="none"`.
+  - applied source: `mode="record-applied"`, `applied=true`, `mutation_authority="record-only"`.
 - All tool-authority booleans are false.
 - Live telemetry, network, runtime pipeline, durable write, and NenDB write booleans are false.
 - Source checks exist and none have status `fail`.

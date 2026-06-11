@@ -988,9 +988,9 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog uses schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the M9 production
 gaps into ordered future hardening branches, and recommends
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy`
+`codex/zigeffect-causal-production-hardening-backlog-refresh`
 after the delivered production telemetry CI gate required status check
-enforcement report application-boundary milestone.
+enforcement report policy milestone.
 It keeps durable work on the NenDB adapter path, keeps the workbench direction
 as SolidJS inside `webui-dev/zig-webui`, and does not grant production mutation
 authority. The full policy is in

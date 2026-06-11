@@ -1119,10 +1119,26 @@ Status values:
      writes, non-NenDB durable adapter work, alternate renderers, production
      health claims, production cluster claims, and mutation authority disabled.
 42. `codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy`
-   - Current next branch: define interpretation policy for externally reviewed
-     enforcement report application-boundary evidence before any workflow,
-     branch-protection, required-status-check, or production authority work can
-     cite it.
+   - Delivered:
+     `causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy`
+     publishes
+     `zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-report-policy.v1`,
+     consumes enforcement report application-boundary artifacts, records
+     planned or externally applied interpretation policy, separates
+     `ready_for_next_branch` from `published_report_policy_ready`, and hands
+     off to `codex/zigeffect-causal-production-hardening-backlog-refresh`
+     while keeping GitHub API mutation by the tool, branch-protection mutation
+     by the tool, workflow mutation by the tool, check-run creation by the
+     tool, required status check creation by the tool, artifact upload
+     execution by the tool, GitHub step summary writes by the tool, pull
+     request comments by the tool, live telemetry, durable writes, NenDB
+     writes, non-NenDB durable adapter work, alternate renderers, production
+     health claims, production cluster claims, and mutation authority disabled.
+43. `codex/zigeffect-causal-production-hardening-backlog-refresh`
+   - Current next branch: refresh the production hardening backlog and choose
+     the next unresolved roadmap item without treating CI report policy
+     readiness as production health, deployment success, customer impact, or
+     cluster readiness.
 
 ## Dual-Interface Causal Spine Expansion
 

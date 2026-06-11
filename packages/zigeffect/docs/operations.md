@@ -495,7 +495,7 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy`
+`codex/zigeffect-causal-production-hardening-backlog-refresh`
 after the unified causal spine, deep runtime internals, app semantic trace API,
 bounded agent query surface, record-only encryption-at-rest policy,
 record-only alerting integrations, delivered live dashboard streaming
@@ -571,10 +571,10 @@ policy, evaluator, advisory CI report, and advisory CI report application
 boundary, advisory CI report publication policy, required status check
 readiness, required status check application boundary, and required status
 check policy, enforcement-readiness, enforcement application-boundary,
-enforcement policy, enforcement evaluator, enforcement report, and enforcement
-report application-boundary milestones.
+enforcement policy, enforcement evaluator, enforcement report, enforcement
+report application-boundary, and enforcement report policy milestones.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy`.
+`codex/zigeffect-causal-production-hardening-backlog-refresh`.
 
 ## Production Telemetry Capture Design
 
@@ -1638,11 +1638,12 @@ CI-gate-required-status-check-enforcement-readiness, and
 CI-gate-required-status-check-enforcement-application-boundary, and
 CI-gate-required-status-check-enforcement-policy, and
 CI-gate-required-status-check-enforcement-evaluator, and
-CI-gate-required-status-check-enforcement-report, and
-CI-gate-required-status-check-enforcement-report-application-boundary
+CI-gate-required-status-check-enforcement-report,
+CI-gate-required-status-check-enforcement-report-application-boundary, and
+CI-gate-required-status-check-enforcement-report-policy
 reports are now delivered.
 The current next branch is
-`codex/zigeffect-causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy`.
+`codex/zigeffect-causal-production-hardening-backlog-refresh`.
 
 ## Production Gaps
 
