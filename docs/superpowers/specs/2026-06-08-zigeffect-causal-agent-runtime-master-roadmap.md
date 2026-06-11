@@ -1757,9 +1757,18 @@ Status values:
      `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-policy.v1`
      for the matching evaluator branch.
 89. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluator`
-   - Next: evaluate approved or rejected six-level policy evidence, keep the
-     app-facing SolidJS WebUI advisory surface read-only, preserve no-mutation
-     authority, and hand off to the next report-summary branch.
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluator`
+     evaluates approved or rejected six-level policy evidence, classifies
+     bounded request/support evidence, keeps the app-facing SolidJS WebUI
+     advisory surface read-only, preserves no-mutation authority, and emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluator.v1`
+     for the next report-summary branch.
+90. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report`
+   - Next: consume ready or advisory six-level evaluator evidence, summarize
+     the app-facing advisory remediation chain for agents and reviewers,
+     preserve no-mutation authority, and hand off to the next
+     application-boundary branch.
 
 ## Dual-Interface Causal Spine Expansion
 
