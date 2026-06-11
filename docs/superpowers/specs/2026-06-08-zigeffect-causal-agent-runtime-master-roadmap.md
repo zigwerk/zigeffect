@@ -1773,10 +1773,18 @@ Status values:
      `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report.v1`
      for the matching application-boundary branch.
 91. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary`
-   - Next: consume ready or advisory seven-level evaluation-report evidence,
-     record planned or reviewed local application-boundary evidence, preserve
-     no-mutation authority, and require reviewed before/after verification
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary`
+     consumes ready or advisory seven-level evaluation-report evidence,
+     records planned or reviewed local application-boundary evidence, preserves
+     no-mutation authority, and requires reviewed before/after verification
      before any applied state.
+92. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-policy`
+   - Next: consume applied seven-level application-boundary evidence,
+     publish record-only interpretation policy for agents and reviewers,
+     preserve local-only SolidJS WebUI consumption, and continue denying CI,
+     GitHub, app runtime, storage, deployment, public upload, and mutation
+     authority.
 
 ## Dual-Interface Causal Spine Expansion
 
