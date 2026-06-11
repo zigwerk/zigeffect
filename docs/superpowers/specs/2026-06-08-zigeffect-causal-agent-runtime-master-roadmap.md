@@ -1312,14 +1312,31 @@ Status values:
      production health proof, deployment authority, alternate renderers, or
      mutation authority.
 59. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-boundary`
-   - Next: define the guarded application boundary for actual read-only
-     consumption of app-facing advisory remediation report evidence by agents
-     and the SolidJS workbench. This branch should consume ready
-     consumption-readiness artifacts, record exactly which read-only
-     consumption contract was reviewed, and keep all mutation, storage,
-     deployment, runtime integration, required CI enforcement, NenDB adapter
-     execution, Cockroach scope, production health, and mutation-authority
-     claims denied.
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-boundary`
+     consumes ready app-facing advisory remediation report
+     consumption-readiness artifacts and emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-boundary.v1`.
+     It records planned, applied, and blocked boundary evidence for actual
+     reviewed read-only consumption by reviewers, agents, non-blocking CI
+     advisory readers, and the SolidJS `webui-dev/zig-webui` workbench. Applied
+     records require consumer-change evidence, before evidence, after evidence,
+     safe consumer-after content, and verification commands before setting
+     `applied=true`, and even then only with `mutation_authority="record-only"`.
+     It denies app mutation, workbench mutation, runtime integration, live
+     projections, raw payload capture, required CI enforcement, GitHub API
+     mutation, workflow mutation, NenDB writes, NenDB adapter execution,
+     Cockroach scope, non-NenDB durable scope, production health proof,
+     deployment authority, alternate renderers, auto-apply, and mutation
+     authority beyond the record-only artifact marker.
+60. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-policy`
+   - Next: define the interpretation policy for applied app-facing advisory
+     remediation report consumption-boundary artifacts so agents, reviewers,
+     non-blocking CI advisory readers, and the SolidJS workbench know exactly
+     what applied read-only consumption evidence can and cannot prove. This
+     policy must preserve the denied mutation, runtime, storage, deployment,
+     required CI, NenDB adapter execution, Cockroach, production health,
+     alternate renderer, and mutation-authority claims.
 
 ## Dual-Interface Causal Spine Expansion
 
