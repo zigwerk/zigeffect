@@ -1540,13 +1540,32 @@ Status values:
      local publication channel limits, findings, verification commands, and
      a handoff to the application-boundary branch.
 71. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-application-boundary`
-   - Next: consume ready or advisory app-facing advisory remediation report
-     consumption-report evaluation-report evaluation-report artifacts and emit
-     guarded plan or record-applied application-boundary evidence. It should
-     only mark applied=true after a reviewed local evaluation-report
-     evaluation-report application update, before/after evidence, verification
-     commands, safe after-report content, and explicit source authority
-     checks. It must continue denying CI enforcement, required status checks,
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-application-boundary`
+     consumes ready or advisory app-facing advisory remediation report
+     consumption-report evaluation-report evaluation-report artifacts and emits
+     guarded plan or record-applied application-boundary evidence. It only
+     marks `applied=true` after reviewed local evaluation-report
+     evaluation-report application changes, before/after evidence, verification
+     commands, safe after-report content, local-only publication posture, and
+     explicit source authority checks. It continues denying CI enforcement,
+     required status checks, GitHub mutation, workflow mutation, app mutation,
+     app runtime integration, live projection, raw payload capture, storage
+     writes, NenDB adapter execution, Cockroach scope, deployment authority,
+     production health claims, hosted live dashboards, public upload,
+     alternate renderer scope, auto-apply, and mutation authority.
+     It emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-application-boundary.v1`
+     with application checks, reviewed evidence, source report lineage,
+     denied claims, verification commands, and a handoff to the policy branch.
+72. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-policy`
+   - Next: consume applied evaluation-report evaluation-report
+     application-boundary evidence and define the record-only interpretation
+     policy for agents, reviewers, non-blocking CI advisory readers, and the
+     SolidJS `webui-dev/zig-webui` workbench. It should distinguish planned,
+     applied, and blocked boundary sources; cite reviewed change, before,
+     after, after-report, source-check, denied-claim, and verification
+     evidence; and continue denying CI enforcement, required status checks,
      GitHub mutation, workflow mutation, app mutation, app runtime
      integration, live projection, raw payload capture, storage writes, NenDB
      adapter execution, Cockroach scope, deployment authority, production
