@@ -3,7 +3,7 @@ schema: zigeffect.causal.schema-governance.v1
 schema_version: 1
 core schema: zigeffect.causal.v1 version 1
 event taxonomy version: 1
-schema count: 95
+schema count: 96
 
 versioning policy:
 - schema names the artifact family
@@ -327,6 +327,14 @@ schemas:
   emitted by: causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-boundary
   consumed by: agents, reviewers, local SolidJS workbench, production-hardening backlog, future app-facing advisory report consumption policy
   governance requirements: consumption boundary producer tests, ready consumption-readiness source checks, plan mode tests, record-applied before/after evidence tests, consumer-after safety tests, verification command evidence, next-branch consumption-policy handoff, docs update
+- zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-policy.v1
+  version: 1
+  category: app-runtime
+  status: current
+  compatibility: strict-v1, record-only, advisory-only, consumption-policy, interpretation-policy, applied-consumption-boundary-source, read-only-consumption, bounded-agent-context, app-facing, solid-webui, webui-dev/zig-webui, no-cockroach, no-ci-enforcement, no-required-status-check, no-workflow-mutation, no-github-api-mutation, no-app-mutation, no-app-runtime-integration, no-live-agent-projection, no-raw-payload-capture, no-deployment-mutation, no-production-mutation, no-nendb-write, no-nendb-adapter-execution, no-mutation-authority
+  emitted by: causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-policy
+  consumed by: agents, reviewers, non-blocking CI advisory readers, local SolidJS workbench, production-hardening backlog, future app-facing advisory report consumption evaluator
+  governance requirements: consumption policy producer tests, applied consumption-boundary source checks, interpretation-rule tests, consumption-scope tests, denied inference tests, negative fixture tests, verification command evidence, next-branch consumption-evaluator handoff, docs update
 - zigeffect.causal.human-agent-feedback-loop.v1
   version: 1
   category: human-agent-feedback

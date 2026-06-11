@@ -391,6 +391,16 @@ const schema_entries: []const SchemaEntry = &.{
         .governance_requirements = &.{ "consumption boundary producer tests", "ready consumption-readiness source checks", "plan mode tests", "record-applied before/after evidence tests", "consumer-after safety tests", "verification command evidence", "next-branch consumption-policy handoff", "docs update" },
     },
     .{
+        .schema = "zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-policy.v1",
+        .version = 1,
+        .category = "app-runtime",
+        .status = "current",
+        .emitted_by = &.{"causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-policy"},
+        .consumed_by = &.{ "agents", "reviewers", "non-blocking CI advisory readers", "local SolidJS workbench", "production-hardening backlog", "future app-facing advisory report consumption evaluator" },
+        .compatibility = &.{ "strict-v1", "record-only", "advisory-only", "consumption-policy", "interpretation-policy", "applied-consumption-boundary-source", "read-only-consumption", "bounded-agent-context", "app-facing", "solid-webui", "webui-dev/zig-webui", "no-cockroach", "no-ci-enforcement", "no-required-status-check", "no-workflow-mutation", "no-github-api-mutation", "no-app-mutation", "no-app-runtime-integration", "no-live-agent-projection", "no-raw-payload-capture", "no-deployment-mutation", "no-production-mutation", "no-nendb-write", "no-nendb-adapter-execution", "no-mutation-authority" },
+        .governance_requirements = &.{ "consumption policy producer tests", "applied consumption-boundary source checks", "interpretation-rule tests", "consumption-scope tests", "denied inference tests", "negative fixture tests", "verification command evidence", "next-branch consumption-evaluator handoff", "docs update" },
+    },
+    .{
         .schema = "zigeffect.causal.human-agent-feedback-loop.v1",
         .version = 1,
         .category = "human-agent-feedback",
@@ -1185,7 +1195,7 @@ test "schema governance usage names command and formats" {
 
 test "schema governance inventory includes official schemas and excludes fake fixtures" {
     const entries = schemaEntries();
-    try std.testing.expectEqual(@as(usize, 95), entries.len);
+    try std.testing.expectEqual(@as(usize, 96), entries.len);
     try expectSchema(entries, "zigeffect.causal.v1");
     try expectSchema(entries, "zigeffect.causal.event.v1");
     try expectSchema(entries, "zigeffect.causal.app-application.v1");
@@ -1256,6 +1266,7 @@ test "schema governance inventory includes official schemas and excludes fake fi
     try expectSchema(entries, "zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-publication-policy.v1");
     try expectSchema(entries, "zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-readiness.v1");
     try expectSchema(entries, "zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-boundary.v1");
+    try expectSchema(entries, "zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-policy.v1");
     try std.testing.expect(!hasSchema(entries, "zigeffect.causal.other.v1"));
     try std.testing.expect(!hasSchema(entries, "zigeffect.causal.unknown.v1"));
 }
@@ -1279,7 +1290,7 @@ test "schema governance text report includes policy and representative schemas" 
 
     try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect causal schema governance") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.schema-governance.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "schema count: 95") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "schema count: 96") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "event taxonomy version: 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "versioning policy:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "migration policy:") != null);
@@ -1366,6 +1377,7 @@ test "schema governance text report includes policy and representative schemas" 
     try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-publication-policy.v1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-readiness.v1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-boundary.v1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-policy.v1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "nendb-handoff-fixtures") != null);
 }
 
@@ -1377,7 +1389,7 @@ test "schema governance json report is machine readable" {
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema_version\": 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"current_core_schema\": \"zigeffect.causal.v1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"current_event_taxonomy_version\": 1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"schema_count\": 95") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"schema_count\": 96") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schemas\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"compatibility\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.performance-budget.v1\"") != null);
@@ -1444,6 +1456,7 @@ test "schema governance json report is machine readable" {
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-publication-policy.v1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-readiness.v1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-boundary.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-policy.v1\"") != null);
 }
 
 test "schema governance parses format options" {
