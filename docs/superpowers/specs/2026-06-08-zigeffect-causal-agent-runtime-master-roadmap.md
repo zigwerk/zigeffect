@@ -1363,16 +1363,30 @@ Status values:
      Cockroach scope, deployment authority, production health claims, alternate
      renderer scope, public artifact upload, and auto-apply.
 62. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report`
-   - Next: render local human/agent consumption reports from ready and advisory
-     evaluator artifacts. The report should summarize safe request context,
-     source refs, support evidence, policy rules, denied claims, bounded
-     redaction posture, next queries, and blocked/advisory findings for agents,
-     reviewers, non-blocking CI advisory readers, and the SolidJS
-     `webui-dev/zig-webui` workbench. It must remain a local read-only report
-     with no mutation authority, runtime wiring, required CI, GitHub mutation,
-     app mutation, NenDB writes, NenDB adapter execution, Cockroach scope,
-     deployment authority, production health claims, alternate renderer scope,
-     public artifact upload, or auto-apply.
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report`
+     consumes ready or advisory app-facing advisory remediation report
+     consumption-evaluator artifacts and emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report.v1`.
+     It renders local human/agent JSON and text reports with source evaluator
+     status, request summaries, support evidence, signals, blocked/advisory
+     findings, checks, policy rule ids, consumption scope ids, denied claims,
+     next queries, local-only publication channels, and application-boundary
+     handoff. It remains read-only with no mutation authority, runtime wiring,
+     required CI, GitHub mutation, app mutation, NenDB writes, NenDB adapter
+     execution, Cockroach scope, deployment authority, production health claims,
+     alternate renderer scope, public artifact upload, or auto-apply.
+63. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-application-boundary`
+   - Next: record planned/applied/blocked local application-boundary evidence
+     for reviewed consumption-report use by agents, reviewers, non-blocking CI
+     advisory readers, and the SolidJS `webui-dev/zig-webui` workbench. Applied
+     records should require explicit before/after report application evidence,
+     safe after-report content, source report status, source evaluator refs, and
+     verification commands before setting any applied marker. The boundary must
+     still avoid mutation authority, runtime wiring, required CI, GitHub
+     mutation, app mutation, NenDB writes, NenDB adapter execution, Cockroach
+     scope, deployment authority, production health claims, alternate renderer
+     scope, public artifact upload, and auto-apply.
 
 ## Dual-Interface Causal Spine Expansion
 
