@@ -1765,10 +1765,18 @@ Status values:
      `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluator.v1`
      for the next report-summary branch.
 90. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report`
-   - Next: consume ready or advisory six-level evaluator evidence, summarize
-     the app-facing advisory remediation chain for agents and reviewers,
-     preserve no-mutation authority, and hand off to the next
-     application-boundary branch.
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report`
+     consumes ready or advisory six-level evaluator evidence, summarizes the
+     app-facing advisory remediation chain for agents and reviewers, preserves
+     no-mutation authority, and emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report.v1`
+     for the matching application-boundary branch.
+91. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary`
+   - Next: consume ready or advisory seven-level evaluation-report evidence,
+     record planned or reviewed local application-boundary evidence, preserve
+     no-mutation authority, and require reviewed before/after verification
+     before any applied state.
 
 ## Dual-Interface Causal Spine Expansion
 
