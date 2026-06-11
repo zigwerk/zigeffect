@@ -121,9 +121,16 @@ production mutation authority disabled.
 ### App Runtime
 
 - `zigeffect.causal.app-runtime.v1`
+- `zigeffect.causal.app-facing-production-integration-fixtures.v1`
 
 App runtime artifacts remain record-only app evidence. User-facing mappings
 belong in the SolidJS workbench launched through `zig-webui`.
+The app-facing production integration fixture schema is fixture-only evidence
+for agents and reviewers. It connects app traces, agent queries, audit-chain
+comparison, app remediation governance, production telemetry fixture
+boundaries, and NenDB durable-history refs without granting live telemetry,
+durable writes, app mutation, CI gates, Cockroach scope, or alternate renderer
+scope.
 
 ### Dev Loop
 

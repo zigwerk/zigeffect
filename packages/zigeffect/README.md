@@ -1309,6 +1309,23 @@ recorded. The command records application state; it does not edit source,
 config, migrations, operations, rollback plans, deployments, queues,
 databases, or external systems.
 
+Print the app-facing production integration fixture catalog:
+
+```bash
+cd packages/zigeffect
+zig build causal-app-facing-production-integration-fixtures
+zig build causal-app-facing-production-integration-fixtures -- validate --format json
+```
+
+The fixture catalog uses schema
+`zigeffect.causal.app-facing-production-integration-fixtures.v1` and connects
+app runtime traces, agent queries, audit-chain comparison, app remediation
+governance, production telemetry fixture boundaries, and NenDB durable-history
+handoff. It is fixture-only: no live telemetry, no durable production writes,
+no app mutation, no CI gates, no Cockroach scope, and no alternate renderer
+work. See
+[docs/app-facing-production-integration-fixtures.md](docs/app-facing-production-integration-fixtures.md).
+
 Print the causal artifact retention manifest for agents and CI:
 
 ```bash

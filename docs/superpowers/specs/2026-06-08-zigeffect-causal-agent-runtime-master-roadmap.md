@@ -1170,10 +1170,19 @@ Status values:
      `applied=true` chains without separate reviewed application evidence, and
      avoids treating audit-chain governance JSON as core event-run artifacts.
 47. `codex/zigeffect-causal-app-facing-production-integration-fixtures`
-   - Current next branch: add deterministic app-facing production integration
-     fixtures on top of app semantic traces, agent queries, retained
-     audit-chain comparison, and NenDB durable-history evidence without live
-     telemetry, production writes, app mutation, or Cockroach scope.
+   - Delivered: `causal-app-facing-production-integration-fixtures` emits
+     `zigeffect.causal.app-facing-production-integration-fixtures.v1`,
+     catalogs source contracts and positive/negative fixtures across app
+     runtime traces, agent queries, retained audit-chain comparison, app
+     remediation governance, production telemetry fixture boundaries, and
+     NenDB durable-history handoff, and preserves no live telemetry, no
+     durable production writes, no app mutation, no CI gates, no Cockroach
+     scope, and no alternate renderer scope.
+48. `codex/zigeffect-causal-app-facing-production-integration-readiness-review`
+   - Next: consume the fixture catalog and decide whether app-facing
+     production integration is ready for implementation proposal work without
+     granting live telemetry, durable writes, app mutation, CI gates,
+     Cockroach scope, or alternate renderer scope.
 
 ## Dual-Interface Causal Spine Expansion
 

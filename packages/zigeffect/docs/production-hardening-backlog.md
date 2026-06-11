@@ -25,7 +25,8 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-app-facing-production-integration-fixtures` means the
+The recommendation `start-app-facing-production-integration-readiness-review`
+means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -260,8 +261,14 @@ adapters, live telemetry, network sends, durable production writes, NenDB
 production write authority, compaction execution, backup/restore execution,
 TTL deletion, production health claims, and mutation authority disabled.
 The cross-run comparison branch and audit-chain snapshot comparison branch are
-now delivered. The next branch should be
-`codex/zigeffect-causal-app-facing-production-integration-fixtures`.
+now delivered. App-facing production integration fixtures are also delivered:
+they publish `zigeffect.causal.app-facing-production-integration-fixtures.v1`,
+connect app runtime traces, agent queries, audit-chain comparison, app
+remediation governance, production telemetry fixture boundaries, and NenDB
+durable-history handoff, and keep live telemetry, durable production writes,
+app mutation, CI gates, Cockroach scope, and alternate renderer scope disabled.
+The next branch should be
+`codex/zigeffect-causal-app-facing-production-integration-readiness-review`.
 
 ## Dependency Order
 
@@ -318,6 +325,7 @@ The backlog currently orders future production-hardening branches as:
 49. `nendb-durable-history-hardening` delivered
 50. `agent-query-cross-run-comparison` delivered
 51. `audit-chain-snapshot-compare` delivered
+52. `app-facing-production-integration-fixtures` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item now
@@ -326,6 +334,10 @@ covers runtime bounded JSON queries, app semantic `trace_data`, and bounded
 The `audit-chain-snapshot-compare` item compares retained audit-chain
 governance snapshots without granting source, registry, app, durable, or
 production mutation authority.
+The `app-facing-production-integration-fixtures` item provides deterministic
+fixture-only evidence for app production integration and hands off to readiness
+review without enabling live telemetry, durable writes, app mutation, CI gates,
+Cockroach scope, or alternate renderer scope.
 
 ## Authority Boundaries
 
@@ -905,9 +917,26 @@ authority, production health claims, and mutation authority.
 
 The cross-run agent comparison branch builds on this durable history evidence.
 Audit-chain snapshot comparison now builds on the bounded run-level comparison
-surface and records retained governance deltas. The next branch should add
-app-facing production integration fixtures without live telemetry ingestion or
-mutation authority.
+surface and records retained governance deltas.
+
+App-facing production integration fixtures are documented in
+[app-facing-production-integration-fixtures.md](app-facing-production-integration-fixtures.md).
+They emit `zigeffect.causal.app-facing-production-integration-fixtures.v1`
+through:
+
+```sh
+zig build causal-app-facing-production-integration-fixtures
+zig build causal-app-facing-production-integration-fixtures -- --format json
+zig build causal-app-facing-production-integration-fixtures -- emit worker-request-redacted-lineage --format json
+zig build causal-app-facing-production-integration-fixtures -- validate --format json
+```
+
+The fixtures connect app runtime traces, agent queries, audit-chain comparison,
+app remediation governance, production telemetry fixture boundaries, and NenDB
+durable-history handoff without live telemetry ingestion, durable production
+writes, app mutation, CI gates, Cockroach scope, alternate renderer scope, or
+mutation authority. The next branch should review readiness for app-facing
+production integration.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,

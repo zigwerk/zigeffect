@@ -1231,6 +1231,16 @@ are recorded. It is a record-only boundary; source, config, migrations,
 operations, rollback plans, deployments, queues, databases, and external state
 are still changed outside the command.
 
+`zig build causal-app-facing-production-integration-fixtures` emits
+`zigeffect.causal.app-facing-production-integration-fixtures.v1`, a
+deterministic fixture-only catalog for app production integration evidence.
+Agents should use it to connect app traces, app semantic refs, `trace_data`
+queries, audit-chain before/after review, app remediation governance,
+production telemetry fixture boundaries, and NenDB durable-history refs before
+the readiness-review branch exists. It keeps `applied=false`,
+`mutation_authority=none`, live telemetry disabled, durable writes disabled,
+app mutation disabled, CI gates disabled, and durable scope NenDB-only.
+
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around
 those pieces. The no-scenario form captures before/after dogfood evidence and
