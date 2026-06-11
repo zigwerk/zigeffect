@@ -1733,9 +1733,18 @@ Status values:
      `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluator.v1`
      for the six-level report branch.
 86. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report`
-   - Next: consume ready or advisory five-level evaluator evidence, emit the
-     six-level local evaluation-report artifact, preserve no-mutation authority,
-     and hand off to the matching application-boundary branch.
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report`
+     consumes ready or advisory five-level evaluator evidence, emits the
+     six-level local evaluation-report artifact, preserves no-mutation
+     authority, and emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report.v1`
+     for the matching application-boundary branch.
+87. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary`
+   - Next: consume ready or advisory six-level evaluation-report evidence,
+     record planned or reviewed local application-boundary evidence, preserve
+     no-mutation authority, and require reviewed before/after verification
+     evidence before any applied state.
 
 ## Dual-Interface Causal Spine Expansion
 
