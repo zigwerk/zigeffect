@@ -92,6 +92,24 @@ The emitted `audit_remediation_bridge_records` catalog contains:
 Each record includes the source NenDB handoff fixture, audit ref,
 remediation ref, bridge kind, review state, retained refs, and blocked claims.
 
+## SolidJS Read-Only Preview Consumer
+
+The next consumer is
+`causal-app-facing-production-integration-solid-webui-readonly-preview`, which
+emits
+`zigeffect.causal.app-facing-production-integration-solid-webui-readonly-preview.v1`.
+
+That consumer validates this bridge artifact before rendering app-facing
+evidence in the local SolidJS workbench. The bridge remains record-only until
+the preview producer confirms source readiness, bridge record coverage,
+authority-disabled fields, and preview verification commands.
+
+The preview consumer still does not grant app runtime integration, live agent
+projection, app mutation controls, hosted live dashboard hosting, CI
+enforcement, deployment mutation, NenDB writes, NenDB adapter execution,
+Cockroach scope, React renderer support, alternate renderer support, production
+health claims, mutation proof, auto-apply, or `applied=true`.
+
 ## Checks
 
 The bridge report evaluates:

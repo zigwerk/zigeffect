@@ -3,7 +3,7 @@ schema: zigeffect.causal.schema-governance.v1
 schema_version: 1
 core schema: zigeffect.causal.v1 version 1
 event taxonomy version: 1
-schema count: 89
+schema count: 90
 
 versioning policy:
 - schema names the artifact family
@@ -279,6 +279,14 @@ schemas:
   emitted by: causal-app-facing-production-integration-audit-remediation-bridge
   consumed by: agents, reviewers, production-hardening backlog, future app-facing SolidJS read-only preview, future guarded app remediation planning
   governance requirements: bridge tests, NenDB handoff artifact checks, audit/remediation bridge catalog checks, verification command evidence, next-branch handoff, docs update
+- zigeffect.causal.app-facing-production-integration-solid-webui-readonly-preview.v1
+  version: 1
+  category: app-runtime
+  status: current
+  compatibility: strict-v1, read-only, solid-webui, webui-dev/zig-webui, no-cockroach, no-live-dashboard, no-production-mutation, no-nendb-write, no-nendb-adapter-execution, no-ci-enforcement, no-react-renderer
+  emitted by: causal-app-facing-production-integration-solid-webui-readonly-preview
+  consumed by: agents, reviewers, local SolidJS workbench, production-hardening backlog, future CI advisory remediation report
+  governance requirements: preview producer tests, source bridge artifact checks, SolidJS workbench parser tests, WebUI sample tests, verification command evidence, next-branch handoff, docs update
 - zigeffect.causal.human-agent-feedback-loop.v1
   version: 1
   category: human-agent-feedback

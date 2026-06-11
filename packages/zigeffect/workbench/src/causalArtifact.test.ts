@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   type CausalEvent,
   causePathForEvent,
+  deriveAppFacingPreviewModel,
   deriveAppRemediationModel,
   deriveGovernanceModel,
   deriveLiveDashboardModel,
@@ -512,6 +513,67 @@ const sampleProductionTelemetryRetention = {
     "zig build causal-production-telemetry-local-pipeline-fixtures",
     "zig build examples",
   ],
+};
+
+const sampleAppFacingSolidWebuiPreview = {
+  schema: "zigeffect.causal.app-facing-production-integration-solid-webui-readonly-preview.v1",
+  schema_version: 1,
+  source_schema: "zigeffect.causal.app-facing-production-integration-audit-remediation-bridge.v1",
+  tool: "causal-app-facing-production-integration-solid-webui-readonly-preview",
+  source_bridge: ".zig-cache/causal-artifacts/source-audit-remediation-bridge.json",
+  source_bridge_status: "ready",
+  status: "ready",
+  solid_webui_readonly_preview_status: "ready",
+  decision: "approve",
+  reason: "ready app-facing audit remediation bridge reviewed for SolidJS read-only preview",
+  ready_for_next_branch: true,
+  applied: false,
+  mutation_authority: "none",
+  read_only_preview: true,
+  solid_webui_enabled: true,
+  solid_webui_renderer: "solidjs",
+  webui_bridge: "webui-dev/zig-webui",
+  hosted_live_dashboard_enabled: false,
+  app_mutation_controls_enabled: false,
+  react_renderer_enabled: false,
+  alternate_renderer_enabled: false,
+  nendb_write_enabled: false,
+  nendb_adapter_execution_enabled: false,
+  durable_write_enabled: false,
+  deployment_mutation_enabled: false,
+  app_runtime_integration_enabled: false,
+  agent_query_live_projection_enabled: false,
+  preview_panels: ["status", "source-artifacts", "authority-boundary", "solid-webui-preview-state", "verification"],
+  app_preview_sections: [
+    {
+      id: "solid-webui-preview",
+      title: "SolidJS WebUI read-only preview",
+      evidence_refs: ["solid-webui-review-preview-bridge", "webui_sample_ref", "solid_view_ref"],
+      blocked_authority: ["live-dashboard-host", "app-mutation-button", "react-renderer", "alternate-renderer"],
+    },
+  ],
+  bridge_records: [
+    {
+      id: "solid-webui-review-preview-bridge",
+      status: "read-only-preview-next",
+      source_ref: "nendb-solid-webui-preview-node-handoff-fixture",
+      target_ref: "review_state_ref",
+      bridge_kind: "solid-webui-preview",
+      retained_refs: ["webui_sample_ref", "solid_view_ref"],
+      blocked_claims: ["react-renderer", "alternate-renderer"],
+    },
+  ],
+  checks: [
+    { name: "solid-webui-readonly", status: "pass", detail: "preview is read-only SolidJS inside webui-dev/zig-webui" },
+    { name: "react-renderer-disabled", status: "pass", detail: "React renderer is not enabled" },
+  ],
+  validation_checks: ["solid-webui-readonly", "solidjs-renderer-only", "cockroach-scope-rejected"],
+  blocked_claims: ["applied=true", "production-health", "mutation-proof", "cockroach-adapter-work"],
+  non_goals: ["hosted live dashboard", "app mutation controls", "NenDB production writes"],
+  required_verification_commands: ["bun run zigeffect:workbench:typecheck", "bun run zigeffect:workbench:test"],
+  verified_commands: ["bun run zigeffect:workbench:typecheck", "bun run zigeffect:workbench:test"],
+  recommendation: "start-app-facing-production-integration-ci-advisory-remediation-report",
+  next_branch_if_ready: "codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report",
 };
 
 test("parseArtifactJson parses causal artifacts", () => {
@@ -1048,6 +1110,79 @@ test("deriveProductionTelemetryPreviewModel reads blocked retention fixtures", (
   expect(preview?.status).toBe("blocked");
   expect(preview?.readyForNextBranch).toBe(false);
   expect(preview?.checks[0]).toEqual({ name: "decision-approved", status: "fail", detail: "reviewer rejected" });
+});
+
+test("deriveAppFacingPreviewModel reads ready SolidJS WebUI preview artifacts", () => {
+  const preview = deriveAppFacingPreviewModel(sampleAppFacingSolidWebuiPreview, {
+    artifactPath: "app-preview.json",
+  });
+
+  expect(preview?.schema).toBe("zigeffect.causal.app-facing-production-integration-solid-webui-readonly-preview.v1");
+  expect(preview?.sourceMode).toBe("solid-webui-readonly-preview");
+  expect(preview?.status).toBe("ready");
+  expect(preview?.decision).toBe("approve");
+  expect(preview?.readyForNextBranch).toBe(true);
+  expect(preview?.authority.readOnlyPreview).toBe(true);
+  expect(preview?.authority.solidWebuiEnabled).toBe(true);
+  expect(preview?.authority.solidWebuiRenderer).toBe("solidjs");
+  expect(preview?.authority.webuiBridge).toBe("webui-dev/zig-webui");
+  expect(preview?.authority.appMutationControlsEnabled).toBe(false);
+  expect(preview?.authority.hostedLiveDashboardEnabled).toBe(false);
+  expect(preview?.authority.reactRendererEnabled).toBe(false);
+  expect(preview?.authority.alternateRendererEnabled).toBe(false);
+  expect(preview?.bridgeRecords.map((record) => record.id)).toContain("solid-webui-review-preview-bridge");
+  expect(preview?.sections.map((section) => section.id)).toContain("solid-webui-preview");
+  expect(preview?.blockedClaims).toContain("applied=true");
+  expect(preview?.verificationCommands).toContain("bun run zigeffect:workbench:test");
+  expect(preview?.nextBranch).toBe("codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report");
+});
+
+test("deriveAppFacingPreviewModel adapts ready audit remediation bridge artifacts into source preview mode", () => {
+  const sourceBridge = {
+    schema: "zigeffect.causal.app-facing-production-integration-audit-remediation-bridge.v1",
+    audit_remediation_bridge_status: "ready",
+    decision: "approve",
+    applied: false,
+    mutation_authority: "none",
+    solid_webui_preview_enabled: false,
+    audit_remediation_bridge_records: sampleAppFacingSolidWebuiPreview.bridge_records,
+    checks: [{ name: "authority-boundary", status: "pass", detail: "no mutation authority" }],
+    bridge_validation_checks: ["solid-webui-readonly-preview-next-only"],
+    verified_commands: ["zig build causal-app-facing-production-integration-audit-remediation-bridge"],
+    recommendation: "start-app-facing-production-integration-solid-webui-readonly-preview",
+    next_branch_if_ready: "codex/zigeffect-causal-app-facing-production-integration-solid-webui-readonly-preview",
+  };
+
+  const preview = deriveAppFacingPreviewModel(sourceBridge, { artifactPath: "source-bridge.json" });
+
+  expect(preview?.sourceMode).toBe("audit-remediation-bridge");
+  expect(preview?.status).toBe("ready");
+  expect(preview?.authority.readOnlyPreview).toBe(false);
+  expect(preview?.authority.solidWebuiEnabled).toBe(false);
+  expect(preview?.authority.appMutationControlsEnabled).toBe(false);
+  expect(preview?.bridgeRecords.map((record) => record.id)).toContain("solid-webui-review-preview-bridge");
+  expect(preview?.validationChecks).toContain("solid-webui-readonly-preview-next-only");
+  expect(preview?.nextBranch).toBe("codex/zigeffect-causal-app-facing-production-integration-solid-webui-readonly-preview");
+});
+
+test("deriveAppFacingPreviewModel keeps authority drift visible instead of hiding blocked artifacts", () => {
+  const preview = deriveAppFacingPreviewModel(
+    {
+      ...sampleAppFacingSolidWebuiPreview,
+      status: "blocked",
+      app_mutation_controls_enabled: true,
+      checks: [{ name: "app-mutation-controls-disabled", status: "fail", detail: "mutation controls are enabled" }],
+    },
+    { artifactPath: "app-preview-blocked.json" },
+  );
+
+  expect(preview?.status).toBe("blocked");
+  expect(preview?.authority.appMutationControlsEnabled).toBe(true);
+  expect(preview?.checks[0]).toEqual({
+    name: "app-mutation-controls-disabled",
+    status: "fail",
+    detail: "mutation controls are enabled",
+  });
 });
 
 test("deriveAppRemediationModel reads app application evidence", () => {

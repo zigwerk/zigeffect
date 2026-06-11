@@ -95,6 +95,20 @@ test("loadPayloadFromBridge can load the production telemetry retention sample",
   expect(payload.artifactJson).toContain("production-telemetry-nendb-retention-fixtures");
 });
 
+test("loadPayloadFromBridge can load the app-facing SolidJS read-only preview sample", async () => {
+  const payload = await loadPayloadFromBridge(
+    {},
+    async (sampleName) => {
+      expect(sampleName).toBe("sample-app-facing-solid-webui-readonly-preview.json");
+      return JSON.stringify({ schema: "zigeffect.causal.app-facing-production-integration-solid-webui-readonly-preview.v1" });
+    },
+    "?sample=app-preview",
+  );
+
+  expect(payload.session?.artifact_path).toBe("sample-app-facing-solid-webui-readonly-preview.json");
+  expect(payload.artifactJson).toContain("app-facing-production-integration-solid-webui-readonly-preview");
+});
+
 test("loadPayloadFromBridge can load the graph visual debugging development sample", async () => {
   const payload = await loadPayloadFromBridge(
     {},

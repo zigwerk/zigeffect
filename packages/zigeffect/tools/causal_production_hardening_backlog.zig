@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-app-facing-production-integration-solid-webui-readonly-preview";
-pub const recommended_next_branch = "codex/zigeffect-causal-app-facing-production-integration-solid-webui-readonly-preview";
+pub const recommendation = "start-app-facing-production-integration-ci-advisory-remediation-report";
+pub const recommended_next_branch = "codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report";
 
 const OutputFormat = enum { text, json };
 
@@ -1492,6 +1492,33 @@ const backlog_items: []const BacklogItem = &.{
         .branch = "codex/zigeffect-causal-app-facing-production-integration-audit-remediation-bridge",
         .agent_guidance = "Use ready audit/remediation bridge artifacts to start the app-facing SolidJS read-only preview only. Do not infer app runtime integration, live agent projection, raw payload capture, app mutation, NenDB production writes, NenDB adapter execution, Cockroach scope, CI enforcement, deployment mutation, production health, mutation proof, auto-apply, or applied=true.",
     },
+    .{
+        .id = "app-facing-production-integration-solid-webui-readonly-preview",
+        .title = "App-Facing Production Integration SolidJS Read-Only Preview",
+        .gap_id = "app-facing-production-integration-solid-webui-readonly-preview",
+        .priority = "P1",
+        .status = "delivered",
+        .summary = "Consumes ready app-facing audit/remediation bridge artifacts and emits a read-only SolidJS preview model for the local webui-dev/zig-webui workbench, exposing authority boundaries, bridge records, preview sections, checks, blocked claims, and verification commands without app writes, live dashboard hosting, CI enforcement, NenDB writes, or adapter execution.",
+        .depends_on = &.{ "app-facing-production-integration-audit-remediation-bridge", "app-facing-production-integration-nendb-handoff-fixtures", "agent-query-interface", "audit-chain-snapshot-compare" },
+        .deliverables = &.{
+            "SolidJS read-only preview schema",
+            "preview producer and approved/rejected artifacts",
+            "workbench app-preview tab",
+            "webui-dev/zig-webui sample artifact",
+            "authority and renderer guardrails",
+        },
+        .evidence_sources = &.{
+            "docs/superpowers/specs/2026-06-11-zigeffect-causal-app-facing-production-integration-solid-webui-readonly-preview-design.md",
+            "docs/superpowers/plans/2026-06-11-zigeffect-causal-app-facing-production-integration-solid-webui-readonly-preview-implementation.md",
+            "packages/zigeffect/tools/causal_app_facing_production_integration_solid_webui_readonly_preview.zig",
+            "packages/zigeffect/docs/app-facing-production-integration-solid-webui-readonly-preview.md",
+            "packages/zigeffect/workbench/src/causalArtifact.ts",
+            "packages/zigeffect/workbench/src/App.tsx",
+            "packages/zigeffect/workbench/public/sample-app-facing-solid-webui-readonly-preview.json",
+        },
+        .branch = "codex/zigeffect-causal-app-facing-production-integration-solid-webui-readonly-preview",
+        .agent_guidance = "Use ready app-facing SolidJS read-only preview artifacts to start the CI advisory remediation report branch only. Do not infer app runtime integration, live agent projection, raw payload capture, app mutation, NenDB production writes, NenDB adapter execution, Cockroach scope, CI enforcement, deployment mutation, production health, mutation proof, auto-apply, hosted live dashboard, React renderer, alternate renderer, or applied=true.",
+    },
 };
 
 const dependency_order: []const []const u8 = &.{
@@ -1553,6 +1580,7 @@ const dependency_order: []const []const u8 = &.{
     "app-facing-production-integration-local-fixtures",
     "app-facing-production-integration-nendb-handoff-fixtures",
     "app-facing-production-integration-audit-remediation-bridge",
+    "app-facing-production-integration-solid-webui-readonly-preview",
 };
 
 const verification_commands: []const []const u8 = &.{
@@ -1938,11 +1966,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-app-facing-production-integration-solid-webui-readonly-preview",
+        "start-app-facing-production-integration-ci-advisory-remediation-report",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-app-facing-production-integration-solid-webui-readonly-preview",
+        "codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report",
         recommended_next_branch,
     );
 }
@@ -2056,6 +2084,8 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItemStatus("app-facing-production-integration-nendb-handoff-fixtures", "delivered");
     try expectBacklogItem("app-facing-production-integration-audit-remediation-bridge");
     try expectBacklogItemStatus("app-facing-production-integration-audit-remediation-bridge", "delivered");
+    try expectBacklogItem("app-facing-production-integration-solid-webui-readonly-preview");
+    try expectBacklogItemStatus("app-facing-production-integration-solid-webui-readonly-preview", "delivered");
 }
 
 test "production hardening backlog preserves user constraints" {
@@ -2074,7 +2104,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-app-facing-production-integration-solid-webui-readonly-preview") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -2167,6 +2197,8 @@ test "production hardening backlog text mentions dependency order and next branc
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-app-facing-production-integration-nendb-handoff-fixtures") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "app-facing-production-integration-audit-remediation-bridge") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-app-facing-production-integration-audit-remediation-bridge") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "app-facing-production-integration-solid-webui-readonly-preview") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "causal-app-facing-production-integration-solid-webui-readonly-preview") != null);
 }
 
 test "production hardening backlog JSON is agent-readable" {
@@ -2175,7 +2207,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-app-facing-production-integration-solid-webui-readonly-preview\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);

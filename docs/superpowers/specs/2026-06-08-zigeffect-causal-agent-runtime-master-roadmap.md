@@ -1246,10 +1246,20 @@ Status values:
      deployment, app writes, production health claims, NenDB writes, NenDB
      adapter execution, Cockroach scope, or `applied=true`.
 54. `codex/zigeffect-causal-app-facing-production-integration-solid-webui-readonly-preview`
-   - Next: consume ready audit/remediation bridge artifacts and build a
-     read-only SolidJS preview model inside `webui-dev/zig-webui` without a
-     hosted live dashboard, React/alternate renderer work, app mutation
-     controls, CI enforcement, production writes, deployment mutation,
+   - Delivered:
+     `causal-app-facing-production-integration-solid-webui-readonly-preview`
+     consumes ready audit/remediation bridge artifacts and emits
+     `zigeffect.causal.app-facing-production-integration-solid-webui-readonly-preview.v1`,
+     adding a read-only SolidJS app-preview model and local
+     `webui-dev/zig-webui` sample without a hosted live dashboard,
+     React/alternate renderer work, app mutation controls, CI enforcement,
+     NenDB production writes, NenDB adapter execution, deployment mutation,
+     production health claims, or `applied=true`.
+55. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report`
+   - Next: consume ready app-facing SolidJS read-only preview artifacts and
+     produce an advisory CI remediation report without required status check
+     enforcement, workflow mutation, GitHub API mutation, deployment mutation,
+     app mutation, NenDB writes, NenDB adapter execution, Cockroach scope,
      production health claims, or `applied=true`.
 
 ## Dual-Interface Causal Spine Expansion

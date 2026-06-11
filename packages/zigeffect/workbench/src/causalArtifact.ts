@@ -396,6 +396,76 @@ export type ProductionTelemetryPreviewModel = {
   warnings: string[];
 };
 
+export type AppFacingPreviewAuthority = {
+  applied: boolean;
+  mutationAuthority: string;
+  readOnlyPreview: boolean;
+  solidWebuiEnabled: boolean;
+  solidWebuiRenderer: string;
+  webuiBridge: string;
+  hostedLiveDashboardEnabled: boolean;
+  appMutationControlsEnabled: boolean;
+  reactRendererEnabled: boolean;
+  alternateRendererEnabled: boolean;
+  nendbWriteEnabled: boolean;
+  nendbAdapterExecutionEnabled: boolean;
+  durableWriteEnabled: boolean;
+  deploymentMutationEnabled: boolean;
+  appRuntimeIntegrationEnabled: boolean;
+  agentQueryLiveProjectionEnabled: boolean;
+};
+
+export type AppFacingPreviewCheck = {
+  name: string;
+  status: string;
+  detail: string;
+};
+
+export type AppFacingBridgeRecord = {
+  id: string;
+  status: string;
+  sourceRef: string;
+  targetRef: string;
+  bridgeKind: string;
+  retainedRefs: string[];
+  blockedClaims: string[];
+};
+
+export type AppFacingPreviewSection = {
+  id: string;
+  title: string;
+  evidenceRefs: string[];
+  blockedAuthority: string[];
+};
+
+export type AppFacingPreviewModel = {
+  artifactPath: string;
+  schema: string;
+  schemaVersion: string;
+  sourceMode: "solid-webui-readonly-preview" | "audit-remediation-bridge";
+  status: string;
+  decision: string;
+  reason: string;
+  readyForNextBranch: boolean | null;
+  sourceBridge: string;
+  sourceBridgeStatus: string;
+  recommendation: string;
+  nextBranch: string;
+  authority: AppFacingPreviewAuthority;
+  previewPanels: string[];
+  sections: AppFacingPreviewSection[];
+  bridgeRecords: AppFacingBridgeRecord[];
+  checks: AppFacingPreviewCheck[];
+  validationChecks: string[];
+  implementationGates: string[];
+  nonGoals: string[];
+  blockedClaims: string[];
+  requiredCommands: string[];
+  verifiedCommands: string[];
+  verificationCommands: string[];
+  warnings: string[];
+};
+
 export type WorkbenchModel = {
   artifactPath: string;
   schema: string;
@@ -434,6 +504,8 @@ const auditChainSchema = "zigeffect.causal.audit-chain.v1";
 const liveDashboardStreamSchema = "zigeffect.causal.live-dashboard-stream.v1";
 const productionTelemetryRetentionSchema = "zigeffect.causal.production-telemetry-nendb-retention-fixtures.v1";
 const productionTelemetryWorkbenchPreviewSchema = "zigeffect.causal.production-telemetry-workbench-readonly-preview.v1";
+const appFacingAuditRemediationBridgeSchema = "zigeffect.causal.app-facing-production-integration-audit-remediation-bridge.v1";
+const appFacingSolidWebuiPreviewSchema = "zigeffect.causal.app-facing-production-integration-solid-webui-readonly-preview.v1";
 const defaultVisualGraphLayouts: VisualGraphLayoutMode[] = ["dagre", "force", "radial"];
 const liveDashboardSourceKinds = ["snapshot", "aggregation_bundle", "access_policy", "alert_preview", "compare"];
 const liveDashboardSourceLabels: Record<string, string> = {
@@ -1126,6 +1198,62 @@ export function deriveProductionTelemetryPreviewModel(raw: unknown, options: Wor
   };
 }
 
+export function deriveAppFacingPreviewModel(raw: unknown, options: WorkbenchOptions): AppFacingPreviewModel | null {
+  const artifact = isRecord(raw) ? raw : {};
+  const schema = textValue(artifact.schema, "unknown");
+  if (schema !== appFacingSolidWebuiPreviewSchema && schema !== appFacingAuditRemediationBridgeSchema) {
+    return null;
+  }
+
+  const sourceMode = schema === appFacingSolidWebuiPreviewSchema
+    ? "solid-webui-readonly-preview"
+    : "audit-remediation-bridge";
+  const warnings: string[] = [];
+  const schemaVersion = textValue(artifact.schema_version, "unknown");
+  if (schemaVersion === "unknown") {
+    warnings.push("artifact schema_version is missing");
+  }
+
+  const requiredCommands = stringList(artifact.required_verification_commands);
+  const verifiedCommands = stringList(artifact.verified_commands);
+
+  return {
+    artifactPath: options.artifactPath,
+    schema,
+    schemaVersion,
+    sourceMode,
+    status: appFacingStatus(artifact),
+    decision: textValue(artifact.decision, "unknown"),
+    reason: textValue(artifact.reason, ""),
+    readyForNextBranch: booleanValue(artifact.ready_for_next_branch),
+    sourceBridge: textValue(artifact.source_bridge, textValue(artifact.source_handoff, "")),
+    sourceBridgeStatus: textValue(artifact.source_bridge_status, appFacingStatus(artifact)),
+    recommendation: textValue(artifact.recommendation, "unknown"),
+    nextBranch: textValue(artifact.next_branch_if_ready, "unknown"),
+    authority: appFacingAuthority(artifact, sourceMode),
+    previewPanels: stringList(artifact.preview_panels),
+    sections: appFacingPreviewSections(artifact.app_preview_sections),
+    bridgeRecords: appFacingBridgeRecords(artifact.bridge_records, artifact.audit_remediation_bridge_records),
+    checks: appFacingChecks(artifact.checks),
+    validationChecks: uniqueInOrder([
+      ...stringList(artifact.validation_checks),
+      ...stringList(artifact.bridge_validation_checks),
+    ]),
+    implementationGates: stringList(artifact.implementation_gates),
+    nonGoals: stringList(artifact.non_goals),
+    blockedClaims: stringList(artifact.blocked_claims),
+    requiredCommands,
+    verifiedCommands,
+    verificationCommands: uniqueInOrder([
+      ...requiredCommands,
+      ...verifiedCommands,
+      ...stringList(artifact.reviewed_verification_commands),
+      ...stringList(artifact.verification_commands),
+    ]),
+    warnings,
+  };
+}
+
 export function deriveGovernanceModel(raw: unknown, options: WorkbenchOptions): GovernanceModel | null {
   const artifact = isRecord(raw) ? raw : {};
   const schema = textValue(artifact.schema, "unknown");
@@ -1673,6 +1801,83 @@ function productionTelemetryMappingFixtures(value: unknown): ProductionTelemetry
     label: textValue(fixture.label, "unknown"),
     retainedFields: stringList(fixture.retained_fields),
     blockedFields: stringList(fixture.blocked_fields),
+  }));
+}
+
+function appFacingStatus(artifact: UnknownRecord): string {
+  return textValue(
+    artifact.status,
+    textValue(
+      artifact.solid_webui_readonly_preview_status,
+      textValue(artifact.audit_remediation_bridge_status, "unknown"),
+    ),
+  );
+}
+
+function appFacingAuthority(
+  artifact: UnknownRecord,
+  sourceMode: AppFacingPreviewModel["sourceMode"],
+): AppFacingPreviewAuthority {
+  const previewDefault = sourceMode === "solid-webui-readonly-preview";
+  return {
+    applied: booleanValue(artifact.applied) ?? false,
+    mutationAuthority: textValue(artifact.mutation_authority, "none"),
+    readOnlyPreview: booleanValue(artifact.read_only_preview) ?? previewDefault,
+    solidWebuiEnabled: booleanValue(artifact.solid_webui_enabled) ?? previewDefault,
+    solidWebuiRenderer: textValue(artifact.solid_webui_renderer, previewDefault ? "solidjs" : "pending"),
+    webuiBridge: textValue(artifact.webui_bridge, previewDefault ? "webui-dev/zig-webui" : "pending"),
+    hostedLiveDashboardEnabled: booleanValue(artifact.hosted_live_dashboard_enabled) ?? false,
+    appMutationControlsEnabled: booleanValue(artifact.app_mutation_controls_enabled) ?? false,
+    reactRendererEnabled: booleanValue(artifact.react_renderer_enabled) ?? false,
+    alternateRendererEnabled: booleanValue(artifact.alternate_renderer_enabled) ?? false,
+    nendbWriteEnabled: booleanValue(artifact.nendb_write_enabled) ?? false,
+    nendbAdapterExecutionEnabled: booleanValue(artifact.nendb_adapter_execution_enabled) ?? false,
+    durableWriteEnabled: booleanValue(artifact.durable_write_enabled) ?? false,
+    deploymentMutationEnabled: booleanValue(artifact.deployment_mutation_enabled) ?? false,
+    appRuntimeIntegrationEnabled: booleanValue(artifact.app_runtime_integration_enabled) ?? false,
+    agentQueryLiveProjectionEnabled: booleanValue(artifact.agent_query_live_projection_enabled) ?? false,
+  };
+}
+
+function appFacingChecks(value: unknown): AppFacingPreviewCheck[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isRecord).map((check) => ({
+    name: textValue(check.name, "unknown"),
+    status: textValue(check.status, "unknown"),
+    detail: textValue(check.detail, ""),
+  }));
+}
+
+function appFacingBridgeRecords(primary: unknown, fallback: unknown): AppFacingBridgeRecord[] {
+  const value = Array.isArray(primary) && primary.length > 0 ? primary : fallback;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isRecord).map((record) => ({
+    id: textValue(record.id, "unknown"),
+    status: textValue(record.status, textValue(record.review_state, "ready")),
+    sourceRef: textValue(record.source_ref, textValue(record.source_handoff_fixture, textValue(record.audit_ref, ""))),
+    targetRef: textValue(record.target_ref, textValue(record.remediation_ref, textValue(record.review_state, ""))),
+    bridgeKind: textValue(record.bridge_kind, "unknown"),
+    retainedRefs: stringList(record.retained_refs),
+    blockedClaims: stringList(record.blocked_claims),
+  }));
+}
+
+function appFacingPreviewSections(value: unknown): AppFacingPreviewSection[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isRecord).map((section) => ({
+    id: textValue(section.id, "unknown"),
+    title: textValue(section.title, textValue(section.id, "unknown")),
+    evidenceRefs: stringList(section.evidence_refs),
+    blockedAuthority: stringList(section.blocked_authority),
   }));
 }
 

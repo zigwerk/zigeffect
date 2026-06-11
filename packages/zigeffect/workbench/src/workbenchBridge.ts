@@ -104,6 +104,7 @@ function sampleNameFromSearch(search: string): string {
   if (sample === "live") return "sample-live-dashboard-stream.json";
   if (sample === "visual-graph") return "sample-visual-graph-debugging.json";
   if (sample === "production-telemetry") return "sample-production-telemetry-nendb-retention-fixtures.json";
+  if (sample === "app-preview") return "sample-app-facing-solid-webui-readonly-preview.json";
   return "sample-artifact.json";
 }
 
