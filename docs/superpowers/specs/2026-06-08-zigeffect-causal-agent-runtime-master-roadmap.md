@@ -1397,18 +1397,37 @@ Status values:
      production health claims, alternate renderer scope, public artifact upload,
      auto-apply, and mutation authority beyond the record-only artifact marker.
 64. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-policy`
-   - Next: consume applied app-facing advisory remediation report
-     consumption-report application-boundary artifacts and emit a record-only
-     interpretation policy for how agents, reviewers, non-blocking CI advisory
-     readers, and the SolidJS `webui-dev/zig-webui` workbench can use applied
-     report evidence. It should preserve source report ids, application checks,
-     report application change evidence, before/after evidence, safe after-report
-     digest, denied claims, local publication channel limits, and verification
-     evidence while denying required CI, GitHub mutation, app mutation, app
-     runtime integration, live projection, raw payload capture, NenDB writes,
-     NenDB adapter execution, Cockroach scope, deployment authority, production
-     health claims, alternate renderer scope, public artifact upload,
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-policy`
+     consumes applied app-facing advisory remediation report consumption-report
+     application-boundary artifacts and emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-policy.v1`.
+     It records approve/reject policy evidence for how agents, reviewers,
+     non-blocking CI advisory readers, and the SolidJS `webui-dev/zig-webui`
+     workbench can use applied report evidence. Ready policy output preserves
+     source report ids, evaluator/policy/boundary/readiness/publication refs,
+     application checks, report checks, report application change evidence,
+     before/after evidence, safe after-report digest, denied claims, local
+     publication channel limits, source verification evidence, and policy
+     verification evidence while keeping `mutation_authority="none"`. It denies
+     required CI, GitHub mutation, workflow mutation, app mutation, app runtime
+     integration, live projection, raw prompt/response/payload capture, NenDB
+     writes, NenDB adapter execution, Cockroach scope, deployment authority,
+     production health claims, alternate renderer scope, public artifact upload,
      auto-apply, and mutation authority.
+65. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluator`
+   - Next: consume ready app-facing advisory remediation report
+     consumption-report policy artifacts plus explicit local request and support
+     evidence, then emit ready, advisory, or blocked report-consumption evaluator
+     evidence for agents, reviewers, non-blocking CI advisory readers, and the
+     SolidJS `webui-dev/zig-webui` workbench. It should classify bounded
+     report-consumption requests, preserve source policy checks and denied
+     inference rules, point agents at next useful causal queries, and continue
+     denying CI enforcement, GitHub mutation, app mutation, runtime wiring,
+     live projection, raw payload capture, storage writes, NenDB adapter
+     execution, Cockroach scope, deployment authority, production health claims,
+     public upload, alternate renderer scope, auto-apply, and mutation
+     authority.
 
 ## Dual-Interface Causal Spine Expansion
 
