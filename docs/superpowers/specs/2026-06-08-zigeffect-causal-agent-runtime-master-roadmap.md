@@ -1804,11 +1804,18 @@ Status values:
      `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report.v1`
      for the matching application-boundary branch.
 95. `codex/zigeffect-causal-app-facing-eight-level-application-boundary`
-   - Next: consume ready or advisory eight-level report artifacts, record
-     planned or reviewed local application-boundary evidence, require reviewed
-     before/after verification before applied state, preserve local publication
-     only, and keep CI, GitHub, app runtime, storage, deployment, public upload,
-     and mutation authority disabled.
+   - Delivered:
+     `causal-app-facing-eight-level-application-boundary` consumes ready or
+     advisory eight-level report artifacts, records planned or reviewed local
+     application-boundary evidence, requires reviewed before/after verification
+     before applied state, preserves the full artifact schema while using short
+     physical aliases, and hands off to the eight-level policy branch with CI,
+     GitHub, app runtime, storage, deployment, public upload, and mutation
+     authority disabled.
+96. `codex/zigeffect-causal-app-facing-eight-level-policy`
+   - Next: consume applied eight-level application-boundary evidence, make a
+     record-only approve or reject decision, preserve no-mutation authority, and
+     hand off to the eight-level evaluator.
 
 ## Dual-Interface Causal Spine Expansion
 
