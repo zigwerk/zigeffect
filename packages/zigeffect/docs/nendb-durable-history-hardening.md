@@ -74,8 +74,8 @@ Ready evidence hands off to:
 
 `codex/zigeffect-causal-agent-query-compare-runs`
 
-That follow-up can use durable-history evidence for cross-run comparison, but
-must still keep query responses bounded, redacted, and read-only.
+That follow-up is now delivered. It uses durable-history evidence for bounded
+cross-run comparison and keeps query responses bounded, redacted, and read-only.
 
 ## Verification
 

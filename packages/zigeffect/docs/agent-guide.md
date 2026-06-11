@@ -1040,13 +1040,16 @@ slice instead of human text:
 zig build causal-query -- --agent --file .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json explain_event 3
 zig build causal-query -- --agent --limit 16 --file .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json summarize_run 1
 zig build causal-query -- --agent --file .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json find_failures 1
+zig build causal-query -- --agent --file .zig-cache/causal-artifacts/before.json --compare-file .zig-cache/causal-artifacts/after.json compare_runs 1:2
 ```
 
 Agent-query responses use `zigeffect.causal.agent-query.v1` and include selected
 events, derived runtime relationships, `bounded`/`truncated` flags, a compact
 confidence signal, policy metadata, compatibility warnings, limitations, and
-next-query hints. This is the compact agent surface; the SolidJS `zig-webui`
-workbench remains the richer human surface.
+next-query hints. The `compare_runs <left_run_id>:<right_run_id>` query compares
+bounded run slices inside one artifact or across `--compare-file` artifacts.
+This is the compact agent surface; the SolidJS `zig-webui` workbench remains the
+richer human surface.
 
 For the real missing-service compile-fail artifact:
 

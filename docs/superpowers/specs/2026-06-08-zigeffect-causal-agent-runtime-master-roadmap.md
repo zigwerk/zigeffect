@@ -1155,10 +1155,17 @@ Status values:
      production write authority, production health claims, and mutation
      authority.
 45. `codex/zigeffect-causal-agent-query-compare-runs`
-   - Current next branch: build bounded cross-run agent comparison on top of
-     the NenDB durable-history evidence before arbitrary audit-chain snapshot
-     comparison, app-facing production integration fixtures, or
-     self-improving agent memory depends on durable causal records.
+   - Delivered: `causal-query --agent compare_runs <left_run_id>:<right_run_id>`
+     compares bounded run slices from one artifact or from
+     `--compare-file`, preserves `zigeffect.causal.agent-query.v1`, reports
+     per-side event and finding deltas, labels left/right warnings and
+     limitations, and keeps live telemetry, durable writes, app mutation,
+     source mutation, registry mutation, and production authority disabled.
+46. `codex/zigeffect-causal-audit-chain-snapshot-compare`
+   - Current next branch: build arbitrary named audit-chain snapshot comparison
+     on top of bounded run-level comparison before app-facing production
+     integration fixtures or self-improving agent memory depends on durable
+     causal records.
 
 ## Dual-Interface Causal Spine Expansion
 

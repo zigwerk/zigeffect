@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-agent-query-cross-run-comparison";
-pub const recommended_next_branch = "codex/zigeffect-causal-agent-query-compare-runs";
+pub const recommendation = "start-audit-chain-snapshot-compare";
+pub const recommended_next_branch = "codex/zigeffect-causal-audit-chain-snapshot-compare";
 
 const OutputFormat = enum { text, json };
 
@@ -209,8 +209,8 @@ const backlog_items: []const BacklogItem = &.{
         .title = "Agent Query Interface",
         .gap_id = "machine-native-causal-queries",
         .priority = "P2",
-        .status = "partial",
-        .summary = "Expose compact bounded agent queries over the unified spine while preserving evidence ids, redaction state, truncation state, confidence, and next-query hints. Runtime query JSON and app semantic trace_data are delivered; cross-run comparison remains future work.",
+        .status = "delivered",
+        .summary = "Expose compact bounded agent queries over the unified spine while preserving evidence ids, redaction state, truncation state, confidence, and next-query hints. Runtime query JSON, app semantic trace_data, and bounded compare_runs are delivered.",
         .depends_on = &.{ "unified-causal-spine-contract", "deep-runtime-internals", "app-semantic-trace-api" },
         .deliverables = &.{
             "runtime summarize_run query",
@@ -220,7 +220,7 @@ const backlog_items: []const BacklogItem = &.{
             "runtime list_findings and next_queries queries",
             "bounded runtime response schema",
             "app trace_data query",
-            "future compare_runs query",
+            "bounded compare_runs query",
         },
         .evidence_sources = &.{
             "packages/zigeffect/tools/causal_query.zig",
@@ -1255,6 +1255,32 @@ const backlog_items: []const BacklogItem = &.{
         .branch = "codex/zigeffect-causal-nendb-durable-history-hardening",
         .agent_guidance = "Use this as the durable-history evidence substrate for cross-run comparison. Do not infer production health, live telemetry, Cockroach scope, durable production writes, NenDB production write authority, or mutation authority.",
     },
+    .{
+        .id = "agent-query-cross-run-comparison",
+        .title = "Agent Query Cross-Run Comparison",
+        .gap_id = "agent-query-cross-run-comparison",
+        .priority = "P0",
+        .status = "delivered",
+        .summary = "Adds bounded compare_runs support to causal-query --agent for same-artifact and cross-artifact run comparison inside zigeffect.causal.agent-query.v1.",
+        .depends_on = &.{ "agent-query-interface", "nendb-durable-history-hardening" },
+        .deliverables = &.{
+            "same-artifact compare_runs query",
+            "cross-artifact --compare-file query",
+            "per-side event and finding deltas",
+            "left/right artifact warnings and limitations",
+            "cross-run next query hints",
+            "audit-chain snapshot comparison handoff",
+        },
+        .evidence_sources = &.{
+            "docs/superpowers/specs/2026-06-11-zigeffect-causal-agent-query-compare-runs-design.md",
+            "docs/superpowers/plans/2026-06-11-zigeffect-causal-agent-query-compare-runs-implementation.md",
+            "packages/zigeffect/tools/causal_query.zig",
+            "packages/zigeffect/docs/agent-observable-runtime.md",
+            "packages/zigeffect/docs/schema-governance.md",
+        },
+        .branch = "codex/zigeffect-causal-agent-query-compare-runs",
+        .agent_guidance = "Use compare_runs to inspect before/after run evidence and regression signatures. Do not infer remediation, source edits, registry updates, production writes, live telemetry, or mutation authority.",
+    },
 };
 
 const dependency_order: []const []const u8 = &.{
@@ -1307,6 +1333,7 @@ const dependency_order: []const []const u8 = &.{
     "production-telemetry-ci-gate-required-status-check-enforcement-report-policy",
     "production-hardening-backlog-refresh",
     "nendb-durable-history-hardening",
+    "agent-query-cross-run-comparison",
 };
 
 const verification_commands: []const []const u8 = &.{
@@ -1401,6 +1428,7 @@ const verification_commands: []const []const u8 = &.{
     "zig build causal-production-hardening-backlog -- --format json 2> ../../.zig-cache/causal-artifacts/production-hardening-backlog.json",
     "zig build causal-production-hardening-backlog-refresh -- --from-backlog ../../.zig-cache/causal-artifacts/production-hardening-backlog.json refresh --reason \"production hardening backlog refreshed after report policy\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"",
     "zig build causal-nendb-durable-history-hardening",
+    "zig test --dep causal_artifact -Mroot=tools/causal_query.zig -Mcausal_artifact=tools/causal_artifact.zig",
     "zig build causal-production-deployment-runbooks",
     "zig build causal-production-deployment-runbooks -- --format json",
     "zig build causal-durable-production-retention",
@@ -1673,11 +1701,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-agent-query-cross-run-comparison",
+        "start-audit-chain-snapshot-compare",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-agent-query-compare-runs",
+        "codex/zigeffect-causal-audit-chain-snapshot-compare",
         recommended_next_branch,
     );
 }
@@ -1691,6 +1719,7 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItem("deep-runtime-internals");
     try expectBacklogItem("app-semantic-trace-api");
     try expectBacklogItem("agent-query-interface");
+    try expectBacklogItemStatus("agent-query-interface", "delivered");
     try expectBacklogItem("encryption-at-rest-policy");
     try expectBacklogItem("alerting-integrations");
     try expectBacklogItemStatus("alerting-integrations", "delivered");
@@ -1772,6 +1801,8 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItemStatus("production-hardening-backlog-refresh", "delivered");
     try expectBacklogItem("nendb-durable-history-hardening");
     try expectBacklogItemStatus("nendb-durable-history-hardening", "delivered");
+    try expectBacklogItem("agent-query-cross-run-comparison");
+    try expectBacklogItemStatus("agent-query-cross-run-comparison", "delivered");
 }
 
 test "production hardening backlog preserves user constraints" {
@@ -1790,7 +1821,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-agent-query-compare-runs") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-audit-chain-snapshot-compare") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -1865,6 +1896,8 @@ test "production hardening backlog text mentions dependency order and next branc
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-hardening-backlog-refresh") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "nendb-durable-history-hardening") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-nendb-durable-history-hardening") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "agent-query-cross-run-comparison") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "codex/zigeffect-causal-agent-query-compare-runs") != null);
 }
 
 test "production hardening backlog JSON is agent-readable" {
@@ -1873,7 +1906,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-agent-query-compare-runs\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-audit-chain-snapshot-compare\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);
@@ -1888,6 +1921,9 @@ test "production hardening backlog JSON is agent-readable" {
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"production-hardening-completion-audit\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-production-hardening-completion-audit\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-production-hardening-completion-audit -- --format json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"agent-query-cross-run-comparison\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-agent-query-compare-runs\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zig test --dep causal_artifact -Mroot=tools/causal_query.zig -Mcausal_artifact=tools/causal_artifact.zig") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"load-test-observation-harness\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-load-test-observation-harness\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-load-test-observation-harness -- observe app-request-trace --iterations 1 --format json") != null);

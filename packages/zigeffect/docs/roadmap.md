@@ -1111,7 +1111,7 @@ metrics, and traces.
   adapter with `CausalNendbDurableHistoryReport`, emits a deterministic local
   fixture through a fake writer, verifies node, parent-edge, flush, redaction,
   cause-query, lineage-query, and bounded-retention evidence, and hands off to
-  `codex/zigeffect-causal-agent-query-compare-runs`. It keeps Cockroach,
+  `codex/zigeffect-causal-agent-query-compare-runs`, now delivered. It keeps Cockroach,
   non-NenDB durable adapters, live telemetry, network sends, durable production
   writes, NenDB production write authority, production health claims, and
   mutation authority disabled.
@@ -1160,10 +1160,11 @@ metrics, and traces.
   artifacts, and responses.
 - Delivered: the compact agent query interface returns bounded JSON for run
   summaries, failures, event explanations, cause traces, data lineage,
-  findings, and recommended next queries. Cross-run comparison remains future.
-- Next: cross-run agent query comparison.
+  findings, recommended next queries, and bounded `compare_runs` before/after
+  summaries across one artifact or two retained artifacts.
+- Next: audit-chain snapshot comparison.
 - Still future: production-grade app-facing integrations and comparing
-  arbitrary named audit-chain snapshots.
+  arbitrary named audit-chain snapshots beyond the current run-level query.
 - Still future: deeper runtime regression scenarios for partial config and
   cause coverage.
 - Extend the SolidJS `zig-webui` causal workbench when future UI branches need

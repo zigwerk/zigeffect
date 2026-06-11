@@ -256,9 +256,9 @@ const schema_entries: []const SchemaEntry = &.{
         .category = "agent-query",
         .status = "current",
         .emitted_by = &.{"causal-query --agent"},
-        .consumed_by = &.{ "agents", "causal-dev-agent", "future workbench graph slices" },
-        .compatibility = &.{ "strict-v1", "record-only" },
-        .governance_requirements = &.{ "agent query tests", "bounded response tests", "policy metadata docs" },
+        .consumed_by = &.{ "agents", "causal-dev-agent", "future workbench graph slices", "cross-run comparison" },
+        .compatibility = &.{ "strict-v1", "record-only", "bounded cross-run comparison" },
+        .governance_requirements = &.{ "agent query tests", "bounded response tests", "cross-run comparison tests", "policy metadata docs" },
     },
     .{
         .schema = "zigeffect.causal.human-agent-feedback-loop.v1",

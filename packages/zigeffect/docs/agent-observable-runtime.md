@@ -624,9 +624,10 @@ queries plus app data-lineage slices:
 - `list_findings(run_id)`
 - `next_queries(context)`
 
-`compare_runs(left_run_id, right_run_id)` remains future work because it needs
-snapshot/compare semantics across two retained artifacts, not just one bounded
-event slice.
+`compare_runs(left_run_id:right_run_id)` is implemented as a bounded agent JSON
+query. It can compare two run ids inside one artifact or compare a left artifact
+against a right artifact with `--compare-file`, while preserving read-only
+evidence and explicit truncation/limitation fields.
 
 ### Causal Workbench
 
@@ -1041,14 +1042,15 @@ schema-stable evidence instead of human text:
 zig build causal-query -- --agent --file <artifact.json> explain_event 3
 zig build causal-query -- --agent --limit 16 --file <artifact.json> summarize_run 1
 zig build causal-query -- --agent --file <artifact.json> find_failures 1
+zig build causal-query -- --agent --file <before.json> --compare-file <after.json> compare_runs 1:2
 ```
 
 Agent mode emits `zigeffect.causal.agent-query.v1` with selected events,
 derived runtime and app semantic relationships, `bounded`/`truncated` flags, a compact
 confidence signal, artifact policy metadata, compatibility warnings,
 limitations, and recommended next queries. Use `trace_data <data_subject_ref>`
-for semantic app data-lineage events; cross-artifact run comparison remains
-future work.
+for semantic app data-lineage events and `compare_runs <left_run_id>:<right_run_id>`
+for bounded before/after runtime comparison.
 
 `zig build causal-human-agent-feedback-loop` records the shared human and agent
 loop around those primitives. It emits

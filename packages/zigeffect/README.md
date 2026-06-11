@@ -1022,10 +1022,20 @@ zig build causal-nendb-durable-history-hardening -- --format json
 The fixture uses schema `zigeffect.causal.nendb-durable-history.v1`, exercises
 the NenDB causal storage adapter through a local fake writer, proves retained
 history remains queryable beyond the bounded core store retention window, and
-hands off to `codex/zigeffect-causal-agent-query-compare-runs`. It does not
-enable Cockroach, live telemetry, network send, durable production writes,
-NenDB production write authority, or mutation authority. The full policy is in
+hands off to `codex/zigeffect-causal-agent-query-compare-runs`, now delivered.
+It does not enable Cockroach, live telemetry, network send, durable production
+writes, NenDB production write authority, or mutation authority. The full policy is in
 [docs/nendb-durable-history-hardening.md](docs/nendb-durable-history-hardening.md).
+
+Compare bounded before/after agent run evidence:
+
+```bash
+zig build causal-query -- --agent --file .zig-cache/causal-artifacts/before.json --compare-file .zig-cache/causal-artifacts/after.json compare_runs 1:2
+```
+
+The response stays within `zigeffect.causal.agent-query.v1`, reports per-side
+event and finding deltas, labels limitations for missing metadata or missing run
+evidence, and keeps mutation authority disabled.
 
 Print the causal live dashboard streaming workbench contract:
 

@@ -55,13 +55,13 @@ verification.
 **Files:**
 - Modify: `packages/zigeffect/tools/causal_query.zig`
 
-- [ ] **Step 1: Add compare fixture JSON**
+- [x] **Step 1: Add compare fixture JSON**
 
 Add a deterministic fixture with two run ids and distinct failure/status/kind
 shape. Include retention, sampling, and truncation metadata so confidence and
 limitations behavior can be verified.
 
-- [ ] **Step 2: Add same-artifact comparison test**
+- [x] **Step 2: Add same-artifact comparison test**
 
 Add:
 
@@ -83,7 +83,7 @@ test "agent compare_runs compares two runs from one artifact" {
 }
 ```
 
-- [ ] **Step 3: Add cross-artifact comparison test**
+- [x] **Step 3: Add cross-artifact comparison test**
 
 Expose a helper such as:
 
@@ -117,7 +117,7 @@ test "agent compare_runs compares two files with bounded evidence" {
 }
 ```
 
-- [ ] **Step 4: Add negative and warning tests**
+- [x] **Step 4: Add negative and warning tests**
 
 Add tests for:
 
@@ -127,7 +127,7 @@ Add tests for:
 - warning labels for unsupported/future/unknown left and right artifacts;
 - `next_queries` commands distinguishing left and right artifacts.
 
-- [ ] **Step 5: Verify RED**
+- [x] **Step 5: Verify RED**
 
 Run:
 
@@ -142,7 +142,7 @@ Expected: compile/test failures until implementation exists.
 **Files:**
 - Modify: `packages/zigeffect/tools/causal_query.zig`
 
-- [ ] **Step 1: Add compare-file support to CLI main**
+- [x] **Step 1: Add compare-file support to CLI main**
 
 Track:
 
@@ -154,7 +154,7 @@ var compare_file_path: ?[]const u8 = null;
 Parse `--compare-file <path>` beside `--file <path>`. Read the second file only
 when provided.
 
-- [ ] **Step 2: Add two-artifact run helper**
+- [x] **Step 2: Add two-artifact run helper**
 
 Keep `runQuery` compatibility by routing it through a helper with optional
 right JSON:
@@ -167,7 +167,7 @@ pub fn runQueryCompareFiles(allocator: std.mem.Allocator, left_json: []const u8,
 The single-artifact path should call the shared implementation with
 `right_json = null`.
 
-- [ ] **Step 3: Parse run pair**
+- [x] **Step 3: Parse run pair**
 
 Implement `parseRunPair("1:2")` with typed errors:
 
@@ -181,7 +181,7 @@ Reject missing colon, empty sides, extra colon, or non-numeric sides.
 **Files:**
 - Modify: `packages/zigeffect/tools/causal_query.zig`
 
-- [ ] **Step 1: Select per-side run events**
+- [x] **Step 1: Select per-side run events**
 
 Add a helper:
 
@@ -192,7 +192,7 @@ fn appendRunEvents(allocator: std.mem.Allocator, output: *std.ArrayList(Event), 
 Use it for both existing `summarize_run` and new comparison if it simplifies
 the code.
 
-- [ ] **Step 2: Calculate side stats**
+- [x] **Step 2: Calculate side stats**
 
 For each side compute:
 
@@ -207,7 +207,7 @@ For each side compute:
 Use existing `isFailureEvidence` for finding/failure evidence unless a stronger
 local helper already exists.
 
-- [ ] **Step 3: Calculate deltas and set differences**
+- [x] **Step 3: Calculate deltas and set differences**
 
 Compute deterministic first-seen arrays for:
 
@@ -222,7 +222,7 @@ Compute signed:
 - `failure_delta = right.failure_events - left.failure_events`;
 - `finding_delta = right.finding_events - left.finding_events`.
 
-- [ ] **Step 4: Bound returned events**
+- [x] **Step 4: Bound returned events**
 
 Split `--limit` between sides:
 
@@ -239,13 +239,13 @@ Append left returned events first, then right returned events. The aggregate
 **Files:**
 - Modify: `packages/zigeffect/tools/causal_query.zig`
 
-- [ ] **Step 1: Add comparison formatter**
+- [x] **Step 1: Add comparison formatter**
 
 Add an optional comparison object to the existing formatter. Keep field order
 stable and append it before `events` or after `limitations`; choose the least
 intrusive location and test for substrings rather than fragile full equality.
 
-- [ ] **Step 2: Add dual artifact warnings**
+- [x] **Step 2: Add dual artifact warnings**
 
 Call existing warning helpers for both artifacts with labels:
 
@@ -255,12 +255,12 @@ Call existing warning helpers for both artifacts with labels:
 When `--compare-file` is omitted, avoid duplicate warnings and add a limitation
 instead.
 
-- [ ] **Step 3: Add dual artifact limitations**
+- [x] **Step 3: Add dual artifact limitations**
 
 Extend limitations with per-side policy metadata absence. Preserve existing
 single-artifact behavior for non-compare queries.
 
-- [ ] **Step 4: Add comparison-aware confidence**
+- [x] **Step 4: Add comparison-aware confidence**
 
 Return `partial` when:
 
@@ -270,7 +270,7 @@ Return `partial` when:
 
 Otherwise return `complete`.
 
-- [ ] **Step 5: Add comparison-aware next queries**
+- [x] **Step 5: Add comparison-aware next queries**
 
 For compare output, append:
 
@@ -288,17 +288,17 @@ cross-file queries. Use `<artifact.json>` for same-artifact comparison.
 **Files:**
 - Modify docs and governance files from the file map.
 
-- [ ] **Step 1: Agent observable runtime docs**
+- [x] **Step 1: Agent observable runtime docs**
 
 Remove the "future work" language for `compare_runs` and add CLI examples.
 
-- [ ] **Step 2: Schema governance docs/tool**
+- [x] **Step 2: Schema governance docs/tool**
 
 Record that `agent-query.v1` now covers runtime queries, app semantic
 `trace_data`, and bounded cross-run comparison. Keep schema count at `81` unless
 new schema constants are added.
 
-- [ ] **Step 3: Production hardening backlog**
+- [x] **Step 3: Production hardening backlog**
 
 Update the backlog item:
 
@@ -310,7 +310,7 @@ Candidate next branch:
 
 `codex/zigeffect-causal-audit-chain-snapshot-compare`
 
-- [ ] **Step 4: Roadmap/README docs**
+- [x] **Step 4: Roadmap/README docs**
 
 Add short delivered notes and command examples.
 

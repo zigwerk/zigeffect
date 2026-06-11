@@ -557,7 +557,7 @@ The fixture records schema `zigeffect.causal.nendb-durable-history.v1`,
 exercises the NenDB causal storage adapter through a local fake writer, verifies
 node, parent-edge, flush, cause-query, lineage-query, redaction, and bounded
 retention evidence, and hands off to
-`codex/zigeffect-causal-agent-query-compare-runs`. It keeps Cockroach,
+`codex/zigeffect-causal-agent-query-compare-runs`, which is now delivered. It keeps Cockroach,
 non-NenDB durable adapters, live telemetry, network sends, durable production
 writes, NenDB production write authority, compaction execution, backup/restore
 execution, TTL deletion, production health claims, and mutation authority

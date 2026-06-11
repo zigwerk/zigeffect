@@ -25,11 +25,11 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-agent-query-cross-run-comparison` means the
+The recommendation `start-audit-chain-snapshot-compare` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
-bounded agent query surface, record-only encryption-at-rest policy, and
+bounded agent query surface with cross-run comparison, record-only encryption-at-rest policy, and
 record-only alerting integrations now exist, and the read-only live dashboard
 streaming workbench now has a stream contract, local fixture, Live tab, and
 Solid G6 visual graph adapter boundary. Graph visual debugging is also
@@ -259,8 +259,8 @@ lineage-query, and bounded-retention evidence, and keeps Cockroach, non-NenDB
 adapters, live telemetry, network sends, durable production writes, NenDB
 production write authority, compaction execution, backup/restore execution,
 TTL deletion, production health claims, and mutation authority disabled.
-The next branch should be
-`codex/zigeffect-causal-agent-query-compare-runs`.
+The cross-run comparison branch is now delivered. The next branch should be
+`codex/zigeffect-causal-audit-chain-snapshot-compare`.
 
 ## Dependency Order
 
@@ -273,7 +273,7 @@ The backlog currently orders future production-hardening branches as:
 5. `unified-causal-spine-contract` delivered
 6. `deep-runtime-internals` delivered
 7. `app-semantic-trace-api` delivered
-8. `agent-query-interface` partial
+8. `agent-query-interface` delivered
 9. `encryption-at-rest-policy` delivered
 10. `alerting-integrations` delivered
 11. `live-dashboard-streaming-workbench` delivered
@@ -315,11 +315,12 @@ The backlog currently orders future production-hardening branches as:
 47. `production-telemetry-ci-gate-required-status-check-enforcement-report-policy` delivered
 48. `production-hardening-backlog-refresh` delivered
 49. `nendb-durable-history-hardening` delivered
+50. `agent-query-cross-run-comparison` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
-boundaries ahead of production behavior. The `agent-query-interface` item is
-split: runtime bounded JSON queries and app semantic `trace_data` are
-delivered, while cross-run comparison remains future work.
+boundaries ahead of production behavior. The `agent-query-interface` item now
+covers runtime bounded JSON queries, app semantic `trace_data`, and bounded
+`compare_runs` evidence across one artifact or two retained artifacts.
 
 ## Authority Boundaries
 
@@ -897,8 +898,9 @@ redaction evidence, and preserves disabled Cockroach, non-NenDB adapters, live
 telemetry, network sends, durable production writes, NenDB production write
 authority, production health claims, and mutation authority.
 
-The next branch should build cross-run agent comparison on top of this durable
-history evidence.
+The cross-run agent comparison branch builds on this durable history evidence.
+The next branch should build audit-chain snapshot comparison on top of the
+bounded run-level comparison surface.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,
