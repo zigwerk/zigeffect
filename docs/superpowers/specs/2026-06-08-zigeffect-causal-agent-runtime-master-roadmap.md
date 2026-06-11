@@ -1296,13 +1296,30 @@ Status values:
      non-NenDB durable scope, deployment mutation, production health claims,
      auto-apply, alternate renderers, and mutation authority.
 58. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-readiness`
-   - Next: define read-only consumption readiness for app-facing advisory
-     remediation reports so agents and the SolidJS workbench can consume policy
-     evidence with bounded queries, source ids, redaction expectations, denied
-     claims, and next-step guidance without turning the report into runtime
-     integration, mutation authority, required CI enforcement, NenDB writes,
-     NenDB adapter execution, Cockroach scope, production health proof, or
-     deployment authority.
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-readiness`
+     consumes ready app-facing advisory remediation report publication-policy
+     artifacts and emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-readiness.v1`.
+     It defines read-only consumer profiles for reviewers, agents,
+     non-blocking CI advisory readers, the SolidJS `webui-dev/zig-webui`
+     workbench, and the future consumption-boundary tool. It records bounded
+     query expectations, source id citation, redaction and retention
+     assumptions, denied-claim carryover, guardrails, negative fixtures, and
+     verification evidence without enabling app mutation, runtime integration,
+     live projections, raw payload capture, required CI enforcement, GitHub API
+     mutation, NenDB writes, NenDB adapter execution, Cockroach scope,
+     production health proof, deployment authority, alternate renderers, or
+     mutation authority.
+59. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-boundary`
+   - Next: define the guarded application boundary for actual read-only
+     consumption of app-facing advisory remediation report evidence by agents
+     and the SolidJS workbench. This branch should consume ready
+     consumption-readiness artifacts, record exactly which read-only
+     consumption contract was reviewed, and keep all mutation, storage,
+     deployment, runtime integration, required CI enforcement, NenDB adapter
+     execution, Cockroach scope, production health, and mutation-authority
+     claims denied.
 
 ## Dual-Interface Causal Spine Expansion
 

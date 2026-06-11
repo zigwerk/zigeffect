@@ -1549,6 +1549,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_app_facing_production_integration_ci_advisory_remediation_report_publication_policy_tool_tests = b.addRunArtifact(causal_app_facing_production_integration_ci_advisory_remediation_report_publication_policy_tool_tests);
     test_step.dependOn(&run_causal_app_facing_production_integration_ci_advisory_remediation_report_publication_policy_tool_tests.step);
 
+    const causal_app_facing_production_integration_ci_advisory_remediation_report_consumption_readiness_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_app_facing_production_integration_ci_advisory_remediation_report_consumption_readiness.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_app_facing_production_integration_ci_advisory_remediation_report_consumption_readiness_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-readiness",
+        .root_module = causal_app_facing_production_integration_ci_advisory_remediation_report_consumption_readiness_tool_module,
+    });
+    const run_causal_app_facing_production_integration_ci_advisory_remediation_report_consumption_readiness_tool = b.addRunArtifact(causal_app_facing_production_integration_ci_advisory_remediation_report_consumption_readiness_tool);
+    if (b.args) |args| run_causal_app_facing_production_integration_ci_advisory_remediation_report_consumption_readiness_tool.addArgs(args);
+    const causal_app_facing_production_integration_ci_advisory_remediation_report_consumption_readiness_step = b.step("causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-readiness", "Review app-facing CI advisory remediation report consumption readiness");
+    causal_app_facing_production_integration_ci_advisory_remediation_report_consumption_readiness_step.dependOn(&run_causal_app_facing_production_integration_ci_advisory_remediation_report_consumption_readiness_tool.step);
+
+    const causal_app_facing_production_integration_ci_advisory_remediation_report_consumption_readiness_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-readiness-tests",
+        .root_module = causal_app_facing_production_integration_ci_advisory_remediation_report_consumption_readiness_tool_module,
+    });
+    const run_causal_app_facing_production_integration_ci_advisory_remediation_report_consumption_readiness_tool_tests = b.addRunArtifact(causal_app_facing_production_integration_ci_advisory_remediation_report_consumption_readiness_tool_tests);
+    test_step.dependOn(&run_causal_app_facing_production_integration_ci_advisory_remediation_report_consumption_readiness_tool_tests.step);
+
     const causal_production_telemetry_readiness_review_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_production_telemetry_readiness_review.zig"),
         .target = target,
