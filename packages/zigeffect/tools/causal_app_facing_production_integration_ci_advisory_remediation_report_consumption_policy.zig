@@ -652,6 +652,7 @@ fn formatPolicyJson(allocator: std.mem.Allocator, options: Options, source: Sour
     try appendStringArray(allocator, &output, options.verified_commands);
     try output.appendSlice(allocator, ",\n  \"agent_guidance\": ");
     try appendStringArray(allocator, &output, agentGuidance(result.status));
+    try output.appendSlice(allocator, ",\n");
     try appendJsonField(allocator, &output, "json_output", paths.json_path, true);
     try appendJsonField(allocator, &output, "text_output", paths.text_path, false);
     try output.appendSlice(allocator, "\n}\n");
@@ -1331,6 +1332,51 @@ test "approved and rejected consumption policy output preserve read-only authori
     try std.testing.expect(std.mem.indexOf(u8, reject_reports.json, "\"consumption_policy_status\": \"blocked\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, reject_reports.json, "\"ready_for_next_branch\": false") != null);
     try std.testing.expect(std.mem.indexOf(u8, reject_reports.text, "denied inference rules:") != null);
+}
+
+test "consumption policy JSON output is parseable" {
+    var approve_options = try parseOptions(std.testing.allocator, &.{
+        "tool",
+        "--from-boundary",
+        "source-consumption-boundary.json",
+        "approve",
+        "--reason",
+        "consumption policy approved",
+        "--verified-command",
+        "bun run zigeffect:workbench:typecheck",
+        "--verified-command",
+        "bun run zigeffect:workbench:test",
+        "--verified-command",
+        "zig build causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-boundary",
+        "--verified-command",
+        "zig build causal-schema-governance -- --format json",
+        "--verified-command",
+        "zig build causal-production-hardening-backlog -- --format json",
+        "--verified-command",
+        "zig build examples",
+        "--verified-command",
+        "zig build test",
+    });
+    defer approve_options.deinit(std.testing.allocator);
+
+    const reports = try formatReports(std.testing.allocator, .{
+        .options = approve_options,
+        .source_boundary_json = readyConsumptionBoundaryJson(),
+    });
+    defer reports.deinit(std.testing.allocator);
+
+    var parsed = try std.json.parseFromSlice(struct {
+        schema: []const u8,
+        consumption_policy_status: []const u8,
+        ready_for_next_branch: bool,
+        json_output: []const u8,
+    }, std.testing.allocator, reports.json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    try std.testing.expectEqualStrings(schema, parsed.value.schema);
+    try std.testing.expectEqualStrings("ready", parsed.value.consumption_policy_status);
+    try std.testing.expect(parsed.value.ready_for_next_branch);
+    try std.testing.expect(std.mem.endsWith(u8, parsed.value.json_output, ".json"));
 }
 
 test "unsafe source and missing verification block approved consumption policy" {
