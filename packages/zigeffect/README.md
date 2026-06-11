@@ -1011,6 +1011,22 @@ The refresh uses schema
 mutation authority. The full policy is in
 [docs/production-hardening-backlog-refresh.md](docs/production-hardening-backlog-refresh.md).
 
+Emit the NenDB durable-history hardening fixture:
+
+```bash
+cd packages/zigeffect
+zig build causal-nendb-durable-history-hardening
+zig build causal-nendb-durable-history-hardening -- --format json
+```
+
+The fixture uses schema `zigeffect.causal.nendb-durable-history.v1`, exercises
+the NenDB causal storage adapter through a local fake writer, proves retained
+history remains queryable beyond the bounded core store retention window, and
+hands off to `codex/zigeffect-causal-agent-query-compare-runs`. It does not
+enable Cockroach, live telemetry, network send, durable production writes,
+NenDB production write authority, or mutation authority. The full policy is in
+[docs/nendb-durable-history-hardening.md](docs/nendb-durable-history-hardening.md).
+
 Print the causal live dashboard streaming workbench contract:
 
 ```bash

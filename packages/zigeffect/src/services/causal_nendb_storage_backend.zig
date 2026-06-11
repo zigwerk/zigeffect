@@ -9,6 +9,8 @@ pub const causal_nendb_edge_schema = "zigeffect.causal.nendb_edge.v1";
 pub const causal_nendb_edge_schema_version: u32 = 1;
 pub const causal_nendb_retention_report_schema = "zigeffect.causal.nendb-retention-report.v1";
 pub const causal_nendb_retention_report_schema_version: u32 = 1;
+pub const causal_nendb_durable_history_schema = "zigeffect.causal.nendb-durable-history.v1";
+pub const causal_nendb_durable_history_schema_version: u32 = 1;
 
 pub const CausalNendbNode = struct {
     id: u64,
@@ -62,6 +64,53 @@ pub const CausalNendbRetentionReport = struct {
     recovery_required: bool = false,
     oldest_retained_event_id: ?u64 = null,
     newest_retained_event_id: ?u64 = null,
+};
+
+pub const CausalNendbDurableHistoryPolicy = struct {
+    max_events: ?usize = null,
+    ttl_days: ?u32 = null,
+    compaction_trigger_events: ?usize = null,
+    compact_to_events: ?usize = null,
+    backup_required: bool = false,
+    recovery_required: bool = false,
+    flush_required: bool = false,
+    redaction_required: bool = false,
+    lineage_query_required: bool = false,
+};
+
+pub const CausalNendbDurableHistoryReport = struct {
+    schema: []const u8 = causal_nendb_durable_history_schema,
+    schema_version: u32 = causal_nendb_durable_history_schema_version,
+    backend_kind: []const u8 = "nendb_graph",
+    storage_adapter: []const u8 = "NenDB adapter",
+    node_schema: []const u8 = causal_nendb_node_schema,
+    edge_schema: []const u8 = causal_nendb_edge_schema,
+    retained_events: usize = 0,
+    max_events: ?usize = null,
+    ttl_days: ?u32 = null,
+    compaction_trigger_events: ?usize = null,
+    compact_to_events: ?usize = null,
+    written_events: u64 = 0,
+    failed_events: u64 = 0,
+    flushed_count: u64 = 0,
+    oldest_retained_event_id: ?u64 = null,
+    newest_retained_event_id: ?u64 = null,
+    writer_attached: bool = false,
+    flush_required: bool = false,
+    flush_observed: bool = false,
+    redaction_required: bool = false,
+    redaction_observed: bool = false,
+    lineage_query_required: bool = false,
+    lineage_query_supported: bool = true,
+    compaction_required: bool = false,
+    backup_required: bool = false,
+    recovery_required: bool = false,
+    live_telemetry_enabled: bool = false,
+    network_send_enabled: bool = false,
+    durable_write_authority: bool = false,
+    nendb_write_authority: bool = false,
+    cockroach_adapter_enabled: bool = false,
+    mutation_authority: []const u8 = "none",
 };
 
 pub const CausalNendbStorageBackendError = error{
@@ -137,6 +186,35 @@ pub const CausalNendbStorageBackendState = struct {
             .recovery_required = policy.recovery_required,
             .oldest_retained_event_id = self.oldestRetainedEventId(),
             .newest_retained_event_id = self.newestRetainedEventId(),
+        };
+    }
+
+    pub fn durableHistoryReport(
+        self: *const CausalNendbStorageBackendState,
+        policy: CausalNendbDurableHistoryPolicy,
+    ) CausalNendbDurableHistoryReport {
+        const retained_events = self.events.items.len;
+        return .{
+            .retained_events = retained_events,
+            .max_events = policy.max_events,
+            .ttl_days = policy.ttl_days,
+            .compaction_trigger_events = policy.compaction_trigger_events,
+            .compact_to_events = policy.compact_to_events,
+            .written_events = self.written_event_count,
+            .failed_events = self.failed_event_count,
+            .flushed_count = self.flushed_count,
+            .oldest_retained_event_id = self.oldestRetainedEventId(),
+            .newest_retained_event_id = self.newestRetainedEventId(),
+            .writer_attached = true,
+            .flush_required = policy.flush_required,
+            .flush_observed = !policy.flush_required or self.flushed_count > 0,
+            .redaction_required = policy.redaction_required,
+            .redaction_observed = !policy.redaction_required or self.hasRedactionEvidence(),
+            .lineage_query_required = policy.lineage_query_required,
+            .lineage_query_supported = true,
+            .compaction_required = isCompactionRequired(retained_events, policy.compaction_trigger_events),
+            .backup_required = policy.backup_required,
+            .recovery_required = policy.recovery_required,
         };
     }
 
@@ -220,6 +298,15 @@ pub const CausalNendbStorageBackendState = struct {
     fn newestRetainedEventId(self: *const CausalNendbStorageBackendState) ?u64 {
         if (self.events.items.len == 0) return null;
         return self.events.items[self.events.items.len - 1].id;
+    }
+
+    fn hasRedactionEvidence(self: *const CausalNendbStorageBackendState) bool {
+        for (self.events.items) |event| {
+            if (std.mem.indexOf(u8, event.redacted_detail, causal.causal_redaction_marker) != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     fn appendCauseChain(

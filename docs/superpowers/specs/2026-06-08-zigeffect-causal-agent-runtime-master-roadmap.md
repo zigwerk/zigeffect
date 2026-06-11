@@ -1145,8 +1145,18 @@ Status values:
      readiness, live telemetry, durable writes, NenDB writes, Cockroach or
      non-NenDB adapter scope, alternate renderer scope, or mutation authority.
 44. `codex/zigeffect-causal-nendb-durable-history-hardening`
-   - Current next branch: harden persisted causal history on the NenDB adapter
-     path before cross-run agent comparison, arbitrary audit-chain snapshot
+   - Delivered: `causal-nendb-durable-history-hardening` publishes
+     `zigeffect.causal.nendb-durable-history.v1`, adds
+     `CausalNendbDurableHistoryReport` to the NenDB causal storage adapter,
+     emits deterministic local fixture evidence through a fake writer, verifies
+     node, parent-edge, flush, redaction, cause-query, lineage-query, and
+     bounded-retention evidence, and preserves disabled Cockroach, non-NenDB
+     adapters, live telemetry, network sends, durable production writes, NenDB
+     production write authority, production health claims, and mutation
+     authority.
+45. `codex/zigeffect-causal-agent-query-compare-runs`
+   - Current next branch: build bounded cross-run agent comparison on top of
+     the NenDB durable-history evidence before arbitrary audit-chain snapshot
      comparison, app-facing production integration fixtures, or
      self-improving agent memory depends on durable causal records.
 

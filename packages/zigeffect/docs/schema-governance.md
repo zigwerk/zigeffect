@@ -49,6 +49,8 @@ mapping, or agent handoff, also update [operations.md](operations.md).
 - `viewer-session`: read-only local workbench/session operating state.
 - `bounded-stream`: ordered dashboard frame records with declared truncation
   and redaction state.
+- `local-fixture`: deterministic local evidence generated without production
+  inputs or production writes.
 - `spine-contract`: defines shared identity and relationship vocabulary without
   changing source event emission.
 - `agent-query`: compact bounded graph slices for agents; read-only and
@@ -106,11 +108,15 @@ mapping, or agent handoff, also update [operations.md](operations.md).
 - `zigeffect.causal.nendb_node.v1`
 - `zigeffect.causal.nendb_edge.v1`
 - `zigeffect.causal.nendb-retention-report.v1`
+- `zigeffect.causal.nendb-durable-history.v1`
 
 Backend export schemas are sink contracts. They are guarded by backend
 conformance, adapter, bounded-history, and redaction tests rather than by core
 causal query compatibility. The NenDB retention report is record-only evidence
 derived from adapter-owned history and policy, not a durable mutation command.
+The NenDB durable-history report adds writer, flush, redaction, and query
+evidence for agents while keeping Cockroach, live telemetry, network sends, and
+production mutation authority disabled.
 
 ### App Runtime
 

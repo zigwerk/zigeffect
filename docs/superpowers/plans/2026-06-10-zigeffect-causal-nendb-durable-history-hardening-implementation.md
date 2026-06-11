@@ -48,7 +48,7 @@
 **Files:**
 - Modify: `packages/zigeffect/test/causal_nendb_storage_backend_test.zig`
 
-- [ ] **Step 1: Add durable-history report test**
+- [x] **Step 1: Add durable-history report test**
 
 Append this test near the existing retention report test:
 
@@ -139,7 +139,7 @@ test "nendb durable history report exposes bounded queryable evidence" {
 }
 ```
 
-- [ ] **Step 2: Add no-redaction-evidence test**
+- [x] **Step 2: Add no-redaction-evidence test**
 
 Append:
 
@@ -171,7 +171,7 @@ test "nendb durable history report keeps redaction evidence explicit" {
 }
 ```
 
-- [ ] **Step 3: Run red runtime tests**
+- [x] **Step 3: Run red runtime tests**
 
 Run:
 
@@ -190,7 +190,7 @@ Expected: fails because `durableHistoryReport`, `CausalNendbDurableHistoryPolicy
 - Modify: `packages/zigeffect/src/services/causal_nendb_storage_backend.zig`
 - Modify: `packages/zigeffect/src/zigeffect.zig`
 
-- [ ] **Step 1: Add schema constants and report types**
+- [x] **Step 1: Add schema constants and report types**
 
 In `causal_nendb_storage_backend.zig`, near the existing NenDB schema constants,
 add:
@@ -251,7 +251,7 @@ pub const CausalNendbDurableHistoryReport = struct {
 };
 ```
 
-- [ ] **Step 2: Add report method**
+- [x] **Step 2: Add report method**
 
 Inside `CausalNendbStorageBackendState`, after `retentionReport`, add:
 
@@ -286,7 +286,7 @@ Inside `CausalNendbStorageBackendState`, after `retentionReport`, add:
     }
 ```
 
-- [ ] **Step 3: Add redaction helper**
+- [x] **Step 3: Add redaction helper**
 
 Inside `CausalNendbStorageBackendState`, near the retained-id helpers, add:
 
@@ -301,7 +301,7 @@ Inside `CausalNendbStorageBackendState`, near the retained-id helpers, add:
     }
 ```
 
-- [ ] **Step 4: Re-export runtime API**
+- [x] **Step 4: Re-export runtime API**
 
 In `packages/zigeffect/src/zigeffect.zig`, add exports in both the nested
 `services` block and top-level export block:
@@ -316,7 +316,7 @@ pub const causal_nendb_durable_history_schema_version = causal_nendb_storage_bac
 For the top-level block, use `services.causal_nendb_storage_backend` as the
 qualifier, matching the existing exports.
 
-- [ ] **Step 5: Run green runtime tests**
+- [x] **Step 5: Run green runtime tests**
 
 Run:
 
@@ -332,7 +332,7 @@ Expected: passes.
 **Files:**
 - Create: `packages/zigeffect/tools/causal_nendb_durable_history_hardening.zig`
 
-- [ ] **Step 1: Create tool test skeleton**
+- [x] **Step 1: Create tool test skeleton**
 
 Create the file with schema constants and failing formatter:
 
@@ -370,13 +370,13 @@ fn formatTextReport(_: std.mem.Allocator, _: OutputFormat) ![]const u8 {
 const OutputFormat = enum { text, json };
 ```
 
-- [ ] **Step 2: Run red tool test**
+- [x] **Step 2: Run red tool test**
 
 Run:
 
 ```sh
 cd packages/zigeffect
-zig test tools/causal_nendb_durable_history_hardening.zig
+zig test --dep zigeffect -Mroot=tools/causal_nendb_durable_history_hardening.zig -Mzigeffect=src/zigeffect.zig
 ```
 
 Expected: fails with `error.NotImplemented`.
@@ -386,7 +386,7 @@ Expected: fails with `error.NotImplemented`.
 **Files:**
 - Modify: `packages/zigeffect/tools/causal_nendb_durable_history_hardening.zig`
 
-- [ ] **Step 1: Add CLI model and fake writer**
+- [x] **Step 1: Add CLI model and fake writer**
 
 Implement these public behaviors:
 
@@ -399,7 +399,7 @@ Implement these public behaviors:
 Use a fake writer equivalent to `FakeNendbWriter` from the runtime tests, with
 owned cloned writes and flush count.
 
-- [ ] **Step 2: Add deterministic fixture generation**
+- [x] **Step 2: Add deterministic fixture generation**
 
 The default fixture should:
 
@@ -413,7 +413,7 @@ The default fixture should:
 - verify `store.cause(child)` is empty while `backend_state.cause(child)` has
   root and child.
 
-- [ ] **Step 3: Add check model**
+- [x] **Step 3: Add check model**
 
 Ready status requires these checks:
 
@@ -435,7 +435,7 @@ const required_check_names = &.{
 The default fixture must pass all checks. Add a negative test helper that can
 evaluate a fixture without redaction marker and returns blocked.
 
-- [ ] **Step 4: Render text and JSON**
+- [x] **Step 4: Render text and JSON**
 
 Text output must include:
 
@@ -469,7 +469,7 @@ JSON output must include at least:
 }
 ```
 
-- [ ] **Step 5: Add tool tests**
+- [x] **Step 5: Add tool tests**
 
 Tests must cover:
 
@@ -480,13 +480,13 @@ Tests must cover:
 - denied authority fields stay false;
 - CLI help succeeds.
 
-- [ ] **Step 6: Run green direct tool tests**
+- [x] **Step 6: Run green direct tool tests**
 
 Run:
 
 ```sh
 cd packages/zigeffect
-zig test tools/causal_nendb_durable_history_hardening.zig
+zig test --dep zigeffect -Mroot=tools/causal_nendb_durable_history_hardening.zig -Mzigeffect=src/zigeffect.zig
 ```
 
 Expected: all tests pass.
@@ -498,7 +498,7 @@ Expected: all tests pass.
 - Modify: `packages/zigeffect/tools/causal_schema_governance.zig`
 - Modify: `packages/zigeffect/docs/schema-governance.md`
 
-- [ ] **Step 1: Register tool build step**
+- [x] **Step 1: Register tool build step**
 
 Add near adjacent causal production hardening tools:
 
@@ -527,7 +527,7 @@ const run_causal_nendb_durable_history_hardening_tool_tests = b.addRunArtifact(c
 test_step.dependOn(&run_causal_nendb_durable_history_hardening_tool_tests.step);
 ```
 
-- [ ] **Step 2: Add schema governance entry**
+- [x] **Step 2: Add schema governance entry**
 
 Add to `causal_schema_governance.zig`:
 
@@ -546,7 +546,7 @@ Add to `causal_schema_governance.zig`:
 
 Update tests and docs from `schema_count: 80` to `schema_count: 81`.
 
-- [ ] **Step 3: Verify build step and schema**
+- [x] **Step 3: Verify build step and schema**
 
 Run:
 
@@ -571,7 +571,7 @@ Expected: help exits 0; schema governance exits 0 and prints
 - Modify: `packages/zigeffect/README.md`
 - Modify: `docs/superpowers/specs/2026-06-08-zigeffect-causal-agent-runtime-master-roadmap.md`
 
-- [ ] **Step 1: Advance production hardening backlog**
+- [x] **Step 1: Advance production hardening backlog**
 
 Change constants:
 
@@ -601,7 +601,7 @@ Add delivered item:
 Append `nendb-durable-history-hardening` to `dependency_order` and add
 `zig build causal-nendb-durable-history-hardening` to `verification_commands`.
 
-- [ ] **Step 2: Update docs**
+- [x] **Step 2: Update docs**
 
 Document:
 
@@ -612,7 +612,7 @@ Document:
 - next branch `codex/zigeffect-causal-agent-query-compare-runs`;
 - no Cockroach/non-NenDB/live telemetry/production mutation authority.
 
-- [ ] **Step 3: Run backlog tests**
+- [x] **Step 3: Run backlog tests**
 
 Run:
 
@@ -630,14 +630,14 @@ Expected: tests pass; report recommends
 **Files:**
 - All modified files from Tasks 1 through 6.
 
-- [ ] **Step 1: Run focused verification**
+- [x] **Step 1: Run focused verification**
 
 Run:
 
 ```sh
 cd packages/zigeffect
 zig build causal-nendb-storage-backend
-zig test tools/causal_nendb_durable_history_hardening.zig
+zig test --dep zigeffect -Mroot=tools/causal_nendb_durable_history_hardening.zig -Mzigeffect=src/zigeffect.zig
 zig build causal-nendb-durable-history-hardening
 zig build causal-schema-governance -- --format json
 zig test tools/causal_production_hardening_backlog.zig
@@ -653,7 +653,7 @@ zig fmt --check build.zig \
 
 Expected: every command exits 0.
 
-- [ ] **Step 2: Run integration verification**
+- [x] **Step 2: Run integration verification**
 
 Run:
 
@@ -669,7 +669,7 @@ git diff --check
 
 Expected: every command exits 0.
 
-- [ ] **Step 3: Stage and commit**
+- [x] **Step 3: Stage and commit**
 
 Run:
 

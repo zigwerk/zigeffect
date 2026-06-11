@@ -25,7 +25,7 @@ telemetry, write durable production state, deploy services, page humans,
 enforce RBAC, encrypt data, open a production dashboard, or mutate source and
 config.
 
-The recommendation `start-nendb-durable-history-hardening` means the
+The recommendation `start-agent-query-cross-run-comparison` means the
 aggregation bundle contract, NenDB-only durable-retention contract, manual
 production deployment runbooks, record-only artifact access-control contract,
 unified causal spine contract, deep runtime internals, app semantic trace API,
@@ -251,9 +251,16 @@ interpretation policy, separates `ready_for_next_branch` from
 refresh without granting publication, GitHub, CI gate, live telemetry, storage,
 or production mutation authority. The production hardening backlog refresh is
 also delivered and selects NenDB durable-history hardening as the next
-unresolved branch.
+unresolved branch. NenDB durable-history hardening is also delivered: it adds
+`CausalNendbDurableHistoryReport`, publishes
+`zigeffect.causal.nendb-durable-history.v1`, exercises the adapter through a
+local fake writer, verifies node, edge, flush, redaction, cause-query,
+lineage-query, and bounded-retention evidence, and keeps Cockroach, non-NenDB
+adapters, live telemetry, network sends, durable production writes, NenDB
+production write authority, compaction execution, backup/restore execution,
+TTL deletion, production health claims, and mutation authority disabled.
 The next branch should be
-`codex/zigeffect-causal-nendb-durable-history-hardening`.
+`codex/zigeffect-causal-agent-query-compare-runs`.
 
 ## Dependency Order
 
@@ -307,6 +314,7 @@ The backlog currently orders future production-hardening branches as:
 46. `production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary` delivered
 47. `production-telemetry-ci-gate-required-status-check-enforcement-report-policy` delivered
 48. `production-hardening-backlog-refresh` delivered
+49. `nendb-durable-history-hardening` delivered
 
 The ordering is intentionally conservative. It keeps contracts and review
 boundaries ahead of production behavior. The `agent-query-interface` item is
@@ -880,8 +888,17 @@ telemetry, durable writes, NenDB writes, Cockroach and non-NenDB adapter scope,
 alternate renderer scope, production health claims, production cluster claims,
 and mutation authority.
 
-The next branch should harden NenDB durable history for persisted causal
-evidence.
+NenDB durable-history hardening is documented in
+[nendb-durable-history-hardening.md](nendb-durable-history-hardening.md).
+It emits `zigeffect.causal.nendb-durable-history.v1` through
+`zig build causal-nendb-durable-history-hardening`, records runtime durable
+history posture from the NenDB causal storage adapter, verifies local query and
+redaction evidence, and preserves disabled Cockroach, non-NenDB adapters, live
+telemetry, network sends, durable production writes, NenDB production write
+authority, production health claims, and mutation authority.
+
+The next branch should build cross-run agent comparison on top of this durable
+history evidence.
 
 Mutation authority remains `none`. Backlog items can describe review gates and
 future evidence records, but this report does not grant source, config,

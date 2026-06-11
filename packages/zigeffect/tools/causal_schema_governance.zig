@@ -81,6 +81,16 @@ const schema_entries: []const SchemaEntry = &.{
         .governance_requirements = &.{ "NenDB retention tests", "durable retention docs", "schema governance entry" },
     },
     .{
+        .schema = "zigeffect.causal.nendb-durable-history.v1",
+        .version = 1,
+        .category = "backend-export",
+        .status = "current",
+        .emitted_by = &.{ "CausalNendbStorageBackendState.durableHistoryReport", "causal-nendb-durable-history-hardening" },
+        .consumed_by = &.{ "agents", "reviewers", "future cross-run query comparison", "future audit-chain snapshot comparison", "future app-facing production fixtures" },
+        .compatibility = &.{ "strict-v1", "nendb-only", "local-fixture", "record-only", "no-cockroach", "no-live-telemetry", "no-network", "no-production-mutation" },
+        .governance_requirements = &.{ "runtime report tests", "fixture tool tests", "redaction evidence checks", "query evidence checks", "next branch handoff" },
+    },
+    .{
         .schema = "zigeffect.causal.app-runtime.v1",
         .version = 1,
         .category = "app-runtime",
@@ -1035,7 +1045,7 @@ test "schema governance usage names command and formats" {
 
 test "schema governance inventory includes official schemas and excludes fake fixtures" {
     const entries = schemaEntries();
-    try std.testing.expectEqual(@as(usize, 80), entries.len);
+    try std.testing.expectEqual(@as(usize, 81), entries.len);
     try expectSchema(entries, "zigeffect.causal.v1");
     try expectSchema(entries, "zigeffect.causal.event.v1");
     try expectSchema(entries, "zigeffect.causal.app-application.v1");
@@ -1091,6 +1101,7 @@ test "schema governance inventory includes official schemas and excludes fake fi
     try expectSchema(entries, "zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-report-policy.v1");
     try expectSchema(entries, "zigeffect.causal.production-hardening-backlog-refresh.v1");
     try expectSchema(entries, "zigeffect.causal.nendb-retention-report.v1");
+    try expectSchema(entries, "zigeffect.causal.nendb-durable-history.v1");
     try std.testing.expect(!hasSchema(entries, "zigeffect.causal.other.v1"));
     try std.testing.expect(!hasSchema(entries, "zigeffect.causal.unknown.v1"));
 }
@@ -1114,7 +1125,7 @@ test "schema governance text report includes policy and representative schemas" 
 
     try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect causal schema governance") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.schema-governance.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "schema count: 80") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "schema count: 81") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "event taxonomy version: 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "versioning policy:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "migration policy:") != null);
@@ -1186,6 +1197,7 @@ test "schema governance text report includes policy and representative schemas" 
     try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-report-policy.v1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect.causal.production-hardening-backlog-refresh.v1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect.causal.nendb-retention-report.v1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect.causal.nendb-durable-history.v1") != null);
 }
 
 test "schema governance json report is machine readable" {
@@ -1196,7 +1208,7 @@ test "schema governance json report is machine readable" {
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema_version\": 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"current_core_schema\": \"zigeffect.causal.v1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"current_event_taxonomy_version\": 1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"schema_count\": 80") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"schema_count\": 81") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schemas\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"compatibility\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.performance-budget.v1\"") != null);
@@ -1248,6 +1260,7 @@ test "schema governance json report is machine readable" {
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-telemetry-ci-gate-required-status-check-enforcement-report-policy.v1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog-refresh.v1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.nendb-retention-report.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.nendb-durable-history.v1\"") != null);
 }
 
 test "schema governance parses format options" {

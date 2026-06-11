@@ -45,6 +45,13 @@ The zigeffect adapter also exposes `CausalNendbRetentionPolicy` and
 NenDB history without granting production mutation authority. The adapter
 report uses schema `zigeffect.causal.nendb-retention-report.v1`.
 
+The follow-up NenDB durable-history hardening branch adds
+`CausalNendbDurableHistoryReport` and
+`zigeffect.causal.nendb-durable-history.v1` as the runtime evidence layer for
+writer, flush, redaction, bounded-history, and query posture. That report is
+still record-only local evidence; it does not perform durable production writes,
+compaction, backup, restore, TTL deletion, or production health validation.
+
 ## TTL Policy
 
 TTL is policy-only in this branch. `CausalEvent` does not currently carry a

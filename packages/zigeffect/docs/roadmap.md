@@ -1106,6 +1106,15 @@ metrics, and traces.
   deployment, rollout, app, GitHub, CI, live telemetry, durable write, NenDB
   write, Cockroach, non-NenDB adapter, alternate renderer, production health,
   production cluster, and mutation authority disabled.
+- Delivered: `causal-nendb-durable-history-hardening` publishes
+  `zigeffect.causal.nendb-durable-history.v1`, extends the NenDB causal storage
+  adapter with `CausalNendbDurableHistoryReport`, emits a deterministic local
+  fixture through a fake writer, verifies node, parent-edge, flush, redaction,
+  cause-query, lineage-query, and bounded-retention evidence, and hands off to
+  `codex/zigeffect-causal-agent-query-compare-runs`. It keeps Cockroach,
+  non-NenDB durable adapters, live telemetry, network sends, durable production
+  writes, NenDB production write authority, production health claims, and
+  mutation authority disabled.
 - Delivered:
   `causal-production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary`
   publishes
@@ -1152,7 +1161,7 @@ metrics, and traces.
 - Delivered: the compact agent query interface returns bounded JSON for run
   summaries, failures, event explanations, cause traces, data lineage,
   findings, and recommended next queries. Cross-run comparison remains future.
-- Next: NenDB durable history hardening.
+- Next: cross-run agent query comparison.
 - Still future: production-grade app-facing integrations and comparing
   arbitrary named audit-chain snapshots.
 - Still future: deeper runtime regression scenarios for partial config and

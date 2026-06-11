@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-nendb-durable-history-hardening";
-pub const recommended_next_branch = "codex/zigeffect-causal-nendb-durable-history-hardening";
+pub const recommendation = "start-agent-query-cross-run-comparison";
+pub const recommended_next_branch = "codex/zigeffect-causal-agent-query-compare-runs";
 
 const OutputFormat = enum { text, json };
 
@@ -1230,6 +1230,31 @@ const backlog_items: []const BacklogItem = &.{
         .branch = "codex/zigeffect-causal-production-hardening-backlog-refresh",
         .agent_guidance = "Use this refresh as a handoff artifact only. The selected next branch is NenDB durable-history hardening; do not infer production health, production cluster readiness, live telemetry, durable writes, NenDB writes, Cockroach scope, or mutation authority.",
     },
+    .{
+        .id = "nendb-durable-history-hardening",
+        .title = "NenDB Durable History Hardening",
+        .gap_id = "nendb-durable-history-hardening",
+        .priority = "P0",
+        .status = "delivered",
+        .summary = "Hardens the NenDB causal storage adapter with runtime durable-history posture, deterministic local fixture evidence, and agent-readable schema governance.",
+        .depends_on = &.{ "production-hardening-backlog-refresh", "causal-nendb-storage-backend", "production-telemetry-nendb-retention-fixtures" },
+        .deliverables = &.{
+            "runtime durable-history report",
+            "local fixture tool",
+            "query evidence checks",
+            "redaction evidence checks",
+            "NenDB-only authority boundary",
+        },
+        .evidence_sources = &.{
+            "docs/superpowers/specs/2026-06-10-zigeffect-causal-nendb-durable-history-hardening-design.md",
+            "docs/superpowers/plans/2026-06-10-zigeffect-causal-nendb-durable-history-hardening-implementation.md",
+            "packages/zigeffect/src/services/causal_nendb_storage_backend.zig",
+            "packages/zigeffect/tools/causal_nendb_durable_history_hardening.zig",
+            "packages/zigeffect/docs/nendb-durable-history-hardening.md",
+        },
+        .branch = "codex/zigeffect-causal-nendb-durable-history-hardening",
+        .agent_guidance = "Use this as the durable-history evidence substrate for cross-run comparison. Do not infer production health, live telemetry, Cockroach scope, durable production writes, NenDB production write authority, or mutation authority.",
+    },
 };
 
 const dependency_order: []const []const u8 = &.{
@@ -1281,6 +1306,7 @@ const dependency_order: []const []const u8 = &.{
     "production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary",
     "production-telemetry-ci-gate-required-status-check-enforcement-report-policy",
     "production-hardening-backlog-refresh",
+    "nendb-durable-history-hardening",
 };
 
 const verification_commands: []const []const u8 = &.{
@@ -1374,6 +1400,7 @@ const verification_commands: []const []const u8 = &.{
     "zig build causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy -- --from-application-boundary ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-enforcement-report-application-boundary-negative.json reject --reason \"negative required status check enforcement report policy path\" --out-prefix ../../.zig-cache/causal-artifacts/production-telemetry-ci-gate-required-status-check-enforcement-report-policy-negative",
     "zig build causal-production-hardening-backlog -- --format json 2> ../../.zig-cache/causal-artifacts/production-hardening-backlog.json",
     "zig build causal-production-hardening-backlog-refresh -- --from-backlog ../../.zig-cache/causal-artifacts/production-hardening-backlog.json refresh --reason \"production hardening backlog refreshed after report policy\" --verified-command \"zig build causal-production-hardening-backlog -- --format json\" --verified-command \"zig build causal-schema-governance -- --format json\" --verified-command \"zig build examples\" --verified-command \"zig build test\"",
+    "zig build causal-nendb-durable-history-hardening",
     "zig build causal-production-deployment-runbooks",
     "zig build causal-production-deployment-runbooks -- --format json",
     "zig build causal-durable-production-retention",
@@ -1646,11 +1673,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-nendb-durable-history-hardening",
+        "start-agent-query-cross-run-comparison",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-nendb-durable-history-hardening",
+        "codex/zigeffect-causal-agent-query-compare-runs",
         recommended_next_branch,
     );
 }
@@ -1743,6 +1770,8 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItemStatus("production-telemetry-ci-gate-required-status-check-enforcement-report-policy", "delivered");
     try expectBacklogItem("production-hardening-backlog-refresh");
     try expectBacklogItemStatus("production-hardening-backlog-refresh", "delivered");
+    try expectBacklogItem("nendb-durable-history-hardening");
+    try expectBacklogItemStatus("nendb-durable-history-hardening", "delivered");
 }
 
 test "production hardening backlog preserves user constraints" {
@@ -1761,7 +1790,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-nendb-durable-history-hardening") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-agent-query-compare-runs") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -1834,6 +1863,8 @@ test "production hardening backlog text mentions dependency order and next branc
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-telemetry-ci-gate-required-status-check-enforcement-report-policy") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-hardening-backlog-refresh") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-production-hardening-backlog-refresh") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "nendb-durable-history-hardening") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "causal-nendb-durable-history-hardening") != null);
 }
 
 test "production hardening backlog JSON is agent-readable" {
@@ -1842,7 +1873,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-nendb-durable-history-hardening\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-agent-query-compare-runs\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);
@@ -1950,6 +1981,9 @@ test "production hardening backlog JSON is agent-readable" {
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"production-hardening-backlog-refresh\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-production-hardening-backlog-refresh\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-production-hardening-backlog-refresh") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"nendb-durable-history-hardening\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-nendb-durable-history-hardening\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-nendb-durable-history-hardening") != null);
 }
 
 test "production hardening backlog parses supported formats" {

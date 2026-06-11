@@ -544,6 +544,25 @@ GitHub, CI, live telemetry, durable write, NenDB write, Cockroach, non-NenDB
 adapter, alternate renderer, production health, production cluster, and
 mutation authority disabled.
 
+Run the NenDB durable-history hardening fixture before starting cross-run
+agent-query comparison:
+
+```sh
+cd packages/zigeffect
+zig build causal-nendb-durable-history-hardening
+zig build causal-nendb-durable-history-hardening -- --format json
+```
+
+The fixture records schema `zigeffect.causal.nendb-durable-history.v1`,
+exercises the NenDB causal storage adapter through a local fake writer, verifies
+node, parent-edge, flush, cause-query, lineage-query, redaction, and bounded
+retention evidence, and hands off to
+`codex/zigeffect-causal-agent-query-compare-runs`. It keeps Cockroach,
+non-NenDB durable adapters, live telemetry, network sends, durable production
+writes, NenDB production write authority, compaction execution, backup/restore
+execution, TTL deletion, production health claims, and mutation authority
+disabled.
+
 ## Production Hardening Completion Audit
 
 Run the production-hardening completion audit after capacity planning and use

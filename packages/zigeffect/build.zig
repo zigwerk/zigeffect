@@ -1967,6 +1967,29 @@ pub fn build(b: *std.Build) void {
     const run_causal_production_hardening_backlog_refresh_tool_tests = b.addRunArtifact(causal_production_hardening_backlog_refresh_tool_tests);
     test_step.dependOn(&run_causal_production_hardening_backlog_refresh_tool_tests.step);
 
+    const causal_nendb_durable_history_hardening_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_nendb_durable_history_hardening.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    causal_nendb_durable_history_hardening_tool_module.addImport("zigeffect", zigeffect);
+
+    const causal_nendb_durable_history_hardening_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-nendb-durable-history-hardening",
+        .root_module = causal_nendb_durable_history_hardening_tool_module,
+    });
+    const run_causal_nendb_durable_history_hardening_tool = b.addRunArtifact(causal_nendb_durable_history_hardening_tool);
+    if (b.args) |args| run_causal_nendb_durable_history_hardening_tool.addArgs(args);
+    const causal_nendb_durable_history_hardening_step = b.step("causal-nendb-durable-history-hardening", "Emit NenDB durable-history hardening fixture");
+    causal_nendb_durable_history_hardening_step.dependOn(&run_causal_nendb_durable_history_hardening_tool.step);
+
+    const causal_nendb_durable_history_hardening_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-nendb-durable-history-hardening-tests",
+        .root_module = causal_nendb_durable_history_hardening_tool_module,
+    });
+    const run_causal_nendb_durable_history_hardening_tool_tests = b.addRunArtifact(causal_nendb_durable_history_hardening_tool_tests);
+    test_step.dependOn(&run_causal_nendb_durable_history_hardening_tool_tests.step);
+
     const causal_production_artifact_aggregation_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_production_artifact_aggregation.zig"),
         .target = target,

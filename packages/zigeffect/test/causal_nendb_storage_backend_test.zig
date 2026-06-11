@@ -324,3 +324,114 @@ test "nendb storage retention report derives policy and event bounds" {
     try std.testing.expectEqual(@as(?u64, root), report.oldest_retained_event_id);
     try std.testing.expectEqual(@as(?u64, child), report.newest_retained_event_id);
 }
+
+test "nendb durable history report exposes bounded queryable evidence" {
+    var fake = FakeNendbWriter.init(std.testing.allocator);
+    defer fake.deinit();
+    var backend_state = fx.CausalNendbStorageBackendState.init(std.testing.allocator, fake.writer(), .{ .max_events = 16 });
+    defer backend_state.deinit();
+
+    var store = fx.CausalStore.initWithOptions(std.testing.allocator, .{
+        .max_events = 1,
+    });
+    store.attachBackend(backend_state.backend());
+    defer store.deinit();
+
+    const root = try store.record(.{
+        .kind = .run_started,
+        .run_id = 77,
+        .label = "durable-history-root",
+        .redacted_detail = fx.causal_redaction_marker,
+    });
+    const child = try store.record(.{
+        .kind = .log_recorded,
+        .run_id = 77,
+        .parent_id = root,
+        .label = "durable-history-child",
+        .redacted_detail = "safe retained detail",
+    });
+    _ = try store.record(.{
+        .kind = .effect_completed,
+        .run_id = 77,
+        .parent_id = root,
+        .label = "durable-history-terminal",
+        .redacted_detail = "complete",
+    });
+    try backend_state.flush();
+
+    var store_cause = try store.cause(std.testing.allocator, child);
+    defer store_cause.deinit();
+    try std.testing.expectEqual(@as(usize, 0), store_cause.events.len);
+
+    var history_cause = try backend_state.cause(std.testing.allocator, child);
+    defer history_cause.deinit();
+    try std.testing.expectEqual(@as(usize, 2), history_cause.events.len);
+    try std.testing.expectEqual(root, history_cause.events[0].id);
+    try std.testing.expectEqual(child, history_cause.events[1].id);
+
+    const report = backend_state.durableHistoryReport(.{
+        .max_events = 16,
+        .ttl_days = 14,
+        .compaction_trigger_events = 2,
+        .compact_to_events = 1,
+        .backup_required = true,
+        .recovery_required = true,
+        .flush_required = true,
+        .redaction_required = true,
+        .lineage_query_required = true,
+    });
+
+    try std.testing.expectEqualStrings(fx.causal_nendb_durable_history_schema, report.schema);
+    try std.testing.expectEqual(@as(u32, 1), report.schema_version);
+    try std.testing.expectEqualStrings("nendb_graph", report.backend_kind);
+    try std.testing.expectEqualStrings("NenDB adapter", report.storage_adapter);
+    try std.testing.expectEqual(@as(usize, 3), report.retained_events);
+    try std.testing.expectEqual(@as(?usize, 16), report.max_events);
+    try std.testing.expectEqual(@as(u64, 3), report.written_events);
+    try std.testing.expectEqual(@as(u64, 0), report.failed_events);
+    try std.testing.expectEqual(@as(u64, 1), report.flushed_count);
+    try std.testing.expectEqual(@as(?u64, root), report.oldest_retained_event_id);
+    try std.testing.expectEqual(@as(?u64, 3), report.newest_retained_event_id);
+    try std.testing.expect(report.writer_attached);
+    try std.testing.expect(report.flush_required);
+    try std.testing.expect(report.flush_observed);
+    try std.testing.expect(report.redaction_required);
+    try std.testing.expect(report.redaction_observed);
+    try std.testing.expect(report.lineage_query_required);
+    try std.testing.expect(report.lineage_query_supported);
+    try std.testing.expect(report.compaction_required);
+    try std.testing.expect(report.backup_required);
+    try std.testing.expect(report.recovery_required);
+    try std.testing.expect(!report.live_telemetry_enabled);
+    try std.testing.expect(!report.network_send_enabled);
+    try std.testing.expect(!report.durable_write_authority);
+    try std.testing.expect(!report.nendb_write_authority);
+    try std.testing.expect(!report.cockroach_adapter_enabled);
+    try std.testing.expectEqualStrings("none", report.mutation_authority);
+}
+
+test "nendb durable history report keeps redaction evidence explicit" {
+    var fake = FakeNendbWriter.init(std.testing.allocator);
+    defer fake.deinit();
+    var backend_state = fx.CausalNendbStorageBackendState.init(std.testing.allocator, fake.writer(), .{});
+    defer backend_state.deinit();
+
+    var store = fx.CausalStore.init(std.testing.allocator);
+    store.attachBackend(backend_state.backend());
+    defer store.deinit();
+
+    _ = try store.record(.{
+        .kind = .run_started,
+        .label = "no-redaction-marker",
+        .redacted_detail = "safe but unmarked",
+    });
+
+    const report = backend_state.durableHistoryReport(.{
+        .redaction_required = true,
+        .lineage_query_required = true,
+    });
+
+    try std.testing.expect(report.redaction_required);
+    try std.testing.expect(!report.redaction_observed);
+    try std.testing.expect(report.lineage_query_supported);
+}
