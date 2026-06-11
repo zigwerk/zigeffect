@@ -1498,7 +1498,9 @@ Status values:
      evaluation-report application evidence, verification evidence, and a
      handoff to the evaluator branch.
 69. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluator`
-   - Next: consume ready app-facing advisory remediation report
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluator`
+     consumes ready app-facing advisory remediation report
      consumption-report evaluation-report policy artifacts plus explicit local
      request and evidence files, then classify evaluation-report consumption
      evidence as ready, advisory, or blocked for agents, reviewers,
@@ -1511,6 +1513,24 @@ Status values:
      NenDB adapter execution, Cockroach scope, deployment authority,
      production health claims, hosted live dashboards, public upload,
      alternate renderer scope, auto-apply, and mutation authority.
+     It emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluator.v1`
+     with source evaluation-report policy refs, applied evaluation-report
+     application evidence, request/evidence summaries, checks, signal
+     evaluations, findings, denied claims, next-query guidance, and a handoff
+     to the evaluation-report evaluation-report branch.
+70. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report`
+   - Next: summarize ready or advisory consumption-report evaluation-report
+     evaluator artifacts into a local report that helps agents, reviewers,
+     non-blocking CI advisory readers, and the SolidJS `webui-dev/zig-webui`
+     workbench understand whether the evaluation-report policy consumption
+     path is sufficiently evidenced for the next boundary. It should preserve
+     denied claims, local-only publication posture, source application
+     evidence, request/evidence classifications, advisory and blocked findings,
+     and next-query guidance while continuing to deny mutation authority,
+     CI enforcement, required status checks, app runtime integration, storage
+     writes, adapter execution, public upload, production health, alternate
+     renderer scope, and auto-apply.
 
 ## Dual-Interface Causal Spine Expansion
 

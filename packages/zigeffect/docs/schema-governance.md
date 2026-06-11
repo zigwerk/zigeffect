@@ -3,7 +3,7 @@ schema: zigeffect.causal.schema-governance.v1
 schema_version: 1
 core schema: zigeffect.causal.v1 version 1
 event taxonomy version: 1
-schema count: 104
+schema count: 105
 
 versioning policy:
 - schema names the artifact family
@@ -399,6 +399,14 @@ schemas:
   emitted by: causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-policy
   consumed by: agents, reviewers, non-blocking CI advisory readers, local SolidJS workbench, production-hardening backlog, future app-facing advisory report consumption report evaluation report evaluator
   governance requirements: consumption report evaluation-report policy producer tests, applied evaluation-report application-boundary source checks, interpretation-rule tests, consumption-scope tests, denied inference tests, negative fixture tests, verification command evidence, next-branch evaluation-report evaluator handoff, docs update
+- zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluator.v1
+  version: 1
+  category: app-runtime
+  status: current
+  compatibility: strict-v1, record-only, advisory-only, consumption-report-evaluation-report-evaluator, approved-consumption-report-evaluation-report-policy-source, bounded-explicit-evidence, request-classifier, read-only-consumption, bounded-agent-context, app-facing, solid-webui, webui-dev/zig-webui, no-cockroach, no-ci-enforcement, no-required-status-check, no-workflow-mutation, no-github-api-mutation, no-app-mutation, no-app-runtime-integration, no-live-agent-projection, no-raw-payload-capture, no-deployment-mutation, no-production-mutation, no-nendb-write, no-nendb-adapter-execution, no-public-artifact-upload, no-hosted-live-dashboard, no-auto-apply, no-mutation-authority
+  emitted by: causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluator
+  consumed by: agents, reviewers, non-blocking CI advisory readers, local SolidJS workbench, production-hardening backlog, future app-facing advisory report consumption report evaluation report evaluation report
+  governance requirements: consumption report evaluation-report evaluator producer tests, ready consumption-report evaluation-report policy source checks, source evaluation-report application evidence checks, request and evidence classifier tests, ready advisory and blocked artifact tests, denied content tests, redaction posture tests, verification command evidence, next-branch evaluation-report evaluation-report handoff, docs update
 - zigeffect.causal.human-agent-feedback-loop.v1
   version: 1
   category: human-agent-feedback
