@@ -442,7 +442,7 @@ export type AppFacingPreviewModel = {
   artifactPath: string;
   schema: string;
   schemaVersion: string;
-  sourceMode: "solid-webui-readonly-preview" | "audit-remediation-bridge";
+  sourceMode: "solid-webui-readonly-preview" | "ci-advisory-remediation-report" | "audit-remediation-bridge";
   status: string;
   decision: string;
   reason: string;
@@ -506,6 +506,7 @@ const productionTelemetryRetentionSchema = "zigeffect.causal.production-telemetr
 const productionTelemetryWorkbenchPreviewSchema = "zigeffect.causal.production-telemetry-workbench-readonly-preview.v1";
 const appFacingAuditRemediationBridgeSchema = "zigeffect.causal.app-facing-production-integration-audit-remediation-bridge.v1";
 const appFacingSolidWebuiPreviewSchema = "zigeffect.causal.app-facing-production-integration-solid-webui-readonly-preview.v1";
+const appFacingCiAdvisoryReportSchema = "zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report.v1";
 const defaultVisualGraphLayouts: VisualGraphLayoutMode[] = ["dagre", "force", "radial"];
 const liveDashboardSourceKinds = ["snapshot", "aggregation_bundle", "access_policy", "alert_preview", "compare"];
 const liveDashboardSourceLabels: Record<string, string> = {
@@ -1201,13 +1202,19 @@ export function deriveProductionTelemetryPreviewModel(raw: unknown, options: Wor
 export function deriveAppFacingPreviewModel(raw: unknown, options: WorkbenchOptions): AppFacingPreviewModel | null {
   const artifact = isRecord(raw) ? raw : {};
   const schema = textValue(artifact.schema, "unknown");
-  if (schema !== appFacingSolidWebuiPreviewSchema && schema !== appFacingAuditRemediationBridgeSchema) {
+  if (
+    schema !== appFacingSolidWebuiPreviewSchema &&
+    schema !== appFacingCiAdvisoryReportSchema &&
+    schema !== appFacingAuditRemediationBridgeSchema
+  ) {
     return null;
   }
 
   const sourceMode = schema === appFacingSolidWebuiPreviewSchema
     ? "solid-webui-readonly-preview"
-    : "audit-remediation-bridge";
+    : schema === appFacingCiAdvisoryReportSchema
+      ? "ci-advisory-remediation-report"
+      : "audit-remediation-bridge";
   const warnings: string[] = [];
   const schemaVersion = textValue(artifact.schema_version, "unknown");
   if (schemaVersion === "unknown") {
@@ -1226,13 +1233,16 @@ export function deriveAppFacingPreviewModel(raw: unknown, options: WorkbenchOpti
     decision: textValue(artifact.decision, "unknown"),
     reason: textValue(artifact.reason, ""),
     readyForNextBranch: booleanValue(artifact.ready_for_next_branch),
-    sourceBridge: textValue(artifact.source_bridge, textValue(artifact.source_handoff, "")),
-    sourceBridgeStatus: textValue(artifact.source_bridge_status, appFacingStatus(artifact)),
+    sourceBridge: textValue(artifact.source_preview, textValue(artifact.source_bridge, textValue(artifact.source_handoff, ""))),
+    sourceBridgeStatus: textValue(artifact.source_preview_status, textValue(artifact.source_bridge_status, appFacingStatus(artifact))),
     recommendation: textValue(artifact.recommendation, "unknown"),
     nextBranch: textValue(artifact.next_branch_if_ready, "unknown"),
     authority: appFacingAuthority(artifact, sourceMode),
-    previewPanels: stringList(artifact.preview_panels),
-    sections: appFacingPreviewSections(artifact.app_preview_sections),
+    previewPanels: uniqueInOrder([
+      ...stringList(artifact.preview_panels),
+      ...stringList(artifact.report_panels),
+    ]),
+    sections: appFacingPreviewSections(artifact.app_preview_sections, artifact.app_report_sections),
     bridgeRecords: appFacingBridgeRecords(artifact.bridge_records, artifact.audit_remediation_bridge_records),
     checks: appFacingChecks(artifact.checks),
     validationChecks: uniqueInOrder([
@@ -1808,8 +1818,11 @@ function appFacingStatus(artifact: UnknownRecord): string {
   return textValue(
     artifact.status,
     textValue(
-      artifact.solid_webui_readonly_preview_status,
-      textValue(artifact.audit_remediation_bridge_status, "unknown"),
+      artifact.ci_advisory_remediation_report_status,
+      textValue(
+        artifact.solid_webui_readonly_preview_status,
+        textValue(artifact.audit_remediation_bridge_status, "unknown"),
+      ),
     ),
   );
 }
@@ -1818,7 +1831,7 @@ function appFacingAuthority(
   artifact: UnknownRecord,
   sourceMode: AppFacingPreviewModel["sourceMode"],
 ): AppFacingPreviewAuthority {
-  const previewDefault = sourceMode === "solid-webui-readonly-preview";
+  const previewDefault = sourceMode === "solid-webui-readonly-preview" || sourceMode === "ci-advisory-remediation-report";
   return {
     applied: booleanValue(artifact.applied) ?? false,
     mutationAuthority: textValue(artifact.mutation_authority, "none"),
@@ -1868,12 +1881,13 @@ function appFacingBridgeRecords(primary: unknown, fallback: unknown): AppFacingB
   }));
 }
 
-function appFacingPreviewSections(value: unknown): AppFacingPreviewSection[] {
-  if (!Array.isArray(value)) {
+function appFacingPreviewSections(value: unknown, fallback?: unknown): AppFacingPreviewSection[] {
+  const sections = Array.isArray(value) && value.length > 0 ? value : fallback;
+  if (!Array.isArray(sections)) {
     return [];
   }
 
-  return value.filter(isRecord).map((section) => ({
+  return sections.filter(isRecord).map((section) => ({
     id: textValue(section.id, "unknown"),
     title: textValue(section.title, textValue(section.id, "unknown")),
     evidenceRefs: stringList(section.evidence_refs),

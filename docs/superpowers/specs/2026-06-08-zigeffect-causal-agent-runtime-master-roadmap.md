@@ -1256,11 +1256,23 @@ Status values:
      NenDB production writes, NenDB adapter execution, deployment mutation,
      production health claims, or `applied=true`.
 55. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report`
-   - Next: consume ready app-facing SolidJS read-only preview artifacts and
-     produce an advisory CI remediation report without required status check
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report`
+     consumes ready app-facing SolidJS read-only preview artifacts and emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report.v1`,
+     producing an advisory-only CI remediation report, SolidJS workbench sample,
+     bridge-record view, validation checks, blocked CI claims, verification
+     commands, and next-branch handoff without required status check
      enforcement, workflow mutation, GitHub API mutation, deployment mutation,
      app mutation, NenDB writes, NenDB adapter execution, Cockroach scope,
      production health claims, or `applied=true`.
+56. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-application-boundary`
+   - Next: consume ready app-facing CI advisory remediation report artifacts and
+     define a reviewed application boundary for interpreting or publishing the
+     advisory report without required status check enforcement, workflow
+     mutation, GitHub API mutation, deployment mutation, app mutation, NenDB
+     writes, NenDB adapter execution, Cockroach scope, production health claims,
+     or `applied=true`.
 
 ## Dual-Interface Causal Spine Expansion
 

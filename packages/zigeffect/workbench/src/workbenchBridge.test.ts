@@ -109,6 +109,20 @@ test("loadPayloadFromBridge can load the app-facing SolidJS read-only preview sa
   expect(payload.artifactJson).toContain("app-facing-production-integration-solid-webui-readonly-preview");
 });
 
+test("loadPayloadFromBridge can load the app-facing CI advisory remediation report sample", async () => {
+  const payload = await loadPayloadFromBridge(
+    {},
+    async (sampleName) => {
+      expect(sampleName).toBe("sample-app-facing-ci-advisory-remediation-report.json");
+      return JSON.stringify({ schema: "zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report.v1" });
+    },
+    "?sample=app-ci-advisory",
+  );
+
+  expect(payload.session?.artifact_path).toBe("sample-app-facing-ci-advisory-remediation-report.json");
+  expect(payload.artifactJson).toContain("app-facing-production-integration-ci-advisory-remediation-report");
+});
+
 test("loadPayloadFromBridge can load the graph visual debugging development sample", async () => {
   const payload = await loadPayloadFromBridge(
     {},
