@@ -1326,6 +1326,29 @@ no app mutation, no CI gates, no Cockroach scope, and no alternate renderer
 work. See
 [docs/app-facing-production-integration-fixtures.md](docs/app-facing-production-integration-fixtures.md).
 
+Review app-facing production integration fixture readiness:
+
+```bash
+cd packages/zigeffect
+zig build causal-app-facing-production-integration-readiness-review -- \
+  --from-fixtures ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures.json \
+  approve \
+  --reason "fixtures reviewed for implementation proposal" \
+  --verified-command "zig build causal-app-facing-production-integration-fixtures -- validate --format json" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The readiness report uses schema
+`zigeffect.causal.app-facing-production-integration-readiness-review.v1` and
+writes `*-readiness-review.json` plus `*-readiness-review.txt`.
+`ready_for_implementation_proposal=true` only allows the next implementation
+proposal branch. It does not grant app mutation, live telemetry, durable
+production writes, CI gates, Cockroach scope, or alternate renderer work. See
+[docs/app-facing-production-integration-readiness-review.md](docs/app-facing-production-integration-readiness-review.md).
+
 Print the causal artifact retention manifest for agents and CI:
 
 ```bash

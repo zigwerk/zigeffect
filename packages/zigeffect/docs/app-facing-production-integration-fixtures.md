@@ -94,7 +94,27 @@ The catalog hands off to:
 
 `codex/zigeffect-causal-app-facing-production-integration-readiness-review`
 
-That branch should consume this fixture report and decide whether app-facing
-production integration is ready for implementation proposal work. It should
-not grant live telemetry, durable production writes, app mutation, CI gates,
-Cockroach scope, or alternate renderer scope.
+That branch is now represented by
+`causal-app-facing-production-integration-readiness-review`. It consumes this
+fixture JSON, records a reviewer decision and required verification command
+evidence, and emits
+`zigeffect.causal.app-facing-production-integration-readiness-review.v1`.
+
+```sh
+zig build causal-app-facing-production-integration-readiness-review -- \
+  --from-fixtures ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures.json \
+  approve \
+  --reason "fixtures reviewed for implementation proposal" \
+  --verified-command "zig build causal-app-facing-production-integration-fixtures -- validate --format json" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+`ready_for_implementation_proposal=true` hands off to:
+
+`codex/zigeffect-causal-app-facing-production-integration-implementation-proposal`
+
+It still does not grant live telemetry, durable production writes, app
+mutation, CI gates, Cockroach scope, or alternate renderer scope.

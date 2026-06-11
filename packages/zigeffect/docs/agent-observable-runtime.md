@@ -1237,9 +1237,21 @@ deterministic fixture-only catalog for app production integration evidence.
 Agents should use it to connect app traces, app semantic refs, `trace_data`
 queries, audit-chain before/after review, app remediation governance,
 production telemetry fixture boundaries, and NenDB durable-history refs before
-the readiness-review branch exists. It keeps `applied=false`,
+the readiness-review gate. It keeps `applied=false`,
 `mutation_authority=none`, live telemetry disabled, durable writes disabled,
 app mutation disabled, CI gates disabled, and durable scope NenDB-only.
+
+`zig build causal-app-facing-production-integration-readiness-review --
+--from-fixtures <app-facing-fixtures-json> approve --reason <reason>
+--verified-command <command>` emits
+`zigeffect.causal.app-facing-production-integration-readiness-review.v1`.
+It records whether the fixtures are ready for an implementation-proposal
+branch, checks required source contracts and fixture coverage, verifies
+NenDB-only durable direction, blocks Cockroach scope and alternate renderers,
+and keeps app mutation, live telemetry, durable writes, and CI gates disabled.
+`ready_for_implementation_proposal=true` is permission to start proposal work
+only. It is not evidence that app code, config, data, deployments, telemetry,
+storage, or CI state changed.
 
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around

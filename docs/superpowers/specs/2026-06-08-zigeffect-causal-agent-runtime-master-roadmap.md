@@ -1179,10 +1179,20 @@ Status values:
      durable production writes, no app mutation, no CI gates, no Cockroach
      scope, and no alternate renderer scope.
 48. `codex/zigeffect-causal-app-facing-production-integration-readiness-review`
-   - Next: consume the fixture catalog and decide whether app-facing
-     production integration is ready for implementation proposal work without
-     granting live telemetry, durable writes, app mutation, CI gates,
-     Cockroach scope, or alternate renderer scope.
+   - Delivered:
+     `causal-app-facing-production-integration-readiness-review` consumes the
+     fixture catalog, emits
+     `zigeffect.causal.app-facing-production-integration-readiness-review.v1`,
+     records reviewer decision and required verification command evidence,
+     checks fixture/source-contract coverage, preserves NenDB-only durable
+     direction, blocks Cockroach and alternate renderer scope, and sets
+     `ready_for_implementation_proposal=true` only for a reviewed ready
+     handoff.
+49. `codex/zigeffect-causal-app-facing-production-integration-implementation-proposal`
+   - Next: consume a ready app-facing production integration readiness-review
+     artifact and propose the implementation sequence without granting live
+     telemetry, durable writes, app mutation, CI gates, Cockroach scope, or
+     alternate renderer scope.
 
 ## Dual-Interface Causal Spine Expansion
 

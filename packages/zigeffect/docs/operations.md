@@ -495,7 +495,7 @@ zig build causal-production-hardening-backlog -- --format json
 The backlog records schema
 `zigeffect.causal.production-hardening-backlog.v1`, turns the deferred
 production gaps into ordered future branches, and now recommends
-`codex/zigeffect-causal-nendb-durable-history-hardening`
+`codex/zigeffect-causal-app-facing-production-integration-implementation-proposal`
 after the unified causal spine, deep runtime internals, app semantic trace API,
 bounded agent query surface, record-only encryption-at-rest policy,
 record-only alerting integrations, delivered live dashboard streaming
@@ -514,7 +514,9 @@ check application boundary, required status check policy, required status
 check enforcement-readiness, required status check enforcement
 application-boundary, required status check enforcement policy, and required
 status check enforcement evaluator, and required status check enforcement report
-milestones.
+milestones, backlog refresh, NenDB durable-history hardening, cross-run
+comparison, audit-chain snapshot comparison, app-facing production integration
+fixtures, and app-facing production integration readiness review.
 It keeps durable production work on the NenDB adapter path, keeps workbench UI
 work on SolidJS inside `webui-dev/zig-webui`, and grants no production mutation
 authority.
@@ -543,6 +545,33 @@ config, registry, workflow, branch-protection, deployment, rollout, app,
 GitHub, CI, live telemetry, durable write, NenDB write, Cockroach, non-NenDB
 adapter, alternate renderer, production health, production cluster, and
 mutation authority disabled.
+
+## App-Facing Production Integration Readiness Review
+
+Generate app-facing fixtures and review whether they are ready for a future
+implementation-proposal branch:
+
+```sh
+cd packages/zigeffect
+mkdir -p ../../.zig-cache/causal-artifacts
+zig build causal-app-facing-production-integration-fixtures -- --format json 2> ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures.json
+zig build causal-app-facing-production-integration-readiness-review -- \
+  --from-fixtures ../../.zig-cache/causal-artifacts/app-facing-production-integration-fixtures.json \
+  approve \
+  --reason "fixtures reviewed for implementation proposal" \
+  --verified-command "zig build causal-app-facing-production-integration-fixtures -- validate --format json" \
+  --verified-command "zig build causal-schema-governance -- --format json" \
+  --verified-command "zig build causal-production-hardening-backlog -- --format json" \
+  --verified-command "zig build examples" \
+  --verified-command "zig build test"
+```
+
+The review records
+`zigeffect.causal.app-facing-production-integration-readiness-review.v1`.
+`ready_for_implementation_proposal=true` permits only the next proposal branch.
+It does not grant app mutation, live telemetry ingestion, exporter setup,
+durable production writes, CI enforcement, Cockroach adapter work, or alternate
+renderer work.
 
 Run the NenDB durable-history hardening fixture before starting cross-run
 agent-query comparison:
