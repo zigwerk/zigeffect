@@ -33,7 +33,7 @@ If the derived default artifact basename would exceed the filesystem filename li
 Ready or advisory eight-level report artifacts hand off to:
 
 ```text
-codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary
+codex/zigeffect-causal-app-facing-eight-level-application-boundary
 ```
 
 The report is local, read-only, and advisory. It does not publish artifacts, mutate app state, enforce CI, execute adapters, host dashboards, apply changes, or claim production health.

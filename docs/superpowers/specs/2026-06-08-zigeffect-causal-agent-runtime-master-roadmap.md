@@ -1803,7 +1803,7 @@ Status values:
      publication only, and emits
      `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report.v1`
      for the matching application-boundary branch.
-95. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary`
+95. `codex/zigeffect-causal-app-facing-eight-level-application-boundary`
    - Next: consume ready or advisory eight-level report artifacts, record
      planned or reviewed local application-boundary evidence, require reviewed
      before/after verification before applied state, preserve local publication

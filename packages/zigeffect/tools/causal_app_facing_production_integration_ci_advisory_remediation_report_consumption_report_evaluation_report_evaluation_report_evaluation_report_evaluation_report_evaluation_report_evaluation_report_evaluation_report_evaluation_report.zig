@@ -3,8 +3,8 @@ const std = @import("std");
 pub const schema = "zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report.v1";
 pub const schema_version: u32 = 1;
 pub const source_branch = "codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report";
-pub const recommendation = "start-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary";
-pub const next_branch_if_ready = "codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary";
+pub const recommendation = "start-app-facing-eight-level-application-boundary";
+pub const next_branch_if_ready = "codex/zigeffect-causal-app-facing-eight-level-application-boundary";
 
 const source_evaluator_schema = "zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluator.v1";
 const generated_by = "causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report";
@@ -1242,8 +1242,8 @@ test "app-facing advisory remediation report consumption report evaluation repor
     try std.testing.expectEqualStrings("zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report.v1", schema);
     try std.testing.expectEqual(@as(u32, 1), schema_version);
     try std.testing.expectEqualStrings("codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report", source_branch);
-    try std.testing.expectEqualStrings("start-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary", recommendation);
-    try std.testing.expectEqualStrings("codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary", next_branch_if_ready);
+    try std.testing.expectEqualStrings("start-app-facing-eight-level-application-boundary", recommendation);
+    try std.testing.expectEqualStrings("codex/zigeffect-causal-app-facing-eight-level-application-boundary", next_branch_if_ready);
 }
 
 test "parses app-facing consumption report evaluation report evaluation report evaluation report evaluation report evaluation report evaluation report evaluation report evaluation report options" {
@@ -1312,7 +1312,7 @@ test "ready evaluator produces ready consumption report evaluation report evalua
     try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"consumption_report_evaluation_report_evaluation_report_evaluation_report_evaluation_report_evaluation_report_evaluation_report_evaluation_report_evaluation_report_status\": \"ready\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"ready_for_next_branch\": true") != null);
     try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"mutation_authority\": \"none\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"next_branch_if_ready\": \"codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reports.json, "\"next_branch_if_ready\": \"codex/zigeffect-causal-app-facing-eight-level-application-boundary\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, reports.text, "consumption report evaluation report evaluation report evaluation report evaluation report evaluation report evaluation report evaluation report evaluation report status: ready") != null);
 
     var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, reports.json, .{});

@@ -31,11 +31,11 @@ test "app-facing advisory remediation report consumption report evaluation repor
         source_branch,
     );
     try std.testing.expectEqualStrings(
-        "start-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary",
+        "start-app-facing-eight-level-application-boundary",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary",
+        "codex/zigeffect-causal-app-facing-eight-level-application-boundary",
         next_branch_if_ready,
     );
 }
@@ -73,8 +73,8 @@ Update text and JSON report tests to expect `schema count: 130` and `"schema_cou
 Update the top-level recommendation expectations to:
 
 ```zig
-"start-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary"
-"codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary"
+"start-app-facing-eight-level-application-boundary"
+"codex/zigeffect-causal-app-facing-eight-level-application-boundary"
 ```
 
 Add delivered item assertions for:
@@ -133,8 +133,8 @@ The new file must contain:
 ```zig
 pub const schema = "zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report.v1";
 pub const source_branch = "codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report";
-pub const recommendation = "start-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary";
-pub const next_branch_if_ready = "codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary";
+pub const recommendation = "start-app-facing-eight-level-application-boundary";
+pub const next_branch_if_ready = "codex/zigeffect-causal-app-facing-eight-level-application-boundary";
 
 const source_evaluator_schema = "zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluator.v1";
 const generated_by = "causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report";
@@ -223,8 +223,8 @@ Set emitted_by to the new build step and consumed_by to agents, reviewers, non-b
 Add a delivered report item after the seven-level evaluator item. Update:
 
 ```zig
-pub const recommendation = "start-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary";
-pub const recommended_next_branch = "codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary";
+pub const recommendation = "start-app-facing-eight-level-application-boundary";
+pub const recommended_next_branch = "codex/zigeffect-causal-app-facing-eight-level-application-boundary";
 ```
 
 Add the new report id to `dependency_order` after the seven-level evaluator item, and add verification commands for help, ready source evaluator, advisory source evaluator, and blocked source evaluator.
@@ -234,7 +234,7 @@ Add the new report id to `dependency_order` after the seven-level evaluator item
 Mark roadmap item 94 delivered and add item 95 as:
 
 ```text
-codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary
+codex/zigeffect-causal-app-facing-eight-level-application-boundary
 ```
 
 The new item should be `Next` and describe consuming ready/advisory eight-level report artifacts with reviewed local application-boundary evidence.
@@ -336,7 +336,7 @@ git -C /Users/seanknowles/.config/superpowers/worktrees/yachdee/master-local-mer
 Run:
 
 ```bash
-git switch -c codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary
+git switch -c codex/zigeffect-causal-app-facing-eight-level-application-boundary
 ```
 
 Expected: working tree is clean on the next application-boundary branch.
