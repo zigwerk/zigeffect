@@ -1660,10 +1660,21 @@ Status values:
      denied claims, next-query guidance, and a handoff to the next report
      branch.
 78. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report`
-   - Next: consume ready evaluation-report evaluation-report evaluation-report
-     evaluator evidence, summarize the bounded request and policy findings for
-     agents/reviewers/non-blocking CI readers, and preserve the same local-only
-     SolidJS `webui-dev/zig-webui` read-only no-mutation posture.
+   - Delivered:
+     `causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report`
+     consumes ready or advisory evaluation-report evaluation-report
+     evaluation-report evaluator evidence, summarizes bounded request, policy,
+     application, inherited evidence, checks, findings, denied claims, and
+     next-query context for agents/reviewers/non-blocking CI readers, and
+     preserves the same local-only SolidJS `webui-dev/zig-webui` read-only
+     no-mutation posture. It emits
+     `zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report.v1`
+     and hands off to the application-boundary branch.
+79. `codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-application-boundary`
+   - Next: consume ready or advisory evaluation-report evaluation-report
+     evaluation-report evaluation-report report evidence, record planned and
+     reviewed local application evidence, and only mark applied after explicit
+     before/after evidence and verification commands are present.
 
 ## Dual-Interface Causal Spine Expansion
 
