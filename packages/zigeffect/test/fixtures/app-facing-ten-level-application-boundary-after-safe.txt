@@ -1,0 +1,3 @@
+zigeffect causal read-only consumption evaluation-report application evidence.
+This local evaluation report records reviewed ten-level application boundary evidence for agents reviewers advisory CI readers and the SolidJS webui.
+Denied claims remain listed by id in the artifact; this text grants no extra authority.
