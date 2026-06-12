@@ -1896,9 +1896,17 @@ Status values:
      nine-level lineage, keeps local-only no-mutation authority, and hands
      applied evidence to the eleven-level policy branch.
 108. `codex/zigeffect-causal-app-facing-eleven-level-policy`
-   - Next: consume applied eleven-level application-boundary evidence, record a
-     local approve or reject policy decision, preserve no mutation authority,
-     and hand approved evidence to the eleven-level evaluator branch.
+   - Delivered:
+     `causal-app-facing-eleven-level-policy` consumes applied eleven-level
+     application-boundary evidence, records a local approve or reject policy
+     decision, preserves eleven-level report plus ten-level and nine-level
+     lineage, keeps local-only no-mutation authority, and hands approved
+     evidence to the eleven-level evaluator branch.
+109. `codex/zigeffect-causal-app-facing-eleven-level-evaluator`
+   - Next: consume approved eleven-level policy evidence plus bounded local
+     request and support evidence, emit read-only evaluator findings, preserve no
+     mutation authority, and hand ready or advisory evidence to the next
+     app-facing report branch.
 
 ## Dual-Interface Causal Spine Expansion
 
