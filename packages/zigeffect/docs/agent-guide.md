@@ -1100,6 +1100,9 @@ This is the Phase 0 self-improving feedback lane: agents use `zigeffect`'s own
 causal runtime as evidence while improving `zigeffect`, then rerun the harness
 and package tests to compare behavior.
 
+For the concise recovery workflow and root Bun commands, see
+`packages/zigeffect/docs/causal-dev-harness.md`.
+
 Use `zig build causal-artifacts` at the start of CI wiring or branch handoff to
 make the artifact retention contract explicit before uploading or attaching
 causal evidence.

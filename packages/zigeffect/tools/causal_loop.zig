@@ -340,7 +340,7 @@ fn appendQuery(
 ) !void {
     var command = std.ArrayList(u8).empty;
     errdefer command.deinit(allocator);
-    try command.print(allocator, "causal-query -- --file {s}", .{artifact_path});
+    try command.print(allocator, "zig build causal-query -- --file {s}", .{artifact_path});
     for (args) |arg| try command.print(allocator, " {s}", .{arg});
     const command_text = try command.toOwnedSlice(allocator);
     errdefer allocator.free(command_text);
@@ -749,7 +749,7 @@ test "query report runs selected dogfood follow-up queries" {
     defer std.testing.allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect causal query report") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "query: causal-query -- --file .zig-cache/causal-artifacts/after.json cause 3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "query: zig build causal-query -- --file .zig-cache/causal-artifacts/after.json cause 3") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "causal.query: requirements 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "causal.query: resources 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "causal.query: fibers pending") != null);
