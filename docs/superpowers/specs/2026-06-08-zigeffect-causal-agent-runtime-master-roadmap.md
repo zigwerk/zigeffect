@@ -1833,10 +1833,16 @@ Status values:
      hands ready or advisory report evidence to the nine-level
      application-boundary branch.
 99. `codex/zigeffect-causal-app-facing-nine-level-application-boundary`
-   - Next: consume ready or advisory nine-level report artifacts, record
-     planned or reviewed local application-boundary evidence, preserve
-     local-only no-mutation authority, and hand off to the nine-level policy
-     branch.
+   - Delivered:
+     `causal-app-facing-nine-level-application-boundary` consumes ready or
+     advisory nine-level report artifacts, records planned or reviewed local
+     application-boundary evidence, requires reviewed before/after verification
+     before applied state, preserves local-only no-mutation authority, and
+     hands applied evidence to the nine-level policy branch.
+100. `codex/zigeffect-causal-app-facing-nine-level-policy`
+   - Next: consume applied nine-level application-boundary evidence, record a
+     local approve or reject policy decision, preserve no-mutation authority,
+     and hand approved evidence to the nine-level evaluator branch.
 
 ## Dual-Interface Causal Spine Expansion
 
