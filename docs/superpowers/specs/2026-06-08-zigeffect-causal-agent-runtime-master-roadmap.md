@@ -1918,10 +1918,18 @@ Status values:
      local-only no-mutation authority, and hands ready or advisory report
      evidence to the twelve-level application-boundary branch.
 111. `codex/zigeffect-causal-app-facing-twelve-level-application-boundary`
-   - Next: consume ready or advisory twelve-level report artifacts, record
-     planned or reviewed local application-boundary evidence, preserve
-     eleven-level, ten-level, and nine-level lineage, keep no mutation
-     authority, and hand applied evidence to the twelve-level policy branch.
+   - Delivered:
+     `causal-app-facing-twelve-level-application-boundary` consumes ready or
+     advisory twelve-level report artifacts, records planned or reviewed local
+     application-boundary evidence, preserves twelve-level report plus
+     eleven-level, ten-level, and nine-level lineage, keeps local-only
+     no-mutation authority, and hands applied evidence to the twelve-level
+     policy branch.
+112. `codex/zigeffect-causal-app-facing-twelve-level-policy`
+   - Next: consume applied twelve-level application-boundary evidence, record a
+     local approve or reject policy decision, preserve twelve/eleven/ten/nine
+     lineage, keep no mutation authority, and hand approved policy evidence to
+     the twelve-level evaluator branch.
 
 ## Dual-Interface Causal Spine Expansion
 
