@@ -282,7 +282,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 6: Commit, checkpoint master, and branch next**
+- [x] **Step 6: Commit, checkpoint master, and branch next**
 
 Run:
 
