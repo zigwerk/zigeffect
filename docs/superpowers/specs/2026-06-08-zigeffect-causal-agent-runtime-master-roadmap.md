@@ -1962,11 +1962,20 @@ Status values:
      ten-level, and nine-level lineage, keeps local-only no-mutation authority,
      and hands approved evidence to the thirteen-level evaluator branch.
 117. `codex/zigeffect-causal-app-facing-thirteen-level-evaluator`
-   - Next: consume approved thirteen-level policy evidence plus bounded local
-     request and support evidence, emit ready, advisory, or blocked evaluator
-     findings, preserve thirteen/twelve/eleven/ten/nine lineage, keep no
-     mutation authority, and hand ready or advisory evidence to the
+   - Delivered:
+     `causal-app-facing-thirteen-level-evaluator` consumes approved
+     thirteen-level policy evidence plus bounded local request and support
+     evidence, emits ready, advisory, or blocked evaluator findings, preserves
+     thirteen-level policy/application/report evidence plus twelve-level
+     evaluator/policy/application/report evidence and lower lineage, keeps
+     no mutation authority, and hands ready or advisory evidence to the
      fourteen-level report branch.
+118. `codex/zigeffect-causal-app-facing-fourteen-level-report`
+   - Next: consume ready or advisory thirteen-level evaluator evidence,
+     summarize source thirteen-level policy/application/report evidence plus
+     twelve-level evaluator/policy/application/report evidence and lower
+     eleven/ten/nine lineage, keep local-only no-mutation authority, and hand
+     report evidence to the fourteen-level application-boundary branch.
 
 ## Dual-Interface Causal Spine Expansion
 
