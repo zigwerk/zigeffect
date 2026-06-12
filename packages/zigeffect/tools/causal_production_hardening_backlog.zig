@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-app-facing-eleven-level-report";
-pub const recommended_next_branch = "codex/zigeffect-causal-app-facing-eleven-level-report";
+pub const recommendation = "start-app-facing-eleven-level-application-boundary";
+pub const recommended_next_branch = "codex/zigeffect-causal-app-facing-eleven-level-application-boundary";
 
 const OutputFormat = enum { text, json };
 
@@ -2907,6 +2907,34 @@ const backlog_items: []const BacklogItem = &.{
         .branch = "codex/zigeffect-causal-app-facing-ten-level-evaluator",
         .agent_guidance = "Use ready or advisory ten-level evaluator evidence to start the eleven-level report branch only. Blocked evaluator evidence is a stop sign. Do not infer CI enforcement, workflow mutation, GitHub API mutation, app mutation, app runtime integration, live agent projection, raw payload capture, NenDB writes, NenDB adapter execution, Cockroach scope, production health, hosted dashboard, public upload, auto-apply, registry mutation, or mutation authority.",
     },
+    .{
+        .id = "app-facing-eleven-level-report",
+        .title = "App-Facing Eleven-Level Report",
+        .gap_id = "app-facing-eleven-level-report",
+        .priority = "P1",
+        .status = "delivered",
+        .summary = "Consumes ready or advisory ten-level evaluator evidence, emits a local eleven-level report, preserves no-mutation authority, carries ten-level and nine-level lineage, and prepares the eleven-level application-boundary branch.",
+        .depends_on = &.{"app-facing-ten-level-evaluator"},
+        .deliverables = &.{
+            "eleven-level report schema",
+            "short alias build step",
+            "ready advisory and blocked report artifacts",
+            "source ten-level evaluator gates",
+            "source ten-level policy application and report evidence carryover",
+            "source nine-level lineage carryover",
+            "local publication channel checks",
+            "schema governance registration",
+            "eleven-level application-boundary handoff",
+        },
+        .evidence_sources = &.{
+            "docs/superpowers/specs/2026-06-12-zigeffect-causal-app-facing-eleven-level-report-design.md",
+            "docs/superpowers/plans/2026-06-12-zigeffect-causal-app-facing-eleven-level-report-implementation.md",
+            "packages/zigeffect/tools/causal_app_facing_eleven_level_report.zig",
+            "packages/zigeffect/docs/app-facing-eleven-level-report.md",
+        },
+        .branch = "codex/zigeffect-causal-app-facing-eleven-level-report",
+        .agent_guidance = "Use ready or advisory eleven-level report evidence to start the eleven-level application-boundary branch only. Blocked report artifacts are stop signs. Do not infer CI enforcement, workflow mutation, GitHub API mutation, app mutation, app runtime integration, live agent projection, raw payload capture, NenDB writes, NenDB adapter execution, Cockroach scope, production health, hosted dashboard, public upload, auto-apply, registry mutation, or mutation authority.",
+    },
 };
 
 const dependency_order: []const []const u8 = &.{
@@ -3020,6 +3048,7 @@ const dependency_order: []const []const u8 = &.{
     "app-facing-ten-level-application-boundary",
     "app-facing-ten-level-policy",
     "app-facing-ten-level-evaluator",
+    "app-facing-eleven-level-report",
 };
 
 const verification_commands: []const []const u8 = &.{
@@ -3319,6 +3348,10 @@ const verification_commands: []const []const u8 = &.{
     "zig build causal-app-facing-ten-level-evaluator -- --from-policy ../../.zig-cache/causal-artifacts/app-facing-ci-ten-level-policy.json evaluate --reason \"reviewed app-facing ten-level evaluator\" --request ../../.zig-cache/causal-artifacts/app-facing-ci-ten-level-evaluator-request.json --evidence ../../.zig-cache/causal-artifacts/app-facing-ci-ten-level-evaluator-support.txt --out-prefix ../../.zig-cache/causal-artifacts/app-facing-ci-ten-level-evaluator",
     "zig build causal-app-facing-ten-level-evaluator -- --from-policy ../../.zig-cache/causal-artifacts/app-facing-ci-ten-level-policy.json evaluate --reason \"advisory app-facing ten-level evaluator missing support\" --request ../../.zig-cache/causal-artifacts/app-facing-ci-ten-level-evaluator-request.json --out-prefix ../../.zig-cache/causal-artifacts/app-facing-ci-ten-level-evaluator-advisory",
     "zig build causal-app-facing-ten-level-evaluator -- --from-policy ../../.zig-cache/causal-artifacts/app-facing-ci-ten-level-policy-reject.json evaluate --reason \"blocked app-facing ten-level evaluator source\" --request ../../.zig-cache/causal-artifacts/app-facing-ci-ten-level-evaluator-request.json --out-prefix ../../.zig-cache/causal-artifacts/app-facing-ci-ten-level-evaluator-blocked",
+    "zig build causal-app-facing-eleven-level-report -- --help",
+    "zig build causal-app-facing-eleven-level-report -- --from-evaluator ../../.zig-cache/causal-artifacts/app-facing-ci-ten-level-evaluator.json summarize --reason \"reviewed app-facing eleven-level report\" --out-prefix ../../.zig-cache/causal-artifacts/app-facing-ci-eleven-level-report",
+    "zig build causal-app-facing-eleven-level-report -- --from-evaluator ../../.zig-cache/causal-artifacts/app-facing-ci-ten-level-evaluator-advisory.json summarize --reason \"advisory app-facing eleven-level report source\" --out-prefix ../../.zig-cache/causal-artifacts/app-facing-ci-eleven-level-report-advisory",
+    "zig build causal-app-facing-eleven-level-report -- --from-evaluator ../../.zig-cache/causal-artifacts/app-facing-ci-ten-level-evaluator-blocked.json summarize --reason \"blocked app-facing eleven-level report source\" --out-prefix ../../.zig-cache/causal-artifacts/app-facing-ci-eleven-level-report-blocked",
     "zig build causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report -- --from-evaluator ../../.zig-cache/causal-artifacts/app-facing-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluator.json summarize --reason \"reviewed app-facing advisory remediation report consumption report evaluation report evaluation report evaluation report evaluation report evaluation report evaluation report evaluation report evaluation report\" --out-prefix ../../.zig-cache/causal-artifacts/app-facing-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report",
     "zig build causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report -- --from-evaluator ../../.zig-cache/causal-artifacts/app-facing-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluator-advisory.json summarize --reason \"advisory app-facing advisory remediation report consumption report evaluation report evaluation report evaluation report evaluation report evaluation report evaluation report evaluation report evaluation report source\" --out-prefix ../../.zig-cache/causal-artifacts/app-facing-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-advisory",
     "zig build causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report -- --from-evaluator ../../.zig-cache/causal-artifacts/app-facing-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluator-blocked.json summarize --reason \"blocked app-facing advisory remediation report consumption report evaluation report evaluation report evaluation report evaluation report evaluation report evaluation report evaluation report evaluation report source\" --out-prefix ../../.zig-cache/causal-artifacts/app-facing-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-blocked",
@@ -3596,11 +3629,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-app-facing-eleven-level-report",
+        "start-app-facing-eleven-level-application-boundary",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-app-facing-eleven-level-report",
+        "codex/zigeffect-causal-app-facing-eleven-level-application-boundary",
         recommended_next_branch,
     );
 }
@@ -3812,6 +3845,8 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItemStatus("app-facing-ten-level-policy", "delivered");
     try expectBacklogItem("app-facing-ten-level-evaluator");
     try expectBacklogItemStatus("app-facing-ten-level-evaluator", "delivered");
+    try expectBacklogItem("app-facing-eleven-level-report");
+    try expectBacklogItemStatus("app-facing-eleven-level-report", "delivered");
 }
 
 test "production hardening backlog preserves user constraints" {
@@ -3830,7 +3865,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-app-facing-eleven-level-report") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-app-facing-eleven-level-application-boundary") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -3961,6 +3996,8 @@ test "production hardening backlog text mentions dependency order and next branc
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-app-facing-ten-level-policy") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "app-facing-ten-level-evaluator") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-app-facing-ten-level-evaluator") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "app-facing-eleven-level-report") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "causal-app-facing-eleven-level-report") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-application-boundary") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-application-boundary") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-policy") != null);
@@ -3973,7 +4010,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-app-facing-eleven-level-report\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-app-facing-eleven-level-application-boundary\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report -- --help") != null);
@@ -4034,6 +4071,9 @@ test "production hardening backlog JSON is agent-readable" {
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"app-facing-ten-level-evaluator\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-app-facing-ten-level-evaluator\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-app-facing-ten-level-evaluator -- --help") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"app-facing-eleven-level-report\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-app-facing-eleven-level-report\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-app-facing-eleven-level-report -- --help") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"global_constraints\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"backlog_items\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"human-agent-feedback-loop\"") != null);
