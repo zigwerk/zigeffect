@@ -1979,12 +1979,22 @@ Status values:
      lineage, keeps local-only no-mutation authority, and hands report
      evidence to the fourteen-level application-boundary branch.
 119. `codex/zigeffect-causal-app-facing-fourteen-level-application-boundary`
-   - Next: consume ready/advisory fourteen-level report artifacts, record
-     planned and reviewed local application-boundary evidence, preserve
-     fourteen-level report plus thirteen-level and twelve-level lineage, keep
-     `applied=true` guarded by explicit before/after verification, keep
-     local-only no-mutation authority, and hand applied evidence to the
-     fourteen-level policy branch.
+   - Delivered:
+     `causal-app-facing-fourteen-level-application-boundary` consumes ready or
+     advisory fourteen-level report artifacts, records planned or reviewed
+     local application-boundary evidence, preserves fourteen-level report plus
+     thirteen-level evaluator/policy/application/report evidence and
+     twelve-level/lower lineage, keeps `applied=true` guarded by explicit
+     before/after verification, keeps local-only no-mutation authority, and
+     hands applied evidence to a future fourteen-level policy branch if that
+     chain is deliberately resumed.
+120. `codex/zigeffect-causal-dev-harness-recovery`
+   - Next: stop automatic recursive app-facing level expansion and return to
+     the intended self-improving zigeffect development loop. Build the local
+     causal test harness that runs zigeffect verification, captures failure
+     artifacts, emits bounded causal CI reports, and gives agents actionable
+     event ids, findings, and next queries for improving the core zigeffect
+     codebase.
 
 ## Dual-Interface Causal Spine Expansion
 
