@@ -4,7 +4,7 @@
   "current_core_schema": "zigeffect.causal.v1",
   "current_core_schema_version": 1,
   "current_event_taxonomy_version": 1,
-  "schema_count": 139,
+  "schema_count": 140,
   "policy": {
     "versioning": "schema names artifact family; schema_version tracks family shape; event_taxonomy_version tracks event-kind role semantics",
     "migration": "legacy core artifacts remain readable; strict governance artifacts fail closed; rewrite tooling is deferred until a real v2 exists",
@@ -820,6 +820,16 @@
       "consumed_by": ["agents", "reviewers", "non-blocking CI advisory readers", "local SolidJS workbench", "production-hardening backlog", "future app-facing ten-level policy"],
       "compatibility": ["strict-v1", "record-only", "advisory-only", "application-boundary", "source-ten-level-report", "guarded-record-applied", "local-report-only", "read-only-consumption", "bounded-agent-context", "app-facing", "solid-webui", "webui-dev/zig-webui", "no-cockroach", "no-ci-enforcement", "no-required-status-check", "no-workflow-mutation", "no-github-api-mutation", "no-app-mutation", "no-app-runtime-integration", "no-live-agent-projection", "no-raw-payload-capture", "no-deployment-mutation", "no-production-mutation", "no-nendb-write", "no-nendb-adapter-execution", "no-public-artifact-upload", "no-hosted-live-dashboard", "no-auto-apply", "no-mutation-authority"],
       "governance_requirements": ["ten-level application-boundary producer tests", "ready advisory and blocked source report checks", "plan mode tests", "record-applied before/after evidence tests", "source nine-level lineage carryover", "after-report safety tests", "authority drift tests", "local publication channel tests", "verification command evidence", "short alias branch and build step", "next-branch ten-level policy handoff", "docs update"]
+    },
+    {
+      "schema": "zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-policy.v1",
+      "version": 1,
+      "category": "app-runtime",
+      "status": "current",
+      "emitted_by": ["causal-app-facing-ten-level-policy"],
+      "consumed_by": ["agents", "reviewers", "non-blocking CI advisory readers", "local SolidJS workbench", "production-hardening backlog", "future app-facing ten-level evaluator"],
+      "compatibility": ["strict-v1", "record-only", "policy-only", "source-ten-level-application-boundary", "approve-reject-decision", "local-publication-only", "read-only-consumption", "bounded-agent-context", "app-facing", "solid-webui", "webui-dev/zig-webui", "no-cockroach", "no-ci-enforcement", "no-required-status-check", "no-workflow-mutation", "no-github-api-mutation", "no-app-mutation", "no-app-runtime-integration", "no-live-agent-projection", "no-raw-payload-capture", "no-deployment-mutation", "no-production-mutation", "no-nendb-write", "no-nendb-adapter-execution", "no-public-artifact-upload", "no-hosted-live-dashboard", "no-auto-apply", "no-mutation-authority"],
+      "governance_requirements": ["ten-level policy producer tests", "applied source ten-level application-boundary checks", "source ten-level report evidence checks", "source nine-level policy application and report lineage checks", "approve reject decision tests", "interpretation rule tests", "consumption scope tests", "negative fixture tests", "denied inference rule tests", "verification command evidence", "short alias branch and build step", "next-branch ten-level evaluator handoff", "docs update"]
     },
     {
       "schema": "zigeffect.causal.human-agent-feedback-loop.v1",
