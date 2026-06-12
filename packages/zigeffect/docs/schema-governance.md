@@ -3,7 +3,7 @@ schema: zigeffect.causal.schema-governance.v1
 schema_version: 1
 core schema: zigeffect.causal.v1 version 1
 event taxonomy version: 1
-schema count: 133
+schema count: 134
 
 versioning policy:
 - schema names the artifact family
@@ -631,6 +631,14 @@ schemas:
   emitted by: causal-app-facing-eight-level-evaluator
   consumed by: agents, reviewers, non-blocking CI advisory readers, local SolidJS workbench, production-hardening backlog, future app-facing nine-level report
   governance requirements: eight-level evaluator producer tests, ready advisory and blocked source policy checks, explicit request evidence checks, support evidence advisory checks, redaction posture checks, authority drift tests, verification command evidence, short alias branch and build step, next-branch nine-level report handoff, docs update
+- zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report.v1
+  version: 1
+  category: app-runtime
+  status: current
+  compatibility: strict-v1, record-only, advisory-only, source-eight-level-evaluator, local-report-only, read-only-consumption, bounded-agent-context, app-facing, solid-webui, webui-dev/zig-webui, no-cockroach, no-ci-enforcement, no-required-status-check, no-workflow-mutation, no-github-api-mutation, no-app-mutation, no-app-runtime-integration, no-live-agent-projection, no-raw-payload-capture, no-deployment-mutation, no-production-mutation, no-nendb-write, no-nendb-adapter-execution, no-public-artifact-upload, no-hosted-live-dashboard, no-auto-apply, no-mutation-authority
+  emitted by: causal-app-facing-nine-level-report
+  consumed by: agents, reviewers, non-blocking CI advisory readers, local SolidJS workbench, production-hardening backlog, future app-facing nine-level application-boundary
+  governance requirements: nine-level report producer tests, ready advisory and blocked source evaluator checks, source eight-level policy evidence carryover, source eight-level application evidence carryover, inherited report evidence checks, request and evidence summary carryover, denied authority tests, local publication posture tests, verification command evidence, short alias branch and build step, next-branch nine-level application-boundary handoff, docs update
 - zigeffect.causal.human-agent-feedback-loop.v1
   version: 1
   category: human-agent-feedback
