@@ -1911,10 +1911,17 @@ Status values:
      nine-level lineage evidence, and hands ready or advisory evidence to the
      twelve-level report branch.
 110. `codex/zigeffect-causal-app-facing-twelve-level-report`
-   - Next: consume ready or advisory eleven-level evaluator evidence, summarize
-     source eleven-level policy/application/report plus ten-level and nine-level
-     lineage, preserve no mutation authority, and hand ready or advisory report
-     evidence to the next application-boundary branch.
+   - Delivered:
+     `causal-app-facing-twelve-level-report` consumes ready or advisory
+     eleven-level evaluator evidence, summarizes source eleven-level
+     policy/application/report plus ten-level and nine-level lineage, preserves
+     local-only no-mutation authority, and hands ready or advisory report
+     evidence to the twelve-level application-boundary branch.
+111. `codex/zigeffect-causal-app-facing-twelve-level-application-boundary`
+   - Next: consume ready or advisory twelve-level report artifacts, record
+     planned or reviewed local application-boundary evidence, preserve
+     eleven-level, ten-level, and nine-level lineage, keep no mutation
+     authority, and hand applied evidence to the twelve-level policy branch.
 
 ## Dual-Interface Causal Spine Expansion
 
