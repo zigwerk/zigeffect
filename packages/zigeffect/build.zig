@@ -2803,6 +2803,28 @@ pub fn build(b: *std.Build) void {
     const run_causal_app_facing_thirteen_level_report_tool_tests = b.addRunArtifact(causal_app_facing_thirteen_level_report_tool_tests);
     test_step.dependOn(&run_causal_app_facing_thirteen_level_report_tool_tests.step);
 
+    const causal_app_facing_thirteen_level_application_boundary_tool_module = b.createModule(.{
+        .root_source_file = b.path("tools/causal_app_facing_thirteen_level_application_boundary.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const causal_app_facing_thirteen_level_application_boundary_tool = b.addExecutable(.{
+        .name = "zigeffect-causal-app-facing-thirteen-level-application-boundary",
+        .root_module = causal_app_facing_thirteen_level_application_boundary_tool_module,
+    });
+    const run_causal_app_facing_thirteen_level_application_boundary_tool = b.addRunArtifact(causal_app_facing_thirteen_level_application_boundary_tool);
+    if (b.args) |args| run_causal_app_facing_thirteen_level_application_boundary_tool.addArgs(args);
+    const causal_app_facing_thirteen_level_application_boundary_step = b.step("causal-app-facing-thirteen-level-application-boundary", "Record app-facing thirteen-level application boundary evidence");
+    causal_app_facing_thirteen_level_application_boundary_step.dependOn(&run_causal_app_facing_thirteen_level_application_boundary_tool.step);
+
+    const causal_app_facing_thirteen_level_application_boundary_tool_tests = b.addTest(.{
+        .name = "zigeffect-causal-app-facing-thirteen-level-application-boundary-tests",
+        .root_module = causal_app_facing_thirteen_level_application_boundary_tool_module,
+    });
+    const run_causal_app_facing_thirteen_level_application_boundary_tool_tests = b.addRunArtifact(causal_app_facing_thirteen_level_application_boundary_tool_tests);
+    test_step.dependOn(&run_causal_app_facing_thirteen_level_application_boundary_tool_tests.step);
+
     const causal_production_telemetry_readiness_review_tool_module = b.createModule(.{
         .root_source_file = b.path("tools/causal_production_telemetry_readiness_review.zig"),
         .target = target,
