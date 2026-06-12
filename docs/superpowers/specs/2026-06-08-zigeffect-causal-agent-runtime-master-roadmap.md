@@ -1971,11 +1971,20 @@ Status values:
      no mutation authority, and hands ready or advisory evidence to the
      fourteen-level report branch.
 118. `codex/zigeffect-causal-app-facing-fourteen-level-report`
-   - Next: consume ready or advisory thirteen-level evaluator evidence,
-     summarize source thirteen-level policy/application/report evidence plus
-     twelve-level evaluator/policy/application/report evidence and lower
-     eleven/ten/nine lineage, keep local-only no-mutation authority, and hand
-     report evidence to the fourteen-level application-boundary branch.
+   - Delivered:
+     `causal-app-facing-fourteen-level-report` consumes ready or advisory
+     thirteen-level evaluator evidence, summarizes source thirteen-level
+     policy/application/report evidence plus twelve-level
+     evaluator/policy/application/report evidence and lower eleven/ten/nine
+     lineage, keeps local-only no-mutation authority, and hands report
+     evidence to the fourteen-level application-boundary branch.
+119. `codex/zigeffect-causal-app-facing-fourteen-level-application-boundary`
+   - Next: consume ready/advisory fourteen-level report artifacts, record
+     planned and reviewed local application-boundary evidence, preserve
+     fourteen-level report plus thirteen-level and twelve-level lineage, keep
+     `applied=true` guarded by explicit before/after verification, keep
+     local-only no-mutation authority, and hand applied evidence to the
+     fourteen-level policy branch.
 
 ## Dual-Interface Causal Spine Expansion
 
