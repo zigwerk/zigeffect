@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub const production_hardening_backlog_schema = "zigeffect.causal.production-hardening-backlog.v1";
 pub const production_hardening_backlog_schema_version: u32 = 1;
-pub const recommendation = "start-causal-dev-harness-recovery";
-pub const recommended_next_branch = "codex/zigeffect-causal-dev-harness-recovery";
+pub const recommendation = "start-first-self-improving-ai-engine-session";
+pub const recommended_next_branch = "codex/zigeffect-first-self-improving-ai-engine-session";
 
 const OutputFormat = enum { text, json };
 
@@ -3340,8 +3340,8 @@ const backlog_items: []const BacklogItem = &.{
         .title = "Causal Dev Harness Recovery",
         .gap_id = "self-improving-dev-harness",
         .priority = "P0",
-        .status = "planned",
-        .summary = "Returns the roadmap to the intended self-improving zigeffect development loop: a local causal test harness that runs zigeffect checks, emits agent-readable causal CI artifacts on failure, and compares before/after traces during development.",
+        .status = "delivered",
+        .summary = "Returned the roadmap to the intended self-improving zigeffect development loop: a local causal test harness that runs zigeffect checks, emits agent-readable causal CI artifacts on failure, and compares before/after traces during development.",
         .depends_on = &.{"app-facing-fourteen-level-application-boundary"},
         .deliverables = &.{
             "zig build causal-test entrypoint",
@@ -3356,9 +3356,11 @@ const backlog_items: []const BacklogItem = &.{
             "packages/zigeffect/docs/agent-observable-runtime.md",
             "packages/zigeffect/docs/production-telemetry-ci-artifact-preview.md",
             "packages/zigeffect/tools/causal_test.zig",
+            "packages/zigeffect/docs/causal-dev-harness.md",
+            "packages/zigeffect/docs/self-improving-ai-engine.md",
         },
         .branch = "codex/zigeffect-causal-dev-harness-recovery",
-        .agent_guidance = "Start the local self-improving development harness next. Do not continue recursive app-facing level expansion unless a human explicitly resumes that chain. Keep scope local, bounded, agent-readable, NenDB-adapter aligned, and free of Cockroach scope, production mutation, CI gate enforcement, workflow mutation, app runtime mutation, deployment authority, or auto-apply.",
+        .agent_guidance = "Use the local self-improving development harness now. Do not continue recursive app-facing level expansion unless a human explicitly resumes that chain. Keep scope local, bounded, agent-readable, NenDB-adapter aligned, and free of Cockroach scope, production mutation, CI gate enforcement, workflow mutation, app runtime mutation, deployment authority, or auto-apply. Next, run a first real self-improving AI engine session and preserve its artifacts as a teaching fixture.",
     },
 };
 
@@ -4120,11 +4122,11 @@ test "production hardening backlog constants preserve the branch boundary" {
         production_hardening_backlog_schema,
     );
     try std.testing.expectEqualStrings(
-        "start-causal-dev-harness-recovery",
+        "start-first-self-improving-ai-engine-session",
         recommendation,
     );
     try std.testing.expectEqualStrings(
-        "codex/zigeffect-causal-dev-harness-recovery",
+        "codex/zigeffect-first-self-improving-ai-engine-session",
         recommended_next_branch,
     );
 }
@@ -4365,7 +4367,7 @@ test "production hardening backlog exposes branch-ready items" {
     try expectBacklogItem("app-facing-fourteen-level-application-boundary");
     try expectBacklogItemStatus("app-facing-fourteen-level-application-boundary", "delivered");
     try expectBacklogItem("causal-dev-harness-recovery");
-    try expectBacklogItemStatus("causal-dev-harness-recovery", "planned");
+    try expectBacklogItemStatus("causal-dev-harness-recovery", "delivered");
 }
 
 test "production hardening backlog preserves user constraints" {
@@ -4384,7 +4386,7 @@ test "production hardening backlog text mentions dependency order and next branc
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.production-hardening-backlog.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-causal-dev-harness-recovery") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "recommended next branch: codex/zigeffect-first-self-improving-ai-engine-session") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "dependency order:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-artifact-aggregation") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "production-deployment-runbooks") != null);
@@ -4553,7 +4555,7 @@ test "production hardening backlog JSON is agent-readable" {
     defer allocator.free(report);
 
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.production-hardening-backlog.v1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-causal-dev-harness-recovery\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"recommended_next_branch\": \"codex/zigeffect-first-self-improving-ai-engine-session\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"id\": \"app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"branch\": \"codex/zigeffect-causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "zig build causal-app-facing-production-integration-ci-advisory-remediation-report-consumption-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report-evaluation-report -- --help") != null);

@@ -16,9 +16,19 @@ bun run zigeffect:causal-artifacts
 bun run zigeffect:causal-ci-handoff
 bun run zigeffect:causal-loop:baseline
 bun run zigeffect:causal-loop:after
+bun run zigeffect:self-improve:start
+bun run zigeffect:self-improve:assess
+bun run zigeffect:self-improve:agent
+bun run zigeffect:self-improve:feedback-loop
 ```
 
 The scripts delegate to the Zig build steps under `packages/zigeffect`.
+Pass a scenario after `--`, for example:
+
+```sh
+bun run zigeffect:self-improve:start -- causal-scoped-fiber
+bun run zigeffect:self-improve:assess -- causal-scoped-fiber
+```
 
 ## Failure Triage
 
@@ -74,6 +84,24 @@ zig build causal-run -- causal-scoped-fiber
 zig build causal-dev-loop -- baseline causal-scoped-fiber
 zig build causal-dev-loop -- after causal-scoped-fiber
 ```
+
+## AI Engine Readiness
+
+For the consolidated engine-AI and app-AI operating boundary, see
+`packages/zigeffect/docs/self-improving-ai-engine.md`.
+
+Use the self-improve scripts for normal agent work on `zigeffect`:
+
+```sh
+bun run zigeffect:self-improve:start -- <scenario>
+# edit zigeffect
+bun run zigeffect:self-improve:assess -- <scenario>
+bun run zigeffect:self-improve:agent -- <scenario>
+```
+
+The engine path is ready for local, bounded, evidence-driven development. The
+app path is ready for advisory analysis of app trace artifacts. Neither path has
+autonomous mutation authority.
 
 ## Safety Boundary
 

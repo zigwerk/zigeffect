@@ -1103,6 +1103,10 @@ and package tests to compare behavior.
 For the concise recovery workflow and root Bun commands, see
 `packages/zigeffect/docs/causal-dev-harness.md`.
 
+For the consolidated self-improving engine boundary, including the engine-AI
+and app-AI split, see
+`packages/zigeffect/docs/self-improving-ai-engine.md`.
+
 Use `zig build causal-artifacts` at the start of CI wiring or branch handoff to
 make the artifact retention contract explicit before uploading or attaching
 causal evidence.

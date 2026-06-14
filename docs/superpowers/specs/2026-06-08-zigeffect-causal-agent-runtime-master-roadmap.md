@@ -1989,12 +1989,18 @@ Status values:
      hands applied evidence to a future fourteen-level policy branch if that
      chain is deliberately resumed.
 120. `codex/zigeffect-causal-dev-harness-recovery`
-   - Next: stop automatic recursive app-facing level expansion and return to
-     the intended self-improving zigeffect development loop. Build the local
-     causal test harness that runs zigeffect verification, captures failure
-     artifacts, emits bounded causal CI reports, and gives agents actionable
-     event ids, findings, and next queries for improving the core zigeffect
-     codebase.
+   - Delivered: stopped automatic recursive app-facing level expansion and
+     returned to the intended self-improving zigeffect development loop. Root
+     Bun scripts now expose the local causal test harness, package-failure
+     capture, causal CI handoff, before/after dev-loop comparison, runnable
+     query reports, and the causal dev harness guide.
+121. `codex/zigeffect-first-self-improving-ai-engine-session`
+   - Next: run the first real self-improving AI engine session against a small
+     `zigeffect` issue, preserve the baseline/after artifacts, cite event ids
+     and compare/advice evidence, and use the result as the teaching fixture for
+     future engine agents. Keep app AI advisory, local-only, and free of live
+     NenDB writes, Cockroach scope, app mutation, deployment authority, or
+     auto-apply.
 
 ## Dual-Interface Causal Spine Expansion
 
