@@ -625,9 +625,50 @@ pub const CausalLineage = struct {
     }
 };
 
+/// Net (latest) lifecycle state of one fiber, collapsing its event history.
+pub const CausalFiberState = struct {
+    fiber_id: u64,
+    latest_event_id: u64,
+    latest_kind: CausalEventKind,
+    /// reached a terminal state (joined or interrupted)
+    resolved: bool,
+    /// latest event is a suspension still awaiting a wake
+    parked: bool,
+};
+
+pub const CausalFiberStates = struct {
+    allocator: Allocator,
+    items: []CausalFiberState,
+
+    pub fn deinit(self: *CausalFiberStates) void {
+        self.allocator.free(self.items);
+    }
+
+    /// Fibers that are neither resolved nor woken — still forked/started/parked.
+    pub fn unresolvedCount(self: *const CausalFiberStates) usize {
+        var count: usize = 0;
+        for (self.items) |state| {
+            if (!state.resolved) count += 1;
+        }
+        return count;
+    }
+};
+
+pub fn isFiberLifecycleKind(kind: CausalEventKind) bool {
+    return switch (kind) {
+        .fiber_forked, .fiber_started, .fiber_suspended, .fiber_resumed, .fiber_joined, .fiber_interrupted => true,
+        else => false,
+    };
+}
+
+fn isTerminalFiberKind(kind: CausalEventKind) bool {
+    return kind == .fiber_joined or kind == .fiber_interrupted;
+}
+
 pub const CausalFindingKind = enum {
     resource_acquired_without_finalization,
     fiber_pending_after_scope_close,
+    fiber_suspended_without_resume,
     finalizer_failure,
     retry_budget_exhausted,
     service_requirement_without_provider,
@@ -884,6 +925,43 @@ pub const CausalStore = struct {
         }.matches, status);
     }
 
+    /// Collapse each fiber's event history to its latest lifecycle state, so an
+    /// agent can answer "is anything still parked/unresolved?" in one call
+    /// instead of reasoning over the immutable per-event log.
+    pub fn fiberStates(self: *const CausalStore, allocator: Allocator) Allocator.Error!CausalFiberStates {
+        var list = std.ArrayList(CausalFiberState).empty;
+        errdefer list.deinit(allocator);
+
+        for (self.events.items) |event| {
+            const fiber_id = event.fiber_id orelse continue;
+            if (!isFiberLifecycleKind(event.kind)) continue;
+
+            var found = false;
+            for (list.items) |*state| {
+                if (state.fiber_id != fiber_id) continue;
+                found = true;
+                if (event.id >= state.latest_event_id) {
+                    state.latest_event_id = event.id;
+                    state.latest_kind = event.kind;
+                    state.resolved = isTerminalFiberKind(event.kind);
+                    state.parked = event.kind == .fiber_suspended;
+                }
+                break;
+            }
+            if (!found) {
+                try list.append(allocator, .{
+                    .fiber_id = fiber_id,
+                    .latest_event_id = event.id,
+                    .latest_kind = event.kind,
+                    .resolved = isTerminalFiberKind(event.kind),
+                    .parked = event.kind == .fiber_suspended,
+                });
+            }
+        }
+
+        return .{ .allocator = allocator, .items = try list.toOwnedSlice(allocator) };
+    }
+
     pub fn requirements(self: *const CausalStore, allocator: Allocator, run_id: u64) Allocator.Error!CausalSnapshot {
         return self.filterEvents(allocator, struct {
             fn matches(event: CausalEvent, expected_run_id: u64) bool {
@@ -915,6 +993,9 @@ pub const CausalStore = struct {
                     try appendFinding(allocator, &output, .resource_acquired_without_finalization, event);
                 },
                 .scope_closed => try self.appendPendingFiberFindings(allocator, &output, event),
+                .fiber_suspended => if (!self.fiberWokeAfter(event)) {
+                    try appendFinding(allocator, &output, .fiber_suspended_without_resume, event);
+                },
                 .resource_finalized => if (std.mem.eql(u8, event.status, "failure")) {
                     try appendFinding(allocator, &output, .finalizer_failure, event);
                 },
@@ -1015,6 +1096,22 @@ pub const CausalStore = struct {
             if (event.fiber_id != fiber_id) continue;
             switch (event.kind) {
                 .fiber_joined, .fiber_interrupted => return true,
+                else => {},
+            }
+        }
+        return false;
+    }
+
+    // A suspended fiber "woke" if a later event for the same fiber resumed it or
+    // reached a terminal state. A `fiber_suspended` with no such follow-up is a
+    // hang. A suspension with no fiber id is not trackable, so it is not flagged.
+    fn fiberWokeAfter(self: *const CausalStore, suspended: CausalEvent) bool {
+        const fiber_id = suspended.fiber_id orelse return true;
+        for (self.events.items) |event| {
+            if (event.id <= suspended.id) continue;
+            if (event.fiber_id != fiber_id) continue;
+            switch (event.kind) {
+                .fiber_resumed, .fiber_joined, .fiber_interrupted => return true,
                 else => {},
             }
         }

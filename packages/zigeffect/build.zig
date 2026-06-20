@@ -750,6 +750,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    causal_artifact_tool_module.addImport("zigeffect", zigeffect);
     const causal_artifact_tool_tests = b.addTest(.{
         .name = "zigeffect-causal-artifact-tests",
         .root_module = causal_artifact_tool_module,

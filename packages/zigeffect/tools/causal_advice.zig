@@ -366,6 +366,9 @@ fn actionNameForEvent(events: []const Event, event: Event) ?[]const u8 {
     if ((std.mem.eql(u8, event.kind, "fiber_forked") or std.mem.eql(u8, event.kind, "fiber_started")) and (std.mem.eql(u8, event.status, "pending") or std.mem.eql(u8, event.status, "running")) and !fiberResolved(events, event)) {
         return "resolve-scoped-fiber";
     }
+    if (std.mem.eql(u8, event.kind, "fiber_suspended") and !fiberWoke(events, event)) {
+        return "inspect-suspended-fiber";
+    }
     if (std.mem.eql(u8, event.kind, "schedule_decision") and std.mem.eql(u8, event.status, "exhausted")) {
         return "inspect-retry-exhaustion";
     }
@@ -531,6 +534,21 @@ fn fiberResolved(events: []const Event, fiber_event: Event) bool {
         if (!std.mem.eql(u8, event.kind, "fiber_joined") and !std.mem.eql(u8, event.kind, "fiber_interrupted")) continue;
         const candidate = event.fiber_id orelse continue;
         if (candidate == fiber_id) return true;
+    }
+    return false;
+}
+
+// A suspended fiber woke if a later event for the same fiber resumed it or
+// reached a terminal state; otherwise the suspension is a hang.
+fn fiberWoke(events: []const Event, suspended: Event) bool {
+    const fiber_id = suspended.fiber_id orelse return true;
+    for (events) |event| {
+        if (event.id <= suspended.id) continue;
+        const candidate = event.fiber_id orelse continue;
+        if (candidate != fiber_id) continue;
+        if (std.mem.eql(u8, event.kind, "fiber_resumed") or
+            std.mem.eql(u8, event.kind, "fiber_joined") or
+            std.mem.eql(u8, event.kind, "fiber_interrupted")) return true;
     }
     return false;
 }

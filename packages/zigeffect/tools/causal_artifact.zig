@@ -1,4 +1,5 @@
 const std = @import("std");
+const fx = @import("zigeffect");
 
 pub const supported_causal_schema = "zigeffect.causal.v1";
 pub const supported_causal_schema_version: u32 = 1;
@@ -54,42 +55,12 @@ pub fn appendTaxonomyVersionWarning(
     );
 }
 
-const known_causal_event_kinds = [_][]const u8{
-    "run_started",
-    "run_completed",
-    "effect_started",
-    "effect_completed",
-    "layer_started",
-    "layer_completed",
-    "service_required",
-    "service_provided",
-    "service_replaced",
-    "scope_opened",
-    "scope_closed",
-    "resource_acquired",
-    "resource_finalized",
-    "fiber_forked",
-    "fiber_started",
-    "fiber_joined",
-    "fiber_interrupted",
-    "fiber_suspended",
-    "fiber_resumed",
-    "timer_scheduled",
-    "timer_fired",
-    "io_wait_started",
-    "io_completed",
-    "schedule_decision",
-    "exit_recorded",
-    "log_recorded",
-    "metric_recorded",
-    "span_recorded",
-    "assertion_recorded",
-    "workflow_event_recorded",
-};
-
+/// Recognized event kinds are derived directly from the engine's
+/// `CausalEventKind` enum, so the tool surface can never drift from the runtime
+/// vocabulary: adding an enum member makes the tools recognize it automatically.
 pub fn isKnownCausalEventKind(kind: []const u8) bool {
-    for (known_causal_event_kinds) |candidate| {
-        if (std.mem.eql(u8, kind, candidate)) return true;
+    inline for (@typeInfo(fx.CausalEventKind).@"enum".fields) |field| {
+        if (std.mem.eql(u8, kind, field.name)) return true;
     }
     return false;
 }

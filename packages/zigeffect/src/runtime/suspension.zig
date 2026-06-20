@@ -287,3 +287,91 @@ pub fn recordDelaySuspensionScenario(
         .scope_closed_id = scope_closed,
     };
 }
+
+/// Hang fixture: a scoped fiber forks, starts, suspends on a timer, and the
+/// timer is NEVER advanced — so the fiber is parked forever. Produces exactly
+/// one `fiber_suspended_without_resume` finding. Used to verify the hang
+/// detector (the failure-mode counterpart of recordDelaySuspensionScenario).
+pub fn recordHangSuspensionScenario(
+    allocator: Allocator,
+    store: *CausalStore,
+    backend: AsyncBackend,
+    due_time_ms: u64,
+) SuspensionError!DelayScenarioAnchors {
+    const run_id = store.nextRunId();
+    const scope_id = store.nextScopeId();
+    const fiber_id: u64 = 1;
+
+    const run_started = try store.record(.{
+        .kind = .run_started,
+        .run_id = run_id,
+        .status = "started",
+        .label = "causal-suspension-hang",
+        .type_name = "CausalHangScenario",
+    });
+    const scope_opened = try store.record(.{
+        .kind = .scope_opened,
+        .run_id = run_id,
+        .scope_id = scope_id,
+        .parent_id = run_started,
+        .status = "opened",
+        .label = "hang scope",
+    });
+    const fiber_forked = try store.record(.{
+        .kind = .fiber_forked,
+        .run_id = run_id,
+        .scope_id = scope_id,
+        .fiber_id = fiber_id,
+        .parent_id = scope_opened,
+        .status = "pending",
+        .label = "hung fiber",
+    });
+    const fiber_started = try store.record(.{
+        .kind = .fiber_started,
+        .run_id = run_id,
+        .scope_id = scope_id,
+        .fiber_id = fiber_id,
+        .parent_id = fiber_forked,
+        .status = "running",
+        .label = "hung fiber",
+    });
+    const delay_effect = try store.record(.{
+        .kind = .effect_started,
+        .run_id = run_id,
+        .scope_id = scope_id,
+        .fiber_id = fiber_id,
+        .parent_id = fiber_started,
+        .status = "started",
+        .label = "delay",
+        .type_name = "DelayEffect",
+    });
+
+    var coordinator = SuspensionCoordinator.init(allocator, store, backend);
+    defer coordinator.deinit();
+
+    // Park the fiber but never advance the clock: it stays suspended.
+    _ = try coordinator.suspendOnTimer(.{
+        .fiber_id = fiber_id,
+        .scope_id = scope_id,
+        .run_id = run_id,
+        .started_event_id = fiber_started,
+        .caused_by_event_id = delay_effect,
+        .due_time_ms = due_time_ms,
+    });
+
+    _ = try store.record(.{
+        .kind = .exit_recorded,
+        .run_id = run_id,
+        .parent_id = run_started,
+        .status = "incomplete",
+        .label = "causal-suspension-hang",
+    });
+
+    return .{
+        .run_id = run_id,
+        .scope_id = scope_id,
+        .fiber_id = fiber_id,
+        .scope_opened_id = scope_opened,
+        .scope_closed_id = 0,
+    };
+}

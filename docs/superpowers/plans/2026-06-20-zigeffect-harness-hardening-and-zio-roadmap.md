@@ -1,0 +1,131 @@
+# zigeffect Harness Hardening → zio Async — Master Roadmap
+
+Date: 2026-06-20
+Status: active
+Predecessors:
+- [zio async delivery roadmap](./2026-06-20-zigeffect-zio-async-delivery-roadmap.md)
+- [zio backend design](../specs/2026-06-20-zigeffect-zio-backend-design.md)
+
+Battle-testing the agent dogfood + causal reporting framework on Stage 0
+surfaced concrete gaps. This roadmap hardens that framework **first** (so the
+loop we rely on for the zio work is trustworthy and ergonomic), then returns to
+the zio async backend. Every item is verified by the same loop it improves:
+TDD test → causal artifact → AI-agent causal verification → `causal-compare` →
+`causal-advice` clean.
+
+Principles carried forward: core stays zio-free; `LocalAsyncBackendState` is the
+deterministic reference; causal-verified not log-scraped; no new record-only
+tools (extend existing ones; new `causal_*` tool needs a `tool-roadmap.md` entry).
+
+---
+
+## Milestone H — Harness Hardening
+
+### H1 — Query results to stdout *(reframed → folded into H6)*
+Investigated and **dropped as specified.** Finding from battle-testing the
+harness: under `zig build <tool>`, the Run step **captures/suppresses child
+stdout** (stderr is the forwarded channel — which is why the whole codebase uses
+`std.debug.print`), and Run steps **cache**, so re-running the same query yields
+*no* output at all. Moving query data to stdout makes it vanish for the exact
+invocation agents use. The real ergonomic fix is therefore not the stream but a
+clean machine-readable surface: **the structured `--agent` JSON mode (H6)**, plus
+documenting the run-cache gotcha (agents should vary args or read the artifact
+JSON directly, and capture `2>&1`).
+- **Outcome:** reverted; intent merged into H6.
+
+### H2 — Net-state `fibers` query
+Add an engine `fiberStates()` (latest lifecycle status per `fiber_id`, with a
+`resolved` flag) and a `fibers_state` query verb. Lets an agent answer "anything
+still parked?" in one call instead of reasoning over immutable events.
+- **Gate:** on the delay artifact, `fibers_state` reports fiber 1 as resolved
+  (terminal `fiber_joined`); a hang fixture reports it unresolved. Agent-verified.
+
+### H3 — Single source of truth for event kinds
+Derive the tools' recognized-kind set from the engine `CausalEventKind` enum via
+`@typeInfo`/`@tagName` (delete the hand-maintained `known_causal_event_kinds`
+list in `causal_artifact.zig`). Kinds can no longer drift from the engine.
+- **Gate:** adding an enum member needs no tool edit; taxonomy warning never
+  fires for an engine-known kind; tests green.
+
+### H4 — Hang detector: `fiber_suspended_without_resume`
+Add the finding kind + a `findings()` rule (a `fiber_suspended` with no later
+`fiber_resumed`/`fiber_interrupted` for the same `fiber_id`) and an
+`inspect-suspended-fiber` advice action. This is the new failure mode the
+suspension capability introduces.
+- **Gate:** delay artifact stays finding-clean; a suspend-without-resume fixture
+  produces exactly one finding + advice action. Agent-verified.
+
+### H5 — Structural-invariant comparator  *(blocks Stage 1)*
+Add a `--structural` mode to `causal-compare`: compare two artifacts on
+structural invariants (set of fibers + terminal status; cause-edge relationships
+by kind; scope nesting; finding kinds) ignoring event ids/ordering. Required to
+verify the zio backend, whose real scheduling makes exact event order vary.
+- **Gate:** deterministic delay artifact vs an id-shifted/reordered copy compares
+  EQUAL structurally; a genuinely different trace compares NOT-EQUAL. Agent-verified.
+
+### H6 — Steer the agent loop to `--agent` + add suspension facts
+The structured `--agent` JSON mode already exists; make the verification loop
+prefer it, and add per-fiber net state + suspend↔resume pairs to its bundle so
+agents get the facts in one structured call (fewer slow `zig build` invocations).
+- **Gate:** `--agent summarize_run` includes fiber net-state + suspension pairs;
+  agent loop uses it.
+
+### H7 — Coverage-truth + real cause edges in the runtime
+(a) A gate asserting a scenario tagged `coverage: <domain>` actually emits that
+domain's event kinds (e.g. `coverage: fiber` ⇒ `fiber_*` events present).
+(b) Populate real `cause_event_id` edges in `fiber.zig`/`scope.zig`
+instrumentation (today only `parent_id` is set), and make `causal-scoped-fiber`
+emit a true fiber lifecycle.
+- **Gate:** coverage-truth gate fails on a stub scenario; `causal-scoped-fiber`
+  emits `fiber_forked/started/.../interrupted` with a scope-close cause edge.
+
+**Milestone H done when:** H1–H6 land green and agent-verified (H7 may trail as
+its own follow-up; it is larger and touches live runtime instrumentation).
+
+---
+
+## Milestone Z — zio Async Backend (resumes after H)
+
+zio v0.14.0 resolves and is Zig-0.16 compatible (dep hash-pinned in
+`packages/zigeffect-zio`). The Stage 0 suspension events + scenario + agent
+harness + the H5 structural comparator gate this work.
+
+### Z1 — zio timer primitive (real suspension)
+Enable the zio import in `zigeffect-zio/build.zig`; implement `suspend_runtime` /
+`wake` / `schedule_timer` against zio (`zio.run` host; park the coroutine; timer
+wake). A delayed fiber yields the OS thread and resumes for real.
+- **Gate:** `zigeffect-zio:test` green; delay program under the zio backend
+  produces a trace that compares **structurally equal** (H5) to the deterministic
+  one; thread actually yields (no busy-wait).
+
+### Z2 — zio IO wait
+`register_io_wait` / `complete_io` over a real socket read via `std.Io`. Emits
+`io_wait_started`/`io_completed`/`fiber_resumed`.
+- **Gate:** socket round-trip wakes the fiber; agent verifies the IO cause edges;
+  structural equivalence on the IO model.
+
+### Z3 — coordination + cancellation
+Back `Deferred`/`Queue`/`Semaphore` with zio primitives (park/unpark); map
+scoped-fiber cancellation → `zio.Group.cancel`. First interleaved scenario,
+verified by H5 structural invariants (partial order), and the H4 hang detector
+proves no fiber is left parked.
+- **Gate:** scope close cancels a parked child (`fiber_interrupted.cause` →
+  `scope_closed`); no leaks under `causal-advice`.
+
+### Z4 — hardening + integration
+Error/defect propagation across the yield boundary; allocator/lifetime of parked
+fibers; leak checks; the `zigeffect-zio` conformance gate; workbench renders a
+real zio-backed run. App integration stays artifact-based (Workers can't run Zig).
+- **Gate:** full release-gate + conformance green; honest "single-threaded async
+  works" statement. Multi-thread parallelism and durable/cluster transports are
+  separate, later roadmap items.
+
+---
+
+## Execution order
+
+H1 → H3 → H4 → H2 → H5 → H6 → (H7) → Z1 → Z2 → Z3 → Z4.
+
+H1/H3 are quick footgun/drift fixes; H4/H2 harden the suspension feature and the
+agent ergonomics; H5 is the Stage-1 gate. Then the zio stages build on a
+trustworthy, suspension-aware, structurally-comparable harness.

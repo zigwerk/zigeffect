@@ -480,6 +480,26 @@ fn runQueryInternal(
             }
             try matched.append(allocator, event);
         }
+    } else if (std.mem.eql(u8, query, "fibers_state")) {
+        // One row per fiber: its latest lifecycle event, i.e. the fiber's NET
+        // state (fiber_joined = resolved, fiber_suspended = parked, etc.). Lets
+        // an agent answer "anything still parked?" without reasoning over the
+        // immutable per-event log.
+        for (parsed.value.events) |event| {
+            if (!isFiberLifecycleEvent(event.kind)) continue;
+            const fiber_id = event.fiber_id orelse continue;
+            var is_latest = true;
+            for (parsed.value.events) |other| {
+                if (other.id <= event.id) continue;
+                if (!isFiberLifecycleEvent(other.kind)) continue;
+                const other_fiber = other.fiber_id orelse continue;
+                if (other_fiber == fiber_id) {
+                    is_latest = false;
+                    break;
+                }
+            }
+            if (is_latest) try matched.append(allocator, event);
+        }
     } else if (std.mem.eql(u8, query, "requirements")) {
         const run_id = try requiredU64(query_args, 1);
         for (parsed.value.events) |event| {
@@ -641,7 +661,7 @@ pub fn main(init: std.process.Init) !void {
 
 fn printUsage(err: anyerror) void {
     std.debug.print(
-        "causal-query error: {s}\nusage: zig build causal-query -- [--agent] [--limit <n>] [--file <path>] [--compare-file <path>] <snapshot|cause|lineage|resources|fibers|requirements|retries|workflow|workflow-findings|summarize_run|find_failures|explain_event|trace_cause|trace_data|compare_runs|list_findings|next_queries> [argument]\n",
+        "causal-query error: {s}\nusage: zig build causal-query -- [--agent] [--limit <n>] [--file <path>] [--compare-file <path>] <snapshot|cause|lineage|resources|fibers|fibers_state|requirements|retries|workflow|workflow-findings|summarize_run|find_failures|explain_event|trace_cause|trace_data|compare_runs|list_findings|next_queries> [argument]\n",
         .{@errorName(err)},
     );
 }
@@ -801,6 +821,12 @@ fn isFiberEvent(kind: []const u8) bool {
         std.mem.eql(u8, kind, "fiber_started") or
         std.mem.eql(u8, kind, "fiber_joined") or
         std.mem.eql(u8, kind, "fiber_interrupted");
+}
+
+fn isFiberLifecycleEvent(kind: []const u8) bool {
+    return isFiberEvent(kind) or
+        std.mem.eql(u8, kind, "fiber_suspended") or
+        std.mem.eql(u8, kind, "fiber_resumed");
 }
 
 fn isFailureEvidence(event: Event) bool {

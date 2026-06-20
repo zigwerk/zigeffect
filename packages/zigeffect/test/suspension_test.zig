@@ -124,6 +124,62 @@ test "AC-6: deterministic virtual time only (no double-suspend, timer due <= adv
     try std.testing.expectEqual(@as(usize, 0), backend_snapshot.pending_count);
 }
 
+test "H4: a fiber suspended without resume produces a hang finding" {
+    const allocator = std.testing.allocator;
+    var store = fx.CausalStore.init(allocator);
+    defer store.deinit();
+    var backend_state = fx.LocalAsyncBackendState.init(allocator, .{});
+    defer backend_state.deinit();
+
+    _ = try fx.recordHangSuspensionScenario(allocator, &store, backend_state.backend(), 100);
+
+    var findings = try store.findings(allocator);
+    defer findings.deinit();
+
+    var hang_findings: usize = 0;
+    for (findings.items) |finding| {
+        if (finding.kind == .fiber_suspended_without_resume) hang_findings += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), hang_findings);
+}
+
+test "H4: the resolved delay scenario produces no hang finding" {
+    const allocator = std.testing.allocator;
+    var h = try Harness.init(allocator);
+    defer h.deinit();
+
+    var findings = try h.store.findings(allocator);
+    defer findings.deinit();
+    for (findings.items) |finding| {
+        try std.testing.expect(finding.kind != .fiber_suspended_without_resume);
+    }
+}
+
+test "H2: fiberStates reports net state — resolved for delay, parked for hang" {
+    const allocator = std.testing.allocator;
+
+    var h = try Harness.init(allocator);
+    defer h.deinit();
+    var delay_states = try h.store.fiberStates(allocator);
+    defer delay_states.deinit();
+    try std.testing.expectEqual(@as(usize, 1), delay_states.items.len);
+    try std.testing.expect(delay_states.items[0].resolved);
+    try std.testing.expect(!delay_states.items[0].parked);
+    try std.testing.expectEqual(@as(usize, 0), delay_states.unresolvedCount());
+
+    var store = fx.CausalStore.init(allocator);
+    defer store.deinit();
+    var backend_state = fx.LocalAsyncBackendState.init(allocator, .{});
+    defer backend_state.deinit();
+    _ = try fx.recordHangSuspensionScenario(allocator, &store, backend_state.backend(), 100);
+    var hang_states = try store.fiberStates(allocator);
+    defer hang_states.deinit();
+    try std.testing.expectEqual(@as(usize, 1), hang_states.items.len);
+    try std.testing.expect(!hang_states.items[0].resolved);
+    try std.testing.expect(hang_states.items[0].parked);
+    try std.testing.expectEqual(@as(usize, 1), hang_states.unresolvedCount());
+}
+
 test "suspension coordinator can be driven directly and reports pending count" {
     const allocator = std.testing.allocator;
     var store = fx.CausalStore.init(allocator);
