@@ -242,6 +242,77 @@ pub fn recordZioCoordinationScenario(store: *fx.CausalStore) !void {
     if (ctx.received != 42) return error.WrongValue;
 }
 
+/// D2: engine fibers run as real zio coroutines and interleave. Each fiber body
+/// uses the core SuspensionCoordinator.delay; under zio the bodies are spawned as
+/// coroutines (a short-delay fiber resumes before a long-delay one, so the events
+/// genuinely reorder), while under the deterministic backend the same bodies run
+/// sequentially. The structural invariants (event-kind multiset + per-fiber net
+/// state) are identical — proving the H5 equivalence holds under real reordering.
+fn d2FiberBody(allocator: std.mem.Allocator, store: *fx.CausalStore, backend: fx.AsyncBackend, run_id: u64, scope_id: u64, fiber_id: u64, forked_id: u64, delay_ms: u64) !void {
+    const started = try store.record(.{ .kind = .fiber_started, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = forked_id, .status = "running", .label = "worker fiber" });
+    var coord = fx.SuspensionCoordinator.init(allocator, store, backend);
+    defer coord.deinit();
+    try coord.delay(.{ .fiber_id = fiber_id, .scope_id = scope_id, .run_id = run_id, .started_event_id = started, .caused_by_event_id = started, .due_time_ms = delay_ms });
+    _ = try store.record(.{ .kind = .fiber_joined, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = started, .status = "success", .label = "worker fiber" });
+}
+
+const D2Ctx = struct {
+    allocator: std.mem.Allocator,
+    store: *fx.CausalStore,
+    backend: fx.AsyncBackend,
+    run_id: u64,
+    scope_id: u64,
+    fiber_id: u64,
+    forked_id: u64,
+    delay_ms: u64,
+    err: ?anyerror = null,
+};
+
+fn d2Coroutine(ctx: *D2Ctx) void {
+    d2FiberBody(ctx.allocator, ctx.store, ctx.backend, ctx.run_id, ctx.scope_id, ctx.fiber_id, ctx.forked_id, ctx.delay_ms) catch |e| {
+        ctx.err = e;
+    };
+}
+
+fn d2Prologue(store: *fx.CausalStore) !struct { run_id: u64, scope_id: u64, forked1: u64, forked2: u64 } {
+    const run_id = store.nextRunId();
+    const scope_id = store.nextScopeId();
+    const run_started = try store.record(.{ .kind = .run_started, .run_id = run_id, .status = "started", .label = "two-fiber-delay", .type_name = "TwoFiberDelay" });
+    _ = try store.record(.{ .kind = .scope_opened, .run_id = run_id, .scope_id = scope_id, .parent_id = run_started, .status = "opened", .label = "worker scope" });
+    const forked1 = try store.record(.{ .kind = .fiber_forked, .run_id = run_id, .scope_id = scope_id, .fiber_id = 1, .status = "pending", .label = "worker fiber" });
+    const forked2 = try store.record(.{ .kind = .fiber_forked, .run_id = run_id, .scope_id = scope_id, .fiber_id = 2, .status = "pending", .label = "worker fiber" });
+    return .{ .run_id = run_id, .scope_id = scope_id, .forked1 = forked1, .forked2 = forked2 };
+}
+
+/// Two engine fibers run sequentially on the deterministic backend.
+pub fn recordDetTwoFiberDelay(allocator: std.mem.Allocator, store: *fx.CausalStore) !void {
+    var backend_state = fx.LocalAsyncBackendState.init(allocator, .{});
+    defer backend_state.deinit();
+    const p = try d2Prologue(store);
+    try d2FiberBody(allocator, store, backend_state.backend(), p.run_id, p.scope_id, 1, p.forked1, 3);
+    try d2FiberBody(allocator, store, backend_state.backend(), p.run_id, p.scope_id, 2, p.forked2, 1);
+    _ = try store.record(.{ .kind = .scope_closed, .run_id = p.run_id, .scope_id = p.scope_id, .status = "closed", .label = "worker scope" });
+    _ = try store.record(.{ .kind = .exit_recorded, .run_id = p.run_id, .status = "success", .label = "two-fiber-delay" });
+}
+
+/// The SAME two engine fibers spawned as real zio coroutines — they interleave.
+pub fn recordZioTwoFiberDelay(allocator: std.mem.Allocator, store: *fx.CausalStore) !void {
+    var backend_state = ZioAsyncBackendState.init(allocator);
+    defer backend_state.deinit();
+    const backend = backend_state.backend();
+    const p = try d2Prologue(store);
+    var ctx1 = D2Ctx{ .allocator = allocator, .store = store, .backend = backend, .run_id = p.run_id, .scope_id = p.scope_id, .fiber_id = 1, .forked_id = p.forked1, .delay_ms = 3 };
+    var ctx2 = D2Ctx{ .allocator = allocator, .store = store, .backend = backend, .run_id = p.run_id, .scope_id = p.scope_id, .fiber_id = 2, .forked_id = p.forked2, .delay_ms = 1 };
+    var group: zio.Group = .init;
+    try group.spawn(d2Coroutine, .{&ctx1});
+    try group.spawn(d2Coroutine, .{&ctx2});
+    try group.wait();
+    if (ctx1.err) |e| return e;
+    if (ctx2.err) |e| return e;
+    _ = try store.record(.{ .kind = .scope_closed, .run_id = p.run_id, .scope_id = p.scope_id, .status = "closed", .label = "worker scope" });
+    _ = try store.record(.{ .kind = .exit_recorded, .run_id = p.run_id, .status = "success", .label = "two-fiber-delay" });
+}
+
 fn kindCount(events: []fx.CausalEvent, kind: fx.CausalEventKind) usize {
     var count: usize = 0;
     for (events) |event| {
@@ -371,6 +442,50 @@ fn advanceTime(context: ?*anyopaque, now_ms: u64) AsyncBackendError!usize {
 fn snapshot(context: ?*anyopaque) AsyncBackendSnapshot {
     _ = context;
     return .{};
+}
+
+test "D2: engine fibers run as real interleaving zio coroutines; structurally equal to the deterministic sequential run" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+
+    var zio_store = fx.CausalStore.init(allocator);
+    defer zio_store.deinit();
+    try recordZioTwoFiberDelay(allocator, &zio_store);
+
+    var det_store = fx.CausalStore.init(allocator);
+    defer det_store.deinit();
+    try recordDetTwoFiberDelay(allocator, &det_store);
+
+    var zio_snap = try zio_store.snapshot(allocator);
+    defer zio_snap.deinit();
+    var det_snap = try det_store.snapshot(allocator);
+    defer det_snap.deinit();
+
+    // Structural equivalence despite real concurrency reordering the events.
+    try std.testing.expectEqual(det_snap.events.len, zio_snap.events.len);
+    inline for ([_]fx.CausalEventKind{ .fiber_forked, .fiber_started, .fiber_suspended, .timer_fired, .fiber_resumed, .fiber_joined }) |kind| {
+        try std.testing.expectEqual(@as(usize, 2), kindCount(det_snap.events, kind));
+        try std.testing.expectEqual(@as(usize, 2), kindCount(zio_snap.events, kind));
+    }
+
+    // Prove zio genuinely interleaved: BOTH fibers parked before EITHER resumed.
+    var max_suspend: u64 = 0;
+    var min_resume: u64 = std.math.maxInt(u64);
+    for (zio_snap.events) |event| {
+        if (event.kind == .fiber_suspended and event.id > max_suspend) max_suspend = event.id;
+        if (event.kind == .fiber_resumed and event.id < min_resume) min_resume = event.id;
+    }
+    try std.testing.expect(max_suspend < min_resume);
+
+    // Prove the deterministic run was sequential: fiber 1 fully resumed before fiber 2 started.
+    var f1_resumed: u64 = 0;
+    var f2_started: u64 = std.math.maxInt(u64);
+    for (det_snap.events) |event| {
+        if (event.kind == .fiber_resumed and event.fiber_id == 1) f1_resumed = event.id;
+        if (event.kind == .fiber_started and event.fiber_id == 2) f2_started = event.id;
+    }
+    try std.testing.expect(f1_resumed < f2_started);
 }
 
 test "D1: the SAME engine delay scenario runs on the zio backend (real wait) and the deterministic backend (virtual) with identical causal traces" {
