@@ -118,13 +118,43 @@ the kind of gap the dogfood loop exists to catch.
 - **Gate:** socket round-trip wakes the fiber; agent verifies the IO cause edges;
   structural equivalence on the IO model.
 
-### Z3 — coordination + cancellation
-Back `Deferred`/`Queue`/`Semaphore` with zio primitives (park/unpark); map
-scoped-fiber cancellation → `zio.Group.cancel`. First interleaved scenario,
-verified by H5 structural invariants (partial order), and the H4 hang detector
-proves no fiber is left parked.
-- **Gate:** scope close cancels a parked child (`fiber_interrupted.cause` →
-  `scope_closed`); no leaks under `causal-advice`.
+### Z3 — structured cancellation — DONE (cancellation half)
+`recordZioCancellationScenario` ([zio_backend.zig](../../../packages/zigeffect-zio/src/zio_backend.zig)):
+a child spawned in a `zio.Group` suspends on a real `zio.sleep`; the parent closes
+the scope and `group.cancel()`s, genuinely interrupting the child. The trace
+records `fiber_interrupted` caused by `scope_closed` — the structured-concurrency
+invariant, against real zio cancellation; the hang detector treats interrupt as
+resolution. `zigeffect-zio` build+test green.
+- **Remaining (Z3b):** back `Deferred`/`Queue`/`Semaphore` park/unpark with zio
+  `Channel`/`Future`/`Semaphore`, and a genuinely *interleaved* two-coroutine
+  scenario verified by H5 structural invariants.
+
+## Remaining work (precise, ordered)
+
+1. **Z2 — real socket IO wait.** A coroutine blocks on a real loopback
+   `zio.net.Stream.read`; emit `io_wait_started`/`io_completed`/`fiber_resumed`;
+   structural-equivalence vs a deterministic IO model. (zio.net API: `IpAddress.
+   listen/connect`, `Server.accept`, `Stream.read/write`.)
+2. **Z3b — coordination park/unpark + interleaving** (above).
+3. **H7a — real `cause_event_id` edges in the live runtime.** Today `fiber.zig`/
+   `scope.zig` set `parent_id` but not cause edges, so *real* programs (not just
+   the demo scenarios) lack causal cause-links. Wire `fiber_interrupted.cause` →
+   `scope_closed` in `forkInScope`'s lease finalizer, and resume/timer causes
+   where applicable. Additive; guard the existing fiber/scope causal tests.
+4. **H7b — coverage-truth gate.** Assert a scenario tagged `coverage: <domain>`
+   actually emits that domain's event kinds (catches stub scenarios like the old
+   `causal-scoped-fiber`). Re-wire `causal-scoped-fiber` to emit a real fiber
+   lifecycle.
+5. **Deep integration (the big one) — engine fibers run AS zio coroutines.**
+   Wire the `AsyncBackend` vtable + `FiberRuntime` so `Effect`/`Fiber` execution
+   actually suspends via zio (not the hand-emitted demo scenarios). This is where
+   the poll-based vtable meets zio's blocking-coroutine model; likely a
+   `blocking_sleep`/host-mode coordinator method. Multi-session.
+6. **H6b — `--agent` bundle enrichment** (per-fiber net state + suspend/resume
+   pairs in the structured JSON mode).
+7. **Z4 — hardening + workbench.** Defect propagation across the yield boundary,
+   allocator/lifetime of parked fibers, conformance gate, workbench renders a
+   real zio-backed run.
 
 ### Z4 — hardening + integration
 Error/defect propagation across the yield boundary; allocator/lifetime of parked
