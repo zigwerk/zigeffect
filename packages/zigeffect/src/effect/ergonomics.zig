@@ -121,6 +121,8 @@ pub fn WhenEffect(comptime Parent: type, comptime Env: type) type {
     };
 }
 
+// ─── Sequential combinators (M3.5–M3.7, M3.10–M3.11) ─────────────────────────
+
 /// Sequential pair — run left, then right, return both successes. Failure
 /// short-circuits at left; right does not run if left failed.
 pub fn ZipEffect(
@@ -209,6 +211,308 @@ pub fn ZipWithEffect(
             self: Self,
             comptime Next: type,
             binder: *const fn (Combined, *Context(Env)) Failure!Next,
+        ) effect_mod.FlatMapEffect(Self, Next, Failure, Env) {
+            return .{ .parent = self, .binder = binder };
+        }
+    };
+}
+
+// ─── Track 4 — Structured concurrency (M4.1 / M4.2) ──────────────────────────
+//
+// These primitives use `ctx.executor` (set via `Runtime(Env).withExecutor` /
+// `FiberRuntime.withExecutor`, plumbed onto Context in M1.1) to spawn each
+// branch as a real coroutine. When no executor is configured they fall back to
+// the sequential traversal — same result, same causal trace structurally. The
+// "same causal structure either way" invariant is the load-bearing claim of
+// the deep integration; these primitives are the user-facing surface that
+// dogfoods it.
+//
+// Threading contract (v1): the configured executor MUST be cooperatively
+// single-threaded (see `FiberExecutor.ThreadingContract`). The engine's
+// `CausalStore`, `Scope`, and the state primitives are not thread-safe, and
+// the per-job `Context` is a shallow copy that still shares pointers to those
+// objects. A multi-threaded executor would race on them.
+//
+// Failure semantics in this v1 (without `FiberExecutor.interrupt`): on
+// failure the primitive joins all in-flight fibers (lets them finish) and
+// returns the **lowest-indexed** failure — deterministic across executors,
+// independent of completion order. True short-circuit cancellation (race /
+// both with loser-interrupt) lands when M7.8 wires the executor interrupt
+// vtable method.
+//
+// Result-lifetime contract: per-item `Result` values that succeed are NOT
+// freed by the primitive on partial failure. If `Result` owns heap
+// allocations, the failing-path leaks them. v1 callers MUST use a non-owning
+// `Result` type (POD value) OR wrap heap ownership in a parent `Scope` /
+// allocator-arena that lives across the call. A future v2 may add a per-slot
+// cleanup hook.
+
+/// M4.1 — parallel traversal. Forks one fiber per item via the executor on
+/// `ctx.executor`, then joins all to collect the result slice. With no executor
+/// configured, falls back to a sequential traversal — same observable result.
+pub fn ForEachParEffect(
+    comptime Item: type,
+    comptime Result: type,
+    comptime Failure: type,
+    comptime Env: type,
+) type {
+    return struct {
+        const Self = @This();
+        pub const SuccessType = []Result;
+        pub const FailureType = Failure;
+        pub const EnvType = Env;
+
+        items: []const Item,
+        body: *const fn (Item, *Context(Env)) Failure!Result,
+
+        const JobCtx = struct {
+            ctx_value: Context(Env),
+            item: Item,
+            body: *const fn (Item, *Context(Env)) Failure!Result,
+            slot: *Slot,
+
+            fn run(raw: ?*anyopaque) void {
+                const self: *JobCtx = @ptrCast(@alignCast(raw.?));
+                if (self.body(self.item, &self.ctx_value)) |value| {
+                    self.slot.* = .{ .value = value };
+                } else |err| {
+                    self.slot.* = .{ .err = err };
+                }
+            }
+        };
+
+        const Slot = union(enum) {
+            pending,
+            value: Result,
+            err: Failure,
+        };
+
+        pub fn run(self: Self, ctx: *Context(Env)) Failure!SuccessType {
+            // Sequential fallback — no executor.
+            if (ctx.executor == null) {
+                const results = ctx.allocator.alloc(Result, self.items.len) catch return @as(Failure, error.OutOfMemory);
+                errdefer ctx.allocator.free(results);
+                for (self.items, 0..) |item, i| {
+                    results[i] = try self.body(item, ctx);
+                }
+                return results;
+            }
+
+            const executor = ctx.executor.?;
+            const results = ctx.allocator.alloc(Result, self.items.len) catch return @as(Failure, error.OutOfMemory);
+            errdefer ctx.allocator.free(results);
+
+            const slots = ctx.allocator.alloc(Slot, self.items.len) catch return @as(Failure, error.OutOfMemory);
+            defer ctx.allocator.free(slots);
+            for (slots) |*s| s.* = .pending;
+
+            const jobs = ctx.allocator.alloc(JobCtx, self.items.len) catch return @as(Failure, error.OutOfMemory);
+            defer ctx.allocator.free(jobs);
+
+            const handles = ctx.allocator.alloc(?*anyopaque, self.items.len) catch return @as(Failure, error.OutOfMemory);
+            defer ctx.allocator.free(handles);
+            for (handles) |*h| h.* = null;
+
+            // Spawn fibers, draining on first decline so inline-fallback bodies
+            // never race with siblings already executing on the executor.
+            for (self.items, 0..) |item, i| {
+                jobs[i] = .{ .ctx_value = ctx.*, .item = item, .body = self.body, .slot = &slots[i] };
+                handles[i] = executor.vtable.spawn(executor.context, .{ .context = &jobs[i], .run = JobCtx.run });
+                if (handles[i] == null) {
+                    // Spawn declined. Drain every prior in-flight handle BEFORE
+                    // running anything inline on the parent stack, so the
+                    // fallback can't race siblings on the shared `ctx` state.
+                    for (handles[0..i]) |maybe_prior| {
+                        if (maybe_prior) |h| {
+                            executor.vtable.join(executor.context, h);
+                            executor.vtable.destroy(executor.context, h);
+                        }
+                    }
+                    // Run THIS item and every remaining one inline-sequential.
+                    JobCtx.run(&jobs[i]);
+                    var j = i + 1;
+                    while (j < self.items.len) : (j += 1) {
+                        jobs[j] = .{ .ctx_value = ctx.*, .item = self.items[j], .body = self.body, .slot = &slots[j] };
+                        JobCtx.run(&jobs[j]);
+                        handles[j] = null;
+                    }
+                    // Mark prior handles as already-joined for the join loop.
+                    for (handles[0..i]) |*slot_h| slot_h.* = null;
+                    break;
+                }
+            }
+
+            // Await any handles still in flight. No early interrupt (M7.8).
+            for (handles) |maybe_handle| {
+                if (maybe_handle) |handle| {
+                    executor.vtable.join(executor.context, handle);
+                    executor.vtable.destroy(executor.context, handle);
+                }
+            }
+
+            // Collect results / lowest-indexed failure (deterministic across
+            // executors). A `.pending` slot here means the executor's `join`
+            // contract was violated — surface a clear defect rather than UB.
+            var first_err: ?Failure = null;
+            for (slots, 0..) |slot, i| {
+                switch (slot) {
+                    .value => |v| results[i] = v,
+                    .err => |e| if (first_err == null) {
+                        first_err = e;
+                    },
+                    .pending => std.debug.panic(
+                        "FiberExecutor.join contract violation: slot[{d}] still pending after join (see executor.zig VTable doc)",
+                        .{i},
+                    ),
+                }
+            }
+            if (first_err) |e| return e;
+            return results;
+        }
+
+        pub fn exit(self: Self, ctx: *Context(Env)) Exit(SuccessType, Failure) {
+            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            return .{ .success = value };
+        }
+
+        pub fn map(
+            self: Self,
+            comptime Next: type,
+            mapper: *const fn (SuccessType) Next,
+        ) effect_mod.MapEffect(Self, Next, Failure, Env) {
+            return .{ .parent = self, .mapper = mapper };
+        }
+
+        pub fn flatMap(
+            self: Self,
+            comptime Next: type,
+            binder: *const fn (SuccessType, *Context(Env)) Failure!Next,
+        ) effect_mod.FlatMapEffect(Self, Next, Failure, Env) {
+            return .{ .parent = self, .binder = binder };
+        }
+    };
+}
+
+/// M4.2 — parallel pair. Spawns both effects onto `ctx.executor` and awaits
+/// both. With no executor, falls back to sequential (`zip`). Same result type
+/// as `zip`: a `ZipPair{left, right}`.
+pub fn ZipParEffect(
+    comptime Left: type,
+    comptime Right: type,
+    comptime Failure: type,
+    comptime Env: type,
+) type {
+    return struct {
+        const Self = @This();
+        pub const SuccessType = ZipPair(Left.SuccessType, Right.SuccessType);
+        pub const FailureType = Failure;
+        pub const EnvType = Env;
+
+        left: Left,
+        right: Right,
+
+        const LeftSlot = union(enum) { pending, value: Left.SuccessType, err: Failure };
+        const RightSlot = union(enum) { pending, value: Right.SuccessType, err: Failure };
+
+        const LeftJob = struct {
+            ctx_value: Context(Env),
+            eff: Left,
+            slot: *LeftSlot,
+            fn run(raw: ?*anyopaque) void {
+                const self: *LeftJob = @ptrCast(@alignCast(raw.?));
+                if (self.eff.run(&self.ctx_value)) |v| {
+                    self.slot.* = .{ .value = v };
+                } else |err| {
+                    self.slot.* = .{ .err = err };
+                }
+            }
+        };
+        const RightJob = struct {
+            ctx_value: Context(Env),
+            eff: Right,
+            slot: *RightSlot,
+            fn run(raw: ?*anyopaque) void {
+                const self: *RightJob = @ptrCast(@alignCast(raw.?));
+                if (self.eff.run(&self.ctx_value)) |v| {
+                    self.slot.* = .{ .value = v };
+                } else |err| {
+                    self.slot.* = .{ .err = err };
+                }
+            }
+        };
+
+        pub fn run(self: Self, ctx: *Context(Env)) Failure!SuccessType {
+            if (ctx.executor == null) {
+                const a = try self.left.run(ctx);
+                const b = try self.right.run(ctx);
+                return .{ .left = a, .right = b };
+            }
+            const executor = ctx.executor.?;
+
+            var ls: LeftSlot = .pending;
+            var rs: RightSlot = .pending;
+            var lj = LeftJob{ .ctx_value = ctx.*, .eff = self.left, .slot = &ls };
+            var rj = RightJob{ .ctx_value = ctx.*, .eff = self.right, .slot = &rs };
+
+            // Spawn left first. If it declines, don't bother spawning right —
+            // run both inline-sequential so we never race the executor.
+            const lh = executor.vtable.spawn(executor.context, .{ .context = &lj, .run = LeftJob.run });
+            var rh: ?*anyopaque = null;
+            if (lh == null) {
+                LeftJob.run(&lj);
+                RightJob.run(&rj);
+            } else {
+                rh = executor.vtable.spawn(executor.context, .{ .context = &rj, .run = RightJob.run });
+                if (rh == null) {
+                    // Right declined; drain left BEFORE running right inline
+                    // so the inline body can't race left's in-flight fiber.
+                    executor.vtable.join(executor.context, lh.?);
+                    executor.vtable.destroy(executor.context, lh.?);
+                    RightJob.run(&rj);
+                } else {
+                    executor.vtable.join(executor.context, lh.?);
+                    executor.vtable.destroy(executor.context, lh.?);
+                    executor.vtable.join(executor.context, rh.?);
+                    executor.vtable.destroy(executor.context, rh.?);
+                }
+            }
+
+            const left_val = switch (ls) {
+                .value => |v| v,
+                .err => |e| return e,
+                .pending => std.debug.panic(
+                    "FiberExecutor.join contract violation: left slot still pending after join",
+                    .{},
+                ),
+            };
+            const right_val = switch (rs) {
+                .value => |v| v,
+                .err => |e| return e,
+                .pending => std.debug.panic(
+                    "FiberExecutor.join contract violation: right slot still pending after join",
+                    .{},
+                ),
+            };
+            return .{ .left = left_val, .right = right_val };
+        }
+
+        pub fn exit(self: Self, ctx: *Context(Env)) Exit(SuccessType, Failure) {
+            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            return .{ .success = value };
+        }
+
+        pub fn map(
+            self: Self,
+            comptime Next: type,
+            mapper: *const fn (SuccessType) Next,
+        ) effect_mod.MapEffect(Self, Next, Failure, Env) {
+            return .{ .parent = self, .mapper = mapper };
+        }
+
+        pub fn flatMap(
+            self: Self,
+            comptime Next: type,
+            binder: *const fn (SuccessType, *Context(Env)) Failure!Next,
         ) effect_mod.FlatMapEffect(Self, Next, Failure, Env) {
             return .{ .parent = self, .binder = binder };
         }

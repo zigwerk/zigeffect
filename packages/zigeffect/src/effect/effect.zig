@@ -13,6 +13,8 @@ pub const ZipPair = ergonomics_mod.ZipPair;
 pub const AllEffect = ergonomics_mod.AllEffect;
 pub const ForEachAllocEffect = ergonomics_mod.ForEachAllocEffect;
 pub const ForEachDiscardEffect = ergonomics_mod.ForEachDiscardEffect;
+pub const ForEachParEffect = ergonomics_mod.ForEachParEffect;
+pub const ZipParEffect = ergonomics_mod.ZipParEffect;
 
 /// M3.7 — sequential gather over a homogeneous slice of effects. Allocates a
 /// result slice via `ctx.allocator`; caller frees it. Failure short-circuits.
@@ -41,6 +43,22 @@ pub fn forEachDiscard(
     items: []const Item,
     body: *const fn (Item, *context_mod.Context(Env)) Failure!void,
 ) ForEachDiscardEffect(Item, Failure, Env) {
+    return .{ .items = items, .body = body };
+}
+
+/// M4.1 — parallel traversal via the executor on `ctx.executor`. Spawns one
+/// fiber per item; falls back to sequential `forEachAlloc` when no executor.
+/// Caller frees the returned slice. On failure, joins all in-flight fibers
+/// and returns the FIRST error encountered (true short-circuit cancellation
+/// lands when M7.8 adds `FiberExecutor.interrupt`).
+pub fn forEachPar(
+    comptime Item: type,
+    comptime Result: type,
+    comptime Failure: type,
+    comptime Env: type,
+    items: []const Item,
+    body: *const fn (Item, *context_mod.Context(Env)) Failure!Result,
+) ForEachParEffect(Item, Result, Failure, Env) {
     return .{ .items = items, .body = body };
 }
 
@@ -286,6 +304,12 @@ pub fn Effect(comptime Success: type, comptime Failure: type, comptime Env: type
             combine: *const fn (Success, @TypeOf(other).SuccessType) Combined,
         ) ZipWithEffect(Self, @TypeOf(other), Combined, Failure, Env) {
             return .{ .left = self, .right = other, .combine = combine };
+        }
+
+        /// M4.2 — parallel pair via the executor on `ctx.executor`. Falls back
+        /// to sequential `zip` when no executor is configured.
+        pub fn zipPar(self: Self, other: anytype) ZipParEffect(Self, @TypeOf(other), Failure, Env) {
+            return .{ .left = self, .right = other };
         }
     };
 }

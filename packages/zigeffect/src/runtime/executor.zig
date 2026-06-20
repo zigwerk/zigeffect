@@ -34,10 +34,30 @@ pub const FiberExecutor = struct {
     pub const VTable = struct {
         /// Schedule the job; return an opaque handle, or null to fall back to
         /// synchronous execution (e.g. on spawn failure).
+        ///
+        /// MEMORY ORDERING: `spawn` MUST establish a happens-before edge from
+        /// the caller's writes preparing `job.context` to the worker's reads
+        /// inside `job.run`. On single-threaded cooperative coroutines this is
+        /// the natural sequence; on a threaded pool the executor's submission
+        /// queue lock typically provides it.
         spawn: *const fn (?*anyopaque, FiberJob) ?*anyopaque,
         /// Block until a spawned job completes.
+        ///
+        /// MEMORY ORDERING: `join` MUST establish a happens-before edge from
+        /// the job's final write (inside `job.run`) to the joiner. A primitive
+        /// like `forEachPar` reads a result slot the job wrote; without this
+        /// edge the read is racy.
         join: *const fn (?*anyopaque, *anyopaque) void,
         /// Release a handle's resources after join.
         destroy: *const fn (?*anyopaque, *anyopaque) void,
     };
+
+    /// Threading contract for v1: the engine's `CausalStore`, `Scope`, and the
+    /// state primitives (`Ref`, `Hub`) are not thread-safe. Executors used with
+    /// the structured-concurrency primitives (`forEachPar`, `zipPar`, etc.) and
+    /// with any code that records causal events MUST be cooperatively
+    /// single-threaded (e.g. `zio.Runtime` with `executors: .exact(1)`). A
+    /// multi-threaded pool requires lifting the engine state primitives to
+    /// thread-safe in a future v2 — at which point this comment must change.
+    pub const ThreadingContract = enum { single_executor_v1 };
 };
