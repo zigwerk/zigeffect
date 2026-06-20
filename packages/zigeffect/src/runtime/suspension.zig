@@ -256,6 +256,128 @@ pub const SuspensionCoordinator = struct {
         }
         return null;
     }
+
+    /// Request shared by all non-timer coordination suspensions
+    /// (Deferred.await, Queue.take, Semaphore/Signal acquire).
+    pub const SuspendOnCoordination = struct {
+        fiber_id: u64,
+        scope_id: ?u64 = null,
+        run_id: ?u64 = null,
+        /// parent for the fiber chain (typically the fiber_started event id)
+        started_event_id: ?u64 = null,
+        /// the effect that triggered the park (e.g. `effect_started` for await)
+        caused_by_event_id: ?u64 = null,
+        label: []const u8 = "",
+    };
+
+    /// Park a fiber on a `Deferred`. Returns the suspension id. The completer
+    /// invokes `resumeFromDeferred` once the deferred is fulfilled; the
+    /// load-bearing causal edge `fiber_resumed.cause_event_id ->
+    /// deferred_completed` is emitted there.
+    pub fn suspendOnDeferred(self: *SuspensionCoordinator, request: SuspendOnCoordination) SuspensionError!u64 {
+        return self.suspendOnCoordination(request, "Deferred", "fiber suspended on deferred");
+    }
+
+    /// Park a fiber on a `Queue.take`. See `suspendOnDeferred`.
+    pub fn suspendOnQueue(self: *SuspensionCoordinator, request: SuspendOnCoordination) SuspensionError!u64 {
+        return self.suspendOnCoordination(request, "Queue", "fiber suspended on queue");
+    }
+
+    /// Park a fiber on a signal/`Semaphore.acquire`. See `suspendOnDeferred`.
+    pub fn suspendOnSignal(self: *SuspensionCoordinator, request: SuspendOnCoordination) SuspensionError!u64 {
+        return self.suspendOnCoordination(request, "Signal", "fiber suspended on signal");
+    }
+
+    fn suspendOnCoordination(
+        self: *SuspensionCoordinator,
+        request: SuspendOnCoordination,
+        comptime type_name: []const u8,
+        comptime suspended_label: []const u8,
+    ) SuspensionError!u64 {
+        const sid = self.store.nextScheduleId();
+        const suspended_id = try self.store.record(.{
+            .kind = .fiber_suspended,
+            .run_id = request.run_id,
+            .fiber_id = request.fiber_id,
+            .scope_id = request.scope_id,
+            .parent_id = request.started_event_id,
+            .cause_event_id = request.caused_by_event_id,
+            .schedule_id = sid,
+            .status = "pending",
+            .label = suspended_label,
+            .type_name = type_name,
+        });
+        try self.records.append(self.allocator, .{
+            .suspension_id = sid,
+            .fiber_id = request.fiber_id,
+            .scope_id = request.scope_id,
+            .run_id = request.run_id,
+            .suspended_event_id = suspended_id,
+            // No scheduled-side event for coordination suspensions; reuse the
+            // suspended_event_id so the record stays self-consistent.
+            .scheduled_event_id = suspended_id,
+            .due_time_ms = 0,
+        });
+        return sid;
+    }
+
+    /// Resume a fiber parked via `suspendOnDeferred`. Records
+    /// `deferred_completed` (the wakeup), then `fiber_resumed` with
+    /// `cause_event_id -> deferred_completed` — the load-bearing causal edge.
+    pub fn resumeFromDeferred(self: *SuspensionCoordinator, suspension_id: u64, resume_label: []const u8) SuspensionError!void {
+        return self.resumeFromCoordination(suspension_id, .deferred_completed, "Deferred", "deferred completed", resume_label);
+    }
+
+    /// Resume a fiber parked via `suspendOnQueue`. Emits `queue_item_available`.
+    pub fn resumeFromQueue(self: *SuspensionCoordinator, suspension_id: u64, resume_label: []const u8) SuspensionError!void {
+        return self.resumeFromCoordination(suspension_id, .queue_item_available, "Queue", "queue item available", resume_label);
+    }
+
+    /// Resume a fiber parked via `suspendOnSignal`. Emits `signal_raised`.
+    pub fn resumeFromSignal(self: *SuspensionCoordinator, suspension_id: u64, resume_label: []const u8) SuspensionError!void {
+        return self.resumeFromCoordination(suspension_id, .signal_raised, "Signal", "signal raised", resume_label);
+    }
+
+    fn resumeFromCoordination(
+        self: *SuspensionCoordinator,
+        suspension_id: u64,
+        wakeup_kind: causal_mod.CausalEventKind,
+        comptime type_name: []const u8,
+        comptime wakeup_label: []const u8,
+        resume_label: []const u8,
+    ) SuspensionError!void {
+        const idx = self.findRecordIndex(suspension_id) orelse return error.UnknownSuspension;
+        if (self.records.items[idx].resumed) return;
+        const rec = self.records.items[idx];
+
+        const wakeup_id = try self.store.record(.{
+            .kind = wakeup_kind,
+            .run_id = rec.run_id,
+            .fiber_id = rec.fiber_id,
+            .scope_id = rec.scope_id,
+            .parent_id = rec.suspended_event_id,
+            .cause_event_id = rec.suspended_event_id,
+            .schedule_id = rec.suspension_id,
+            .status = "ready",
+            .label = wakeup_label,
+            .type_name = type_name,
+        });
+
+        _ = try self.store.record(.{
+            .kind = .fiber_resumed,
+            .run_id = rec.run_id,
+            .fiber_id = rec.fiber_id,
+            .scope_id = rec.scope_id,
+            .parent_id = rec.suspended_event_id,
+            .cause_event_id = wakeup_id,
+            .schedule_id = rec.suspension_id,
+            .status = "running",
+            .label = resume_label,
+            .type_name = type_name,
+        });
+
+        self.records.items[idx].resumed = true;
+    }
 };
 
 pub const DelayScenarioAnchors = struct {
