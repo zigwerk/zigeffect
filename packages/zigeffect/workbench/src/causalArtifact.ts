@@ -152,50 +152,6 @@ export type VisualGraphOptions = {
   layoutMode: VisualGraphLayoutMode;
   perspective?: VisualGraphPerspective;
   selectedEventId?: string | null;
-  liveDashboard?: LiveDashboardModel | null;
-};
-
-export type LiveDashboardPriority = "normal" | "watch" | "critical";
-
-export type LiveDashboardSourceStep = {
-  kind: string;
-  label: string;
-  path: string;
-  workbenchCommand: string | null;
-};
-
-export type LiveStreamFrameModel = {
-  sequence: number;
-  eventId: string;
-  parentId: string | null;
-  eventKind: string;
-  status: string;
-  label: string;
-  lane: string;
-  findingKind: string | null;
-  priority: LiveDashboardPriority;
-};
-
-export type LiveDashboardModel = {
-  artifactPath: string;
-  schema: string;
-  schemaVersion: string;
-  mode: string;
-  target: string;
-  mutationAuthority: string | null;
-  stream: {
-    windowPolicy: string;
-    maxFrames: number;
-    frameCount: number;
-    truncated: boolean;
-    redaction: string;
-  };
-  frames: LiveStreamFrameModel[];
-  priorityCounts: Record<LiveDashboardPriority, number>;
-  sources: LiveDashboardSourceStep[];
-  layouts: VisualGraphLayoutMode[];
-  guardrails: string[];
-  warnings: string[];
 };
 
 export type GovernanceArtifactKind =
@@ -220,12 +176,7 @@ export type ChainSourceKind =
   | "proposal"
   | "before"
   | "after"
-  | "compare"
-  | "local-pipeline"
-  | "boundary"
-  | "readiness"
-  | "fixtures"
-  | "retention";
+  | "compare";
 
 export type ChainSourceStep = {
   kind: ChainSourceKind;
@@ -345,127 +296,6 @@ export type GovernanceModel = {
   warnings: string[];
 };
 
-export type ProductionTelemetryMappingFixture = {
-  id: string;
-  sourceEnvelope: string;
-  targetSchema: string;
-  label: string;
-  retainedFields: string[];
-  blockedFields: string[];
-};
-
-export type ProductionTelemetryCheck = {
-  name: string;
-  status: string;
-  detail: string;
-};
-
-export type ProductionTelemetryAuthority = {
-  applied: boolean | null;
-  mutationAuthority: string | null;
-  liveTelemetryEnabled: boolean | null;
-  networkSendEnabled: boolean | null;
-  collectorEndpointConfigured: boolean | null;
-  otlpSerializationEnabled: boolean | null;
-  runtimePipelineEnabled: boolean | null;
-  durableWriteEnabled: boolean | null;
-  nendbWriteEnabled: boolean | null;
-  ciGateEnabled: boolean | null;
-};
-
-export type ProductionTelemetryPreviewModel = {
-  artifactPath: string;
-  schema: string;
-  schemaVersion: string;
-  status: string;
-  decision: string;
-  readyForNextBranch: boolean | null;
-  recommendation: string;
-  nextBranch: string;
-  sources: ChainSourceStep[];
-  authority: ProductionTelemetryAuthority;
-  checks: ProductionTelemetryCheck[];
-  mappingFixtures: ProductionTelemetryMappingFixture[];
-  validationChecks: string[];
-  implementationGates: string[];
-  nonGoals: string[];
-  blockedClaims: string[];
-  requiredCommands: string[];
-  verifiedCommands: string[];
-  verificationCommands: string[];
-  warnings: string[];
-};
-
-export type AppFacingPreviewAuthority = {
-  applied: boolean;
-  mutationAuthority: string;
-  readOnlyPreview: boolean;
-  solidWebuiEnabled: boolean;
-  solidWebuiRenderer: string;
-  webuiBridge: string;
-  hostedLiveDashboardEnabled: boolean;
-  appMutationControlsEnabled: boolean;
-  reactRendererEnabled: boolean;
-  alternateRendererEnabled: boolean;
-  nendbWriteEnabled: boolean;
-  nendbAdapterExecutionEnabled: boolean;
-  durableWriteEnabled: boolean;
-  deploymentMutationEnabled: boolean;
-  appRuntimeIntegrationEnabled: boolean;
-  agentQueryLiveProjectionEnabled: boolean;
-};
-
-export type AppFacingPreviewCheck = {
-  name: string;
-  status: string;
-  detail: string;
-};
-
-export type AppFacingBridgeRecord = {
-  id: string;
-  status: string;
-  sourceRef: string;
-  targetRef: string;
-  bridgeKind: string;
-  retainedRefs: string[];
-  blockedClaims: string[];
-};
-
-export type AppFacingPreviewSection = {
-  id: string;
-  title: string;
-  evidenceRefs: string[];
-  blockedAuthority: string[];
-};
-
-export type AppFacingPreviewModel = {
-  artifactPath: string;
-  schema: string;
-  schemaVersion: string;
-  sourceMode: "solid-webui-readonly-preview" | "ci-advisory-remediation-report" | "audit-remediation-bridge";
-  status: string;
-  decision: string;
-  reason: string;
-  readyForNextBranch: boolean | null;
-  sourceBridge: string;
-  sourceBridgeStatus: string;
-  recommendation: string;
-  nextBranch: string;
-  authority: AppFacingPreviewAuthority;
-  previewPanels: string[];
-  sections: AppFacingPreviewSection[];
-  bridgeRecords: AppFacingBridgeRecord[];
-  checks: AppFacingPreviewCheck[];
-  validationChecks: string[];
-  implementationGates: string[];
-  nonGoals: string[];
-  blockedClaims: string[];
-  requiredCommands: string[];
-  verifiedCommands: string[];
-  verificationCommands: string[];
-  warnings: string[];
-};
-
 export type WorkbenchModel = {
   artifactPath: string;
   schema: string;
@@ -501,21 +331,6 @@ const graphFailureStatuses = new Set(["failure"]);
 const graphWarningStatuses = new Set(["missing", "exhausted", "pending", "running"]);
 const graphLaneKindOrder: GraphLaneKind[] = ["run", "scope", "fiber", "resource", "retry"];
 const auditChainSchema = "zigeffect.causal.audit-chain.v1";
-const liveDashboardStreamSchema = "zigeffect.causal.live-dashboard-stream.v1";
-const productionTelemetryRetentionSchema = "zigeffect.causal.production-telemetry-nendb-retention-fixtures.v1";
-const productionTelemetryWorkbenchPreviewSchema = "zigeffect.causal.production-telemetry-workbench-readonly-preview.v1";
-const appFacingAuditRemediationBridgeSchema = "zigeffect.causal.app-facing-production-integration-audit-remediation-bridge.v1";
-const appFacingSolidWebuiPreviewSchema = "zigeffect.causal.app-facing-production-integration-solid-webui-readonly-preview.v1";
-const appFacingCiAdvisoryReportSchema = "zigeffect.causal.app-facing-production-integration-ci-advisory-remediation-report.v1";
-const defaultVisualGraphLayouts: VisualGraphLayoutMode[] = ["dagre", "force", "radial"];
-const liveDashboardSourceKinds = ["snapshot", "aggregation_bundle", "access_policy", "alert_preview", "compare"];
-const liveDashboardSourceLabels: Record<string, string> = {
-  snapshot: "Snapshot artifact",
-  aggregation_bundle: "Aggregation bundle",
-  access_policy: "Access policy",
-  alert_preview: "Alert preview",
-  compare: "Compare report",
-};
 const chainSourceKinds: ChainSourceKind[] = ["session", "audit", "decision", "proposal", "before", "after", "compare"];
 const chainSourceLabels: Record<ChainSourceKind, string> = {
   session: "Dev session",
@@ -525,11 +340,6 @@ const chainSourceLabels: Record<ChainSourceKind, string> = {
   before: "Before artifact",
   after: "After artifact",
   compare: "Compare report",
-  "local-pipeline": "Local pipeline fixtures",
-  boundary: "Exporter boundary",
-  readiness: "Readiness review",
-  fixtures: "Capture fixtures",
-  retention: "NenDB retention fixtures",
 };
 
 export function parseArtifactJson(json: string): unknown {
@@ -688,61 +498,22 @@ export function causePathForEvent(events: CausalEvent[], eventId: string): Causa
   return path.reverse();
 }
 
-export function deriveLiveDashboardModel(
-  raw: unknown,
-  options: WorkbenchOptions,
-  workbench?: WorkbenchModel,
-): LiveDashboardModel | null {
-  const artifact = isRecord(raw) ? raw : {};
-  const schema = textValue(artifact.schema, "unknown");
-
-  if (schema === liveDashboardStreamSchema) {
-    return deriveLiveStreamDashboard(artifact, options);
-  }
-
-  const model = workbench ?? deriveWorkbenchModel(raw, options);
-  return deriveStaticDashboard(model);
-}
-
 export function deriveVisualGraphModel(
   workbench: WorkbenchModel,
   graph: GraphModel,
   optionsOrLayout: VisualGraphOptions | VisualGraphLayoutMode,
-  legacyLiveDashboard?: LiveDashboardModel | null,
 ): VisualGraphModel {
   const options: VisualGraphOptions = typeof optionsOrLayout === "string"
-    ? { layoutMode: optionsOrLayout, perspective: "cause", liveDashboard: legacyLiveDashboard }
+    ? { layoutMode: optionsOrLayout, perspective: "cause" }
     : optionsOrLayout;
   const perspective = options.perspective ?? "cause";
   const legacyIds = typeof optionsOrLayout === "string";
-  const liveDashboard = options.liveDashboard ?? null;
   const warnings: string[] = [];
   const findingEventIds = new Set(workbench.findings.map((finding) => finding.eventId));
   const eventNodes = workbench.events.map((event) => visualNodeFromEvent(event, findingEventIds, options.selectedEventId ?? null, legacyIds));
   const eventNodeToneById = new Map(eventNodes.map((node) => [node.eventId ?? node.id, node.tone]));
   const eventEdges = graph.parentEdges.map((edge) => visualParentEdge(edge, eventNodeToneById, legacyIds));
-  const streamNodes = liveDashboard?.frames.map((frame) => visualNodeFromStreamFrame(frame, legacyIds)) ?? [];
-  const streamNodeIds = new Set(streamNodes.map((node) => node.id));
-  const streamEdges = liveDashboard?.frames.flatMap((frame) => {
-    const source = legacyIds ? frame.parentId : (frame.parentId ? `event:${frame.parentId}` : null);
-    const target = legacyIds ? frame.eventId : `event:${frame.eventId}`;
-    if (!source || !streamNodeIds.has(source)) {
-      return [];
-    }
-
-    return [{
-      id: `${source}->${target}`,
-      source,
-      target,
-      label: "parent",
-      detail: "stream parent edge",
-      kind: "parent" as const,
-      tone: visualStreamFrameTone(frame),
-    }];
-  }) ?? [];
-  const baseNodes = eventNodes.length > 0 ? eventNodes : streamNodes;
-  const baseEdges = eventNodes.length > 0 ? eventEdges : streamEdges;
-  const perspectiveGraph = applyVisualGraphPerspective(perspective, workbench, baseNodes, baseEdges, warnings, legacyIds);
+  const perspectiveGraph = applyVisualGraphPerspective(perspective, workbench, eventNodes, eventEdges, warnings, legacyIds);
 
   return {
     perspective,
@@ -778,23 +549,6 @@ function visualNodeFromEvent(
     refs: visualRefsForEvent(event),
     tone,
     priority: visualPriority(tone, event.idText === selectedEventId),
-  };
-}
-
-function visualNodeFromStreamFrame(frame: LiveStreamFrameModel, legacyIds: boolean): VisualGraphNode {
-  const tone = visualStreamFrameTone(frame);
-  return {
-    id: visualEventNodeId(frame.eventId, legacyIds),
-    eventId: frame.eventId,
-    label: frame.label || frame.eventKind,
-    detail: frame.findingKind ?? frame.eventKind,
-    kind: frame.eventKind,
-    status: frame.status,
-    lane: frame.lane,
-    group: "event",
-    refs: visualEmptyRefs(),
-    tone,
-    priority: frame.priority,
   };
 }
 
@@ -1011,18 +765,6 @@ function visualRefsForEvent(event: CausalEvent): VisualGraphRefSet {
   };
 }
 
-function visualStreamFrameTone(frame: LiveStreamFrameModel): VisualGraphNodeTone {
-  if (frame.priority === "critical" || frame.status === "failure" || frame.status === "missing") {
-    return "failure";
-  }
-
-  if (frame.priority === "watch" || frame.findingKind) {
-    return "warning";
-  }
-
-  return "ok";
-}
-
 export function deriveRemediationChainModel(raw: unknown, options: WorkbenchOptions): RemediationChainModel | null {
   const artifact = isRecord(raw) ? raw : {};
   const schema = textValue(artifact.schema, "unknown");
@@ -1138,127 +880,6 @@ export function deriveAppRemediationModel(raw: unknown, options: WorkbenchOption
       ...stringList(artifact.proposal_guardrails),
       ...stringList(artifact.review_guardrails),
       ...stringList(artifact.readiness_guardrails),
-    ]),
-    warnings,
-  };
-}
-
-export function deriveProductionTelemetryPreviewModel(raw: unknown, options: WorkbenchOptions): ProductionTelemetryPreviewModel | null {
-  const artifact = isRecord(raw) ? raw : {};
-  const schema = textValue(artifact.schema, "unknown");
-  if (schema !== productionTelemetryRetentionSchema && schema !== productionTelemetryWorkbenchPreviewSchema) {
-    return null;
-  }
-
-  const warnings: string[] = [];
-  const schemaVersion = textValue(artifact.schema_version, "unknown");
-  if (schemaVersion === "unknown") {
-    warnings.push("artifact schema_version is missing");
-  }
-
-  const requiredCommands = stringList(artifact.required_verification_commands);
-  const verifiedCommands = stringList(artifact.verified_commands);
-
-  return {
-    artifactPath: options.artifactPath,
-    schema,
-    schemaVersion,
-    status: textValue(artifact.preview_status, textValue(artifact.retention_fixture_status, "unknown")),
-    decision: textValue(artifact.decision, "unknown"),
-    readyForNextBranch: booleanValue(artifact.ready_for_next_branch),
-    recommendation: textValue(artifact.recommendation, "unknown"),
-    nextBranch: textValue(artifact.next_branch_if_ready, "unknown"),
-    sources: productionTelemetrySourceSteps(artifact),
-    authority: {
-      applied: booleanValue(artifact.applied),
-      mutationAuthority: nullableTextValue(artifact.mutation_authority),
-      liveTelemetryEnabled: booleanValue(artifact.live_exporter_enabled),
-      networkSendEnabled: booleanValue(artifact.network_send_enabled),
-      collectorEndpointConfigured: booleanValue(artifact.collector_endpoint_configured),
-      otlpSerializationEnabled: booleanValue(artifact.otlp_serialization_enabled),
-      runtimePipelineEnabled: booleanValue(artifact.runtime_pipeline_enabled),
-      durableWriteEnabled: booleanValue(artifact.durable_write_enabled),
-      nendbWriteEnabled: booleanValue(artifact.nendb_write_enabled),
-      ciGateEnabled: booleanValue(artifact.ci_gate_enabled),
-    },
-    checks: productionTelemetryChecks(artifact.checks),
-    mappingFixtures: productionTelemetryMappingFixtures(artifact.nendb_mapping_fixtures),
-    validationChecks: stringList(artifact.retention_validation_checks),
-    implementationGates: stringList(artifact.implementation_gates),
-    nonGoals: stringList(artifact.non_goals),
-    blockedClaims: stringList(artifact.blocked_claims),
-    requiredCommands,
-    verifiedCommands,
-    verificationCommands: uniqueInOrder([
-      ...requiredCommands,
-      ...verifiedCommands,
-      ...stringList(artifact.reviewed_verification_commands),
-      ...stringList(artifact.verification_commands),
-    ]),
-    warnings,
-  };
-}
-
-export function deriveAppFacingPreviewModel(raw: unknown, options: WorkbenchOptions): AppFacingPreviewModel | null {
-  const artifact = isRecord(raw) ? raw : {};
-  const schema = textValue(artifact.schema, "unknown");
-  if (
-    schema !== appFacingSolidWebuiPreviewSchema &&
-    schema !== appFacingCiAdvisoryReportSchema &&
-    schema !== appFacingAuditRemediationBridgeSchema
-  ) {
-    return null;
-  }
-
-  const sourceMode = schema === appFacingSolidWebuiPreviewSchema
-    ? "solid-webui-readonly-preview"
-    : schema === appFacingCiAdvisoryReportSchema
-      ? "ci-advisory-remediation-report"
-      : "audit-remediation-bridge";
-  const warnings: string[] = [];
-  const schemaVersion = textValue(artifact.schema_version, "unknown");
-  if (schemaVersion === "unknown") {
-    warnings.push("artifact schema_version is missing");
-  }
-
-  const requiredCommands = stringList(artifact.required_verification_commands);
-  const verifiedCommands = stringList(artifact.verified_commands);
-
-  return {
-    artifactPath: options.artifactPath,
-    schema,
-    schemaVersion,
-    sourceMode,
-    status: appFacingStatus(artifact),
-    decision: textValue(artifact.decision, "unknown"),
-    reason: textValue(artifact.reason, ""),
-    readyForNextBranch: booleanValue(artifact.ready_for_next_branch),
-    sourceBridge: textValue(artifact.source_preview, textValue(artifact.source_bridge, textValue(artifact.source_handoff, ""))),
-    sourceBridgeStatus: textValue(artifact.source_preview_status, textValue(artifact.source_bridge_status, appFacingStatus(artifact))),
-    recommendation: textValue(artifact.recommendation, "unknown"),
-    nextBranch: textValue(artifact.next_branch_if_ready, "unknown"),
-    authority: appFacingAuthority(artifact, sourceMode),
-    previewPanels: uniqueInOrder([
-      ...stringList(artifact.preview_panels),
-      ...stringList(artifact.report_panels),
-    ]),
-    sections: appFacingPreviewSections(artifact.app_preview_sections, artifact.app_report_sections),
-    bridgeRecords: appFacingBridgeRecords(artifact.bridge_records, artifact.audit_remediation_bridge_records),
-    checks: appFacingChecks(artifact.checks),
-    validationChecks: uniqueInOrder([
-      ...stringList(artifact.validation_checks),
-      ...stringList(artifact.bridge_validation_checks),
-    ]),
-    implementationGates: stringList(artifact.implementation_gates),
-    nonGoals: stringList(artifact.non_goals),
-    blockedClaims: stringList(artifact.blocked_claims),
-    requiredCommands,
-    verifiedCommands,
-    verificationCommands: uniqueInOrder([
-      ...requiredCommands,
-      ...verifiedCommands,
-      ...stringList(artifact.reviewed_verification_commands),
-      ...stringList(artifact.verification_commands),
     ]),
     warnings,
   };
@@ -1483,120 +1104,6 @@ function compareGraphLanes(left: GraphLane, right: GraphLane): number {
   return left.key.localeCompare(right.key);
 }
 
-function deriveLiveStreamDashboard(artifact: UnknownRecord, options: WorkbenchOptions): LiveDashboardModel {
-  const warnings: string[] = [];
-  const schemaVersion = textValue(artifact.schema_version, "unknown");
-  if (schemaVersion === "unknown") {
-    warnings.push("artifact schema_version is missing");
-  }
-
-  const source = isRecord(artifact.source) ? artifact.source : {};
-  if (!isRecord(artifact.source)) {
-    warnings.push("artifact source object is missing");
-  }
-
-  const stream = isRecord(artifact.stream) ? artifact.stream : {};
-  if (!isRecord(artifact.stream)) {
-    warnings.push("artifact stream object is missing");
-  }
-
-  const rawFrames = Array.isArray(artifact.frames) ? artifact.frames : [];
-  if (!Array.isArray(artifact.frames)) {
-    warnings.push("artifact frames array is missing");
-  }
-
-  const frames = rawFrames
-    .filter(isRecord)
-    .map((frame, index) => liveFrameFromRecord(frame, index))
-    .sort((left, right) => left.sequence - right.sequence);
-
-  return {
-    artifactPath: options.artifactPath,
-    schema: liveDashboardStreamSchema,
-    schemaVersion,
-    mode: textValue(artifact.mode, "unknown"),
-    target: textValue(artifact.target, "unknown"),
-    mutationAuthority: nullableTextValue(artifact.mutation_authority),
-    stream: {
-      windowPolicy: textValue(stream.window_policy, "unknown"),
-      maxFrames: numericValue(stream.max_frames) ?? frames.length,
-      frameCount: numericValue(stream.frame_count) ?? frames.length,
-      truncated: booleanValue(stream.truncated) ?? false,
-      redaction: textValue(stream.redaction, "unknown"),
-    },
-    frames,
-    priorityCounts: priorityCounts(frames),
-    sources: liveDashboardSources(source),
-    layouts: visualLayoutList(artifact.layouts),
-    guardrails: stringList(artifact.guardrails),
-    warnings,
-  };
-}
-
-function deriveStaticDashboard(model: WorkbenchModel): LiveDashboardModel {
-  const frames = model.events.map((event, index) => liveFrameFromEvent(event, model.findings, index));
-
-  return {
-    artifactPath: model.artifactPath,
-    schema: model.schema,
-    schemaVersion: model.schemaVersion,
-    mode: "static-snapshot",
-    target: model.artifactPath,
-    mutationAuthority: "none",
-    stream: {
-      windowPolicy: "static",
-      maxFrames: frames.length,
-      frameCount: frames.length,
-      truncated: false,
-      redaction: model.safeToShare,
-    },
-    frames,
-    priorityCounts: priorityCounts(frames),
-    sources: [{
-      kind: "snapshot",
-      label: liveDashboardSourceLabels.snapshot ?? "Snapshot artifact",
-      path: model.artifactPath,
-      workbenchCommand: workbenchCommandForPath(model.artifactPath),
-    }],
-    layouts: defaultVisualGraphLayouts,
-    guardrails: [
-      "Read-only static artifact dashboard.",
-      "Mutation authority remains none.",
-    ],
-    warnings: model.warnings,
-  };
-}
-
-function liveFrameFromRecord(frame: UnknownRecord, index: number): LiveStreamFrameModel {
-  const status = textValue(frame.status, "unknown");
-  return {
-    sequence: numericValue(frame.sequence) ?? index + 1,
-    eventId: idValue(frame.event_id) ?? `frame-${index + 1}`,
-    parentId: nullableIdValue(frame.parent_id),
-    eventKind: textValue(frame.event_kind, "unknown"),
-    status,
-    label: textValue(frame.label, ""),
-    lane: textValue(frame.lane, "unknown"),
-    findingKind: nullableTextValue(frame.finding_kind),
-    priority: liveDashboardPriority(frame.dashboard_priority, status, nullableTextValue(frame.finding_kind)),
-  };
-}
-
-function liveFrameFromEvent(event: CausalEvent, findings: CausalFinding[], index: number): LiveStreamFrameModel {
-  const findingKind = findings.find((finding) => finding.eventId === event.idText)?.kind ?? null;
-  return {
-    sequence: event.numericId ?? index + 1,
-    eventId: event.idText,
-    parentId: event.parentId,
-    eventKind: event.kind,
-    status: event.status,
-    label: event.label || event.typeName,
-    lane: eventLaneLabel(event),
-    findingKind,
-    priority: liveDashboardPriority("", event.status, findingKind),
-  };
-}
-
 function eventLaneLabel(event: CausalEvent): string {
   if (event.fiberId) return `fiber:${event.fiberId}`;
   if (event.scopeId) return `scope:${event.scopeId}`;
@@ -1612,52 +1119,6 @@ function visualNodeTone(event: CausalEvent, findingEventIds: Set<string>): Visua
     return "warning";
   }
   return "ok";
-}
-
-function liveDashboardPriority(value: unknown, status: string, findingKind: string | null): LiveDashboardPriority {
-  const priority = textValue(value, "");
-  if (priority === "critical" || priority === "watch" || priority === "normal") {
-    return priority;
-  }
-  if (status === "failure" || status === "missing" || status === "exhausted") {
-    return "critical";
-  }
-  if (findingKind || status === "pending" || status === "running") {
-    return "watch";
-  }
-  return "normal";
-}
-
-function priorityCounts(frames: LiveStreamFrameModel[]): Record<LiveDashboardPriority, number> {
-  return frames.reduce<Record<LiveDashboardPriority, number>>((counts, frame) => {
-    counts[frame.priority] += 1;
-    return counts;
-  }, { normal: 0, watch: 0, critical: 0 });
-}
-
-function liveDashboardSources(source: UnknownRecord): LiveDashboardSourceStep[] {
-  return liveDashboardSourceKinds.flatMap((kind) => {
-    const path = textValue(source[kind], "");
-    if (!path) {
-      return [];
-    }
-    return [{
-      kind,
-      label: liveDashboardSourceLabels[kind] ?? kind,
-      path,
-      workbenchCommand: workbenchCommandForPath(path),
-    }];
-  });
-}
-
-function visualLayoutList(value: unknown): VisualGraphLayoutMode[] {
-  if (!Array.isArray(value)) {
-    return defaultVisualGraphLayouts;
-  }
-  const layouts = value.filter((layout): layout is VisualGraphLayoutMode => (
-    layout === "dagre" || layout === "force" || layout === "radial"
-  ));
-  return layouts.length > 0 ? uniqueInOrder(layouts) as VisualGraphLayoutMode[] : defaultVisualGraphLayouts;
 }
 
 function governanceKindForSchema(schema: string): GovernanceArtifactKind | null {
@@ -1759,140 +1220,6 @@ function appSourceStep(field: string, label: string, source: UnknownRecord): Cha
     path,
     workbenchCommand: workbenchCommandForPath(path),
   };
-}
-
-function productionTelemetrySourceSteps(artifact: UnknownRecord): ChainSourceStep[] {
-  const definitions: Array<[ChainSourceKind, string, string]> = [
-    ["local-pipeline", "source_local_pipeline", "Local pipeline fixtures"],
-    ["boundary", "source_boundary", "Exporter boundary"],
-    ["proposal", "source_proposal", "Implementation proposal"],
-    ["readiness", "source_readiness", "Readiness review"],
-    ["fixtures", "source_fixtures", "Capture fixtures"],
-    ["retention", "source_retention", "NenDB retention fixtures"],
-  ];
-
-  return definitions
-    .map(([kind, field, label]) => {
-      const path = textValue(artifact[field], "");
-      if (!path) {
-        return null;
-      }
-      return {
-        kind,
-        label,
-        path,
-        workbenchCommand: workbenchCommandForPath(path),
-      };
-    })
-    .filter((step): step is ChainSourceStep => step !== null);
-}
-
-function productionTelemetryChecks(value: unknown): ProductionTelemetryCheck[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.filter(isRecord).map((check) => ({
-    name: textValue(check.name, "unknown"),
-    status: textValue(check.status, "unknown"),
-    detail: textValue(check.detail, ""),
-  }));
-}
-
-function productionTelemetryMappingFixtures(value: unknown): ProductionTelemetryMappingFixture[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.filter(isRecord).map((fixture) => ({
-    id: textValue(fixture.id, "unknown"),
-    sourceEnvelope: textValue(fixture.source_envelope, "unknown"),
-    targetSchema: textValue(fixture.target_schema, "unknown"),
-    label: textValue(fixture.label, "unknown"),
-    retainedFields: stringList(fixture.retained_fields),
-    blockedFields: stringList(fixture.blocked_fields),
-  }));
-}
-
-function appFacingStatus(artifact: UnknownRecord): string {
-  return textValue(
-    artifact.status,
-    textValue(
-      artifact.ci_advisory_remediation_report_status,
-      textValue(
-        artifact.solid_webui_readonly_preview_status,
-        textValue(artifact.audit_remediation_bridge_status, "unknown"),
-      ),
-    ),
-  );
-}
-
-function appFacingAuthority(
-  artifact: UnknownRecord,
-  sourceMode: AppFacingPreviewModel["sourceMode"],
-): AppFacingPreviewAuthority {
-  const previewDefault = sourceMode === "solid-webui-readonly-preview" || sourceMode === "ci-advisory-remediation-report";
-  return {
-    applied: booleanValue(artifact.applied) ?? false,
-    mutationAuthority: textValue(artifact.mutation_authority, "none"),
-    readOnlyPreview: booleanValue(artifact.read_only_preview) ?? previewDefault,
-    solidWebuiEnabled: booleanValue(artifact.solid_webui_enabled) ?? previewDefault,
-    solidWebuiRenderer: textValue(artifact.solid_webui_renderer, previewDefault ? "solidjs" : "pending"),
-    webuiBridge: textValue(artifact.webui_bridge, previewDefault ? "webui-dev/zig-webui" : "pending"),
-    hostedLiveDashboardEnabled: booleanValue(artifact.hosted_live_dashboard_enabled) ?? false,
-    appMutationControlsEnabled: booleanValue(artifact.app_mutation_controls_enabled) ?? false,
-    reactRendererEnabled: booleanValue(artifact.react_renderer_enabled) ?? false,
-    alternateRendererEnabled: booleanValue(artifact.alternate_renderer_enabled) ?? false,
-    nendbWriteEnabled: booleanValue(artifact.nendb_write_enabled) ?? false,
-    nendbAdapterExecutionEnabled: booleanValue(artifact.nendb_adapter_execution_enabled) ?? false,
-    durableWriteEnabled: booleanValue(artifact.durable_write_enabled) ?? false,
-    deploymentMutationEnabled: booleanValue(artifact.deployment_mutation_enabled) ?? false,
-    appRuntimeIntegrationEnabled: booleanValue(artifact.app_runtime_integration_enabled) ?? false,
-    agentQueryLiveProjectionEnabled: booleanValue(artifact.agent_query_live_projection_enabled) ?? false,
-  };
-}
-
-function appFacingChecks(value: unknown): AppFacingPreviewCheck[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.filter(isRecord).map((check) => ({
-    name: textValue(check.name, "unknown"),
-    status: textValue(check.status, "unknown"),
-    detail: textValue(check.detail, ""),
-  }));
-}
-
-function appFacingBridgeRecords(primary: unknown, fallback: unknown): AppFacingBridgeRecord[] {
-  const value = Array.isArray(primary) && primary.length > 0 ? primary : fallback;
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.filter(isRecord).map((record) => ({
-    id: textValue(record.id, "unknown"),
-    status: textValue(record.status, textValue(record.review_state, "ready")),
-    sourceRef: textValue(record.source_ref, textValue(record.source_handoff_fixture, textValue(record.audit_ref, ""))),
-    targetRef: textValue(record.target_ref, textValue(record.remediation_ref, textValue(record.review_state, ""))),
-    bridgeKind: textValue(record.bridge_kind, "unknown"),
-    retainedRefs: stringList(record.retained_refs),
-    blockedClaims: stringList(record.blocked_claims),
-  }));
-}
-
-function appFacingPreviewSections(value: unknown, fallback?: unknown): AppFacingPreviewSection[] {
-  const sections = Array.isArray(value) && value.length > 0 ? value : fallback;
-  if (!Array.isArray(sections)) {
-    return [];
-  }
-
-  return sections.filter(isRecord).map((section) => ({
-    id: textValue(section.id, "unknown"),
-    title: textValue(section.title, textValue(section.id, "unknown")),
-    evidenceRefs: stringList(section.evidence_refs),
-    blockedAuthority: stringList(section.blocked_authority),
-  }));
 }
 
 function appIncidents(value: unknown): AppIncidentModel[] {

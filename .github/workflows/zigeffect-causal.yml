@@ -78,3 +78,38 @@ jobs:
             packages/zigeffect/.zig-cache/causal-artifacts/*.dot
             packages/zigeffect/.zig-cache/release-gate/*.txt
             packages/zigeffect/.zig-cache/release-gate/*.json
+
+  tool-hygiene:
+    name: tool hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run tool hygiene check
+        shell: bash
+        run: |
+          chmod +x packages/zigeffect/tools/check_tool_hygiene.sh
+          packages/zigeffect/tools/check_tool_hygiene.sh
+
+      - name: Guard runtime-to-tools growth ratio (PR only)
+        if: ${{ github.event_name == 'pull_request' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="origin/${{ github.base_ref }}"
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          pkg="packages/zigeffect"
+          tools_added=$(git diff --numstat "$base"...HEAD -- "$pkg/tools/" \
+            | awk '{ a += $1 } END { print a+0 }')
+          src_changed=$(git diff --numstat "$base"...HEAD -- "$pkg/src/" \
+            | awk '{ a += $1 + $2 } END { print a+0 }')
+          echo "tools/ lines added: $tools_added ; src/ lines changed: $src_changed"
+          # A tool must add runtime capability, not paperwork: block a PR that
+          # dumps >2000 lines into tools/ while barely touching src/.
+          if [ "$tools_added" -gt 2000 ] && [ "$src_changed" -lt 50 ]; then
+            echo "::error::PR adds $tools_added lines to tools/ but changes only $src_changed lines in src/. See AGENTS.md > Tool Hygiene Policy."
+            exit 1
+          fi

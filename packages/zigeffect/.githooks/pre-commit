@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# zigeffect tool-hygiene pre-commit hook.
+# Enable once per clone:  git config core.hooksPath packages/zigeffect/.githooks
+#
+# Blocks a commit locally before a runaway loop's generated files reach a branch.
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+HYGIENE="$REPO_ROOT/packages/zigeffect/tools/check_tool_hygiene.sh"
+
+# Fast per-file checks on newly added staged tool files.
+staged=$(git diff --cached --name-only --diff-filter=A -- 'packages/zigeffect/tools/*.zig' || true)
+if [ -n "$staged" ]; then
+  while IFS= read -r rel; do
+    [ -z "$rel" ] && continue
+    f="$(basename "$rel")"; base="${f%.zig}"
+    if [ "${#base}" -gt 64 ]; then
+      echo "BLOCKED: $f name is ${#base} chars (max 64)." >&2; exit 1
+    fi
+    if printf '%s' "$base" | grep -Eq '_(two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)_level_'; then
+      echo "BLOCKED: $f matches banned <number>_level_ series." >&2; exit 1
+    fi
+    if printf '%s' "$base" | grep -oE '[a-z]+_[a-z]+' | sort | uniq -d | grep -q .; then
+      echo "BLOCKED: $f contains a repeated bigram token (report-about-a-report naming)." >&2; exit 1
+    fi
+  done <<< "$staged"
+fi
+
+# Run the full hygiene check so count and line caps are enforced too.
+if [ -x "$HYGIENE" ]; then
+  "$HYGIENE"
+fi

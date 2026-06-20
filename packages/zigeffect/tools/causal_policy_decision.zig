@@ -1,3 +1,4 @@
+//hygiene:allow-long-file reason=local self-improvement policy engine over audit/decision/proposal/chain inputs
 const std = @import("std");
 const causal_run = @import("causal_run");
 

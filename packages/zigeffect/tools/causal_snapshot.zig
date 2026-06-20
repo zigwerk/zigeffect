@@ -1,3 +1,4 @@
+//hygiene:allow-long-file reason=snapshot manifest, fork-proposal, replay-feasibility and compare in one CLI
 const std = @import("std");
 const causal_artifact = @import("causal_artifact");
 const causal_compare = @import("causal_compare");

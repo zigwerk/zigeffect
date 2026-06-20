@@ -101,11 +101,7 @@ function sampleNameFromSearch(search: string): string {
   if (sample === "app-review") return "sample-app-human-review.json";
   if (sample === "app-readiness") return "sample-app-application-readiness.json";
   if (sample === "app-application") return "sample-app-application.json";
-  if (sample === "live") return "sample-live-dashboard-stream.json";
   if (sample === "visual-graph") return "sample-visual-graph-debugging.json";
-  if (sample === "production-telemetry") return "sample-production-telemetry-nendb-retention-fixtures.json";
-  if (sample === "app-preview") return "sample-app-facing-solid-webui-readonly-preview.json";
-  if (sample === "app-ci-advisory") return "sample-app-facing-ci-advisory-remediation-report.json";
   return "sample-artifact.json";
 }
 

@@ -1,3 +1,4 @@
+//hygiene:allow-long-file reason=full agent query surface (cause/lineage/resources/fibers/requirements/retries/--agent)
 const std = @import("std");
 const causal_artifact = @import("causal_artifact");
 

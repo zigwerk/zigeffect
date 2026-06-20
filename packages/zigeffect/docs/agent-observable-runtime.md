@@ -102,14 +102,9 @@ and findings. Future work is about production adapters, durable histories,
 replay, workbench UI, and policy-controlled remediation rather than inventing
 the core event shape.
 
-The production-hardening surface now includes deterministic contracts for
-artifact aggregation, NenDB-only durable retention, manual production
-deployment runbooks, record-only artifact access control, and the unified
-causal spine. Agents can use those contracts to reason about deploy, rollback,
-causal verification, incident-response readiness, visibility, denied-view audit
-posture, shared ids, relationship vocabulary, projection boundaries, and next
-runtime work without assuming zigeffect can mutate production systems or
-enforce live RBAC.
+The production-hardening direction is tracked separately in
+[roadmap.md](roadmap.md). It stays record-only and never assumes zigeffect can
+mutate production systems or enforce live RBAC.
 
 ## Two Agent Audiences
 
@@ -556,16 +551,7 @@ agent can ask about directly.
 
 ### Dual-Interface Causal Spine
 
-The unified spine contract now exists as
-`zigeffect.causal.unified-spine-contract.v1` and is printed by:
-
-```sh
-cd packages/zigeffect
-zig build causal-unified-spine-contract
-zig build causal-unified-spine-contract -- --format json
-```
-
-The runtime should evolve around this one causal truth model with two consumer
+The runtime should evolve around one causal truth model with two consumer
 surfaces:
 
 - humans use the SolidJS `zig-webui` workbench to read, view, manage, and
@@ -1052,21 +1038,6 @@ limitations, and recommended next queries. Use `trace_data <data_subject_ref>`
 for semantic app data-lineage events and `compare_runs <left_run_id>:<right_run_id>`
 for bounded before/after runtime comparison.
 
-`zig build causal-human-agent-feedback-loop` records the shared human and agent
-loop around those primitives. It emits
-`zigeffect.causal.human-agent-feedback-loop.v1` and names the five record-only
-stages: failure-to-query, before/after trace comparison, regression clustering
-records, guarded remediation proposal handoff, and future NenDB durable-history
-handoff. The report is a contract and evidence index. It keeps `applied=false`,
-`mutation_authority=none`, `workbench_mutation=false`, and
-`agent_mutation=false`; it does not execute queries, apply remediation, or write
-durable history.
-
-```sh
-zig build causal-human-agent-feedback-loop
-zig build causal-human-agent-feedback-loop -- --format json
-```
-
 The companion `zig build causal-check` command runs the same dogfood scenario in
 fail-on-findings mode. It writes artifacts first, then exits nonzero when
 findings exist. This is the first development-agent gate; real failing-test
@@ -1230,41 +1201,6 @@ evidence, before/after evidence, and required post-application verification
 are recorded. It is a record-only boundary; source, config, migrations,
 operations, rollback plans, deployments, queues, databases, and external state
 are still changed outside the command.
-
-`zig build causal-app-facing-production-integration-fixtures` emits
-`zigeffect.causal.app-facing-production-integration-fixtures.v1`, a
-deterministic fixture-only catalog for app production integration evidence.
-Agents should use it to connect app traces, app semantic refs, `trace_data`
-queries, audit-chain before/after review, app remediation governance,
-production telemetry fixture boundaries, and NenDB durable-history refs before
-the readiness-review gate. It keeps `applied=false`,
-`mutation_authority=none`, live telemetry disabled, durable writes disabled,
-app mutation disabled, CI gates disabled, and durable scope NenDB-only.
-
-`zig build causal-app-facing-production-integration-readiness-review --
---from-fixtures <app-facing-fixtures-json> approve --reason <reason>
---verified-command <command>` emits
-`zigeffect.causal.app-facing-production-integration-readiness-review.v1`.
-It records whether the fixtures are ready for an implementation-proposal
-branch, checks required source contracts and fixture coverage, verifies
-NenDB-only durable direction, blocks Cockroach scope and alternate renderers,
-and keeps app mutation, live telemetry, durable writes, and CI gates disabled.
-`ready_for_implementation_proposal=true` is permission to start proposal work
-only. It is not evidence that app code, config, data, deployments, telemetry,
-storage, or CI state changed.
-
-`zig build causal-app-facing-production-integration-implementation-proposal --
---from-readiness <app-facing-readiness-json> approve --reason <reason>
---verified-command <command>` emits
-`zigeffect.causal.app-facing-production-integration-implementation-proposal.v1`.
-It consumes a ready readiness-review artifact, verifies that readiness checks
-and verification commands are still cited, records a proposal decision, and
-hands off only to the guarded app-facing production integration boundary. The
-proposal phases cover app runtime refs, bounded agent-query projection,
-NenDB-history handoff, audit/remediation bridge, SolidJS webui read-only
-preview, and advisory CI artifacts. It keeps app mutation, raw payload access,
-live telemetry, durable writes, CI gates, Cockroach scope, alternate renderers,
-and `applied=true` outside proposal authority.
 
 `zig build causal-dev-loop -- baseline` and
 `zig build causal-dev-loop -- after` are the first orchestration layer around
