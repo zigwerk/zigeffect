@@ -820,6 +820,13 @@ pub const CausalStore = struct {
         return id;
     }
 
+    // INVARIANT: `record` must contain no suspension/yield point. When a store is
+    // shared across cooperative fibers on a single executor (e.g. the zio backend
+    // with `executors = .exact(1)`), correctness relies on `record` running
+    // atomically between cooperative yields — no fiber may be scheduled mid-record.
+    // A store shared across OS threads (multiple executors / task migration) would
+    // need external synchronization; that is out of scope for the current
+    // single-threaded async model.
     pub fn record(self: *CausalStore, event: CausalEvent) Allocator.Error!u64 {
         const event_id = self.next_event_id;
         if (!self.shouldRecordBySampling(event.kind)) {

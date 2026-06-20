@@ -39,7 +39,6 @@ pub const SuspensionCoordinator = struct {
     store: *CausalStore,
     backend: AsyncBackend,
     records: std.ArrayList(Record) = .empty,
-    next_suspension_id: u64 = 1,
 
     pub fn init(allocator: Allocator, store: *CausalStore, backend: AsyncBackend) SuspensionCoordinator {
         return .{ .allocator = allocator, .store = store, .backend = backend };
@@ -65,8 +64,9 @@ pub const SuspensionCoordinator = struct {
     /// Park a fiber on a timer: emit `fiber_suspended` + `timer_scheduled` and
     /// register the timer with the backend. Returns the suspension id.
     pub fn suspendOnTimer(self: *SuspensionCoordinator, request: SuspendOnTimer) SuspensionError!u64 {
-        const sid = self.next_suspension_id;
-        self.next_suspension_id += 1;
+        // Globally unique across all coordinators sharing this store, so timer
+        // correlation by schedule_id never conflates two concurrent fibers.
+        const sid = self.store.nextScheduleId();
 
         const suspended_id = try self.store.record(.{
             .kind = .fiber_suspended,
@@ -119,8 +119,7 @@ pub const SuspensionCoordinator = struct {
     /// fiber_resumed. The SAME engine code drives both backends, so the causal
     /// trace is identical — only the wait is virtual vs real.
     pub fn delay(self: *SuspensionCoordinator, request: SuspendOnTimer) SuspensionError!void {
-        const sid = self.next_suspension_id;
-        self.next_suspension_id += 1;
+        const sid = self.store.nextScheduleId();
 
         const suspended = try self.store.record(.{
             .kind = .fiber_suspended,
@@ -147,7 +146,28 @@ pub const SuspensionCoordinator = struct {
             .type_name = "Timer",
         });
 
-        try self.backend.blockingSleep(request.due_time_ms);
+        // If the wait is interrupted (e.g. the fiber's scope is cancelled while
+        // it is parked on a real zio.sleep), record an interruption — NOT a
+        // resumption — and propagate. Without this, a cancelled delay would
+        // fabricate a timer_fired + fiber_resumed and the causal graph would lie.
+        self.backend.blockingSleep(request.due_time_ms) catch |err| {
+            if (err == error.Interrupted) {
+                _ = try self.store.record(.{
+                    .kind = .fiber_interrupted,
+                    .run_id = request.run_id,
+                    .fiber_id = request.fiber_id,
+                    .scope_id = request.scope_id,
+                    .parent_id = suspended,
+                    .cause_event_id = suspended,
+                    .schedule_id = sid,
+                    .status = "interrupted",
+                    .label = "delay interrupted",
+                    .type_name = "Suspension",
+                });
+                return error.Interrupted;
+            }
+            return err;
+        };
 
         const fired = try self.store.record(.{
             .kind = .timer_fired,
@@ -182,8 +202,12 @@ pub const SuspensionCoordinator = struct {
         _ = try self.backend.advanceTime(now_ms);
         var resumed: usize = 0;
         while (try self.backend.pollWake()) |event| {
-            const rec = self.findRecord(event.suspension.id) orelse continue;
-            if (rec.resumed) continue;
+            const idx = self.findRecordIndex(event.suspension.id) orelse continue;
+            if (self.records.items[idx].resumed) continue;
+            // Copy the record by value: store.record() below could grow another
+            // ArrayList, and holding a pointer into self.records across it would
+            // be a use-after-free if it ever reallocated. Re-index to mutate.
+            const rec = self.records.items[idx];
 
             const fired_id = try self.store.record(.{
                 .kind = .timer_fired,
@@ -211,7 +235,7 @@ pub const SuspensionCoordinator = struct {
                 .type_name = "Suspension",
             });
 
-            rec.resumed = true;
+            self.records.items[idx].resumed = true;
             resumed += 1;
         }
         return resumed;
@@ -226,9 +250,9 @@ pub const SuspensionCoordinator = struct {
         return count;
     }
 
-    fn findRecord(self: *SuspensionCoordinator, suspension_id: u64) ?*Record {
-        for (self.records.items) |*rec| {
-            if (rec.suspension_id == suspension_id) return rec;
+    fn findRecordIndex(self: *SuspensionCoordinator, suspension_id: u64) ?usize {
+        for (self.records.items, 0..) |rec, index| {
+            if (rec.suspension_id == suspension_id) return index;
         }
         return null;
     }

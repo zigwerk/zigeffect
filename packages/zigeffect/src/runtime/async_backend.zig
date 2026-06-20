@@ -15,6 +15,9 @@ pub const AsyncBackendError = error{
     UnsupportedBackendCapability,
     UnknownSuspension,
     InvalidIoWaitKind,
+    // A blocking wait (e.g. blocking_sleep) was interrupted/cancelled before it
+    // completed — the fiber must record an interruption, not a resumption.
+    Interrupted,
     OutOfMemory,
 };
 
@@ -566,7 +569,9 @@ fn localSnapshot(context: ?*anyopaque) AsyncBackendSnapshot {
 fn localBlockingSleep(context: ?*anyopaque, ms: u64) AsyncBackendError!void {
     const state: *LocalAsyncBackendState = @ptrCast(@alignCast(context.?));
     // Virtual, instant: advance the clock by `ms`, firing any now-due timers.
-    _ = try state.advanceTo(state.now_ms + ms);
+    // Saturating add so a huge delay cannot overflow the clock (which would
+    // otherwise panic in Debug or silently move time backwards in ReleaseFast).
+    _ = try state.advanceTo(state.now_ms +| ms);
 }
 
 const unsupported_vtable: AsyncBackend.VTable = .{
