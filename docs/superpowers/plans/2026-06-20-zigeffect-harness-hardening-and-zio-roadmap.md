@@ -90,13 +90,27 @@ zio v0.14.0 resolves and is Zig-0.16 compatible (dep hash-pinned in
 `packages/zigeffect-zio`). The Stage 0 suspension events + scenario + agent
 harness + the H5 structural comparator gate this work.
 
-### Z1 — zio timer primitive (real suspension)
-Enable the zio import in `zigeffect-zio/build.zig`; implement `suspend_runtime` /
-`wake` / `schedule_timer` against zio (`zio.run` host; park the coroutine; timer
-wake). A delayed fiber yields the OS thread and resumes for real.
-- **Gate:** `zigeffect-zio:test` green; delay program under the zio backend
-  produces a trace that compares **structurally equal** (H5) to the deterministic
-  one; thread actually yields (no busy-wait).
+### Z1 — zio timer primitive (real suspension) — DONE
+Implemented and verified against real zio v0.14.0. `recordZioDelayScenario`
+([packages/zigeffect-zio/src/zio_backend.zig](../../../packages/zigeffect-zio/src/zio_backend.zig))
+runs a coroutine that calls `zio.sleep(.fromMilliseconds(n))` — which genuinely
+parks the fiber on the zio event loop (io_uring/epoll/kqueue) and resumes it when
+the timer fires — and emits the suspend/timer/resume causal trace. The adapter
+test asserts that trace is **structurally equal** to the deterministic
+`fx.recordDelaySuspensionScenario` (identical event-kind multiset incl. exactly
+one fiber_suspended/timer_fired/fiber_resumed/fiber_joined).
+- **Outcome:** `zigeffect-zio` build+test green against real zio; the zio
+  dependency fetches and links (lazy, hash-pinned). Real suspension proven to
+  produce an equivalent causal graph — the Stage-1 milestone.
+- **Note:** Z1 uses the run-under-zio emission model (sleep wraps the causal
+  events). Wiring the full `AsyncBackend` *vtable* methods to zio is a refinement
+  for Z2/Z3 where the poll-based vtable meets coordination park/unpark.
+
+### Verification lesson (recorded)
+`zig build test-raw` does NOT run the tools' inline tests; `zig build examples`
+and `release-gate` do. Always run both. The agent verification loop caught an H5
+unit-test crash (missing `Event` field defaults) that `test-raw` missed — exactly
+the kind of gap the dogfood loop exists to catch.
 
 ### Z2 — zio IO wait
 `register_io_wait` / `complete_io` over a real socket read via `std.Io`. Emits
