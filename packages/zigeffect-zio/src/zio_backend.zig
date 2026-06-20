@@ -26,7 +26,22 @@ const zio = @import("zio");
 /// at fork time; `join` awaits it. The engine core stays zio-free — all zio
 /// lives here behind the executor vtable. The same effect program is therefore
 /// deterministically debuggable (no executor) and really concurrent (this
-/// executor), producing the same causal structure either way.
+/// executor), producing the same causal structure either way (for joined fibers
+/// — see `fx.FiberExecutor`).
+///
+/// Usage contract:
+///   - A live zio runtime must be active on the calling thread (i.e. you are
+///     running under `zio.Runtime.init` / inside a zio task). `fork` calls
+///     `zio.spawn`, which panics if invoked with no current executor.
+///   - The zio runtime must be SINGLE-EXECUTOR (the default `.exact(1)`). The
+///     engine's `CausalStore` (and typically the services the fibers touch) is
+///     not thread-safe — it relies on cooperative single-threaded scheduling so
+///     that `CausalStore.record` runs atomically between yields (see the
+///     invariant on `CausalStore.record`). A multi-executor runtime would run
+///     fibers in true parallel and race on the store.
+///   - The zio runtime must outlive the `FiberRuntime`: a fiber forked but never
+///     joined is awaited at the `FiberRuntime`'s deinit, which requires the
+///     backing runtime to still be able to complete it.
 pub const ZioFiberExecutor = struct {
     allocator: std.mem.Allocator,
 
