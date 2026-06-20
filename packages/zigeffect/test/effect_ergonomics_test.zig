@@ -147,6 +147,63 @@ test "M3.7 — all short-circuits on first failure" {
     try std.testing.expectError(error.Boom, result);
 }
 
+const DoubleBody = struct {
+    fn run(item: u32, ctx: *fx.Context(fx.TestServices)) fixtures.TestError!u32 {
+        _ = ctx;
+        return item * 2;
+    }
+    fn fails(item: u32, ctx: *fx.Context(fx.TestServices)) fixtures.TestError!u32 {
+        _ = ctx;
+        if (item == 2) return error.Boom;
+        return item * 2;
+    }
+};
+
+test "M3.10 — forEachAlloc collects per-item results sequentially" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+    var rt = runtime(&env);
+
+    const items = [_]u32{ 1, 2, 3 };
+    const program = fx.forEachAlloc(u32, u32, fixtures.TestError, fx.TestServices, &items, DoubleBody.run);
+    const results = try rt.run(program);
+    defer std.testing.allocator.free(results);
+
+    try std.testing.expectEqualSlices(u32, &.{ 2, 4, 6 }, results);
+}
+
+test "M3.10 — forEachAlloc short-circuits on body failure and frees the partial slice" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+    var rt = runtime(&env);
+
+    const items = [_]u32{ 1, 2, 3 };
+    const program = fx.forEachAlloc(u32, u32, fixtures.TestError, fx.TestServices, &items, DoubleBody.fails);
+    const result = rt.run(program);
+    try std.testing.expectError(error.Boom, result);
+    // testing.allocator would flag a leak if the partial slice wasn't freed.
+}
+
+const Accum = struct {
+    var total: u32 = 0;
+    fn run(item: u32, ctx: *fx.Context(fx.TestServices)) fixtures.TestError!void {
+        _ = ctx;
+        total += item;
+    }
+};
+
+test "M3.11 — forEachDiscard runs the side-effecting body over every item" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+    var rt = runtime(&env);
+
+    Accum.total = 0;
+    const items = [_]u32{ 1, 2, 3, 4 };
+    const program = fx.forEachDiscard(u32, fixtures.TestError, fx.TestServices, &items, Accum.run);
+    try rt.run(program);
+    try std.testing.expectEqual(@as(u32, 10), Accum.total);
+}
+
 test "ergonomics compose with the existing pipeline (e.g. .map after .as)" {
     var env = try fx.TestEnv.init(std.testing.allocator);
     defer env.deinit();

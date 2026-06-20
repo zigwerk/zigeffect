@@ -215,6 +215,101 @@ pub fn ZipWithEffect(
     };
 }
 
+/// Sequential traversal — apply `body(item, ctx)` to each input item,
+/// collecting the per-item results into an allocated slice. Failure short-
+/// circuits; the partial result slice is freed before the error returns.
+/// `EnvType` is the effect environment the body runs against.
+pub fn ForEachAllocEffect(
+    comptime Item: type,
+    comptime Result: type,
+    comptime Failure: type,
+    comptime Env: type,
+) type {
+    return struct {
+        const Self = @This();
+        pub const SuccessType = []Result;
+        pub const FailureType = Failure;
+        pub const EnvType = Env;
+
+        items: []const Item,
+        body: *const fn (Item, *Context(Env)) Failure!Result,
+
+        pub fn run(self: Self, ctx: *Context(Env)) Failure!SuccessType {
+            const results = ctx.allocator.alloc(Result, self.items.len) catch
+                return @as(Failure, error.OutOfMemory);
+            errdefer ctx.allocator.free(results);
+            for (self.items, 0..) |item, i| {
+                results[i] = try self.body(item, ctx);
+            }
+            return results;
+        }
+
+        pub fn exit(self: Self, ctx: *Context(Env)) Exit(SuccessType, Failure) {
+            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            return .{ .success = value };
+        }
+
+        pub fn map(
+            self: Self,
+            comptime Next: type,
+            mapper: *const fn (SuccessType) Next,
+        ) effect_mod.MapEffect(Self, Next, Failure, Env) {
+            return .{ .parent = self, .mapper = mapper };
+        }
+
+        pub fn flatMap(
+            self: Self,
+            comptime Next: type,
+            binder: *const fn (SuccessType, *Context(Env)) Failure!Next,
+        ) effect_mod.FlatMapEffect(Self, Next, Failure, Env) {
+            return .{ .parent = self, .binder = binder };
+        }
+    };
+}
+
+/// Sequential traversal that discards per-item results. Yields `void`.
+/// Useful for "apply side-effecting body to each item; stop on first failure".
+pub fn ForEachDiscardEffect(
+    comptime Item: type,
+    comptime Failure: type,
+    comptime Env: type,
+) type {
+    return struct {
+        const Self = @This();
+        pub const SuccessType = void;
+        pub const FailureType = Failure;
+        pub const EnvType = Env;
+
+        items: []const Item,
+        body: *const fn (Item, *Context(Env)) Failure!void,
+
+        pub fn run(self: Self, ctx: *Context(Env)) Failure!void {
+            for (self.items) |item| try self.body(item, ctx);
+        }
+
+        pub fn exit(self: Self, ctx: *Context(Env)) Exit(void, Failure) {
+            self.run(ctx) catch |err| return .{ .failure = err };
+            return .{ .success = {} };
+        }
+
+        pub fn map(
+            self: Self,
+            comptime Next: type,
+            mapper: *const fn (void) Next,
+        ) effect_mod.MapEffect(Self, Next, Failure, Env) {
+            return .{ .parent = self, .mapper = mapper };
+        }
+
+        pub fn flatMap(
+            self: Self,
+            comptime Next: type,
+            binder: *const fn (void, *Context(Env)) Failure!Next,
+        ) effect_mod.FlatMapEffect(Self, Next, Failure, Env) {
+            return .{ .parent = self, .binder = binder };
+        }
+    };
+}
+
 /// Sequential gather over a slice of homogeneous effects. Allocates a result
 /// slice via `ctx.allocator`; caller owns and frees it. Failure short-circuits
 /// — any results already collected are freed before returning the error.

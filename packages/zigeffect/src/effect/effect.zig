@@ -11,11 +11,37 @@ pub const ZipEffect = ergonomics_mod.ZipEffect;
 pub const ZipWithEffect = ergonomics_mod.ZipWithEffect;
 pub const ZipPair = ergonomics_mod.ZipPair;
 pub const AllEffect = ergonomics_mod.AllEffect;
+pub const ForEachAllocEffect = ergonomics_mod.ForEachAllocEffect;
+pub const ForEachDiscardEffect = ergonomics_mod.ForEachDiscardEffect;
 
 /// M3.7 — sequential gather over a homogeneous slice of effects. Allocates a
 /// result slice via `ctx.allocator`; caller frees it. Failure short-circuits.
 pub fn all(comptime Item: type, comptime Failure: type, comptime Env: type, items: []const Item) AllEffect(Item, Failure, Env) {
     return .{ .items = items };
+}
+
+/// M3.10 — sequential traversal collecting per-item results into an allocated
+/// slice. Caller frees the returned slice; failure short-circuits.
+pub fn forEachAlloc(
+    comptime Item: type,
+    comptime Result: type,
+    comptime Failure: type,
+    comptime Env: type,
+    items: []const Item,
+    body: *const fn (Item, *context_mod.Context(Env)) Failure!Result,
+) ForEachAllocEffect(Item, Result, Failure, Env) {
+    return .{ .items = items, .body = body };
+}
+
+/// M3.11 — sequential traversal discarding per-item results.
+pub fn forEachDiscard(
+    comptime Item: type,
+    comptime Failure: type,
+    comptime Env: type,
+    items: []const Item,
+    body: *const fn (Item, *context_mod.Context(Env)) Failure!void,
+) ForEachDiscardEffect(Item, Failure, Env) {
+    return .{ .items = items, .body = body };
 }
 
 pub const Allocator = std.mem.Allocator;
