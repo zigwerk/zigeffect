@@ -363,7 +363,7 @@ fn actionNameForEvent(events: []const Event, event: Event) ?[]const u8 {
     if (std.mem.eql(u8, event.kind, "resource_acquired") and !hasFinalizedResource(events, event)) {
         return "close-resource";
     }
-    if ((std.mem.eql(u8, event.kind, "fiber_forked") or std.mem.eql(u8, event.kind, "fiber_started")) and (std.mem.eql(u8, event.status, "pending") or std.mem.eql(u8, event.status, "running"))) {
+    if ((std.mem.eql(u8, event.kind, "fiber_forked") or std.mem.eql(u8, event.kind, "fiber_started")) and (std.mem.eql(u8, event.status, "pending") or std.mem.eql(u8, event.status, "running")) and !fiberResolved(events, event)) {
         return "resolve-scoped-fiber";
     }
     if (std.mem.eql(u8, event.kind, "schedule_decision") and std.mem.eql(u8, event.status, "exhausted")) {
@@ -517,6 +517,20 @@ fn hasFinalizedResource(events: []const Event, acquired: Event) bool {
         if (event.scope_id != acquired.scope_id) continue;
         if (!std.mem.eql(u8, event.type_name, acquired.type_name)) continue;
         return true;
+    }
+    return false;
+}
+
+// A scoped fiber is resolved once it reaches a terminal lifecycle event
+// (fiber_joined or fiber_interrupted) for the same fiber id. A fiber that
+// suspended on a timer and later resumed and joined therefore needs no
+// resolve-scoped-fiber advice.
+fn fiberResolved(events: []const Event, fiber_event: Event) bool {
+    const fiber_id = fiber_event.fiber_id orelse return false;
+    for (events) |event| {
+        if (!std.mem.eql(u8, event.kind, "fiber_joined") and !std.mem.eql(u8, event.kind, "fiber_interrupted")) continue;
+        const candidate = event.fiber_id orelse continue;
+        if (candidate == fiber_id) return true;
     }
     return false;
 }

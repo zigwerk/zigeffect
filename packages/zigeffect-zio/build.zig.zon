@@ -1,0 +1,25 @@
+.{
+    .name = .zigeffect_zio,
+    .version = "0.0.0",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0xb57e11c8f544afc8,
+    .dependencies = .{
+        // Stage 1: enable with
+        //   zig fetch --save "git+https://github.com/lalinsky/zio#v0.14.0"
+        // which fills in the .hash below. zio's `main` branch targets Zig 0.16;
+        // use the `zig-0.17` branch for Zig master.
+        .zio = .{
+            .url = "git+https://github.com/lalinsky/zio#v0.14.0",
+            .hash = "zio-0.14.0-xHbVVPxFHgBCop4CvfF4u360kzWlHD4FS8Ud-RIkPcZ7",
+            .lazy = true,
+        },
+        .zigeffect = .{
+            .path = "../zigeffect",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

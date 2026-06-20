@@ -8,6 +8,9 @@ pub const dot_path = artifact_dir ++ "/zigeffect-causal-dogfood.dot";
 pub const workflow_crash_recovery_report_path = artifact_dir ++ "/zigeffect-causal-workflow-crash-recovery.txt";
 pub const workflow_crash_recovery_json_path = artifact_dir ++ "/zigeffect-causal-workflow-crash-recovery.json";
 pub const workflow_crash_recovery_dot_path = artifact_dir ++ "/zigeffect-causal-workflow-crash-recovery.dot";
+pub const delay_suspension_report_path = artifact_dir ++ "/zigeffect-causal-delay-suspension.txt";
+pub const delay_suspension_json_path = artifact_dir ++ "/zigeffect-causal-delay-suspension.json";
+pub const delay_suspension_dot_path = artifact_dir ++ "/zigeffect-causal-delay-suspension.dot";
 
 pub const ArtifactSet = struct {
     report_path: []const u8,
@@ -230,6 +233,36 @@ pub fn buildWorkflowCrashRecoveryArtifacts(allocator: std.mem.Allocator) std.mem
     };
 }
 
+pub fn buildDelaySuspensionArtifacts(allocator: std.mem.Allocator) fx.SuspensionError!ArtifactSet {
+    var store = fx.CausalStore.init(allocator);
+    defer store.deinit();
+    var backend_state = fx.LocalAsyncBackendState.init(allocator, .{});
+    defer backend_state.deinit();
+
+    _ = try fx.recordDelaySuspensionScenario(allocator, &store, backend_state.backend(), 10);
+
+    var findings = try store.findings(allocator);
+    defer findings.deinit();
+    const finding_count = findings.items.len;
+
+    const report = try fx.formatCausalCiReport(allocator, "zigeffect delay suspension", &store);
+    errdefer allocator.free(report);
+    const json = try fx.formatCausalJson(allocator, &store);
+    errdefer allocator.free(json);
+    const dot = try fx.formatCausalDot(allocator, &store);
+    errdefer allocator.free(dot);
+
+    return .{
+        .report_path = delay_suspension_report_path,
+        .json_path = delay_suspension_json_path,
+        .dot_path = delay_suspension_dot_path,
+        .report = report,
+        .json = json,
+        .dot = dot,
+        .finding_count = finding_count,
+    };
+}
+
 pub fn exitCodeForFindings(finding_count: usize, fail_on_findings: bool) u8 {
     if (fail_on_findings and finding_count > 0) return 1;
     return 0;
@@ -270,13 +303,16 @@ pub fn main(init: std.process.Init) !void {
     defer artifacts.deinit(allocator);
     const workflow_artifacts = try buildWorkflowCrashRecoveryArtifacts(allocator);
     defer workflow_artifacts.deinit(allocator);
+    const delay_artifacts = try buildDelaySuspensionArtifacts(allocator);
+    defer delay_artifacts.deinit(allocator);
 
     try writeArtifacts(init.io, artifacts);
     try writeArtifacts(init.io, workflow_artifacts);
+    try writeArtifacts(init.io, delay_artifacts);
 
-    const total_finding_count = artifacts.finding_count + workflow_artifacts.finding_count;
+    const total_finding_count = artifacts.finding_count + workflow_artifacts.finding_count + delay_artifacts.finding_count;
     std.debug.print(
-        "zigeffect causal dogfood artifacts written:\n- {s}\n- {s}\n- {s}\n- {s}\n- {s}\n- {s}\nfindings: {d}\n",
+        "zigeffect causal dogfood artifacts written:\n- {s}\n- {s}\n- {s}\n- {s}\n- {s}\n- {s}\n- {s}\n- {s}\n- {s}\nfindings: {d}\n",
         .{
             artifacts.report_path,
             artifacts.json_path,
@@ -284,6 +320,9 @@ pub fn main(init: std.process.Init) !void {
             workflow_artifacts.report_path,
             workflow_artifacts.json_path,
             workflow_artifacts.dot_path,
+            delay_artifacts.report_path,
+            delay_artifacts.json_path,
+            delay_artifacts.dot_path,
             total_finding_count,
         },
     );
