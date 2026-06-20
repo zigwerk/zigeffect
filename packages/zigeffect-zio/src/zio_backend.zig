@@ -158,6 +158,90 @@ pub fn recordZioIoScenario(store: *fx.CausalStore) !void {
     if (n == 0) return error.NoDataRead;
 }
 
+/// Z3b: real concurrent coordination. A consumer coroutine parks on an empty
+/// zio.Channel; a producer coroutine sends a value, waking it. Two fibers
+/// genuinely interleave on one cooperative executor; the consumer's fiber_resumed
+/// is caused by the producer's send — cross-fiber coordination causality.
+const Z3bCtx = struct {
+    store: *fx.CausalStore,
+    run_id: u64,
+    scope_id: u64,
+    channel: *zio.Channel(i32),
+    producer_forked: u64,
+    consumer_forked: u64,
+    send_event_id: u64 = 0,
+    received: i32 = -1,
+    err: ?anyerror = null,
+};
+
+fn z3bConsumer(ctx: *Z3bCtx) void {
+    const started = ctx.store.record(.{ .kind = .fiber_started, .run_id = ctx.run_id, .scope_id = ctx.scope_id, .fiber_id = 2, .parent_id = ctx.consumer_forked, .status = "running", .label = "consumer fiber" }) catch |e| {
+        ctx.err = e;
+        return;
+    };
+    const suspended = ctx.store.record(.{ .kind = .fiber_suspended, .run_id = ctx.run_id, .scope_id = ctx.scope_id, .fiber_id = 2, .parent_id = started, .cause_event_id = started, .schedule_id = 2, .status = "pending", .label = "consumer awaiting channel", .type_name = "Suspension" }) catch |e| {
+        ctx.err = e;
+        return;
+    };
+    ctx.received = ctx.channel.receive() catch |e| {
+        ctx.err = e;
+        return;
+    };
+    _ = ctx.store.record(.{ .kind = .fiber_resumed, .run_id = ctx.run_id, .scope_id = ctx.scope_id, .fiber_id = 2, .parent_id = suspended, .cause_event_id = ctx.send_event_id, .schedule_id = 2, .status = "running", .label = "consumer resumed by send", .type_name = "Suspension" }) catch |e| {
+        ctx.err = e;
+        return;
+    };
+    _ = ctx.store.record(.{ .kind = .fiber_joined, .run_id = ctx.run_id, .scope_id = ctx.scope_id, .fiber_id = 2, .parent_id = suspended, .status = "success", .label = "consumer fiber" }) catch |e| {
+        ctx.err = e;
+    };
+}
+
+fn z3bProducer(ctx: *Z3bCtx) void {
+    zio.sleep(zio.Duration.fromMilliseconds(5)) catch {};
+    const started = ctx.store.record(.{ .kind = .fiber_started, .run_id = ctx.run_id, .scope_id = ctx.scope_id, .fiber_id = 1, .parent_id = ctx.producer_forked, .status = "running", .label = "producer fiber" }) catch |e| {
+        ctx.err = e;
+        return;
+    };
+    const send_event = ctx.store.record(.{ .kind = .effect_started, .run_id = ctx.run_id, .scope_id = ctx.scope_id, .fiber_id = 1, .parent_id = started, .status = "started", .label = "channel send", .type_name = "ChannelSend" }) catch |e| {
+        ctx.err = e;
+        return;
+    };
+    ctx.send_event_id = send_event;
+    ctx.channel.send(42) catch |e| {
+        ctx.err = e;
+        return;
+    };
+    _ = ctx.store.record(.{ .kind = .fiber_joined, .run_id = ctx.run_id, .scope_id = ctx.scope_id, .fiber_id = 1, .parent_id = started, .status = "success", .label = "producer fiber" }) catch |e| {
+        ctx.err = e;
+    };
+}
+
+pub fn recordZioCoordinationScenario(store: *fx.CausalStore) !void {
+    const run_id = store.nextRunId();
+    const scope_id = store.nextScopeId();
+
+    const run_started = try store.record(.{ .kind = .run_started, .run_id = run_id, .status = "started", .label = "zio-coordination", .type_name = "ZioCoordinationScenario" });
+    const scope_opened = try store.record(.{ .kind = .scope_opened, .run_id = run_id, .scope_id = scope_id, .parent_id = run_started, .status = "opened", .label = "coordination scope" });
+    const producer_forked = try store.record(.{ .kind = .fiber_forked, .run_id = run_id, .scope_id = scope_id, .fiber_id = 1, .parent_id = scope_opened, .status = "pending", .label = "producer fiber" });
+    const consumer_forked = try store.record(.{ .kind = .fiber_forked, .run_id = run_id, .scope_id = scope_id, .fiber_id = 2, .parent_id = scope_opened, .status = "pending", .label = "consumer fiber" });
+
+    var buffer: [1]i32 = undefined;
+    var channel = zio.Channel(i32).init(&buffer);
+    var ctx = Z3bCtx{ .store = store, .run_id = run_id, .scope_id = scope_id, .channel = &channel, .producer_forked = producer_forked, .consumer_forked = consumer_forked };
+
+    var group: zio.Group = .init;
+    try group.spawn(z3bConsumer, .{&ctx});
+    try group.spawn(z3bProducer, .{&ctx});
+    try group.wait();
+
+    if (ctx.err) |err| return err;
+
+    _ = try store.record(.{ .kind = .scope_closed, .run_id = run_id, .scope_id = scope_id, .parent_id = run_started, .status = "closed", .label = "coordination scope" });
+    _ = try store.record(.{ .kind = .exit_recorded, .run_id = run_id, .parent_id = run_started, .status = "success", .label = "zio-coordination" });
+
+    if (ctx.received != 42) return error.WrongValue;
+}
+
 fn kindCount(events: []fx.CausalEvent, kind: fx.CausalEventKind) usize {
     var count: usize = 0;
     for (events) |event| {
@@ -311,6 +395,41 @@ test "Z1: zio-backed delay suspends for real and yields a structurally-equal cau
     try std.testing.expectEqual(kindCount(det_snap.events, .fiber_joined), kindCount(zio_snap.events, .fiber_joined));
     try std.testing.expectEqual(@as(usize, 1), kindCount(zio_snap.events, .fiber_suspended));
     try std.testing.expectEqual(@as(usize, 1), kindCount(zio_snap.events, .fiber_resumed));
+}
+
+test "Z3b: two coroutines interleave over a zio.Channel; consumer resume is caused by producer send" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+
+    var store = fx.CausalStore.init(allocator);
+    defer store.deinit();
+    try recordZioCoordinationScenario(&store);
+
+    var snap = try store.snapshot(allocator);
+    defer snap.deinit();
+
+    // both fibers reached a terminal join; the consumer parked and resumed
+    try std.testing.expectEqual(@as(usize, 2), kindCount(snap.events, .fiber_joined));
+    try std.testing.expectEqual(@as(usize, 1), kindCount(snap.events, .fiber_suspended));
+    try std.testing.expectEqual(@as(usize, 1), kindCount(snap.events, .fiber_resumed));
+
+    // cross-fiber coordination: the consumer's resume is caused by the producer's send effect
+    var send_effect_id: ?u64 = null;
+    var resume_cause: ?u64 = null;
+    for (snap.events) |event| {
+        if (event.kind == .effect_started and std.mem.eql(u8, event.type_name, "ChannelSend")) send_effect_id = event.id;
+        if (event.kind == .fiber_resumed) resume_cause = event.cause_event_id;
+    }
+    try std.testing.expect(send_effect_id != null);
+    try std.testing.expectEqual(send_effect_id, resume_cause);
+
+    // no hang: the parked consumer was woken
+    var findings = try store.findings(allocator);
+    defer findings.deinit();
+    for (findings.items) |finding| {
+        try std.testing.expect(finding.kind != .fiber_suspended_without_resume);
+    }
 }
 
 test "Z2: a fiber blocks on a real socket read and resumes when data arrives" {
