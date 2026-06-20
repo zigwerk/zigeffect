@@ -48,6 +48,35 @@ const FiberRecord = struct {
     deinit: *const fn (?*anyopaque) void,
 };
 
+/// A unit of work the runtime hands to a `FiberExecutor`: run one fiber's effect
+/// to completion. `run` is type-erased over the fiber's Success/Failure/Env.
+pub const FiberJob = struct {
+    context: ?*anyopaque,
+    run: *const fn (?*anyopaque) void,
+};
+
+/// Pluggable execution strategy for forked fibers.
+///
+/// With NO executor (the default), fibers run synchronously to completion on
+/// `join` — the deterministic model, unchanged. An executor (e.g. the zio
+/// adapter) instead spawns each fiber as a real stackful coroutine at `fork`
+/// time, and `join` awaits it — so the SAME `Effect.fork` program runs with real
+/// concurrency while producing the same causal structure it does deterministically.
+pub const FiberExecutor = struct {
+    context: ?*anyopaque = null,
+    vtable: *const VTable,
+
+    pub const VTable = struct {
+        /// Schedule the job; return an opaque handle, or null to fall back to
+        /// synchronous execution (e.g. on spawn failure).
+        spawn: *const fn (?*anyopaque, FiberJob) ?*anyopaque,
+        /// Block until a spawned job completes.
+        join: *const fn (?*anyopaque, *anyopaque) void,
+        /// Release a handle's resources after join.
+        destroy: *const fn (?*anyopaque, *anyopaque) void,
+    };
+};
+
 fn FiberState(comptime Success: type, comptime Failure: type, comptime Env: type) type {
     return struct {
         const Self = @This();
@@ -68,6 +97,14 @@ fn FiberState(comptime Success: type, comptime Failure: type, comptime Env: type
         causal_trace_id: ?u64 = null,
         causal_span_id: ?u64 = null,
         causal_joined_recorded: bool = false,
+        // Set when this fiber was spawned onto a FiberExecutor at fork time. The
+        // executor is stored so the handle is self-describing: both join and
+        // deinit can await + release it without consulting the runtime, and an
+        // un-joined fiber is drained at deinit instead of leaking the handle.
+        executor: ?FiberExecutor = null,
+        executor_handle: ?*anyopaque = null,
+        job_context: ?*anyopaque = null,
+        job_context_deinit: ?*const fn (Allocator, ?*anyopaque) void = null,
 
         pub fn init(
             allocator: Allocator,
@@ -87,11 +124,30 @@ fn FiberState(comptime Success: type, comptime Failure: type, comptime Env: type
         }
 
         pub fn deinit(self: *Self) void {
+            // Drain an executor-spawned fiber that was never joined, so its
+            // handle (and any backend resources) are released rather than leaked.
+            self.drainExecutor();
+            if (self.job_context) |jc| {
+                if (self.job_context_deinit) |free_jc| free_jc(self.allocator, jc);
+                self.job_context = null;
+            }
             if (self.task) |task| {
                 self.deinit_task.?(task);
                 self.task = null;
             }
             self.scope.deinit();
+        }
+
+        /// Await and release this fiber's executor handle, if it has one. Safe to
+        /// call more than once (it clears the handle). The coroutine runs `self.run`
+        /// itself, so the exit is already recorded by the time join returns.
+        fn drainExecutor(self: *Self) void {
+            const handle = self.executor_handle orelse return;
+            if (self.executor) |executor| {
+                executor.vtable.join(executor.context, handle);
+                executor.vtable.destroy(executor.context, handle);
+            }
+            self.executor_handle = null;
         }
 
         pub fn status(self: *const Self) FiberStatus {
@@ -222,7 +278,10 @@ fn FiberState(comptime Success: type, comptime Failure: type, comptime Env: type
         }
 
         pub fn join(self: *Self, runtime: *FiberRuntime(Env)) Exit(Success, Failure) {
-            if (self.status_value == .pending) {
+            if (self.executor_handle != null) {
+                // Spawned onto an executor at fork time: await the coroutine.
+                self.drainExecutor();
+            } else if (self.status_value == .pending) {
                 var ctx = runtime.context(&self.scope);
                 self.run(&ctx);
             }
@@ -274,6 +333,7 @@ pub fn FiberRuntime(comptime Env: type) type {
         provided_provider_builder: ?ProviderServiceSetBuilder = null,
         next_fiber_id: FiberId = 1,
         fibers: std.ArrayList(FiberRecord) = .empty,
+        executor: ?FiberExecutor = null,
 
         pub fn init(allocator: Allocator, env: *Env) Self {
             return .{
@@ -318,6 +378,15 @@ pub fn FiberRuntime(comptime Env: type) type {
             var runtime = self;
             runtime.async_backend = async_backend;
             runtime.backend = async_backend.capabilities;
+            return runtime;
+        }
+
+        /// Run forked fibers via the given executor (e.g. a real coroutine
+        /// backend) instead of synchronously on join. The deterministic default
+        /// (no executor) is unchanged.
+        pub fn withExecutor(self: Self, executor: FiberExecutor) Self {
+            var runtime = self;
+            runtime.executor = executor;
             return runtime;
         }
 
@@ -423,6 +492,40 @@ pub fn FiberRuntime(comptime Env: type) type {
             if (self.causal_store) |store| {
                 if (self.ensureCausalRunId()) |run_id| {
                     state.attachCausal(store, run_id, self.trace_id, self.span_id);
+                }
+            }
+
+            // If an executor is configured, spawn the fiber's effect onto it now
+            // (e.g. a real zio coroutine) and let `join` await it. Allocation here
+            // is best-effort: on failure we fall back to synchronous execution, so
+            // we must not introduce a `try` that could fire the errdefers above
+            // after the state was already appended to `self.fibers`.
+            if (self.executor) |executor| {
+                const JobCtx = struct {
+                    ctx: Context(Env),
+                    state: *State,
+
+                    fn run(raw: ?*anyopaque) void {
+                        const jc: *@This() = @ptrCast(@alignCast(raw.?));
+                        jc.state.run(&jc.ctx);
+                    }
+                    fn free(allocator: Allocator, raw: ?*anyopaque) void {
+                        const jc: *@This() = @ptrCast(@alignCast(raw.?));
+                        allocator.destroy(jc);
+                    }
+                };
+                if (self.allocator.create(JobCtx)) |jc| {
+                    jc.* = .{ .ctx = self.context(&state.scope), .state = state };
+                    if (executor.vtable.spawn(executor.context, .{ .context = jc, .run = JobCtx.run })) |handle| {
+                        state.executor = executor;
+                        state.executor_handle = handle;
+                        state.job_context = jc;
+                        state.job_context_deinit = JobCtx.free;
+                    } else {
+                        self.allocator.destroy(jc);
+                    }
+                } else |_| {
+                    // Allocation failed — run synchronously on join instead.
                 }
             }
 

@@ -20,6 +20,54 @@ const std = @import("std");
 const fx = @import("zigeffect");
 const zio = @import("zio");
 
+/// The productized deep integration: a `fx.FiberExecutor` backed by real zio
+/// coroutines. Configure it on a `FiberRuntime` via `withExecutor`, and an
+/// ordinary `Effect.fork` spawns the fiber's effect as a stackful zio coroutine
+/// at fork time; `join` awaits it. The engine core stays zio-free — all zio
+/// lives here behind the executor vtable. The same effect program is therefore
+/// deterministically debuggable (no executor) and really concurrent (this
+/// executor), producing the same causal structure either way.
+pub const ZioFiberExecutor = struct {
+    allocator: std.mem.Allocator,
+
+    const HandleBox = struct {
+        handle: zio.JoinHandle(void),
+    };
+
+    // zio.spawn needs a concrete fn; this thunk runs the type-erased fiber job.
+    fn jobThunk(job: fx.FiberJob) void {
+        job.run(job.context);
+    }
+
+    fn spawn(context: ?*anyopaque, job: fx.FiberJob) ?*anyopaque {
+        const self: *ZioFiberExecutor = @ptrCast(@alignCast(context.?));
+        const box = self.allocator.create(HandleBox) catch return null;
+        box.handle = zio.spawn(jobThunk, .{job}) catch {
+            self.allocator.destroy(box);
+            return null; // engine falls back to synchronous execution on join
+        };
+        return box;
+    }
+
+    fn join(context: ?*anyopaque, handle: *anyopaque) void {
+        _ = context;
+        const box: *HandleBox = @ptrCast(@alignCast(handle));
+        _ = box.handle.join();
+    }
+
+    fn destroy(context: ?*anyopaque, handle: *anyopaque) void {
+        const self: *ZioFiberExecutor = @ptrCast(@alignCast(context.?));
+        const box: *HandleBox = @ptrCast(@alignCast(handle));
+        self.allocator.destroy(box);
+    }
+
+    const vtable = fx.FiberExecutor.VTable{ .spawn = spawn, .join = join, .destroy = destroy };
+
+    pub fn executor(self: *ZioFiberExecutor) fx.FiberExecutor {
+        return .{ .context = self, .vtable = &vtable };
+    }
+};
+
 /// Z1: a delay that suspends on a REAL zio coroutine timer, emitting the same
 /// causal trace shape as the deterministic `fx.recordDelaySuspensionScenario`.
 /// `zio.sleep` actually parks the coroutine on the event loop (io_uring/epoll/
@@ -574,6 +622,93 @@ test "D2: engine fibers run as real interleaving zio coroutines; structurally eq
         if (event.kind == .fiber_started and event.fiber_id == 2) f2_started = event.id;
     }
     try std.testing.expect(f1_resumed < f2_started);
+}
+
+// --- Productization: an ordinary Effect.fork runs as a real zio coroutine ---
+
+const ForkError = error{ Boom, OutOfMemory };
+
+// Two effect bodies whose only zio dependency is the sleep — the kind of code a
+// user writes. Under the zio executor they run as coroutines and interleave;
+// without it they run synchronously on the main task, sequentially.
+fn forkBodyLong(ctx: *fx.Context(fx.TestServices)) ForkError!u32 {
+    _ = ctx;
+    zio.sleep(zio.Duration.fromMilliseconds(50)) catch {};
+    return 1;
+}
+fn forkBodyShort(ctx: *fx.Context(fx.TestServices)) ForkError!u32 {
+    _ = ctx;
+    zio.sleep(zio.Duration.fromMilliseconds(1)) catch {};
+    return 2;
+}
+
+fn expectSuccess(exit: fx.Exit(u32, ForkError), expected: u32) !void {
+    switch (exit) {
+        .success => |value| try std.testing.expectEqual(expected, value),
+        else => return error.UnexpectedExit,
+    }
+}
+
+fn runTwoForkProgram(allocator: std.mem.Allocator, maybe_executor: ?fx.FiberExecutor, store: *fx.CausalStore) !void {
+    var env = try fx.TestEnv.init(allocator);
+    defer env.deinit();
+
+    var runtime = fx.FiberRuntime(fx.TestServices)
+        .init(allocator, &env.services)
+        .withClock(&env.services.clock)
+        .withCausalStore(store)
+        .provides(.{ fx.Logger, fx.Config, fx.Metrics, fx.Tracing, fx.MemoryFileSystem, fx.Clock });
+    if (maybe_executor) |e| runtime = runtime.withExecutor(e);
+    defer runtime.deinit();
+
+    const long = fx.Effect(u32, ForkError, fx.TestServices).fromFn(forkBodyLong);
+    const short = fx.Effect(u32, ForkError, fx.TestServices).fromFn(forkBodyShort);
+    const f1 = try runtime.fork(long);
+    const f2 = try runtime.fork(short);
+    try expectSuccess(runtime.join(f1), 1);
+    try expectSuccess(runtime.join(f2), 2);
+}
+
+// True iff both fibers STARTED before either's scope CLOSED — only possible when
+// they ran concurrently. In a sequential run, fiber 1 closes before fiber 2 starts.
+fn bothStartedBeforeEitherClosed(events: []fx.CausalEvent) bool {
+    var max_started: u64 = 0;
+    var min_closed: u64 = std.math.maxInt(u64);
+    for (events) |event| {
+        if (event.kind == .fiber_started and event.id > max_started) max_started = event.id;
+        if (event.kind == .scope_closed and event.id < min_closed) min_closed = event.id;
+    }
+    return max_started != 0 and min_closed != std.math.maxInt(u64) and max_started < min_closed;
+}
+
+test "productization: an ordinary Effect.fork runs as a real interleaving zio coroutine via FiberExecutor" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+
+    // Default path: no executor — fibers run synchronously, sequentially.
+    var det_store = fx.CausalStore.init(allocator);
+    defer det_store.deinit();
+    try runTwoForkProgram(allocator, null, &det_store);
+
+    // Productized path: the real zio executor — each fork spawns a coroutine.
+    var exec = ZioFiberExecutor{ .allocator = allocator };
+    var zio_store = fx.CausalStore.init(allocator);
+    defer zio_store.deinit();
+    try runTwoForkProgram(allocator, exec.executor(), &zio_store);
+
+    var det_snap = try det_store.snapshot(allocator);
+    defer det_snap.deinit();
+    var zio_snap = try zio_store.snapshot(allocator);
+    defer zio_snap.deinit();
+
+    // Same program shape regardless of execution strategy (the whole point: the
+    // deterministic run is a faithful model of the real concurrent run).
+    try std.testing.expect(try fx.causalStructurallyEquivalent(allocator, det_snap.events, zio_snap.events));
+
+    // The zio run genuinely interleaved; the deterministic run did not.
+    try std.testing.expect(bothStartedBeforeEitherClosed(zio_snap.events));
+    try std.testing.expect(!bothStartedBeforeEitherClosed(det_snap.events));
 }
 
 test "D1: the SAME engine delay scenario runs on the zio backend (real wait) and the deterministic backend (virtual) with identical causal traces" {

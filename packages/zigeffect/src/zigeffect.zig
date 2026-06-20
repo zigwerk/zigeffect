@@ -781,6 +781,8 @@ pub const Queue = runtime.coordination.Queue;
 pub const Semaphore = runtime.coordination.Semaphore;
 pub const Fiber = runtime.fiber.Fiber;
 pub const FiberRuntime = runtime.fiber.FiberRuntime;
+pub const FiberExecutor = runtime.fiber.FiberExecutor;
+pub const FiberJob = runtime.fiber.FiberJob;
 pub const Runtime = runtime.runner.Runtime;
 
 pub const Layer = layer.definitions.Layer;

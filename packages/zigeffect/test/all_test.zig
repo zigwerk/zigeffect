@@ -6,6 +6,7 @@ comptime {
     _ = @import("scope_test.zig");
     _ = @import("runtime_test.zig");
     _ = @import("fiber_test.zig");
+    _ = @import("fiber_executor_test.zig");
     _ = @import("supervisor_test.zig");
     _ = @import("entity_test.zig");
     _ = @import("message_envelope_test.zig");
