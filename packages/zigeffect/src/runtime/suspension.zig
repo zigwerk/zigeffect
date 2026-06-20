@@ -288,6 +288,16 @@ pub const SuspensionCoordinator = struct {
         return self.suspendOnCoordination(request, "Signal", "fiber suspended on signal");
     }
 
+    /// Park a fiber awaiting a durable activity result (workflow activity).
+    pub fn suspendOnActivity(self: *SuspensionCoordinator, request: SuspendOnCoordination) SuspensionError!u64 {
+        return self.suspendOnCoordination(request, "Activity", "fiber suspended on activity");
+    }
+
+    /// Park a fiber awaiting an external signal (cross-process / human input).
+    pub fn suspendOnExternal(self: *SuspensionCoordinator, request: SuspendOnCoordination) SuspensionError!u64 {
+        return self.suspendOnCoordination(request, "External", "fiber suspended on external signal");
+    }
+
     fn suspendOnCoordination(
         self: *SuspensionCoordinator,
         request: SuspendOnCoordination,
@@ -336,6 +346,16 @@ pub const SuspensionCoordinator = struct {
     /// Resume a fiber parked via `suspendOnSignal`. Emits `signal_raised`.
     pub fn resumeFromSignal(self: *SuspensionCoordinator, suspension_id: u64, resume_label: []const u8) SuspensionError!void {
         return self.resumeFromCoordination(suspension_id, .signal_raised, "Signal", "signal raised", resume_label);
+    }
+
+    /// Resume a fiber parked via `suspendOnActivity`. Emits `activity_completed`.
+    pub fn resumeFromActivity(self: *SuspensionCoordinator, suspension_id: u64, resume_label: []const u8) SuspensionError!void {
+        return self.resumeFromCoordination(suspension_id, .activity_completed, "Activity", "activity completed", resume_label);
+    }
+
+    /// Resume a fiber parked via `suspendOnExternal`. Emits `external_signal_received`.
+    pub fn resumeFromExternal(self: *SuspensionCoordinator, suspension_id: u64, resume_label: []const u8) SuspensionError!void {
+        return self.resumeFromCoordination(suspension_id, .external_signal_received, "External", "external signal received", resume_label);
     }
 
     fn resumeFromCoordination(

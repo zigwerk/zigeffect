@@ -138,6 +138,66 @@ test "suspendOnSignal + resumeFromSignal emit fiber_suspended → signal_raised 
     try std.testing.expectEqual(wakeup.id, resumed.cause_event_id.?);
 }
 
+test "suspendOnActivity + resumeFromActivity emit fiber_suspended → activity_completed → fiber_resumed" {
+    const allocator = std.testing.allocator;
+    var store = fx.CausalStore.init(allocator);
+    defer store.deinit();
+    var backend_state = fx.LocalAsyncBackendState.init(allocator, .{});
+    defer backend_state.deinit();
+
+    var coord = fx.SuspensionCoordinator.init(allocator, &store, deterministicBackend(&backend_state));
+    defer coord.deinit();
+
+    const run = try buildRun(&store);
+    const sid = try coord.suspendOnActivity(.{
+        .fiber_id = run.fiber_id,
+        .scope_id = run.scope_id,
+        .run_id = run.run_id,
+        .started_event_id = run.started,
+        .caused_by_event_id = run.started,
+        .label = "await activity result",
+    });
+    try coord.resumeFromActivity(sid, "fiber resumed from activity");
+
+    var snap = try store.snapshot(allocator);
+    defer snap.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), kindCount(&snap, .activity_completed));
+    const wakeup = findFirst(&snap, .activity_completed).?;
+    const resumed = findFirst(&snap, .fiber_resumed).?;
+    try std.testing.expectEqual(wakeup.id, resumed.cause_event_id.?);
+}
+
+test "suspendOnExternal + resumeFromExternal emit fiber_suspended → external_signal_received → fiber_resumed" {
+    const allocator = std.testing.allocator;
+    var store = fx.CausalStore.init(allocator);
+    defer store.deinit();
+    var backend_state = fx.LocalAsyncBackendState.init(allocator, .{});
+    defer backend_state.deinit();
+
+    var coord = fx.SuspensionCoordinator.init(allocator, &store, deterministicBackend(&backend_state));
+    defer coord.deinit();
+
+    const run = try buildRun(&store);
+    const sid = try coord.suspendOnExternal(.{
+        .fiber_id = run.fiber_id,
+        .scope_id = run.scope_id,
+        .run_id = run.run_id,
+        .started_event_id = run.started,
+        .caused_by_event_id = run.started,
+        .label = "await human approval",
+    });
+    try coord.resumeFromExternal(sid, "fiber resumed from external signal");
+
+    var snap = try store.snapshot(allocator);
+    defer snap.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), kindCount(&snap, .external_signal_received));
+    const wakeup = findFirst(&snap, .external_signal_received).?;
+    const resumed = findFirst(&snap, .fiber_resumed).?;
+    try std.testing.expectEqual(wakeup.id, resumed.cause_event_id.?);
+}
+
 test "coordination suspend with no resume fires the fiber_suspended_without_resume finding (hang detector)" {
     const allocator = std.testing.allocator;
     var store = fx.CausalStore.init(allocator);
