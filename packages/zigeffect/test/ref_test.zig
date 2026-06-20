@@ -57,6 +57,28 @@ test "Ref.updateE leaves the cell untouched on transform failure" {
     try std.testing.expectEqual(@as(u32, 3), counter.get());
 }
 
+test "M5.2 — SynchronizedRef.get reads through to the underlying cell" {
+    var sref = fx.SynchronizedRef(u32).init(11);
+    try std.testing.expectEqual(@as(u32, 11), sref.get());
+}
+
+test "M5.2 — SynchronizedRef.update applies the transform under the permit" {
+    var sref = fx.SynchronizedRef(u32).init(11);
+    const next = try sref.update(Incr.add_one);
+    try std.testing.expectEqual(@as(u32, 12), next);
+    try std.testing.expectEqual(@as(u32, 12), sref.get());
+}
+
+test "M5.2 — SynchronizedRef.updateE rolls back on failure, keeps permit free" {
+    var sref = fx.SynchronizedRef(u32).init(3);
+    const result = sref.updateE(BumpFail.E, BumpFail.fails);
+    try std.testing.expectError(error.Boom, result);
+    try std.testing.expectEqual(@as(u32, 3), sref.get());
+    // Subsequent update must succeed (permit was released even on error).
+    const next = try sref.update(Incr.add_one);
+    try std.testing.expectEqual(@as(u32, 4), next);
+}
+
 test "Ref works over a non-numeric type (slice)" {
     var slot = fx.Ref([]const u8).init("alpha");
     try std.testing.expectEqualStrings("alpha", slot.get());

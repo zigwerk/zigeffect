@@ -795,6 +795,7 @@ pub const Semaphore = runtime.coordination.Semaphore;
 pub const Fiber = runtime.fiber.Fiber;
 pub const FiberRuntime = runtime.fiber.FiberRuntime;
 pub const Ref = runtime.ref.Ref;
+pub const SynchronizedRef = runtime.ref.SynchronizedRef;
 pub const Hub = runtime.hub.Hub;
 pub const HubStrategy = runtime.hub.HubStrategy;
 pub const HubError = runtime.hub.HubError;

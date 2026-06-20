@@ -12,6 +12,10 @@
 //! `Hub` subscriber state (M5.4).
 
 const std = @import("std");
+const coordination = @import("coordination.zig");
+
+pub const Semaphore = coordination.Semaphore;
+pub const FiberPrimitiveError = coordination.FiberPrimitiveError;
 
 pub fn Ref(comptime T: type) type {
     return struct {
@@ -61,6 +65,51 @@ pub fn Ref(comptime T: type) type {
             const next = try transform(self.value);
             self.value = next;
             return next;
+        }
+    };
+}
+
+/// M5.2 — `SynchronizedRef(T)`, a `Ref` whose `update` is serialized through a
+/// 1-permit semaphore. Single-threaded v1: the semaphore is effectively a
+/// reentrancy guard; in v2 (multi-executor), it becomes the actual mutex.
+///
+/// Reads (`get`) are NOT guarded — the semaphore protects the
+/// read-transform-write window, not snapshot reads. The convention matches
+/// EffectTS `SynchronizedRef.modify`.
+pub fn SynchronizedRef(comptime T: type) type {
+    return struct {
+        const Self = @This();
+
+        cell: Ref(T),
+        permit: Semaphore,
+
+        pub fn init(value: T) Self {
+            return .{ .cell = Ref(T).init(value), .permit = Semaphore.init(1) };
+        }
+
+        pub fn get(self: *const Self) T {
+            return self.cell.get();
+        }
+
+        /// Serialized read-transform-write. Acquires the permit, applies
+        /// `transform`, releases. Returns the new value.
+        pub fn update(self: *Self, transform: *const fn (T) T) FiberPrimitiveError!T {
+            try self.permit.acquire(1);
+            defer self.permit.release(1) catch {};
+            return self.cell.update(transform);
+        }
+
+        /// Serialized read-transform-write where the transform may itself
+        /// fail. Leaves the cell unchanged on error. Returns the new value on
+        /// success.
+        pub fn updateE(
+            self: *Self,
+            comptime E: type,
+            transform: *const fn (T) E!T,
+        ) (E || FiberPrimitiveError)!T {
+            try self.permit.acquire(1);
+            defer self.permit.release(1) catch {};
+            return self.cell.updateE(E, transform);
         }
     };
 }
