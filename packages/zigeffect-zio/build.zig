@@ -17,10 +17,9 @@ pub fn build(b: *std.Build) void {
     });
     zio_backend.addImport("zigeffect", zigeffect);
 
-    // Stage 1: wire zio once fetched.
-    //   if (b.lazyDependency("zio", .{ .target = target, .optimize = optimize })) |zio| {
-    //       zio_backend.addImport("zio", zio.module("zio"));
-    //   }
+    if (b.lazyDependency("zio", .{ .target = target, .optimize = optimize })) |zio| {
+        zio_backend.addImport("zio", zio.module("zio"));
+    }
 
     const tests = b.addTest(.{
         .root_module = zio_backend,

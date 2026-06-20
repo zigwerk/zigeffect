@@ -9,19 +9,19 @@ const Artifact = struct {
 };
 
 const Event = struct {
-    id: u64,
-    kind: []const u8,
-    run_id: ?u64,
-    parent_id: ?u64,
+    id: u64 = 0,
+    kind: []const u8 = "",
+    run_id: ?u64 = null,
+    parent_id: ?u64 = null,
     cause_event_id: ?u64 = null,
-    fiber_id: ?u64,
-    scope_id: ?u64,
-    trace_id: ?u64,
-    span_id: ?u64,
-    label: []const u8,
-    type_name: []const u8,
-    status: []const u8,
-    redacted_detail: []const u8,
+    fiber_id: ?u64 = null,
+    scope_id: ?u64 = null,
+    trace_id: ?u64 = null,
+    span_id: ?u64 = null,
+    label: []const u8 = "",
+    type_name: []const u8 = "",
+    status: []const u8 = "",
+    redacted_detail: []const u8 = "",
 };
 
 const before_json =

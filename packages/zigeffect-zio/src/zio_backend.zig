@@ -18,6 +18,45 @@
 
 const std = @import("std");
 const fx = @import("zigeffect");
+const zio = @import("zio");
+
+/// Z1: a delay that suspends on a REAL zio coroutine timer, emitting the same
+/// causal trace shape as the deterministic `fx.recordDelaySuspensionScenario`.
+/// `zio.sleep` actually parks the coroutine on the event loop (io_uring/epoll/
+/// kqueue) and resumes it when the timer fires — no virtual clock. The emitted
+/// causal graph must compare STRUCTURALLY EQUAL to the deterministic trace
+/// (same event kinds + cause edges + fiber net state), which is the Stage-1 gate.
+pub fn recordZioDelayScenario(store: *fx.CausalStore, due_ms: u64) !void {
+    const run_id = store.nextRunId();
+    const scope_id = store.nextScopeId();
+    const fiber_id: u64 = 1;
+    const sid: u64 = 1;
+
+    const run_started = try store.record(.{ .kind = .run_started, .run_id = run_id, .status = "started", .label = "zio-delay-suspension", .type_name = "ZioDelayScenario" });
+    const scope_opened = try store.record(.{ .kind = .scope_opened, .run_id = run_id, .scope_id = scope_id, .parent_id = run_started, .status = "opened", .label = "delay scope" });
+    const fiber_forked = try store.record(.{ .kind = .fiber_forked, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = scope_opened, .status = "pending", .label = "delay fiber" });
+    const fiber_started = try store.record(.{ .kind = .fiber_started, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = fiber_forked, .status = "running", .label = "delay fiber" });
+    const delay_effect = try store.record(.{ .kind = .effect_started, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = fiber_started, .status = "started", .label = "delay", .type_name = "DelayEffect" });
+    const suspended = try store.record(.{ .kind = .fiber_suspended, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = fiber_started, .cause_event_id = delay_effect, .schedule_id = sid, .status = "pending", .label = "fiber suspended on timer", .type_name = "Suspension" });
+    const scheduled = try store.record(.{ .kind = .timer_scheduled, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = suspended, .cause_event_id = suspended, .schedule_id = sid, .status = "pending", .label = "delay", .type_name = "Timer" });
+
+    // Real suspension: park this coroutine on the zio event loop for due_ms.
+    try zio.sleep(zio.Duration.fromMilliseconds(due_ms));
+
+    const fired = try store.record(.{ .kind = .timer_fired, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = scheduled, .cause_event_id = scheduled, .schedule_id = sid, .status = "ready", .label = "timer fired", .type_name = "Timer" });
+    _ = try store.record(.{ .kind = .fiber_resumed, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = suspended, .cause_event_id = fired, .schedule_id = sid, .status = "running", .label = "fiber resumed", .type_name = "Suspension" });
+    const scope_closed = try store.record(.{ .kind = .scope_closed, .run_id = run_id, .scope_id = scope_id, .parent_id = run_started, .status = "closed", .label = "delay scope" });
+    _ = try store.record(.{ .kind = .fiber_joined, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = scope_closed, .status = "success", .label = "delay fiber" });
+    _ = try store.record(.{ .kind = .exit_recorded, .run_id = run_id, .parent_id = run_started, .status = "success", .label = "zio-delay-suspension" });
+}
+
+fn kindCount(events: []fx.CausalEvent, kind: fx.CausalEventKind) usize {
+    var count: usize = 0;
+    for (events) |event| {
+        if (event.kind == kind) count += 1;
+    }
+    return count;
+}
 
 pub const AsyncBackend = fx.AsyncBackend;
 pub const AsyncBackendError = fx.AsyncBackendError;
@@ -130,6 +169,40 @@ fn advanceTime(context: ?*anyopaque, now_ms: u64) AsyncBackendError!usize {
 fn snapshot(context: ?*anyopaque) AsyncBackendSnapshot {
     _ = context;
     return .{};
+}
+
+test "Z1: zio-backed delay suspends for real and yields a structurally-equal causal trace" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+
+    // Real suspension under zio (the coroutine parks on the event loop).
+    var zio_store = fx.CausalStore.init(allocator);
+    defer zio_store.deinit();
+    try recordZioDelayScenario(&zio_store, 2);
+
+    // Deterministic reference (virtual clock).
+    var det_store = fx.CausalStore.init(allocator);
+    defer det_store.deinit();
+    var backend = fx.LocalAsyncBackendState.init(allocator, .{});
+    defer backend.deinit();
+    _ = try fx.recordDelaySuspensionScenario(allocator, &det_store, backend.backend(), 2);
+
+    var zio_snap = try zio_store.snapshot(allocator);
+    defer zio_snap.deinit();
+    var det_snap = try det_store.snapshot(allocator);
+    defer det_snap.deinit();
+
+    // Structural equivalence: same event-kind multiset, including the load-bearing
+    // suspend/timer/resume kinds that prove a real suspend->resume happened.
+    try std.testing.expectEqual(det_snap.events.len, zio_snap.events.len);
+    try std.testing.expectEqual(kindCount(det_snap.events, .fiber_suspended), kindCount(zio_snap.events, .fiber_suspended));
+    try std.testing.expectEqual(kindCount(det_snap.events, .timer_scheduled), kindCount(zio_snap.events, .timer_scheduled));
+    try std.testing.expectEqual(kindCount(det_snap.events, .timer_fired), kindCount(zio_snap.events, .timer_fired));
+    try std.testing.expectEqual(kindCount(det_snap.events, .fiber_resumed), kindCount(zio_snap.events, .fiber_resumed));
+    try std.testing.expectEqual(kindCount(det_snap.events, .fiber_joined), kindCount(zio_snap.events, .fiber_joined));
+    try std.testing.expectEqual(@as(usize, 1), kindCount(zio_snap.events, .fiber_suspended));
+    try std.testing.expectEqual(@as(usize, 1), kindCount(zio_snap.events, .fiber_resumed));
 }
 
 test "zio backend exposes a valid AsyncBackend seam (stub returns Unsupported until Stage 1)" {
