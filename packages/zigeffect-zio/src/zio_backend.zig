@@ -780,6 +780,77 @@ test "productization: an ordinary Effect.fork runs as a real interleaving zio co
     try std.testing.expect(!bothStartedBeforeEitherClosed(det_snap.events));
 }
 
+// M4.9 — the Track 4 parallel primitives (forEachPar/zipPar) on the REAL zio
+// executor must produce a structurally-equivalent causal trace to the
+// deterministic sequential run. (The in-core test only used a synchronous
+// ProbeExec; this exercises the genuine coroutine executor — the gap the
+// Track 4 adversarial review flagged as Finding #4.)
+
+const RecordingParBody = struct {
+    fn run(item: u32, ctx: *fx.Context(fx.TestServices)) ForkError!u32 {
+        _ = ctx.recordCausal(.{ .kind = .metric_recorded, .label = "forEachPar body ran", .status = "ready" });
+        return item * 2;
+    }
+};
+
+fn runForEachParProgram(allocator: std.mem.Allocator, maybe_executor: ?fx.FiberExecutor, store: *fx.CausalStore) ![]u32 {
+    var env = try fx.TestEnv.init(allocator);
+    defer env.deinit();
+    var runtime = fx.Runtime(fx.TestServices)
+        .init(allocator, &env.services)
+        .withClock(&env.services.clock)
+        .withCausalStore(store)
+        .provides(.{ fx.Logger, fx.Config, fx.Metrics, fx.Tracing, fx.MemoryFileSystem, fx.Clock });
+    if (maybe_executor) |e| runtime = runtime.withExecutor(e);
+
+    const items = [_]u32{ 1, 2, 3 };
+    const program = fx.forEachPar(u32, u32, ForkError, fx.TestServices, &items, RecordingParBody.run);
+    return runtime.run(program);
+}
+
+test "M4.9: forEachPar on the real zio executor is structurally equivalent to the deterministic sequential run" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+
+    // Deterministic: no executor — bodies run sequentially inline.
+    var det_store = fx.CausalStore.init(allocator);
+    defer det_store.deinit();
+    const det = try runForEachParProgram(allocator, null, &det_store);
+    defer allocator.free(det);
+
+    // Real zio executor: each body spawns a real coroutine.
+    var exec = ZioFiberExecutor{ .allocator = allocator };
+    var zio_store = fx.CausalStore.init(allocator);
+    defer zio_store.deinit();
+    const par = try runForEachParProgram(allocator, exec.executor(), &zio_store);
+    defer allocator.free(par);
+
+    // Same results.
+    try std.testing.expectEqualSlices(u32, det, par);
+
+    var det_snap = try det_store.snapshot(allocator);
+    defer det_snap.deinit();
+    var zio_snap = try zio_store.snapshot(allocator);
+    defer zio_snap.deinit();
+
+    // Non-vacuity: each run recorded one metric_recorded per item (3).
+    var det_metrics: usize = 0;
+    var zio_metrics: usize = 0;
+    for (det_snap.events) |e| if (e.kind == .metric_recorded) {
+        det_metrics += 1;
+    };
+    for (zio_snap.events) |e| if (e.kind == .metric_recorded) {
+        zio_metrics += 1;
+    };
+    try std.testing.expectEqual(@as(usize, 3), det_metrics);
+    try std.testing.expectEqual(@as(usize, 3), zio_metrics);
+
+    // The load-bearing claim, now witnessed on a REAL coroutine executor:
+    // parallel and sequential traversals are structurally equivalent.
+    try std.testing.expect(try fx.causalStructurallyEquivalent(allocator, det_snap.events, zio_snap.events));
+}
+
 test "D1: the SAME engine delay scenario runs on the zio backend (real wait) and the deterministic backend (virtual) with identical causal traces" {
     const allocator = std.testing.allocator;
     var rt = try zio.Runtime.init(allocator, .{});

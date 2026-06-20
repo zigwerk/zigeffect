@@ -102,24 +102,36 @@ Forward-roadmap L112-175 surface, today missing from `src/zigeffect.zig:762-777`
 
 D2 gave us real interleaving; this gives users an API to compose it.
 
-- **M4.1** `forEachPar(iter, fn, opts)` — parallel traversal (opts: concurrency cap).
-- **M4.2** `zipPar(other)` — parallel pair; combined exit only when both succeed.
-- **M4.3** `race(other)` — first to succeed wins; loser interrupted.
-- **M4.4** `raceFirst(other)` — first to finish (success or failure) wins.
-- **M4.5** `raceAll(iter)` — N-way race.
-- **M4.6** `both(other)` — parallel pair semantically distinct from zipPar (any failure interrupts).
-- **M4.7** Loser-interrupt cause-edge wiring (depends on M2.7).
+- **M4.1** `forEachPar(iter, fn, opts)` — parallel traversal (opts: concurrency cap). **DONE** (c18e0c3c).
+- **M4.2** `zipPar(other)` — parallel pair; combined exit only when both succeed. **DONE** (c18e0c3c).
+- **M4.0** **PREREQUISITE for the race family — `FiberExecutor.waitAny`.** `race`/`raceFirst`/
+  `raceAll`/`both` cannot honestly short-circuit without a wait-for-any primitive that returns the
+  index of the first-completing handle WITHOUT joining the rest. Without it, "race" would have to
+  join all branches first — providing zero latency benefit over `zipPar` and misrepresenting the
+  semantics. Expose zio `select`/`waitUntilComplete`-over-multiple as a new vtable method
+  `waitAny(handles) -> usize`. The deterministic backend returns the lowest-indexed completed.
+  M7.8 `FiberExecutor.interrupt` (**DONE**, 2c2c0fc5) supplies the loser-cancel half; `waitAny`
+  supplies the missing half. The race family below is BLOCKED on M4.0 — deliberately not shipped
+  half-built.
+- **M4.3** `race(other)` — first to succeed wins; loser interrupted. **BLOCKED on M4.0.**
+- **M4.4** `raceFirst(other)` — first to finish (success or failure) wins. **BLOCKED on M4.0.**
+- **M4.5** `raceAll(iter)` — N-way race. **BLOCKED on M4.0.**
+- **M4.6** `both(other)` — parallel pair semantically distinct from zipPar (any failure interrupts). **BLOCKED on M4.0** (needs interrupt + waitAny).
+- **M4.7** Loser-interrupt cause-edge wiring (depends on M2.7 + M4.0).
 - **M4.8** `examples/effect_structured_concurrency.zig` covering each operator.
-- **M4.9** Causal-equivalence test: each operator's deterministic-vs-zio trace is structurally equal (the D2 invariant generalizes).
+- **M4.9** Causal-equivalence test: each operator's deterministic-vs-zio trace is structurally
+  equal (the D2 invariant generalizes). **DONE for forEachPar** (real zio executor, see
+  `zigeffect-zio` test "M4.9: forEachPar on the real zio executor is structurally equivalent…").
+  Extends to race operators once M4.0 lands.
 
 ---
 
 ## Track 5 — Effect state primitives
 
-- **M5.1** `Ref(T)` — atomic cell (get/set/update). Single-threaded v1; document the thread-safety boundary for future v2.
-- **M5.2** `SynchronizedRef(T)` — effectful update under a semaphore.
-- **M5.3** `FiberRef(T)` — fiber-local with auto-propagation across fork. Propagation happens via the `FiberExecutor.spawn`'s `FiberJob` — extend `FiberJob` with a small ref snapshot vector.
-- **M5.4** `Hub(T)` with bounded/sliding/dropping variants — multi-subscriber broadcast. Emits `hub_published` / `hub_received` causal events. **Critical dep:** unblocks workbench live-attach (Track 10) AND agent-attach query interface (Track 8).
+- **M5.1** `Ref(T)` — atomic cell (get/set/update). Single-threaded v1; document the thread-safety boundary for future v2. **DONE** (aa9b3e3a).
+- **M5.2** `SynchronizedRef(T)` — effectful update under a semaphore. **DONE** (ebce9292).
+- **M5.3** `FiberRef(T)` — fiber-local with auto-propagation across fork. Propagation happens via the `FiberExecutor.spawn`'s `FiberJob` — extend `FiberJob` with a small ref snapshot vector. (Non-trivial in the current shallow-Context-copy model — needs Context-attached fiber-local storage; scoped for a focused session.)
+- **M5.4** `Hub(T)` with bounded/sliding/dropping variants — multi-subscriber broadcast. Emits `hub_published` / `hub_received` causal events. **Critical dep:** unblocks workbench live-attach (Track 10) AND agent-attach query interface (Track 8). **DONE** (bd733322).
 - **M5.5** Facade export + tests for each primitive.
 - **M5.6** `examples/effect_state.zig` — `Ref` counter, `FiberRef` request-id propagation, `Hub` fanout.
 
@@ -147,8 +159,8 @@ Migrate the conformance test from "asserts UnsupportedBackendCapability" to "ass
 - **M7.5** Expose `std.Io` as engine effects — `fx.io.read(fd, buf)`, `fx.io.write(fd, buf)`, `fx.io.accept(sock)`. Each emits `io_wait_started` / `io_completed` with the schedule-id correlation.
 - **M7.6** `DurableAsyncBackendState` — the missing implementation behind `durableLocalBackend()`'s `can_durable_suspend=true`.
 - **M7.7** Clustered `AsyncBackend` — the missing implementation behind `clusteredBackend()`'s `can_distribute=true`.
-- **M7.8** `FiberExecutor.interrupt(handle: *anyopaque) void` — vtable extension. **Cross-cuts Track 8 (executable remediation).**
-- **M7.9** `ZioFiberExecutor.interrupt` → `JoinHandle.cancel`.
+- **M7.8** `FiberExecutor.interrupt(handle: *anyopaque) void` — vtable extension. **Cross-cuts Track 8 (executable remediation).** **DONE** (2c2c0fc5) — nullable vtable field + `canInterrupt`/`tryInterrupt` helpers.
+- **M7.9** `ZioFiberExecutor.interrupt` → `JoinHandle.cancel`. **DONE** (2c2c0fc5) — proven by cancelling a 10s-parked coroutine in ~1s.
 - **M7.10** Single-executor assertion at adapter boundary (M11.7 dup) — assert `RuntimeOptions.executors == .exact(1)` on construction.
 - **M7.11** Conformance test rewrite (`packages/zigeffect-zio/src/zio_backend.zig:893-901`): each `Unsupported...` assertion migrates to "asserts working" as the corresponding M7.x lands.
 - **M7.12** Per-vtable-method adapter test driven via the engine, NOT via the scenario harness — proves the seam services real workloads.
