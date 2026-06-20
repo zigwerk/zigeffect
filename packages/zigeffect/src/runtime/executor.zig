@@ -50,7 +50,32 @@ pub const FiberExecutor = struct {
         join: *const fn (?*anyopaque, *anyopaque) void,
         /// Release a handle's resources after join.
         destroy: *const fn (?*anyopaque, *anyopaque) void,
+        /// Request cancellation of a spawned job (M7.8). OPTIONAL — executors
+        /// that cannot interrupt leave this null, and primitives fall back to
+        /// joining the job to completion. When present, after
+        /// `interrupt(handle)` the job is guaranteed to have terminated; a
+        /// subsequent `join` returns its (possibly interrupted) result and
+        /// `destroy` releases the handle. Used by Phase-8 remediation (cut a
+        /// wedged fiber) and, in future, by `race`/`both` to cancel losers.
+        interrupt: ?*const fn (?*anyopaque, *anyopaque) void = null,
     };
+
+    /// Whether this executor can interrupt a spawned job. Primitives branch on
+    /// this to choose early-cancel vs join-to-completion.
+    pub fn canInterrupt(self: FiberExecutor) bool {
+        return self.vtable.interrupt != null;
+    }
+
+    /// Best-effort interrupt: cancels the job if the executor supports it,
+    /// returns whether an interrupt was issued. After a true return the job has
+    /// terminated and the handle is still valid for `join`/`destroy`.
+    pub fn tryInterrupt(self: FiberExecutor, handle: *anyopaque) bool {
+        if (self.vtable.interrupt) |interrupt_fn| {
+            interrupt_fn(self.context, handle);
+            return true;
+        }
+        return false;
+    }
 
     /// Threading contract for v1: the engine's `CausalStore`, `Scope`, and the
     /// state primitives (`Ref`, `Hub`) are not thread-safe. Executors used with

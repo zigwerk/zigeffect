@@ -76,7 +76,18 @@ pub const ZioFiberExecutor = struct {
         self.allocator.destroy(box);
     }
 
-    const vtable = fx.FiberExecutor.VTable{ .spawn = spawn, .join = join, .destroy = destroy };
+    /// M7.9 — interrupt a spawned coroutine via zio's `JoinHandle.cancel`,
+    /// which requests cancellation, waits for the coroutine to unwind (its
+    /// `zio.sleep` / IO wait returns `error.Canceled`), and releases the
+    /// awaitable. After this returns the job has terminated; a subsequent
+    /// `join` is a cached no-op and `destroy` frees the box.
+    fn interruptJob(context: ?*anyopaque, handle: *anyopaque) void {
+        _ = context;
+        const box: *HandleBox = @ptrCast(@alignCast(handle));
+        box.handle.cancel();
+    }
+
+    const vtable = fx.FiberExecutor.VTable{ .spawn = spawn, .join = join, .destroy = destroy, .interrupt = interruptJob };
 
     pub fn executor(self: *ZioFiberExecutor) fx.FiberExecutor {
         return .{ .context = self, .vtable = &vtable };
@@ -694,6 +705,49 @@ fn bothStartedBeforeEitherClosed(events: []fx.CausalEvent) bool {
         if (event.kind == .scope_closed and event.id < min_closed) min_closed = event.id;
     }
     return max_started != 0 and min_closed != std.math.maxInt(u64) and max_started < min_closed;
+}
+
+// M7.9 — a coroutine that parks on a long sleep, then (if not cancelled) marks
+// itself completed. Cancellation makes zio.sleep return error.Canceled, so the
+// body returns early and `completed` stays false.
+const CancelProbe = struct {
+    started: bool = false,
+    completed: bool = false,
+    fn run(raw: ?*anyopaque) void {
+        const self: *CancelProbe = @ptrCast(@alignCast(raw.?));
+        self.started = true;
+        zio.sleep(zio.Duration.fromMilliseconds(10_000)) catch {
+            return; // cancelled mid-sleep — never reach completed
+        };
+        self.completed = true;
+    }
+};
+
+test "M7.9: ZioFiberExecutor.interrupt cancels a parked coroutine (no 10s wait)" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+
+    var exec = ZioFiberExecutor{ .allocator = allocator };
+    const e = exec.executor();
+    try std.testing.expect(e.canInterrupt());
+
+    var probe = CancelProbe{};
+    const handle = e.vtable.spawn(e.context, .{ .context = &probe, .run = CancelProbe.run }).?;
+
+    // Let the coroutine start and park on the 10s sleep.
+    try zio.sleep(zio.Duration.fromMilliseconds(5));
+    try std.testing.expect(probe.started);
+    try std.testing.expect(!probe.completed);
+
+    // Interrupt — must terminate the coroutine WITHOUT waiting the full 10s.
+    // (If interrupt didn't work, this test would hang for 10 seconds.)
+    try std.testing.expect(e.tryInterrupt(handle));
+    e.vtable.destroy(e.context, handle);
+
+    // The coroutine started but never completed — it was cancelled mid-sleep.
+    try std.testing.expect(probe.started);
+    try std.testing.expect(!probe.completed);
 }
 
 test "productization: an ordinary Effect.fork runs as a real interleaving zio coroutine via FiberExecutor" {
