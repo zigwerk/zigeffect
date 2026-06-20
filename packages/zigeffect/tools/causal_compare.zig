@@ -13,6 +13,7 @@ const Event = struct {
     kind: []const u8,
     run_id: ?u64,
     parent_id: ?u64,
+    cause_event_id: ?u64 = null,
     fiber_id: ?u64,
     scope_id: ?u64,
     trace_id: ?u64,
@@ -296,8 +297,116 @@ fn appendEventLine(output: *std.ArrayList(u8), allocator: std.mem.Allocator, pre
     try output.append(allocator, '\n');
 }
 
+const StructuralFact = struct { key: []const u8, count: usize };
+
+fn isFiberLifecycle(kind: []const u8) bool {
+    return std.mem.eql(u8, kind, "fiber_forked") or
+        std.mem.eql(u8, kind, "fiber_started") or
+        std.mem.eql(u8, kind, "fiber_suspended") or
+        std.mem.eql(u8, kind, "fiber_resumed") or
+        std.mem.eql(u8, kind, "fiber_joined") or
+        std.mem.eql(u8, kind, "fiber_interrupted");
+}
+
+fn bumpFact(allocator: std.mem.Allocator, facts: *std.ArrayList(StructuralFact), key: []const u8) !void {
+    for (facts.items) |*fact| {
+        if (std.mem.eql(u8, fact.key, key)) {
+            fact.count += 1;
+            return;
+        }
+    }
+    try facts.append(allocator, .{ .key = try allocator.dupe(u8, key), .count = 1 });
+}
+
+fn freeFacts(allocator: std.mem.Allocator, facts: *std.ArrayList(StructuralFact)) void {
+    for (facts.items) |fact| allocator.free(fact.key);
+    facts.deinit(allocator);
+}
+
+fn factCountFor(facts: []const StructuralFact, key: []const u8) usize {
+    for (facts) |fact| {
+        if (std.mem.eql(u8, fact.key, key)) return fact.count;
+    }
+    return 0;
+}
+
+// Structural invariants that hold across backends (deterministic vs zio) for the
+// same program even though event ids and ordering vary: the multiset of event
+// kinds, the multiset of cause-edge kind pairs (cause.kind -> effect.kind), and
+// each fiber's net (latest) lifecycle kind.
+fn buildStructuralFacts(allocator: std.mem.Allocator, events: []const Event) !std.ArrayList(StructuralFact) {
+    var facts = std.ArrayList(StructuralFact).empty;
+    errdefer freeFacts(allocator, &facts);
+
+    for (events) |event| {
+        const key = try std.fmt.allocPrint(allocator, "kind:{s}", .{event.kind});
+        defer allocator.free(key);
+        try bumpFact(allocator, &facts, key);
+    }
+    for (events) |event| {
+        const cause_id = event.cause_event_id orelse continue;
+        const cause = findEvent(events, cause_id) orelse continue;
+        const key = try std.fmt.allocPrint(allocator, "cause:{s}->{s}", .{ cause.kind, event.kind });
+        defer allocator.free(key);
+        try bumpFact(allocator, &facts, key);
+    }
+    for (events) |event| {
+        if (!isFiberLifecycle(event.kind)) continue;
+        const fiber_id = event.fiber_id orelse continue;
+        var is_latest = true;
+        for (events) |other| {
+            if (other.id <= event.id) continue;
+            if (!isFiberLifecycle(other.kind)) continue;
+            const other_fiber = other.fiber_id orelse continue;
+            if (other_fiber == fiber_id) {
+                is_latest = false;
+                break;
+            }
+        }
+        if (!is_latest) continue;
+        const key = try std.fmt.allocPrint(allocator, "fiber-net:{s}", .{event.kind});
+        defer allocator.free(key);
+        try bumpFact(allocator, &facts, key);
+    }
+    return facts;
+}
+
+pub fn runStructuralCompare(allocator: std.mem.Allocator, before_json_input: []const u8, after_json_input: []const u8) ![]const u8 {
+    var before_parsed = try std.json.parseFromSlice(Artifact, allocator, before_json_input, .{ .ignore_unknown_fields = true });
+    defer before_parsed.deinit();
+    var after_parsed = try std.json.parseFromSlice(Artifact, allocator, after_json_input, .{ .ignore_unknown_fields = true });
+    defer after_parsed.deinit();
+
+    var before_facts = try buildStructuralFacts(allocator, before_parsed.value.events);
+    defer freeFacts(allocator, &before_facts);
+    var after_facts = try buildStructuralFacts(allocator, after_parsed.value.events);
+    defer freeFacts(allocator, &after_facts);
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+    try output.appendSlice(allocator, "zigeffect causal structural compare\n");
+    try output.appendSlice(allocator, "(invariants: event-kind multiset, cause-edge kind pairs, fiber net states)\n");
+
+    var equal = true;
+    for (before_facts.items) |fact| {
+        const after_count = factCountFor(after_facts.items, fact.key);
+        if (after_count != fact.count) {
+            equal = false;
+            try output.print(allocator, "- {s}: before={d} after={d}\n", .{ fact.key, fact.count, after_count });
+        }
+    }
+    for (after_facts.items) |fact| {
+        if (factCountFor(before_facts.items, fact.key) == 0) {
+            equal = false;
+            try output.print(allocator, "- {s}: before=0 after={d}\n", .{ fact.key, fact.count });
+        }
+    }
+    try output.print(allocator, "structural: {s}\n", .{if (equal) "equal" else "not-equal"});
+    return output.toOwnedSlice(allocator);
+}
+
 fn usage() []const u8 {
-    return "usage: zig build causal-compare -- <before.json> <after.json>\n";
+    return "usage: zig build causal-compare -- [--structural] <before.json> <after.json>\n";
 }
 
 fn failUsage() noreturn {
@@ -308,16 +417,75 @@ fn failUsage() noreturn {
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
     const args = try init.minimal.args.toSlice(init.arena.allocator());
-    if (args.len != 3) failUsage();
 
-    const before = try std.Io.Dir.cwd().readFileAlloc(init.io, args[1], allocator, .limited(1024 * 1024));
+    var structural = false;
+    var paths: [2][]const u8 = undefined;
+    var path_count: usize = 0;
+    for (args[1..]) |arg| {
+        if (std.mem.eql(u8, arg, "--structural")) {
+            structural = true;
+        } else if (path_count < 2) {
+            paths[path_count] = arg;
+            path_count += 1;
+        } else {
+            failUsage();
+        }
+    }
+    if (path_count != 2) failUsage();
+
+    const before = try std.Io.Dir.cwd().readFileAlloc(init.io, paths[0], allocator, .limited(1024 * 1024));
     defer allocator.free(before);
-    const after = try std.Io.Dir.cwd().readFileAlloc(init.io, args[2], allocator, .limited(1024 * 1024));
+    const after = try std.Io.Dir.cwd().readFileAlloc(init.io, paths[1], allocator, .limited(1024 * 1024));
     defer allocator.free(after);
 
-    const report = try runCompare(allocator, before, after);
+    const report = if (structural)
+        try runStructuralCompare(allocator, before, after)
+    else
+        try runCompare(allocator, before, after);
     defer allocator.free(report);
     std.debug.print("{s}", .{report});
+}
+
+test "structural compare: identical structure with shifted ids compares equal" {
+    const allocator = std.testing.allocator;
+    // same kinds + same cause edges, but event ids offset and reordered
+    const a =
+        \\{"events":[
+        \\{"id":1,"kind":"fiber_suspended","fiber_id":1,"cause_event_id":null,"status":"pending"},
+        \\{"id":2,"kind":"timer_fired","fiber_id":1,"cause_event_id":1,"status":"ready"},
+        \\{"id":3,"kind":"fiber_resumed","fiber_id":1,"cause_event_id":2,"status":"running"},
+        \\{"id":4,"kind":"fiber_joined","fiber_id":1,"cause_event_id":null,"status":"success"}
+        \\]}
+    ;
+    const b =
+        \\{"events":[
+        \\{"id":50,"kind":"timer_fired","fiber_id":1,"cause_event_id":40,"status":"ready"},
+        \\{"id":40,"kind":"fiber_suspended","fiber_id":1,"cause_event_id":null,"status":"pending"},
+        \\{"id":99,"kind":"fiber_joined","fiber_id":1,"cause_event_id":null,"status":"success"},
+        \\{"id":60,"kind":"fiber_resumed","fiber_id":1,"cause_event_id":50,"status":"running"}
+        \\]}
+    ;
+    const report = try runStructuralCompare(allocator, a, b);
+    defer allocator.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "structural: equal") != null);
+}
+
+test "structural compare: a dropped resume compares not-equal" {
+    const allocator = std.testing.allocator;
+    const a =
+        \\{"events":[
+        \\{"id":1,"kind":"fiber_suspended","fiber_id":1,"cause_event_id":null,"status":"pending"},
+        \\{"id":2,"kind":"fiber_resumed","fiber_id":1,"cause_event_id":1,"status":"running"}
+        \\]}
+    ;
+    const b =
+        \\{"events":[
+        \\{"id":1,"kind":"fiber_suspended","fiber_id":1,"cause_event_id":null,"status":"pending"}
+        \\]}
+    ;
+    const report = try runStructuralCompare(allocator, a, b);
+    defer allocator.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "structural: not-equal") != null);
 }
 
 test "compare report includes event and finding deltas" {
