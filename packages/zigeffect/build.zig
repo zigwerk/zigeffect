@@ -335,6 +335,28 @@ pub fn build(b: *std.Build) void {
     });
     const run_data_and_matching_example_tests = b.addRunArtifact(data_and_matching_example_tests);
 
+    const effect_state_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/effect_state.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    effect_state_example_module.addImport("zigeffect", zigeffect);
+
+    const effect_state_example = b.addExecutable(.{
+        .name = "zigeffect-effect-state-example",
+        .root_module = effect_state_example_module,
+    });
+
+    const effect_state_example_tests = b.addTest(.{
+        .name = "zigeffect-effect-state-example-tests",
+        .root_module = effect_state_example_module,
+    });
+    const run_effect_state_example_tests = b.addRunArtifact(effect_state_example_tests);
+
+    const effect_state_example_step = b.step("effect-state-example", "Compile and test the effect state (Ref/SynchronizedRef/Hub) example");
+    effect_state_example_step.dependOn(&effect_state_example.step);
+    effect_state_example_step.dependOn(&run_effect_state_example_tests.step);
+
     const causal_readiness_example_module = b.createModule(.{
         .root_source_file = b.path("examples/causal_readiness.zig"),
         .target = target,
@@ -1608,6 +1630,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_readiness_example_tests.step);
     examples_step.dependOn(&data_and_matching_example.step);
     examples_step.dependOn(&run_data_and_matching_example_tests.step);
+    examples_step.dependOn(&effect_state_example.step);
+    examples_step.dependOn(&run_effect_state_example_tests.step);
     examples_step.dependOn(&causal_readiness_example.step);
     examples_step.dependOn(&run_causal_readiness_example_tests.step);
     examples_step.dependOn(&causal_app_request_example.step);
