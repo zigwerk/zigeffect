@@ -488,6 +488,60 @@ test "structural compare: a dropped resume compares not-equal" {
     try std.testing.expect(std.mem.indexOf(u8, report, "structural: not-equal") != null);
 }
 
+test "structural compare: same event kinds but a different cause edge compares not-equal" {
+    const allocator = std.testing.allocator;
+    // Same event-kind multiset (timer_fired, io_completed, fiber_resumed) but the
+    // resume is caused by a different kind of event — isolates the cause-edge invariant.
+    const a =
+        \\{"events":[
+        \\{"id":1,"kind":"timer_fired","fiber_id":1,"cause_event_id":null,"status":"ready"},
+        \\{"id":2,"kind":"io_completed","fiber_id":1,"cause_event_id":null,"status":"ready"},
+        \\{"id":3,"kind":"fiber_resumed","fiber_id":1,"cause_event_id":1,"status":"running"}
+        \\]}
+    ;
+    const b =
+        \\{"events":[
+        \\{"id":1,"kind":"timer_fired","fiber_id":1,"cause_event_id":null,"status":"ready"},
+        \\{"id":2,"kind":"io_completed","fiber_id":1,"cause_event_id":null,"status":"ready"},
+        \\{"id":3,"kind":"fiber_resumed","fiber_id":1,"cause_event_id":2,"status":"running"}
+        \\]}
+    ;
+    const report = try runStructuralCompare(allocator, a, b);
+    defer allocator.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "structural: not-equal") != null);
+}
+
+test "structural compare: two fibers, fully reordered with offset ids, compares equal" {
+    const allocator = std.testing.allocator;
+    const a =
+        \\{"events":[
+        \\{"id":1,"kind":"fiber_forked","fiber_id":1,"cause_event_id":null,"status":"pending"},
+        \\{"id":2,"kind":"fiber_forked","fiber_id":2,"cause_event_id":null,"status":"pending"},
+        \\{"id":3,"kind":"fiber_joined","fiber_id":1,"cause_event_id":null,"status":"success"},
+        \\{"id":4,"kind":"fiber_joined","fiber_id":2,"cause_event_id":null,"status":"success"}
+        \\]}
+    ;
+    const b =
+        \\{"events":[
+        \\{"id":40,"kind":"fiber_joined","fiber_id":2,"cause_event_id":null,"status":"success"},
+        \\{"id":10,"kind":"fiber_forked","fiber_id":1,"cause_event_id":null,"status":"pending"},
+        \\{"id":30,"kind":"fiber_joined","fiber_id":1,"cause_event_id":null,"status":"success"},
+        \\{"id":20,"kind":"fiber_forked","fiber_id":2,"cause_event_id":null,"status":"pending"}
+        \\]}
+    ;
+    const report = try runStructuralCompare(allocator, a, b);
+    defer allocator.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "structural: equal") != null);
+}
+
+test "structural compare: empty traces compare equal" {
+    const allocator = std.testing.allocator;
+    const empty = "{\"events\":[]}";
+    const report = try runStructuralCompare(allocator, empty, empty);
+    defer allocator.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "structural: equal") != null);
+}
+
 test "compare report includes event and finding deltas" {
     const report = try runCompare(std.testing.allocator, before_json, after_json);
     defer std.testing.allocator.free(report);
