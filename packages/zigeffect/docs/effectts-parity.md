@@ -49,7 +49,10 @@ EffectTS has a broad set of constructors, combinators, and generator syntax.
 edge combinators to compose stdlib services:
 
 - constructors: `succeed`, `fail`, `sync`
-- transformation: `map`, `flatMap`, `tap`
+- transformation: `map`, `flatMap`, `tap`, `as`, `replace`, `asVoid`, `andThen`
+- pairing / gather: `zip`, `zipWith`, `fx.all` (sequential, homogeneous slice)
+- conditional: `when`, `unless`
+- traversal: `fx.forEachAlloc`, `fx.forEachDiscard`
 - recovery: `mapError`, `catchAll`, `orElse`, `tapError`
 - lifecycle observation: `onExit`, `ensuring`
 - scheduling: `retry`, `repeat`
@@ -179,8 +182,11 @@ identity, sharding, runners, message storage, and lease-protected ownership.
   node-down recovery, split-brain evidence, and operator inspection reports.
 
 This now covers the Effect-style workflow and cluster substrate inside a local
-durable runtime, including a real shared-storage cluster control plane. Full
-supervision trees remain the next Erlang-style runtime milestone.
+durable runtime, including a real shared-storage cluster control plane.
+Erlang-style local supervision trees (escalate / restart / shutdown strategies)
+shipped in Milestone 51 — see `Supervisor` in the public facade. Distributed
+multi-runner supervision remains tracked in Track 9 of the vision-completion
+roadmap (`docs/superpowers/plans/2026-06-20-zigeffect-vision-completion-roadmap.md`).
 
 ### Schedule
 
