@@ -111,6 +111,53 @@ pub fn recordZioCancellationScenario(store: *fx.CausalStore) !void {
     _ = try store.record(.{ .kind = .exit_recorded, .run_id = run_id, .parent_id = run_started, .status = "interrupted", .label = "zio-cancellation" });
 }
 
+/// Z2: real async IO wait. A fiber blocks on a real loopback-socket read, which
+/// parks the coroutine on the zio event loop until a client writes; the engine
+/// emits io_wait_started before the read and io_completed + fiber_resumed after.
+/// This is the IO-wait counterpart of Z1's timer suspension.
+fn z2Client(addr: zio.net.IpAddress) void {
+    zio.sleep(zio.Duration.fromMilliseconds(5)) catch return;
+    const stream = addr.connect(.{}) catch return;
+    defer stream.close();
+    _ = stream.write("x", .none) catch return;
+}
+
+pub fn recordZioIoScenario(store: *fx.CausalStore) !void {
+    const addr = try zio.net.IpAddress.parseIp4("127.0.0.1", 19191);
+    const server = try addr.listen(.{});
+    defer server.close();
+
+    const run_id = store.nextRunId();
+    const scope_id = store.nextScopeId();
+    const fiber_id: u64 = 1;
+
+    const run_started = try store.record(.{ .kind = .run_started, .run_id = run_id, .status = "started", .label = "zio-io-wait", .type_name = "ZioIoScenario" });
+    const scope_opened = try store.record(.{ .kind = .scope_opened, .run_id = run_id, .scope_id = scope_id, .parent_id = run_started, .status = "opened", .label = "io scope" });
+    const fiber_forked = try store.record(.{ .kind = .fiber_forked, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = scope_opened, .status = "pending", .label = "io fiber" });
+    const fiber_started = try store.record(.{ .kind = .fiber_started, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = fiber_forked, .status = "running", .label = "io fiber" });
+    const io_effect = try store.record(.{ .kind = .effect_started, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = fiber_started, .status = "started", .label = "socket read", .type_name = "IoEffect" });
+
+    var group: zio.Group = .init;
+    try group.spawn(z2Client, .{addr});
+
+    const io_wait = try store.record(.{ .kind = .io_wait_started, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = fiber_started, .cause_event_id = io_effect, .schedule_id = 1, .status = "pending", .label = "socket read", .type_name = "IoWait" });
+
+    // Real async IO: accept + read park the coroutine on the event loop until data.
+    const stream = try server.accept(.{});
+    defer stream.close();
+    var buf: [16]u8 = undefined;
+    const n = try stream.read(&buf, .none);
+
+    const io_done = try store.record(.{ .kind = .io_completed, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = io_wait, .cause_event_id = io_wait, .schedule_id = 1, .status = "ready", .label = "socket readable", .type_name = "IoWait" });
+    _ = try store.record(.{ .kind = .fiber_resumed, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = io_wait, .cause_event_id = io_done, .schedule_id = 1, .status = "running", .label = "io fiber resumed", .type_name = "Suspension" });
+    const scope_closed = try store.record(.{ .kind = .scope_closed, .run_id = run_id, .scope_id = scope_id, .parent_id = run_started, .status = "closed", .label = "io scope" });
+    _ = try store.record(.{ .kind = .fiber_joined, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = scope_closed, .status = "success", .label = "io fiber" });
+    _ = try store.record(.{ .kind = .exit_recorded, .run_id = run_id, .parent_id = run_started, .status = "success", .label = "zio-io-wait" });
+
+    group.wait() catch {};
+    if (n == 0) return error.NoDataRead;
+}
+
 fn kindCount(events: []fx.CausalEvent, kind: fx.CausalEventKind) usize {
     var count: usize = 0;
     for (events) |event| {
@@ -264,6 +311,33 @@ test "Z1: zio-backed delay suspends for real and yields a structurally-equal cau
     try std.testing.expectEqual(kindCount(det_snap.events, .fiber_joined), kindCount(zio_snap.events, .fiber_joined));
     try std.testing.expectEqual(@as(usize, 1), kindCount(zio_snap.events, .fiber_suspended));
     try std.testing.expectEqual(@as(usize, 1), kindCount(zio_snap.events, .fiber_resumed));
+}
+
+test "Z2: a fiber blocks on a real socket read and resumes when data arrives" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+
+    var store = fx.CausalStore.init(allocator);
+    defer store.deinit();
+    try recordZioIoScenario(&store);
+
+    var snap = try store.snapshot(allocator);
+    defer snap.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), kindCount(snap.events, .io_wait_started));
+    try std.testing.expectEqual(@as(usize, 1), kindCount(snap.events, .io_completed));
+    try std.testing.expectEqual(@as(usize, 1), kindCount(snap.events, .fiber_resumed));
+    try std.testing.expectEqual(@as(usize, 1), kindCount(snap.events, .fiber_joined));
+
+    // the resume is caused by the IO completing
+    var io_completed_id: ?u64 = null;
+    var resume_cause: ?u64 = null;
+    for (snap.events) |event| {
+        if (event.kind == .io_completed) io_completed_id = event.id;
+        if (event.kind == .fiber_resumed) resume_cause = event.cause_event_id;
+    }
+    try std.testing.expectEqual(io_completed_id, resume_cause);
 }
 
 test "Z3: zio.Group.cancel interrupts a parked child, caused by scope close" {
