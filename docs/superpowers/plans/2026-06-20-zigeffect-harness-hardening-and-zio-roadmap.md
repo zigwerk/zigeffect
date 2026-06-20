@@ -141,7 +141,7 @@ passing adapter test that runs real coroutines and asserts the causal trace):
 This is the thesis proven end to end: real structured concurrency (suspend, IO,
 cancel, coordinate) under real zio, with the causal graph capturing it.
 
-## Deep integration — CORE CAPABILITY DONE (D1 + D2)
+## Deep integration — DONE (D1 + D2 + productized executor)
 
 The novel result is proven and verified against real zio v0.14.0:
 
@@ -155,28 +155,34 @@ The novel result is proven and verified against real zio v0.14.0:
   genuinely interleave (both park before either resumes), yet are **structurally
   equal** (H5) to the deterministic *sequential* run despite real reordering.
 
+- **Productized executor (DONE).** Core `fiber.zig` now has a pluggable
+  `FiberExecutor` vtable + `FiberRuntime.withExecutor`. With no executor the
+  behavior is byte-for-byte the deterministic model (fibers run synchronously on
+  join); with one, `fork` eagerly spawns the fiber's effect onto the executor and
+  `join` awaits it. `zigeffect-zio` ships `ZioFiberExecutor` (real coroutines via
+  `zio.spawn`/`JoinHandle`). Verified: an ordinary two-fiber `Effect.fork` program
+  runs deterministically (sequential) and on the zio executor (genuinely
+  interleaved — both fibers start before either's scope closes), with the **same
+  causal structure** either way. Lifetimes are leak-safe (un-joined fibers drained
+  at deinit; proven under the leak detector) and an adversarial review confirmed no
+  memory-safety bug and exact deterministic-path invariance.
+
 This is the cutting edge: an agent develops/debugs a concurrent program against
 the deterministic backend (reproducible, fully causal) and runs it for real on
-zio with an identical causal graph.
+zio with an identical causal graph — now transparently via `Effect.fork`.
 
-### Remaining refinement (productization)
+### Remaining refinement
 
-1. **Hoist the executor into core `FiberRuntime.fork`** so user `Effect.fork`
-   auto-spawns a zio coroutine via a pluggable executor hook (default = today's
-   synchronous run). D1/D2 prove the capability via the adapter spawning the
-   engine's coordinator coroutines; this makes it transparent to user code. A
-   generic-type refactor of `fiber.zig` that must preserve deterministic
-   behavior exactly.
-2. **H7b — coverage-truth gate + un-stub `causal-scoped-fiber`.** The scenario
+1. **H7b — coverage-truth gate + un-stub `causal-scoped-fiber`.** The scenario
    harness runs commands, so `causal-scoped-fiber` emits no fiber lifecycle.
    Make it run an in-process fiber program with a `CausalStore` (like the
    dogfood), and add a gate asserting `coverage: <domain>` scenarios emit that
    domain's kinds.
-3. **H7a — refine the live interrupt cause to `scope_closed`.** Lower priority:
+2. **H7a — refine the live interrupt cause to `scope_closed`.** Lower priority:
    the runtime already sets `cause_event_id` (interrupt → fork). Pointing it at
    `scope_closed` needs `FinalizerExit`/scope back-reference plumbing; invasive.
-4. **H6b — `--agent` bundle enrichment** (net fiber state + suspend/resume pairs).
-5. **Z4 — hardening + workbench** (defect propagation across the yield boundary,
+3. **H6b — `--agent` bundle enrichment** (net fiber state + suspend/resume pairs).
+4. **Z4 — hardening + workbench** (defect propagation across the yield boundary,
    parked-fiber lifetime, conformance gate, workbench renders a real zio run).
 
 Original H7a item, for reference: real `cause_event_id` edges in the live runtime.
