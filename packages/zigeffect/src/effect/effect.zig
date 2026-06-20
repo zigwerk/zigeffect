@@ -3,6 +3,10 @@ const context_mod = @import("../core/context.zig");
 const result = @import("../core/result.zig");
 const schedule_mod = @import("schedule.zig");
 const dep_services = @import("../dependency/services.zig");
+const ergonomics_mod = @import("ergonomics.zig");
+
+pub const AsEffect = ergonomics_mod.AsEffect;
+pub const WhenEffect = ergonomics_mod.WhenEffect;
 
 pub const Allocator = std.mem.Allocator;
 pub const Context = context_mod.Context;
@@ -191,6 +195,45 @@ pub fn Effect(comptime Success: type, comptime Failure: type, comptime Env: type
 
         pub fn requires(self: Self, comptime services: anytype) RequiredEffect(Self, services, Env) {
             return .{ .parent = self };
+        }
+
+        // ─── Ergonomics M1 (Track 3) ─────────────────────────────────────────
+        // Daily-use combinators that map onto existing primitives. Defined here
+        // so they appear on the base Effect type (the most common entry point);
+        // wrapper Effects retain the same names already via their own methods.
+
+        /// M3.1 / M3.2 — run self for side-effect, then return `replacement`.
+        /// `replace` is the documented alias; both produce an `AsEffect`.
+        pub fn as(self: Self, comptime NewSuccess: type, replacement: NewSuccess) AsEffect(Self, NewSuccess, Env) {
+            return .{ .parent = self, .replacement = replacement };
+        }
+        pub fn replace(self: Self, comptime NewSuccess: type, replacement: NewSuccess) AsEffect(Self, NewSuccess, Env) {
+            return self.as(NewSuccess, replacement);
+        }
+
+        /// M3.3 — run self for side-effect, discard success.
+        pub fn asVoid(self: Self) AsEffect(Self, void, Env) {
+            return .{ .parent = self, .replacement = {} };
+        }
+
+        /// M3.4 — alias for `flatMap`. The EffectTS canonical name; the
+        /// signature is identical.
+        pub fn andThen(
+            self: Self,
+            comptime Next: type,
+            binder: *const fn (Success, *Context(Env)) Failure!Next,
+        ) FlatMapEffect(Self, Next, Failure, Env) {
+            return self.flatMap(Next, binder);
+        }
+
+        /// M3.8 — run self only if `cond` is true; success becomes `?Success`.
+        pub fn when(self: Self, cond: bool) WhenEffect(Self, Env) {
+            return .{ .parent = self, .cond = cond };
+        }
+
+        /// M3.9 — run self unless `cond` is true; the inverse of `when`.
+        pub fn unless(self: Self, cond: bool) WhenEffect(Self, Env) {
+            return .{ .parent = self, .cond = !cond };
         }
     };
 }
