@@ -4,6 +4,7 @@ comptime {
     _ = @import("dependency_test.zig");
     _ = @import("effect_test.zig");
     _ = @import("effect_ergonomics_test.zig");
+    _ = @import("ref_test.zig");
     _ = @import("scope_test.zig");
     _ = @import("runtime_test.zig");
     _ = @import("runtime_executor_test.zig");
