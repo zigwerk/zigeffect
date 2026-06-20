@@ -34,7 +34,10 @@ const result = try Program
 - **`Runtime` / `FiberRuntime` / `Fiber`**: engine-managed scopes with automatic
   cleanup, and deterministic fork/join/interrupt with scoped leases. The fiber
   runtime is semantic-first and deterministic — it does not claim real
-  green-thread suspension; a future async backend adapter provides that.
+  green-thread suspension; an optional [zio](https://github.com/lalinsky/zio)
+  adapter (`packages/zigeffect-zio`, planned) provides the stackful-coroutine and
+  `std.Io` backend, keeping the core dependency-free. See
+  [docs/roadmap.md](docs/roadmap.md).
 - **`Deferred`, `Queue`, `Semaphore`**: deterministic coordination primitives
   with explicit wait-state/backpressure inspection.
 - **`Context`**, **`acquireRelease`**, **`Scope`**: typed service access and

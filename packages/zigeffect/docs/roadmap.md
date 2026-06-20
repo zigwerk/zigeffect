@@ -56,7 +56,9 @@ Cause / event contracts.
   on join. `async_backend.zig` defines a full `AsyncBackend` vtable
   (suspend/wake/timer/interrupt/IO-wait) but the only implementation is an
   in-memory virtual-clock simulation — no real threading or IO. Real suspension
-  belongs to a future backend adapter.
+  belongs to the optional `packages/zigeffect-zio` adapter (see the forward
+  sequence); the core stays zio-free so it remains testable without threads, IO,
+  or wall-clock time.
 - **Clustering transports are in-memory.** `production_http`/`production_socket`
   kinds format bytes and route through an in-process transport over in-memory
   storage; no real sockets yet. Durability is local journal stores.
@@ -77,13 +79,22 @@ concurrency.
 
 ## Forward sequence
 
-1. **Prove one real async backend.** Implement an `AsyncBackend` vtable impl
-   backed by real suspension (`std.Thread` or a Zig event loop) for a single
-   primitive (timer + IO wait). Keep `LocalAsyncBackendState` as the
-   deterministic compatibility-suite reference.
+1. **Build the zio backend (`packages/zigeffect-zio`).**
+   [zio](https://github.com/lalinsky/zio) v0.14.0 — installed with
+   `zig fetch --save "git+https://github.com/lalinsky/zio#v0.14.0"` — targets
+   Zig 0.16 on its `main` branch (use the `zig-0.17` branch for Zig master) and
+   provides stackful coroutines plus a full `std.Io` implementation over
+   io_uring / epoll / kqueue. Add it as a **separate, optional adapter package**
+   that implements the `AsyncBackend` seam; the core `packages/zigeffect` stays
+   zio-free and must pass its tests without it. Map `fork` → `group.spawn`,
+   scoped fibers → `zio.Group` lifetime, `interrupt` → `group.cancel`, and start
+   with a single primitive (timer + IO wait). Keep `LocalAsyncBackendState` as
+   the deterministic compatibility-suite reference: the same program must produce
+   the same causal trace under both backends.
 2. **Wire it into the wait-states.** Make `Queue`/`Semaphore`/`Deferred` actually
-   suspend/resume on the real backend — the smallest end-to-end proof that
-   deterministic event semantics survive a real backend.
+   suspend/resume on the zio backend (backed by zio channels / sync primitives) —
+   the smallest end-to-end proof that deterministic event semantics survive a
+   real backend.
 3. **Make one export adapter live end-to-end.** Either OTel (add OTLP
    serialization + a local collector sink) or NenDB (pin the upstream package,
    adapt `addNode`/`addEdge`/`flush`) so the causal graph leaves the in-memory /
