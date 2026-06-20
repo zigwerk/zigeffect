@@ -84,6 +84,11 @@ fn FiberState(comptime Success: type, comptime Failure: type, comptime Env: type
         executor_handle: ?*anyopaque = null,
         job_context: ?*anyopaque = null,
         job_context_deinit: ?*const fn (Allocator, ?*anyopaque) void = null,
+        // H7a — when a fiber is forked into a parent scope, hold a pointer to
+        // that scope so a finalizer-triggered interrupt can point its
+        // cause_event_id at the parent's scope_closed (the real cause) rather
+        // than falling back to the fiber_forked event.
+        parent_scope: ?*Scope = null,
 
         pub fn init(
             allocator: Allocator,
@@ -192,10 +197,18 @@ fn FiberState(comptime Success: type, comptime Failure: type, comptime Env: type
         }
 
         fn recordInterrupted(self: *Self) void {
+            // H7a — prefer the parent scope's scope_closed event as the cause,
+            // so live-runtime cause queries trace the interrupt back to the
+            // actual scope-cancellation that triggered it. Falls back to the
+            // forked event for top-level / scope-less fibers.
+            const cause = if (self.parent_scope) |ps|
+                ps.causal_closed_event_id orelse self.causal_forked_event_id
+            else
+                self.causal_forked_event_id;
             _ = self.recordCausal(.{
                 .kind = .fiber_interrupted,
                 .parent_id = self.causal_forked_event_id,
-                .cause_event_id = self.causal_forked_event_id,
+                .cause_event_id = cause,
                 .status = "interrupted",
             });
         }
@@ -547,6 +560,9 @@ pub fn FiberRuntime(comptime Env: type) type {
                 self.interrupt(fiber);
                 return err;
             };
+            // H7a — record the parent so a finalizer-triggered interrupt can
+            // point its cause at the parent's scope_closed.
+            fiber.state.parent_scope = parent_scope;
             return fiber;
         }
 

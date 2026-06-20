@@ -22,6 +22,11 @@ pub const Scope = struct {
     finalizers: std.ArrayList(Finalizer) = .empty,
     finalizer_failures: std.ArrayList([]const u8) = .empty,
     closed: bool = false,
+    /// Captured at scope-close time so downstream events (e.g. a child fiber's
+    /// `fiber_interrupted` whose interrupt was triggered by this scope's
+    /// finalizers) can point their `cause_event_id` at the precise close event.
+    /// Null before close.
+    causal_closed_event_id: ?u64 = null,
     causal_store: ?*CausalStore = null,
     causal_run_id: ?u64 = null,
     causal_scope_id: ?u64 = null,
@@ -110,12 +115,16 @@ pub const Scope = struct {
     }
 
     fn recordScopeClosed(self: *Scope, exit: FinalizerExit) void {
-        _ = self.recordCausal(.{
+        // Capture the close event id on the scope so finalizer-triggered
+        // interrupts on child fibers can point their cause_event_id at the
+        // precise scope_closed (instead of falling back to fiber_forked).
+        const close_id = self.recordCausal(.{
             .kind = .scope_closed,
             .parent_id = self.causal_opened_event_id,
             .status = finalizerExitStatus(exit),
             .redacted_detail = finalizerExitDetail(exit),
         });
+        self.causal_closed_event_id = close_id;
     }
 
     pub fn deinit(self: *Scope) void {
@@ -294,6 +303,12 @@ pub const Scope = struct {
 
     pub fn closeWithExit(self: *Scope, exit: FinalizerExit) void {
         if (self.closed) return;
+        // H7a — record `scope_closed` BEFORE running finalizers so that
+        // finalizer-triggered events (e.g. a child fiber being interrupted as
+        // its parent scope cancels) can point their cause_event_id at the real
+        // scope_closed. This is also the logically correct order: the scope
+        // was closed first, finalizers are the consequences.
+        self.recordScopeClosed(exit);
         while (self.finalizers.items.len > 0) {
             const index = self.finalizers.items.len - 1;
             const finalizer = self.finalizers.items[index];
@@ -304,7 +319,6 @@ pub const Scope = struct {
                 self.finalizer_failures.append(self.allocator, name) catch {};
             }
         }
-        self.recordScopeClosed(exit);
         self.closed = true;
     }
 

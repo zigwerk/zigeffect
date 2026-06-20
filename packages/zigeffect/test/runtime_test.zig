@@ -385,19 +385,23 @@ test "runtime causal events show resource acquisition and finalization" {
         .run_started,
         .scope_opened,
         .resource_acquired,
-        .resource_finalized,
+        // H7a — scope_closed is now recorded BEFORE finalizers run so the
+        // close event id is available when finalizer-triggered events
+        // (e.g. a child fiber's interrupt) need it as their cause.
         .scope_closed,
+        .resource_finalized,
         .exit_recorded,
         .run_completed,
     });
     try std.testing.expectEqualStrings(@typeName(fixtures.TrackedResource), snapshot.events[2].type_name);
-    try std.testing.expectEqualStrings(@typeName(fixtures.TrackedResource), snapshot.events[3].type_name);
-    try std.testing.expectEqualStrings("success", snapshot.events[3].status);
+    try std.testing.expectEqualStrings(@typeName(fixtures.TrackedResource), snapshot.events[4].type_name);
+    try std.testing.expectEqualStrings("success", snapshot.events[4].status);
     try std.testing.expect(snapshot.events[2].resource_id != null);
-    try std.testing.expectEqual(snapshot.events[2].resource_id, snapshot.events[3].resource_id);
-    try std.testing.expectEqual(snapshot.events[2].id, snapshot.events[3].parent_id.?);
+    try std.testing.expectEqual(snapshot.events[2].resource_id, snapshot.events[4].resource_id);
+    // resource_finalized (now at index 4) has resource_acquired (index 2) as parent.
+    try std.testing.expectEqual(snapshot.events[2].id, snapshot.events[4].parent_id.?);
     try std.testing.expectEqual(snapshot.events[1].scope_id.?, snapshot.events[2].scope_id.?);
-    try std.testing.expectEqual(snapshot.events[1].scope_id.?, snapshot.events[3].scope_id.?);
+    try std.testing.expectEqual(snapshot.events[1].scope_id.?, snapshot.events[4].scope_id.?);
 }
 
 test "runtime causal events record finalizer failure evidence" {
@@ -428,18 +432,19 @@ test "runtime causal events record finalizer failure evidence" {
         .run_started,
         .scope_opened,
         .resource_acquired,
-        .resource_finalized,
+        // H7a — scope_closed is now recorded BEFORE finalizers run.
         .scope_closed,
+        .resource_finalized,
         .exit_recorded,
         .run_completed,
     });
     try std.testing.expectEqualStrings(@typeName(fixtures.TrackedResource), snapshot.events[2].type_name);
-    try std.testing.expectEqualStrings(@typeName(fixtures.TrackedResource), snapshot.events[3].type_name);
-    try std.testing.expectEqualStrings("failure", snapshot.events[3].status);
-    try std.testing.expectEqualStrings("CloseFailed", snapshot.events[3].redacted_detail);
+    try std.testing.expectEqualStrings(@typeName(fixtures.TrackedResource), snapshot.events[4].type_name);
+    try std.testing.expectEqualStrings("failure", snapshot.events[4].status);
+    try std.testing.expectEqualStrings("CloseFailed", snapshot.events[4].redacted_detail);
     try std.testing.expect(snapshot.events[2].resource_id != null);
-    try std.testing.expectEqual(snapshot.events[2].resource_id, snapshot.events[3].resource_id);
-    try std.testing.expectEqual(snapshot.events[2].id, snapshot.events[3].parent_id.?);
-    try std.testing.expectEqual(snapshot.events[2].id, snapshot.events[3].cause_event_id.?);
+    try std.testing.expectEqual(snapshot.events[2].resource_id, snapshot.events[4].resource_id);
+    try std.testing.expectEqual(snapshot.events[2].id, snapshot.events[4].parent_id.?);
+    try std.testing.expectEqual(snapshot.events[2].id, snapshot.events[4].cause_event_id.?);
     try std.testing.expectEqualStrings("cause", snapshot.events[5].status);
 }
