@@ -4,6 +4,7 @@ const result = @import("result.zig");
 const clock_mod = @import("../services/clock.zig");
 const causal_mod = @import("../services/causal.zig");
 const async_backend_mod = @import("../runtime/async_backend.zig");
+const executor_mod = @import("../runtime/executor.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const Scope = scope_mod.Scope;
@@ -18,6 +19,8 @@ pub const AsyncBackendError = async_backend_mod.AsyncBackendError;
 pub const Suspension = async_backend_mod.Suspension;
 pub const AsyncIoWaitKind = async_backend_mod.AsyncIoWaitKind;
 pub const AsyncIoInterest = async_backend_mod.AsyncIoInterest;
+pub const FiberExecutor = executor_mod.FiberExecutor;
+pub const FiberJob = executor_mod.FiberJob;
 
 pub fn serviceNotFound(comptime Env: type, comptime Service: type) noreturn {
     @compileError(
@@ -46,6 +49,11 @@ pub fn Context(comptime Env: type) type {
         causal_store: ?*CausalStore = null,
         causal_run_id: ?u64 = null,
         async_backend: ?AsyncBackend = null,
+        /// Pluggable execution strategy for forked work originating inside an
+        /// effect (set by `Runtime(Env).withExecutor` / `FiberRuntime.withExecutor`).
+        /// When null, future fork primitives run synchronously — the
+        /// deterministic baseline.
+        executor: ?FiberExecutor = null,
 
         pub fn init(allocator: Allocator, env: *Env, scope: ?*Scope) Self {
             return .{

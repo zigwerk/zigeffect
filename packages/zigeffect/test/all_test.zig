@@ -5,6 +5,7 @@ comptime {
     _ = @import("effect_test.zig");
     _ = @import("scope_test.zig");
     _ = @import("runtime_test.zig");
+    _ = @import("runtime_executor_test.zig");
     _ = @import("fiber_test.zig");
     _ = @import("fiber_executor_test.zig");
     _ = @import("supervisor_test.zig");

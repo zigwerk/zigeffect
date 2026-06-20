@@ -8,6 +8,7 @@ const dep_contracts = @import("../dependency/contracts.zig");
 const dep_validation = @import("../dependency/validation.zig");
 const backend_mod = @import("backend.zig");
 const async_backend_mod = @import("async_backend.zig");
+const executor_mod = @import("executor.zig");
 const runner_mod = @import("runner.zig");
 
 pub const Allocator = dep_services.Allocator;
@@ -21,6 +22,8 @@ pub const CausalStore = causal_mod.CausalStore;
 pub const BackendCapabilities = backend_mod.BackendCapabilities;
 pub const deterministicBackend = backend_mod.deterministicBackend;
 pub const AsyncBackend = async_backend_mod.AsyncBackend;
+pub const FiberExecutor = executor_mod.FiberExecutor;
+pub const FiberJob = executor_mod.FiberJob;
 pub const runManagedScope = runner_mod.runManagedScope;
 pub const exitManagedScope = runner_mod.exitManagedScope;
 pub const runCallerOwnedScope = runner_mod.runCallerOwnedScope;
@@ -49,6 +52,10 @@ pub fn Runtime(comptime Env: type) type {
         causal_store: ?*CausalStore = null,
         backend: BackendCapabilities = deterministicBackend(),
         async_backend: ?AsyncBackend = null,
+        /// Pluggable execution strategy for forked work. Propagated onto every
+        /// `Context` produced by `context()`. Default (null) keeps the
+        /// deterministic posture: forks run synchronously on join.
+        executor: ?FiberExecutor = null,
         provided_builder: ServiceSetBuilder = emptyServiceSet,
         provided_provider: ?*const anyopaque = null,
         provided_provider_builder: ?ProviderServiceSetBuilder = null,
@@ -98,6 +105,16 @@ pub fn Runtime(comptime Env: type) type {
             return runtime;
         }
 
+        /// Run forked work via the given executor (e.g. a real coroutine
+        /// backend) instead of synchronously. Propagated to every `Context`
+        /// the runtime produces. The deterministic default (no executor)
+        /// is unchanged. Mirrors `FiberRuntime.withExecutor`.
+        pub fn withExecutor(self: Self, exec: FiberExecutor) Self {
+            var runtime = self;
+            runtime.executor = exec;
+            return runtime;
+        }
+
         pub fn backendCapabilities(self: *const Self) BackendCapabilities {
             return self.backend;
         }
@@ -131,6 +148,7 @@ pub fn Runtime(comptime Env: type) type {
             ctx.span_id = self.span_id;
             ctx.causal_store = self.causal_store;
             ctx.async_backend = self.async_backend;
+            ctx.executor = self.executor;
             return ctx;
         }
 

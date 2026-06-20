@@ -1,5 +1,6 @@
 const std = @import("std");
 const context_mod = @import("../core/context.zig");
+const executor_mod = @import("executor.zig");
 const scope_mod = @import("../core/scope.zig");
 const result = @import("../core/result.zig");
 const clock_mod = @import("../services/clock.zig");
@@ -48,41 +49,12 @@ const FiberRecord = struct {
     deinit: *const fn (?*anyopaque) void,
 };
 
-/// A unit of work the runtime hands to a `FiberExecutor`: run one fiber's effect
-/// to completion. `run` is type-erased over the fiber's Success/Failure/Env.
-pub const FiberJob = struct {
-    context: ?*anyopaque,
-    run: *const fn (?*anyopaque) void,
-};
-
-/// Pluggable execution strategy for forked fibers.
-///
-/// With NO executor (the default), fibers run synchronously to completion on
-/// `join` — the deterministic model, unchanged. An executor (e.g. the zio
-/// adapter) instead spawns each fiber as a real stackful coroutine at `fork`
-/// time, and `join` awaits it — so the SAME `Effect.fork` program runs with real
-/// concurrency while producing the same causal structure it does deterministically.
-///
-/// Equivalence scope: the "same causal structure either way" guarantee holds for
-/// fibers that are JOINED. The two paths differ in WHEN a fiber runs — an
-/// executor runs it eagerly at fork, the default runs it lazily at join — so a
-/// fiber that is forked and never joined diverges: under an executor it is still
-/// drained (run + released) at deinit as a leak-safety net and thus records its
-/// start, whereas the lazy default never runs it. Join the fibers you fork.
-pub const FiberExecutor = struct {
-    context: ?*anyopaque = null,
-    vtable: *const VTable,
-
-    pub const VTable = struct {
-        /// Schedule the job; return an opaque handle, or null to fall back to
-        /// synchronous execution (e.g. on spawn failure).
-        spawn: *const fn (?*anyopaque, FiberJob) ?*anyopaque,
-        /// Block until a spawned job completes.
-        join: *const fn (?*anyopaque, *anyopaque) void,
-        /// Release a handle's resources after join.
-        destroy: *const fn (?*anyopaque, *anyopaque) void,
-    };
-};
+// Re-export the executor-strategy types from the shared module so historical
+// users of `fx.fiber.FiberExecutor` keep working; the canonical home is now
+// `src/runtime/executor.zig` so `core/context.zig` can hold an executor field
+// without a cycle through `fiber.zig`.
+pub const FiberJob = executor_mod.FiberJob;
+pub const FiberExecutor = executor_mod.FiberExecutor;
 
 fn FiberState(comptime Success: type, comptime Failure: type, comptime Env: type) type {
     return struct {
@@ -439,6 +411,7 @@ pub fn FiberRuntime(comptime Env: type) type {
             ctx.causal_store = self.causal_store;
             ctx.causal_run_id = self.ensureCausalRunId();
             ctx.async_backend = self.async_backend;
+            ctx.executor = self.executor;
             return ctx;
         }
 
