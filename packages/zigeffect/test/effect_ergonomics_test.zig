@@ -96,6 +96,57 @@ test "M3.9 — unless(false) runs the effect, unless(true) skips it" {
     try std.testing.expect(skipped == null);
 }
 
+test "M3.5 — zip pairs two successes into a ZipPair struct" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+    var rt = runtime(&env);
+
+    const program = E.succeed(7).zip(E.succeed(11));
+    const value = try rt.run(program);
+    try std.testing.expectEqual(@as(u32, 7), value.left);
+    try std.testing.expectEqual(@as(u32, 11), value.right);
+}
+
+const Sum = struct {
+    fn add(a: u32, b: u32) u32 {
+        return a + b;
+    }
+};
+
+test "M3.6 — zipWith applies the combiner" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+    var rt = runtime(&env);
+
+    const program = E.succeed(7).zipWith(E.succeed(11), u32, Sum.add);
+    const value = try rt.run(program);
+    try std.testing.expectEqual(@as(u32, 18), value);
+}
+
+test "M3.7 — all gathers a homogeneous slice of effects sequentially" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+    var rt = runtime(&env);
+
+    const items = [_]E{ E.succeed(1), E.succeed(2), E.succeed(3) };
+    const program = fx.all(E, fixtures.TestError, fx.TestServices, &items);
+    const results = try rt.run(program);
+    defer std.testing.allocator.free(results);
+
+    try std.testing.expectEqualSlices(u32, &.{ 1, 2, 3 }, results);
+}
+
+test "M3.7 — all short-circuits on first failure" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+    var rt = runtime(&env);
+
+    const items = [_]E{ E.succeed(1), E.fail(error.Boom), E.succeed(3) };
+    const program = fx.all(E, fixtures.TestError, fx.TestServices, &items);
+    const result = rt.run(program);
+    try std.testing.expectError(error.Boom, result);
+}
+
 test "ergonomics compose with the existing pipeline (e.g. .map after .as)" {
     var env = try fx.TestEnv.init(std.testing.allocator);
     defer env.deinit();

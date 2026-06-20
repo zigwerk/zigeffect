@@ -7,6 +7,16 @@ const ergonomics_mod = @import("ergonomics.zig");
 
 pub const AsEffect = ergonomics_mod.AsEffect;
 pub const WhenEffect = ergonomics_mod.WhenEffect;
+pub const ZipEffect = ergonomics_mod.ZipEffect;
+pub const ZipWithEffect = ergonomics_mod.ZipWithEffect;
+pub const ZipPair = ergonomics_mod.ZipPair;
+pub const AllEffect = ergonomics_mod.AllEffect;
+
+/// M3.7 — sequential gather over a homogeneous slice of effects. Allocates a
+/// result slice via `ctx.allocator`; caller frees it. Failure short-circuits.
+pub fn all(comptime Item: type, comptime Failure: type, comptime Env: type, items: []const Item) AllEffect(Item, Failure, Env) {
+    return .{ .items = items };
+}
 
 pub const Allocator = std.mem.Allocator;
 pub const Context = context_mod.Context;
@@ -234,6 +244,22 @@ pub fn Effect(comptime Success: type, comptime Failure: type, comptime Env: type
         /// M3.9 — run self unless `cond` is true; the inverse of `when`.
         pub fn unless(self: Self, cond: bool) WhenEffect(Self, Env) {
             return .{ .parent = self, .cond = !cond };
+        }
+
+        /// M3.5 — sequential pair. Both effects share the same Failure/Env.
+        /// Success becomes `ZipPair(SelfSuccess, OtherSuccess)`.
+        pub fn zip(self: Self, other: anytype) ZipEffect(Self, @TypeOf(other), Failure, Env) {
+            return .{ .left = self, .right = other };
+        }
+
+        /// M3.6 — sequential pair + combiner.
+        pub fn zipWith(
+            self: Self,
+            other: anytype,
+            comptime Combined: type,
+            combine: *const fn (Success, @TypeOf(other).SuccessType) Combined,
+        ) ZipWithEffect(Self, @TypeOf(other), Combined, Failure, Env) {
+            return .{ .left = self, .right = other, .combine = combine };
         }
     };
 }
