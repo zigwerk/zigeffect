@@ -50,6 +50,67 @@ pub fn recordZioDelayScenario(store: *fx.CausalStore, due_ms: u64) !void {
     _ = try store.record(.{ .kind = .exit_recorded, .run_id = run_id, .parent_id = run_started, .status = "success", .label = "zio-delay-suspension" });
 }
 
+/// Z3: real structured cancellation. A parent spawns a child coroutine in a
+/// zio.Group; the child suspends on a long sleep; the parent closes the scope
+/// and cancels the group, which interrupts the child's real suspension. The
+/// child's fiber_interrupted is caused by the parent's scope_closed — the
+/// structured-concurrency invariant, proven against real zio cancellation.
+const Z3Ctx = struct {
+    store: *fx.CausalStore,
+    run_id: u64,
+    scope_id: u64,
+    fiber_id: u64,
+    fiber_forked_id: u64,
+    scope_closed_id: u64 = 0,
+    record_err: ?anyerror = null,
+};
+
+fn z3Child(ctx: *Z3Ctx) void {
+    const started = ctx.store.record(.{ .kind = .fiber_started, .run_id = ctx.run_id, .scope_id = ctx.scope_id, .fiber_id = ctx.fiber_id, .parent_id = ctx.fiber_forked_id, .status = "running", .label = "child fiber" }) catch |e| {
+        ctx.record_err = e;
+        return;
+    };
+    const suspended = ctx.store.record(.{ .kind = .fiber_suspended, .run_id = ctx.run_id, .scope_id = ctx.scope_id, .fiber_id = ctx.fiber_id, .parent_id = started, .cause_event_id = started, .schedule_id = 1, .status = "pending", .label = "child suspended", .type_name = "Suspension" }) catch |e| {
+        ctx.record_err = e;
+        return;
+    };
+
+    // Real suspension that will be interrupted by the parent's group.cancel().
+    zio.sleep(zio.Duration.fromMilliseconds(10_000)) catch {
+        _ = ctx.store.record(.{ .kind = .fiber_interrupted, .run_id = ctx.run_id, .scope_id = ctx.scope_id, .fiber_id = ctx.fiber_id, .parent_id = suspended, .cause_event_id = ctx.scope_closed_id, .status = "interrupted", .label = "child interrupted by scope close" }) catch |e| {
+            ctx.record_err = e;
+        };
+        return;
+    };
+    // Not reached in this scenario (the sleep is always canceled).
+    _ = ctx.store.record(.{ .kind = .fiber_joined, .run_id = ctx.run_id, .scope_id = ctx.scope_id, .fiber_id = ctx.fiber_id, .parent_id = suspended, .status = "success", .label = "child fiber" }) catch {};
+}
+
+pub fn recordZioCancellationScenario(store: *fx.CausalStore) !void {
+    const run_id = store.nextRunId();
+    const scope_id = store.nextScopeId();
+    const fiber_id: u64 = 1;
+
+    const run_started = try store.record(.{ .kind = .run_started, .run_id = run_id, .status = "started", .label = "zio-cancellation", .type_name = "ZioCancellationScenario" });
+    const scope_opened = try store.record(.{ .kind = .scope_opened, .run_id = run_id, .scope_id = scope_id, .parent_id = run_started, .status = "opened", .label = "parent scope" });
+    const fiber_forked = try store.record(.{ .kind = .fiber_forked, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = scope_opened, .status = "pending", .label = "child fiber" });
+
+    var ctx = Z3Ctx{ .store = store, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .fiber_forked_id = fiber_forked };
+
+    var group: zio.Group = .init;
+    try group.spawn(z3Child, .{&ctx});
+
+    // Let the child run to its suspend point, then close the scope and cancel.
+    try zio.sleep(zio.Duration.fromMilliseconds(5));
+    const scope_closed = try store.record(.{ .kind = .scope_closed, .run_id = run_id, .scope_id = scope_id, .parent_id = run_started, .status = "closed", .label = "parent scope" });
+    ctx.scope_closed_id = scope_closed;
+    group.cancel();
+    group.wait() catch {};
+
+    if (ctx.record_err) |err| return err;
+    _ = try store.record(.{ .kind = .exit_recorded, .run_id = run_id, .parent_id = run_started, .status = "interrupted", .label = "zio-cancellation" });
+}
+
 fn kindCount(events: []fx.CausalEvent, kind: fx.CausalEventKind) usize {
     var count: usize = 0;
     for (events) |event| {
@@ -203,6 +264,41 @@ test "Z1: zio-backed delay suspends for real and yields a structurally-equal cau
     try std.testing.expectEqual(kindCount(det_snap.events, .fiber_joined), kindCount(zio_snap.events, .fiber_joined));
     try std.testing.expectEqual(@as(usize, 1), kindCount(zio_snap.events, .fiber_suspended));
     try std.testing.expectEqual(@as(usize, 1), kindCount(zio_snap.events, .fiber_resumed));
+}
+
+test "Z3: zio.Group.cancel interrupts a parked child, caused by scope close" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+
+    var store = fx.CausalStore.init(allocator);
+    defer store.deinit();
+    try recordZioCancellationScenario(&store);
+
+    var snap = try store.snapshot(allocator);
+    defer snap.deinit();
+
+    // The child suspended for real and was interrupted (never resumed/joined).
+    try std.testing.expectEqual(@as(usize, 1), kindCount(snap.events, .fiber_suspended));
+    try std.testing.expectEqual(@as(usize, 1), kindCount(snap.events, .fiber_interrupted));
+    try std.testing.expectEqual(@as(usize, 0), kindCount(snap.events, .fiber_resumed));
+
+    // Structured-concurrency invariant: the interrupt is caused by scope_closed.
+    var scope_closed_id: ?u64 = null;
+    var interrupt_cause: ?u64 = null;
+    for (snap.events) |event| {
+        if (event.kind == .scope_closed) scope_closed_id = event.id;
+        if (event.kind == .fiber_interrupted) interrupt_cause = event.cause_event_id;
+    }
+    try std.testing.expect(scope_closed_id != null);
+    try std.testing.expectEqual(scope_closed_id, interrupt_cause);
+
+    // The hang detector must NOT fire: an interrupted fiber is resolved, not hung.
+    var findings = try store.findings(allocator);
+    defer findings.deinit();
+    for (findings.items) |finding| {
+        try std.testing.expect(finding.kind != .fiber_suspended_without_resume);
+    }
 }
 
 test "zio backend exposes a valid AsyncBackend seam (stub returns Unsupported until Stage 1)" {
