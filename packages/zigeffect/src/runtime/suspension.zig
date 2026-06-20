@@ -112,6 +112,69 @@ pub const SuspensionCoordinator = struct {
         return sid;
     }
 
+    /// The unified delay — the heart of the deterministic↔real backend bridge.
+    /// Emits fiber_suspended + timer_scheduled, waits via the backend's
+    /// `blockingSleep` (virtual/instant on `LocalAsyncBackendState`, a real
+    /// coroutine yield on the zio backend), then emits timer_fired +
+    /// fiber_resumed. The SAME engine code drives both backends, so the causal
+    /// trace is identical — only the wait is virtual vs real.
+    pub fn delay(self: *SuspensionCoordinator, request: SuspendOnTimer) SuspensionError!void {
+        const sid = self.next_suspension_id;
+        self.next_suspension_id += 1;
+
+        const suspended = try self.store.record(.{
+            .kind = .fiber_suspended,
+            .run_id = request.run_id,
+            .fiber_id = request.fiber_id,
+            .scope_id = request.scope_id,
+            .parent_id = request.started_event_id,
+            .cause_event_id = request.caused_by_event_id,
+            .schedule_id = sid,
+            .status = "pending",
+            .label = "fiber suspended on timer",
+            .type_name = "Suspension",
+        });
+        const scheduled = try self.store.record(.{
+            .kind = .timer_scheduled,
+            .run_id = request.run_id,
+            .fiber_id = request.fiber_id,
+            .scope_id = request.scope_id,
+            .parent_id = suspended,
+            .cause_event_id = suspended,
+            .schedule_id = sid,
+            .status = "pending",
+            .label = request.label,
+            .type_name = "Timer",
+        });
+
+        try self.backend.blockingSleep(request.due_time_ms);
+
+        const fired = try self.store.record(.{
+            .kind = .timer_fired,
+            .run_id = request.run_id,
+            .fiber_id = request.fiber_id,
+            .scope_id = request.scope_id,
+            .parent_id = scheduled,
+            .cause_event_id = scheduled,
+            .schedule_id = sid,
+            .status = "ready",
+            .label = "timer fired",
+            .type_name = "Timer",
+        });
+        _ = try self.store.record(.{
+            .kind = .fiber_resumed,
+            .run_id = request.run_id,
+            .fiber_id = request.fiber_id,
+            .scope_id = request.scope_id,
+            .parent_id = suspended,
+            .cause_event_id = fired,
+            .schedule_id = sid,
+            .status = "running",
+            .label = "fiber resumed",
+            .type_name = "Suspension",
+        });
+    }
+
     /// Advance virtual time and resume any fibers whose timers fired. For each
     /// fired timer, emit `timer_fired` (correlated by `schedule_id`) and
     /// `fiber_resumed` (`cause_event_id` -> `timer_fired`). Returns count resumed.
@@ -244,7 +307,9 @@ pub fn recordDelaySuspensionScenario(
     var coordinator = SuspensionCoordinator.init(allocator, store, backend);
     defer coordinator.deinit();
 
-    _ = try coordinator.suspendOnTimer(.{
+    // Unified path: the same delay() that the zio backend uses; here the wait is
+    // virtual (the deterministic backend's blockingSleep advances a clock).
+    try coordinator.delay(.{
         .fiber_id = fiber_id,
         .scope_id = scope_id,
         .run_id = run_id,
@@ -252,7 +317,6 @@ pub fn recordDelaySuspensionScenario(
         .caused_by_event_id = delay_effect,
         .due_time_ms = due_time_ms,
     });
-    _ = try coordinator.advanceAndResume(due_time_ms);
 
     const scope_closed = try store.record(.{
         .kind = .scope_closed,

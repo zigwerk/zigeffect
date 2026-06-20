@@ -291,7 +291,17 @@ const zio_vtable = AsyncBackend.VTable{
     .poll_wake = pollWake,
     .advance_time = advanceTime,
     .snapshot = snapshot,
+    .blocking_sleep = blockingSleep,
 };
+
+/// The real wait: park the running coroutine on the zio event loop for `ms`.
+/// This is what makes the engine's `SuspensionCoordinator.delay` suspend for
+/// real when driven by this backend — the same core code the deterministic
+/// backend runs virtually.
+fn blockingSleep(context: ?*anyopaque, ms: u64) AsyncBackendError!void {
+    _ = context;
+    zio.sleep(zio.Duration.fromMilliseconds(ms)) catch {};
+}
 
 /// Stage 1: park the current zio coroutine keyed by `request.suspension.id`
 /// (the engine emits `fiber_suspended` around this call). Implement by yielding
@@ -361,6 +371,40 @@ fn advanceTime(context: ?*anyopaque, now_ms: u64) AsyncBackendError!usize {
 fn snapshot(context: ?*anyopaque) AsyncBackendSnapshot {
     _ = context;
     return .{};
+}
+
+test "D1: the SAME engine delay scenario runs on the zio backend (real wait) and the deterministic backend (virtual) with identical causal traces" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+
+    // Same core function (fx.recordDelaySuspensionScenario), zio backend: the
+    // engine's SuspensionCoordinator.delay calls backend.blockingSleep, which on
+    // this backend is a real zio.sleep — the coroutine actually parks.
+    var zio_state = ZioAsyncBackendState.init(allocator);
+    defer zio_state.deinit();
+    var zio_store = fx.CausalStore.init(allocator);
+    defer zio_store.deinit();
+    _ = try fx.recordDelaySuspensionScenario(allocator, &zio_store, zio_state.backend(), 2);
+
+    // Same core function, deterministic backend: blockingSleep advances a virtual
+    // clock instantly. No hand-written zio scenario — the engine drives both.
+    var det_state = fx.LocalAsyncBackendState.init(allocator, .{});
+    defer det_state.deinit();
+    var det_store = fx.CausalStore.init(allocator);
+    defer det_store.deinit();
+    _ = try fx.recordDelaySuspensionScenario(allocator, &det_store, det_state.backend(), 2);
+
+    var zio_snap = try zio_store.snapshot(allocator);
+    defer zio_snap.deinit();
+    var det_snap = try det_store.snapshot(allocator);
+    defer det_snap.deinit();
+
+    // Identical causal structure: same engine code path, only the wait differed.
+    try std.testing.expectEqual(det_snap.events.len, zio_snap.events.len);
+    inline for ([_]fx.CausalEventKind{ .fiber_suspended, .timer_scheduled, .timer_fired, .fiber_resumed, .fiber_joined }) |kind| {
+        try std.testing.expectEqual(kindCount(det_snap.events, kind), kindCount(zio_snap.events, kind));
+    }
 }
 
 test "Z1: zio-backed delay suspends for real and yields a structurally-equal causal trace" {

@@ -123,6 +123,11 @@ pub const AsyncBackend = struct {
         poll_wake: *const fn (?*anyopaque) AsyncBackendError!?BackendWakeEvent,
         advance_time: *const fn (?*anyopaque, u64) AsyncBackendError!usize,
         snapshot: *const fn (?*anyopaque) AsyncBackendSnapshot,
+        // The unifying suspension primitive: park the running fiber for `ms`.
+        // Deterministic backends advance a virtual clock instantly; a real
+        // backend (zio) actually yields the OS thread. Same causal trace either
+        // way — only the wait differs.
+        blocking_sleep: *const fn (?*anyopaque, u64) AsyncBackendError!void,
     };
 
     pub fn suspendRuntime(self: AsyncBackend, request: BackendSuspendRequest) AsyncBackendError!void {
@@ -159,6 +164,10 @@ pub const AsyncBackend = struct {
 
     pub fn snapshot(self: AsyncBackend) AsyncBackendSnapshot {
         return self.vtable.snapshot(self.context);
+    }
+
+    pub fn blockingSleep(self: AsyncBackend, ms: u64) AsyncBackendError!void {
+        return self.vtable.blocking_sleep(self.context, ms);
     }
 };
 
@@ -503,6 +512,12 @@ fn unsupportedSnapshot(context: ?*anyopaque) AsyncBackendSnapshot {
     return .{};
 }
 
+fn unsupportedBlockingSleep(context: ?*anyopaque, ms: u64) AsyncBackendError!void {
+    _ = context;
+    _ = ms;
+    return error.UnsupportedBackendCapability;
+}
+
 fn localSuspend(context: ?*anyopaque, request: BackendSuspendRequest) AsyncBackendError!void {
     const state: *LocalAsyncBackendState = @ptrCast(@alignCast(context.?));
     return state.suspendRuntime(request);
@@ -548,6 +563,12 @@ fn localSnapshot(context: ?*anyopaque) AsyncBackendSnapshot {
     return state.snapshot();
 }
 
+fn localBlockingSleep(context: ?*anyopaque, ms: u64) AsyncBackendError!void {
+    const state: *LocalAsyncBackendState = @ptrCast(@alignCast(context.?));
+    // Virtual, instant: advance the clock by `ms`, firing any now-due timers.
+    _ = try state.advanceTo(state.now_ms + ms);
+}
+
 const unsupported_vtable: AsyncBackend.VTable = .{
     .suspend_runtime = unsupportedSuspend,
     .wake = unsupportedWake,
@@ -558,6 +579,7 @@ const unsupported_vtable: AsyncBackend.VTable = .{
     .poll_wake = unsupportedPollWake,
     .advance_time = unsupportedAdvanceTime,
     .snapshot = unsupportedSnapshot,
+    .blocking_sleep = unsupportedBlockingSleep,
 };
 
 const local_vtable: AsyncBackend.VTable = .{
@@ -570,4 +592,5 @@ const local_vtable: AsyncBackend.VTable = .{
     .poll_wake = localPollWake,
     .advance_time = localAdvanceTime,
     .snapshot = localSnapshot,
+    .blocking_sleep = localBlockingSleep,
 };
