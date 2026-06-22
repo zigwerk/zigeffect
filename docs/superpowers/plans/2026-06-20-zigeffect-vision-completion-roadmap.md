@@ -51,6 +51,10 @@ commit.
 | M4.0+M4.4+M4.5 (race family) | 0dc371f7 | `waitAny` (poll-park, N-ary) + `raceFirst`/`raceAll` — real short-circuit proven on zio (1ms winner, 10s loser cancelled, no 10s hang) |
 | Multi-threading lift | 67773aea | Thread-safe `CausalStore`/`Ref`/`Hub` (SpinLock); 8-thread stress test + mutation-proven discrimination |
 | M6.1 (STM first cut) | 183787ac | `TRef`/`Stm.atomically` optimistic transactional memory; 8-thread conflict-retry proven (no lost updates) |
+| M8.4–M8.7 (Phase-8 dispatch) | dc84123b | `RemediationExecutor` — per-kind action dispatch into the apply boundary; no-handler-fails |
+| M10.1 (live-attach bridge) | f01d3be5 | `CausalHubBackend` — republishes recorded events to a `Hub(CausalEvent)` for live subscribers |
+| M9.1 (OTLP/JSON) | f3edc0bb | `formatOtlpLogs` — OTLP/JSON `resourceLogs` wire serialization (re-parses as valid JSON) |
+| M5.3 (FiberRef first cut) | c1a02939 | `FiberRef(T)` — fiber-local cell with snapshot-on-fork (`forkChild`); completes Track 5 |
 
 **The closed loop is COMPLETE as an engine capability**: detection (autonomous,
 from causal findings), decision (binding policy, default-OFF), execution (the
@@ -87,18 +91,29 @@ productization work the audit's Working Defaults deliberately scoped out:
   (Hub's per-subscriber queues are guarded by the Hub lock; a standalone
   thread-safe `Queue` is a small follow-up).
 
-**Large productization (needs decisions/resources, not just code):**
-- OTel/OTLP live export (M9.1): the shape-mapper exists; live export needs OTLP
-  serialization + a collector. Track 9.
-- Workbench live-attach (M10.1): needs SolidJS frontend work on top of the
-  shipped `Hub`/`CausalHubBackend` substrate.
-- The other Phase-8 executors (retry/replace_provider/replay — M8.4–M8.7):
-  `interrupt` is wired and demonstrated; the others need real per-action runtime
-  plumbing (re-run under a schedule, layer swap, scenario replay).
-- FiberRef (M5.3): needs Context-attached fiber-local storage (a focused design
-  session).
+**Large productization — NOW SUBSTANTIALLY DELIVERED:**
+- ~~OTel/OTLP live export~~ **OTLP/JSON serialization DONE** (f3edc0bb) — the wire
+  format re-parses as valid JSON. The remaining piece is the host's HTTP POST to a
+  running collector (untestable here without one).
+- ~~Workbench live-attach engine side~~ **DONE** (f01d3be5) — `CausalHubBackend`
+  streams events to subscribers. The remaining piece is the SolidJS frontend that
+  renders the stream (separate frontend work, not engine).
+- ~~Phase-8 executors~~ **DISPATCH DONE** (dc84123b) — `RemediationExecutor` routes
+  each kind to a handler; `interrupt` is wired+proven. The retry/replace/replay
+  HANDLERS are host-supplied by design (only the host knows its effects/layers/
+  scenarios) — the engine provides the execution structure.
+- ~~FiberRef~~ **FIRST CUT DONE** (c1a02939) — snapshot-on-fork cell. Automatic
+  propagation through `FiberRuntime.fork` (type-erased Context fiber-local storage)
+  is the remaining follow-up.
 
-Everything NOT in those three categories has been delivered this run.
+Genuinely remaining (each a real next session, none fake-able now):
+- The zio `AsyncBackend` vtable fill (M7.1–M7.5, 6 stub methods) — large.
+- A thread-pool `FiberExecutor` (the primitives are now thread-safe to support it).
+- The SolidJS workbench frontend (frontend, not engine).
+- `race`(prefer-success)/`both`(fail-fast) atop the shipped `raceFirst`/`raceAll`.
+- Full FiberRef auto-propagation; heterogeneous STM.
+
+Everything else surfaced by the audit has been delivered.
 
 Honest non-actions recorded (not faked):
 - **M4.0 race family — BLOCKED** on a zio upstream export gap (`selectAwaitables`
