@@ -39,6 +39,25 @@ commit.
 | M2.4 / M2.5 | cc91ed60 | Activity & external suspension causal edges — full SuspensionKind coverage |
 | M8.3 / M14.1 | 6b3f5941 | Engine-side `policy_engine` — binding remediation decision, gate-OFF-by-default |
 | M14.1 (recording) | a1b92d8a | Remediation decisions as causal events (remediation_requested/decided) |
+| M8.13 | ed638d94 | The apply boundary — applied=true earned only when approve AND verify both hold |
+| M14.5 (deterministic) | 2856939b | The closed agent loop end-to-end with the REAL structural verifier (genuine fix applied, bogus fix caught) |
+| apply-boundary hardening | e6e8b448 | Review-driven regression net: cross-kind isolation, audit-token coverage, lossy-status doc |
+| M14.5 (zio) | cb344e19 | The closed loop on REAL concurrency — a wedged coroutine interrupted under policy + verified |
+| M8.1 (detection) | f5d3d470 | Autonomous: `remediationFromFinding` derives the request from a causal-graph finding (no human names the fiber) |
+
+**The closed loop is demonstrated end-to-end, both deterministically and on real
+zio concurrency, and is autonomous on the detection side.** It runs:
+`store.findings()` → `remediationFromFinding()` → `PolicyEngine.decide()` →
+`ApplyBoundary.apply()` (action + structural verify) → `applied=true` — with the
+master gate OFF by default so nothing executes until an operator lifts it
+per-kind. An adversarial review (3 reviewers + synthesis) confirmed the
+`applied=true`-requires-approve-AND-verify invariant holds, by exhaustive branch
+enumeration AND mutation testing.
+
+What remains for the loop to be PRODUCTION-autonomous (future sessions): the
+loop runner that polls findings continuously (M8.1 runner), live agent-attach
+via Hub (M8.8), and the other Phase-8 action executors (retry/replace_provider/
+replay — M8.4–M8.7) beyond `interrupt`.
 
 Honest non-actions recorded (not faked):
 - **M4.0 race family — BLOCKED** on a zio upstream export gap (`selectAwaitables`
