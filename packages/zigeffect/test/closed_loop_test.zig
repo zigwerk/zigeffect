@@ -69,6 +69,9 @@ const LoopContext = struct {
         const self: *LoopContext = @ptrCast(@alignCast(ctx.?));
         var snap = self.after_store.snapshot(self.allocator) catch return false;
         defer snap.deinit();
+        // OOM → "not equivalent" is the CONSERVATIVE direction: under memory
+        // pressure a genuine fix is reported applied_unverified rather than
+        // over-claiming applied=true. The verifier never errs toward applying.
         return fx.causalStructurallyEquivalent(self.allocator, self.good_events, snap.events) catch false;
     }
 };
@@ -82,6 +85,9 @@ test "M14.5 closed loop: a GENUINE fix is structurally proven → applied=true e
     const allocator = std.testing.allocator;
 
     // The known-good reference shape (what a healthy run looks like).
+    // good_snap MUST outlive boundary.apply(...): LoopContext.good_events borrows
+    // good_snap.events, which the verifier reads during apply(). Safe here via
+    // LIFO defer ordering (apply runs before any defer fires).
     var good_store = fx.CausalStore.init(allocator);
     defer good_store.deinit();
     try recordHealthyRun(&good_store);

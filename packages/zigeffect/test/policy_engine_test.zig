@@ -58,6 +58,58 @@ test "always_reject still rejects even with the master gate ON" {
     try std.testing.expectEqual(fx.PolicyDecision.reject, d.decision);
 }
 
+test "cross-kind isolation: always_reject on one kind does not affect siblings (guards the crossed-wire bug class)" {
+    // Reviewer #1: the historical bug had withKindPolicy(.replay_scenario, ...)
+    // write replace_provider_policy. Lock ALL arms against cross-contamination:
+    // reject one kind, auto-approve the rest, and assert each decides on its OWN
+    // configured policy.
+    const engine = (fx.PolicyEngine{})
+        .withApplyEnabled(true)
+        .withKindPolicy(.retry, .always_reject)
+        .withKindPolicy(.interrupt, .auto_approve)
+        .withKindPolicy(.replace_provider, .auto_approve)
+        .withKindPolicy(.replay_scenario, .auto_approve);
+
+    try std.testing.expectEqual(fx.PolicyDecision.reject, engine.decide(req(.retry)).decision);
+    try std.testing.expectEqual(fx.PolicyDecision.approve, engine.decide(req(.interrupt)).decision);
+    try std.testing.expectEqual(fx.PolicyDecision.approve, engine.decide(req(.replace_provider)).decision);
+    try std.testing.expectEqual(fx.PolicyDecision.approve, engine.decide(req(.replay_scenario)).decision);
+
+    // Same, rotating which kind is the odd one out, to exercise every arm.
+    const engine2 = (fx.PolicyEngine{})
+        .withApplyEnabled(true)
+        .withKindPolicy(.retry, .auto_approve)
+        .withKindPolicy(.interrupt, .auto_approve)
+        .withKindPolicy(.replace_provider, .always_reject)
+        .withKindPolicy(.replay_scenario, .auto_approve);
+    try std.testing.expectEqual(fx.PolicyDecision.approve, engine2.decide(req(.retry)).decision);
+    try std.testing.expectEqual(fx.PolicyDecision.approve, engine2.decide(req(.interrupt)).decision);
+    try std.testing.expectEqual(fx.PolicyDecision.reject, engine2.decide(req(.replace_provider)).decision);
+    try std.testing.expectEqual(fx.PolicyDecision.approve, engine2.decide(req(.replay_scenario)).decision);
+}
+
+test "remediation_decided records the exact verdict token (audit-provenance coverage)" {
+    // Reviewer #1: the recorded status string is @tagName(PolicyDecision); lock
+    // the exact tokens so an enum rename can't silently change the audit trail.
+    const cases = .{
+        .{ (fx.PolicyEngine{}), fx.RemediationKind.retry, "needs_human_review" },
+        .{ (fx.PolicyEngine{}).withKindPolicy(.interrupt, .always_reject), fx.RemediationKind.interrupt, "reject" },
+        .{ (fx.PolicyEngine{}).withApplyEnabled(true).withKindPolicy(.replay_scenario, .auto_approve), fx.RemediationKind.replay_scenario, "approve" },
+    };
+    inline for (cases) |c| {
+        var store = fx.CausalStore.init(std.testing.allocator);
+        defer store.deinit();
+        _ = c[0].decideAndRecord(&store, req(c[1]));
+        var snap = try store.snapshot(std.testing.allocator);
+        defer snap.deinit();
+        var decided_status: ?[]const u8 = null;
+        for (snap.events) |e| if (e.kind == .remediation_decided) {
+            decided_status = e.status;
+        };
+        try std.testing.expectEqualStrings(c[2], decided_status.?);
+    }
+}
+
 test "decideAndRecord records remediation_requested → remediation_decided with the verdict + cause edge" {
     var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();

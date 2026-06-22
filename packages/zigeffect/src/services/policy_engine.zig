@@ -247,6 +247,12 @@ pub const ApplyBoundary = struct {
 /// Record the terminal `remediation_applied` event. `applied` is encoded in the
 /// status ("applied" vs "not_applied") so a query can filter earned applies.
 /// The cause edge chains to the `remediation_decided` event when available.
+///
+/// NOTE: the status string is intentionally LOSSY — three distinct non-applied
+/// `ApplyOutcome`s (declined / action_failed / applied_unverified) all record
+/// "not_applied". The `ApplyResult.outcome` enum is the load-bearing, precise
+/// signal; the durable status is a coarse applied/not-applied filter for audit
+/// queries.
 pub fn recordApplied(store: *CausalStore, request: RemediationRequest, decided_id: ?u64, applied: bool, detail: []const u8) void {
     _ = store.record(.{
         .kind = .remediation_applied,
