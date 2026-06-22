@@ -364,3 +364,68 @@ pub const RemediationLoop = struct {
         return summary;
     }
 };
+
+// ─── M8.4–M8.7 — the Phase-8 remediation executor ────────────────────────────
+//
+// The apply boundary's ActionFn is generic. A RemediationExecutor structures it:
+// a per-kind handler dispatch so the four Phase-8 actions (retry / interrupt /
+// replace_provider / replay_scenario) each route to a registered handler. The
+// engine supplies the dispatch + framework; the concrete handlers are wired by
+// the host, because only the host knows the effect to retry, the provider to
+// swap, the scenario to replay, or the fiber handle to interrupt. A kind with
+// no registered handler fails the action (so the apply boundary records
+// not_applied) — the runtime never pretends to have executed something it
+// can't.
+
+pub const RemediationHandler = struct {
+    context: ?*anyopaque = null,
+    /// Perform the action for `request`. Returns whether the action itself
+    /// succeeded (not whether it fixed anything — that's the verifier's job).
+    run: *const fn (?*anyopaque, RemediationRequest) bool,
+};
+
+pub const RemediationExecutor = struct {
+    retry_handler: ?RemediationHandler = null,
+    interrupt_handler: ?RemediationHandler = null,
+    replace_provider_handler: ?RemediationHandler = null,
+    replay_scenario_handler: ?RemediationHandler = null,
+
+    fn handlerFor(self: *const RemediationExecutor, kind: RemediationKind) ?RemediationHandler {
+        return switch (kind) {
+            .retry => self.retry_handler,
+            .interrupt => self.interrupt_handler,
+            .replace_provider => self.replace_provider_handler,
+            .replay_scenario => self.replay_scenario_handler,
+        };
+    }
+
+    /// Dispatch `request` to its kind's handler. Returns false (action failed)
+    /// when no handler is registered for the kind.
+    pub fn execute(self: *const RemediationExecutor, request: RemediationRequest) bool {
+        const handler = self.handlerFor(request.kind) orelse return false;
+        return handler.run(handler.context, request);
+    }
+
+    pub fn withHandler(self: RemediationExecutor, kind: RemediationKind, handler: RemediationHandler) RemediationExecutor {
+        var e = self;
+        switch (kind) {
+            .retry => e.retry_handler = handler,
+            .interrupt => e.interrupt_handler = handler,
+            .replace_provider => e.replace_provider_handler = handler,
+            .replay_scenario => e.replay_scenario_handler = handler,
+        }
+        return e;
+    }
+
+    /// True if `kind` has a registered handler.
+    pub fn canExecute(self: *const RemediationExecutor, kind: RemediationKind) bool {
+        return self.handlerFor(kind) != null;
+    }
+
+    /// Adapt to the ApplyBoundary's ActionFn. Pass `&executor` as the
+    /// action_context.
+    pub fn action(ctx: ?*anyopaque, request: RemediationRequest) bool {
+        const self: *const RemediationExecutor = @ptrCast(@alignCast(ctx.?));
+        return self.execute(request);
+    }
+};

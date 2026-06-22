@@ -297,3 +297,109 @@ test "per-kind policies are independent (one auto_approve doesn't leak to siblin
     try std.testing.expectEqual(fx.PolicyDecision.needs_human_review, engine.decide(req(.interrupt)).decision);
     try std.testing.expectEqual(fx.PolicyDecision.needs_human_review, engine.decide(req(.replace_provider)).decision);
 }
+
+// ── M8.4–M8.7 RemediationExecutor ──
+
+const HandlerProbe = struct {
+    ran_kind: ?fx.RemediationKind = null,
+    target: ?u64 = null,
+    result: bool = true,
+    fn run(ctx: ?*anyopaque, request: fx.RemediationRequest) bool {
+        const self: *HandlerProbe = @ptrCast(@alignCast(ctx.?));
+        self.ran_kind = request.kind;
+        self.target = request.target_fiber_id;
+        return self.result;
+    }
+};
+
+test "RemediationExecutor dispatches to the registered handler for the request's kind" {
+    var probe = HandlerProbe{};
+    const executor = (fx.RemediationExecutor{})
+        .withHandler(.interrupt, .{ .context = &probe, .run = HandlerProbe.run });
+
+    try std.testing.expect(executor.canExecute(.interrupt));
+    try std.testing.expect(!executor.canExecute(.retry));
+
+    const ok = executor.execute(.{ .kind = .interrupt, .target_fiber_id = 7 });
+    try std.testing.expect(ok);
+    try std.testing.expectEqual(fx.RemediationKind.interrupt, probe.ran_kind.?);
+    try std.testing.expectEqual(@as(?u64, 7), probe.target);
+}
+
+test "RemediationExecutor with no handler for a kind fails the action (never pretends)" {
+    const executor = fx.RemediationExecutor{}; // nothing registered
+    try std.testing.expect(!executor.execute(.{ .kind = .replay_scenario, .target_run_id = 1 }));
+}
+
+test "RemediationExecutor routes each kind to its own handler" {
+    var retry_probe = HandlerProbe{};
+    var replace_probe = HandlerProbe{};
+    const executor = (fx.RemediationExecutor{})
+        .withHandler(.retry, .{ .context = &retry_probe, .run = HandlerProbe.run })
+        .withHandler(.replace_provider, .{ .context = &replace_probe, .run = HandlerProbe.run });
+
+    _ = executor.execute(.{ .kind = .retry, .target_fiber_id = 1 });
+    _ = executor.execute(.{ .kind = .replace_provider, .target_scope_id = 2 });
+
+    try std.testing.expectEqual(fx.RemediationKind.retry, retry_probe.ran_kind.?);
+    try std.testing.expectEqual(fx.RemediationKind.replace_provider, replace_probe.ran_kind.?);
+    // Cross-contamination check: retry handler never saw replace_provider.
+    try std.testing.expectEqual(@as(?u64, 1), retry_probe.target);
+}
+
+test "RemediationExecutor.action plugs into the ApplyBoundary end-to-end" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    var probe = HandlerProbe{ .result = true };
+    var executor = (fx.RemediationExecutor{})
+        .withHandler(.retry, .{ .context = &probe, .run = HandlerProbe.run });
+
+    const VerifyOk = struct {
+        fn verify(ctx: ?*anyopaque, request: fx.RemediationRequest) bool {
+            _ = ctx;
+            _ = request;
+            return true;
+        }
+    };
+    const boundary = fx.ApplyBoundary{
+        .engine = (fx.PolicyEngine{}).withApplyEnabled(true).withKindPolicy(.retry, .auto_approve),
+        .action = fx.RemediationExecutor.action,
+        .verify = VerifyOk.verify,
+        .action_context = &executor,
+        .verify_context = null,
+    };
+
+    const result = boundary.apply(&store, .{ .kind = .retry, .target_fiber_id = 5, .reason = "retry under fix" });
+    try std.testing.expectEqual(fx.ApplyOutcome.applied, result.outcome);
+    try std.testing.expect(result.isApplied());
+    // The handler actually ran with the right target.
+    try std.testing.expectEqual(fx.RemediationKind.retry, probe.ran_kind.?);
+    try std.testing.expectEqual(@as(?u64, 5), probe.target);
+}
+
+test "RemediationExecutor.action fails the boundary when no handler is registered (records not_applied)" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    var executor = fx.RemediationExecutor{}; // no handlers
+    const VerifyOk = struct {
+        fn verify(ctx: ?*anyopaque, request: fx.RemediationRequest) bool {
+            _ = ctx;
+            _ = request;
+            return true;
+        }
+    };
+    const boundary = fx.ApplyBoundary{
+        .engine = (fx.PolicyEngine{}).withApplyEnabled(true).withKindPolicy(.retry, .auto_approve),
+        .action = fx.RemediationExecutor.action,
+        .verify = VerifyOk.verify,
+        .action_context = &executor,
+        .verify_context = null,
+    };
+
+    // Approved by policy, but the action fails (no handler) → action_failed.
+    const result = boundary.apply(&store, .{ .kind = .retry, .target_fiber_id = 5 });
+    try std.testing.expectEqual(fx.ApplyOutcome.action_failed, result.outcome);
+    try std.testing.expect(!result.isApplied());
+}
