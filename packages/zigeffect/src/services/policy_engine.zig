@@ -129,7 +129,7 @@ pub const PolicyEngine = struct {
     /// `remediation_decided` event id is available by querying the store.
     pub fn decideAndRecord(self: PolicyEngine, store: *CausalStore, request: RemediationRequest) Decision {
         const decision = self.decide(request);
-        recordDecision(store, request, decision);
+        _ = recordDecision(store, request, decision);
         return decision;
     }
 };
@@ -137,9 +137,10 @@ pub const PolicyEngine = struct {
 /// Record a remediation request + its decision into the causal graph. The
 /// `remediation_decided` event's `cause_event_id` points at the
 /// `remediation_requested` event — the load-bearing edge for "why was this
-/// remediation approved/denied?" queries. Best-effort: record failures are
-/// swallowed (the decision itself is already returned to the caller).
-pub fn recordDecision(store: *CausalStore, request: RemediationRequest, decision: Decision) void {
+/// remediation approved/denied?" queries. Returns the `remediation_decided`
+/// event id (null if no store / record failed) so the apply step can chain its
+/// `remediation_applied` cause edge to it.
+pub fn recordDecision(store: *CausalStore, request: RemediationRequest, decision: Decision) ?u64 {
     const requested = store.record(.{
         .kind = .remediation_requested,
         .run_id = request.target_run_id,
@@ -148,9 +149,9 @@ pub fn recordDecision(store: *CausalStore, request: RemediationRequest, decision
         .status = "proposed",
         .label = request.reason,
         .type_name = @tagName(request.kind),
-    }) catch return;
+    }) catch return null;
 
-    _ = store.record(.{
+    return store.record(.{
         .kind = .remediation_decided,
         .run_id = request.target_run_id,
         .scope_id = request.target_scope_id,
@@ -159,6 +160,103 @@ pub fn recordDecision(store: *CausalStore, request: RemediationRequest, decision
         .cause_event_id = requested,
         .status = @tagName(decision.decision),
         .label = decision.reason,
+        .type_name = @tagName(request.kind),
+    }) catch null;
+}
+
+// ─── M8.13 — the apply boundary ──────────────────────────────────────────────
+//
+// The convergence of the decision (PolicyEngine), the cancel capability
+// (FiberExecutor.interrupt, M7.8), and structural verification
+// (causalStructurallyEquivalent, M5/H5). It is the state machine that earns
+// `applied=true` — and ONLY earns it when BOTH (a) the policy approved the
+// action AND (b) a re-captured trace proves the fix. The concrete action and
+// verifier are injected so the boundary stays testable without the full runtime
+// and so callers wire kind-specific execution (interrupt → FiberExecutor.interrupt,
+// retry → re-run under a schedule, etc.).
+
+pub const ApplyOutcome = enum {
+    /// Policy did not approve — nothing executed.
+    declined,
+    /// Approved and executed, but the action itself failed.
+    action_failed,
+    /// Approved and executed, but verification did NOT prove the fix → applied=false.
+    applied_unverified,
+    /// Approved, executed, AND verification proved the fix → applied=true.
+    applied,
+};
+
+pub const ApplyResult = struct {
+    outcome: ApplyOutcome,
+    decision: PolicyDecision,
+    kind: RemediationKind,
+    reason: []const u8,
+
+    /// The single bit the whole machinery exists to gate. True ONLY for
+    /// `ApplyOutcome.applied`.
+    pub fn isApplied(self: ApplyResult) bool {
+        return self.outcome == .applied;
+    }
+};
+
+/// Perform the remediation. Returns whether the ACTION itself succeeded (not
+/// whether it fixed anything — that is the verifier's job).
+pub const ActionFn = *const fn (?*anyopaque, RemediationRequest) bool;
+
+/// Re-capture system state and return whether the fix is structurally proven
+/// (e.g. `causalStructurallyEquivalent` vs a known-good shape, or a
+/// causal-compare verdict of `improved`).
+pub const VerifyFn = *const fn (?*anyopaque) bool;
+
+/// The apply boundary: decide → (if approved) execute → verify → record.
+pub const ApplyBoundary = struct {
+    engine: PolicyEngine,
+    action: ActionFn,
+    verify: VerifyFn,
+    action_context: ?*anyopaque = null,
+    verify_context: ?*anyopaque = null,
+
+    pub fn apply(self: ApplyBoundary, store: *CausalStore, request: RemediationRequest) ApplyResult {
+        const decision = self.engine.decide(request);
+        const decided_id = recordDecision(store, request, decision);
+
+        if (decision.decision != .approve) {
+            // Record-only / rejected — nothing executes, applied=false.
+            recordApplied(store, request, decided_id, false, "not approved — no action taken");
+            return .{ .outcome = .declined, .decision = decision.decision, .kind = request.kind, .reason = decision.reason };
+        }
+
+        // Approved — execute the action.
+        if (!self.action(self.action_context, request)) {
+            recordApplied(store, request, decided_id, false, "action failed");
+            return .{ .outcome = .action_failed, .decision = .approve, .kind = request.kind, .reason = "action failed" };
+        }
+
+        // Verify the fix. applied=true is earned ONLY if this proves it.
+        const verified = self.verify(self.verify_context);
+        recordApplied(store, request, decided_id, verified, if (verified) "applied and verified" else "executed but verification failed");
+        return .{
+            .outcome = if (verified) .applied else .applied_unverified,
+            .decision = .approve,
+            .kind = request.kind,
+            .reason = if (verified) "applied and verified" else "executed but verification failed",
+        };
+    }
+};
+
+/// Record the terminal `remediation_applied` event. `applied` is encoded in the
+/// status ("applied" vs "not_applied") so a query can filter earned applies.
+/// The cause edge chains to the `remediation_decided` event when available.
+pub fn recordApplied(store: *CausalStore, request: RemediationRequest, decided_id: ?u64, applied: bool, detail: []const u8) void {
+    _ = store.record(.{
+        .kind = .remediation_applied,
+        .run_id = request.target_run_id,
+        .scope_id = request.target_scope_id,
+        .fiber_id = request.target_fiber_id,
+        .parent_id = decided_id,
+        .cause_event_id = decided_id,
+        .status = if (applied) "applied" else "not_applied",
+        .label = detail,
         .type_name = @tagName(request.kind),
     }) catch {};
 }

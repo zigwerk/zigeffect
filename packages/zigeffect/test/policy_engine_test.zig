@@ -91,6 +91,149 @@ test "decideAndRecord records remediation_requested → remediation_decided with
     try std.testing.expectEqual(@as(?u64, 42), decided.?.fiber_id);
 }
 
+// ── M8.13 apply boundary ──
+
+/// Injectable action/verifier that record whether they were called and return
+/// a configurable result.
+const Probe = struct {
+    action_called: bool = false,
+    verify_called: bool = false,
+    action_result: bool = true,
+    verify_result: bool = true,
+
+    fn action(ctx: ?*anyopaque, request: fx.RemediationRequest) bool {
+        const self: *Probe = @ptrCast(@alignCast(ctx.?));
+        _ = request;
+        self.action_called = true;
+        return self.action_result;
+    }
+    fn verify(ctx: ?*anyopaque) bool {
+        const self: *Probe = @ptrCast(@alignCast(ctx.?));
+        self.verify_called = true;
+        return self.verify_result;
+    }
+};
+
+fn boundaryWith(engine: fx.PolicyEngine, probe: *Probe) fx.ApplyBoundary {
+    return .{
+        .engine = engine,
+        .action = Probe.action,
+        .verify = Probe.verify,
+        .action_context = probe,
+        .verify_context = probe,
+    };
+}
+
+fn appliedEventStatus(snap: *fx.CausalSnapshot) ?[]const u8 {
+    for (snap.events) |e| if (e.kind == .remediation_applied) return e.status;
+    return null;
+}
+
+test "apply boundary: declined (gate off) runs NO action and records not_applied" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+    var probe = Probe{};
+    const boundary = boundaryWith(fx.PolicyEngine{}, &probe); // gate OFF
+
+    const result = boundary.apply(&store, req(.interrupt));
+
+    try std.testing.expectEqual(fx.ApplyOutcome.declined, result.outcome);
+    try std.testing.expect(!result.isApplied());
+    // The action and verifier were never invoked — record-only is enforced.
+    try std.testing.expect(!probe.action_called);
+    try std.testing.expect(!probe.verify_called);
+
+    var snap = try store.snapshot(std.testing.allocator);
+    defer snap.deinit();
+    try std.testing.expectEqualStrings("not_applied", appliedEventStatus(&snap).?);
+}
+
+test "apply boundary: approved + action ok + verify true → applied=true" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+    var probe = Probe{ .action_result = true, .verify_result = true };
+    const engine = (fx.PolicyEngine{}).withApplyEnabled(true).withKindPolicy(.interrupt, .auto_approve);
+    const boundary = boundaryWith(engine, &probe);
+
+    const result = boundary.apply(&store, req(.interrupt));
+
+    try std.testing.expectEqual(fx.ApplyOutcome.applied, result.outcome);
+    try std.testing.expect(result.isApplied());
+    try std.testing.expect(probe.action_called);
+    try std.testing.expect(probe.verify_called);
+
+    var snap = try store.snapshot(std.testing.allocator);
+    defer snap.deinit();
+    try std.testing.expectEqualStrings("applied", appliedEventStatus(&snap).?);
+}
+
+test "SAFETY: approved + action ok but verify FALSE → applied_unverified (applied=true NOT earned)" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+    var probe = Probe{ .action_result = true, .verify_result = false }; // fix not proven
+    const engine = (fx.PolicyEngine{}).withApplyEnabled(true).withKindPolicy(.retry, .auto_approve);
+    const boundary = boundaryWith(engine, &probe);
+
+    const result = boundary.apply(&store, req(.retry));
+
+    // The action ran, but the fix wasn't structurally proven — applied=true is
+    // NOT earned. This is the load-bearing property of the apply boundary.
+    try std.testing.expectEqual(fx.ApplyOutcome.applied_unverified, result.outcome);
+    try std.testing.expect(!result.isApplied());
+    try std.testing.expect(probe.action_called);
+    try std.testing.expect(probe.verify_called);
+
+    var snap = try store.snapshot(std.testing.allocator);
+    defer snap.deinit();
+    try std.testing.expectEqualStrings("not_applied", appliedEventStatus(&snap).?);
+}
+
+test "apply boundary: approved but action fails → action_failed, verify never runs" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+    var probe = Probe{ .action_result = false }; // action itself fails
+    const engine = (fx.PolicyEngine{}).withApplyEnabled(true).withKindPolicy(.interrupt, .auto_approve);
+    const boundary = boundaryWith(engine, &probe);
+
+    const result = boundary.apply(&store, req(.interrupt));
+
+    try std.testing.expectEqual(fx.ApplyOutcome.action_failed, result.outcome);
+    try std.testing.expect(!result.isApplied());
+    try std.testing.expect(probe.action_called);
+    // Verification is skipped when the action itself failed.
+    try std.testing.expect(!probe.verify_called);
+
+    var snap = try store.snapshot(std.testing.allocator);
+    defer snap.deinit();
+    try std.testing.expectEqualStrings("not_applied", appliedEventStatus(&snap).?);
+}
+
+test "apply boundary records the full remediation chain: requested → decided → applied" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+    var probe = Probe{ .action_result = true, .verify_result = true };
+    const engine = (fx.PolicyEngine{}).withApplyEnabled(true).withKindPolicy(.replay_scenario, .auto_approve);
+    const boundary = boundaryWith(engine, &probe);
+
+    _ = boundary.apply(&store, req(.replay_scenario));
+
+    var snap = try store.snapshot(std.testing.allocator);
+    defer snap.deinit();
+
+    var requested: ?fx.CausalEvent = null;
+    var decided: ?fx.CausalEvent = null;
+    var applied: ?fx.CausalEvent = null;
+    for (snap.events) |e| {
+        if (e.kind == .remediation_requested) requested = e;
+        if (e.kind == .remediation_decided) decided = e;
+        if (e.kind == .remediation_applied) applied = e;
+    }
+    try std.testing.expect(requested != null and decided != null and applied != null);
+    // The chain: applied.cause -> decided.cause -> requested.
+    try std.testing.expectEqual(requested.?.id, decided.?.cause_event_id.?);
+    try std.testing.expectEqual(decided.?.id, applied.?.cause_event_id.?);
+}
+
 test "per-kind policies are independent (one auto_approve doesn't leak to siblings)" {
     const engine = (fx.PolicyEngine{})
         .withApplyEnabled(true)
