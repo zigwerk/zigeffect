@@ -16,6 +16,8 @@ const std = @import("std");
 const causal = @import("causal.zig");
 
 pub const CausalStore = causal.CausalStore;
+pub const CausalFinding = causal.CausalFinding;
+pub const CausalFindingKind = causal.CausalFindingKind;
 
 /// The bounded set of remediation actions an agent may request the runtime to
 /// perform. Each maps to a Phase-8 executable action:
@@ -162,6 +164,34 @@ pub fn recordDecision(store: *CausalStore, request: RemediationRequest, decision
         .label = decision.reason,
         .type_name = @tagName(request.kind),
     }) catch null;
+}
+
+/// Derive a bounded remediation request from a causal finding, if the runtime
+/// knows a remediation for that finding kind. This is the autonomous
+/// detection→proposal step of the closed loop (M8.1): the agent reads a finding
+/// out of the causal graph and proposes the action the runtime associates with
+/// that diagnosed problem — without a human naming the target fiber. Returns
+/// null when no safe auto-remediation is mapped (the agent must decide), e.g.
+/// `retry_budget_exhausted` is deliberately NOT mapped to `retry` (that would
+/// loop), and resource/finalizer/provider/assertion findings need human design.
+pub fn remediationFromFinding(finding: CausalFinding) ?RemediationRequest {
+    return switch (finding.kind) {
+        // A hung fiber (parked with no resume) or one leaked past its scope's
+        // close → interrupt it to recover.
+        .fiber_suspended_without_resume, .fiber_pending_after_scope_close => .{
+            .kind = .interrupt,
+            .target_fiber_id = finding.fiber_id,
+            .target_scope_id = finding.scope_id,
+            .target_run_id = finding.run_id,
+            .reason = "hung/leaked fiber diagnosed by the causal graph — interrupt to recover",
+        },
+        .resource_acquired_without_finalization,
+        .finalizer_failure,
+        .retry_budget_exhausted,
+        .service_requirement_without_provider,
+        .assertion_failure,
+        => null,
+    };
 }
 
 // ─── M8.13 — the apply boundary ──────────────────────────────────────────────

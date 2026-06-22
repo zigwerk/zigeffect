@@ -846,6 +846,7 @@ pub const KindPolicy = services.policy_engine.KindPolicy;
 pub const ApplyBoundary = services.policy_engine.ApplyBoundary;
 pub const ApplyOutcome = services.policy_engine.ApplyOutcome;
 pub const ApplyResult = services.policy_engine.ApplyResult;
+pub const remediationFromFinding = services.policy_engine.remediationFromFinding;
 pub const CausalFindingKind = services.causal.CausalFindingKind;
 pub const CausalFinding = services.causal.CausalFinding;
 pub const CausalFindings = services.causal.CausalFindings;

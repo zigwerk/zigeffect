@@ -81,6 +81,49 @@ fn appliedStatus(snap: *fx.CausalSnapshot) ?[]const u8 {
     return null;
 }
 
+/// Build a scenario with a hung fiber (suspended, never resumed) so the H4 hang
+/// detector produces a `fiber_suspended_without_resume` finding.
+fn recordHungFiber(store: *fx.CausalStore, fiber_id: u64) !void {
+    const run_id = store.nextRunId();
+    const scope_id = store.nextScopeId();
+    const rs = try store.record(.{ .kind = .run_started, .run_id = run_id, .status = "started" });
+    const opened = try store.record(.{ .kind = .scope_opened, .run_id = run_id, .scope_id = scope_id, .parent_id = rs, .status = "opened" });
+    const forked = try store.record(.{ .kind = .fiber_forked, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = opened, .status = "pending" });
+    const started = try store.record(.{ .kind = .fiber_started, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = forked, .status = "running" });
+    _ = try store.record(.{ .kind = .fiber_suspended, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = started, .status = "pending" });
+    // No fiber_resumed / fiber_joined — the fiber is hung.
+}
+
+test "M8.1 autonomous: a remediation request is DERIVED from a causal-graph finding (no human names the fiber)" {
+    const allocator = std.testing.allocator;
+    var store = fx.CausalStore.init(allocator);
+    defer store.deinit();
+    try recordHungFiber(&store, 17);
+
+    // The agent reads findings out of the causal graph — it is not told which
+    // fiber is hung.
+    var findings = try store.findings(allocator);
+    defer findings.deinit();
+
+    var derived: ?fx.RemediationRequest = null;
+    for (findings.items) |f| {
+        if (fx.remediationFromFinding(f)) |request| derived = request;
+    }
+
+    // A request was derived, targeting the hung fiber, with kind=interrupt.
+    try std.testing.expect(derived != null);
+    try std.testing.expectEqual(fx.RemediationKind.interrupt, derived.?.kind);
+    try std.testing.expectEqual(@as(?u64, 17), derived.?.target_fiber_id);
+}
+
+test "M8.1 autonomous: findings with no safe auto-remediation derive no request" {
+    // A scope-less assertion finding etc. should not auto-propose an action.
+    const allocator = std.testing.allocator;
+    const finding = fx.CausalFinding{ .kind = .retry_budget_exhausted, .event_id = 1, .fiber_id = 9 };
+    try std.testing.expect(fx.remediationFromFinding(finding) == null);
+    _ = allocator;
+}
+
 test "M14.5 closed loop: a GENUINE fix is structurally proven → applied=true earned" {
     const allocator = std.testing.allocator;
 
