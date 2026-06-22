@@ -750,6 +750,138 @@ test "M7.9: ZioFiberExecutor.interrupt cancels a parked coroutine (no 10s wait)"
     try std.testing.expect(!probe.completed);
 }
 
+// M14.5 (zio variant) — the closed agent loop on REAL concurrency. A genuinely
+// wedged coroutine (parked on a 10s sleep) is interrupted under policy via the
+// real FiberExecutor.interrupt, and the runtime verifies the fix actually took
+// (the coroutine unwound without completing). This is the deterministic M14.5
+// demo with the injected action swapped for a real cancel.
+
+const WedgeProbe = struct {
+    started: bool = false,
+    finished: bool = false, // set on ANY exit (normal return OR cancel unwind)
+    completed: bool = false, // set ONLY if the sleep ran to completion
+    fn run(raw: ?*anyopaque) void {
+        const self: *WedgeProbe = @ptrCast(@alignCast(raw.?));
+        self.started = true;
+        defer self.finished = true; // runs even when the sleep is cancelled
+        zio.sleep(zio.Duration.fromMilliseconds(10_000)) catch return;
+        self.completed = true;
+    }
+};
+
+const ZioLoopContext = struct {
+    executor: fx.FiberExecutor,
+    handle: *anyopaque,
+    probe: *WedgeProbe,
+    action_ran: bool = false,
+
+    /// The remediation ACTION: interrupt the wedged coroutine for real.
+    fn action(ctx: ?*anyopaque, request: fx.RemediationRequest) bool {
+        const self: *ZioLoopContext = @ptrCast(@alignCast(ctx.?));
+        _ = request;
+        self.action_ran = true;
+        return self.executor.tryInterrupt(self.handle);
+    }
+
+    /// The VERIFIER: the fix is proven iff the coroutine actually UNWOUND
+    /// (finished) WITHOUT completing — i.e. it was cancelled, not still parked
+    /// and not allowed to run its full duration. A still-parked coroutine has
+    /// finished == false, so this discriminates a real cancel from a no-op.
+    fn verify(ctx: ?*anyopaque) bool {
+        const self: *ZioLoopContext = @ptrCast(@alignCast(ctx.?));
+        return self.probe.started and self.probe.finished and !self.probe.completed;
+    }
+};
+
+fn appliedStatusZio(snap: *fx.CausalSnapshot) ?[]const u8 {
+    for (snap.events) |e| if (e.kind == .remediation_applied) return e.status;
+    return null;
+}
+
+test "M14.5-zio: a wedged coroutine is interrupted under policy and the fix is verified → applied=true" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+
+    var exec = ZioFiberExecutor{ .allocator = allocator };
+    const e = exec.executor();
+
+    var probe = WedgeProbe{};
+    const handle = e.vtable.spawn(e.context, .{ .context = &probe, .run = WedgeProbe.run }).?;
+    // Let the coroutine wedge on its 10s sleep.
+    try zio.sleep(zio.Duration.fromMilliseconds(5));
+    try std.testing.expect(probe.started and !probe.finished and !probe.completed);
+
+    // The agent's remediation: interrupt the wedged fiber, under an
+    // operator-enabled policy (gate ON, interrupt opted in).
+    var audit_store = fx.CausalStore.init(allocator);
+    defer audit_store.deinit();
+    var ctx = ZioLoopContext{ .executor = e, .handle = handle, .probe = &probe };
+    const engine = (fx.PolicyEngine{}).withApplyEnabled(true).withKindPolicy(.interrupt, .auto_approve);
+    const boundary = fx.ApplyBoundary{
+        .engine = engine,
+        .action = ZioLoopContext.action,
+        .verify = ZioLoopContext.verify,
+        .action_context = &ctx,
+        .verify_context = &ctx,
+    };
+
+    const result = boundary.apply(&audit_store, .{ .kind = .interrupt, .target_fiber_id = 1, .reason = "fiber wedged on 10s sleep" });
+    e.vtable.destroy(e.context, handle);
+
+    // The loop closed on REAL concurrency: the coroutine was actually cancelled
+    // (unwound without completing) and the runtime proved it → applied=true.
+    try std.testing.expect(ctx.action_ran);
+    try std.testing.expect(probe.started and probe.finished and !probe.completed);
+    try std.testing.expectEqual(fx.ApplyOutcome.applied, result.outcome);
+    try std.testing.expect(result.isApplied());
+
+    var snap = try audit_store.snapshot(allocator);
+    defer snap.deinit();
+    try std.testing.expectEqualStrings("applied", appliedStatusZio(&snap).?);
+}
+
+test "M14.5-zio: with the policy gate OFF the wedged coroutine is NOT touched (declined, record-only)" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+
+    var exec = ZioFiberExecutor{ .allocator = allocator };
+    const e = exec.executor();
+
+    var probe = WedgeProbe{};
+    const handle = e.vtable.spawn(e.context, .{ .context = &probe, .run = WedgeProbe.run }).?;
+    try zio.sleep(zio.Duration.fromMilliseconds(5));
+    try std.testing.expect(probe.started and !probe.finished);
+
+    var audit_store = fx.CausalStore.init(allocator);
+    defer audit_store.deinit();
+    var ctx = ZioLoopContext{ .executor = e, .handle = handle, .probe = &probe };
+    // Default engine — master gate OFF (record-only posture).
+    const boundary = fx.ApplyBoundary{
+        .engine = fx.PolicyEngine{},
+        .action = ZioLoopContext.action,
+        .verify = ZioLoopContext.verify,
+        .action_context = &ctx,
+        .verify_context = &ctx,
+    };
+
+    const result = boundary.apply(&audit_store, .{ .kind = .interrupt, .target_fiber_id = 1, .reason = "fiber wedged" });
+
+    // Declined: the action NEVER ran, so the coroutine is untouched (still parked).
+    try std.testing.expectEqual(fx.ApplyOutcome.declined, result.outcome);
+    try std.testing.expect(!ctx.action_ran);
+    try std.testing.expect(!probe.finished); // still wedged — the runtime did nothing
+
+    // Clean up the still-parked coroutine.
+    _ = e.tryInterrupt(handle);
+    e.vtable.destroy(e.context, handle);
+
+    var snap = try audit_store.snapshot(allocator);
+    defer snap.deinit();
+    try std.testing.expectEqualStrings("not_applied", appliedStatusZio(&snap).?);
+}
+
 test "productization: an ordinary Effect.fork runs as a real interleaving zio coroutine via FiberExecutor" {
     const allocator = std.testing.allocator;
     var rt = try zio.Runtime.init(allocator, .{});
