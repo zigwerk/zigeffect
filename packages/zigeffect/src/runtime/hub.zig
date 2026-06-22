@@ -29,6 +29,7 @@
 const std = @import("std");
 const coordination = @import("coordination.zig");
 const causal_mod = @import("../services/causal.zig");
+const sync = @import("sync.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const Queue = coordination.Queue;
@@ -71,6 +72,12 @@ pub fn Hub(comptime T: type) type {
         next_subscription_id: SubscriptionId = 1,
         subscribers: std.ArrayList(Subscriber) = .empty,
         causal_store: ?*CausalStore = null,
+        // Thread-safe (M-thread lift): guards subscriber list + per-subscriber
+        // queues so concurrent publish/take/subscribe from multiple executor
+        // threads are safe. Lock ordering is always hub-then-store (publish/take
+        // call store.record under the hub lock); the store never calls the hub,
+        // so there is no cycle. Uncontended single-threaded.
+        mutex: sync.SpinLock = .{},
 
         pub fn init(allocator: Allocator, strategy: HubStrategy, capacity: usize) Self {
             return .{ .allocator = allocator, .strategy = strategy, .capacity = capacity };
@@ -87,7 +94,9 @@ pub fn Hub(comptime T: type) type {
             self.causal_store = store;
         }
 
-        pub fn subscriberCount(self: *const Self) usize {
+        pub fn subscriberCount(self: *Self) usize {
+            self.mutex.lock();
+            defer self.mutex.unlock();
             var n: usize = 0;
             for (self.subscribers.items) |sub| if (sub.active) {
                 n += 1;
@@ -99,6 +108,8 @@ pub fn Hub(comptime T: type) type {
         /// subscriber's queue receives every subsequently published item per
         /// the hub's strategy.
         pub fn subscribe(self: *Self) HubError!SubscriptionId {
+            self.mutex.lock();
+            defer self.mutex.unlock();
             const id = self.next_subscription_id;
             self.next_subscription_id += 1;
             self.subscribers.append(self.allocator, .{
@@ -110,6 +121,8 @@ pub fn Hub(comptime T: type) type {
 
         /// Detach a subscriber. Its remaining items are discarded.
         pub fn unsubscribe(self: *Self, id: SubscriptionId) HubError!void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
             const idx = self.findSubscriberIndex(id) orelse return error.UnknownSubscription;
             self.subscribers.items[idx].queue.deinit();
             _ = self.subscribers.orderedRemove(idx);
@@ -118,6 +131,8 @@ pub fn Hub(comptime T: type) type {
         /// Take the next item from the subscriber's queue, or null if empty.
         /// When `causal_store` is set, takes that succeed emit `hub_received`.
         pub fn take(self: *Self, id: SubscriptionId) HubError!?T {
+            self.mutex.lock();
+            defer self.mutex.unlock();
             const idx = self.findSubscriberIndex(id) orelse return error.UnknownSubscription;
             const sub = &self.subscribers.items[idx];
             const item = sub.queue.take() catch |err| switch (err) {
@@ -143,6 +158,8 @@ pub fn Hub(comptime T: type) type {
         ///   - `error.OutOfMemory` if a strategy needed to grow a queue.
         /// Other strategies never error per subscriber; they silently degrade.
         pub fn publish(self: *Self, item: T) HubError!void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
             if (self.causal_store) |store| {
                 _ = store.record(.{
                     .kind = .hub_published,

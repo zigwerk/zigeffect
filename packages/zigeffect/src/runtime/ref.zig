@@ -13,6 +13,7 @@
 
 const std = @import("std");
 const coordination = @import("coordination.zig");
+const sync = @import("sync.zig");
 
 pub const Semaphore = coordination.Semaphore;
 pub const FiberPrimitiveError = coordination.FiberPrimitiveError;
@@ -22,18 +23,26 @@ pub fn Ref(comptime T: type) type {
         const Self = @This();
 
         value: T,
+        // Thread-safe (M-thread lift): the spinlock guards the read-modify-write
+        // window so concurrent updates from multiple executor threads don't tear
+        // or lose writes. Uncontended (one CAS) single-threaded — zero cost there.
+        mutex: sync.SpinLock = .{},
 
         pub fn init(value: T) Self {
             return .{ .value = value };
         }
 
-        /// Load the current value.
-        pub fn get(self: *const Self) T {
+        /// Load the current value (under the lock, so it never reads a torn write).
+        pub fn get(self: *Self) T {
+            self.mutex.lock();
+            defer self.mutex.unlock();
             return self.value;
         }
 
         /// Store a new value, returning the previous one.
         pub fn set(self: *Self, value: T) T {
+            self.mutex.lock();
+            defer self.mutex.unlock();
             const prev = self.value;
             self.value = value;
             return prev;
@@ -42,6 +51,8 @@ pub fn Ref(comptime T: type) type {
         /// Apply `transform` to the current value, store the result, and
         /// return the NEW value (matches EffectTS `Ref.update`).
         pub fn update(self: *Self, transform: *const fn (T) T) T {
+            self.mutex.lock();
+            defer self.mutex.unlock();
             self.value = transform(self.value);
             return self.value;
         }
@@ -50,6 +61,8 @@ pub fn Ref(comptime T: type) type {
         /// 2-field struct. Useful for caller-observable change detection.
         pub const UpdatePair = struct { previous: T, current: T };
         pub fn updateAndReturnBoth(self: *Self, transform: *const fn (T) T) UpdatePair {
+            self.mutex.lock();
+            defer self.mutex.unlock();
             const previous = self.value;
             self.value = transform(previous);
             return .{ .previous = previous, .current = self.value };
@@ -62,6 +75,8 @@ pub fn Ref(comptime T: type) type {
             comptime E: type,
             transform: *const fn (T) E!T,
         ) E!T {
+            self.mutex.lock();
+            defer self.mutex.unlock();
             const next = try transform(self.value);
             self.value = next;
             return next;
@@ -87,7 +102,7 @@ pub fn SynchronizedRef(comptime T: type) type {
             return .{ .cell = Ref(T).init(value), .permit = Semaphore.init(1) };
         }
 
-        pub fn get(self: *const Self) T {
+        pub fn get(self: *Self) T {
             return self.cell.get();
         }
 

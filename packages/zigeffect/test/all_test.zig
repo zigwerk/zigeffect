@@ -8,6 +8,7 @@ comptime {
     _ = @import("race_test.zig");
     _ = @import("ref_test.zig");
     _ = @import("hub_test.zig");
+    _ = @import("thread_safety_test.zig");
     _ = @import("h7a_cause_edge_test.zig");
     _ = @import("scope_test.zig");
     _ = @import("runtime_test.zig");

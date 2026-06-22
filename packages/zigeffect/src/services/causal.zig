@@ -1,5 +1,6 @@
 const std = @import("std");
 const causal_backend = @import("causal_backend.zig");
+const sync = @import("../runtime/sync.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const CausalBackend = causal_backend.CausalBackend;
@@ -737,6 +738,14 @@ pub const CausalFindings = struct {
 
 pub const CausalStore = struct {
     allocator: Allocator,
+    // Guards the WRITE path: `record` and the `next*` id generators. This makes
+    // concurrent recording from multiple OS threads / executors safe (the
+    // multi-executor zio + parallel-primitive case). READS (`snapshot` /
+    // `findings`) are NOT locked — they require a quiescent barrier (no
+    // concurrent writers), which is the normal usage: fork/spawn fibers, join
+    // them all, THEN snapshot. The mutex is uncontended (≈ a few ns) in the
+    // single-threaded case, so it costs nothing there.
+    mutex: sync.SpinLock = .{},
     next_event_id: u64 = 1,
     next_run_id_value: u64 = 1,
     next_scope_id_value: u64 = 1,
@@ -811,43 +820,55 @@ pub const CausalStore = struct {
     }
 
     pub fn nextRunId(self: *CausalStore) u64 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         const id = self.next_run_id_value;
         self.next_run_id_value += 1;
         return id;
     }
 
     pub fn nextScopeId(self: *CausalStore) u64 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         const id = self.next_scope_id_value;
         self.next_scope_id_value += 1;
         return id;
     }
 
     pub fn nextLayerId(self: *CausalStore) u64 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         const id = self.next_layer_id_value;
         self.next_layer_id_value += 1;
         return id;
     }
 
     pub fn nextResourceId(self: *CausalStore) u64 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         const id = self.next_resource_id_value;
         self.next_resource_id_value += 1;
         return id;
     }
 
     pub fn nextScheduleId(self: *CausalStore) u64 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         const id = self.next_schedule_id_value;
         self.next_schedule_id_value += 1;
         return id;
     }
 
-    // INVARIANT: `record` must contain no suspension/yield point. When a store is
-    // shared across cooperative fibers on a single executor (e.g. the zio backend
-    // with `executors = .exact(1)`), correctness relies on `record` running
-    // atomically between cooperative yields — no fiber may be scheduled mid-record.
-    // A store shared across OS threads (multiple executors / task migration) would
-    // need external synchronization; that is out of scope for the current
-    // single-threaded async model.
+    // Thread-safe append. The mutex makes concurrent `record` from multiple
+    // executor threads safe (the events ArrayList + counters are mutated under
+    // it). It is held across `cloneEventForStore`, `events.append`,
+    // `backend.record`, and `trimRetainedEvents` — none of which re-enter the
+    // store (the mutex is non-reentrant). READS still require a quiescent
+    // barrier (see the `mutex` field doc).
     pub fn record(self: *CausalStore, event: CausalEvent) Allocator.Error!u64 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         const event_id = self.next_event_id;
         if (!self.shouldRecordBySampling(event.kind)) {
             self.next_event_id += 1;
