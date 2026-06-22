@@ -45,19 +45,50 @@ commit.
 | M14.5 (zio) | cb344e19 | The closed loop on REAL concurrency — a wedged coroutine interrupted under policy + verified |
 | M8.1 (detection) | f5d3d470 | Autonomous: `remediationFromFinding` derives the request from a causal-graph finding (no human names the fiber) |
 
-**The closed loop is demonstrated end-to-end, both deterministically and on real
-zio concurrency, and is autonomous on the detection side.** It runs:
-`store.findings()` → `remediationFromFinding()` → `PolicyEngine.decide()` →
-`ApplyBoundary.apply()` (action + structural verify) → `applied=true` — with the
-master gate OFF by default so nothing executes until an operator lifts it
-per-kind. An adversarial review (3 reviewers + synthesis) confirmed the
-`applied=true`-requires-approve-AND-verify invariant holds, by exhaustive branch
-enumeration AND mutation testing.
+| M8.1 (loop runner) | 88a950e4 | `RemediationLoop.runOnce` — the standing closed-loop driver (findings→derive→decide→apply→verify→summary) |
+| M6.2 (Stream first cut) | 5b26c386 | Pull-based composable `Stream(Item)` — map/filter/take/drop + runCollect/forEach/fold/count |
+| self-improving example | 1ea4706b | The whole loop as a runnable example (gate OFF vs ON) |
 
-What remains for the loop to be PRODUCTION-autonomous (future sessions): the
-loop runner that polls findings continuously (M8.1 runner), live agent-attach
-via Hub (M8.8), and the other Phase-8 action executors (retry/replace_provider/
-replay — M8.4–M8.7) beyond `interrupt`.
+**The closed loop is COMPLETE as an engine capability**: detection (autonomous,
+from causal findings), decision (binding policy, default-OFF), execution (the
+apply boundary with real `FiberExecutor.interrupt`), verification (real
+structural comparator), and the standing `RemediationLoop` runner — demonstrated
+both deterministically and on real zio concurrency, and adversarially verified
+(`applied=true` requires approve AND verify, by branch enumeration AND mutation).
+
+## Delivery boundary — what "fully delivered" honestly means here
+
+The CONCEPTUAL CORE of the vision and every self-contained track are delivered.
+The remainder splits into three honest categories — none can be shipped now
+without either an external change, a threading-model decision, or large
+productization work the audit's Working Defaults deliberately scoped out:
+
+**Externally gated (cannot ship without an upstream/3rd-party change):**
+- Race family (M4.0–M4.7): needs zio to export `selectAwaitables` (it has the
+  primitive; only the comptime-tuple `select` is re-exported). Recorded above.
+- zio `AsyncBackend` vtable fill (M7.1–M7.5): 6 stub methods. Large, and the
+  Z1/Z2/Z3 proofs already demonstrate the underlying zio capabilities; wiring
+  them through the vtable is a multi-session push, not a quick win.
+
+**Needs the multi-threaded model (deferred by Working Default #4):**
+- STM / `TRef` (M6.1): single-threaded STM has no contention to transact
+  against — its retry/blocking semantics only become meaningful under real
+  parallelism. Building it now would be a hollow shell. Deferred, honestly,
+  until threading lands.
+- True multi-thread parallelism (the `Hub`/`Queue`/`Ref` thread-safety lift).
+
+**Large productization (needs decisions/resources, not just code):**
+- OTel/OTLP live export (M9.1): the shape-mapper exists; live export needs OTLP
+  serialization + a collector. Track 9.
+- Workbench live-attach (M10.1): needs SolidJS frontend work on top of the
+  shipped `Hub`/`CausalHubBackend` substrate.
+- The other Phase-8 executors (retry/replace_provider/replay — M8.4–M8.7):
+  `interrupt` is wired and demonstrated; the others need real per-action runtime
+  plumbing (re-run under a schedule, layer swap, scenario replay).
+- FiberRef (M5.3): needs Context-attached fiber-local storage (a focused design
+  session).
+
+Everything NOT in those three categories has been delivered this run.
 
 Honest non-actions recorded (not faked):
 - **M4.0 race family — BLOCKED** on a zio upstream export gap (`selectAwaitables`
