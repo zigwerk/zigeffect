@@ -235,8 +235,9 @@ pub const ActionFn = *const fn (?*anyopaque, RemediationRequest) bool;
 
 /// Re-capture system state and return whether the fix is structurally proven
 /// (e.g. `causalStructurallyEquivalent` vs a known-good shape, or a
-/// causal-compare verdict of `improved`).
-pub const VerifyFn = *const fn (?*anyopaque) bool;
+/// causal-compare verdict of `improved`). Receives the request so a verifier
+/// shared across multiple remediations knows which one it is proving.
+pub const VerifyFn = *const fn (?*anyopaque, RemediationRequest) bool;
 
 /// The apply boundary: decide → (if approved) execute → verify → record.
 pub const ApplyBoundary = struct {
@@ -263,7 +264,7 @@ pub const ApplyBoundary = struct {
         }
 
         // Verify the fix. applied=true is earned ONLY if this proves it.
-        const verified = self.verify(self.verify_context);
+        const verified = self.verify(self.verify_context, request);
         recordApplied(store, request, decided_id, verified, if (verified) "applied and verified" else "executed but verification failed");
         return .{
             .outcome = if (verified) .applied else .applied_unverified,
@@ -296,3 +297,70 @@ pub fn recordApplied(store: *CausalStore, request: RemediationRequest, decided_i
         .type_name = @tagName(request.kind),
     }) catch {};
 }
+
+// ─── M8.1 — the remediation loop runner ──────────────────────────────────────
+//
+// The standing capability: one driver that, per pass, queries the causal graph
+// for findings, derives a remediation request for each (via
+// remediationFromFinding), and runs each through the apply boundary. This turns
+// the demonstrated closed loop into a callable engine primitive — a host calls
+// `runOnce` on each tick (or in response to a finding), with the gate governing
+// whether anything actually executes.
+
+pub const Allocator = std.mem.Allocator;
+
+pub const LoopSummary = struct {
+    findings_seen: usize = 0,
+    /// Findings that mapped to a remediation request.
+    requests_derived: usize = 0,
+    /// Outcome tallies (sum == requests_derived).
+    applied: usize = 0,
+    declined: usize = 0,
+    action_failed: usize = 0,
+    applied_unverified: usize = 0,
+
+    fn tally(self: *LoopSummary, outcome: ApplyOutcome) void {
+        switch (outcome) {
+            .applied => self.applied += 1,
+            .declined => self.declined += 1,
+            .action_failed => self.action_failed += 1,
+            .applied_unverified => self.applied_unverified += 1,
+        }
+    }
+};
+
+pub const RemediationLoop = struct {
+    engine: PolicyEngine,
+    action: ActionFn,
+    verify: VerifyFn,
+    action_context: ?*anyopaque = null,
+    verify_context: ?*anyopaque = null,
+
+    /// One pass over the store's current findings. Derives a request per
+    /// finding (skipping findings with no mapped remediation) and runs each
+    /// through the apply boundary, recording the requested→decided→applied
+    /// chain into the same store. Returns a summary of what happened.
+    pub fn runOnce(self: RemediationLoop, allocator: Allocator, store: *CausalStore) Allocator.Error!LoopSummary {
+        var findings = try store.findings(allocator);
+        defer findings.deinit();
+
+        var summary = LoopSummary{};
+        summary.findings_seen = findings.items.len;
+
+        const boundary = ApplyBoundary{
+            .engine = self.engine,
+            .action = self.action,
+            .verify = self.verify,
+            .action_context = self.action_context,
+            .verify_context = self.verify_context,
+        };
+
+        for (findings.items) |finding| {
+            const request = remediationFromFinding(finding) orelse continue;
+            summary.requests_derived += 1;
+            const result = boundary.apply(store, request);
+            summary.tally(result.outcome);
+        }
+        return summary;
+    }
+};

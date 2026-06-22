@@ -787,7 +787,8 @@ const ZioLoopContext = struct {
     /// (finished) WITHOUT completing — i.e. it was cancelled, not still parked
     /// and not allowed to run its full duration. A still-parked coroutine has
     /// finished == false, so this discriminates a real cancel from a no-op.
-    fn verify(ctx: ?*anyopaque) bool {
+    fn verify(ctx: ?*anyopaque, request: fx.RemediationRequest) bool {
+        _ = request;
         const self: *ZioLoopContext = @ptrCast(@alignCast(ctx.?));
         return self.probe.started and self.probe.finished and !self.probe.completed;
     }

@@ -65,7 +65,8 @@ const LoopContext = struct {
     /// by structural equivalence to the known-good shape. This is the runtime
     /// executing the vision's "tell me whether the change improved the causal
     /// structure" — using the real comparator, not a flag.
-    fn verify(ctx: ?*anyopaque) bool {
+    fn verify(ctx: ?*anyopaque, request: fx.RemediationRequest) bool {
+        _ = request;
         const self: *LoopContext = @ptrCast(@alignCast(ctx.?));
         var snap = self.after_store.snapshot(self.allocator) catch return false;
         defer snap.deinit();
@@ -122,6 +123,107 @@ test "M8.1 autonomous: findings with no safe auto-remediation derive no request"
     const finding = fx.CausalFinding{ .kind = .retry_budget_exhausted, .event_id = 1, .fiber_id = 9 };
     try std.testing.expect(fx.remediationFromFinding(finding) == null);
     _ = allocator;
+}
+
+// ── M8.1 loop runner ──
+
+/// An action+verify pair for the loop: it "fixes" each targeted fiber by
+/// recording its id, and verifies by checking the id was recorded. Shared
+/// context; action runs before verify within each apply().
+const LoopRunnerCtx = struct {
+    fixed: std.AutoHashMap(u64, void),
+    fail_action: bool = false,
+    fail_verify: bool = false,
+
+    fn action(ctx: ?*anyopaque, request: fx.RemediationRequest) bool {
+        const self: *LoopRunnerCtx = @ptrCast(@alignCast(ctx.?));
+        if (self.fail_action) return false;
+        self.fixed.put(request.target_fiber_id.?, {}) catch return false;
+        return true;
+    }
+    fn verify(ctx: ?*anyopaque, request: fx.RemediationRequest) bool {
+        const self: *LoopRunnerCtx = @ptrCast(@alignCast(ctx.?));
+        if (self.fail_verify) return false;
+        return self.fixed.contains(request.target_fiber_id.?);
+    }
+};
+
+test "M8.1 loop runner: two hung fibers, gate ON → both detected, remediated, verified" {
+    const allocator = std.testing.allocator;
+    var store = fx.CausalStore.init(allocator);
+    defer store.deinit();
+    try recordHungFiber(&store, 1);
+    try recordHungFiber(&store, 2);
+
+    var ctx = LoopRunnerCtx{ .fixed = std.AutoHashMap(u64, void).init(allocator) };
+    defer ctx.fixed.deinit();
+
+    const loop = fx.RemediationLoop{
+        .engine = (fx.PolicyEngine{}).withApplyEnabled(true).withKindPolicy(.interrupt, .auto_approve),
+        .action = LoopRunnerCtx.action,
+        .verify = LoopRunnerCtx.verify,
+        .action_context = &ctx,
+        .verify_context = &ctx,
+    };
+
+    const summary = try loop.runOnce(allocator, &store);
+
+    try std.testing.expectEqual(@as(usize, 2), summary.requests_derived);
+    try std.testing.expectEqual(@as(usize, 2), summary.applied);
+    try std.testing.expectEqual(@as(usize, 0), summary.declined);
+    // Both fibers were actually targeted.
+    try std.testing.expect(ctx.fixed.contains(1));
+    try std.testing.expect(ctx.fixed.contains(2));
+}
+
+test "M8.1 loop runner: gate OFF (default) → findings detected but ALL declined, nothing executes" {
+    const allocator = std.testing.allocator;
+    var store = fx.CausalStore.init(allocator);
+    defer store.deinit();
+    try recordHungFiber(&store, 1);
+    try recordHungFiber(&store, 2);
+
+    var ctx = LoopRunnerCtx{ .fixed = std.AutoHashMap(u64, void).init(allocator) };
+    defer ctx.fixed.deinit();
+
+    const loop = fx.RemediationLoop{
+        .engine = fx.PolicyEngine{}, // gate OFF
+        .action = LoopRunnerCtx.action,
+        .verify = LoopRunnerCtx.verify,
+        .action_context = &ctx,
+        .verify_context = &ctx,
+    };
+
+    const summary = try loop.runOnce(allocator, &store);
+
+    try std.testing.expectEqual(@as(usize, 2), summary.requests_derived);
+    try std.testing.expectEqual(@as(usize, 0), summary.applied);
+    try std.testing.expectEqual(@as(usize, 2), summary.declined);
+    // The record-only posture means NO fiber was touched.
+    try std.testing.expectEqual(@as(usize, 0), ctx.fixed.count());
+}
+
+test "M8.1 loop runner: verify-false → applied_unverified (the loop refuses to claim unproven fixes)" {
+    const allocator = std.testing.allocator;
+    var store = fx.CausalStore.init(allocator);
+    defer store.deinit();
+    try recordHungFiber(&store, 1);
+
+    var ctx = LoopRunnerCtx{ .fixed = std.AutoHashMap(u64, void).init(allocator), .fail_verify = true };
+    defer ctx.fixed.deinit();
+
+    const loop = fx.RemediationLoop{
+        .engine = (fx.PolicyEngine{}).withApplyEnabled(true).withKindPolicy(.interrupt, .auto_approve),
+        .action = LoopRunnerCtx.action,
+        .verify = LoopRunnerCtx.verify,
+        .action_context = &ctx,
+        .verify_context = &ctx,
+    };
+
+    const summary = try loop.runOnce(allocator, &store);
+    try std.testing.expectEqual(@as(usize, 1), summary.requests_derived);
+    try std.testing.expectEqual(@as(usize, 0), summary.applied);
+    try std.testing.expectEqual(@as(usize, 1), summary.applied_unverified);
 }
 
 test "M14.5 closed loop: a GENUINE fix is structurally proven → applied=true earned" {

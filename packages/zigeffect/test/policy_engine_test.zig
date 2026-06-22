@@ -159,7 +159,8 @@ const Probe = struct {
         self.action_called = true;
         return self.action_result;
     }
-    fn verify(ctx: ?*anyopaque) bool {
+    fn verify(ctx: ?*anyopaque, request: fx.RemediationRequest) bool {
+        _ = request;
         const self: *Probe = @ptrCast(@alignCast(ctx.?));
         self.verify_called = true;
         return self.verify_result;
