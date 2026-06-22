@@ -357,6 +357,28 @@ pub fn build(b: *std.Build) void {
     effect_state_example_step.dependOn(&effect_state_example.step);
     effect_state_example_step.dependOn(&run_effect_state_example_tests.step);
 
+    const self_improving_loop_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/self_improving_loop.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    self_improving_loop_example_module.addImport("zigeffect", zigeffect);
+
+    const self_improving_loop_example = b.addExecutable(.{
+        .name = "zigeffect-self-improving-loop-example",
+        .root_module = self_improving_loop_example_module,
+    });
+
+    const self_improving_loop_example_tests = b.addTest(.{
+        .name = "zigeffect-self-improving-loop-example-tests",
+        .root_module = self_improving_loop_example_module,
+    });
+    const run_self_improving_loop_example_tests = b.addRunArtifact(self_improving_loop_example_tests);
+
+    const self_improving_loop_example_step = b.step("self-improving-loop-example", "Compile and test the self-improving remediation-loop example");
+    self_improving_loop_example_step.dependOn(&self_improving_loop_example.step);
+    self_improving_loop_example_step.dependOn(&run_self_improving_loop_example_tests.step);
+
     const causal_readiness_example_module = b.createModule(.{
         .root_source_file = b.path("examples/causal_readiness.zig"),
         .target = target,
@@ -1632,6 +1654,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_data_and_matching_example_tests.step);
     examples_step.dependOn(&effect_state_example.step);
     examples_step.dependOn(&run_effect_state_example_tests.step);
+    examples_step.dependOn(&self_improving_loop_example.step);
+    examples_step.dependOn(&run_self_improving_loop_example_tests.step);
     examples_step.dependOn(&causal_readiness_example.step);
     examples_step.dependOn(&run_causal_readiness_example_tests.step);
     examples_step.dependOn(&causal_app_request_example.step);
