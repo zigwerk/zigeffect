@@ -14,6 +14,39 @@ remain authoritative for their narrower scopes — this doc super-sets them.
 
 ---
 
+## Progress log (this execution run)
+
+Milestones delivered since this roadmap landed, newest last. All gates green
+(core test-raw / examples / release-gate / tool-hygiene + zigeffect-zio) at each
+commit.
+
+| Milestone | Commit | Summary |
+|---|---|---|
+| M1.1 | 69bf0ba0 | `Runtime(Env).withExecutor` hoist (+ executor extracted to `runtime/executor.zig`, plumbed onto Context) |
+| M1.2 | 58026453 | Coordination suspension causal edges: suspendOn/resumeFrom Deferred/Queue/Signal |
+| M3.1–M3.4, M3.8–M3.9 | b907fbe3 | Effect ergonomics: as/replace/asVoid/andThen/when/unless |
+| M5.1 | aa9b3e3a | `Ref(T)` atomic cell |
+| M3.5–M3.7 | bf55fd57 | zip / zipWith / `fx.all` |
+| M3.10–M3.11 | c0c5b843 | forEachAlloc / forEachDiscard |
+| M5.4 | bd733322 | `Hub(T)` multi-subscriber broadcast (+ hub_published/received kinds) |
+| M5.2 | ebce9292 | `SynchronizedRef(T)` |
+| M2.6 / H7a | b4d6f50c | Live `cause_event_id` edges: fiber_interrupted → scope_closed (scope records close before finalizers) |
+| M12.1/M12.2/M3.13 | 328c66b0 | Docs honesty: zio README, supervision-tree claim, ergonomics surface |
+| M4.1 / M4.2 | c18e0c3c | forEachPar / zipPar (+ all 8 adversarial-review findings fixed pre-commit) |
+| M7.8 / M7.9 | 2c2c0fc5 | `FiberExecutor.interrupt` + zio `JoinHandle.cancel` (cancels a 10s-parked coroutine in ~1s) |
+| M4.9 (forEachPar) | 931020ac | Real-zio cross-backend structural equivalence + roadmap sync |
+| M5.6 | bb8f2e42 | `examples/effect_state.zig` — Ref/SynchronizedRef/Hub dogfood |
+| M2.4 / M2.5 | cc91ed60 | Activity & external suspension causal edges — full SuspensionKind coverage |
+| M8.3 / M14.1 | 6b3f5941 | Engine-side `policy_engine` — binding remediation decision, gate-OFF-by-default |
+| M14.1 (recording) | a1b92d8a | Remediation decisions as causal events (remediation_requested/decided) |
+
+Honest non-actions recorded (not faked):
+- **M4.0 race family — BLOCKED** on a zio upstream export gap (`selectAwaitables`
+  not re-exported). See the Track 4 note. M7.8 interrupt supplies the loser-cancel
+  half; `waitAny` is the missing half.
+- **M11.4** found already-satisfied (release-gate depends on individual backend
+  conformance via `test_step`); no spurious change made.
+
 ## Working Defaults (the five open audit questions, resolved)
 
 | # | Question | Default | Reason |
@@ -104,15 +137,23 @@ D2 gave us real interleaving; this gives users an API to compose it.
 
 - **M4.1** `forEachPar(iter, fn, opts)` — parallel traversal (opts: concurrency cap). **DONE** (c18e0c3c).
 - **M4.2** `zipPar(other)` — parallel pair; combined exit only when both succeed. **DONE** (c18e0c3c).
-- **M4.0** **PREREQUISITE for the race family — `FiberExecutor.waitAny`.** `race`/`raceFirst`/
-  `raceAll`/`both` cannot honestly short-circuit without a wait-for-any primitive that returns the
-  index of the first-completing handle WITHOUT joining the rest. Without it, "race" would have to
-  join all branches first — providing zero latency benefit over `zipPar` and misrepresenting the
-  semantics. Expose zio `select`/`waitUntilComplete`-over-multiple as a new vtable method
-  `waitAny(handles) -> usize`. The deterministic backend returns the lowest-indexed completed.
-  M7.8 `FiberExecutor.interrupt` (**DONE**, 2c2c0fc5) supplies the loser-cancel half; `waitAny`
-  supplies the missing half. The race family below is BLOCKED on M4.0 — deliberately not shipped
-  half-built.
+- **M4.0** **PREREQUISITE for the race family — `FiberExecutor.waitAny`. BLOCKED on a zio
+  upstream export gap.** `race`/`raceFirst`/`raceAll`/`both` cannot honestly short-circuit
+  without a wait-for-any primitive that returns the index of the first-completing handle WITHOUT
+  joining the rest. Without it, "race" would have to join all branches first — zero latency
+  benefit over `zipPar`, a misrepresentation of the semantics. The clean vtable shape is
+  `waitAny(handles: []const *anyopaque) -> usize`.
+  - zio HAS the right primitive: `select.zig:343` `selectAwaitables(awaitables: []const *Awaitable)
+    Cancelable!usize` returns the first-completing index over a RUNTIME slice — exactly what a
+    type-erased `waitAny` needs. But it is **not re-exported** from `zio.zig` (only the
+    comptime-tuple `select(futures: anytype)` and `wait` are, at `zio.zig:64-65`). The tuple form
+    can't service a type-erased N-ary vtable cleanly.
+  - Honest unblock paths: (a) upstream PR to lalinsky/zio exporting `selectAwaitables`; (b) a
+    fixed-arity-2 `waitAny2` vtable method using the exported tuple `select(.{a, b})` for BINARY
+    race only (raceAll stays blocked); (c) vendor-patch the local zio copy (discouraged — drifts
+    from upstream). Decision deferred to the user; until then the race family stays unshipped
+    rather than faked.
+  - M7.8 `FiberExecutor.interrupt` (**DONE**, 2c2c0fc5) already supplies the loser-cancel half.
 - **M4.3** `race(other)` — first to succeed wins; loser interrupted. **BLOCKED on M4.0.**
 - **M4.4** `raceFirst(other)` — first to finish (success or failure) wins. **BLOCKED on M4.0.**
 - **M4.5** `raceAll(iter)` — N-way race. **BLOCKED on M4.0.**
