@@ -224,6 +224,7 @@ pub const services = struct {
     pub const causal_graph_history_backend = @import("services/causal_graph_history_backend.zig");
     pub const causal_nendb_storage_backend = @import("services/causal_nendb_storage_backend.zig");
     pub const causal_async_stream_backend = @import("services/causal_async_stream_backend.zig");
+    pub const causal_hub_backend = @import("services/causal_hub_backend.zig");
     pub const causal_app_runtime = @import("services/causal_app_runtime.zig");
 
     pub const Clock = clock.Clock;
@@ -848,6 +849,8 @@ pub const CausalLineage = services.causal.CausalLineage;
 pub const CausalFiberState = services.causal.CausalFiberState;
 pub const CausalFiberStates = services.causal.CausalFiberStates;
 pub const causalStructurallyEquivalent = services.causal_structural.structurallyEquivalent;
+pub const causal_hub_backend = services.causal_hub_backend;
+pub const CausalHubBackendState = services.causal_hub_backend.CausalHubBackendState;
 pub const PolicyEngine = services.policy_engine.PolicyEngine;
 pub const RemediationKind = services.policy_engine.RemediationKind;
 pub const RemediationRequest = services.policy_engine.RemediationRequest;
