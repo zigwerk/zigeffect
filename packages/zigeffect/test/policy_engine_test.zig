@@ -58,6 +58,39 @@ test "always_reject still rejects even with the master gate ON" {
     try std.testing.expectEqual(fx.PolicyDecision.reject, d.decision);
 }
 
+test "decideAndRecord records remediation_requested → remediation_decided with the verdict + cause edge" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    const engine = (fx.PolicyEngine{}); // default → needs_human_review
+    const decision = engine.decideAndRecord(&store, .{
+        .kind = .interrupt,
+        .target_fiber_id = 42,
+        .reason = "fiber wedged on a 10s sleep",
+    });
+    try std.testing.expectEqual(fx.PolicyDecision.needs_human_review, decision.decision);
+
+    var snap = try store.snapshot(std.testing.allocator);
+    defer snap.deinit();
+
+    var requested: ?fx.CausalEvent = null;
+    var decided: ?fx.CausalEvent = null;
+    for (snap.events) |e| {
+        if (e.kind == .remediation_requested) requested = e;
+        if (e.kind == .remediation_decided) decided = e;
+    }
+    try std.testing.expect(requested != null);
+    try std.testing.expect(decided != null);
+    // The load-bearing cause edge.
+    try std.testing.expectEqual(requested.?.id, decided.?.cause_event_id.?);
+    // The decision's verdict is the recorded status.
+    try std.testing.expectEqualStrings("needs_human_review", decided.?.status);
+    // The remediation kind is the type_name on both events.
+    try std.testing.expectEqualStrings("interrupt", requested.?.type_name);
+    // The targeted fiber id is carried through.
+    try std.testing.expectEqual(@as(?u64, 42), decided.?.fiber_id);
+}
+
 test "per-kind policies are independent (one auto_approve doesn't leak to siblings)" {
     const engine = (fx.PolicyEngine{})
         .withApplyEnabled(true)

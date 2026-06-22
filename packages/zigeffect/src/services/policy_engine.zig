@@ -13,6 +13,9 @@
 //! `auto_approve`. An explicit `always_reject` overrides everything.
 
 const std = @import("std");
+const causal = @import("causal.zig");
+
+pub const CausalStore = causal.CausalStore;
 
 /// The bounded set of remediation actions an agent may request the runtime to
 /// perform. Each maps to a Phase-8 executable action:
@@ -118,4 +121,44 @@ pub const PolicyEngine = struct {
         }
         return engine;
     }
+
+    /// Decide AND record the request + decision into the causal graph so an
+    /// agent can later query proposed remediations and their verdicts. Emits
+    /// `remediation_requested` → `remediation_decided{cause = requested}`, with
+    /// the decision's verdict as the status. Returns the Decision; the
+    /// `remediation_decided` event id is available by querying the store.
+    pub fn decideAndRecord(self: PolicyEngine, store: *CausalStore, request: RemediationRequest) Decision {
+        const decision = self.decide(request);
+        recordDecision(store, request, decision);
+        return decision;
+    }
 };
+
+/// Record a remediation request + its decision into the causal graph. The
+/// `remediation_decided` event's `cause_event_id` points at the
+/// `remediation_requested` event — the load-bearing edge for "why was this
+/// remediation approved/denied?" queries. Best-effort: record failures are
+/// swallowed (the decision itself is already returned to the caller).
+pub fn recordDecision(store: *CausalStore, request: RemediationRequest, decision: Decision) void {
+    const requested = store.record(.{
+        .kind = .remediation_requested,
+        .run_id = request.target_run_id,
+        .scope_id = request.target_scope_id,
+        .fiber_id = request.target_fiber_id,
+        .status = "proposed",
+        .label = request.reason,
+        .type_name = @tagName(request.kind),
+    }) catch return;
+
+    _ = store.record(.{
+        .kind = .remediation_decided,
+        .run_id = request.target_run_id,
+        .scope_id = request.target_scope_id,
+        .fiber_id = request.target_fiber_id,
+        .parent_id = requested,
+        .cause_event_id = requested,
+        .status = @tagName(decision.decision),
+        .label = decision.reason,
+        .type_name = @tagName(request.kind),
+    }) catch {};
+}
