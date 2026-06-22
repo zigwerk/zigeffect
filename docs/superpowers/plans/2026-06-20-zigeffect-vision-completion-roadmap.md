@@ -48,6 +48,9 @@ commit.
 | M8.1 (loop runner) | 88a950e4 | `RemediationLoop.runOnce` — the standing closed-loop driver (findings→derive→decide→apply→verify→summary) |
 | M6.2 (Stream first cut) | 5b26c386 | Pull-based composable `Stream(Item)` — map/filter/take/drop + runCollect/forEach/fold/count |
 | self-improving example | 1ea4706b | The whole loop as a runnable example (gate OFF vs ON) |
+| M4.0+M4.4+M4.5 (race family) | 0dc371f7 | `waitAny` (poll-park, N-ary) + `raceFirst`/`raceAll` — real short-circuit proven on zio (1ms winner, 10s loser cancelled, no 10s hang) |
+| Multi-threading lift | 67773aea | Thread-safe `CausalStore`/`Ref`/`Hub` (SpinLock); 8-thread stress test + mutation-proven discrimination |
+| M6.1 (STM first cut) | 183787ac | `TRef`/`Stm.atomically` optimistic transactional memory; 8-thread conflict-retry proven (no lost updates) |
 
 **The closed loop is COMPLETE as an engine capability**: detection (autonomous,
 from causal findings), decision (binding policy, default-OFF), execution (the
@@ -64,18 +67,25 @@ without either an external change, a threading-model decision, or large
 productization work the audit's Working Defaults deliberately scoped out:
 
 **Externally gated (cannot ship without an upstream/3rd-party change):**
-- Race family (M4.0–M4.7): needs zio to export `selectAwaitables` (it has the
-  primitive; only the comptime-tuple `select` is re-exported). Recorded above.
+- ~~Race family~~ **DELIVERED** without an upstream change — found a poll-park
+  `waitAny` over the exported `hasResult`+`sleep`. The upstream `selectAwaitables`
+  export (`docs/superpowers/upstream/zio-selectAwaitables.patch`) remains a
+  nice-to-have efficiency upgrade (park-on-futures vs poll); `race`(prefer-success)
+  and `both`(fail-fast) are still follow-ups on top of the shipped `raceFirst`/`raceAll`.
 - zio `AsyncBackend` vtable fill (M7.1–M7.5): 6 stub methods. Large, and the
   Z1/Z2/Z3 proofs already demonstrate the underlying zio capabilities; wiring
   them through the vtable is a multi-session push, not a quick win.
 
-**Needs the multi-threaded model (deferred by Working Default #4):**
-- STM / `TRef` (M6.1): single-threaded STM has no contention to transact
-  against — its retry/blocking semantics only become meaningful under real
-  parallelism. Building it now would be a hollow shell. Deferred, honestly,
-  until threading lands.
-- True multi-thread parallelism (the `Hub`/`Queue`/`Ref` thread-safety lift).
+**Needs the multi-threaded model — NOW DELIVERED:**
+- ~~Thread-safety lift~~ **DONE** (67773aea): `CausalStore`/`Ref`/`Hub` are
+  thread-safe (SpinLock), proven with an 8-thread stress test + mutation testing.
+- ~~STM~~ **DONE** (183787ac, first cut) — unblocked by the lift; conflict-retry
+  proven under 8 concurrent threads.
+- Still open: a multi-threaded EXECUTOR (the engine still runs single-cooperative
+  by default; multi-executor zio is now SAFE to use against these primitives, but
+  wiring a thread-pool FiberExecutor is a follow-up). `Queue` thread-safety lift
+  (Hub's per-subscriber queues are guarded by the Hub lock; a standalone
+  thread-safe `Queue` is a small follow-up).
 
 **Large productization (needs decisions/resources, not just code):**
 - OTel/OTLP live export (M9.1): the shape-mapper exists; live export needs OTLP
