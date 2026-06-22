@@ -15,6 +15,8 @@ pub const ForEachAllocEffect = ergonomics_mod.ForEachAllocEffect;
 pub const ForEachDiscardEffect = ergonomics_mod.ForEachDiscardEffect;
 pub const ForEachParEffect = ergonomics_mod.ForEachParEffect;
 pub const ZipParEffect = ergonomics_mod.ZipParEffect;
+pub const RaceFirstEffect = ergonomics_mod.RaceFirstEffect;
+pub const RaceAllEffect = ergonomics_mod.RaceAllEffect;
 
 /// M3.7 — sequential gather over a homogeneous slice of effects. Allocates a
 /// result slice via `ctx.allocator`; caller frees it. Failure short-circuits.
@@ -44,6 +46,13 @@ pub fn forEachDiscard(
     body: *const fn (Item, *context_mod.Context(Env)) Failure!void,
 ) ForEachDiscardEffect(Item, Failure, Env) {
     return .{ .items = items, .body = body };
+}
+
+/// M4.5 — race N homogeneous effects; the first to complete wins, losers
+/// interrupted. Needs `ctx.allocator`. Falls back to the first effect when no
+/// racing executor is configured.
+pub fn raceAll(comptime Item: type, comptime Failure: type, comptime Env: type, items: []const Item) RaceAllEffect(Item, Failure, Env) {
+    return .{ .items = items };
 }
 
 /// M4.1 — parallel traversal via the executor on `ctx.executor`. Spawns one
@@ -309,6 +318,12 @@ pub fn Effect(comptime Success: type, comptime Failure: type, comptime Env: type
         /// M4.2 — parallel pair via the executor on `ctx.executor`. Falls back
         /// to sequential `zip` when no executor is configured.
         pub fn zipPar(self: Self, other: anytype) ZipParEffect(Self, @TypeOf(other), Failure, Env) {
+            return .{ .left = self, .right = other };
+        }
+
+        /// M4.4 — race: the first of self/other to complete wins; loser
+        /// interrupted. Both must produce the same Success type.
+        pub fn raceFirst(self: Self, other: anytype) RaceFirstEffect(Self, @TypeOf(other), Failure, Env) {
             return .{ .left = self, .right = other };
         }
     };

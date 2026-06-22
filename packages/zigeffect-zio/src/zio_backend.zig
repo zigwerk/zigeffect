@@ -87,7 +87,38 @@ pub const ZioFiberExecutor = struct {
         box.handle.cancel();
     }
 
-    const vtable = fx.FiberExecutor.VTable{ .spawn = spawn, .join = join, .destroy = destroy, .interrupt = interruptJob };
+    /// M4.0 — wait for the first of `handles` to complete, returning its index.
+    /// Implemented by polling each coroutine's non-blocking `hasResult()` and
+    /// cooperatively yielding between rounds so the spawned coroutines make
+    /// progress. (zio has a more efficient `selectAwaitables` over a runtime
+    /// slice, but it is not re-exported from the package root; poll+yield uses
+    /// only the exported `hasResult` + `yield` and is correct under the
+    /// cooperative single executor. Swap to selectAwaitables if/when upstream
+    /// exports it — see docs/superpowers/upstream/zio-selectAwaitables.patch.)
+    fn waitAny(context: ?*anyopaque, handles: []const *anyopaque) usize {
+        _ = context;
+        while (true) {
+            for (handles, 0..) |h, i| {
+                const box: *HandleBox = @ptrCast(@alignCast(h));
+                if (box.handle.hasResult()) return i;
+            }
+            // Park briefly (not a busy `yield`, which would starve the event
+            // loop's timer/IO servicing and make racing sleeps fire late). A
+            // short sleep lets the loop advance the racers' timers/IO, then we
+            // re-poll. ~100µs keeps latency low. (selectAwaitables would park
+            // exactly on the futures — poll-park is the fallback while it is
+            // unexported; see the upstream patch note.)
+            zio.sleep(zio.Duration.fromMicroseconds(100)) catch {};
+        }
+    }
+
+    const vtable = fx.FiberExecutor.VTable{
+        .spawn = spawn,
+        .join = join,
+        .destroy = destroy,
+        .interrupt = interruptJob,
+        .waitAny = waitAny,
+    };
 
     pub fn executor(self: *ZioFiberExecutor) fx.FiberExecutor {
         return .{ .context = self, .vtable = &vtable };
@@ -666,6 +697,67 @@ fn forkBodyShort(ctx: *fx.Context(fx.TestServices)) ForkError!u32 {
     _ = ctx;
     zio.sleep(zio.Duration.fromMilliseconds(1)) catch {};
     return 2;
+}
+
+// Race bodies: a 10-SECOND loser and a 1ms winner. If the race genuinely
+// short-circuits (cancels the loser), the test finishes in ~1ms; if not, it
+// hangs ~10s. Fast completion IS the proof.
+fn raceSlowBody(ctx: *fx.Context(fx.TestServices)) ForkError!u32 {
+    _ = ctx;
+    zio.sleep(zio.Duration.fromMilliseconds(10_000)) catch {};
+    return 1;
+}
+fn raceFastBody(ctx: *fx.Context(fx.TestServices)) ForkError!u32 {
+    _ = ctx;
+    zio.sleep(zio.Duration.fromMilliseconds(1)) catch {};
+    return 2;
+}
+fn raceMidBody(ctx: *fx.Context(fx.TestServices)) ForkError!u32 {
+    _ = ctx;
+    zio.sleep(zio.Duration.fromMilliseconds(5_000)) catch {};
+    return 3;
+}
+
+fn raceRuntime(env: *fx.TestEnv, exec: *ZioFiberExecutor) fx.Runtime(fx.TestServices) {
+    return fx.Runtime(fx.TestServices)
+        .init(std.testing.allocator, &env.services)
+        .withClock(&env.services.clock)
+        .withExecutor(exec.executor())
+        .provides(.{ fx.Logger, fx.Config, fx.Metrics, fx.Tracing, fx.MemoryFileSystem, fx.Clock });
+}
+
+test "M4.4 raceFirst on zio: the fast branch wins, the 10s loser is cancelled (short-circuit, no 10s hang)" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+    var env = try fx.TestEnv.init(allocator);
+    defer env.deinit();
+    var exec = ZioFiberExecutor{ .allocator = allocator };
+    var runtime = raceRuntime(&env, &exec);
+
+    const E = fx.Effect(u32, ForkError, fx.TestServices);
+    const program = E.fromFn(raceSlowBody).raceFirst(E.fromFn(raceFastBody));
+    const result = try runtime.run(program);
+    // The 1ms branch wins; the 10s loser was interrupted (otherwise this test
+    // would take ~10 seconds).
+    try std.testing.expectEqual(@as(u32, 2), result);
+}
+
+test "M4.5 raceAll on zio: fastest of three wins, the slow two are cancelled" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+    var env = try fx.TestEnv.init(allocator);
+    defer env.deinit();
+    var exec = ZioFiberExecutor{ .allocator = allocator };
+    var runtime = raceRuntime(&env, &exec);
+
+    const E = fx.Effect(u32, ForkError, fx.TestServices);
+    const items = [_]E{ E.fromFn(raceSlowBody), E.fromFn(raceMidBody), E.fromFn(raceFastBody) };
+    const program = fx.raceAll(E, ForkError, fx.TestServices, &items);
+    const result = try runtime.run(program);
+    // The 1ms branch wins; the 5s and 10s branches were interrupted.
+    try std.testing.expectEqual(@as(u32, 2), result);
 }
 
 fn expectSuccess(exit: fx.Exit(u32, ForkError), expected: u32) !void {

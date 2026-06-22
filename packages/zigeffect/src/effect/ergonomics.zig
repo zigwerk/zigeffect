@@ -519,6 +519,190 @@ pub fn ZipParEffect(
     };
 }
 
+// ─── Race family (M4.3/M4.4/M4.5) ────────────────────────────────────────────
+//
+// These short-circuit via the executor's `waitAny` (M4.0) + `interrupt` (M7.8):
+// spawn the branches, wait for the FIRST to complete, cancel the losers. When
+// the executor can't race (no waitAny/interrupt, or no executor at all) they
+// fall back to sequential evaluation of the first branch. Both branches must
+// produce the same SuccessType.
+
+fn raceSlotResult(comptime A: type, comptime Failure: type, slot: anytype) Failure!A {
+    return switch (slot) {
+        .value => |v| v,
+        .err => |e| e,
+        .pending => unreachable, // the winner completed before waitAny returned
+    };
+}
+
+/// M4.4 — `raceFirst(left, right)`: the FIRST branch to complete (success OR
+/// failure) wins; the loser is interrupted.
+pub fn RaceFirstEffect(
+    comptime Left: type,
+    comptime Right: type,
+    comptime Failure: type,
+    comptime Env: type,
+) type {
+    return struct {
+        const Self = @This();
+        const A = Left.SuccessType;
+        pub const SuccessType = A;
+        pub const FailureType = Failure;
+        pub const EnvType = Env;
+
+        left: Left,
+        right: Right,
+
+        const Slot = union(enum) { pending, value: A, err: Failure };
+
+        fn Job(comptime Eff: type) type {
+            return struct {
+                ctx_value: Context(Env),
+                eff: Eff,
+                slot: *Slot,
+                fn run(raw: ?*anyopaque) void {
+                    const self: *@This() = @ptrCast(@alignCast(raw.?));
+                    if (self.eff.run(&self.ctx_value)) |v| {
+                        self.slot.* = .{ .value = v };
+                    } else |e| {
+                        self.slot.* = .{ .err = e };
+                    }
+                }
+            };
+        }
+
+        pub fn run(self: Self, ctx: *Context(Env)) Failure!A {
+            const executor = ctx.executor orelse return self.left.run(ctx);
+            if (!executor.canRace()) return self.left.run(ctx);
+
+            const LJob = Job(Left);
+            const RJob = Job(Right);
+            var ls: Slot = .pending;
+            var rs: Slot = .pending;
+            var lj = LJob{ .ctx_value = ctx.*, .eff = self.left, .slot = &ls };
+            var rj = RJob{ .ctx_value = ctx.*, .eff = self.right, .slot = &rs };
+
+            const lh = executor.vtable.spawn(executor.context, .{ .context = &lj, .run = LJob.run }) orelse {
+                LJob.run(&lj); // spawn declined — sequential
+                return raceSlotResult(A, Failure, ls);
+            };
+            const rh = executor.vtable.spawn(executor.context, .{ .context = &rj, .run = RJob.run }) orelse {
+                // right declined; drain left, return it
+                executor.vtable.join(executor.context, lh);
+                executor.vtable.destroy(executor.context, lh);
+                return raceSlotResult(A, Failure, ls);
+            };
+
+            var handles = [_]*anyopaque{ lh, rh };
+            const winner = executor.vtable.waitAny.?(executor.context, &handles);
+            // Cancel the loser, then join + destroy both.
+            _ = executor.tryInterrupt(handles[1 - winner]);
+            executor.vtable.join(executor.context, lh);
+            executor.vtable.destroy(executor.context, lh);
+            executor.vtable.join(executor.context, rh);
+            executor.vtable.destroy(executor.context, rh);
+
+            return raceSlotResult(A, Failure, if (winner == 0) ls else rs);
+        }
+
+        pub fn exit(self: Self, ctx: *Context(Env)) Exit(A, Failure) {
+            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            return .{ .success = value };
+        }
+        pub fn map(self: Self, comptime Next: type, mapper: *const fn (A) Next) effect_mod.MapEffect(Self, Next, Failure, Env) {
+            return .{ .parent = self, .mapper = mapper };
+        }
+        pub fn flatMap(self: Self, comptime Next: type, binder: *const fn (A, *Context(Env)) Failure!Next) effect_mod.FlatMapEffect(Self, Next, Failure, Env) {
+            return .{ .parent = self, .binder = binder };
+        }
+    };
+}
+
+/// M4.5 — `raceAll(items)`: the first of N homogeneous effects to complete wins;
+/// all losers are interrupted. Needs `ctx.allocator` for the spawn bookkeeping.
+pub fn RaceAllEffect(
+    comptime Item: type,
+    comptime Failure: type,
+    comptime Env: type,
+) type {
+    return struct {
+        const Self = @This();
+        const A = Item.SuccessType;
+        pub const SuccessType = A;
+        pub const FailureType = Failure;
+        pub const EnvType = Env;
+
+        items: []const Item,
+
+        const Slot = union(enum) { pending, value: A, err: Failure };
+        const Job = struct {
+            ctx_value: Context(Env),
+            eff: Item,
+            slot: *Slot,
+            fn run(raw: ?*anyopaque) void {
+                const self: *Job = @ptrCast(@alignCast(raw.?));
+                if (self.eff.run(&self.ctx_value)) |v| {
+                    self.slot.* = .{ .value = v };
+                } else |e| {
+                    self.slot.* = .{ .err = e };
+                }
+            }
+        };
+
+        pub fn run(self: Self, ctx: *Context(Env)) Failure!A {
+            std.debug.assert(self.items.len > 0);
+            const executor = ctx.executor orelse return self.items[0].run(ctx);
+            if (!executor.canRace()) return self.items[0].run(ctx);
+
+            const slots = ctx.allocator.alloc(Slot, self.items.len) catch return @as(Failure, error.OutOfMemory);
+            defer ctx.allocator.free(slots);
+            for (slots) |*s| s.* = .pending;
+            const jobs = ctx.allocator.alloc(Job, self.items.len) catch return @as(Failure, error.OutOfMemory);
+            defer ctx.allocator.free(jobs);
+            const handles = ctx.allocator.alloc(*anyopaque, self.items.len) catch return @as(Failure, error.OutOfMemory);
+            defer ctx.allocator.free(handles);
+
+            var spawned: usize = 0;
+            for (self.items, 0..) |item, i| {
+                jobs[i] = .{ .ctx_value = ctx.*, .eff = item, .slot = &slots[i] };
+                if (executor.vtable.spawn(executor.context, .{ .context = &jobs[i], .run = Job.run })) |h| {
+                    handles[i] = h;
+                    spawned += 1;
+                } else {
+                    // spawn declined — drain what we have, run this one inline, return it.
+                    for (handles[0..spawned]) |prior| {
+                        executor.vtable.join(executor.context, prior);
+                        executor.vtable.destroy(executor.context, prior);
+                    }
+                    Job.run(&jobs[i]);
+                    return raceSlotResult(A, Failure, slots[i]);
+                }
+            }
+
+            const winner = executor.vtable.waitAny.?(executor.context, handles);
+            for (handles, 0..) |h, i| {
+                if (i != winner) _ = executor.tryInterrupt(h);
+            }
+            for (handles) |h| {
+                executor.vtable.join(executor.context, h);
+                executor.vtable.destroy(executor.context, h);
+            }
+            return raceSlotResult(A, Failure, slots[winner]);
+        }
+
+        pub fn exit(self: Self, ctx: *Context(Env)) Exit(A, Failure) {
+            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            return .{ .success = value };
+        }
+        pub fn map(self: Self, comptime Next: type, mapper: *const fn (A) Next) effect_mod.MapEffect(Self, Next, Failure, Env) {
+            return .{ .parent = self, .mapper = mapper };
+        }
+        pub fn flatMap(self: Self, comptime Next: type, binder: *const fn (A, *Context(Env)) Failure!Next) effect_mod.FlatMapEffect(Self, Next, Failure, Env) {
+            return .{ .parent = self, .binder = binder };
+        }
+    };
+}
+
 /// Sequential traversal — apply `body(item, ctx)` to each input item,
 /// collecting the per-item results into an allocated slice. Failure short-
 /// circuits; the partial result slice is freed before the error returns.

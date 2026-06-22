@@ -56,9 +56,21 @@ pub const FiberExecutor = struct {
         /// `interrupt(handle)` the job is guaranteed to have terminated; a
         /// subsequent `join` returns its (possibly interrupted) result and
         /// `destroy` releases the handle. Used by Phase-8 remediation (cut a
-        /// wedged fiber) and, in future, by `race`/`both` to cancel losers.
+        /// wedged fiber) and by `race`/`raceFirst`/`both` to cancel losers.
         interrupt: ?*const fn (?*anyopaque, *anyopaque) void = null,
+        /// Wait for the FIRST of several spawned jobs to complete, returning its
+        /// index (M4.0). OPTIONAL — executors without it leave it null and the
+        /// race family falls back to sequential evaluation. Does NOT join or
+        /// cancel the others; the caller cancels the losers (via `interrupt`)
+        /// and joins/destroys all. This is the wait-for-any the race family
+        /// needs to genuinely short-circuit.
+        waitAny: ?*const fn (?*anyopaque, []const *anyopaque) usize = null,
     };
+
+    /// Whether this executor can wait-for-any (needed for short-circuit race).
+    pub fn canRace(self: FiberExecutor) bool {
+        return self.vtable.waitAny != null and self.vtable.interrupt != null;
+    }
 
     /// Whether this executor can interrupt a spawned job. Primitives branch on
     /// this to choose early-cancel vs join-to-completion.
