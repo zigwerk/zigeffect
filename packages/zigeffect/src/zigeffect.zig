@@ -81,6 +81,7 @@ pub const effect = struct {
     pub const program = @import("effect/effect.zig");
     pub const resource = @import("effect/resource.zig");
     pub const schedule = @import("effect/schedule.zig");
+    pub const stream = @import("effect/stream.zig");
 
     pub const Effect = program.Effect;
     pub const acquireRelease = resource.acquireRelease;
@@ -820,6 +821,8 @@ pub const LayerGraphRuntime = layer.graph.LayerGraphRuntime;
 pub const layerGraph = layer.graph.layerGraph;
 
 pub const Schedule = effect.schedule.Schedule;
+pub const Stream = effect.stream.Stream;
+pub const streamFromSlice = effect.stream.fromSlice;
 pub const ScheduleProgram = effect.schedule.ScheduleProgram;
 pub const Logger = services.logger.Logger;
 pub const ConfigError = services.config.ConfigError;
