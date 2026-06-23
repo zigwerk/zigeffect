@@ -837,6 +837,7 @@ pub const streamFromSlice = effect.stream.fromSlice;
 pub const Stm = effect.stm.Stm;
 pub const TRef = effect.stm.TRef;
 pub const Transaction = effect.stm.Transaction;
+pub const HeteroTransaction = effect.stm.HeteroTransaction;
 pub const ScheduleProgram = effect.schedule.ScheduleProgram;
 pub const Logger = services.logger.Logger;
 pub const ConfigError = services.config.ConfigError;

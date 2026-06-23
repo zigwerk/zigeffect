@@ -131,6 +131,19 @@ pub const Stm = struct {
         }
     }
 
+    /// Heterogeneous transaction: the body may touch `TRef`s of DIFFERENT value
+    /// types. Method form of `atomicallyHetero`.
+    pub fn atomicallyMixed(
+        self: *Stm,
+        comptime R: type,
+        comptime Ctx: type,
+        allocator: Allocator,
+        ctx: Ctx,
+        body: *const fn (*HeteroTransaction, Ctx) R,
+    ) R {
+        return atomicallyHetero(self, R, Ctx, allocator, ctx, body);
+    }
+
     fn tryCommit(self: *Stm, comptime T: type, txn: *Transaction(T)) bool {
         self.commit_lock.lock();
         defer self.commit_lock.unlock();
@@ -153,3 +166,158 @@ pub const Stm = struct {
         return true;
     }
 };
+
+// ─── Track C — heterogeneous STM ─────────────────────────────────────────────
+//
+// A transaction that touches TRef(A), TRef(B), … of DIFFERENT value types in
+// one atomic body. The read/write log is type-erased: `get`/`set` are generic
+// over the per-ref type T and generate (at the comptime call site) the
+// type-specific version-reader, write-applier, and free fns that the type-erased
+// commit drives. Validation is type-agnostic (u64 version compare); apply is
+// type-specific via the generated fn.
+
+const HeteroRead = struct {
+    ref: *anyopaque,
+    read_version: *const fn (*anyopaque) u64,
+    observed: u64,
+};
+
+const HeteroWrite = struct {
+    ref: *anyopaque,
+    value: *anyopaque, // an allocated *T (aligned); applied/freed via the fns below
+    apply: *const fn (ref: *anyopaque, value: *anyopaque) void,
+    free: *const fn (Allocator, value: *anyopaque) void,
+};
+
+pub const HeteroTransaction = struct {
+    allocator: Allocator,
+    reads: std.ArrayList(HeteroRead) = .empty,
+    writes: std.ArrayList(HeteroWrite) = .empty,
+    failed: bool = false,
+
+    fn init(allocator: Allocator) HeteroTransaction {
+        return .{ .allocator = allocator };
+    }
+
+    fn deinit(self: *HeteroTransaction) void {
+        self.clearWrites();
+        self.reads.deinit(self.allocator);
+        self.writes.deinit(self.allocator);
+    }
+
+    fn clearWrites(self: *HeteroTransaction) void {
+        for (self.writes.items) |w| w.free(self.allocator, w.value);
+        self.writes.clearRetainingCapacity();
+    }
+
+    fn reset(self: *HeteroTransaction) void {
+        self.reads.clearRetainingCapacity();
+        self.clearWrites();
+        self.failed = false;
+    }
+
+    fn Ops(comptime T: type) type {
+        return struct {
+            fn readVersion(raw: *anyopaque) u64 {
+                const ref: *TRef(T) = @ptrCast(@alignCast(raw));
+                ref.lock.lock();
+                defer ref.lock.unlock();
+                return ref.version;
+            }
+            fn apply(raw_ref: *anyopaque, raw_val: *anyopaque) void {
+                const ref: *TRef(T) = @ptrCast(@alignCast(raw_ref));
+                const val: *T = @ptrCast(@alignCast(raw_val));
+                ref.lock.lock();
+                defer ref.lock.unlock();
+                ref.value = val.*;
+                ref.version += 1;
+            }
+            fn free(allocator: Allocator, raw_val: *anyopaque) void {
+                const val: *T = @ptrCast(@alignCast(raw_val));
+                allocator.destroy(val);
+            }
+        };
+    }
+
+    /// Transactional read of `ref`. Returns a staged write if present, else the
+    /// committed value (logging the observed version for commit validation).
+    pub fn get(self: *HeteroTransaction, comptime T: type, ref: *TRef(T)) T {
+        const ref_erased: *anyopaque = @ptrCast(ref);
+        for (self.writes.items) |w| {
+            if (w.ref == ref_erased) {
+                const val: *T = @ptrCast(@alignCast(w.value));
+                return val.*;
+            }
+        }
+        ref.lock.lock();
+        const v = ref.value;
+        const ver = ref.version;
+        ref.lock.unlock();
+        self.reads.append(self.allocator, .{
+            .ref = ref_erased,
+            .read_version = Ops(T).readVersion,
+            .observed = ver,
+        }) catch {
+            self.failed = true;
+        };
+        return v;
+    }
+
+    /// Stage a transactional write of `ref` (applied only at commit). Replaces an
+    /// earlier staged write of the same ref.
+    pub fn set(self: *HeteroTransaction, comptime T: type, ref: *TRef(T), value: T) void {
+        const ref_erased: *anyopaque = @ptrCast(ref);
+        // Replace an existing staged write for this ref.
+        for (self.writes.items) |*w| {
+            if (w.ref == ref_erased) {
+                const val: *T = @ptrCast(@alignCast(w.value));
+                val.* = value;
+                return;
+            }
+        }
+        const slot = self.allocator.create(T) catch {
+            self.failed = true;
+            return;
+        };
+        slot.* = value;
+        self.writes.append(self.allocator, .{
+            .ref = ref_erased,
+            .value = @ptrCast(slot),
+            .apply = Ops(T).apply,
+            .free = Ops(T).free,
+        }) catch {
+            self.failed = true;
+            self.allocator.destroy(slot);
+        };
+    }
+};
+
+pub fn atomicallyHetero(
+    self: *Stm,
+    comptime R: type,
+    comptime Ctx: type,
+    allocator: Allocator,
+    ctx: Ctx,
+    body: *const fn (*HeteroTransaction, Ctx) R,
+) R {
+    var txn = HeteroTransaction.init(allocator);
+    defer txn.deinit();
+    while (true) {
+        txn.reset();
+        const result = body(&txn, ctx);
+        if (txn.failed) continue;
+        if (tryCommitHetero(self, &txn)) return result;
+    }
+}
+
+fn tryCommitHetero(self: *Stm, txn: *HeteroTransaction) bool {
+    self.commit_lock.lock();
+    defer self.commit_lock.unlock();
+    for (txn.reads.items) |r| {
+        if (r.read_version(r.ref) != r.observed) return false; // conflict
+    }
+    for (txn.writes.items) |w| {
+        w.apply(w.ref, w.value);
+    }
+    return true;
+}

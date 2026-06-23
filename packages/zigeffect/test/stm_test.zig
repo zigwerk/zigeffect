@@ -62,6 +62,87 @@ test "atomically moves a value between two refs atomically (multi-ref transactio
     try std.testing.expectEqual(@as(u64, 100), a.peek() + b.peek());
 }
 
+// ── Heterogeneous transactions (Track C) ──
+
+const HTxn = fx.HeteroTransaction;
+
+test "heterogeneous transaction touches a TRef(u64) AND a TRef([]const u8) atomically" {
+    const allocator = std.testing.allocator;
+    var stm = fx.Stm{};
+    var balance = fx.TRef(u64).init(100);
+    var label = fx.TRef([]const u8).init("idle");
+
+    const Refs = struct { balance: *fx.TRef(u64), label: *fx.TRef([]const u8) };
+    const Body = struct {
+        fn run(txn: *HTxn, refs: Refs) void {
+            const b = txn.get(u64, refs.balance);
+            txn.set(u64, refs.balance, b - 30);
+            txn.set([]const u8, refs.label, "charged");
+        }
+    };
+    stm.atomicallyMixed(void, Refs, allocator, .{ .balance = &balance, .label = &label }, Body.run);
+
+    try std.testing.expectEqual(@as(u64, 70), balance.peek());
+    try std.testing.expectEqualStrings("charged", label.peek());
+}
+
+test "heterogeneous read-after-write within a transaction sees the staged write" {
+    const allocator = std.testing.allocator;
+    var stm = fx.Stm{};
+    var ref = fx.TRef(u32).init(0);
+
+    const Body = struct {
+        fn run(txn: *HTxn, r: *fx.TRef(u32)) u32 {
+            txn.set(u32, r, 77);
+            return txn.get(u32, r); // must see the staged 77, not committed 0
+        }
+    };
+    const seen = stm.atomicallyMixed(u32, *fx.TRef(u32), allocator, &ref, Body.run);
+    try std.testing.expectEqual(@as(u32, 77), seen);
+    try std.testing.expectEqual(@as(u32, 77), ref.peek());
+}
+
+const HeteroWorker = struct {
+    stm: *fx.Stm,
+    a: *fx.TRef(u64),
+    b: *fx.TRef(u64),
+    allocator: std.mem.Allocator,
+
+    const Refs = struct { a: *fx.TRef(u64), b: *fx.TRef(u64) };
+    fn body(txn: *HTxn, refs: Refs) void {
+        // Atomically increment BOTH refs — conserving (a - b) under conflict.
+        txn.set(u64, refs.a, txn.get(u64, refs.a) + 1);
+        txn.set(u64, refs.b, txn.get(u64, refs.b) + 1);
+    }
+    fn run(self: *HeteroWorker) void {
+        var i: usize = 0;
+        while (i < 1000) : (i += 1) {
+            self.stm.atomicallyMixed(void, Refs, self.allocator, .{ .a = self.a, .b = self.b }, body);
+        }
+    }
+};
+
+test "heterogeneous STM: concurrent two-ref transactions stay consistent (no lost updates)" {
+    const allocator = std.testing.allocator;
+    var stm = fx.Stm{};
+    var a = fx.TRef(u64).init(0);
+    var b = fx.TRef(u64).init(0);
+
+    var workers: [8]HeteroWorker = undefined;
+    var threads: [8]std.Thread = undefined;
+    for (&workers, 0..) |*w, i| {
+        w.* = .{ .stm = &stm, .a = &a, .b = &b, .allocator = allocator };
+        threads[i] = try std.Thread.spawn(.{}, HeteroWorker.run, .{w});
+    }
+    for (&threads) |t| t.join();
+
+    // Both refs incremented exactly 8*1000 times — and stayed EQUAL (the
+    // two-ref write committed atomically every time).
+    try std.testing.expectEqual(@as(u64, 8000), a.peek());
+    try std.testing.expectEqual(@as(u64, 8000), b.peek());
+    try std.testing.expectEqual(a.peek(), b.peek());
+}
+
 // ── Multi-threaded conflict-retry proof ──
 
 const STM_THREADS = 8;
