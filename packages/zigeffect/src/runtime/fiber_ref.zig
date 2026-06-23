@@ -19,6 +19,58 @@
 
 const std = @import("std");
 const sync = @import("sync.zig");
+const context_mod = @import("../core/context.zig");
+
+pub const Context = context_mod.Context;
+
+/// Module-level slot cursor. Each `FiberRefSlot` instance claims the next slot.
+/// Capped at the Context's slot count; over-allocation is a programmer error.
+var slot_cursor: sync.SpinLock = .{};
+var next_slot: usize = 0;
+
+fn claimSlot() usize {
+    slot_cursor.lock();
+    defer slot_cursor.unlock();
+    const idx = next_slot;
+    next_slot += 1;
+    return idx;
+}
+
+/// M5.3 (auto-propagation) — a fiber-local cell stored INLINE in the `Context`,
+/// so it auto-snapshots across fork via the executor's `ctx.*` copy (no
+/// explicit `forkChild` needed). Constraint: `@sizeOf(T) <= 8` (it lives in one
+/// of the Context's u64 slots). Larger T uses the explicit `FiberRef(T)` cell.
+///
+/// Usage: create ONE `FiberRefSlot(T)` (claims a slot at init), then
+/// `ref.set(ctx, v)` / `ref.get(ctx)` against the running fiber's Context. A
+/// fiber forked from that Context inherits the value; its own writes stay local.
+pub fn FiberRefSlot(comptime T: type) type {
+    comptime std.debug.assert(@sizeOf(T) <= 8);
+    return struct {
+        const Self = @This();
+        slot: usize,
+
+        pub fn init() Self {
+            const idx = claimSlot();
+            std.debug.assert(idx < context_mod.fiber_local_slot_count);
+            return .{ .slot = idx };
+        }
+
+        pub fn get(self: Self, ctx: anytype) T {
+            const slot_bytes: [8]u8 = @bitCast(ctx.fiber_local_slots[self.slot]);
+            var value: T = undefined;
+            @memcpy(std.mem.asBytes(&value), slot_bytes[0..@sizeOf(T)]);
+            return value;
+        }
+
+        pub fn set(self: Self, ctx: anytype, value: T) void {
+            var slot_bytes: [8]u8 = @bitCast(ctx.fiber_local_slots[self.slot]);
+            const value_bytes = std.mem.asBytes(&value);
+            @memcpy(slot_bytes[0..@sizeOf(T)], value_bytes);
+            ctx.fiber_local_slots[self.slot] = @bitCast(slot_bytes);
+        }
+    };
+}
 
 pub fn FiberRef(comptime T: type) type {
     return struct {

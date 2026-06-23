@@ -22,6 +22,9 @@ pub const AsyncIoInterest = async_backend_mod.AsyncIoInterest;
 pub const FiberExecutor = executor_mod.FiberExecutor;
 pub const FiberJob = executor_mod.FiberJob;
 
+/// Number of inline fiber-local slots on every Context (see FiberRefSlot).
+pub const fiber_local_slot_count = 8;
+
 pub fn serviceNotFound(comptime Env: type, comptime Service: type) noreturn {
     @compileError(
         "zigeffect service not found\n\n" ++
@@ -54,6 +57,13 @@ pub fn Context(comptime Env: type) type {
         /// When null, future fork primitives run synchronously — the
         /// deterministic baseline.
         executor: ?FiberExecutor = null,
+        /// Inline fiber-local storage (M5.3 auto-propagation). Because the
+        /// executor's FiberJob copies `ctx.*` by value when spawning a fiber,
+        /// these slots auto-SNAPSHOT on fork: a child inherits the parent's
+        /// values and its own writes stay local. Accessed via `FiberRefSlot(T)`
+        /// (for `@sizeOf(T) <= 8`). The same mechanism `trace_id`/`span_id`
+        /// already use, generalized to N typed slots.
+        fiber_local_slots: [fiber_local_slot_count]u64 = .{0} ** fiber_local_slot_count,
 
         pub fn init(allocator: Allocator, env: *Env, scope: ?*Scope) Self {
             return .{

@@ -811,6 +811,7 @@ pub const FiberRuntime = runtime.fiber.FiberRuntime;
 pub const Ref = runtime.ref.Ref;
 pub const SynchronizedRef = runtime.ref.SynchronizedRef;
 pub const FiberRef = runtime.fiber_ref.FiberRef;
+pub const FiberRefSlot = runtime.fiber_ref.FiberRefSlot;
 pub const Hub = runtime.hub.Hub;
 pub const HubStrategy = runtime.hub.HubStrategy;
 pub const HubError = runtime.hub.HubError;
