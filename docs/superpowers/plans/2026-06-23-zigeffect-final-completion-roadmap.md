@@ -115,3 +115,47 @@ Honest stop conditions: if a zio vtable method (Track E) needs a zio API that
 isn't exported (as `selectAwaitables` was), record the precise gap + a
 poll/fallback rather than fake it. If the frontend (Track F) can't be verified
 beyond typecheck without a browser, say so.
+
+---
+
+## Delivery log — ALL SIX TRACKS COMPLETE (2026-06-23)
+
+Executed A → D → C → B → E → F. Every track shipped with tests; concurrency/safety
+tracks added real-OS-thread proofs and mutation checks. All gates green per
+commit (`test-raw` + `examples` + `release-gate` + `tool-hygiene` for core,
+`zig build test` for zio, `typecheck` + `test` for the workbench).
+
+- **Track A — race + both** (`6e9af4c0`): `RaceEffect` (prefer-success: first
+  `.value` wins, interrupting the other; on `.err` await the other) and
+  `BothEffect` (fail-fast: first failure interrupts the other, else assemble the
+  pair). Short-circuit via poll-park `waitAny`; zio timing tests + core tests.
+- **Track D — FiberRef auto-propagation** (`c01c83dc`): `FiberRefSlot(T)` for
+  `@sizeOf(T)<=8`, stored in `Context.fiber_local_slots`, auto-snapshotted on
+  fork by the executor's context copy. Auto-propagation test.
+- **Track C — heterogeneous STM** (`7aee8dca`): `HeteroTransaction` with a
+  type-erased read/write log; `Stm.atomicallyMixed` touches `TRef`s of different
+  value types in one atomic body. Proof: 8 threads × 1000 two-ref txns leave both
+  refs equal at 8000 (atomic multi-ref commit under real concurrency).
+- **Track B — ThreadPoolExecutor** (`1c893d48`): a `FiberExecutor` over real OS
+  threads. `forEachPar`/`zipPar` now run on the deterministic backend, on zio
+  coroutines, OR on an OS-thread pool — one abstraction, three executors. The D2
+  structural-equivalence invariant holds over real OS-thread parallelism.
+  Documented honest limit: thread `interrupt` is cooperative-only.
+- **Track E — zio AsyncBackend vtable fill** (`99f3358b`): migrated the six
+  stubbed pull-model methods from `UnsupportedBackendCapability` to a real
+  registration + wake-queue (`suspend_runtime`/`register_io_wait`/`wake`/
+  `complete_io`/`interrupt`/`poll_wake`); `schedule_timer` spawns a REAL zio
+  timer coroutine. `advance_time` is the one deterministic-only concept (no-op on
+  zio). Conformance test flipped from asserts-Unsupported to asserts-working.
+- **Track F — workbench live-attach** (`6e346f9b`): `liveAttach.ts` —
+  `LiveCausalBuffer` (sequence order, event_id dedup, ring window), `LiveSource`
+  transport abstraction (mock + WebSocket), and `createLiveArtifact` Solid
+  reactive integration. `?live=<ws-url>` streams frames into the SAME views.
+  +12 tests (43→55). HONEST BOUNDARY: the WebSocket transport needs the
+  engine-side collector endpoint (not yet built); browser rendering is manual.
+
+Residual (genuinely needs new external surface, not fake-able here): the
+live-attach HTTP/WS COLLECTOR endpoint that bridges `CausalHubBackend` to the
+workbench socket, and running the cluster/workflow scheduler ON the zio backend
+(needs the scheduler loop to cooperate with zio's event loop — the engine-loop
+push/pull reconciliation, beyond the vtable itself).
