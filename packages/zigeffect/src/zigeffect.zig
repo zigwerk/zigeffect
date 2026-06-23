@@ -94,6 +94,7 @@ pub const effect = struct {
 pub const runtime = struct {
     pub const runner = @import("runtime/runtime.zig");
     pub const fiber = @import("runtime/fiber.zig");
+    pub const thread_pool_executor = @import("runtime/thread_pool_executor.zig");
     pub const coordination = @import("runtime/coordination.zig");
     pub const ref = @import("runtime/ref.zig");
     pub const fiber_ref = @import("runtime/fiber_ref.zig");
@@ -818,6 +819,7 @@ pub const HubError = runtime.hub.HubError;
 pub const SubscriptionId = runtime.hub.SubscriptionId;
 pub const FiberExecutor = runtime.fiber.FiberExecutor;
 pub const FiberJob = runtime.fiber.FiberJob;
+pub const ThreadPoolExecutor = runtime.thread_pool_executor.ThreadPoolExecutor;
 pub const Runtime = runtime.runner.Runtime;
 
 pub const Layer = layer.definitions.Layer;

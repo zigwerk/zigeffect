@@ -6,6 +6,7 @@ comptime {
     _ = @import("effect_ergonomics_test.zig");
     _ = @import("effect_structured_concurrency_test.zig");
     _ = @import("race_test.zig");
+    _ = @import("thread_pool_executor_test.zig");
     _ = @import("ref_test.zig");
     _ = @import("fiber_ref_test.zig");
     _ = @import("hub_test.zig");
