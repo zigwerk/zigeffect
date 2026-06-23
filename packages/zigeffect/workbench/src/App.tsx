@@ -26,6 +26,7 @@ import {
   queryCommandsForEvent,
 } from "./causalArtifact";
 import { loadPayload, type WorkbenchSession } from "./workbenchBridge";
+import { createLiveArtifact, liveUrlFromSearch, webSocketLiveSource } from "./liveAttach";
 
 const VisualGraphCanvas = lazy(async () => {
   const module = await import("./visualGraphAdapter");
@@ -71,8 +72,22 @@ export function App() {
   const [graphPerspective, setGraphPerspective] = createSignal<VisualGraphPerspective>("cause");
   const [selectedGraphNodeId, setSelectedGraphNodeId] = createSignal<string | null>(null);
 
+  // Live-attach: when the workbench is opened with `?live=<ws-url>`, stream
+  // causal-event frames from the engine's live bridge into the SAME artifact
+  // model every view below renders. Absent `?live`, this is a no-op and the
+  // static one-shot snapshot path is used unchanged.
+  const liveUrl = typeof window === "undefined" ? null : liveUrlFromSearch(window.location.search);
+  const live = liveUrl ? createLiveArtifact(webSocketLiveSource(liveUrl), { maxFrames: 1000 }) : null;
+  const liveSession: WorkbenchSession = {
+    schema: "zigeffect.causal.workbench-session.v1",
+    artifact_path: "live-attach",
+    read_only: true,
+    warnings: ["live-attach stream"],
+  };
+
   const parsed = createMemo(() => {
-    const loaded = payload();
+    const liveJson = live?.artifactJson();
+    const loaded = liveJson !== undefined ? { artifactJson: liveJson, session: liveSession } : payload();
     if (!loaded) {
       return null;
     }
