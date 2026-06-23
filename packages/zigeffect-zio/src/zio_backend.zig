@@ -1,20 +1,21 @@
-//! zigeffect-zio — Stage 1 scaffold.
+//! zigeffect-zio — real zio backend.
 //!
 //! `ZioAsyncBackendState` implements the core `zigeffect` `AsyncBackend` vtable
 //! on top of zio (https://github.com/lalinsky/zio) v0.14.0, which provides
 //! stackful coroutines + a full `std.Io` implementation over io_uring/epoll/kqueue.
 //!
-//! STATUS: this is a registered-but-unimplemented backend. Every method returns
-//! `error.UnsupportedBackendCapability` until the zio integration lands, so it
-//! fails loudly rather than silently faking suspension. The doc comment on each
-//! method records the exact zio mapping to implement. The core engine
-//! (`packages/zigeffect`) stays zio-free and is the deterministic reference;
-//! `LocalAsyncBackendState` must produce the same *structural* causal trace as
-//! this backend for the same program (see
-//! docs/superpowers/specs/2026-06-20-zigeffect-zio-backend-design.md).
+//! STATUS: the vtable is implemented (Track E). `blocking_sleep` parks the
+//! running coroutine on the real event loop (D1); the pull-model methods
+//! (`suspend_runtime`/`register_io_wait`/`wake`/`complete_io`/`interrupt`/
+//! `poll_wake`) are a real registration + wake-queue, and `schedule_timer` spawns
+//! a REAL zio timer coroutine that enqueues a wake on fire. `advance_time` is the
+//! single deterministic-specific concept — a no-op under zio, since real time
+//! advances itself. All backend state is spinlock-guarded (thread-safe).
 //!
-//! To activate Stage 1: `zig fetch --save "git+https://github.com/lalinsky/zio#v0.14.0"`,
-//! enable the zio import in build.zig, then replace the stubs below.
+//! The core engine (`packages/zigeffect`) stays zio-free and is the deterministic
+//! reference; `LocalAsyncBackendState` must produce the same *structural* causal
+//! trace as this backend for the same program (see
+//! docs/superpowers/specs/2026-06-20-zigeffect-zio-backend-design.md).
 
 const std = @import("std");
 const fx = @import("zigeffect");
@@ -493,15 +494,97 @@ pub const BackendIoWaitRequest = fx.BackendIoWaitRequest;
 pub const BackendIoCompleteRequest = fx.BackendIoCompleteRequest;
 pub const BackendWakeEvent = fx.BackendWakeEvent;
 
+pub const SpinLock = fx.SpinLock;
+pub const Suspension = fx.Suspension;
+pub const AsyncWaitKind = fx.AsyncWaitKind;
+pub const AsyncWaitStatus = fx.AsyncWaitStatus;
+pub const AsyncIoWaitKind = fx.AsyncIoWaitKind;
+pub const AsyncIoInterest = fx.AsyncIoInterest;
+
+// Track E — a faithful registration + wake-queue implementation of the
+// AsyncBackend pull-model vtable on zio. The deterministic backend drives the
+// engine's cluster/workflow subsystems with a virtual clock (advance_time fires
+// due timers, poll_wake drains them). zio drives them with REAL state: an effect
+// registers a suspension (suspend_runtime / register_io_wait / schedule_timer);
+// it is woken by an explicit `wake` / `complete_io`, by a real zio timer
+// (schedule_timer), or `interrupt`; poll_wake drains the resulting wake queue.
+// `advance_time` is the only deterministic-specific concept — a no-op here
+// (real time advances itself). All state is spinlock-guarded (thread-safe).
+const PendingSuspension = struct {
+    suspension: Suspension,
+    wait_kind: AsyncWaitKind,
+    workflow_id: ?u64 = null,
+    execution_id: ?u64 = null,
+    due_time_ms: ?u64 = null,
+    io_kind: ?AsyncIoWaitKind = null,
+    interest: ?AsyncIoInterest = null,
+    descriptor: ?i64 = null,
+};
+
 pub const ZioAsyncBackendState = struct {
     allocator: std.mem.Allocator,
+    mutex: SpinLock = .{},
+    pending: std.ArrayList(PendingSuspension) = .empty,
+    wakes: std.ArrayList(BackendWakeEvent) = .empty,
+    timer_group: zio.Group = .init,
+    completed_count: usize = 0,
+    interrupted_count: usize = 0,
+    duplicate_wake_count: usize = 0,
 
     pub fn init(allocator: std.mem.Allocator) ZioAsyncBackendState {
         return .{ .allocator = allocator };
     }
 
+    /// MUST be called while the zio runtime is still alive (so pending timer
+    /// coroutines can be cancelled + drained before their state is freed).
     pub fn deinit(self: *ZioAsyncBackendState) void {
-        _ = self;
+        self.timer_group.cancel();
+        self.timer_group.wait() catch {};
+        self.pending.deinit(self.allocator);
+        self.wakes.deinit(self.allocator);
+    }
+
+    fn register(self: *ZioAsyncBackendState, entry: PendingSuspension) AsyncBackendError!void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.pending.append(self.allocator, entry) catch return error.OutOfMemory;
+    }
+
+    /// Move a registered suspension to the wake queue with the given outcome.
+    fn resolve(self: *ZioAsyncBackendState, id: u64, wait_kind: AsyncWaitKind, status: AsyncWaitStatus, reason: []const u8) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        for (self.pending.items, 0..) |p, i| {
+            if (p.suspension.id == id) {
+                _ = self.pending.orderedRemove(i);
+                self.wakes.append(self.allocator, .{
+                    .suspension = p.suspension,
+                    .wait_kind = wait_kind,
+                    .status = status,
+                    .reason = reason,
+                    .workflow_id = p.workflow_id,
+                    .execution_id = p.execution_id,
+                    .due_time_ms = p.due_time_ms,
+                    .io_kind = p.io_kind,
+                    .interest = p.interest,
+                    .descriptor = p.descriptor,
+                }) catch {};
+                if (status == .interrupted) {
+                    self.interrupted_count += 1;
+                } else {
+                    self.completed_count += 1;
+                }
+                return;
+            }
+        }
+        self.duplicate_wake_count += 1; // wake for an unknown/already-resolved id
+    }
+
+    fn nextWake(self: *ZioAsyncBackendState) ?BackendWakeEvent {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        if (self.wakes.items.len == 0) return null;
+        return self.wakes.orderedRemove(0);
     }
 
     pub fn backend(self: *ZioAsyncBackendState) AsyncBackend {
@@ -512,6 +595,14 @@ pub const ZioAsyncBackendState = struct {
         };
     }
 };
+
+/// Real zio timer coroutine: sleep for `due_ms`, then enqueue a `.ready` wake for
+/// the suspension. Cancellation (group.cancel at deinit) makes the sleep return
+/// an error and we skip the wake.
+fn zioTimerFire(state: *ZioAsyncBackendState, suspension: Suspension, due_ms: u64) void {
+    zio.sleep(zio.Duration.fromMilliseconds(due_ms)) catch return;
+    state.resolve(suspension.id, .timer, .ready, "timer fired");
+}
 
 const zio_vtable = AsyncBackend.VTable{
     .suspend_runtime = suspendRuntime,
@@ -539,74 +630,104 @@ fn blockingSleep(context: ?*anyopaque, ms: u64) AsyncBackendError!void {
     };
 }
 
-/// Stage 1: park the current zio coroutine keyed by `request.suspension.id`
-/// (the engine emits `fiber_suspended` around this call). Implement by yielding
-/// the running fiber so the OS thread is freed for other coroutines.
+/// Register a runtime suspension keyed by `request.suspension.id`. It stays
+/// parked until `wake` / `interrupt` resolves it (then `poll_wake` drains it).
 fn suspendRuntime(context: ?*anyopaque, request: BackendSuspendRequest) AsyncBackendError!void {
-    _ = context;
-    _ = request;
-    return error.UnsupportedBackendCapability;
+    const state: *ZioAsyncBackendState = @ptrCast(@alignCast(context.?));
+    try state.register(.{
+        .suspension = request.suspension,
+        .wait_kind = .runtime,
+        .workflow_id = request.workflow_id,
+        .execution_id = request.execution_id,
+    });
 }
 
-/// Stage 1: reschedule the coroutine parked under `request.suspension_id`.
+/// Resolve the suspension under `request.suspension_id` as ready.
 fn wake(context: ?*anyopaque, request: BackendWakeRequest) AsyncBackendError!void {
-    _ = context;
-    _ = request;
-    return error.UnsupportedBackendCapability;
+    const state: *ZioAsyncBackendState = @ptrCast(@alignCast(context.?));
+    state.resolve(request.suspension_id, .runtime, .ready, request.reason);
 }
 
-/// Stage 1 (first primitive): register a zio timer for `request.due_time_ms`;
-/// on fire, wake the suspension. The engine emits `timer_scheduled` here and
-/// `timer_fired` + `fiber_resumed` when the wake is consumed.
+/// Register a timer suspension AND spawn a REAL zio timer coroutine that wakes
+/// it after `due_time_ms`. The engine emits `timer_scheduled` here; the wake is
+/// drained by `poll_wake` once the real timer fires.
 fn scheduleTimer(context: ?*anyopaque, request: BackendTimerRequest) AsyncBackendError!void {
-    _ = context;
-    _ = request;
-    return error.UnsupportedBackendCapability;
+    const state: *ZioAsyncBackendState = @ptrCast(@alignCast(context.?));
+    try state.register(.{
+        .suspension = request.suspension,
+        .wait_kind = .timer,
+        .due_time_ms = request.due_time_ms,
+        .workflow_id = request.workflow_id,
+        .execution_id = request.execution_id,
+    });
+    // Best-effort: needs a live zio runtime on this thread. If spawn fails the
+    // registration remains and an explicit `wake` can still resolve it.
+    state.timer_group.spawn(zioTimerFire, .{ state, request.suspension, request.due_time_ms }) catch {};
 }
 
-/// Stage 1: `zio.Group.cancel` / targeted cancellation of the parked coroutine;
-/// resume it with an interrupted status (engine emits `fiber_interrupted`).
+/// Resolve the suspension under `request.target_id` as interrupted.
 fn interrupt(context: ?*anyopaque, request: BackendInterruptRequest) AsyncBackendError!void {
-    _ = context;
-    _ = request;
-    return error.UnsupportedBackendCapability;
+    const state: *ZioAsyncBackendState = @ptrCast(@alignCast(context.?));
+    state.resolve(request.target_id, .cancellation, .interrupted, request.reason);
 }
 
-/// Stage 2: register fd readiness (or issue the `std.Io` op) for an async IO
-/// wait; on completion, `complete_io` + wake. Engine emits `io_wait_started`.
+/// Register an async IO suspension keyed by `request.suspension.id`. Resolved by
+/// `complete_io` (or `interrupt`).
 fn registerIoWait(context: ?*anyopaque, request: BackendIoWaitRequest) AsyncBackendError!void {
-    _ = context;
-    _ = request;
-    return error.UnsupportedBackendCapability;
+    const state: *ZioAsyncBackendState = @ptrCast(@alignCast(context.?));
+    const wait_kind: AsyncWaitKind = switch (request.io_kind) {
+        .network => .network,
+        .file => .file,
+    };
+    try state.register(.{
+        .suspension = request.suspension,
+        .wait_kind = wait_kind,
+        .io_kind = request.io_kind,
+        .interest = request.interest,
+        .descriptor = request.descriptor,
+        .workflow_id = request.workflow_id,
+        .execution_id = request.execution_id,
+    });
 }
 
-/// Stage 2: mark an outstanding IO wait satisfied and resume (engine emits
-/// `io_completed` + `fiber_resumed`).
+/// Resolve an outstanding IO wait as ready.
 fn completeIo(context: ?*anyopaque, request: BackendIoCompleteRequest) AsyncBackendError!void {
-    _ = context;
-    _ = request;
-    return error.UnsupportedBackendCapability;
+    const state: *ZioAsyncBackendState = @ptrCast(@alignCast(context.?));
+    const wait_kind: AsyncWaitKind = switch (request.io_kind) {
+        .network => .network,
+        .file => .file,
+    };
+    state.resolve(request.suspension_id, wait_kind, .ready, request.reason);
 }
 
-/// Under zio the event loop drives wakes directly; `poll_wake` returns
-/// already-resolved events for inspection/parity with the deterministic backend.
+/// Drain the next resolved wake (or null). The engine emits `timer_fired` /
+/// `io_completed` / `fiber_resumed` (or `fiber_interrupted`) from the event.
 fn pollWake(context: ?*anyopaque) AsyncBackendError!?BackendWakeEvent {
-    _ = context;
-    return null;
+    const state: *ZioAsyncBackendState = @ptrCast(@alignCast(context.?));
+    return state.nextWake();
 }
 
 /// Deterministic-backend concept only: under zio, time is real, so advancing a
-/// virtual clock is a no-op.
+/// virtual clock is a no-op. (Real timers fire via the event loop; see
+/// scheduleTimer.)
 fn advanceTime(context: ?*anyopaque, now_ms: u64) AsyncBackendError!usize {
     _ = context;
     _ = now_ms;
     return 0;
 }
 
-/// Stage 1: report parked/ready/interrupted counts for tests and the workbench.
+/// Report parked/ready/interrupted counts for tests and the workbench.
 fn snapshot(context: ?*anyopaque) AsyncBackendSnapshot {
-    _ = context;
-    return .{};
+    const state: *ZioAsyncBackendState = @ptrCast(@alignCast(context.?));
+    state.mutex.lock();
+    defer state.mutex.unlock();
+    return .{
+        .pending_count = state.pending.items.len,
+        .ready_count = state.wakes.items.len,
+        .completed_count = state.completed_count,
+        .interrupted_count = state.interrupted_count,
+        .duplicate_wake_count = state.duplicate_wake_count,
+    };
 }
 
 test "hardening: a delay cancelled mid-wait records fiber_interrupted, never a fabricated resume" {
@@ -1287,12 +1408,84 @@ test "Z3: zio.Group.cancel interrupts a parked child, caused by scope close" {
     }
 }
 
-test "zio backend exposes a valid AsyncBackend seam (stub returns Unsupported until Stage 1)" {
-    var state = ZioAsyncBackendState.init(std.testing.allocator);
+// Track E — the AsyncBackend vtable is now WORKING on zio (was: asserts
+// Unsupported). The pull-model methods (suspend/register/wake/interrupt/poll)
+// are a real registration + wake-queue; schedule_timer spawns a REAL zio timer.
+
+test "zio AsyncBackend: suspend_runtime → wake → poll_wake round-trips" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+    var state = ZioAsyncBackendState.init(allocator);
+    defer state.deinit(); // runs before rt.deinit (defer LIFO)
+    const b = state.backend();
+
+    try b.suspendRuntime(.{ .suspension = .{ .kind = .external, .id = 1, .label = "park" }, .reason = "wait" });
+    try std.testing.expectEqual(@as(?BackendWakeEvent, null), try b.pollWake()); // not woken yet
+    try std.testing.expectEqual(@as(usize, 1), b.snapshot().pending_count);
+
+    try b.wake(.{ .suspension_id = 1, .reason = "ready" });
+    const w = (try b.pollWake()).?;
+    try std.testing.expectEqual(@as(u64, 1), w.suspension.id);
+    try std.testing.expectEqual(fx.AsyncWaitStatus.ready, w.status);
+    try std.testing.expectEqual(fx.AsyncWaitKind.runtime, w.wait_kind);
+    try std.testing.expectEqual(@as(?BackendWakeEvent, null), try b.pollWake()); // drained
+}
+
+test "zio AsyncBackend: interrupt resolves a suspension as interrupted" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+    var state = ZioAsyncBackendState.init(allocator);
     defer state.deinit();
     const b = state.backend();
-    try std.testing.expectError(
-        error.UnsupportedBackendCapability,
-        b.scheduleTimer(.{ .suspension = .{ .kind = .timer, .id = 1, .label = "delay" }, .due_time_ms = 10 }),
-    );
+
+    try b.suspendRuntime(.{ .suspension = .{ .kind = .external, .id = 2, .label = "park" } });
+    try b.interrupt(.{ .target_id = 2, .reason = "cancel" });
+    const w = (try b.pollWake()).?;
+    try std.testing.expectEqual(@as(u64, 2), w.suspension.id);
+    try std.testing.expectEqual(fx.AsyncWaitStatus.interrupted, w.status);
+    try std.testing.expectEqual(@as(usize, 1), b.snapshot().interrupted_count);
+}
+
+test "zio AsyncBackend: register_io_wait → complete_io round-trips with the io kind" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+    var state = ZioAsyncBackendState.init(allocator);
+    defer state.deinit();
+    const b = state.backend();
+
+    try b.registerIoWait(.{ .suspension = .{ .kind = .external, .id = 3, .label = "sock" }, .io_kind = .network, .interest = .readable, .descriptor = 7 });
+    try b.completeIo(.{ .suspension_id = 3, .io_kind = .network, .reason = "readable" });
+    const w = (try b.pollWake()).?;
+    try std.testing.expectEqual(@as(u64, 3), w.suspension.id);
+    try std.testing.expectEqual(fx.AsyncWaitStatus.ready, w.status);
+    try std.testing.expectEqual(fx.AsyncWaitKind.network, w.wait_kind);
+}
+
+test "zio AsyncBackend: schedule_timer fires a REAL zio timer that poll_wake drains" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+    var state = ZioAsyncBackendState.init(allocator);
+    defer state.deinit();
+    const b = state.backend();
+
+    try b.scheduleTimer(.{ .suspension = .{ .kind = .timer, .id = 4, .label = "t" }, .due_time_ms = 5 });
+
+    // Poll until the real timer coroutine fires (giving it event-loop time).
+    var fired = false;
+    var i: usize = 0;
+    while (i < 5000 and !fired) : (i += 1) {
+        if (try b.pollWake()) |w| {
+            try std.testing.expectEqual(@as(u64, 4), w.suspension.id);
+            try std.testing.expectEqual(fx.AsyncWaitStatus.ready, w.status);
+            try std.testing.expectEqual(fx.AsyncWaitKind.timer, w.wait_kind);
+            fired = true;
+        } else {
+            try zio.sleep(zio.Duration.fromMilliseconds(1));
+        }
+    }
+    try std.testing.expect(fired);
 }
