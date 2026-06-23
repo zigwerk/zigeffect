@@ -6,11 +6,12 @@ The WebSocket bridge between a running zigeffect engine and the SolidJS workbenc
 engine ──NDJSON──▶ collector ──LiveFrame per WS message──▶ workbench (?live=)
 ```
 
-The engine republishes every recorded `CausalEvent` to a `Hub(CausalEvent)` via
-`CausalHubBackend`; `drainHubToNdjson` (in `services/causal_hub_backend.zig`)
-serializes drained events to NDJSON. This collector ingests that NDJSON, maps
-each line to the workbench `LiveFrame` wire shape (`frame.ts`), and broadcasts it
-— one frame per WebSocket message — to every connected browser.
+The engine feeds NDJSON via `CausalNdjsonTap` (in
+`services/causal_hub_backend.zig`) — a `CausalBackend` that serializes each
+recorded `CausalEvent` to an NDJSON line as it happens (safe with bounded stores)
+and buffers it for `drain`. This collector ingests that NDJSON, maps each line to
+the workbench `LiveFrame` wire shape (`frame.ts`), and broadcasts it — one frame
+per WebSocket message — to every connected browser.
 
 ## Run
 

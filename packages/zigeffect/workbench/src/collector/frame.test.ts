@@ -63,3 +63,13 @@ test("malformed / incomplete lines are rejected (never break the stream)", () =>
   expect(causalLineToFrame(JSON.stringify({ kind: "x" }), 1)).toBeNull(); // missing id
   expect(causalLineToFrame(JSON.stringify({ id: 1 }), 1)).toBeNull(); // missing kind
 });
+
+test("non-integer / out-of-range ids are rejected, not silently corrupted", () => {
+  expect(causalLineToFrame(JSON.stringify({ id: 1.5, kind: "x" }), 1)).toBeNull(); // fractional
+  expect(causalLineToFrame(JSON.stringify({ id: -1, kind: "x" }), 1)).toBeNull(); // negative
+  expect(causalLineToFrame(JSON.stringify({ id: 9007199254740993, kind: "x" }), 1)).toBeNull(); // > 2^53, precision-lost
+  // A valid id with a fractional parent_id keeps the event but drops the bad edge.
+  const frame = causalLineToFrame(JSON.stringify({ id: 1, kind: "x", parent_id: 2.5 }), 1);
+  expect(frame).not.toBeNull();
+  expect(frame!.parent_id).toBeNull();
+});

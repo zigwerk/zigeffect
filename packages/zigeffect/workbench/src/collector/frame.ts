@@ -15,8 +15,10 @@ export type { LiveFrame };
 
 type CausalEventRecord = Record<string, unknown>;
 
-function numberOrNull(value: unknown): number | null {
-  return typeof value === "number" ? value : null;
+/** A safe non-negative integer id, or null. Rejects fractional/NaN/Infinity and
+ * values past 2^53 where JSON.parse silently loses integer precision. */
+function safeIdOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 /** Lane the event belongs to, most-specific first (fiber → scope → run). */
@@ -64,16 +66,19 @@ export function causalLineToFrame(line: string, sequence: number): LiveFrame | n
   if (typeof parsed !== "object" || parsed === null) return null;
 
   const event = parsed as CausalEventRecord;
-  if (typeof event.id !== "number" || typeof event.kind !== "string") return null;
+  const eventId = safeIdOrNull(event.id);
+  // A genuine engine event always has a safe-integer id and a string kind;
+  // anything else is junk and is dropped (a malformed line never breaks the stream).
+  if (eventId === null || typeof event.kind !== "string") return null;
 
   return {
     sequence,
-    event_id: event.id,
+    event_id: eventId,
     event_kind: event.kind,
     status: typeof event.status === "string" && event.status.length > 0 ? event.status : "unknown",
     label: typeof event.label === "string" ? event.label : "",
     lane: deriveLane(event),
-    parent_id: numberOrNull(event.parent_id),
+    parent_id: safeIdOrNull(event.parent_id),
     finding_kind: null,
     dashboard_priority: derivePriority(event),
   };

@@ -486,16 +486,25 @@ pub const WorkflowScheduler = struct {
     ) anyerror!void {
         switch (wake.suspension.kind) {
             .timer => {
-                // The timer resolved (fired or was cancelled): allow re-registration
-                // if the journal still holds a pending timer with this id.
-                if (wake.status != .pending) self.unregisterTimer(wake.suspension.id);
                 const workflow_id = wake.workflow_id orelse return;
                 const execution_id = wake.execution_id orelse return;
                 var durable_clock = DurableClock.init(self.allocator, self.journal_store, workflow_id, execution_id);
                 switch (wake.status) {
                     .pending => {},
-                    .ready => result.timers_fired += try durable_clock.fireDueTimers(self.clock.nowMs()),
-                    .interrupted => _ = try durable_clock.cancel(wake.suspension.label),
+                    .ready => {
+                        const fired = try durable_clock.fireDueTimers(self.clock.nowMs());
+                        result.timers_fired += fired;
+                        // Release the registration ONLY if the journal timer
+                        // actually became terminal. If the durable clock says it is
+                        // not due yet (clock skew vs the real backend that fired the
+                        // coroutine), keep it registered so the next tick does NOT
+                        // re-spawn a duplicate timer (the dedup's whole purpose).
+                        if (fired > 0) self.unregisterTimer(wake.suspension.id);
+                    },
+                    .interrupted => {
+                        _ = try durable_clock.cancel(wake.suspension.label);
+                        self.unregisterTimer(wake.suspension.id);
+                    },
                 }
             },
             else => {},

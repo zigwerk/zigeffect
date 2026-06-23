@@ -28,14 +28,17 @@ export function createCollector(): Collector {
   const clients = new Set<ServerWebSocket<undefined>>();
   let sequence = 0;
 
+  const WS_OPEN = 1; // WebSocket.OPEN
   function broadcast(frame: LiveFrame): void {
     const message = JSON.stringify(frame);
     for (const client of clients) {
-      try {
-        client.send(message);
-      } catch {
-        // A dead/slow socket is dropped on its `close`; never fail ingest.
-      }
+      // Skip a socket that is closing/closed (it is removed on its `close`
+      // callback, which may lag the client's close). `send` returns a status
+      // (-1 closed / 0 backpressure / >0 bytes) rather than throwing; on a slow
+      // subscriber a 0 means the frame is buffered by Bun, which is acceptable
+      // for a best-effort live stream.
+      if (client.readyState !== WS_OPEN) continue;
+      client.send(message);
     }
   }
 

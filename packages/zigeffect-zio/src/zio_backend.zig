@@ -527,12 +527,19 @@ pub const ZioAsyncBackendState = struct {
     pending: std.ArrayList(PendingSuspension) = .empty,
     wakes: std.ArrayList(BackendWakeEvent) = .empty,
     timer_group: zio.Group = .init,
+    // Owns every registered suspension's `label` bytes. Callers (e.g. the
+    // WorkflowScheduler) pass a BORROWED label that they free before the real
+    // timer fires; the deterministic backend clones it, so this one must too. A
+    // suspension outlives the call that registered it (it lives until its real
+    // timer/IO resolves and the wake is drained), so the copy is owned here and
+    // freed at `deinit`. Bounded by the distinct suspensions in a session.
+    label_arena: std.heap.ArenaAllocator,
     completed_count: usize = 0,
     interrupted_count: usize = 0,
     duplicate_wake_count: usize = 0,
 
     pub fn init(allocator: std.mem.Allocator) ZioAsyncBackendState {
-        return .{ .allocator = allocator };
+        return .{ .allocator = allocator, .label_arena = std.heap.ArenaAllocator.init(allocator) };
     }
 
     /// MUST be called while the zio runtime is still alive (so pending timer
@@ -542,12 +549,23 @@ pub const ZioAsyncBackendState = struct {
         self.timer_group.wait() catch {};
         self.pending.deinit(self.allocator);
         self.wakes.deinit(self.allocator);
+        self.label_arena.deinit();
+    }
+
+    /// Copy a borrowed label into backend-owned storage (empty stays a shared
+    /// empty literal; an allocation failure degrades to empty rather than
+    /// crashing). Caller must hold `mutex` (the arena is not thread-safe).
+    fn ownLabelLocked(self: *ZioAsyncBackendState, label: []const u8) []const u8 {
+        if (label.len == 0) return "";
+        return self.label_arena.allocator().dupe(u8, label) catch "";
     }
 
     fn register(self: *ZioAsyncBackendState, entry: PendingSuspension) AsyncBackendError!void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        self.pending.append(self.allocator, entry) catch return error.OutOfMemory;
+        var owned = entry;
+        owned.suspension.label = self.ownLabelLocked(entry.suspension.label);
+        self.pending.append(self.allocator, owned) catch return error.OutOfMemory;
     }
 
     /// Move a registered suspension to the wake queue with the given outcome.
@@ -669,9 +687,16 @@ fn scheduleTimer(context: ?*anyopaque, request: BackendTimerRequest) AsyncBacken
     // due_time_ms itself the delay). Saturating subtraction clamps a
     // past-due deadline to fire immediately.
     const delay_ms = request.due_time_ms -| request.now_ms;
-    // Best-effort: needs a live zio runtime on this thread. If spawn fails the
-    // registration remains and an explicit `wake` can still resolve it.
-    state.timer_group.spawn(zioTimerFire, .{ state, request.suspension, delay_ms }) catch {};
+    // Spawn the real timer coroutine. NOTE: this requires a live zio runtime on
+    // the calling thread — `zio.Group.spawn` @panics (uncatchably) without one,
+    // so the AsyncBackend contract is "drive me from a thread with a runtime".
+    // The error union here only carries allocation-class failures; on such a
+    // failure we must NOT leave the suspension orphaned (no coroutine would ever
+    // resolve it, so a draining scheduler would never reach idle) — resolve it
+    // immediately as ready, the safe degradation for a timer we cannot arm.
+    state.timer_group.spawn(zioTimerFire, .{ state, request.suspension, delay_ms }) catch {
+        state.resolve(request.suspension.id, .timer, .ready, "timer spawn failed; fired immediately");
+    };
 }
 
 /// Resolve the suspension under `request.target_id` as interrupted.
