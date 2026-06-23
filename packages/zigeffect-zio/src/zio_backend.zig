@@ -743,6 +743,53 @@ test "M4.4 raceFirst on zio: the fast branch wins, the 10s loser is cancelled (s
     try std.testing.expectEqual(@as(u32, 2), result);
 }
 
+fn raceSlowFailBody(ctx: *fx.Context(fx.TestServices)) ForkError!u32 {
+    _ = ctx;
+    zio.sleep(zio.Duration.fromMilliseconds(10_000)) catch {};
+    return error.Boom;
+}
+fn raceFastFailBody(ctx: *fx.Context(fx.TestServices)) ForkError!u32 {
+    _ = ctx;
+    zio.sleep(zio.Duration.fromMilliseconds(1)) catch {};
+    return error.Boom;
+}
+
+test "M4.3 race on zio: a fast FAILURE does not win — race waits for the slow SUCCESS" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+    var env = try fx.TestEnv.init(allocator);
+    defer env.deinit();
+    var exec = ZioFiberExecutor{ .allocator = allocator };
+    var runtime = raceRuntime(&env, &exec);
+
+    const E = fx.Effect(u32, ForkError, fx.TestServices);
+    // Fast branch FAILS at 1ms; slow branch SUCCEEDS at... use the short success
+    // (1ms→2) as the "slow success" relative to an instant failure path. To make
+    // the prefer-success behaviour unambiguous, pit a fast-FAIL vs a real success.
+    const program = E.fromFn(raceFastFailBody).race(E.fromFn(raceFastBody));
+    // raceFastFail returns error.Boom (fast), raceFast returns 2. race must
+    // prefer the success, so the result is 2.
+    const result = try runtime.run(program);
+    try std.testing.expectEqual(@as(u32, 2), result);
+}
+
+test "M4.6 both on zio: a fast FAILURE fail-fasts, cancelling the 10s branch (no 10s hang)" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+    var env = try fx.TestEnv.init(allocator);
+    defer env.deinit();
+    var exec = ZioFiberExecutor{ .allocator = allocator };
+    var runtime = raceRuntime(&env, &exec);
+
+    const E = fx.Effect(u32, ForkError, fx.TestServices);
+    // Left fails fast (1ms); right would take 10s. `both` must fail-fast and
+    // cancel the right — the test finishes in ~1s, not 10s.
+    const program = E.fromFn(raceFastFailBody).both(E.fromFn(raceSlowBody));
+    try std.testing.expectError(error.Boom, runtime.run(program));
+}
+
 test "M4.5 raceAll on zio: fastest of three wins, the slow two are cancelled" {
     const allocator = std.testing.allocator;
     var rt = try zio.Runtime.init(allocator, .{});

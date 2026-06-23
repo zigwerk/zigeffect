@@ -122,3 +122,75 @@ test "raceAll with no executor falls back to the first item" {
     const program = fx.raceAll(E, fixtures.TestError, fx.TestServices, &items);
     try std.testing.expectEqual(@as(u32, 5), try runtime.run(program));
 }
+
+// ── M4.3 race (prefer-success) + M4.6 both (fail-fast) ──
+
+test "race: first (left) succeeds → returns it (sync racing executor)" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+    var exec = SyncRacingExec{};
+    var runtime = rt(&env, exec.executor());
+    const program = E.succeed(1).race(E.succeed(2));
+    try std.testing.expectEqual(@as(u32, 1), try runtime.run(program));
+}
+
+test "race: first completer FAILS → returns the OTHER branch's result (prefer success)" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+    var exec = SyncRacingExec{};
+    var runtime = rt(&env, exec.executor());
+    // Winner index 0 (left) fails; race must then take the right branch.
+    const program = E.fail(error.Boom).race(E.succeed(99));
+    try std.testing.expectEqual(@as(u32, 99), try runtime.run(program));
+}
+
+test "race: both fail → returns the second (other) failure" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+    var exec = SyncRacingExec{};
+    var runtime = rt(&env, exec.executor());
+    const program = E.fail(error.Boom).race(E.fail(error.Empty));
+    try std.testing.expectError(error.Empty, runtime.run(program));
+}
+
+test "race with no executor falls back to sequential prefer-success" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+    var runtime = rt(&env, null);
+    try std.testing.expectEqual(@as(u32, 7), try runtime.run(E.fail(error.Boom).race(E.succeed(7))));
+}
+
+test "both: both succeed → ZipPair of the two values" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+    var exec = SyncRacingExec{};
+    var runtime = rt(&env, exec.executor());
+    const pair = try runtime.run(E.succeed(3).both(E.succeed(4)));
+    try std.testing.expectEqual(@as(u32, 3), pair.left);
+    try std.testing.expectEqual(@as(u32, 4), pair.right);
+}
+
+test "both: left fails → fail-fast with that failure (right interrupted)" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+    var exec = SyncRacingExec{};
+    var runtime = rt(&env, exec.executor());
+    try std.testing.expectError(error.Boom, runtime.run(E.fail(error.Boom).both(E.succeed(4))));
+}
+
+test "both: right fails → fail-fast returns the RIGHT failure (regardless of which completed first)" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+    var exec = SyncRacingExec{};
+    var runtime = rt(&env, exec.executor());
+    try std.testing.expectError(error.Empty, runtime.run(E.succeed(1).both(E.fail(error.Empty))));
+}
+
+test "both with no executor falls back to sequential zip semantics" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+    var runtime = rt(&env, null);
+    const pair = try runtime.run(E.succeed(5).both(E.succeed(6)));
+    try std.testing.expectEqual(@as(u32, 5), pair.left);
+    try std.testing.expectEqual(@as(u32, 6), pair.right);
+}

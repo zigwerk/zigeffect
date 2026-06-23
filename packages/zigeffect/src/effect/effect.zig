@@ -17,6 +17,8 @@ pub const ForEachParEffect = ergonomics_mod.ForEachParEffect;
 pub const ZipParEffect = ergonomics_mod.ZipParEffect;
 pub const RaceFirstEffect = ergonomics_mod.RaceFirstEffect;
 pub const RaceAllEffect = ergonomics_mod.RaceAllEffect;
+pub const RaceEffect = ergonomics_mod.RaceEffect;
+pub const BothEffect = ergonomics_mod.BothEffect;
 
 /// M3.7 — sequential gather over a homogeneous slice of effects. Allocates a
 /// result slice via `ctx.allocator`; caller frees it. Failure short-circuits.
@@ -321,9 +323,21 @@ pub fn Effect(comptime Success: type, comptime Failure: type, comptime Env: type
             return .{ .left = self, .right = other };
         }
 
-        /// M4.4 — race: the first of self/other to complete wins; loser
+        /// M4.4 — raceFirst: the first of self/other to complete wins; loser
         /// interrupted. Both must produce the same Success type.
         pub fn raceFirst(self: Self, other: anytype) RaceFirstEffect(Self, @TypeOf(other), Failure, Env) {
+            return .{ .left = self, .right = other };
+        }
+
+        /// M4.3 — race: prefer success — first to SUCCEED wins; if the first
+        /// completer fails, the other's result is returned.
+        pub fn race(self: Self, other: anytype) RaceEffect(Self, @TypeOf(other), Failure, Env) {
+            return .{ .left = self, .right = other };
+        }
+
+        /// M4.6 — both: parallel pair, FAIL-FAST (either failure interrupts the
+        /// other). Distinct from zipPar (which waits for both regardless).
+        pub fn both(self: Self, other: anytype) BothEffect(Self, @TypeOf(other), Failure, Env) {
             return .{ .left = self, .right = other };
         }
     };

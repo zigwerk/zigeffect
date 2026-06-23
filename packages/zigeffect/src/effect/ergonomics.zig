@@ -703,6 +703,232 @@ pub fn RaceAllEffect(
     };
 }
 
+/// M4.3 — `race(left, right)`: prefer SUCCESS. The first branch to complete
+/// SUCCESSFULLY wins (the loser is interrupted); if the first completer FAILED,
+/// the result is the other branch's outcome (we wait for it). Both branches
+/// must produce the same Success type. Falls back to sequential when no racing
+/// executor (run left; on failure, run right).
+pub fn RaceEffect(
+    comptime Left: type,
+    comptime Right: type,
+    comptime Failure: type,
+    comptime Env: type,
+) type {
+    return struct {
+        const Self = @This();
+        const A = Left.SuccessType;
+        pub const SuccessType = A;
+        pub const FailureType = Failure;
+        pub const EnvType = Env;
+
+        left: Left,
+        right: Right,
+
+        const Slot = union(enum) { pending, value: A, err: Failure };
+
+        fn Job(comptime Eff: type) type {
+            return struct {
+                ctx_value: Context(Env),
+                eff: Eff,
+                slot: *Slot,
+                fn run(raw: ?*anyopaque) void {
+                    const self: *@This() = @ptrCast(@alignCast(raw.?));
+                    if (self.eff.run(&self.ctx_value)) |v| {
+                        self.slot.* = .{ .value = v };
+                    } else |e| {
+                        self.slot.* = .{ .err = e };
+                    }
+                }
+            };
+        }
+
+        pub fn run(self: Self, ctx: *Context(Env)) Failure!A {
+            const executor = ctx.executor orelse return self.sequential(ctx);
+            if (!executor.canRace()) return self.sequential(ctx);
+
+            const LJob = Job(Left);
+            const RJob = Job(Right);
+            var ls: Slot = .pending;
+            var rs: Slot = .pending;
+            var lj = LJob{ .ctx_value = ctx.*, .eff = self.left, .slot = &ls };
+            var rj = RJob{ .ctx_value = ctx.*, .eff = self.right, .slot = &rs };
+
+            const lh = executor.vtable.spawn(executor.context, .{ .context = &lj, .run = LJob.run }) orelse {
+                LJob.run(&lj);
+                return raceSlotResult(A, Failure, ls);
+            };
+            const rh = executor.vtable.spawn(executor.context, .{ .context = &rj, .run = RJob.run }) orelse {
+                executor.vtable.join(executor.context, lh);
+                executor.vtable.destroy(executor.context, lh);
+                return raceSlotResult(A, Failure, ls);
+            };
+
+            var handles = [_]*anyopaque{ lh, rh };
+            const first = executor.vtable.waitAny.?(executor.context, &handles);
+            const first_slot = if (first == 0) ls else rs;
+
+            switch (first_slot) {
+                .value => |v| {
+                    // First to complete SUCCEEDED — it wins, interrupt the other.
+                    _ = executor.tryInterrupt(handles[1 - first]);
+                    joinDestroyBoth(executor, lh, rh);
+                    return v;
+                },
+                .err => {
+                    // First completer FAILED — the result is the other branch.
+                    executor.vtable.join(executor.context, handles[1 - first]); // wait for it
+                    const other_slot = if (first == 0) rs else ls;
+                    joinDestroyBoth(executor, lh, rh);
+                    return raceSlotResult(A, Failure, other_slot);
+                },
+                .pending => unreachable,
+            }
+        }
+
+        fn sequential(self: Self, ctx: *Context(Env)) Failure!A {
+            return self.left.run(ctx) catch return self.right.run(ctx);
+        }
+
+        pub fn exit(self: Self, ctx: *Context(Env)) Exit(A, Failure) {
+            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            return .{ .success = value };
+        }
+        pub fn map(self: Self, comptime Next: type, mapper: *const fn (A) Next) effect_mod.MapEffect(Self, Next, Failure, Env) {
+            return .{ .parent = self, .mapper = mapper };
+        }
+        pub fn flatMap(self: Self, comptime Next: type, binder: *const fn (A, *Context(Env)) Failure!Next) effect_mod.FlatMapEffect(Self, Next, Failure, Env) {
+            return .{ .parent = self, .binder = binder };
+        }
+    };
+}
+
+/// M4.6 — `both(left, right)`: parallel pair, FAIL-FAST. If either branch fails,
+/// the other is interrupted and the failure returned; if both succeed, returns
+/// the `ZipPair`. Distinct from `zipPar` (which waits for both regardless). Each
+/// side may have its own Success type. Falls back to sequential `zip` semantics
+/// when no racing executor.
+pub fn BothEffect(
+    comptime Left: type,
+    comptime Right: type,
+    comptime Failure: type,
+    comptime Env: type,
+) type {
+    return struct {
+        const Self = @This();
+        pub const SuccessType = ZipPair(Left.SuccessType, Right.SuccessType);
+        pub const FailureType = Failure;
+        pub const EnvType = Env;
+
+        left: Left,
+        right: Right,
+
+        const LeftSlot = union(enum) { pending, value: Left.SuccessType, err: Failure };
+        const RightSlot = union(enum) { pending, value: Right.SuccessType, err: Failure };
+        const LeftJob = struct {
+            ctx_value: Context(Env),
+            eff: Left,
+            slot: *LeftSlot,
+            fn run(raw: ?*anyopaque) void {
+                const self: *@This() = @ptrCast(@alignCast(raw.?));
+                if (self.eff.run(&self.ctx_value)) |v| {
+                    self.slot.* = .{ .value = v };
+                } else |e| {
+                    self.slot.* = .{ .err = e };
+                }
+            }
+        };
+        const RightJob = struct {
+            ctx_value: Context(Env),
+            eff: Right,
+            slot: *RightSlot,
+            fn run(raw: ?*anyopaque) void {
+                const self: *@This() = @ptrCast(@alignCast(raw.?));
+                if (self.eff.run(&self.ctx_value)) |v| {
+                    self.slot.* = .{ .value = v };
+                } else |e| {
+                    self.slot.* = .{ .err = e };
+                }
+            }
+        };
+
+        pub fn run(self: Self, ctx: *Context(Env)) Failure!SuccessType {
+            const executor = ctx.executor orelse return self.sequential(ctx);
+            if (!executor.canRace()) return self.sequential(ctx);
+
+            var ls: LeftSlot = .pending;
+            var rs: RightSlot = .pending;
+            var lj = LeftJob{ .ctx_value = ctx.*, .eff = self.left, .slot = &ls };
+            var rj = RightJob{ .ctx_value = ctx.*, .eff = self.right, .slot = &rs };
+
+            const lh = executor.vtable.spawn(executor.context, .{ .context = &lj, .run = LeftJob.run }) orelse {
+                LeftJob.run(&lj);
+                RightJob.run(&rj);
+                return assemble(ls, rs);
+            };
+            const rh = executor.vtable.spawn(executor.context, .{ .context = &rj, .run = RightJob.run }) orelse {
+                executor.vtable.join(executor.context, lh);
+                executor.vtable.destroy(executor.context, lh);
+                RightJob.run(&rj);
+                return assemble(ls, rs);
+            };
+
+            var handles = [_]*anyopaque{ lh, rh };
+            const first = executor.vtable.waitAny.?(executor.context, &handles);
+            const first_failed = if (first == 0) (ls == .err) else (rs == .err);
+
+            if (first_failed) {
+                // Fail-fast: interrupt the other branch.
+                _ = executor.tryInterrupt(handles[1 - first]);
+            } else {
+                // First succeeded — wait for the other (it decides the outcome).
+                executor.vtable.join(executor.context, handles[1 - first]);
+            }
+            joinDestroyBoth(executor, lh, rh);
+            return assemble(ls, rs);
+        }
+
+        fn assemble(ls: LeftSlot, rs: RightSlot) Failure!SuccessType {
+            // Any error wins (fail-fast). Check both sides regardless of order,
+            // so the failing side's error is returned even when the other was
+            // interrupted before completing (its slot stays .pending).
+            switch (ls) {
+                .err => |e| return e,
+                else => {},
+            }
+            switch (rs) {
+                .err => |e| return e,
+                else => {},
+            }
+            // No errors → both succeeded (the join guarantees the other is set).
+            return .{ .left = ls.value, .right = rs.value };
+        }
+
+        fn sequential(self: Self, ctx: *Context(Env)) Failure!SuccessType {
+            const a = try self.left.run(ctx);
+            const b = try self.right.run(ctx);
+            return .{ .left = a, .right = b };
+        }
+
+        pub fn exit(self: Self, ctx: *Context(Env)) Exit(SuccessType, Failure) {
+            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            return .{ .success = value };
+        }
+        pub fn map(self: Self, comptime Next: type, mapper: *const fn (SuccessType) Next) effect_mod.MapEffect(Self, Next, Failure, Env) {
+            return .{ .parent = self, .mapper = mapper };
+        }
+        pub fn flatMap(self: Self, comptime Next: type, binder: *const fn (SuccessType, *Context(Env)) Failure!Next) effect_mod.FlatMapEffect(Self, Next, Failure, Env) {
+            return .{ .parent = self, .binder = binder };
+        }
+    };
+}
+
+fn joinDestroyBoth(executor: anytype, lh: *anyopaque, rh: *anyopaque) void {
+    executor.vtable.join(executor.context, lh);
+    executor.vtable.destroy(executor.context, lh);
+    executor.vtable.join(executor.context, rh);
+    executor.vtable.destroy(executor.context, rh);
+}
+
 /// Sequential traversal — apply `body(item, ctx)` to each input item,
 /// collecting the per-item results into an allocated slice. Failure short-
 /// circuits; the partial result slice is freed before the error returns.
