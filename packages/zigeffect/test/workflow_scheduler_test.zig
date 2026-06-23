@@ -145,6 +145,68 @@ test "workflow scheduler fires due timers from registered watches" {
     try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[4].kind);
 }
 
+test "pumpAsyncUntilIdle drives async timers to completion on a virtual-clock backend" {
+    const allocator = std.testing.allocator;
+    var clock = fx.FakeClock.fake(1_000);
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "pump-timer-workflow",
+        .status = "running",
+        .idempotency_key = "pump-timer",
+    } });
+    {
+        var context = try fx.workflow.WorkflowContext.init(allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+            .clock = &clock,
+        });
+        defer context.deinit();
+        switch (try context.sleep("wake", 250)) {
+            .suspended => {},
+            else => return error.ExpectedTimerSuspension,
+        }
+    }
+
+    var backend_state = fx.LocalAsyncBackendState.init(allocator, .{});
+    defer backend_state.deinit();
+    var scheduler = fx.workflow.WorkflowScheduler.initWithAsyncBackend(allocator, journal, &clock, backend_state.backend());
+    defer scheduler.deinit();
+    try scheduler.registerTimerWatch(.{ .workflow_id = 7, .execution_id = 8 });
+    // The virtual-clock backend is NOT real_clock — the pump must not busy-spin.
+    try std.testing.expect(!backend_state.backend().capabilities.real_clock);
+
+    const budget = fx.workflow.WorkflowSchedulerBudget{
+        .max_iterations = 8,
+        .max_workflow_polls = 0,
+        .max_timers = 4,
+        .max_queue_retries = 0,
+        .max_queue_claims = 0,
+    };
+
+    // Before the deadline: the pump registers the timer, finds it not due, and
+    // TERMINATES (it must not loop forever waiting on a clock it cannot advance).
+    const early = try scheduler.pumpAsyncUntilIdle(budget, 0);
+    try std.testing.expectEqual(@as(usize, 0), early.timers_fired);
+
+    // Advance virtual time past the deadline; one pump fires it and goes idle.
+    clock.sleep(250);
+    const due = try scheduler.pumpAsyncUntilIdle(budget, 0);
+    try std.testing.expectEqual(@as(usize, 1), due.timers_fired);
+    try std.testing.expect(!due.budget_exhausted); // reached idle, not the cap
+
+    var events = try journal.readAll(allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.timer_fired, events.events[3].kind);
+    try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[4].kind);
+}
+
 const SchedulerQueuePayload = struct {
     account_id: u64,
 };

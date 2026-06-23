@@ -144,6 +144,7 @@ pub const runtime = struct {
     pub const deterministicBackend = backend.deterministicBackend;
     pub const durableLocalBackend = backend.durableLocalBackend;
     pub const asyncLocalBackend = backend.asyncLocalBackend;
+    pub const asyncRealBackend = backend.asyncRealBackend;
     pub const clusteredBackend = backend.clusteredBackend;
     pub const AsyncBackendError = async_backend.AsyncBackendError;
     pub const AsyncWaitKind = async_backend.AsyncWaitKind;

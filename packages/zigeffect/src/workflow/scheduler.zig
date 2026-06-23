@@ -220,6 +220,10 @@ pub const WorkflowScheduler = struct {
     queue_cursor: usize = 0,
     shutdown_requested: bool = false,
     async_backend: ?AsyncBackend = null,
+    // Timer ids already registered with the async backend and not yet resolved.
+    // Prevents re-registering (and, on a real-clock backend, re-spawning a timer
+    // coroutine for) the same journal timer on every async tick.
+    registered_timer_ids: std.ArrayList(u64) = .empty,
 
     pub fn init(allocator: Allocator, journal_store: JournalStore, clock: *Clock) WorkflowScheduler {
         return .{
@@ -250,6 +254,7 @@ pub const WorkflowScheduler = struct {
         self.queue_workers.deinit(self.allocator);
         self.timer_watches.deinit(self.allocator);
         self.workflow_workers.deinit(self.allocator);
+        self.registered_timer_ids.deinit(self.allocator);
     }
 
     pub fn registerWorkflowWorker(self: *WorkflowScheduler, worker: RegisteredWorkflowWorker) Allocator.Error!void {
@@ -301,6 +306,74 @@ pub const WorkflowScheduler = struct {
         try self.processQueueClaimsWithBackend(budget.max_queue_claims, &result, backend);
         try self.pollWorkflowWorkers(budget.max_workflow_polls, &result);
         return result;
+    }
+
+    /// Drive `tickAsync` until idle, reconciling the backend's clock model.
+    ///
+    /// On a virtual-clock backend (`real_clock == false`) due timers fire inside
+    /// `tickAsync` (via `advanceTime`), so this behaves like `drain`: loop while a
+    /// tick makes progress; the caller advances virtual time between pumps.
+    ///
+    /// On a real-clock backend (zio) timers fire on the OS clock via the event
+    /// loop, so a tick that registered a timer sees no wake yet. When timers are
+    /// still pending in the backend this YIELDS the event loop via
+    /// `blockingSleep(quantum_ms)` — letting the real timer coroutine run — then
+    /// re-ticks to consume the wake. Bounded by `budget.max_iterations`.
+    pub fn pumpAsyncUntilIdle(
+        self: *WorkflowScheduler,
+        budget: WorkflowSchedulerBudget,
+        quantum_ms: u64,
+    ) anyerror!WorkflowSchedulerTickResult {
+        const backend = self.async_backend orelse return self.drain(budget);
+
+        var merged = WorkflowSchedulerTickResult{};
+        if (budget.max_iterations == 0) {
+            merged.budget_exhausted = true;
+            merged.shutdown_requested = self.shutdown_requested;
+            return merged;
+        }
+
+        var iteration: usize = 0;
+        while (iteration < budget.max_iterations) : (iteration += 1) {
+            const tick_result = try self.tickAsync(budget);
+            const made_progress = tick_result.progressed();
+            merged.merge(tick_result);
+            if (tick_result.shutdown_requested) return merged;
+
+            const pending = backend.snapshot().pending_count;
+            if (pending == 0 and !made_progress) return merged; // fully idle
+
+            if (pending > 0 and backend.capabilities.real_clock) {
+                // Real timers will fire on their own — yield the event loop so the
+                // pending timer coroutine(s) can run, then re-tick to consume.
+                backend.blockingSleep(quantum_ms) catch {};
+                continue;
+            }
+            if (!made_progress) {
+                // Virtual clock with pending timers not yet due: nothing changes
+                // until the caller advances the clock. Stop pumping.
+                return merged;
+            }
+        }
+
+        if (merged.progressed()) merged.budget_exhausted = true;
+        return merged;
+    }
+
+    fn isTimerRegistered(self: *const WorkflowScheduler, timer_id: u64) bool {
+        for (self.registered_timer_ids.items) |id| {
+            if (id == timer_id) return true;
+        }
+        return false;
+    }
+
+    fn unregisterTimer(self: *WorkflowScheduler, timer_id: u64) void {
+        for (self.registered_timer_ids.items, 0..) |id, index| {
+            if (id == timer_id) {
+                _ = self.registered_timer_ids.swapRemove(index);
+                return;
+            }
+        }
     }
 
     pub fn drain(self: *WorkflowScheduler, budget: WorkflowSchedulerBudget) anyerror!WorkflowSchedulerTickResult {
@@ -374,6 +447,11 @@ pub const WorkflowScheduler = struct {
             defer pending.deinit();
 
             for (pending.timers) |timer| {
+                // Register each journal timer with the backend at most once. On a
+                // real-clock backend `scheduleTimer` spawns a live timer; without
+                // this guard every tick would spawn a duplicate for the same
+                // still-pending timer. Cleared when the wake is consumed.
+                if (self.isTimerRegistered(timer.timer_id)) continue;
                 try backend.scheduleTimer(.{
                     .suspension = .{ .kind = .timer, .id = timer.timer_id, .label = timer.name },
                     .due_time_ms = timer.fire_at_ms,
@@ -381,6 +459,7 @@ pub const WorkflowScheduler = struct {
                     .workflow_id = timer.workflow_id,
                     .execution_id = timer.execution_id,
                 });
+                try self.registered_timer_ids.append(self.allocator, timer.timer_id);
             }
         }
     }
@@ -407,6 +486,9 @@ pub const WorkflowScheduler = struct {
     ) anyerror!void {
         switch (wake.suspension.kind) {
             .timer => {
+                // The timer resolved (fired or was cancelled): allow re-registration
+                // if the journal still holds a pending timer with this id.
+                if (wake.status != .pending) self.unregisterTimer(wake.suspension.id);
                 const workflow_id = wake.workflow_id orelse return;
                 const execution_id = wake.execution_id orelse return;
                 var durable_clock = DurableClock.init(self.allocator, self.journal_store, workflow_id, execution_id);

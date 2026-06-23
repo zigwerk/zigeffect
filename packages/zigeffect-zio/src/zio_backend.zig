@@ -590,7 +590,10 @@ pub const ZioAsyncBackendState = struct {
     pub fn backend(self: *ZioAsyncBackendState) AsyncBackend {
         return .{
             .context = self,
-            .capabilities = fx.runtime.asyncLocalBackend(),
+            // Real-clock backend: timers fire on the OS clock via the zio event
+            // loop, so a scheduler driving it must yield (blockingSleep) for
+            // pending timers to fire. See WorkflowScheduler.pumpAsyncUntilIdle.
+            .capabilities = fx.runtime.asyncRealBackend(),
             .vtable = &zio_vtable,
         };
     }
@@ -660,9 +663,15 @@ fn scheduleTimer(context: ?*anyopaque, request: BackendTimerRequest) AsyncBacken
         .workflow_id = request.workflow_id,
         .execution_id = request.execution_id,
     });
+    // `due_time_ms` is an ABSOLUTE deadline; the timer must sleep the RELATIVE
+    // remaining delay. `now_ms` is the caller's clock at scheduling time (the
+    // scheduler passes clock.nowMs(); ad-hoc callers leave it 0, making
+    // due_time_ms itself the delay). Saturating subtraction clamps a
+    // past-due deadline to fire immediately.
+    const delay_ms = request.due_time_ms -| request.now_ms;
     // Best-effort: needs a live zio runtime on this thread. If spawn fails the
     // registration remains and an explicit `wake` can still resolve it.
-    state.timer_group.spawn(zioTimerFire, .{ state, request.suspension, request.due_time_ms }) catch {};
+    state.timer_group.spawn(zioTimerFire, .{ state, request.suspension, delay_ms }) catch {};
 }
 
 /// Resolve the suspension under `request.target_id` as interrupted.
@@ -1488,4 +1497,75 @@ test "zio AsyncBackend: schedule_timer fires a REAL zio timer that poll_wake dra
         }
     }
     try std.testing.expect(fired);
+}
+
+// ─── The workflow scheduler running ON the zio backend ───────────────────────
+// The push/pull reconciliation end-to-end: a durable workflow timer scheduled on
+// a REAL clock, drained by WorkflowScheduler.pumpAsyncUntilIdle, which yields the
+// zio event loop (blockingSleep) so the real timer coroutine can fire — then
+// consumes the wake and advances the workflow. (Deterministic-backend schedulers
+// fire timers synchronously inside advanceTime; this proves the real-clock path.)
+test "WorkflowScheduler runs on the zio backend: a real timer fires and resumes the workflow" {
+    const allocator = std.testing.allocator;
+    var rt = try zio.Runtime.init(allocator, .{});
+    defer rt.deinit();
+    var backend_state = ZioAsyncBackendState.init(allocator);
+    defer backend_state.deinit(); // runs before rt.deinit (defer LIFO)
+
+    var clock = fx.Clock.system(); // REAL time — timers fire on the OS clock
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "zio-timer-workflow",
+        .status = "running",
+        .idempotency_key = "zio-sched-timer",
+    } });
+    {
+        var context = try fx.workflow.WorkflowContext.init(allocator, journal, .{
+            .workflow_id = 7,
+            .execution_id = 8,
+            .clock = &clock,
+        });
+        defer context.deinit();
+        // A short real-time timer (~20ms out).
+        switch (try context.sleep("wake", 20)) {
+            .suspended => {},
+            else => return error.ExpectedTimerSuspension,
+        }
+    }
+
+    var scheduler = fx.workflow.WorkflowScheduler.initWithAsyncBackend(allocator, journal, &clock, backend_state.backend());
+    defer scheduler.deinit();
+    try scheduler.registerTimerWatch(.{ .workflow_id = 7, .execution_id = 8 });
+    try std.testing.expect(backend_state.backend().capabilities.real_clock);
+
+    // Pump with a 2ms event-loop quantum; bounded iterations cover the ~20ms wait.
+    const result = try scheduler.pumpAsyncUntilIdle(.{
+        .max_iterations = 4000,
+        .max_workflow_polls = 0,
+        .max_timers = 4,
+        .max_queue_retries = 0,
+        .max_queue_claims = 0,
+    }, 2);
+
+    try std.testing.expect(result.timers_fired >= 1);
+
+    // The journal records the timer firing and the workflow resuming — proof the
+    // real coroutine fired, the pump consumed the wake, and the workflow advanced.
+    var events = try journal.readAll(allocator);
+    defer events.deinit();
+    var saw_timer_fired = false;
+    var saw_resumed = false;
+    for (events.events) |event| {
+        if (event.kind == .timer_fired) saw_timer_fired = true;
+        if (event.kind == .workflow_resumed) saw_resumed = true;
+    }
+    try std.testing.expect(saw_timer_fired);
+    try std.testing.expect(saw_resumed);
 }

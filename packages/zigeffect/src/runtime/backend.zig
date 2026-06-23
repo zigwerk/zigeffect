@@ -17,6 +17,12 @@ pub const BackendCapabilities = struct {
     can_parallel: bool,
     can_persist: bool,
     can_distribute: bool,
+    /// True when timers fire on a REAL clock via the backend's own event loop
+    /// (e.g. zio coroutine timers), so a driver must yield to that loop to let
+    /// them fire. False for a virtual-clock backend whose `advanceTime` fires
+    /// due timers synchronously. Lets a scheduler reconcile the PUSH (real) vs
+    /// PULL (virtual) timer models without inspecting the concrete backend.
+    real_clock: bool = false,
 };
 
 pub fn deterministicBackend() BackendCapabilities {
@@ -65,6 +71,15 @@ pub fn asyncLocalBackend() BackendCapabilities {
         .can_persist = false,
         .can_distribute = false,
     };
+}
+
+/// Same surface as `asyncLocalBackend`, but its timers fire on a REAL clock via
+/// the backend's own event loop (the zio backend). A scheduler driving this must
+/// yield to the event loop (`blockingSleep`) for pending timers to fire.
+pub fn asyncRealBackend() BackendCapabilities {
+    var caps = asyncLocalBackend();
+    caps.real_clock = true;
+    return caps;
 }
 
 pub fn clusteredBackend() BackendCapabilities {
