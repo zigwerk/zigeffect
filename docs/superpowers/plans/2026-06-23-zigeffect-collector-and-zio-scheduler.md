@@ -81,3 +81,35 @@ NDJSON. Browser rendering of the live stream remains a manual check.
 Piece 2 first (contained, core+zio), then Piece 1 (Zig tap + Bun collector).
 Gates: core `test-raw`+`examples`+`release-gate`+`tool-hygiene`; `zig build test`
 (zio); `bun test` (collector) + workbench typecheck/test. Adversarial review last.
+
+---
+
+## Delivery log (2026-06-23)
+
+Both pieces delivered, then hardened against an adversarial review.
+
+- **Piece 2 — scheduler on zio** (`83146b35`): `real_clock` capability +
+  `asyncRealBackend()`; zio `scheduleTimer` relative-delay; scheduler timer
+  dedup; `pumpAsyncUntilIdle` (yields the event loop on real-clock backends).
+  Deterministic + zio end-to-end timer tests.
+- **Piece 1 — live-attach collector** (`db9bd483`): Zig tap + Bun WebSocket
+  collector (`createCollector`) mapping engine NDJSON → `LiveFrame`, one per
+  message; real WebSocket fan-out tested.
+- **Hardening** (`ed452a13`): a 4-dimension adversarial review (each finding
+  independently verified) found two real use-after-frees and several
+  liveness/validation defects. Fixed: (UAF) zio backend now OWNS suspension
+  labels in an arena (the scheduler frees the borrowed `timer.name` before the
+  timer fires); (UAF) replaced the borrowed-slice `drainHubToNdjson` with
+  `CausalNdjsonTap`, which serializes each event under its `record` call into an
+  owned buffer — proven UAF-safe with a bounded(1) store that trims every record;
+  (liveness) a failed timer-coroutine spawn now resolves immediately instead of
+  orphaning the suspension (pump always reaches idle); (thrash) the timer
+  registration is released only when the journal timer actually fires, not on any
+  wake; (validation) collector broadcast skips non-OPEN sockets, and frame
+  mapping requires safe non-negative integer ids.
+
+**Residual after this:** none that is fake-able today. The remaining honest
+follow-ups are operational, not code gaps — wiring the collector binary into a
+real engine run + manual browser verification of the live stream, and (if ever
+needed) running the *full* cluster transport on zio (the workflow scheduler path
+is done; cluster transport uses the same vtable but was out of scope here).
