@@ -54,6 +54,11 @@ export type LiveCommandFrame = {
   resource_id?: number | null;
 };
 
+export type LiveCommandInboxResponse = {
+  commands: LiveCommandFrame[];
+  next_after: number;
+};
+
 export type LiveStreamMeta = {
   schema?: string;
   schemaVersion?: number | string;
@@ -139,6 +144,28 @@ export function parseCommandMessage(data: string): LiveCommandFrame | null {
   }
 }
 
+function isSafeCursor(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+export function isLiveCommandInboxResponse(value: unknown): value is LiveCommandInboxResponse {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (!isSafeCursor(record.next_after) || !Array.isArray(record.commands)) {
+    return false;
+  }
+  let maxSequence = 0;
+  for (const command of record.commands) {
+    if (!isLiveCommandFrame(command)) {
+      return false;
+    }
+    maxSequence = Math.max(maxSequence, command.sequence);
+  }
+  return record.next_after >= maxSequence;
+}
+
 export type LiveCommandFetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
 export async function sendLiveCommand(
@@ -157,6 +184,27 @@ export async function sendLiveCommand(
   const parsed = (await response.json()) as unknown;
   if (!isLiveCommandFrame(parsed)) {
     throw new Error("live command endpoint returned an invalid command frame");
+  }
+  return parsed;
+}
+
+export async function fetchLiveCommands(
+  url: string,
+  afterSequence: number,
+  fetcher: LiveCommandFetcher = fetch,
+): Promise<LiveCommandInboxResponse> {
+  if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) {
+    throw new Error("live command inbox cursor must be a non-negative safe integer");
+  }
+  const endpoint = new URL(url);
+  endpoint.searchParams.set("after", String(afterSequence));
+  const response = await fetcher(endpoint.toString());
+  if (!response.ok) {
+    throw new Error(`live command inbox rejected: ${response.status}`);
+  }
+  const parsed = (await response.json()) as unknown;
+  if (!isLiveCommandInboxResponse(parsed)) {
+    throw new Error("live command inbox returned an invalid response");
   }
   return parsed;
 }

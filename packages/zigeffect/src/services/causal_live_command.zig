@@ -46,6 +46,16 @@ pub const CausalLiveCommandTapResult = struct {
     last_sequence: ?u64 = null,
 };
 
+pub const CausalLiveCommandPollBatch = struct {
+    next_after: u64,
+    envelopes: []const CausalLiveCommandEnvelope,
+};
+
+pub const CausalLiveCommandPollResult = struct {
+    next_after: u64,
+    tap: CausalLiveCommandTapResult,
+};
+
 pub fn applyCausalLiveCommand(
     store: *CausalStore,
     policy: AgentInterventionPolicy,
@@ -117,6 +127,19 @@ pub fn runCausalLiveCommandTapBatch(
         }
     }
     return output;
+}
+
+pub fn runCausalLiveCommandPolledBatch(
+    store: *CausalStore,
+    policy: AgentInterventionPolicy,
+    batch: CausalLiveCommandPollBatch,
+) std.mem.Allocator.Error!CausalLiveCommandPollResult {
+    const tap = try runCausalLiveCommandTapBatch(store, policy, batch.envelopes);
+    const cursor = if (tap.last_sequence) |last| @max(batch.next_after, last) else batch.next_after;
+    return .{
+        .next_after = cursor,
+        .tap = tap,
+    };
 }
 
 fn liveCommandKind(command_kind: []const u8) ?AgentInterventionKind {

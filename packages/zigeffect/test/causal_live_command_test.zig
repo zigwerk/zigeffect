@@ -101,3 +101,38 @@ test "live command tap batch processes approved and rejected commands" {
     try std.testing.expectEqual(fx.CausalEventKind.fiber_interrupted, snapshot.events[3].kind);
     try std.testing.expectEqual(fx.CausalEventKind.alert_emitted, snapshot.events[4].kind);
 }
+
+test "live command polled batch carries inbox cursor while applying commands" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    const policy = (fx.AgentInterventionPolicy{})
+        .withApplyEnabled(true)
+        .withKindPolicy(.fire_timer, .auto_approve);
+
+    const result = try fx.runCausalLiveCommandPolledBatch(&store, policy, .{
+        .next_after = 12,
+        .envelopes = &.{
+            .{
+                .sequence = 12,
+                .request = .{
+                    .command_id = "cmd-12",
+                    .command_kind = "fire_timer",
+                    .actor = "agent",
+                    .run_id = 1,
+                    .schedule_id = 99,
+                    .reason = "wake timer",
+                },
+            },
+        },
+    });
+
+    try std.testing.expectEqual(@as(u64, 12), result.next_after);
+    try std.testing.expectEqual(@as(usize, 1), result.tap.processed);
+    try std.testing.expectEqual(@as(usize, 1), result.tap.applied);
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 4), snapshot.events.len);
+    try std.testing.expectEqual(fx.CausalEventKind.timer_fired, snapshot.events[3].kind);
+}

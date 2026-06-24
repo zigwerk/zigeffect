@@ -10,6 +10,8 @@ pub const CausalOpsRetentionPolicy = causal_ops.CausalOpsRetentionPolicy;
 
 pub const causal_ops_runbook_schema = "zigeffect.causal.ops-runbook.v1";
 pub const causal_ops_runbook_schema_version: u32 = 1;
+pub const causal_ops_alert_delivery_schema = "zigeffect.causal.ops-alert-delivery.v1";
+pub const causal_ops_alert_delivery_schema_version: u32 = 1;
 
 pub const CausalOpsAlertSink = struct {
     state: ?*anyopaque = null,
@@ -26,6 +28,13 @@ pub const CausalOpsRunbookOptions = struct {
     retention: CausalOpsRetentionPolicy,
     retained_events: usize = 0,
     alert_count: usize = 0,
+};
+
+pub const CausalOpsAlertDeliveryOptions = struct {
+    deployment: CausalDeploymentMetadata,
+    delivery_kind: []const u8,
+    endpoint_id: []const u8,
+    event: CausalEvent,
 };
 
 pub fn emitCausalOpsAlerts(
@@ -70,6 +79,44 @@ pub fn formatCausalOpsRunbookJson(
         ",\"trim_required\":{s}",
         .{if (options.retention.max_events > 0 and options.retained_events > options.retention.max_events) "true" else "false"},
     );
+    try output.appendSlice(allocator, "}}");
+    return output.toOwnedSlice(allocator);
+}
+
+pub fn formatCausalOpsAlertDeliveryJson(
+    allocator: Allocator,
+    options: CausalOpsAlertDeliveryOptions,
+) Allocator.Error![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\"schema\":");
+    try appendJsonString(&output, allocator, causal_ops_alert_delivery_schema);
+    try output.print(allocator, ",\"schema_version\":{d}", .{causal_ops_alert_delivery_schema_version});
+    try output.appendSlice(allocator, ",\"delivery\":{\"delivery_kind\":");
+    try appendJsonString(&output, allocator, options.delivery_kind);
+    try output.appendSlice(allocator, ",\"endpoint_id\":");
+    try appendJsonString(&output, allocator, options.endpoint_id);
+    try output.appendSlice(allocator, "},\"deployment\":{\"service\":");
+    try appendJsonString(&output, allocator, options.deployment.service);
+    try output.appendSlice(allocator, ",\"environment\":");
+    try appendJsonString(&output, allocator, options.deployment.environment);
+    try output.appendSlice(allocator, ",\"region\":");
+    try appendJsonString(&output, allocator, options.deployment.region);
+    try output.appendSlice(allocator, ",\"cluster_id\":");
+    try appendRedactedJsonString(&output, allocator, options.deployment.cluster_id);
+    try output.appendSlice(allocator, "},\"alert_event\":{\"event_id\":");
+    try output.print(allocator, "{d}", .{options.event.id});
+    try output.appendSlice(allocator, ",\"kind\":");
+    try appendJsonString(&output, allocator, @tagName(options.event.kind));
+    try output.appendSlice(allocator, ",\"status\":");
+    try appendRedactedJsonString(&output, allocator, options.event.status);
+    try output.appendSlice(allocator, ",\"label\":");
+    try appendRedactedJsonString(&output, allocator, options.event.label);
+    try output.appendSlice(allocator, ",\"type_name\":");
+    try appendRedactedJsonString(&output, allocator, options.event.type_name);
+    try output.appendSlice(allocator, ",\"redacted_detail\":");
+    try appendRedactedJsonString(&output, allocator, options.event.redacted_detail);
     try output.appendSlice(allocator, "}}");
     return output.toOwnedSlice(allocator);
 }

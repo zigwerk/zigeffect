@@ -4,8 +4,10 @@ import { deriveWorkbenchModel } from "./causalArtifact";
 import {
   LiveCausalBuffer,
   createLiveArtifact,
+  fetchLiveCommands,
   frameToEventRecord,
   framesFromStreamDocument,
+  isLiveCommandInboxResponse,
   isLiveFrame,
   isLiveCommandFrame,
   liveUrlFromSearch,
@@ -16,6 +18,7 @@ import {
   webSocketLiveSource,
   type LiveCommandRequest,
   type LiveCommandFrame,
+  type LiveCommandInboxResponse,
   type LiveFrame,
   type WebSocketLike,
 } from "./liveAttach";
@@ -102,6 +105,43 @@ test("sendLiveCommand posts a bounded intervention request and returns command f
   expect(sent.body).toEqual(request);
   expect(frame.command_id).toBe("cmd-7");
   expect(frame.command_kind).toBe("interrupt_fiber");
+});
+
+test("fetchLiveCommands polls the command inbox by cursor and validates frames", async () => {
+  const response: LiveCommandInboxResponse = {
+    next_after: 8,
+    commands: [
+      {
+        sequence: 8,
+        command_id: "cmd-8",
+        command_kind: "fire_timer",
+        status: "received",
+        run_id: 1,
+        schedule_id: 7,
+      },
+    ],
+  };
+  const seen: string[] = [];
+  const fetcher = async (url: string) => {
+    seen.push(url);
+    return new Response(JSON.stringify(response), { headers: { "content-type": "application/json" } });
+  };
+
+  expect(isLiveCommandInboxResponse(response)).toBe(true);
+  const inbox = await fetchLiveCommands("http://127.0.0.1:4500/commands", 7, fetcher);
+  expect(seen[0]).toBe("http://127.0.0.1:4500/commands?after=7");
+  expect(inbox.next_after).toBe(8);
+  expect(inbox.commands[0]?.command_kind).toBe("fire_timer");
+});
+
+test("fetchLiveCommands rejects invalid command inbox payloads", async () => {
+  const fetcher = async () =>
+    new Response(JSON.stringify({ next_after: 9, commands: [{ sequence: 9, command_id: "cmd-9" }] }));
+
+  expect(isLiveCommandInboxResponse({ next_after: 9, commands: [{ sequence: 9, command_id: "cmd-9" }] })).toBe(false);
+  await expect(fetchLiveCommands("http://127.0.0.1:4500/commands", 8, fetcher)).rejects.toThrow(
+    "live command inbox returned an invalid response",
+  );
 });
 
 test("LiveCausalBuffer accumulates frames in causal (sequence) order", () => {

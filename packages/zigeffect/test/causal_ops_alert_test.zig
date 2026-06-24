@@ -59,3 +59,32 @@ test "ops runbook json summarizes deployment retention and redacts secrets" {
     try std.testing.expect(std.mem.indexOf(u8, json, "hunter2") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, fx.causal_redaction_marker) != null);
 }
+
+test "ops alert delivery json redacts alert evidence for external adapters" {
+    const json = try fx.formatCausalOpsAlertDeliveryJson(std.testing.allocator, .{
+        .deployment = .{
+            .service = "zigeffect",
+            .environment = "prod",
+            .region = "eu-west",
+            .cluster_id = "cluster-a",
+        },
+        .delivery_kind = "webhook",
+        .endpoint_id = "pager-duty-primary",
+        .event = .{
+            .id = 42,
+            .kind = .alert_emitted,
+            .status = "emitted",
+            .label = "retention password=sentinel-secret threshold",
+            .type_name = "retention.threshold",
+            .redacted_detail = "token=sentinel-secret",
+        },
+    });
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.ops-alert-delivery.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"delivery_kind\":\"webhook\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"endpoint_id\":\"pager-duty-primary\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"event_id\":42") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "sentinel-secret") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, fx.causal_redaction_marker) != null);
+}
