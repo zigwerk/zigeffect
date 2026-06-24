@@ -126,6 +126,48 @@ export type LiveEngineHost = {
   ) => Promise<LiveEngineCommandDaemonResult>;
 };
 
+export type LiveEngineHostSupervisorResult = {
+  runs: number;
+  restarts: number;
+  errors: number;
+  cycles: number;
+  polls: number;
+  commands: number;
+  next_after: number;
+  stopped: boolean;
+  processed: number;
+  applied: number;
+  rejected: number;
+  needs_human_review: number;
+  emitted_frames: number;
+};
+
+export type LiveEngineHostSupervisorLifecycleEvent =
+  | { kind: "started"; url: string; max_restarts: number; next_after: number }
+  | { kind: "daemon_error"; run: number; error: unknown; restarts: number; next_after: number }
+  | { kind: "restart"; run: number; restarts: number; next_after: number }
+  | { kind: "daemon_succeeded"; run: number; result: LiveEngineCommandDaemonResult }
+  | { kind: "stopped"; result: LiveEngineHostSupervisorResult };
+
+export type LiveEngineHostSupervisorOptions = {
+  daemonOptions?: LiveCommandDaemonOptions;
+  maxRestarts?: number;
+  restartDelay?: (event: Extract<LiveEngineHostSupervisorLifecycleEvent, { kind: "restart" }>) => void | Promise<void>;
+  onLifecycle?: (event: LiveEngineHostSupervisorLifecycleEvent) => void | Promise<void>;
+};
+
+export type LiveEngineNdjsonTapOptions = {
+  maxLinesPerPost?: number;
+};
+
+export type LiveEngineNdjsonTapResult = {
+  chunks: number;
+  lines: number;
+  posts: number;
+  ingested: number;
+  errors: number;
+};
+
 export type LiveCommandDaemonLifecycleEvent =
   | { kind: "started"; next_after: number }
   | ({ kind: "cycle"; cycle: number } & LiveCommandPollingResult)
@@ -487,6 +529,176 @@ export function createLiveEngineHost(bridge: LiveCommandEngineBridge): LiveEngin
     handleApplyRequest: (request) => serveLiveEngineCommandApplyRequest(request, bridge),
     runCommandDaemon: (url, options = {}, fetcher = fetch) => runLiveEngineCommandDaemon(url, bridge, options, fetcher),
   };
+}
+
+export async function runLiveEngineHostSupervisor(
+  host: LiveEngineHost,
+  url: string,
+  options: LiveEngineHostSupervisorOptions = {},
+  fetcher: LiveCommandFetcher = fetch,
+): Promise<LiveEngineHostSupervisorResult> {
+  const maxRestarts = options.maxRestarts ?? 0;
+  if (!Number.isSafeInteger(maxRestarts) || maxRestarts < 0) {
+    throw new Error("live engine host supervisor maxRestarts must be a non-negative safe integer");
+  }
+
+  const emitLifecycle = async (event: LiveEngineHostSupervisorLifecycleEvent) => {
+    if (options.onLifecycle) {
+      await options.onLifecycle(event);
+    }
+  };
+
+  let cursor = options.daemonOptions?.startAfter ?? 0;
+  let runs = 0;
+  let restarts = 0;
+  let errors = 0;
+  const aggregate = {
+    cycles: 0,
+    polls: 0,
+    commands: 0,
+    processed: 0,
+    applied: 0,
+    rejected: 0,
+    needs_human_review: 0,
+    emitted_frames: 0,
+  };
+
+  await emitLifecycle({ kind: "started", url, max_restarts: maxRestarts, next_after: cursor });
+
+  for (;;) {
+    runs += 1;
+    try {
+      const daemon = await host.runCommandDaemon(
+        url,
+        {
+          ...options.daemonOptions,
+          startAfter: cursor,
+        },
+        fetcher,
+      );
+      cursor = daemon.next_after;
+      aggregate.cycles += daemon.cycles;
+      aggregate.polls += daemon.polls;
+      aggregate.commands += daemon.commands;
+      aggregate.processed += daemon.processed;
+      aggregate.applied += daemon.applied;
+      aggregate.rejected += daemon.rejected;
+      aggregate.needs_human_review += daemon.needs_human_review;
+      aggregate.emitted_frames += daemon.emitted_frames;
+      await emitLifecycle({ kind: "daemon_succeeded", run: runs, result: daemon });
+      const result = {
+        runs,
+        restarts,
+        errors,
+        cycles: aggregate.cycles,
+        polls: aggregate.polls,
+        commands: aggregate.commands,
+        next_after: cursor,
+        stopped: daemon.stopped,
+        processed: aggregate.processed,
+        applied: aggregate.applied,
+        rejected: aggregate.rejected,
+        needs_human_review: aggregate.needs_human_review,
+        emitted_frames: aggregate.emitted_frames,
+      };
+      await emitLifecycle({ kind: "stopped", result });
+      return result;
+    } catch (error) {
+      errors += 1;
+      await emitLifecycle({ kind: "daemon_error", run: runs, error, restarts, next_after: cursor });
+      if (restarts >= maxRestarts) {
+        throw error;
+      }
+      restarts += 1;
+      const event = { kind: "restart" as const, run: runs, restarts, next_after: cursor };
+      await emitLifecycle(event);
+      if (options.restartDelay) {
+        await options.restartDelay(event);
+      }
+    }
+  }
+}
+
+function liveEngineIngestedCount(value: unknown): number {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("live engine NDJSON ingest returned an invalid response");
+  }
+  const record = value as Record<string, unknown>;
+  const ingested = record.ingested;
+  if (typeof ingested !== "number" || !Number.isSafeInteger(ingested) || ingested < 0) {
+    throw new Error("live engine NDJSON ingest returned an invalid response");
+  }
+  return ingested;
+}
+
+export async function runLiveEngineNdjsonTap(
+  source: ReadableStream<Uint8Array>,
+  ingestUrl: string,
+  options: LiveEngineNdjsonTapOptions = {},
+  fetcher: LiveCommandFetcher = fetch,
+): Promise<LiveEngineNdjsonTapResult> {
+  const maxLinesPerPost = options.maxLinesPerPost ?? 128;
+  if (!Number.isSafeInteger(maxLinesPerPost) || maxLinesPerPost <= 0) {
+    throw new Error("live engine NDJSON tap maxLinesPerPost must be a positive safe integer");
+  }
+
+  const result: LiveEngineNdjsonTapResult = {
+    chunks: 0,
+    lines: 0,
+    posts: 0,
+    ingested: 0,
+    errors: 0,
+  };
+  const decoder = new TextDecoder();
+  const reader = source.getReader();
+  const pending: string[] = [];
+  let buffer = "";
+
+  const postBatch = async (lines: string[]) => {
+    const body = lines.join("\n");
+    result.posts += 1;
+    const response = await fetcher(ingestUrl, {
+      method: "POST",
+      headers: { "content-type": "application/x-ndjson" },
+      body,
+    });
+    if (!response.ok) {
+      result.errors += 1;
+      throw new Error(`live engine NDJSON ingest rejected: ${response.status}`);
+    }
+    result.ingested += liveEngineIngestedCount(await response.json());
+  };
+
+  const flushPending = async (force = false) => {
+    while (pending.length > 0 && (force || pending.length >= maxLinesPerPost)) {
+      const count = force ? pending.length : maxLinesPerPost;
+      await postBatch(pending.splice(0, count));
+    }
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    result.chunks += 1;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line.trim().length === 0) continue;
+      pending.push(line);
+      result.lines += 1;
+    }
+    await flushPending(false);
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim().length > 0) {
+    pending.push(buffer);
+    result.lines += 1;
+    buffer = "";
+  }
+  await flushPending(true);
+  return result;
 }
 
 export function createHttpLiveEngineCommandBridge(options: HttpLiveEngineCommandBridgeOptions): LiveCommandEngineBridge {

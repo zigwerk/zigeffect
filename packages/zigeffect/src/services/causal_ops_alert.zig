@@ -96,6 +96,17 @@ pub const CausalOpsAlertProviderSecretResolver = struct {
     resolve: *const fn (?*anyopaque, secret_ref: []const u8) anyerror![]const u8,
 };
 
+pub const CausalOpsAlertProviderDeliveryPolicy = struct {
+    max_attempts: usize = 1,
+};
+
+pub const CausalOpsAlertProviderDeliveryReport = struct {
+    attempts: usize = 0,
+    delivered: bool = false,
+    failures: usize = 0,
+    last_error_name: []const u8 = "",
+};
+
 pub const CausalOpsAlertHttpSink = struct {
     state: ?*anyopaque = null,
     send: *const fn (?*anyopaque, CausalOpsAlertHttpRequest) anyerror!void,
@@ -281,6 +292,31 @@ pub fn deliverCausalOpsAlertProviderWithSecret(
     var request = try formatCausalOpsPagerDutyAlertRequestWithRoutingKey(allocator, options, routing_key);
     defer request.deinit();
     try sink.send(sink.state, request);
+}
+
+pub fn deliverCausalOpsAlertProviderWithSecretRetrying(
+    allocator: Allocator,
+    options: CausalOpsAlertProviderOptions,
+    resolver: CausalOpsAlertProviderSecretResolver,
+    sink: CausalOpsAlertHttpSink,
+    policy: CausalOpsAlertProviderDeliveryPolicy,
+) anyerror!CausalOpsAlertProviderDeliveryReport {
+    if (policy.max_attempts == 0) return error.InvalidCausalOpsAlertProviderDeliveryPolicy;
+
+    var report = CausalOpsAlertProviderDeliveryReport{};
+    while (report.attempts < policy.max_attempts) {
+        report.attempts += 1;
+        deliverCausalOpsAlertProviderWithSecret(allocator, options, resolver, sink) catch |err| {
+            report.failures += 1;
+            report.last_error_name = @errorName(err);
+            if (report.attempts >= policy.max_attempts) return err;
+            continue;
+        };
+        report.delivered = true;
+        return report;
+    }
+
+    return error.InvalidCausalOpsAlertProviderDeliveryPolicy;
 }
 
 fn formatCausalOpsSlackAlertBody(

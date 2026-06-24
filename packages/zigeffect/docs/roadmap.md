@@ -33,11 +33,11 @@ semantic fact comparison, not exact event-id graph isomorphism.
 | 6 | Causal dev loop (compare/advice/verdict) | **done** | `tools/causal_dev_loop`, `causal_compare`, `causal_advice`, `causal_verdict` |
 | 7 | Guarded remediation + agent interventions | **closed loop, gate-off by default** | `src/services/policy_engine.zig`, `src/services/agent_intervention.zig`, `tools/causal_*remediation*` |
 | 8 | App-facing causal trace | **done** | `src/services/causal_app_runtime.zig` |
-| 9 | Visual workbench (SolidJS / zig-webui) | **live-attach** (static + streaming via collector plus host-frame ingest, host apply adapter, and host runner bundle) | `workbench/`, `workbench/src/collector/` |
+| 9 | Visual workbench (SolidJS / zig-webui) | **live-attach** (static + streaming via collector plus host-frame ingest, host apply adapter, host runner bundle, supervised host loop, and NDJSON fact tap) | `workbench/`, `workbench/src/collector/` |
 | 10 | Export adapters (JSONL/DOT/OTel/OTLP/graph-history/NenDB) | **OTLP + collector live end-to-end** | `src/services/causal_*_backend.zig`, `causal_otlp_json.zig` |
-| 11 | Durable workflows + clustering | **scheduler runs on zio; loopback + remote socket wrappers cross the transport boundary; discovery JSON/file/HTTP snapshots refresh the local registry** | `src/workflow/*`, `src/cluster/*` |
+| 11 | Durable workflows + clustering | **scheduler runs on zio; loopback + remote socket wrappers cross the transport boundary; discovery JSON/file/HTTP snapshots and caller-owned HTTP fetchers refresh the local registry** | `src/workflow/*`, `src/cluster/*` |
 | 12 | Agent-operable runtime layer | **bounded interventions, counterfactuals, invariants, evals, semantic diffs, live command executor/tap, poll bridge, local daemon/HTTP engine bridge, eval diff artifacts/links/manifests, dev-loop/remediation-decision/patch-proposal eval persistence** | `src/services/agent_intervention.zig`, `counterfactual.zig`, `causal_invariant.zig`, `agent_eval.zig`, `causal_diff.zig`, `causal_live_command.zig` |
-| 13 | Production-operable guardrails | **live commands, concurrency facts, transport policy/discovery registry, ops storage/alert policy, gated ops artifact responses, alert delivery/webhook/provider envelopes, provider secret injection, endpoint-aware runbooks** | `workbench/src/collector`, `src/services/causal_concurrency.zig`, `src/services/causal_ops.zig`, `causal_ops_storage.zig`, `causal_ops_alert.zig`, `src/cluster/transport.zig` |
+| 13 | Production-operable guardrails | **live commands, concurrency facts, transport policy/discovery registry, ops storage/alert policy, gated ops artifact responses, alert delivery/webhook/provider envelopes, provider secret injection and retry reporting, endpoint-aware runbooks** | `workbench/src/collector`, `src/services/causal_concurrency.zig`, `src/services/causal_ops.zig`, `causal_ops_storage.zig`, `causal_ops_alert.zig`, `src/cluster/transport.zig` |
 | 14 | Multi-runner causal evidence | **local lineage stitcher plus deployment artifact metadata** | `src/services/causal_runner_lineage.zig` |
 
 ## What is real today
@@ -154,6 +154,12 @@ semantic fact comparison, not exact event-id graph isomorphism.
   host apply request adapter with the local command daemon bridge, so a host
   process can expose `handleApplyRequest(request)` and run collector polling
   through the same caller-owned engine bridge.
+- **Supervised live engine host loop.** `runLiveEngineHostSupervisor` wraps a
+  host's command daemon in a bounded restart loop, emits lifecycle events, and
+  returns aggregate command/apply/frame counters.
+- **Continuous NDJSON fact tap.** `runLiveEngineNdjsonTap` reads engine NDJSON
+  byte streams, posts complete lines to the collector's ingest endpoint, flushes
+  trailing partial lines, and reports chunk/line/post/ingest counts.
 - **Bounded live command poll loop.** `runCausalLiveCommandPollLoop` repeatedly
   calls a caller-provided poller up to a fixed limit, applies decoded command
   batches through engine policy, aggregates tap counters, and stops on an empty
@@ -203,6 +209,10 @@ semantic fact comparison, not exact event-id graph isomorphism.
   resolves PagerDuty routing keys through a caller-owned secret resolver and
   keeps the resolved value limited to the transient outbound request body passed
   to the caller-owned HTTP sink.
+- **Provider alert retry reporting.**
+  `deliverCausalOpsAlertProviderWithSecretRetrying` retries transient sink
+  failures under a bounded policy and returns attempts/delivered/failure
+  metadata while rebuilding each transient secret-bearing request per attempt.
 - **Endpoint-aware ops runbooks.** `formatCausalOpsRunbookJson` can include
   artifact endpoint path, alert delivery kind, and alert endpoint id metadata for
   live operator surfaces.
@@ -243,6 +253,10 @@ semantic fact comparison, not exact event-id graph isomorphism.
   `parseClusterTransportServiceDiscoveryHttpResponse` define the fixed `GET`
   request and governed response parser a host-owned HTTP client can use before
   refreshing the local registry.
+- **Caller-owned HTTP discovery refresh.**
+  `refreshClusterTransportServiceDiscoveryFromHttp` formats the discovery
+  request, calls a caller-owned fetcher, parses the governed response, and
+  refreshes the in-memory registry while keeping source metadata stable.
 - **Schema governance for the agentic artifact surface.** The schema governance
   inventory now tracks semantic diff, eval diff, eval diff links, ops artifact
   response, ops runbook, ops alert delivery, and runner lineage artifact
@@ -311,9 +325,9 @@ substrates into real deployed systems:
    `runLiveEngineCommandDaemon` bridge exist. Local tooling also has an HTTP
    engine bridge client, host apply request adapter, and collector `POST /frames`
    endpoint, and `createLiveEngineHost` bundles apply handling with collector
-   command polling. A running engine still needs a real long-lived host process
-   with process supervision, continuous engine fact tapping, and deployment
-   lifecycle management.
+   command polling. The supervised host loop and continuous NDJSON fact tap
+   exist as testable inner-loop helpers; next is a real long-lived host process
+   with OS-level lifecycle management and deployment wiring.
 2. **Real multi-node cluster deployment.** The transport validates TLS/pool/
    backpressure policy and propagates origin causal ids, and
    `stitchCausalRunnerLineage` can merge runner traces, emit deployment metadata
@@ -321,9 +335,10 @@ substrates into real deployed systems:
    select the first safe candidate, keep an in-memory discovery registry, refresh
    it from external discovery snapshots, parse snapshot JSON documents, and load
    governed snapshots from local files. The HTTP-shaped discovery request/
-   response seam exists; next are real TLS handshakes, host-owned HTTP discovery
-   clients, auth rotation, live health-checked pool maintenance, and stitched
-   lineage from separate runner processes.
+   response seam and caller-owned fetcher refresh helper exist; next are real
+   TLS handshakes, concrete HTTP discovery clients, auth rotation, live
+   health-checked pool maintenance, and stitched lineage from separate runner
+   processes.
 3. **Diff/eval integration.** The workbench renders portable `semantic_diff`
    payloads, evals can emit linked diff artifacts, the new artifact schemas are
    governed, evals can write artifacts to caller sinks, the runtime can write
@@ -339,9 +354,10 @@ substrates into real deployed systems:
    delivery envelopes, delivery-sink hooks, HTTP-shaped artifact responses,
    method/path-gated request adapters, fixed security/cache headers, webhook
    request shapes for alert providers, provider-shaped Slack/PagerDuty bodies,
-   provider secret injection, and endpoint-aware runbooks exist. Next: network
-   sending, served artifact endpoints, deployment metadata ingestion from real
-   deployments, and runbook generation from live deployment metadata.
+   provider secret injection, provider retry reporting, and endpoint-aware
+   runbooks exist. Next: real network sending, served artifact endpoints,
+   deployment metadata ingestion from real deployments, and runbook generation
+   from live deployment metadata.
 
 ## Hardening milestone roadmap
 
@@ -1459,6 +1475,76 @@ without storing or logging those secrets in the deterministic core.
   the resolved routing key, the secret-ref field is omitted from the outbound
   body, and sentinel alert evidence remains redacted.
 
+### M64 — Supervised live engine host loop
+
+**Status:** delivered on 2026-06-24 via `runLiveEngineHostSupervisor`.
+
+**Goal:** give a live engine host a bounded restart/reporting loop around the
+collector command daemon without claiming OS process supervision.
+
+**Work:**
+- Run a host's command daemon through a bounded restart loop.
+- Emit lifecycle events for start, daemon failure, restart, success, and stop.
+- Aggregate command/apply/frame counters across the successful run.
+
+**Acceptance:**
+- Bun tests prove a transient daemon failure is restarted once, counters are
+  returned, lifecycle events are emitted, and the restart limit is honored.
+
+### M65 — Continuous NDJSON fact tap
+
+**Status:** delivered on 2026-06-24 via `runLiveEngineNdjsonTap`.
+
+**Goal:** give a live engine host a tested stream-to-collector fact tap for
+engine NDJSON output.
+
+**Work:**
+- Read chunked engine NDJSON bytes.
+- Post complete lines to the collector ingest endpoint.
+- Flush a trailing partial line and report chunk/line/post/ingest/error counts.
+
+**Acceptance:**
+- Bun tests prove complete lines are posted, trailing partials flush, and counts
+  are accurate.
+
+### M66 — HTTP discovery refresh with caller-owned fetcher
+
+**Status:** delivered on 2026-06-24 via
+`refreshClusterTransportServiceDiscoveryFromHttp`.
+
+**Goal:** compose the HTTP-shaped discovery request/response seam with the owned
+registry refresh path while keeping real HTTP ownership in host code.
+
+**Work:**
+- Add `ClusterTransportServiceDiscoveryHttpFetcher`.
+- Format the fixed discovery request and call the caller-owned fetcher.
+- Parse governed responses, reject non-200 responses, refresh the registry, and
+  keep refresh source metadata stable.
+
+**Acceptance:**
+- Zig tests prove the fetcher sees GET/accept/url metadata, a 200 response
+  refreshes the registry, and a non-200 response is rejected.
+
+### M67 — Provider alert retry reporting
+
+**Status:** delivered on 2026-06-24 via
+`deliverCausalOpsAlertProviderWithSecretRetrying`.
+
+**Goal:** let host-owned alert delivery retry transient provider sink failures
+with a bounded attempts report.
+
+**Work:**
+- Add `CausalOpsAlertProviderDeliveryPolicy` and
+  `CausalOpsAlertProviderDeliveryReport`.
+- Retry secret-backed provider delivery up to a fixed attempt count.
+- Rebuild the transient secret-bearing request per attempt and preserve redacted
+  alert evidence.
+
+**Acceptance:**
+- Zig tests prove a transient first failure is retried, the final delivery
+  succeeds, attempts/failures are reported, and sentinel alert evidence stays
+  redacted.
+
 ## Delivered since 2026-06-20
 
 The forward sequence from the prior roadmap is largely done. Tracked in
@@ -1476,21 +1562,21 @@ The forward sequence from the prior roadmap is largely done. Tracked in
 - One loopback cluster transport crosses localhost TCP, and the remote socket
   wrapper adds auth preflight, reconnect attempts, transport policy validation,
   origin causal ids, metrics, and redacted failure handling.
-- The M6-M63 agentic engine layer now covers bounded interventions,
+- The M6-M67 agentic engine layer now covers bounded interventions,
   counterfactual trace forks, reusable invariants, semantic graph diffs, live
   command transport primitives plus engine execution/taps, collector polling,
   typed inbox validation, local polling and daemon harnesses with lifecycle
   evidence, live engine bridge wiring, HTTP engine bridge clients, host apply
-  request adapters, host runner bundles, collector frame ingest, poll-batch
-  cursor bridging, and
+  request adapters, host runner bundles, supervised host loops, continuous
+  NDJSON fact taps, collector frame ingest, poll-batch cursor bridging, and
   bounded poll loops, concurrency annotations, transport hardening plus
   service-discovery validation/selection, an in-memory registry, snapshot
   refresh, snapshot JSON parsing, file-backed snapshot loading, and HTTP-shaped
-  discovery response parsing, ops
+  discovery response parsing plus caller-owned HTTP fetcher refresh, ops
   guardrails/storage/alert/artifact/delivery adapters with delivery sinks,
   webhook and provider-shaped request bodies, endpoint-aware runbooks,
-  provider secret injection, HTTP-shaped responses, fixed headers, and
-  method/path-gated request adapters,
+  provider secret injection, provider retry reporting, HTTP-shaped responses,
+  fixed headers, and method/path-gated request adapters,
   schema-governed visual/emitted/eval-linked diff evidence with writer sinks,
   remediation links, linked manifests, a manifest writer, dev-loop eval artifact
   persistence, remediation-decision eval artifact persistence, patch-proposal

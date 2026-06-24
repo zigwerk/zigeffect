@@ -365,3 +365,70 @@ test "ops alert provider delivery injects pagerduty secret through caller-owned 
     try std.testing.expect(!capture.saw_secret_ref_field);
     try std.testing.expect(!capture.saw_secret_alert_evidence);
 }
+
+const ProviderSecretRetryCapture = struct {
+    resolved: usize = 0,
+    sent: usize = 0,
+    saw_routing_key: bool = false,
+    saw_secret_alert_evidence: bool = false,
+
+    fn resolver(self: *ProviderSecretRetryCapture) fx.CausalOpsAlertProviderSecretResolver {
+        return .{ .state = self, .resolve = resolve };
+    }
+
+    fn sink(self: *ProviderSecretRetryCapture) fx.CausalOpsAlertHttpSink {
+        return .{ .state = self, .send = send };
+    }
+
+    fn resolve(raw: ?*anyopaque, secret_ref: []const u8) anyerror![]const u8 {
+        const self: *ProviderSecretRetryCapture = @ptrCast(@alignCast(raw.?));
+        self.resolved += 1;
+        try std.testing.expectEqualStrings("pd-routing-key-prod", secret_ref);
+        return "pd_retry_routing_key_456";
+    }
+
+    fn send(raw: ?*anyopaque, request: fx.CausalOpsAlertHttpRequest) anyerror!void {
+        const self: *ProviderSecretRetryCapture = @ptrCast(@alignCast(raw.?));
+        self.sent += 1;
+        self.saw_routing_key = self.saw_routing_key or std.mem.indexOf(u8, request.body, "\"routing_key\":\"pd_retry_routing_key_456\"") != null;
+        self.saw_secret_alert_evidence = self.saw_secret_alert_evidence or std.mem.indexOf(u8, request.body, "sentinel-secret") != null;
+        if (self.sent == 1) return error.TransientAlertSinkFailure;
+    }
+};
+
+test "ops alert provider secret delivery retries transient sink failures" {
+    var capture = ProviderSecretRetryCapture{};
+
+    const report = try fx.deliverCausalOpsAlertProviderWithSecretRetrying(std.testing.allocator, .{
+        .provider = .pagerduty_events_v2,
+        .endpoint_url = "https://events.pagerduty.test/v2/enqueue",
+        .secret_ref = "pd-routing-key-prod",
+        .delivery = .{
+            .deployment = .{
+                .service = "zigeffect",
+                .environment = "prod",
+                .region = "eu-west",
+                .cluster_id = "cluster-a",
+            },
+            .delivery_kind = "provider",
+            .endpoint_id = "primary-alerts",
+            .event = .{
+                .id = 47,
+                .kind = .alert_emitted,
+                .status = "emitted",
+                .label = "retention password=sentinel-secret threshold",
+                .type_name = "retention.threshold",
+                .redacted_detail = "token=sentinel-secret",
+            },
+        },
+    }, capture.resolver(), capture.sink(), .{ .max_attempts = 2 });
+
+    try std.testing.expectEqual(@as(usize, 2), report.attempts);
+    try std.testing.expectEqual(@as(usize, 1), report.failures);
+    try std.testing.expect(report.delivered);
+    try std.testing.expectEqualStrings("TransientAlertSinkFailure", report.last_error_name);
+    try std.testing.expectEqual(@as(usize, 2), capture.resolved);
+    try std.testing.expectEqual(@as(usize, 2), capture.sent);
+    try std.testing.expect(capture.saw_routing_key);
+    try std.testing.expect(!capture.saw_secret_alert_evidence);
+}

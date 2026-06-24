@@ -20,6 +20,8 @@ import {
   runLiveCommandPollingLoop,
   runLiveCommandDaemon,
   runLiveEngineCommandDaemon,
+  runLiveEngineHostSupervisor,
+  runLiveEngineNdjsonTap,
   serveLiveEngineCommandApplyRequest,
   sendLiveCommand,
   webSocketLiveSource,
@@ -621,6 +623,107 @@ test("createLiveEngineHost wires apply requests and collector command daemon", a
   expect(daemon.applied).toBe(1);
   expect(daemon.emitted_frames).toBe(1);
   expect(daemon.next_after).toBe(31);
+});
+
+test("runLiveEngineHostSupervisor restarts failed daemon runs and aggregates counters", async () => {
+  const lifecycle: string[] = [];
+  const runUrls: string[] = [];
+  let runCount = 0;
+  const host = {
+    handleApplyRequest: async () => new Response("{}"),
+    runCommandDaemon: async (url: string) => {
+      runUrls.push(url);
+      runCount += 1;
+      if (runCount === 1) {
+        throw new Error("transient collector failure");
+      }
+      return {
+        cycles: 2,
+        polls: 3,
+        commands: 4,
+        errors: 0,
+        next_after: 40,
+        stopped: false,
+        processed: 4,
+        applied: 3,
+        rejected: 1,
+        needs_human_review: 0,
+        emitted_frames: 2,
+      };
+    },
+  };
+
+  const result = await runLiveEngineHostSupervisor(host, "http://127.0.0.1:4500/commands", {
+    maxRestarts: 1,
+    onLifecycle: (event) => {
+      lifecycle.push(event.kind);
+    },
+  });
+
+  expect(runUrls).toEqual(["http://127.0.0.1:4500/commands", "http://127.0.0.1:4500/commands"]);
+  expect(lifecycle).toEqual(["started", "daemon_error", "restart", "daemon_succeeded", "stopped"]);
+  expect(result).toEqual({
+    runs: 2,
+    restarts: 1,
+    errors: 1,
+    cycles: 2,
+    polls: 3,
+    commands: 4,
+    next_after: 40,
+    stopped: false,
+    processed: 4,
+    applied: 3,
+    rejected: 1,
+    needs_human_review: 0,
+    emitted_frames: 2,
+  });
+
+  const failingHost = {
+    handleApplyRequest: async () => new Response("{}"),
+    runCommandDaemon: async () => {
+      throw new Error("transient collector failure");
+    },
+  };
+  await expect(
+    runLiveEngineHostSupervisor(failingHost, "http://127.0.0.1:4500/commands", { maxRestarts: 0 }),
+  ).rejects.toThrow("transient collector failure");
+});
+
+test("runLiveEngineNdjsonTap posts complete engine lines and flushes trailing partials", async () => {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode('{"id":1}\n{"id"'));
+      controller.enqueue(encoder.encode(':2}\n{"id":3}'));
+      controller.close();
+    },
+  });
+  const posts: string[] = [];
+  const fetcher = async (url: string, init?: RequestInit) => {
+    expect(url).toBe("http://127.0.0.1:4500/ingest");
+    expect(init?.method).toBe("POST");
+    const body = String(init?.body ?? "");
+    posts.push(body);
+    return new Response(JSON.stringify({ ingested: body.length > 0 ? body.split("\n").length : 0 }), {
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  const result = await runLiveEngineNdjsonTap(
+    stream,
+    "http://127.0.0.1:4500/ingest",
+    { maxLinesPerPost: 1 },
+    fetcher,
+  );
+
+  expect(posts).toEqual(['{"id":1}', '{"id":2}', '{"id":3}']);
+  expect(result).toEqual({
+    chunks: 2,
+    lines: 3,
+    posts: 3,
+    ingested: 3,
+    errors: 0,
+  });
 });
 
 test("LiveCausalBuffer accumulates frames in causal (sequence) order", () => {

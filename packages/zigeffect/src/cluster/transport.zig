@@ -631,10 +631,16 @@ pub const ClusterTransportServiceDiscoveryHttpResponse = struct {
     body: []const u8,
 };
 
+pub const ClusterTransportServiceDiscoveryHttpFetcher = struct {
+    state: ?*anyopaque = null,
+    fetch: *const fn (?*anyopaque, ClusterTransportServiceDiscoveryHttpRequest) anyerror!ClusterTransportServiceDiscoveryHttpResponse,
+};
+
 pub const InMemoryClusterTransportServiceDiscovery = struct {
     allocator: Allocator,
     requirements: ClusterTransportServiceDiscoveryRequirements,
     endpoints: std.ArrayList(ClusterTransportDiscoveredEndpoint) = .empty,
+    last_source: []const u8 = "",
 
     pub fn init(
         allocator: Allocator,
@@ -651,6 +657,7 @@ pub const InMemoryClusterTransportServiceDiscovery = struct {
             self.allocator.free(endpoint.host);
         }
         self.endpoints.deinit(self.allocator);
+        if (self.last_source.len > 0) self.allocator.free(self.last_source);
         self.* = .{
             .allocator = self.allocator,
             .requirements = self.requirements,
@@ -691,12 +698,18 @@ pub const InMemoryClusterTransportServiceDiscovery = struct {
         self: *InMemoryClusterTransportServiceDiscovery,
         snapshot: ClusterTransportServiceDiscoverySnapshot,
     ) Allocator.Error!ClusterTransportServiceDiscoveryRefreshReport {
+        const owned_source = try dupeOrEmpty(self.allocator, snapshot.source);
+        errdefer if (owned_source.len > 0) self.allocator.free(owned_source);
+
         for (snapshot.endpoints) |endpoint| {
             try self.upsert(endpoint);
         }
 
+        if (self.last_source.len > 0) self.allocator.free(self.last_source);
+        self.last_source = owned_source;
+
         return .{
-            .source = snapshot.source,
+            .source = self.last_source,
             .observed_at_ms = snapshot.observed_at_ms,
             .imported = snapshot.endpoints.len,
             .registry_size = self.endpoints.items.len,
@@ -842,6 +855,22 @@ pub fn parseClusterTransportServiceDiscoveryHttpResponse(
 ) !ClusterTransportOwnedServiceDiscoverySnapshot {
     if (response.status != 200) return error.TransportUnavailable;
     return try parseClusterTransportServiceDiscoverySnapshotJson(allocator, response.body);
+}
+
+pub fn refreshClusterTransportServiceDiscoveryFromHttp(
+    allocator: Allocator,
+    registry: *InMemoryClusterTransportServiceDiscovery,
+    url: []const u8,
+    fetcher: ClusterTransportServiceDiscoveryHttpFetcher,
+) !ClusterTransportServiceDiscoveryRefreshReport {
+    var request = try formatClusterTransportServiceDiscoveryHttpRequest(allocator, url);
+    defer request.deinit();
+
+    const response = try fetcher.fetch(fetcher.state, request);
+    var snapshot = try parseClusterTransportServiceDiscoveryHttpResponse(allocator, response);
+    defer snapshot.deinit();
+
+    return try registry.refreshFromSnapshot(snapshot.asSnapshot());
 }
 
 pub const RemoteSocketClusterTransport = struct {

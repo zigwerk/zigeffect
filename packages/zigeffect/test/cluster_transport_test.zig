@@ -1263,6 +1263,80 @@ test "service discovery parses governed snapshot http response" {
     }));
 }
 
+const ServiceDiscoveryHttpFetchCapture = struct {
+    calls: usize = 0,
+    saw_method: bool = false,
+    saw_url: bool = false,
+    saw_accept: bool = false,
+    status: u16 = 200,
+    body: []const u8,
+
+    fn fetcher(self: *ServiceDiscoveryHttpFetchCapture) fx.ClusterTransportServiceDiscoveryHttpFetcher {
+        return .{
+            .state = self,
+            .fetch = fetch,
+        };
+    }
+
+    fn fetch(raw: ?*anyopaque, request: fx.ClusterTransportServiceDiscoveryHttpRequest) anyerror!fx.ClusterTransportServiceDiscoveryHttpResponse {
+        const self: *ServiceDiscoveryHttpFetchCapture = @ptrCast(@alignCast(raw.?));
+        self.calls += 1;
+        self.saw_method = std.mem.eql(u8, request.method, "GET");
+        self.saw_url = std.mem.eql(u8, request.url, "https://discovery.internal/snapshot");
+        self.saw_accept = std.mem.eql(u8, request.accept, "application/json");
+        return .{
+            .status = self.status,
+            .body = self.body,
+        };
+    }
+};
+
+test "service discovery refreshes registry through caller-owned http fetcher" {
+    const json =
+        \\{
+        \\  "schema": "zigeffect.cluster.service-discovery-snapshot.v1",
+        \\  "schema_version": 1,
+        \\  "source": "http-refresh-provider",
+        \\  "observed_at_ms": 8910,
+        \\  "endpoints": [
+        \\    {"host":"runner-refresh-unsafe.internal","port":7001,"tls_enabled":false,"healthy":true,"auth_epoch":39},
+        \\    {"host":"runner-refresh-safe.internal","port":7002,"tls_enabled":true,"healthy":true,"auth_epoch":41}
+        \\  ]
+        \\}
+    ;
+    var capture = ServiceDiscoveryHttpFetchCapture{ .body = json };
+    var discovery = fx.InMemoryClusterTransportServiceDiscovery.init(std.testing.allocator, .{
+        .require_tls = true,
+        .require_healthy = true,
+        .min_auth_epoch = 40,
+    });
+    defer discovery.deinit();
+
+    const refresh = try fx.refreshClusterTransportServiceDiscoveryFromHttp(
+        std.testing.allocator,
+        &discovery,
+        "https://discovery.internal/snapshot",
+        capture.fetcher(),
+    );
+
+    try std.testing.expectEqual(@as(usize, 1), capture.calls);
+    try std.testing.expect(capture.saw_method);
+    try std.testing.expect(capture.saw_url);
+    try std.testing.expect(capture.saw_accept);
+    try std.testing.expectEqualStrings("http-refresh-provider", refresh.source);
+    try std.testing.expectEqual(@as(usize, 2), refresh.imported);
+    try std.testing.expect(refresh.selection.selected != null);
+    try std.testing.expectEqualStrings("runner-refresh-safe.internal", refresh.selection.selected.?.host);
+
+    capture.status = 503;
+    try std.testing.expectError(error.TransportUnavailable, fx.refreshClusterTransportServiceDiscoveryFromHttp(
+        std.testing.allocator,
+        &discovery,
+        "https://discovery.internal/snapshot",
+        capture.fetcher(),
+    ));
+}
+
 test "remote socket transport applies reject backpressure before durable submission" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
