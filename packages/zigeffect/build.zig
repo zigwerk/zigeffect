@@ -357,6 +357,34 @@ pub fn build(b: *std.Build) void {
     effect_state_example_step.dependOn(&effect_state_example.step);
     effect_state_example_step.dependOn(&run_effect_state_example_tests.step);
 
+    const live_stream_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/live_stream_example.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    live_stream_example_module.addImport("zigeffect", zigeffect);
+
+    const live_stream_example = b.addExecutable(.{
+        .name = "zigeffect-live-stream-example",
+        .root_module = live_stream_example_module,
+    });
+    // Installed so it can be piped directly:
+    //   ./zig-out/bin/zigeffect-live-stream-example | bun .../collector.ts
+    b.installArtifact(live_stream_example);
+    const run_live_stream_example = b.addRunArtifact(live_stream_example);
+    const live_stream_step = b.step("live-stream", "Stream a sample causal scenario as NDJSON to stdout (collector feed)");
+    live_stream_step.dependOn(&run_live_stream_example.step);
+
+    const live_stream_example_tests = b.addTest(.{
+        .name = "zigeffect-live-stream-example-tests",
+        .root_module = live_stream_example_module,
+    });
+    const run_live_stream_example_tests = b.addRunArtifact(live_stream_example_tests);
+
+    const live_stream_example_step = b.step("live-stream-example", "Compile and test the live-attach engine emitter example");
+    live_stream_example_step.dependOn(&live_stream_example.step);
+    live_stream_example_step.dependOn(&run_live_stream_example_tests.step);
+
     const self_improving_loop_example_module = b.createModule(.{
         .root_source_file = b.path("examples/self_improving_loop.zig"),
         .target = target,
@@ -1654,6 +1682,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_data_and_matching_example_tests.step);
     examples_step.dependOn(&effect_state_example.step);
     examples_step.dependOn(&run_effect_state_example_tests.step);
+    examples_step.dependOn(&live_stream_example.step);
+    examples_step.dependOn(&run_live_stream_example_tests.step);
     examples_step.dependOn(&self_improving_loop_example.step);
     examples_step.dependOn(&run_self_improving_loop_example_tests.step);
     examples_step.dependOn(&causal_readiness_example.step);

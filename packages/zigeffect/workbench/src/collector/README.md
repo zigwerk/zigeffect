@@ -15,15 +15,24 @@ per WebSocket message — to every connected browser.
 
 ## Run
 
-```bash
-# Serve on :4500 and fan out NDJSON piped on stdin:
-your-engine-emitting-ndjson | bun packages/zigeffect/workbench/src/collector/collector.ts
+The engine half is `examples/live_stream_example.zig` (`CausalNdjsonTap` →
+NDJSON). End to end:
 
-# …or POST NDJSON to the ingest endpoint of an already-running collector:
+```bash
+# 1. Build the engine emitter once.
+cd packages/zigeffect && zig build live-stream-example
+
+# 2. Stream a sample causal run into the collector (serves :4500):
+./zig-out/bin/zigeffect-live-stream-example \
+  | bun src/collector/collector.ts   # cwd: packages/zigeffect/workbench
+
+# …or POST NDJSON to an already-running collector:
 curl -XPOST --data-binary @events.ndjson http://127.0.0.1:4500/ingest
 ```
 
-Set `PORT` to change the listen port.
+`zig build live-stream` also prints the sample NDJSON to stdout directly. Set
+`PORT` to change the listen port. (`sample-engine-stream.ndjson` here is that
+emitter's output, replayed verbatim by the end-to-end collector test.)
 
 ### Endpoints
 - `GET /live` — WebSocket; browser clients subscribe here. Each message is one

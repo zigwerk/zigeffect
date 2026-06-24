@@ -99,6 +99,57 @@ test("every connected client receives the broadcast", async () => {
   }
 });
 
+function collectFrames(ws: WebSocket, count: number, timeoutMs = 3000): Promise<LiveFrame[]> {
+  return new Promise((resolve, reject) => {
+    const frames: LiveFrame[] = [];
+    const timer = setTimeout(
+      () => reject(new Error(`timed out: got ${frames.length}/${count} frames`)),
+      timeoutMs,
+    );
+    ws.addEventListener("message", (event) => {
+      const frame = parseFrameMessage(typeof event.data === "string" ? event.data : "");
+      if (frame) frames.push(frame);
+      if (frames.length >= count) {
+        clearTimeout(timer);
+        resolve(frames);
+      }
+    });
+  });
+}
+
+test("END-TO-END: REAL engine NDJSON (live_stream_example output) flows through the collector to a client", async () => {
+  // sample-engine-stream.ndjson is captured verbatim from `zig build live-stream`
+  // — real CausalNdjsonTap output, not a hand-written fixture.
+  const samplePath = new URL("./sample-engine-stream.ndjson", import.meta.url);
+  const ndjson = await Bun.file(samplePath).text();
+  const lineCount = ndjson.split("\n").filter((l) => l.trim().length > 0).length;
+  expect(lineCount).toBe(11);
+
+  const { origin } = serve();
+  const client = await openClient(origin);
+  try {
+    const allFrames = collectFrames(client, lineCount);
+    const response = await fetch(`http://${origin}/ingest`, { method: "POST", body: ndjson });
+    expect(await response.json()).toEqual({ ingested: lineCount });
+
+    const frames = await allFrames;
+    expect(frames).toHaveLength(lineCount);
+    // The real lifecycle, reconstructed on the client from the engine stream.
+    expect(frames[0]!.event_kind).toBe("run_started");
+    expect(frames.at(-1)!.event_kind).toBe("run_completed");
+    expect(frames.map((f) => f.event_kind)).toContain("fiber_suspended");
+    expect(frames.map((f) => f.event_kind)).toContain("fiber_resumed");
+    // Sequence is monotonic and the engine's parent edges survive the hop.
+    expect(frames.map((f) => f.sequence)).toEqual(Array.from({ length: lineCount }, (_, i) => i + 1));
+    const scopeOpened = frames.find((f) => f.event_kind === "scope_opened");
+    expect(scopeOpened!.parent_id).toBe(1); // child of run_started (id 1)
+    // Every frame passes the frontend's own guard.
+    for (const frame of frames) expect(parseFrameMessage(JSON.stringify(frame))).not.toBeNull();
+  } finally {
+    client.close();
+  }
+});
+
 test("/health reports the connected client count", async () => {
   const { origin } = serve();
   const client = await openClient(origin);
