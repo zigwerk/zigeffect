@@ -31,3 +31,29 @@ test "semantic causal graph diff reports resolved findings and added lifecycle f
     try std.testing.expect(diff.added_lineage_edges.len >= 2);
     try std.testing.expect(diff.summary().improved());
 }
+
+test "semantic causal graph diff formats workbench artifact json" {
+    const before = [_]fx.CausalEvent{
+        .{ .kind = .run_started, .run_id = 1, .status = "started" },
+        .{ .kind = .resource_acquired, .run_id = 1, .scope_id = 2, .resource_id = 3, .status = "acquired", .type_name = "db" },
+    };
+    const after = [_]fx.CausalEvent{
+        .{ .kind = .run_started, .run_id = 1, .status = "started" },
+        .{ .kind = .resource_acquired, .run_id = 1, .scope_id = 2, .resource_id = 3, .status = "acquired", .type_name = "db" },
+        .{ .kind = .resource_finalized, .run_id = 1, .scope_id = 2, .resource_id = 3, .parent_id = 2, .cause_event_id = 2, .status = "success", .type_name = "db" },
+    };
+
+    var diff = try fx.diffCausalGraphs(std.testing.allocator, &before, &after);
+    defer diff.deinit();
+
+    const json = try fx.formatCausalGraphDiffJson(std.testing.allocator, diff, "before.json", "after.json");
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.semantic-diff.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"before\":\"before.json\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"after\":\"after.json\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"resolved_findings\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"added_resource_finalizations\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"type_name\":\"db\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"added_lineage_edges\"") != null);
+}

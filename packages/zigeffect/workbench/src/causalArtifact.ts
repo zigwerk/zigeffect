@@ -1034,6 +1034,32 @@ export function deriveSemanticDiffModel(raw: unknown, options: WorkbenchOptions)
   };
 }
 
+export function semanticDiffSelectableEventIds(diff: SemanticDiffModel): string[] {
+  const ids: string[] = [];
+  const add = (id: string) => {
+    if (isSelectableEventId(id)) {
+      ids.push(id);
+    }
+  };
+
+  for (const entry of diff.resolvedFindings) add(entry.eventId);
+  for (const entry of diff.introducedFindings) add(entry.eventId);
+  for (const entry of diff.addedFiberTerminals) add(entry.eventId);
+  for (const entry of diff.removedFiberTerminals) add(entry.eventId);
+  for (const entry of diff.addedResourceFinalizations) add(entry.eventId);
+  for (const entry of diff.removedResourceFinalizations) add(entry.eventId);
+  for (const entry of diff.addedLineageEdges) {
+    add(entry.fromEventId);
+    add(entry.toEventId);
+  }
+  for (const entry of diff.removedLineageEdges) {
+    add(entry.fromEventId);
+    add(entry.toEventId);
+  }
+
+  return uniqueInOrder(ids);
+}
+
 function deriveFindings(events: CausalEvent[]): CausalFinding[] {
   const findings: CausalFinding[] = [];
 
@@ -1455,6 +1481,10 @@ function stringList(value: unknown): string[] {
 
 function uniqueInOrder(values: string[]): string[] {
   return Array.from(new Set(values));
+}
+
+function isSelectableEventId(value: string): boolean {
+  return value.length > 0 && value !== "unknown" && value !== "null";
 }
 
 function pendingFiberFindings(events: CausalEvent[], closed: CausalEvent): CausalFinding[] {

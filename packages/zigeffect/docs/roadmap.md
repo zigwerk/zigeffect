@@ -36,8 +36,8 @@ semantic fact comparison, not exact event-id graph isomorphism.
 | 9 | Visual workbench (SolidJS / zig-webui) | **live-attach** (static + streaming via collector) | `workbench/`, `workbench/src/collector/` |
 | 10 | Export adapters (JSONL/DOT/OTel/OTLP/graph-history/NenDB) | **OTLP + collector live end-to-end** | `src/services/causal_*_backend.zig`, `causal_otlp_json.zig` |
 | 11 | Durable workflows + clustering | **scheduler runs on zio; loopback + remote socket wrappers cross the transport boundary** | `src/workflow/*`, `src/cluster/*` |
-| 12 | Agent-operable runtime layer | **bounded interventions, counterfactuals, invariants, evals, semantic diffs, live command executor** | `src/services/agent_intervention.zig`, `counterfactual.zig`, `causal_invariant.zig`, `agent_eval.zig`, `causal_diff.zig`, `causal_live_command.zig` |
-| 13 | Production-operable guardrails | **live commands, concurrency facts, transport policy, ops storage policy** | `workbench/src/collector`, `src/services/causal_concurrency.zig`, `src/services/causal_ops.zig`, `causal_ops_storage.zig`, `src/cluster/transport.zig` |
+| 12 | Agent-operable runtime layer | **bounded interventions, counterfactuals, invariants, evals, semantic diffs, live command executor/tap** | `src/services/agent_intervention.zig`, `counterfactual.zig`, `causal_invariant.zig`, `agent_eval.zig`, `causal_diff.zig`, `causal_live_command.zig` |
+| 13 | Production-operable guardrails | **live commands, concurrency facts, transport policy, ops storage/alert policy** | `workbench/src/collector`, `src/services/causal_concurrency.zig`, `src/services/causal_ops.zig`, `causal_ops_storage.zig`, `causal_ops_alert.zig`, `src/cluster/transport.zig` |
 | 14 | Multi-runner causal evidence | **local lineage stitcher** | `src/services/causal_runner_lineage.zig` |
 
 ## What is real today
@@ -84,7 +84,11 @@ semantic fact comparison, not exact event-id graph isomorphism.
   between two traces; counterfactuals and evals now carry diff summaries.
 - **Visual semantic diff UX.** Workbench artifacts can carry
   `semantic_diff` data and the Solid workbench renders a read-only Diff tab with
-  summary counters plus finding/fiber/resource/lineage entries.
+  summary counters plus clickable finding/fiber/resource/lineage entries that
+  select graph events.
+- **Semantic diff artifact emission.** `formatCausalGraphDiffJson` emits the
+  portable `zigeffect.causal.semantic-diff.v1` JSON shape consumed by the
+  workbench Diff tab.
 - **Bidirectional live debugging transport primitives.** The Bun collector now
   accepts `POST /command`, broadcasts redacted command frames, and the workbench
   live layer can send bounded command requests. Applying commands still belongs
@@ -92,6 +96,9 @@ semantic fact comparison, not exact event-id graph isomorphism.
 - **Engine-applied live command executor.** `applyCausalLiveCommand` translates
   bounded command frames into `AgentInterventionRequest`s, invokes
   `AgentInterventionPolicy`, and records unknown command attempts as alert facts.
+- **Live engine command tap.** `runCausalLiveCommandTapBatch` processes ordered
+  command envelopes through the engine policy boundary and reports processed,
+  applied, rejected, and human-review counts.
 - **Concurrency and STM annotation helpers.** `CausalConcurrencyRecorder` records
   race winner/loser facts, `both` completion facts, and STM conflict/retry/commit
   facts as causal events.
@@ -100,6 +107,9 @@ semantic fact comparison, not exact event-id graph isomorphism.
 - **Ops storage adapter.** `readCausalOpsArtifact` applies `CausalOpsPolicy` to
   NenDB-backed causal artifact reads, and `checkCausalOpsStorageRetention` turns
   durable storage posture into retention decisions plus alert events.
+- **Ops alert/runbook adapter.** `emitCausalOpsAlerts` forwards alert facts to a
+  caller-provided sink, and `formatCausalOpsRunbookJson` emits a redacted local
+  operator runbook artifact.
 - **Multi-runner lineage stitching.** `stitchCausalRunnerLineage` merges
   runner-labeled causal traces and reports cross-runner `cause_event_id` edges as
   structured facts for agents.
@@ -160,22 +170,22 @@ can explain and audit its own interventions — now has a tested local substrate
 and local operator-facing adapters. The next frontier is turning these local
 substrates into real deployed systems:
 
-1. **Deployed command taps.** `applyCausalLiveCommand` exists, but a running
-   engine still needs a long-lived command tap connected to the collector that
-   applies approved commands and streams resulting causal facts back to the
-   browser.
+1. **Network-connected command taps.** `applyCausalLiveCommand` and
+   `runCausalLiveCommandTapBatch` exist, but a running engine still needs a
+   long-lived transport client connected to the collector that receives command
+   frames and streams resulting causal facts back to the browser.
 2. **Real multi-node cluster deployment.** The transport validates TLS/pool/
    backpressure policy and propagates origin causal ids, and
    `stitchCausalRunnerLineage` can merge runner traces. Next: real TLS
    handshakes, service discovery, auth rotation, health-checked pools, and
    stitched lineage from separate runner processes.
-3. **Richer semantic diff artifacts.** The workbench renders portable
-   `semantic_diff` payloads. Next: emit those payloads directly from Zig diff
-   tools/evals and link entries back into graph selections.
-4. **Operator runbooks and alert sinks.** `CausalOpsPolicy` and the NenDB adapter
-   gate local reads and retention alerts. Next: external alert sinks,
+3. **Diff/eval integration.** The workbench renders portable `semantic_diff`
+   payloads and Zig can emit them. Next: have eval/dev-loop tools write diff
+   artifacts automatically and cross-link them from remediation chains.
+4. **External operator integrations.** `CausalOpsPolicy`, NenDB reads, alert
+   sinks, and local runbook JSON exist. Next: external alert delivery,
    access-controlled artifact endpoints, deployment metadata ingestion, and
-   operator-facing runbooks.
+   operator-facing runbooks generated from live deployments.
 
 ## Hardening milestone roadmap
 
@@ -563,6 +573,70 @@ multi-node deployment platform.
 - Tests prove a response event from one runner can be stitched back to a cause
   event recorded by another runner.
 
+### M20 — Live engine command tap
+
+**Status:** delivered on 2026-06-24 via
+`src/services/causal_live_command.zig`.
+
+**Goal:** process ordered live command batches through the engine's policy
+boundary without binding the core to a particular transport.
+
+**Work:**
+- Add command envelopes with sequence numbers.
+- Add a batch tap runner over `applyCausalLiveCommand`.
+- Report processed, applied, rejected, and human-review counts.
+
+**Acceptance:**
+- Tests prove a batch with an approved command and an unknown command records
+  both the intervention facts and alert evidence.
+
+### M21 — Zig semantic diff artifact emission
+
+**Status:** delivered on 2026-06-24 via `formatCausalGraphDiffJson`.
+
+**Goal:** emit the same portable semantic diff artifact shape that the workbench
+renders.
+
+**Work:**
+- Add `zigeffect.causal.semantic-diff.v1` JSON formatting.
+- Include summary counters and finding/fiber/resource/lineage sections.
+
+**Acceptance:**
+- Tests prove a graph diff formats parseable JSON with before/after labels,
+  summary counts, resource finalization entries, and lineage entries.
+
+### M22 — Graph-linked Diff UX
+
+**Status:** delivered on 2026-06-24 in the Solid workbench.
+
+**Goal:** make diff evidence navigable, not only readable.
+
+**Work:**
+- Add selectable event-id extraction for semantic diffs.
+- Convert Diff entries to read-only selection buttons.
+- Reuse the existing selected-event state.
+
+**Acceptance:**
+- Workbench tests prove selectable event ids are derived from diff evidence.
+- Workbench tests/typecheck pass with clickable Diff rows.
+
+### M23 — Ops alert sink and runbook artifact
+
+**Status:** delivered on 2026-06-24 via
+`src/services/causal_ops_alert.zig`.
+
+**Goal:** turn local alert facts and ops posture into operator-facing evidence.
+
+**Work:**
+- Add callback-based alert sinks.
+- Emit only `alert_emitted` causal facts to the sink.
+- Format redacted `zigeffect.causal.ops-runbook.v1` JSON.
+
+**Acceptance:**
+- Tests prove alert sinks receive alert facts only.
+- Tests prove runbook JSON summarizes deployment/retention posture without
+  leaking sentinel secrets.
+
 ## Delivered since 2026-06-20
 
 The forward sequence from the prior roadmap is largely done. Tracked in
@@ -580,11 +654,11 @@ The forward sequence from the prior roadmap is largely done. Tracked in
 - One loopback cluster transport crosses localhost TCP, and the remote socket
   wrapper adds auth preflight, reconnect attempts, transport policy validation,
   origin causal ids, metrics, and redacted failure handling.
-- The M6-M19 agentic engine layer now covers bounded interventions,
+- The M6-M23 agentic engine layer now covers bounded interventions,
   counterfactual trace forks, reusable invariants, semantic graph diffs, live
-  command transport primitives and engine execution, concurrency annotations,
-  transport hardening, ops guardrails/storage adapters, visual diff evidence, and
-  multi-runner lineage stitching.
+  command transport primitives plus engine execution/taps, concurrency
+  annotations, transport hardening, ops guardrails/storage/alert adapters, visual
+  and emitted diff evidence, and multi-runner lineage stitching.
 
 ## June 2026 cleanup note
 

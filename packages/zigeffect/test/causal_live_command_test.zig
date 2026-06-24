@@ -58,3 +58,46 @@ test "live command executor rejects unknown commands with alert evidence" {
     try std.testing.expect(std.mem.indexOf(u8, snapshot.events[0].redacted_detail, "[REDACTED]") == null);
     try std.testing.expect(std.mem.indexOf(u8, snapshot.events[0].redacted_detail, fx.causal_redaction_marker) != null);
 }
+
+test "live command tap batch processes approved and rejected commands" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    const policy = (fx.AgentInterventionPolicy{})
+        .withApplyEnabled(true)
+        .withKindPolicy(.interrupt_fiber, .auto_approve);
+
+    const result = try fx.runCausalLiveCommandTapBatch(&store, policy, &.{
+        .{
+            .sequence = 1,
+            .request = .{
+                .command_id = "cmd-1",
+                .command_kind = "interrupt_fiber",
+                .actor = "agent",
+                .fiber_id = 42,
+                .reason = "interrupt hung fiber",
+            },
+        },
+        .{
+            .sequence = 2,
+            .request = .{
+                .command_id = "cmd-2",
+                .command_kind = "delete_cluster",
+                .actor = "agent",
+                .reason = "not allowed",
+            },
+        },
+    });
+
+    try std.testing.expectEqual(@as(usize, 2), result.processed);
+    try std.testing.expectEqual(@as(usize, 1), result.applied);
+    try std.testing.expectEqual(@as(usize, 1), result.rejected);
+    try std.testing.expectEqual(@as(usize, 0), result.needs_human_review);
+    try std.testing.expectEqual(@as(?u64, 2), result.last_sequence);
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 5), snapshot.events.len);
+    try std.testing.expectEqual(fx.CausalEventKind.fiber_interrupted, snapshot.events[3].kind);
+    try std.testing.expectEqual(fx.CausalEventKind.alert_emitted, snapshot.events[4].kind);
+}

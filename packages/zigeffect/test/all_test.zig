@@ -63,6 +63,7 @@ comptime {
     _ = @import("causal_concurrency_test.zig");
     _ = @import("causal_ops_test.zig");
     _ = @import("causal_ops_storage_test.zig");
+    _ = @import("causal_ops_alert_test.zig");
     _ = @import("causal_runner_lineage_test.zig");
     _ = @import("causal_app_runtime_test.zig");
     _ = @import("invariants_test.zig");

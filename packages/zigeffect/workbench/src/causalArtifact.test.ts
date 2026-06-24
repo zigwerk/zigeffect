@@ -12,6 +12,7 @@ import {
   filterEvents,
   parseArtifactJson,
   queryCommandsForEvent,
+  semanticDiffSelectableEventIds,
 } from "./causalArtifact";
 
 const sampleArtifact = JSON.stringify({
@@ -493,6 +494,15 @@ test("deriveSemanticDiffModel normalizes graph diff summary and entries", () => 
     toEventId: "11",
     edgeKind: "cause",
   });
+});
+
+test("semanticDiffSelectableEventIds exposes graph-linked diff event ids", () => {
+  const diff = deriveSemanticDiffModel(sampleSemanticDiffArtifact, {
+    artifactPath: "semantic-diff.json",
+  });
+
+  expect(diff).not.toBeNull();
+  expect(semanticDiffSelectableEventIds(diff!)).toEqual(["5", "9", "10", "11"]);
 });
 
 test("filterEvents supports text kind and status filters", () => {

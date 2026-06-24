@@ -299,7 +299,7 @@ export function App() {
                     />
                   </Match>
                   <Match when={activeTab() === "diff"}>
-                    <DiffView diff={semanticDiff()} />
+                    <DiffView diff={semanticDiff()} onSelectEvent={setSelectedId} />
                   </Match>
                   <Match when={activeTab() === "queries"}>
                     <Queries
@@ -332,7 +332,7 @@ export function App() {
   );
 }
 
-function DiffView(props: { diff: SemanticDiffModel | null }) {
+function DiffView(props: { diff: SemanticDiffModel | null; onSelectEvent: (id: string) => void }) {
   return (
     <div class="view-stack">
       <div class="view-heading">
@@ -361,14 +361,14 @@ function DiffView(props: { diff: SemanticDiffModel | null }) {
             </section>
 
             <div class="diff-grid">
-              <DiffFindingList title="Resolved findings" entries={diff().resolvedFindings} tone="ok" />
-              <DiffFindingList title="Introduced findings" entries={diff().introducedFindings} tone="warn" />
-              <DiffFiberList title="Added fiber terminals" entries={diff().addedFiberTerminals} />
-              <DiffFiberList title="Removed fiber terminals" entries={diff().removedFiberTerminals} />
-              <DiffResourceList title="Added resource finalizations" entries={diff().addedResourceFinalizations} />
-              <DiffResourceList title="Removed resource finalizations" entries={diff().removedResourceFinalizations} />
-              <DiffLineageList title="Added lineage edges" entries={diff().addedLineageEdges} />
-              <DiffLineageList title="Removed lineage edges" entries={diff().removedLineageEdges} />
+              <DiffFindingList title="Resolved findings" entries={diff().resolvedFindings} tone="ok" onSelectEvent={props.onSelectEvent} />
+              <DiffFindingList title="Introduced findings" entries={diff().introducedFindings} tone="warn" onSelectEvent={props.onSelectEvent} />
+              <DiffFiberList title="Added fiber terminals" entries={diff().addedFiberTerminals} onSelectEvent={props.onSelectEvent} />
+              <DiffFiberList title="Removed fiber terminals" entries={diff().removedFiberTerminals} onSelectEvent={props.onSelectEvent} />
+              <DiffResourceList title="Added resource finalizations" entries={diff().addedResourceFinalizations} onSelectEvent={props.onSelectEvent} />
+              <DiffResourceList title="Removed resource finalizations" entries={diff().removedResourceFinalizations} onSelectEvent={props.onSelectEvent} />
+              <DiffLineageList title="Added lineage edges" entries={diff().addedLineageEdges} onSelectEvent={props.onSelectEvent} />
+              <DiffLineageList title="Removed lineage edges" entries={diff().removedLineageEdges} onSelectEvent={props.onSelectEvent} />
             </div>
 
             <Show when={diff().warnings.length > 0}>
@@ -383,7 +383,7 @@ function DiffView(props: { diff: SemanticDiffModel | null }) {
   );
 }
 
-function DiffFindingList(props: { title: string; entries: SemanticDiffFinding[]; tone: "ok" | "warn" }) {
+function DiffFindingList(props: { title: string; entries: SemanticDiffFinding[]; tone: "ok" | "warn"; onSelectEvent: (id: string) => void }) {
   return (
     <section class="diff-panel">
       <div class="lane-section-head">
@@ -393,11 +393,16 @@ function DiffFindingList(props: { title: string; entries: SemanticDiffFinding[];
       <div class="diff-entry-list">
         <For each={props.entries} fallback={<EmptyState label="No entries" compact />}>
           {(entry) => (
-            <div classList={{ "diff-entry": true, ok: props.tone === "ok", warning: props.tone === "warn" }}>
+            <button
+              type="button"
+              classList={{ "diff-entry": true, ok: props.tone === "ok", warning: props.tone === "warn" }}
+              disabled={!selectableDiffEventId(entry.eventId)}
+              onClick={() => selectDiffEvent(props.onSelectEvent, entry.eventId)}
+            >
               <span>#{entry.eventId}</span>
               <strong>{entry.kind}</strong>
               <small>{entry.owner}</small>
-            </div>
+            </button>
           )}
         </For>
       </div>
@@ -405,7 +410,7 @@ function DiffFindingList(props: { title: string; entries: SemanticDiffFinding[];
   );
 }
 
-function DiffFiberList(props: { title: string; entries: SemanticDiffFiberTerminal[] }) {
+function DiffFiberList(props: { title: string; entries: SemanticDiffFiberTerminal[]; onSelectEvent: (id: string) => void }) {
   return (
     <section class="diff-panel">
       <div class="lane-section-head">
@@ -415,11 +420,16 @@ function DiffFiberList(props: { title: string; entries: SemanticDiffFiberTermina
       <div class="diff-entry-list">
         <For each={props.entries} fallback={<EmptyState label="No entries" compact />}>
           {(entry) => (
-            <div class="diff-entry">
+            <button
+              type="button"
+              class="diff-entry"
+              disabled={!selectableDiffEventId(entry.eventId)}
+              onClick={() => selectDiffEvent(props.onSelectEvent, entry.eventId)}
+            >
               <span>fiber {entry.fiberId}</span>
               <strong>{entry.terminalKind}</strong>
               <small>#{entry.eventId} / {entry.status}</small>
-            </div>
+            </button>
           )}
         </For>
       </div>
@@ -427,7 +437,7 @@ function DiffFiberList(props: { title: string; entries: SemanticDiffFiberTermina
   );
 }
 
-function DiffResourceList(props: { title: string; entries: SemanticDiffResourceFinalization[] }) {
+function DiffResourceList(props: { title: string; entries: SemanticDiffResourceFinalization[]; onSelectEvent: (id: string) => void }) {
   return (
     <section class="diff-panel">
       <div class="lane-section-head">
@@ -437,11 +447,16 @@ function DiffResourceList(props: { title: string; entries: SemanticDiffResourceF
       <div class="diff-entry-list">
         <For each={props.entries} fallback={<EmptyState label="No entries" compact />}>
           {(entry) => (
-            <div class="diff-entry">
+            <button
+              type="button"
+              class="diff-entry"
+              disabled={!selectableDiffEventId(entry.eventId)}
+              onClick={() => selectDiffEvent(props.onSelectEvent, entry.eventId)}
+            >
               <span>scope {entry.scopeId}</span>
               <strong>{entry.typeName}</strong>
               <small>resource {entry.resourceId} / event #{entry.eventId}</small>
-            </div>
+            </button>
           )}
         </For>
       </div>
@@ -449,7 +464,7 @@ function DiffResourceList(props: { title: string; entries: SemanticDiffResourceF
   );
 }
 
-function DiffLineageList(props: { title: string; entries: SemanticDiffLineageEdge[] }) {
+function DiffLineageList(props: { title: string; entries: SemanticDiffLineageEdge[]; onSelectEvent: (id: string) => void }) {
   return (
     <section class="diff-panel">
       <div class="lane-section-head">
@@ -459,16 +474,32 @@ function DiffLineageList(props: { title: string; entries: SemanticDiffLineageEdg
       <div class="diff-entry-list">
         <For each={props.entries} fallback={<EmptyState label="No entries" compact />}>
           {(entry) => (
-            <div class="diff-entry">
+            <button
+              type="button"
+              class="diff-entry"
+              disabled={!selectableDiffEventId(entry.toEventId, entry.fromEventId)}
+              onClick={() => selectDiffEvent(props.onSelectEvent, entry.toEventId, entry.fromEventId)}
+            >
               <span>#{entry.fromEventId} -&gt; #{entry.toEventId}</span>
               <strong>{entry.edgeKind}</strong>
               <small>semantic edge</small>
-            </div>
+            </button>
           )}
         </For>
       </div>
     </section>
   );
+}
+
+function selectableDiffEventId(...ids: string[]): string | null {
+  return ids.find((id) => id.length > 0 && id !== "unknown" && id !== "null") ?? null;
+}
+
+function selectDiffEvent(onSelectEvent: (id: string) => void, ...ids: string[]) {
+  const id = selectableDiffEventId(...ids);
+  if (id) {
+    onSelectEvent(id);
+  }
 }
 
 function ChainView(props: {

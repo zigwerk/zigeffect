@@ -1,6 +1,9 @@
 const std = @import("std");
 const causal = @import("causal.zig");
 
+pub const causal_semantic_diff_schema = "zigeffect.causal.semantic-diff.v1";
+pub const causal_semantic_diff_schema_version: u32 = 1;
+
 pub const CausalFindingDelta = struct {
     kind: causal.CausalFindingKind,
     run_id: ?u64 = null,
@@ -316,4 +319,156 @@ pub fn diffCausalGraphs(
         .added_lineage_edges = try added_lineage.toOwnedSlice(allocator),
         .removed_lineage_edges = try removed_lineage.toOwnedSlice(allocator),
     };
+}
+
+pub fn formatCausalGraphDiffJson(
+    allocator: std.mem.Allocator,
+    diff: CausalGraphDiff,
+    before_artifact: []const u8,
+    after_artifact: []const u8,
+) std.mem.Allocator.Error![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+    const summary = diff.summary();
+
+    try output.appendSlice(allocator, "{\"schema\":");
+    try appendJsonString(&output, allocator, causal_semantic_diff_schema);
+    try output.print(allocator, ",\"schema_version\":{d}", .{causal_semantic_diff_schema_version});
+    try output.appendSlice(allocator, ",\"before\":");
+    try appendJsonString(&output, allocator, before_artifact);
+    try output.appendSlice(allocator, ",\"after\":");
+    try appendJsonString(&output, allocator, after_artifact);
+    try output.print(
+        allocator,
+        ",\"summary\":{{\"resolved_findings\":{d},\"introduced_findings\":{d},\"added_fiber_terminals\":{d},\"removed_fiber_terminals\":{d},\"added_resource_finalizations\":{d},\"removed_resource_finalizations\":{d},\"added_lineage_edges\":{d},\"removed_lineage_edges\":{d}}}",
+        .{
+            summary.resolved_findings,
+            summary.introduced_findings,
+            summary.added_fiber_terminals,
+            summary.removed_fiber_terminals,
+            summary.added_resource_finalizations,
+            summary.removed_resource_finalizations,
+            summary.added_lineage_edges,
+            summary.removed_lineage_edges,
+        },
+    );
+    try appendFindingArray(&output, allocator, "resolved_findings", diff.resolved_findings);
+    try appendFindingArray(&output, allocator, "introduced_findings", diff.introduced_findings);
+    try appendFiberArray(&output, allocator, "added_fiber_terminals", diff.added_fiber_terminals);
+    try appendFiberArray(&output, allocator, "removed_fiber_terminals", diff.removed_fiber_terminals);
+    try appendResourceArray(&output, allocator, "added_resource_finalizations", diff.added_resource_finalizations);
+    try appendResourceArray(&output, allocator, "removed_resource_finalizations", diff.removed_resource_finalizations);
+    try appendLineageArray(&output, allocator, "added_lineage_edges", diff.added_lineage_edges);
+    try appendLineageArray(&output, allocator, "removed_lineage_edges", diff.removed_lineage_edges);
+    try output.appendSlice(allocator, "}");
+    return output.toOwnedSlice(allocator);
+}
+
+fn appendFindingArray(output: *std.ArrayList(u8), allocator: std.mem.Allocator, name: []const u8, items: []const CausalFindingDelta) std.mem.Allocator.Error!void {
+    try output.appendSlice(allocator, ",\"");
+    try output.appendSlice(allocator, name);
+    try output.appendSlice(allocator, "\":[");
+    for (items, 0..) |item, index| {
+        if (index > 0) try output.appendSlice(allocator, ",");
+        try output.appendSlice(allocator, "{\"kind\":");
+        try appendJsonString(output, allocator, @tagName(item.kind));
+        try output.appendSlice(allocator, ",\"event_id\":null,\"owner\":");
+        try appendOwner(output, allocator, item.run_id, item.scope_id, item.fiber_id, null);
+        try output.appendSlice(allocator, "}");
+    }
+    try output.appendSlice(allocator, "]");
+}
+
+fn appendFiberArray(output: *std.ArrayList(u8), allocator: std.mem.Allocator, name: []const u8, items: []const CausalFiberTerminalFact) std.mem.Allocator.Error!void {
+    try output.appendSlice(allocator, ",\"");
+    try output.appendSlice(allocator, name);
+    try output.appendSlice(allocator, "\":[");
+    for (items, 0..) |item, index| {
+        if (index > 0) try output.appendSlice(allocator, ",");
+        try output.appendSlice(allocator, "{\"fiber_id\":");
+        try appendOptionalU64(output, allocator, item.fiber_id);
+        try output.appendSlice(allocator, ",\"terminal_kind\":");
+        try appendJsonString(output, allocator, @tagName(item.kind));
+        try output.appendSlice(allocator, ",\"status\":");
+        try appendJsonString(output, allocator, item.status);
+        try output.appendSlice(allocator, ",\"event_id\":null}");
+    }
+    try output.appendSlice(allocator, "]");
+}
+
+fn appendResourceArray(output: *std.ArrayList(u8), allocator: std.mem.Allocator, name: []const u8, items: []const CausalResourceFinalizationFact) std.mem.Allocator.Error!void {
+    try output.appendSlice(allocator, ",\"");
+    try output.appendSlice(allocator, name);
+    try output.appendSlice(allocator, "\":[");
+    for (items, 0..) |item, index| {
+        if (index > 0) try output.appendSlice(allocator, ",");
+        try output.appendSlice(allocator, "{\"scope_id\":");
+        try appendOptionalU64(output, allocator, item.scope_id);
+        try output.appendSlice(allocator, ",\"resource_id\":");
+        try appendOptionalU64(output, allocator, item.resource_id);
+        try output.appendSlice(allocator, ",\"type_name\":");
+        try appendJsonString(output, allocator, item.type_name);
+        try output.appendSlice(allocator, ",\"status\":");
+        try appendJsonString(output, allocator, item.status);
+        try output.appendSlice(allocator, ",\"event_id\":null}");
+    }
+    try output.appendSlice(allocator, "]");
+}
+
+fn appendLineageArray(output: *std.ArrayList(u8), allocator: std.mem.Allocator, name: []const u8, items: []const CausalLineageEdgeFact) std.mem.Allocator.Error!void {
+    try output.appendSlice(allocator, ",\"");
+    try output.appendSlice(allocator, name);
+    try output.appendSlice(allocator, "\":[");
+    for (items, 0..) |item, index| {
+        if (index > 0) try output.appendSlice(allocator, ",");
+        try output.appendSlice(allocator, "{\"from_event_id\":null,\"to_event_id\":null,\"edge_kind\":");
+        try appendJsonString(output, allocator, if (item.cause_kind != null) "cause" else "parent");
+        try output.appendSlice(allocator, ",\"kind\":");
+        try appendJsonString(output, allocator, @tagName(item.kind));
+        try output.appendSlice(allocator, ",\"parent_kind\":");
+        try appendOptionalKind(output, allocator, item.parent_kind);
+        try output.appendSlice(allocator, ",\"cause_kind\":");
+        try appendOptionalKind(output, allocator, item.cause_kind);
+        try output.appendSlice(allocator, "}");
+    }
+    try output.appendSlice(allocator, "]");
+}
+
+fn appendOwner(output: *std.ArrayList(u8), allocator: std.mem.Allocator, run_id: ?u64, scope_id: ?u64, fiber_id: ?u64, resource_id: ?u64) std.mem.Allocator.Error!void {
+    if (fiber_id) |id| return output.print(allocator, "\"fiber:{d}\"", .{id});
+    if (resource_id) |id| return output.print(allocator, "\"resource:{d}\"", .{id});
+    if (scope_id) |id| return output.print(allocator, "\"scope:{d}\"", .{id});
+    if (run_id) |id| return output.print(allocator, "\"run:{d}\"", .{id});
+    try output.appendSlice(allocator, "\"unknown\"");
+}
+
+fn appendOptionalKind(output: *std.ArrayList(u8), allocator: std.mem.Allocator, kind: ?causal.CausalEventKind) std.mem.Allocator.Error!void {
+    if (kind) |value| {
+        try appendJsonString(output, allocator, @tagName(value));
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+}
+
+fn appendOptionalU64(output: *std.ArrayList(u8), allocator: std.mem.Allocator, value: ?u64) std.mem.Allocator.Error!void {
+    if (value) |number| {
+        try output.print(allocator, "{d}", .{number});
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+}
+
+fn appendJsonString(output: *std.ArrayList(u8), allocator: std.mem.Allocator, value: []const u8) std.mem.Allocator.Error!void {
+    try output.append(allocator, '"');
+    for (value) |byte| {
+        switch (byte) {
+            '"' => try output.appendSlice(allocator, "\\\""),
+            '\\' => try output.appendSlice(allocator, "\\\\"),
+            '\n' => try output.appendSlice(allocator, "\\n"),
+            '\r' => try output.appendSlice(allocator, "\\r"),
+            '\t' => try output.appendSlice(allocator, "\\t"),
+            else => try output.append(allocator, byte),
+        }
+    }
+    try output.append(allocator, '"');
 }

@@ -33,6 +33,19 @@ pub const CausalLiveCommandResult = struct {
     alert_event_id: ?u64 = null,
 };
 
+pub const CausalLiveCommandEnvelope = struct {
+    sequence: u64,
+    request: CausalLiveCommandRequest,
+};
+
+pub const CausalLiveCommandTapResult = struct {
+    processed: usize = 0,
+    applied: usize = 0,
+    rejected: usize = 0,
+    needs_human_review: usize = 0,
+    last_sequence: ?u64 = null,
+};
+
 pub fn applyCausalLiveCommand(
     store: *CausalStore,
     policy: AgentInterventionPolicy,
@@ -82,6 +95,28 @@ pub fn applyCausalLiveCommand(
         .applied = intervention.applied,
         .intervention = intervention,
     };
+}
+
+pub fn runCausalLiveCommandTapBatch(
+    store: *CausalStore,
+    policy: AgentInterventionPolicy,
+    envelopes: []const CausalLiveCommandEnvelope,
+) std.mem.Allocator.Error!CausalLiveCommandTapResult {
+    var output = CausalLiveCommandTapResult{};
+    for (envelopes) |envelope| {
+        const result = try applyCausalLiveCommand(store, policy, envelope.request);
+        output.processed += 1;
+        output.last_sequence = envelope.sequence;
+        if (result.applied) {
+            output.applied += 1;
+        }
+        switch (result.decision) {
+            .approve => {},
+            .reject => output.rejected += 1,
+            .needs_human_review => output.needs_human_review += 1,
+        }
+    }
+    return output;
 }
 
 fn liveCommandKind(command_kind: []const u8) ?AgentInterventionKind {

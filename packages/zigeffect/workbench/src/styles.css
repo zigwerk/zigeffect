@@ -729,6 +729,14 @@ h3 {
   border-radius: 6px;
   padding: 8px;
   background: #fbfcfa;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.diff-entry:disabled {
+  cursor: default;
+  opacity: 0.72;
 }
 
 .diff-entry.ok {
