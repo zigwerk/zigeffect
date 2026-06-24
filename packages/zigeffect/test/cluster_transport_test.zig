@@ -12,6 +12,9 @@ test "cluster transport public exports are available" {
     try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportAuthMode"));
     try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportAuth"));
     try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportLimits"));
+    try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportTlsPolicy"));
+    try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportBackpressurePolicy"));
+    try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportConnectionPoolPolicy"));
     try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportLifecycleState"));
     try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportMetricsSnapshot"));
     try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportFailureReport"));
@@ -26,6 +29,8 @@ test "cluster transport public exports are available" {
     try std.testing.expect(@hasDecl(fx.cluster, "formatClusterTransportFailureReport"));
     try std.testing.expect(@hasDecl(fx.cluster, "chunkedClusterTransportRequest"));
     try std.testing.expect(@hasDecl(fx, "ClusterTransport"));
+    try std.testing.expect(@hasDecl(fx, "ClusterTransportTlsPolicy"));
+    try std.testing.expect(@hasDecl(fx, "ClusterTransportBackpressurePolicy"));
     try std.testing.expect(@hasDecl(fx, "LoopbackSocketClusterTransport"));
     try std.testing.expect(@hasDecl(fx, "RemoteSocketClusterTransport"));
     try std.testing.expect(@hasDecl(fx, "ProductionHttpClusterTransport"));
@@ -71,6 +76,7 @@ test "transport request json redacts auth credential while preserving trace and 
         .auth = .{ .mode = .bearer_token, .credential = "token-1" },
         .trace_id = 7001,
         .span_id = 7002,
+        .origin_causal_event_id = 7003,
         .chunk_index = 0,
         .chunk_count = 3,
         .policy = .{ .timeout_ms = 250, .max_retries = 2 },
@@ -88,6 +94,7 @@ test "transport request json redacts auth credential while preserving trace and 
     try std.testing.expectEqualStrings(fx.causal_redaction_marker, parsed.auth.credential.?);
     try std.testing.expectEqual(@as(?u64, 7001), parsed.trace_id);
     try std.testing.expectEqual(@as(?u64, 7002), parsed.span_id);
+    try std.testing.expectEqual(@as(?u64, 7003), parsed.origin_causal_event_id);
     try std.testing.expectEqual(@as(?u32, 0), parsed.chunk_index);
     try std.testing.expectEqual(@as(?u32, 3), parsed.chunk_count);
 }
@@ -960,6 +967,100 @@ test "remote socket transport sends over socket path with matching auth" {
     try std.testing.expectEqual(@as(usize, 1), metrics.successes);
     try std.testing.expect(metrics.bytes_sent > 0);
     try std.testing.expect(metrics.bytes_received > 0);
+}
+
+test "remote socket transport validates TLS and pool policy before start" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var message_storage_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_state.deinit();
+
+    try std.testing.expectError(error.InvalidTransportLimits, fx.RemoteSocketClusterTransport.init(
+        std.testing.allocator,
+        std.testing.io,
+        message_storage_state.asMessageStorage(),
+        .{
+            .shard_count = 8,
+            .port = 19395,
+            .tls = .{ .mode = .pinned_fingerprint, .pinned_fingerprint = "" },
+        },
+    ));
+
+    try std.testing.expectError(error.InvalidTransportLimits, fx.RemoteSocketClusterTransport.init(
+        std.testing.allocator,
+        std.testing.io,
+        message_storage_state.asMessageStorage(),
+        .{
+            .shard_count = 8,
+            .port = 19396,
+            .pool = .{ .max_connections = 0 },
+        },
+    ));
+}
+
+test "remote socket transport applies reject backpressure before durable submission" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var message_storage_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_state.deinit();
+
+    var transport_state = try fx.RemoteSocketClusterTransport.init(
+        std.testing.allocator,
+        std.testing.io,
+        message_storage_state.asMessageStorage(),
+        .{
+            .shard_count = 8,
+            .port = 19397,
+            .backpressure = .{ .strategy = .reject, .max_queued = 0 },
+        },
+    );
+    defer transport_state.deinit();
+
+    const address = fx.entityAddress("counter", "remote-backpressure");
+    const shard_id = try fx.shardIdForAddress(address, 8);
+    try std.testing.expectError(error.TransportBackpressured, transport_state.asClusterTransport().send(std.testing.allocator, .{
+        .kind = .tell,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "inc",
+        .redacted_detail = "backpressure",
+    }));
+
+    var by_shard = try message_storage_state.asMessageStorage().unprocessedByShard(shard_id, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 0), by_shard.records.len);
+    const metrics = transport_state.snapshotMetrics();
+    try std.testing.expectEqual(@as(usize, 1), metrics.backpressured);
+}
+
+test "remote socket transport preserves origin causal event id across socket path" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var message_storage_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_state.deinit();
+
+    var transport_state = try fx.RemoteSocketClusterTransport.init(
+        std.testing.allocator,
+        std.testing.io,
+        message_storage_state.asMessageStorage(),
+        .{ .shard_count = 8, .port = 19398 },
+    );
+    defer transport_state.deinit();
+
+    const address = fx.entityAddress("counter", "remote-origin-causal");
+    var response = try transport_state.asClusterTransport().send(std.testing.allocator, .{
+        .kind = .request,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "get",
+        .redacted_detail = "origin",
+        .idempotency_key = "remote-origin-causal-key",
+        .origin_causal_event_id = 777,
+    });
+    defer response.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(?u64, 777), response.origin_causal_event_id);
+    try std.testing.expectEqual(@as(?u64, 777), response.envelope.origin_causal_event_id);
 }
 
 const TraceTransportKind = enum {

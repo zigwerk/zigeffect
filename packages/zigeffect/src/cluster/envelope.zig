@@ -35,6 +35,7 @@ pub const MessageEnvelope = struct {
     attempt: MessageAttempt = 0,
     trace_id: ?u64 = null,
     span_id: ?u64 = null,
+    origin_causal_event_id: ?u64 = null,
     chunk_index: ?u32 = null,
     chunk_count: ?u32 = null,
     lease_epoch: ?runner_storage.ShardLeaseEpoch = null,
@@ -236,7 +237,7 @@ pub fn deinitMessageEnvelope(allocator: Allocator, envelope: MessageEnvelope) vo
 pub fn formatMessageDiagnostic(allocator: Allocator, envelope: MessageEnvelope) Allocator.Error![]const u8 {
     return std.fmt.allocPrint(
         allocator,
-        "zigeffect message\nid: {d}\nkind: {s}\nentity: {s}/{d}\ncorrelation: {?d}\nattempt: {d}\nchunk: {d}/{d}\ntype: {s}\ndetail: {s}",
+        "zigeffect message\nid: {d}\nkind: {s}\nentity: {s}/{d}\ncorrelation: {?d}\nattempt: {d}\norigin_causal_event_id: {?d}\nchunk: {d}/{d}\ntype: {s}\ndetail: {s}",
         .{
             envelope.id,
             @tagName(envelope.kind),
@@ -244,6 +245,7 @@ pub fn formatMessageDiagnostic(allocator: Allocator, envelope: MessageEnvelope) 
             envelope.address.id,
             envelope.correlation_id,
             envelope.attempt,
+            envelope.origin_causal_event_id,
             envelope.chunk_index orelse 0,
             envelope.chunk_count orelse 0,
             envelope.payload_type_name,

@@ -36,7 +36,8 @@ semantic fact comparison, not exact event-id graph isomorphism.
 | 9 | Visual workbench (SolidJS / zig-webui) | **live-attach** (static + streaming via collector) | `workbench/`, `workbench/src/collector/` |
 | 10 | Export adapters (JSONL/DOT/OTel/OTLP/graph-history/NenDB) | **OTLP + collector live end-to-end** | `src/services/causal_*_backend.zig`, `causal_otlp_json.zig` |
 | 11 | Durable workflows + clustering | **scheduler runs on zio; loopback + remote socket wrappers cross the transport boundary** | `src/workflow/*`, `src/cluster/*` |
-| 12 | Agent-operable runtime layer | **bounded interventions, counterfactuals, invariants, evals** | `src/services/agent_intervention.zig`, `counterfactual.zig`, `causal_invariant.zig`, `agent_eval.zig` |
+| 12 | Agent-operable runtime layer | **bounded interventions, counterfactuals, invariants, evals, semantic diffs** | `src/services/agent_intervention.zig`, `counterfactual.zig`, `causal_invariant.zig`, `agent_eval.zig`, `causal_diff.zig` |
+| 13 | Production-operable guardrails | **live commands, concurrency facts, transport policy, ops policy** | `workbench/src/collector`, `src/services/causal_concurrency.zig`, `src/services/causal_ops.zig`, `src/cluster/transport.zig` |
 
 ## What is real today
 
@@ -77,6 +78,18 @@ semantic fact comparison, not exact event-id graph isomorphism.
   scope close, and assertion failures.
 - A first **agent eval harness**: `runAgentEval` scores an intervention by graph
   improvement plus invariant cleanliness rather than prose plausibility.
+- **Semantic causal graph diffs.** `diffCausalGraphs` explains which findings,
+  fiber terminal facts, resource finalization facts, and lineage edges changed
+  between two traces; counterfactuals and evals now carry diff summaries.
+- **Bidirectional live debugging transport primitives.** The Bun collector now
+  accepts `POST /command`, broadcasts redacted command frames, and the workbench
+  live layer can send bounded command requests. Applying commands still belongs
+  to the engine's `AgentInterventionPolicy`.
+- **Concurrency and STM annotation helpers.** `CausalConcurrencyRecorder` records
+  race winner/loser facts, `both` completion facts, and STM conflict/retry/commit
+  facts as causal events.
+- **Ops policy core.** `CausalOpsPolicy` validates deployment metadata, checks
+  actor/scope read access, and emits retention threshold alerts as causal facts.
 - App-facing causal traces (`CausalAppTrace`) emitting `zigeffect.causal.v1` from
   Worker-shaped request/job paths.
 - Export adapters as sinks (JSONL, DOT, OTel-shaped, **OTLP/JSON**, graph-history,
@@ -99,7 +112,8 @@ semantic fact comparison, not exact event-id graph isomorphism.
   frame back through the public transport vtable.
 - **A hardened remote socket wrapper.** `RemoteSocketClusterTransport` keeps the
   same socket frame path but adds endpoint validation, auth preflight before
-  durable submission, nonzero pool validation, reconnect attempts, lifecycle
+  durable submission, nonzero pool validation, TLS/pool/backpressure policy
+  validation, reconnect attempts, origin causal event propagation, lifecycle
   metrics, and redacted failure reports.
 
 ## Boundary decisions (intentional non-goals, for now)
@@ -128,24 +142,25 @@ semantic fact comparison, not exact event-id graph isomorphism.
 ## The frontier now
 
 The original "single biggest gap" — real async/concurrency under the causal graph
-— is **substantially closed**: the graph now explains real zio-coroutine and
-real-OS-thread execution, not only a deterministic simulation. The next frontier
-is the agent-operable runtime becoming production-operable:
+— is **substantially closed**. The second gap — an agent-operable runtime that
+can explain and audit its own interventions — now has a tested local substrate.
+The next frontier is turning these local substrates into real deployed systems:
 
-1. **Deployed remote cluster networking.** The socket boundary now has loopback
-   and remote-wrapper coverage. The next distributed step is real multi-node
-   deployment semantics: TLS/auth rotation, timeout/backpressure policy,
-   connection-pool behavior, and causal lineage across runner boundaries.
-2. **Bidirectional live debugging.** The agent intervention protocol exists in
-   the engine; the workbench live path is still observe-only. The next step is an
-   explicit, policy-gated browser/collector command path that records every
-   intervention as causal facts.
-3. **Causal graph diffs and richer evals.** Counterfactuals and `runAgentEval`
-   now produce coarse finding deltas. Next, add semantic graph diffs that explain
-   exactly which lineage, resource, fiber, or finding facts changed.
-4. **Durable retention + operational hardening** (deployment, access control,
-   alerting) — deferred until the above, and only ever as `src/` capabilities with
-   tests and an approved [tool-roadmap.md](tool-roadmap.md) entry.
+1. **Real multi-node cluster deployment.** The transport validates TLS/pool/
+   backpressure policy and propagates origin causal ids, but it still runs over a
+   local socket wrapper. Next: real TLS handshakes, service discovery, auth
+   rotation, health-checked pools, and causal lineage stitched across separate
+   runner processes.
+2. **Engine-applied live commands.** The collector/workbench command lane exists.
+   Next: wire those command frames into a running engine command tap that invokes
+   `AgentInterventionPolicy`, applies approved effects, and streams the resulting
+   causal facts back to the browser.
+3. **Visual semantic diff UX.** `diffCausalGraphs` exists as a runtime API. Next:
+   render before/after graph deltas in the workbench and use them as richer agent
+   eval evidence.
+4. **Durable ops adapters.** `CausalOpsPolicy` exists. Next: attach it to NenDB/
+   storage backends, access-controlled artifact reads, alert sinks, deployment
+   metadata, and operator-facing runbooks.
 
 ## Hardening milestone roadmap
 
@@ -373,6 +388,95 @@ platform.
 - Approved interrupt over a suspended-fiber trace passes.
 - Denied policy does not pass.
 
+### M11 — Semantic causal graph diffs
+
+**Status:** delivered on 2026-06-24 via `src/services/causal_diff.zig`.
+
+**Goal:** explain what changed between two causal traces in graph facts, not only
+finding counts.
+
+**Work:**
+- Compare resolved/introduced findings.
+- Compare added/removed fiber terminal facts.
+- Compare added/removed resource finalization facts.
+- Compare added/removed parent/cause lineage facts.
+- Feed diff summaries into counterfactual and agent eval results.
+
+**Acceptance:**
+- A before/after trace with an interrupted hung fiber and finalized resource
+  reports resolved findings, terminal fiber facts, resource finalization, and
+  added lineage edges.
+
+### M12 — Bidirectional live debugging command lane
+
+**Status:** delivered on 2026-06-24 via the workbench live attach and collector.
+
+**Goal:** let the browser/collector carry bounded intervention requests without
+making the browser the policy authority.
+
+**Work:**
+- Add `LiveCommandRequest` and `LiveCommandFrame`.
+- Add `sendLiveCommand` with injectable fetcher.
+- Add collector `POST /command` that validates shape, redacts command text, and
+  broadcasts command frames to live subscribers.
+
+**Acceptance:**
+- Workbench tests parse command frames and post commands.
+- Collector tests prove `POST /command` broadcasts a redacted command frame.
+
+### M13 — Race/both and STM causal annotations
+
+**Status:** delivered on 2026-06-24 via `src/services/causal_concurrency.zig`.
+
+**Goal:** expose important concurrency decisions as causal facts agents can
+query.
+
+**Work:**
+- Add event kinds for race start, winner selection, loser interruption,
+  `both` start/completion, and STM transaction/conflict/retry/commit.
+- Add `CausalConcurrencyRecorder` to record those facts into a `CausalStore`.
+
+**Acceptance:**
+- Tests prove race, both, and STM retry facts are recorded with run/scope/fiber
+  ownership.
+
+### M14 — Remote transport policy hardening
+
+**Status:** delivered on 2026-06-24 via `RemoteSocketClusterTransport` policy
+extensions.
+
+**Goal:** add real deployment policy seams without pretending this is already a
+hosted multi-node platform.
+
+**Work:**
+- Add TLS policy metadata, connection pool policy, and backpressure policy.
+- Validate TLS/pool policy at init.
+- Reject sends under reject-style backpressure before durable submission.
+- Propagate `origin_causal_event_id` through request/response JSON and message
+  envelopes.
+
+**Acceptance:**
+- Tests reject invalid TLS and pool policy.
+- Tests reject backpressured sends before storage submission.
+- Tests preserve origin causal ids across the socket path.
+
+### M15 — Durable retention and ops hardening
+
+**Status:** delivered on 2026-06-24 via `src/services/causal_ops.zig`.
+
+**Goal:** create a small tested policy core for deployment metadata, causal
+artifact access, retention decisions, and alert emission.
+
+**Work:**
+- Validate deployment metadata before access checks pass.
+- Check actor/scope read access.
+- Decide retention trim/keep actions.
+- Emit `alert_emitted` causal facts for retention threshold breaches.
+
+**Acceptance:**
+- Tests prove actor/scope access decisions.
+- Tests prove retention threshold alerts are recorded in the causal graph.
+
 ## Delivered since 2026-06-20
 
 The forward sequence from the prior roadmap is largely done. Tracked in
@@ -388,10 +492,12 @@ The forward sequence from the prior roadmap is largely done. Tracked in
   FiberRef auto-propagation, the zio vtable fill, workbench live-attach) plus the
   collector and scheduler-on-zio, each adversarially reviewed and hardened.
 - One loopback cluster transport crosses localhost TCP, and the remote socket
-  wrapper adds auth preflight, reconnect attempts, metrics, and redacted failure
-  handling.
-- The M6-M10 agentic engine layer now covers bounded interventions,
-  counterfactual trace forks, reusable invariants, and graph-delta eval scoring.
+  wrapper adds auth preflight, reconnect attempts, transport policy validation,
+  origin causal ids, metrics, and redacted failure handling.
+- The M6-M15 agentic engine layer now covers bounded interventions,
+  counterfactual trace forks, reusable invariants, semantic graph diffs, live
+  command transport primitives, concurrency annotations, transport hardening, and
+  ops guardrails.
 
 ## June 2026 cleanup note
 

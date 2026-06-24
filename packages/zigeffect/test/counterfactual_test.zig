@@ -23,4 +23,6 @@ test "counterfactual interrupt reduces hung fiber findings" {
     try std.testing.expectEqual(@as(isize, -1), result.finding_delta);
     try std.testing.expect(result.improved);
     try std.testing.expect(result.intervention.applied);
+    try std.testing.expectEqual(@as(usize, 1), result.diff_summary.resolved_findings);
+    try std.testing.expectEqual(@as(usize, 1), result.diff_summary.added_fiber_terminals);
 }

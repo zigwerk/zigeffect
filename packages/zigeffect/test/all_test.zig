@@ -58,6 +58,9 @@ comptime {
     _ = @import("counterfactual_test.zig");
     _ = @import("causal_invariant_test.zig");
     _ = @import("agent_eval_test.zig");
+    _ = @import("causal_diff_test.zig");
+    _ = @import("causal_concurrency_test.zig");
+    _ = @import("causal_ops_test.zig");
     _ = @import("causal_app_runtime_test.zig");
     _ = @import("invariants_test.zig");
     _ = @import("layer_test.zig");

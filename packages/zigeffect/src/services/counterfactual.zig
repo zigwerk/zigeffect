@@ -1,6 +1,7 @@
 const std = @import("std");
 const causal = @import("causal.zig");
 const causal_structural = @import("causal_structural.zig");
+const causal_diff = @import("causal_diff.zig");
 const agent_intervention = @import("agent_intervention.zig");
 
 pub const CounterfactualResult = struct {
@@ -8,6 +9,7 @@ pub const CounterfactualResult = struct {
     after_findings: usize,
     finding_delta: isize,
     structurally_equivalent: bool,
+    diff_summary: causal_diff.CausalGraphDiffSummary,
     improved: bool,
     intervention: agent_intervention.AgentInterventionResult,
 };
@@ -45,6 +47,9 @@ pub fn runCounterfactual(
     defer before_snapshot.deinit();
     var after_snapshot = try after.snapshot(allocator);
     defer after_snapshot.deinit();
+    var diff = try causal_diff.diffCausalGraphs(allocator, before_snapshot.events, after_snapshot.events);
+    defer diff.deinit();
+    const diff_summary = diff.summary();
 
     const delta: isize = @as(isize, @intCast(after_findings)) - @as(isize, @intCast(before_findings));
     return .{
@@ -52,7 +57,8 @@ pub fn runCounterfactual(
         .after_findings = after_findings,
         .finding_delta = delta,
         .structurally_equivalent = try causal_structural.structurallyEquivalent(allocator, before_snapshot.events, after_snapshot.events),
-        .improved = intervention.applied and delta < 0,
+        .diff_summary = diff_summary,
+        .improved = intervention.applied and (delta < 0 or diff_summary.improved()),
         .intervention = intervention,
     };
 }

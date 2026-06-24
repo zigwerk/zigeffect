@@ -7,10 +7,15 @@ import {
   frameToEventRecord,
   framesFromStreamDocument,
   isLiveFrame,
+  isLiveCommandFrame,
   liveUrlFromSearch,
   mockLiveSource,
+  parseCommandMessage,
   parseFrameMessage,
+  sendLiveCommand,
   webSocketLiveSource,
+  type LiveCommandRequest,
+  type LiveCommandFrame,
   type LiveFrame,
   type WebSocketLike,
 } from "./liveAttach";
@@ -48,6 +53,55 @@ test("isLiveFrame / parseFrameMessage accept valid frames and reject junk", () =
   expect(parseFrameMessage(JSON.stringify(sampleFrames[0]))?.event_id).toBe(10);
   expect(parseFrameMessage("not json")).toBeNull();
   expect(parseFrameMessage(JSON.stringify({ hello: "world" }))).toBeNull();
+});
+
+test("isLiveCommandFrame / parseCommandMessage accept intervention command frames", () => {
+  const command: LiveCommandFrame = {
+    sequence: 1,
+    command_id: "cmd-1",
+    command_kind: "interrupt_fiber",
+    status: "received",
+    reason: "interrupt hung fiber",
+    run_id: 1,
+    fiber_id: 9,
+  };
+
+  expect(isLiveCommandFrame(command)).toBe(true);
+  expect(isLiveCommandFrame({ sequence: 1, command_id: "cmd-1" })).toBe(false);
+  expect(parseCommandMessage(JSON.stringify(command))?.command_kind).toBe("interrupt_fiber");
+  expect(parseCommandMessage("not json")).toBeNull();
+});
+
+test("sendLiveCommand posts a bounded intervention request and returns command frame", async () => {
+  const request: LiveCommandRequest = {
+    kind: "interrupt_fiber",
+    reason: "interrupt hung fiber",
+    run_id: 1,
+    fiber_id: 9,
+  };
+  const sent: { url?: string; body?: unknown } = {};
+  const fetcher = async (url: string, init?: RequestInit) => {
+    sent.url = url;
+    sent.body = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(
+      JSON.stringify({
+        sequence: 7,
+        command_id: "cmd-7",
+        command_kind: "interrupt_fiber",
+        status: "received",
+        reason: "interrupt hung fiber",
+        run_id: 1,
+        fiber_id: 9,
+      }),
+      { headers: { "content-type": "application/json" } },
+    );
+  };
+
+  const frame = await sendLiveCommand("http://127.0.0.1:4500/command", request, fetcher);
+  expect(sent.url).toBe("http://127.0.0.1:4500/command");
+  expect(sent.body).toEqual(request);
+  expect(frame.command_id).toBe("cmd-7");
+  expect(frame.command_kind).toBe("interrupt_fiber");
 });
 
 test("LiveCausalBuffer accumulates frames in causal (sequence) order", () => {

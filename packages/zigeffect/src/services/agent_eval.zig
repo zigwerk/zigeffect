@@ -2,6 +2,7 @@ const std = @import("std");
 const causal = @import("causal.zig");
 const agent_intervention = @import("agent_intervention.zig");
 const counterfactual = @import("counterfactual.zig");
+const causal_diff = @import("causal_diff.zig");
 const causal_invariant = @import("causal_invariant.zig");
 
 pub const AgentEvalOptions = struct {
@@ -16,6 +17,7 @@ pub const AgentEvalOptions = struct {
 pub const AgentEvalResult = struct {
     passed: bool,
     counterfactual: counterfactual.CounterfactualResult,
+    diff_summary: causal_diff.CausalGraphDiffSummary,
     invariant_violations: usize,
 };
 
@@ -43,6 +45,7 @@ pub fn runAgentEval(allocator: std.mem.Allocator, options: AgentEvalOptions) std
     return .{
         .passed = cf.intervention.applied and improvement_ok and invariant_check.violations.len == 0,
         .counterfactual = cf,
+        .diff_summary = cf.diff_summary,
         .invariant_violations = invariant_check.violations.len,
     };
 }

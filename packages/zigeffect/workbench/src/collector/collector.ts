@@ -10,6 +10,7 @@
 
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import { causalLineToFrame, type LiveFrame } from "./frame";
+import type { LiveCommandFrame } from "../liveAttach";
 
 export type Collector = {
   /** Bun.serve `fetch` handler: upgrades `/live` to WS, ingests `POST /ingest`. */
@@ -20,6 +21,8 @@ export type Collector = {
   ingestLine: (line: string) => LiveFrame | null;
   /** Ingest an NDJSON body; returns the number of frames broadcast. */
   ingestBody: (body: string) => number;
+  /** Validate and broadcast one policy-gated live command intent. */
+  ingestCommand: (body: unknown) => LiveCommandFrame | null;
   /** Number of currently-connected WebSocket clients. */
   clientCount: () => number;
 };
@@ -27,9 +30,10 @@ export type Collector = {
 export function createCollector(): Collector {
   const clients = new Set<ServerWebSocket<undefined>>();
   let sequence = 0;
+  let commandSequence = 0;
 
   const WS_OPEN = 1; // WebSocket.OPEN
-  function broadcast(frame: LiveFrame): void {
+  function broadcast(frame: LiveFrame | LiveCommandFrame): void {
     const message = JSON.stringify(frame);
     for (const client of clients) {
       // Skip a socket that is closing/closed (it is removed on its `close`
@@ -56,6 +60,43 @@ export function createCollector(): Collector {
       if (ingestLine(line)) count += 1;
     }
     return count;
+  }
+
+  function redactCommandText(value: string): string {
+    return value
+      .replace(/\b(authorization|proxy-authorization)\s*:\s*(bearer|basic)\s+[^;\s,]+/gi, "$1: $2 <redacted>")
+      .replace(/\bcookie\s*:\s*[^,\n\r]+/gi, "Cookie: <redacted>")
+      .replace(
+        /\b(api[_-]?key|x-api-key|token|password|secret|session(?:_id)?|sid)\b\s*[:=]\s*("[^"]*"|'[^']*'|[^;\s,]+)/gi,
+        "$1=<redacted>",
+      );
+  }
+
+  function optionalNumber(record: Record<string, unknown>, key: string): number | null {
+    const value = record[key];
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+  }
+
+  function ingestCommand(body: unknown): LiveCommandFrame | null {
+    if (typeof body !== "object" || body === null) return null;
+    const record = body as Record<string, unknown>;
+    if (typeof record.kind !== "string" || record.kind.length === 0) return null;
+    commandSequence += 1;
+    const frame: LiveCommandFrame = {
+      sequence: commandSequence,
+      command_id: `cmd-${commandSequence}`,
+      command_kind: record.kind,
+      status: "received",
+      reason: typeof record.reason === "string" ? redactCommandText(record.reason) : "",
+      redacted_detail: typeof record.redacted_detail === "string" ? redactCommandText(record.redacted_detail) : "",
+      run_id: optionalNumber(record, "run_id"),
+      scope_id: optionalNumber(record, "scope_id"),
+      fiber_id: optionalNumber(record, "fiber_id"),
+      schedule_id: optionalNumber(record, "schedule_id"),
+      resource_id: optionalNumber(record, "resource_id"),
+    };
+    broadcast(frame);
+    return frame;
   }
 
   const websocket: WebSocketHandler<undefined> = {
@@ -87,6 +128,19 @@ export function createCollector(): Collector {
       );
     }
 
+    if (url.pathname === "/command" && request.method === "POST") {
+      return request.json().then(
+        (body) => {
+          const command = ingestCommand(body);
+          if (!command) return new Response("invalid command", { status: 400 });
+          return new Response(JSON.stringify(command), {
+            headers: { "content-type": "application/json" },
+          });
+        },
+        () => new Response("invalid command", { status: 400 }),
+      );
+    }
+
     if (url.pathname === "/health") {
       return new Response(JSON.stringify({ ok: true, clients: clients.size }), {
         headers: { "content-type": "application/json" },
@@ -96,7 +150,7 @@ export function createCollector(): Collector {
     return new Response("not found", { status: 404 });
   }
 
-  return { fetch, websocket, ingestLine, ingestBody, clientCount: () => clients.size };
+  return { fetch, websocket, ingestLine, ingestBody, ingestCommand, clientCount: () => clients.size };
 }
 
 // `engine | bun collector.ts` — serve + pipe stdin NDJSON to connected clients.

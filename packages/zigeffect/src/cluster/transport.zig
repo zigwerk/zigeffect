@@ -66,6 +66,34 @@ pub const ClusterTransportLimits = struct {
     max_in_flight: usize = 1024,
 };
 
+pub const ClusterTransportTlsMode = enum {
+    disabled,
+    pinned_fingerprint,
+};
+
+pub const ClusterTransportTlsPolicy = struct {
+    mode: ClusterTransportTlsMode = .disabled,
+    pinned_fingerprint: []const u8 = "",
+    rotation_epoch: u64 = 0,
+};
+
+pub const ClusterTransportBackpressureStrategy = enum {
+    reject,
+    drop,
+    block,
+};
+
+pub const ClusterTransportBackpressurePolicy = struct {
+    strategy: ClusterTransportBackpressureStrategy = .reject,
+    max_queued: usize = 1024,
+};
+
+pub const ClusterTransportConnectionPoolPolicy = struct {
+    max_connections: usize = 1,
+    idle_timeout_ms: u64 = 30_000,
+    health_check_interval_ms: u64 = 10_000,
+};
+
 pub const ClusterTransportLifecycleState = struct {
     started: bool = true,
     stopped: bool = false,
@@ -100,6 +128,7 @@ pub const ClusterTransportRequest = struct {
     auth: ClusterTransportAuth = .{},
     trace_id: ?u64 = null,
     span_id: ?u64 = null,
+    origin_causal_event_id: ?u64 = null,
     chunk_index: ?u32 = null,
     chunk_count: ?u32 = null,
     policy: ClusterTransportPolicy = .{},
@@ -125,6 +154,7 @@ pub const ClusterTransportResponse = struct {
     duplicate: bool = false,
     attempts: usize = 1,
     transport: ClusterTransportKind,
+    origin_causal_event_id: ?u64 = null,
 
     pub fn deinit(self: *ClusterTransportResponse, allocator: Allocator) void {
         envelope.deinitMessageEnvelope(allocator, self.envelope);
@@ -265,6 +295,7 @@ pub const InProcessClusterTransport = struct {
                 .idempotency_key = idempotency_key,
                 .trace_id = request.trace_id,
                 .span_id = request.span_id,
+                .origin_causal_event_id = request.origin_causal_event_id,
                 .chunk_index = request.chunk_index,
                 .chunk_count = request.chunk_count,
                 .payload_type_name = request.payload_type_name,
@@ -281,6 +312,7 @@ pub const InProcessClusterTransport = struct {
             .duplicate = submitted.duplicate,
             .attempts = attempts,
             .transport = transport_kind,
+            .origin_causal_event_id = request.origin_causal_event_id,
         };
     }
 
@@ -498,6 +530,9 @@ pub const RemoteSocketClusterTransportOptions = struct {
     port: u16 = 19391,
     auth: ClusterTransportAuth = .{},
     limits: ClusterTransportLimits = .{},
+    tls: ClusterTransportTlsPolicy = .{},
+    pool: ClusterTransportConnectionPoolPolicy = .{},
+    backpressure: ClusterTransportBackpressurePolicy = .{},
     pool_size: usize = 1,
     reconnect_attempts: usize = 0,
 };
@@ -505,6 +540,9 @@ pub const RemoteSocketClusterTransportOptions = struct {
 pub const RemoteSocketClusterTransport = struct {
     endpoint_host: []const u8,
     auth: ClusterTransportAuth = .{},
+    tls: ClusterTransportTlsPolicy = .{},
+    pool: ClusterTransportConnectionPoolPolicy = .{},
+    backpressure: ClusterTransportBackpressurePolicy = .{},
     pool_size: usize,
     reconnect_attempts: usize,
     inner: LoopbackSocketClusterTransport,
@@ -519,12 +557,18 @@ pub const RemoteSocketClusterTransport = struct {
     ) !RemoteSocketClusterTransport {
         if (options.pool_size == 0) return error.InvalidTransportLimits;
         try validateTransportLimits(options.limits);
+        try validateTransportTlsPolicy(options.tls);
+        try validateTransportConnectionPoolPolicy(options.pool);
+        try validateTransportBackpressurePolicy(options.backpressure);
         if (!std.mem.eql(u8, options.endpoint_host, "127.0.0.1") and !std.mem.eql(u8, options.endpoint_host, "localhost")) {
             return error.TransportUnavailable;
         }
         return .{
             .endpoint_host = options.endpoint_host,
             .auth = options.auth,
+            .tls = options.tls,
+            .pool = options.pool,
+            .backpressure = options.backpressure,
             .pool_size = options.pool_size,
             .reconnect_attempts = options.reconnect_attempts,
             .inner = try LoopbackSocketClusterTransport.init(allocator, io, storage, .{
@@ -587,6 +631,12 @@ pub const RemoteSocketClusterTransport = struct {
     fn preflight(self: *RemoteSocketClusterTransport, request: ClusterTransportRequest) ClusterTransportError!void {
         _ = self.endpoint_host;
         _ = self.pool_size;
+        _ = self.tls;
+        _ = self.pool;
+        if (self.backpressure.strategy == .reject and self.backpressure.max_queued == 0) {
+            self.recordFailure(1, error.TransportBackpressured, "remote backpressure rejected");
+            return error.TransportBackpressured;
+        }
         validateTransportAuth(self.auth, request.auth) catch |err| {
             self.recordFailure(1, err, "remote auth rejected");
             return err;
@@ -946,6 +996,7 @@ const ClusterTransportRequestJson = struct {
     auth_credential: ?[]const u8 = null,
     trace_id: ?u64 = null,
     span_id: ?u64 = null,
+    origin_causal_event_id: ?u64 = null,
     chunk_index: ?u32 = null,
     chunk_count: ?u32 = null,
     timeout_ms: u64,
@@ -967,6 +1018,7 @@ const ClusterTransportResponseJson = struct {
     redacted_detail: []const u8,
     trace_id: ?u64 = null,
     span_id: ?u64 = null,
+    origin_causal_event_id: ?u64 = null,
     chunk_index: ?u32 = null,
     chunk_count: ?u32 = null,
     duplicate: bool,
@@ -1002,6 +1054,8 @@ pub fn formatClusterTransportRequestJson(allocator: Allocator, request: ClusterT
     try appendOptionalJsonU64(&output, allocator, request.trace_id);
     try output.appendSlice(allocator, ",\"span_id\":");
     try appendOptionalJsonU64(&output, allocator, request.span_id);
+    try output.appendSlice(allocator, ",\"origin_causal_event_id\":");
+    try appendOptionalJsonU64(&output, allocator, request.origin_causal_event_id);
     try output.appendSlice(allocator, ",\"chunk_index\":");
     try appendOptionalJsonU32(&output, allocator, request.chunk_index);
     try output.appendSlice(allocator, ",\"chunk_count\":");
@@ -1041,6 +1095,7 @@ pub fn parseClusterTransportRequestJson(allocator: Allocator, content: []const u
         },
         .trace_id = parsed.value.trace_id,
         .span_id = parsed.value.span_id,
+        .origin_causal_event_id = parsed.value.origin_causal_event_id,
         .chunk_index = parsed.value.chunk_index,
         .chunk_count = parsed.value.chunk_count,
         .policy = .{
@@ -1078,6 +1133,8 @@ pub fn formatClusterTransportResponseJson(allocator: Allocator, response: Cluste
     try appendOptionalJsonU64(&output, allocator, response.envelope.trace_id);
     try output.appendSlice(allocator, ",\"span_id\":");
     try appendOptionalJsonU64(&output, allocator, response.envelope.span_id);
+    try output.appendSlice(allocator, ",\"origin_causal_event_id\":");
+    try appendOptionalJsonU64(&output, allocator, response.origin_causal_event_id);
     try output.appendSlice(allocator, ",\"chunk_index\":");
     try appendOptionalJsonU32(&output, allocator, response.envelope.chunk_index);
     try output.appendSlice(allocator, ",\"chunk_count\":");
@@ -1115,6 +1172,7 @@ pub fn parseClusterTransportResponseJson(allocator: Allocator, content: []const 
             .idempotency_key = try dupeOrEmpty(allocator, parsed.value.idempotency_key),
             .trace_id = parsed.value.trace_id,
             .span_id = parsed.value.span_id,
+            .origin_causal_event_id = parsed.value.origin_causal_event_id,
             .chunk_index = parsed.value.chunk_index,
             .chunk_count = parsed.value.chunk_count,
             .payload_type_name = try dupeOrEmpty(allocator, parsed.value.payload_type_name),
@@ -1125,6 +1183,7 @@ pub fn parseClusterTransportResponseJson(allocator: Allocator, content: []const 
         .duplicate = parsed.value.duplicate,
         .attempts = parsed.value.attempts,
         .transport = transport_kind,
+        .origin_causal_event_id = parsed.value.origin_causal_event_id,
     };
 }
 
@@ -1247,6 +1306,23 @@ fn validateTransportLimits(limits: ClusterTransportLimits) ClusterTransportError
     if (limits.max_in_flight == 0) return error.InvalidTransportLimits;
 }
 
+fn validateTransportTlsPolicy(policy: ClusterTransportTlsPolicy) ClusterTransportError!void {
+    switch (policy.mode) {
+        .disabled => {},
+        .pinned_fingerprint => if (policy.pinned_fingerprint.len == 0) return error.InvalidTransportLimits,
+    }
+}
+
+fn validateTransportConnectionPoolPolicy(policy: ClusterTransportConnectionPoolPolicy) ClusterTransportError!void {
+    if (policy.max_connections == 0) return error.InvalidTransportLimits;
+    if (policy.idle_timeout_ms == 0) return error.InvalidTransportLimits;
+    if (policy.health_check_interval_ms == 0) return error.InvalidTransportLimits;
+}
+
+fn validateTransportBackpressurePolicy(policy: ClusterTransportBackpressurePolicy) ClusterTransportError!void {
+    _ = policy;
+}
+
 fn validateTransportAuth(required: ClusterTransportAuth, provided: ClusterTransportAuth) ClusterTransportError!void {
     if (required.mode != provided.mode) return error.TransportUnauthorized;
     switch (required.mode) {
@@ -1315,6 +1391,7 @@ fn cloneClusterTransportRequest(allocator: Allocator, request: ClusterTransportR
         .auth = .{ .mode = request.auth.mode },
         .trace_id = request.trace_id,
         .span_id = request.span_id,
+        .origin_causal_event_id = request.origin_causal_event_id,
         .chunk_index = request.chunk_index,
         .chunk_count = request.chunk_count,
     };

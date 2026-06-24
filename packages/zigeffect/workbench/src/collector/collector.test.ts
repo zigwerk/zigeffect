@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import type { Server } from "bun";
 import { createCollector } from "./collector";
-import { parseFrameMessage, type LiveFrame } from "../liveAttach";
+import { parseCommandMessage, parseFrameMessage, type LiveCommandFrame, type LiveFrame } from "../liveAttach";
 
 const engineLine = (extra: Record<string, unknown>): string =>
   JSON.stringify({ id: 1, kind: "run_started", run_id: 1, status: "started", label: "", ...extra });
@@ -61,6 +61,22 @@ function nextFrame(ws: WebSocket): Promise<LiveFrame> {
   });
 }
 
+function nextCommand(ws: WebSocket): Promise<LiveCommandFrame> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out waiting for a command")), 2000);
+    ws.addEventListener(
+      "message",
+      (event) => {
+        clearTimeout(timer);
+        const frame = parseCommandMessage(typeof event.data === "string" ? event.data : "");
+        if (frame) resolve(frame);
+        else reject(new Error(`unparseable command: ${String(event.data)}`));
+      },
+      { once: true },
+    );
+  });
+}
+
 test("a connected client receives an ingested line as ONE mapped LiveFrame message", async () => {
   const { origin } = serve();
   const client = await openClient(origin);
@@ -96,6 +112,35 @@ test("every connected client receives the broadcast", async () => {
   } finally {
     a.close();
     b.close();
+  }
+});
+
+test("POST /command broadcasts a redacted policy-gated command frame", async () => {
+  const { origin } = serve();
+  const client = await openClient(origin);
+  try {
+    const received = nextCommand(client);
+    const response = await fetch(`http://${origin}/command`, {
+      method: "POST",
+      body: JSON.stringify({
+        kind: "interrupt_fiber",
+        reason: "interrupt token=sentinel-secret fiber",
+        redacted_detail: "password=sentinel-secret",
+        run_id: 1,
+        fiber_id: 9,
+      }),
+    });
+
+    const json = await response.json();
+    expect(json.command_kind).toBe("interrupt_fiber");
+    const command = await received;
+    expect(command.command_kind).toBe("interrupt_fiber");
+    expect(command.status).toBe("received");
+    expect(command.reason).toContain("<redacted>");
+    expect(command.reason).not.toContain("sentinel-secret");
+    expect(command.redacted_detail).not.toContain("sentinel-secret");
+  } finally {
+    client.close();
   }
 });
 

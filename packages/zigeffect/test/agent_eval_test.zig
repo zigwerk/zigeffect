@@ -28,6 +28,7 @@ test "agent eval passes when intervention improves findings and satisfies invari
 
     try std.testing.expect(result.passed);
     try std.testing.expect(result.counterfactual.improved);
+    try std.testing.expectEqual(@as(usize, 1), result.diff_summary.resolved_findings);
     try std.testing.expectEqual(@as(usize, 0), result.invariant_violations);
 }
 

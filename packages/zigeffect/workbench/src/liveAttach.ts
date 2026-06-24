@@ -29,6 +29,31 @@ export type LiveFrame = {
   dashboard_priority?: string | null;
 };
 
+export type LiveCommandRequest = {
+  kind: string;
+  reason?: string;
+  redacted_detail?: string;
+  run_id?: number;
+  scope_id?: number;
+  fiber_id?: number;
+  schedule_id?: number;
+  resource_id?: number;
+};
+
+export type LiveCommandFrame = {
+  sequence: number;
+  command_id: string;
+  command_kind: string;
+  status: "received" | "rejected" | "forwarded";
+  reason?: string;
+  redacted_detail?: string;
+  run_id?: number | null;
+  scope_id?: number | null;
+  fiber_id?: number | null;
+  schedule_id?: number | null;
+  resource_id?: number | null;
+};
+
 export type LiveStreamMeta = {
   schema?: string;
   schemaVersion?: number | string;
@@ -90,6 +115,50 @@ export function parseFrameMessage(data: string): LiveFrame | null {
   } catch {
     return null;
   }
+}
+
+export function isLiveCommandFrame(value: unknown): value is LiveCommandFrame {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.sequence === "number" &&
+    typeof record.command_id === "string" &&
+    typeof record.command_kind === "string" &&
+    (record.status === "received" || record.status === "rejected" || record.status === "forwarded")
+  );
+}
+
+export function parseCommandMessage(data: string): LiveCommandFrame | null {
+  try {
+    const parsed = JSON.parse(data) as unknown;
+    return isLiveCommandFrame(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export type LiveCommandFetcher = (url: string, init?: RequestInit) => Promise<Response>;
+
+export async function sendLiveCommand(
+  url: string,
+  command: LiveCommandRequest,
+  fetcher: LiveCommandFetcher = fetch,
+): Promise<LiveCommandFrame> {
+  const response = await fetcher(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(command),
+  });
+  if (!response.ok) {
+    throw new Error(`live command rejected: ${response.status}`);
+  }
+  const parsed = (await response.json()) as unknown;
+  if (!isLiveCommandFrame(parsed)) {
+    throw new Error("live command endpoint returned an invalid command frame");
+  }
+  return parsed;
 }
 
 /** Pull `frames` out of a full live-stream document (the sample fixture shape). */

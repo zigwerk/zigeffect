@@ -584,6 +584,7 @@ const StoredMessageRecordJson = struct {
     attempt: envelope_mod.MessageAttempt = 0,
     trace_id: ?u64 = null,
     span_id: ?u64 = null,
+    origin_causal_event_id: ?u64 = null,
     chunk_index: ?u32 = null,
     chunk_count: ?u32 = null,
     payload_type_name: []const u8 = "",
@@ -606,6 +607,7 @@ const StoredReplyRecordJson = struct {
     attempt: envelope_mod.MessageAttempt = 0,
     trace_id: ?u64 = null,
     span_id: ?u64 = null,
+    origin_causal_event_id: ?u64 = null,
     chunk_index: ?u32 = null,
     chunk_count: ?u32 = null,
     payload_type_name: []const u8 = "",
@@ -755,6 +757,8 @@ fn appendEnvelopeJsonFields(output: *std.ArrayList(u8), allocator: Allocator, en
     try appendOptionalJsonU64(output, allocator, envelope.trace_id);
     try output.appendSlice(allocator, ",\"span_id\":");
     try appendOptionalJsonU64(output, allocator, envelope.span_id);
+    try output.appendSlice(allocator, ",\"origin_causal_event_id\":");
+    try appendOptionalJsonU64(output, allocator, envelope.origin_causal_event_id);
     try output.appendSlice(allocator, ",\"chunk_index\":");
     try appendOptionalJsonU64(output, allocator, if (envelope.chunk_index) |index| @as(u64, index) else null);
     try output.appendSlice(allocator, ",\"chunk_count\":");
@@ -793,6 +797,7 @@ fn envelopeFromJson(allocator: Allocator, value: anytype, kind: envelope_mod.Mes
         .attempt = value.attempt,
         .trace_id = value.trace_id,
         .span_id = value.span_id,
+        .origin_causal_event_id = value.origin_causal_event_id,
         .chunk_index = value.chunk_index,
         .chunk_count = value.chunk_count,
         .lease_epoch = value.lease_epoch,
