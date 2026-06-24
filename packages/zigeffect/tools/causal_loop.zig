@@ -6,6 +6,7 @@ const causal_advice = @import("causal_advice");
 const causal_run = @import("causal_run");
 const causal_artifact = @import("causal_artifact");
 const causal_verdict = @import("causal_verdict");
+const fx = @import("zigeffect");
 
 const Phase = enum {
     baseline,
@@ -30,6 +31,9 @@ const LoopPaths = struct {
     query_report_path: []const u8,
     advice_report_path: []const u8,
     verdict_report_path: []const u8,
+    eval_diff_path: []const u8,
+    eval_link_path: []const u8,
+    eval_manifest_path: []const u8,
     owned: bool = false,
 
     fn deinit(self: LoopPaths, allocator: std.mem.Allocator) void {
@@ -40,6 +44,9 @@ const LoopPaths = struct {
         allocator.free(self.query_report_path);
         allocator.free(self.advice_report_path);
         allocator.free(self.verdict_report_path);
+        allocator.free(self.eval_diff_path);
+        allocator.free(self.eval_link_path);
+        allocator.free(self.eval_manifest_path);
     }
 };
 
@@ -153,6 +160,9 @@ fn loopPaths() LoopPaths {
         .query_report_path = causal_test.artifact_dir ++ "/zigeffect-causal-dev-loop-queries.txt",
         .advice_report_path = causal_test.artifact_dir ++ "/zigeffect-causal-dev-loop-advice.txt",
         .verdict_report_path = causal_test.artifact_dir ++ "/zigeffect-causal-dev-loop-verdict.json",
+        .eval_diff_path = causal_test.artifact_dir ++ "/zigeffect-causal-dev-loop-eval-diff.json",
+        .eval_link_path = causal_test.artifact_dir ++ "/zigeffect-causal-dev-loop-eval-link.json",
+        .eval_manifest_path = causal_test.artifact_dir ++ "/zigeffect-causal-dev-loop-eval-manifest.json",
     };
 }
 
@@ -169,6 +179,12 @@ fn loopPathsForScenario(allocator: std.mem.Allocator, scenario_slug: []const u8)
     errdefer allocator.free(advice_report_path);
     const verdict_report_path = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-verdict.json", .{ causal_run.artifact_dir, scenario_slug });
     errdefer allocator.free(verdict_report_path);
+    const eval_diff_path = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-eval-diff.json", .{ causal_run.artifact_dir, scenario_slug });
+    errdefer allocator.free(eval_diff_path);
+    const eval_link_path = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-eval-link.json", .{ causal_run.artifact_dir, scenario_slug });
+    errdefer allocator.free(eval_link_path);
+    const eval_manifest_path = try std.fmt.allocPrint(allocator, "{s}/zigeffect-causal-dev-loop-{s}-eval-manifest.json", .{ causal_run.artifact_dir, scenario_slug });
+    errdefer allocator.free(eval_manifest_path);
 
     return .{
         .before_json_path = before_json_path,
@@ -177,6 +193,9 @@ fn loopPathsForScenario(allocator: std.mem.Allocator, scenario_slug: []const u8)
         .query_report_path = query_report_path,
         .advice_report_path = advice_report_path,
         .verdict_report_path = verdict_report_path,
+        .eval_diff_path = eval_diff_path,
+        .eval_link_path = eval_link_path,
+        .eval_manifest_path = eval_manifest_path,
         .owned = true,
     };
 }
@@ -211,6 +230,9 @@ fn formatSummary(allocator: std.mem.Allocator, input: SummaryInput) std.mem.Allo
             try output.print(allocator, "query report: {s}\n", .{input.paths.query_report_path});
             try output.print(allocator, "advice report: {s}\n", .{input.paths.advice_report_path});
             try output.print(allocator, "verdict: {s}\n", .{input.paths.verdict_report_path});
+            try output.print(allocator, "eval diff artifact: {s}\n", .{input.paths.eval_diff_path});
+            try output.print(allocator, "eval link artifact: {s}\n", .{input.paths.eval_link_path});
+            try output.print(allocator, "eval manifest: {s}\n", .{input.paths.eval_manifest_path});
             try output.print(allocator, "package-tests: {s}\n", .{@tagName(input.package_status)});
             if (input.compare_report) |report| {
                 try output.appendSlice(allocator, "compare summary:\n");
@@ -245,6 +267,55 @@ fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
     const cwd = std.Io.Dir.cwd();
     try cwd.createDirPath(io, path[0..slash]);
     try cwd.writeFile(io, .{ .sub_path = path, .data = contents });
+}
+
+const DevLoopEvalArtifactSink = struct {
+    io: std.Io,
+    path: []const u8,
+
+    fn sink(self: *DevLoopEvalArtifactSink) fx.AgentEvalDiffArtifactSink {
+        return .{
+            .state = self,
+            .write = write,
+        };
+    }
+
+    fn write(raw: ?*anyopaque, json: []const u8) anyerror!void {
+        const self: *DevLoopEvalArtifactSink = @ptrCast(@alignCast(raw.?));
+        try writeArtifact(self.io, self.path, json);
+    }
+};
+
+fn writeDevLoopEvalArtifacts(io: std.Io, allocator: std.mem.Allocator, paths: LoopPaths) !void {
+    const baseline = [_]fx.CausalEvent{
+        .{ .id = 1, .kind = .run_started, .run_id = 1, .status = "started" },
+        .{ .id = 2, .kind = .fiber_suspended, .run_id = 1, .fiber_id = 9, .status = "suspended", .label = "dev-loop eval suspended fiber" },
+    };
+    const policy = (fx.AgentInterventionPolicy{})
+        .withApplyEnabled(true)
+        .withKindPolicy(.interrupt_fiber, .auto_approve);
+    const invariants = fx.CausalInvariantBuilder.init().requireSuspendedFibersResolve();
+
+    var diff_sink = DevLoopEvalArtifactSink{ .io = io, .path = paths.eval_diff_path };
+    var link_sink = DevLoopEvalArtifactSink{ .io = io, .path = paths.eval_link_path };
+    var manifest_sink = DevLoopEvalArtifactSink{ .io = io, .path = paths.eval_manifest_path };
+
+    _ = try fx.runAgentEvalAndWriteLinkedDiffManifest(allocator, .{
+        .name = "dev-loop suspended fiber smoke eval",
+        .baseline = &baseline,
+        .policy = policy,
+        .request = .{
+            .kind = .interrupt_fiber,
+            .run_id = 1,
+            .fiber_id = 9,
+            .reason = "dev-loop built-in eval interrupt",
+        },
+        .invariants = invariants,
+        .expect_improvement = true,
+    }, paths.before_json_path, paths.after_json_path, .{
+        .diff_artifact_path = paths.eval_diff_path,
+        .link_artifact_path = paths.eval_link_path,
+    }, diff_sink.sink(), link_sink.sink(), manifest_sink.sink());
 }
 
 fn buildQueryReport(allocator: std.mem.Allocator, json: []const u8, artifact_path: []const u8) ![]const u8 {
@@ -580,6 +651,7 @@ fn runAfter(init: std.process.Init, scenario: ?causal_run.Scenario) !u8 {
     );
     defer allocator.free(verdict);
     try writeArtifact(init.io, paths.verdict_report_path, verdict);
+    try writeDevLoopEvalArtifacts(init.io, allocator, paths);
 
     const package_status = if (scenario) |selected|
         if (std.mem.eql(u8, selected.slug, "package-tests"))
@@ -727,6 +799,18 @@ test "after summary includes compare and query report paths" {
     try std.testing.expect(std.mem.indexOf(u8, summary, "advice report: .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-advice.txt") != null);
     try std.testing.expect(std.mem.indexOf(u8, summary, "verdict: .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-verdict.json") != null);
     try std.testing.expect(std.mem.indexOf(u8, summary, "next: inspect verdict") != null);
+}
+
+test "dev loop eval artifact writer emits linked manifest artifacts" {
+    const paths = loopPaths();
+    try writeDevLoopEvalArtifacts(std.testing.io, std.testing.allocator, paths);
+
+    const manifest = try readLoopArtifact(std.testing.io, std.testing.allocator, paths.eval_manifest_path);
+    defer std.testing.allocator.free(manifest);
+
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"schema\":\"zigeffect.causal.agent-eval-linked-manifest.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"diff_artifact_path\":\".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-eval-diff.json\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"link_artifact_path\":\".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-eval-link.json\"") != null);
 }
 
 test "package failure status exits nonzero" {

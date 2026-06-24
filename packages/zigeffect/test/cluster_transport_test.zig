@@ -1142,6 +1142,39 @@ test "service discovery refresh imports external snapshots and selects safe endp
     try std.testing.expectEqualStrings("runner-safe.internal", refresh.selection.selected.?.host);
 }
 
+test "service discovery parses provider snapshot json and refreshes registry" {
+    const json =
+        \\{
+        \\  "schema": "zigeffect.cluster.service-discovery-snapshot.v1",
+        \\  "schema_version": 1,
+        \\  "source": "consul-json",
+        \\  "observed_at_ms": 5678,
+        \\  "endpoints": [
+        \\    {"host":"runner-json-unsafe.internal","port":7001,"tls_enabled":false,"healthy":true,"auth_epoch":9},
+        \\    {"host":"runner-json-safe.internal","port":7002,"tls_enabled":true,"healthy":true,"auth_epoch":11}
+        \\  ]
+        \\}
+    ;
+
+    var snapshot = try fx.parseClusterTransportServiceDiscoverySnapshotJson(std.testing.allocator, json);
+    defer snapshot.deinit();
+
+    var discovery = fx.InMemoryClusterTransportServiceDiscovery.init(std.testing.allocator, .{
+        .require_tls = true,
+        .require_healthy = true,
+        .min_auth_epoch = 10,
+    });
+    defer discovery.deinit();
+
+    const refresh = try discovery.refreshFromSnapshot(snapshot.asSnapshot());
+
+    try std.testing.expectEqualStrings("consul-json", snapshot.source);
+    try std.testing.expectEqual(@as(usize, 2), refresh.imported);
+    try std.testing.expectEqual(@as(usize, 2), refresh.registry_size);
+    try std.testing.expect(refresh.selection.selected != null);
+    try std.testing.expectEqualStrings("runner-json-safe.internal", refresh.selection.selected.?.host);
+}
+
 test "remote socket transport applies reject backpressure before durable submission" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

@@ -23,11 +23,18 @@ pub const CausalOpsAlertReport = struct {
     emitted_alerts: usize = 0,
 };
 
+pub const CausalOpsRunbookEndpointMetadata = struct {
+    artifact_endpoint_path: []const u8,
+    alert_delivery_kind: []const u8,
+    alert_endpoint_id: []const u8,
+};
+
 pub const CausalOpsRunbookOptions = struct {
     deployment: CausalDeploymentMetadata,
     retention: CausalOpsRetentionPolicy,
     retained_events: usize = 0,
     alert_count: usize = 0,
+    endpoints: ?CausalOpsRunbookEndpointMetadata = null,
 };
 
 pub const CausalOpsAlertDeliveryOptions = struct {
@@ -118,7 +125,17 @@ pub fn formatCausalOpsRunbookJson(
         ",\"trim_required\":{s}",
         .{if (options.retention.max_events > 0 and options.retained_events > options.retention.max_events) "true" else "false"},
     );
-    try output.appendSlice(allocator, "}}");
+    try output.appendSlice(allocator, "}");
+    if (options.endpoints) |endpoints| {
+        try output.appendSlice(allocator, ",\"operator_endpoints\":{\"artifact_endpoint_path\":");
+        try appendRedactedJsonString(&output, allocator, endpoints.artifact_endpoint_path);
+        try output.appendSlice(allocator, ",\"alert_delivery_kind\":");
+        try appendRedactedJsonString(&output, allocator, endpoints.alert_delivery_kind);
+        try output.appendSlice(allocator, ",\"alert_endpoint_id\":");
+        try appendRedactedJsonString(&output, allocator, endpoints.alert_endpoint_id);
+        try output.appendSlice(allocator, "}");
+    }
+    try output.appendSlice(allocator, "}");
     return output.toOwnedSlice(allocator);
 }
 

@@ -115,6 +115,36 @@ test("every connected client receives the broadcast", async () => {
   }
 });
 
+test("POST /frames broadcasts an already mapped LiveFrame", async () => {
+  const { origin } = serve();
+  const client = await openClient(origin);
+  try {
+    const received = nextFrame(client);
+    const frame: LiveFrame = {
+      sequence: 12,
+      event_id: 120,
+      event_kind: "remediation_applied",
+      status: "applied",
+      label: "cmd-12",
+      lane: "fiber:9",
+      parent_id: 10,
+    };
+    const response = await fetch(`http://${origin}/frames`, {
+      method: "POST",
+      body: JSON.stringify(frame),
+      headers: { "content-type": "application/json" },
+    });
+    expect(await response.json()).toEqual({ ingested: 1 });
+
+    const next = await received;
+    expect(next.event_id).toBe(120);
+    expect(next.event_kind).toBe("remediation_applied");
+    expect(next.parent_id).toBe(10);
+  } finally {
+    client.close();
+  }
+});
+
 test("POST /command broadcasts a redacted policy-gated command frame", async () => {
   const { origin } = serve();
   const client = await openClient(origin);

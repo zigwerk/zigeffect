@@ -1659,6 +1659,7 @@ pub fn build(b: *std.Build) void {
     causal_loop_tool_module.addImport("causal_run", causal_run_tool_module);
     causal_loop_tool_module.addImport("causal_artifact", causal_artifact_tool_module);
     causal_loop_tool_module.addImport("causal_verdict", causal_verdict_tool_module);
+    causal_loop_tool_module.addImport("zigeffect", zigeffect);
 
     const causal_loop_tool = b.addExecutable(.{
         .name = "zigeffect-causal-loop",

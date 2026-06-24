@@ -22,6 +22,8 @@ pub const transport_request_schema = "zigeffect.cluster.transport.request.v1";
 pub const transport_request_schema_version: u32 = 1;
 pub const transport_response_schema = "zigeffect.cluster.transport.response.v1";
 pub const transport_response_schema_version: u32 = 1;
+pub const cluster_transport_service_discovery_snapshot_schema = "zigeffect.cluster.service-discovery-snapshot.v1";
+pub const cluster_transport_service_discovery_snapshot_schema_version: u32 = 1;
 
 pub const ClusterTransportError = error{
     InvalidShardCount,
@@ -557,6 +559,30 @@ pub const ClusterTransportServiceDiscoverySnapshot = struct {
     endpoints: []const ClusterTransportDiscoveredEndpoint,
 };
 
+pub const ClusterTransportOwnedServiceDiscoverySnapshot = struct {
+    allocator: Allocator,
+    source: []const u8 = "",
+    observed_at_ms: u64 = 0,
+    endpoints: []ClusterTransportDiscoveredEndpoint = &.{},
+
+    pub fn deinit(self: *ClusterTransportOwnedServiceDiscoverySnapshot) void {
+        if (self.source.len > 0) self.allocator.free(self.source);
+        for (self.endpoints) |endpoint| {
+            if (endpoint.host.len > 0) self.allocator.free(endpoint.host);
+        }
+        if (self.endpoints.len > 0) self.allocator.free(self.endpoints);
+        self.* = .{ .allocator = self.allocator };
+    }
+
+    pub fn asSnapshot(self: *const ClusterTransportOwnedServiceDiscoverySnapshot) ClusterTransportServiceDiscoverySnapshot {
+        return .{
+            .source = self.source,
+            .observed_at_ms = self.observed_at_ms,
+            .endpoints = self.endpoints,
+        };
+    }
+};
+
 pub const ClusterTransportServiceDiscoveryReport = struct {
     checked: usize = 0,
     missing_host: usize = 0,
@@ -707,6 +733,69 @@ fn clusterTransportEndpointSatisfiesDiscovery(
         (!requirements.require_tls or endpoint.tls_enabled) and
         (!requirements.require_healthy or endpoint.healthy) and
         endpoint.auth_epoch >= requirements.min_auth_epoch;
+}
+
+const ClusterTransportServiceDiscoveryEndpointJson = struct {
+    host: []const u8,
+    port: u32,
+    tls_enabled: bool = false,
+    healthy: bool = false,
+    auth_epoch: u64 = 0,
+};
+
+const ClusterTransportServiceDiscoverySnapshotJson = struct {
+    schema: []const u8,
+    schema_version: u32,
+    source: []const u8 = "",
+    observed_at_ms: u64 = 0,
+    endpoints: []const ClusterTransportServiceDiscoveryEndpointJson = &.{},
+};
+
+pub fn parseClusterTransportServiceDiscoverySnapshotJson(
+    allocator: Allocator,
+    content: []const u8,
+) (Allocator.Error || ClusterTransportError)!ClusterTransportOwnedServiceDiscoverySnapshot {
+    var parsed = std.json.parseFromSlice(ClusterTransportServiceDiscoverySnapshotJson, allocator, content, .{ .ignore_unknown_fields = true }) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.CorruptTransportMessage,
+    };
+    defer parsed.deinit();
+
+    if (!std.mem.eql(u8, parsed.value.schema, cluster_transport_service_discovery_snapshot_schema)) return error.IncompatibleTransportSchema;
+    if (parsed.value.schema_version != cluster_transport_service_discovery_snapshot_schema_version) return error.IncompatibleTransportSchema;
+
+    var endpoints = std.ArrayList(ClusterTransportDiscoveredEndpoint).empty;
+    errdefer {
+        for (endpoints.items) |endpoint| {
+            if (endpoint.host.len > 0) allocator.free(endpoint.host);
+        }
+        endpoints.deinit(allocator);
+    }
+
+    for (parsed.value.endpoints) |endpoint| {
+        if (endpoint.port > std.math.maxInt(u16)) return error.CorruptTransportMessage;
+        const owned_host = try dupeOrEmpty(allocator, endpoint.host);
+        endpoints.append(allocator, .{
+            .host = owned_host,
+            .port = @intCast(endpoint.port),
+            .tls_enabled = endpoint.tls_enabled,
+            .healthy = endpoint.healthy,
+            .auth_epoch = endpoint.auth_epoch,
+        }) catch |err| {
+            if (owned_host.len > 0) allocator.free(owned_host);
+            return err;
+        };
+    }
+
+    const source = try dupeOrEmpty(allocator, parsed.value.source);
+    errdefer if (source.len > 0) allocator.free(source);
+
+    return .{
+        .allocator = allocator,
+        .source = source,
+        .observed_at_ms = parsed.value.observed_at_ms,
+        .endpoints = try endpoints.toOwnedSlice(allocator),
+    };
 }
 
 pub const RemoteSocketClusterTransport = struct {

@@ -21,6 +21,8 @@ export type Collector = {
   ingestLine: (line: string) => LiveFrame | null;
   /** Ingest an NDJSON body; returns the number of frames broadcast. */
   ingestBody: (body: string) => number;
+  /** Broadcast already-mapped LiveFrame JSON from a trusted engine host. */
+  ingestFrame: (body: unknown) => LiveFrame | null;
   /** Validate and broadcast one policy-gated live command intent. */
   ingestCommand: (body: unknown) => LiveCommandFrame | null;
   /** Return command frames newer than the provided command sequence. */
@@ -61,6 +63,38 @@ export function createCollector(): Collector {
     let count = 0;
     for (const line of body.split("\n")) {
       if (ingestLine(line)) count += 1;
+    }
+    return count;
+  }
+
+  function safeFrameNumber(value: unknown): value is number {
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+  }
+
+  function isFrameBody(value: unknown): value is LiveFrame {
+    if (typeof value !== "object" || value === null) return false;
+    const record = value as Record<string, unknown>;
+    return (
+      safeFrameNumber(record.sequence) &&
+      safeFrameNumber(record.event_id) &&
+      typeof record.event_kind === "string" &&
+      typeof record.status === "string"
+    );
+  }
+
+  function ingestFrame(body: unknown): LiveFrame | null {
+    if (!isFrameBody(body)) return null;
+    sequence = Math.max(sequence, body.sequence);
+    broadcast(body);
+    return body;
+  }
+
+  function ingestFrameBody(body: unknown): number | null {
+    const frames = Array.isArray(body) ? body : [body];
+    let count = 0;
+    for (const frame of frames) {
+      if (!ingestFrame(frame)) return null;
+      count += 1;
     }
     return count;
   }
@@ -136,6 +170,19 @@ export function createCollector(): Collector {
       );
     }
 
+    if (url.pathname === "/frames" && request.method === "POST") {
+      return request.json().then(
+        (body) => {
+          const ingested = ingestFrameBody(body);
+          if (ingested === null) return new Response("invalid frame", { status: 400 });
+          return new Response(JSON.stringify({ ingested }), {
+            headers: { "content-type": "application/json" },
+          });
+        },
+        () => new Response("invalid frame", { status: 400 }),
+      );
+    }
+
     if (url.pathname === "/command" && request.method === "POST") {
       return request.json().then(
         (body) => {
@@ -171,7 +218,7 @@ export function createCollector(): Collector {
     return new Response("not found", { status: 404 });
   }
 
-  return { fetch, websocket, ingestLine, ingestBody, ingestCommand, commandsSince, clientCount: () => clients.size };
+  return { fetch, websocket, ingestLine, ingestBody, ingestFrame, ingestCommand, commandsSince, clientCount: () => clients.size };
 }
 
 // `engine | bun collector.ts` — serve + pipe stdin NDJSON to connected clients.

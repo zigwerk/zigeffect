@@ -3,10 +3,12 @@ import { createRoot } from "solid-js";
 import { deriveWorkbenchModel } from "./causalArtifact";
 import {
   LiveCausalBuffer,
+  createHttpLiveEngineCommandBridge,
   createLiveArtifact,
   fetchLiveCommands,
   frameToEventRecord,
   framesFromStreamDocument,
+  isLiveCommandEngineBatchResult,
   isLiveCommandInboxResponse,
   isLiveFrame,
   isLiveCommandFrame,
@@ -371,6 +373,74 @@ test("runLiveEngineCommandDaemon bridges command batches to engine frames", asyn
     needs_human_review: 0,
     emitted_frames: 2,
   });
+});
+
+test("createHttpLiveEngineCommandBridge posts command batches and emitted frames", async () => {
+  const requests: Array<{ url: string; method?: string; body: unknown }> = [];
+  const returnedFrame = frame({
+    sequence: 10,
+    event_id: 110,
+    event_kind: "remediation_applied",
+    status: "applied",
+    label: "cmd-10",
+  });
+  const fetcher = async (url: string, init?: RequestInit) => {
+    requests.push({
+      url,
+      method: init?.method,
+      body: init?.body ? JSON.parse(String(init.body)) : null,
+    });
+    if (url === "http://127.0.0.1:4600/apply-commands") {
+      return new Response(
+        JSON.stringify({
+          processed: 1,
+          applied: 1,
+          rejected: 0,
+          needs_human_review: 0,
+          frames: [returnedFrame],
+        }),
+        { headers: { "content-type": "application/json" } },
+      );
+    }
+    return new Response(JSON.stringify({ ingested: 1 }), { headers: { "content-type": "application/json" } });
+  };
+  const bridge = createHttpLiveEngineCommandBridge({
+    applyUrl: "http://127.0.0.1:4600/apply-commands",
+    framesUrl: "http://127.0.0.1:4500/frames",
+    fetcher,
+  });
+  const inbox: LiveCommandInboxResponse = {
+    next_after: 10,
+    commands: [
+      {
+        sequence: 10,
+        command_id: "cmd-10",
+        command_kind: "interrupt_fiber",
+        status: "received",
+        run_id: 1,
+        fiber_id: 9,
+      },
+    ],
+  };
+
+  const result = await bridge.applyBatch(inbox);
+  expect(isLiveCommandEngineBatchResult(result)).toBe(true);
+  await bridge.emitFrame?.(result.frames![0]!);
+
+  expect(result.processed).toBe(1);
+  expect(result.frames?.[0]?.event_id).toBe(110);
+  expect(requests).toEqual([
+    {
+      url: "http://127.0.0.1:4600/apply-commands",
+      method: "POST",
+      body: inbox,
+    },
+    {
+      url: "http://127.0.0.1:4500/frames",
+      method: "POST",
+      body: returnedFrame,
+    },
+  ]);
 });
 
 test("LiveCausalBuffer accumulates frames in causal (sequence) order", () => {

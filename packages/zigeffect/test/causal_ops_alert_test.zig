@@ -69,6 +69,34 @@ test "ops runbook json summarizes deployment retention and redacts secrets" {
     try std.testing.expect(std.mem.indexOf(u8, json, fx.causal_redaction_marker) != null);
 }
 
+test "ops runbook json includes operator endpoint metadata" {
+    const json = try fx.formatCausalOpsRunbookJson(std.testing.allocator, .{
+        .deployment = .{
+            .service = "zigeffect",
+            .environment = "prod",
+            .region = "eu-west",
+            .cluster_id = "cluster-a",
+        },
+        .retention = .{
+            .max_events = 100,
+            .alert_threshold = 3,
+        },
+        .retained_events = 80,
+        .alert_count = 1,
+        .endpoints = .{
+            .artifact_endpoint_path = "/causal-artifacts",
+            .alert_delivery_kind = "webhook",
+            .alert_endpoint_id = "pager-duty-primary",
+        },
+    });
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"operator_endpoints\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"artifact_endpoint_path\":\"/causal-artifacts\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"alert_delivery_kind\":\"webhook\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"alert_endpoint_id\":\"pager-duty-primary\"") != null);
+}
+
 test "ops alert delivery json redacts alert evidence for external adapters" {
     const json = try fx.formatCausalOpsAlertDeliveryJson(std.testing.allocator, .{
         .deployment = .{

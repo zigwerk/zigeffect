@@ -103,6 +103,12 @@ export type LiveCommandEngineBridge = {
   emitFrame?: (frame: LiveFrame) => void | Promise<void>;
 };
 
+export type HttpLiveEngineCommandBridgeOptions = {
+  applyUrl: string;
+  framesUrl?: string;
+  fetcher?: LiveCommandFetcher;
+};
+
 export type LiveEngineCommandDaemonResult = LiveCommandDaemonResult & {
   processed: number;
   applied: number;
@@ -222,6 +228,25 @@ export function isLiveCommandInboxResponse(value: unknown): value is LiveCommand
     maxSequence = Math.max(maxSequence, command.sequence);
   }
   return record.next_after >= maxSequence;
+}
+
+export function isLiveCommandEngineBatchResult(value: unknown): value is LiveCommandEngineBatchResult {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    !isSafeCursor(record.processed) ||
+    !isSafeCursor(record.applied) ||
+    !isSafeCursor(record.rejected) ||
+    !isSafeCursor(record.needs_human_review)
+  ) {
+    return false;
+  }
+  if (record.frames === undefined) {
+    return true;
+  }
+  return Array.isArray(record.frames) && record.frames.every(isLiveFrame);
 }
 
 export type LiveCommandFetcher = (url: string, init?: RequestInit) => Promise<Response>;
@@ -406,6 +431,43 @@ export async function runLiveEngineCommandDaemon(
   );
 
   return { ...daemon, ...engine };
+}
+
+export function createHttpLiveEngineCommandBridge(options: HttpLiveEngineCommandBridgeOptions): LiveCommandEngineBridge {
+  const fetcher = options.fetcher ?? fetch;
+
+  const bridge: LiveCommandEngineBridge = {
+    applyBatch: async (inbox) => {
+      const response = await fetcher(options.applyUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(inbox),
+      });
+      if (!response.ok) {
+        throw new Error(`live engine command bridge rejected: ${response.status}`);
+      }
+      const parsed = (await response.json()) as unknown;
+      if (!isLiveCommandEngineBatchResult(parsed)) {
+        throw new Error("live engine command bridge returned an invalid batch result");
+      }
+      return parsed;
+    },
+  };
+
+  if (options.framesUrl) {
+    bridge.emitFrame = async (frame) => {
+      const response = await fetcher(options.framesUrl!, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(frame),
+      });
+      if (!response.ok) {
+        throw new Error(`live engine frame ingest rejected: ${response.status}`);
+      }
+    };
+  }
+
+  return bridge;
 }
 
 /** Pull `frames` out of a full live-stream document (the sample fixture shape). */
