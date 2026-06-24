@@ -4,6 +4,7 @@ const identity = @import("identity.zig");
 const message_storage = @import("message_storage.zig");
 const routing = @import("routing.zig");
 const async_backend_mod = @import("../runtime/async_backend.zig");
+const causal = @import("../services/causal.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const AsyncBackend = async_backend_mod.AsyncBackend;
@@ -338,6 +339,274 @@ pub const LoopbackHttpClusterTransport = struct {
 
     fn sendOpaque(ptr: *anyopaque, allocator: Allocator, request: ClusterTransportRequest) anyerror!ClusterTransportResponse {
         const self: *LoopbackHttpClusterTransport = @ptrCast(@alignCast(ptr));
+        return self.send(allocator, request);
+    }
+};
+
+pub const LoopbackSocketClusterTransportOptions = struct {
+    shard_count: ShardCount,
+    port: u16 = 19391,
+    limits: ClusterTransportLimits = .{},
+};
+
+pub const LoopbackSocketClusterTransport = struct {
+    io: std.Io,
+    handler: InProcessClusterTransport,
+    port: u16,
+    limits: ClusterTransportLimits = .{},
+    lifecycle: ClusterTransportLifecycleState = .{},
+    last_failure: ?ClusterTransportFailureReport = null,
+
+    pub fn init(
+        allocator: Allocator,
+        io: std.Io,
+        storage: MessageStorage,
+        options: LoopbackSocketClusterTransportOptions,
+    ) !LoopbackSocketClusterTransport {
+        try validateTransportLimits(options.limits);
+        return .{
+            .io = io,
+            .handler = try InProcessClusterTransport.init(allocator, storage, .{ .shard_count = options.shard_count }),
+            .port = options.port,
+            .limits = options.limits,
+        };
+    }
+
+    pub fn deinit(self: *LoopbackSocketClusterTransport) void {
+        self.handler.deinit();
+    }
+
+    pub fn asClusterTransport(self: *LoopbackSocketClusterTransport) ClusterTransport {
+        return .{
+            .ptr = self,
+            .vtable = &.{
+                .send = sendOpaque,
+            },
+        };
+    }
+
+    pub fn snapshotMetrics(self: *const LoopbackSocketClusterTransport) ClusterTransportMetricsSnapshot {
+        return self.lifecycle;
+    }
+
+    pub fn lastFailure(self: *const LoopbackSocketClusterTransport) ?ClusterTransportFailureReport {
+        return self.last_failure;
+    }
+
+    pub fn send(self: *LoopbackSocketClusterTransport, allocator: Allocator, request: ClusterTransportRequest) !ClusterTransportResponse {
+        self.lifecycle.sends += 1;
+        try self.preflight(request);
+
+        const address = try std.Io.net.IpAddress.parseIp4("127.0.0.1", self.port);
+        var server = try address.listen(self.io, .{ .reuse_address = true });
+        defer server.deinit(self.io);
+
+        const request_json = try formatClusterTransportRequestJson(allocator, request);
+        defer allocator.free(request_json);
+        const request_frame = try formatClusterTransportSocketFrame(allocator, request_json);
+        defer allocator.free(request_frame);
+
+        var ctx = LoopbackSocketServeContext{
+            .transport = self,
+            .server = &server,
+            .allocator = allocator,
+            .attempts = 1,
+        };
+        const thread = try std.Thread.spawn(.{}, serveLoopbackSocketOnce, .{&ctx});
+
+        var stream = try address.connect(self.io, .{ .mode = .stream });
+        defer stream.close(self.io);
+
+        try writeSocketFrame(stream, self.io, request_frame);
+        const response_frame = readSocketFrame(allocator, stream, self.io, self.limits.max_envelope_bytes) catch |err| {
+            thread.join();
+            if (ctx.err) |server_err| return server_err;
+            return err;
+        };
+        defer allocator.free(response_frame);
+        thread.join();
+        if (ctx.err) |err| return err;
+
+        self.lifecycle.bytes_sent += request_frame.len;
+        self.lifecycle.bytes_received += response_frame.len;
+        self.lifecycle.successes += 1;
+        return parseClusterTransportResponseJson(allocator, response_frame);
+    }
+
+    fn preflight(self: *LoopbackSocketClusterTransport, request: ClusterTransportRequest) ClusterTransportError!void {
+        if (request.policy.timeout_ms == 0) {
+            self.recordFailure(1, error.TransportTimeout, "timeout before submit");
+            return error.TransportTimeout;
+        }
+        validateTransportEnvelopeLimits(request, self.limits) catch |err| {
+            self.recordFailure(1, err, "envelope limits rejected");
+            return err;
+        };
+        if (self.lifecycle.in_flight >= self.limits.max_in_flight) {
+            self.recordFailure(1, error.TransportBackpressured, "max in-flight reached");
+            return error.TransportBackpressured;
+        }
+    }
+
+    fn recordFailure(self: *LoopbackSocketClusterTransport, attempts: usize, err: anyerror, detail: []const u8) void {
+        recordTransportFailure(&self.lifecycle, &self.last_failure, .production_socket, attempts, err, detail);
+    }
+
+    fn sendOpaque(ptr: *anyopaque, allocator: Allocator, request: ClusterTransportRequest) anyerror!ClusterTransportResponse {
+        const self: *LoopbackSocketClusterTransport = @ptrCast(@alignCast(ptr));
+        return self.send(allocator, request);
+    }
+};
+
+const LoopbackSocketServeContext = struct {
+    transport: *LoopbackSocketClusterTransport,
+    server: *std.Io.net.Server,
+    allocator: Allocator,
+    attempts: usize,
+    err: ?anyerror = null,
+};
+
+fn serveLoopbackSocketOnce(ctx: *LoopbackSocketServeContext) void {
+    serveLoopbackSocketOnceFallible(ctx) catch |err| {
+        ctx.err = err;
+    };
+}
+
+fn serveLoopbackSocketOnceFallible(ctx: *LoopbackSocketServeContext) !void {
+    var stream = try ctx.server.accept(ctx.transport.io);
+    defer stream.close(ctx.transport.io);
+
+    const request_body = try readSocketFrame(ctx.allocator, stream, ctx.transport.io, ctx.transport.limits.max_envelope_bytes);
+    defer ctx.allocator.free(request_body);
+
+    var parsed_request = try parseClusterTransportRequestJson(ctx.allocator, request_body);
+    defer parsed_request.deinit(ctx.allocator);
+
+    var handler_response = try ctx.transport.handler.sendWithAttempts(parsed_request, ctx.attempts, .production_socket);
+    defer handler_response.deinit(ctx.allocator);
+
+    const response_json = try formatClusterTransportResponseJson(ctx.allocator, handler_response);
+    defer ctx.allocator.free(response_json);
+    const response_frame = try formatClusterTransportSocketFrame(ctx.allocator, response_json);
+    defer ctx.allocator.free(response_frame);
+    try writeSocketFrame(stream, ctx.transport.io, response_frame);
+}
+
+pub const RemoteSocketClusterTransportOptions = struct {
+    shard_count: ShardCount,
+    endpoint_host: []const u8 = "127.0.0.1",
+    port: u16 = 19391,
+    auth: ClusterTransportAuth = .{},
+    limits: ClusterTransportLimits = .{},
+    pool_size: usize = 1,
+    reconnect_attempts: usize = 0,
+};
+
+pub const RemoteSocketClusterTransport = struct {
+    endpoint_host: []const u8,
+    auth: ClusterTransportAuth = .{},
+    pool_size: usize,
+    reconnect_attempts: usize,
+    inner: LoopbackSocketClusterTransport,
+    lifecycle: ClusterTransportLifecycleState = .{},
+    last_failure: ?ClusterTransportFailureReport = null,
+
+    pub fn init(
+        allocator: Allocator,
+        io: std.Io,
+        storage: MessageStorage,
+        options: RemoteSocketClusterTransportOptions,
+    ) !RemoteSocketClusterTransport {
+        if (options.pool_size == 0) return error.InvalidTransportLimits;
+        try validateTransportLimits(options.limits);
+        if (!std.mem.eql(u8, options.endpoint_host, "127.0.0.1") and !std.mem.eql(u8, options.endpoint_host, "localhost")) {
+            return error.TransportUnavailable;
+        }
+        return .{
+            .endpoint_host = options.endpoint_host,
+            .auth = options.auth,
+            .pool_size = options.pool_size,
+            .reconnect_attempts = options.reconnect_attempts,
+            .inner = try LoopbackSocketClusterTransport.init(allocator, io, storage, .{
+                .shard_count = options.shard_count,
+                .port = options.port,
+                .limits = options.limits,
+            }),
+        };
+    }
+
+    pub fn deinit(self: *RemoteSocketClusterTransport) void {
+        self.inner.deinit();
+    }
+
+    pub fn asClusterTransport(self: *RemoteSocketClusterTransport) ClusterTransport {
+        return .{
+            .ptr = self,
+            .vtable = &.{
+                .send = sendOpaque,
+            },
+        };
+    }
+
+    pub fn snapshotMetrics(self: *const RemoteSocketClusterTransport) ClusterTransportMetricsSnapshot {
+        return self.lifecycle;
+    }
+
+    pub fn lastFailure(self: *const RemoteSocketClusterTransport) ?ClusterTransportFailureReport {
+        return self.last_failure;
+    }
+
+    pub fn send(self: *RemoteSocketClusterTransport, allocator: Allocator, request: ClusterTransportRequest) !ClusterTransportResponse {
+        self.lifecycle.sends += 1;
+        try self.preflight(request);
+
+        const max_attempts = self.reconnect_attempts + 1;
+        var attempts: usize = 0;
+        while (attempts < max_attempts) {
+            attempts += 1;
+            const before = self.inner.snapshotMetrics();
+            var response = self.inner.send(allocator, request) catch |err| {
+                if (attempts < max_attempts and err == error.TransportUnavailable) {
+                    self.lifecycle.retries += 1;
+                    continue;
+                }
+                self.recordFailure(attempts, err, "remote socket send failed");
+                return err;
+            };
+            errdefer response.deinit(allocator);
+            const after = self.inner.snapshotMetrics();
+            self.lifecycle.successes += 1;
+            self.lifecycle.bytes_sent += after.bytes_sent - before.bytes_sent;
+            self.lifecycle.bytes_received += after.bytes_received - before.bytes_received;
+            return response;
+        }
+        self.recordFailure(attempts, error.TransportUnavailable, "remote socket reconnect exhausted");
+        return error.TransportUnavailable;
+    }
+
+    fn preflight(self: *RemoteSocketClusterTransport, request: ClusterTransportRequest) ClusterTransportError!void {
+        _ = self.endpoint_host;
+        _ = self.pool_size;
+        validateTransportAuth(self.auth, request.auth) catch |err| {
+            self.recordFailure(1, err, "remote auth rejected");
+            return err;
+        };
+        validateTransportEnvelopeLimits(request, self.inner.limits) catch |err| {
+            self.recordFailure(1, err, "remote envelope limits rejected");
+            return err;
+        };
+        if (self.lifecycle.in_flight >= self.inner.limits.max_in_flight) {
+            self.recordFailure(1, error.TransportBackpressured, "remote max in-flight reached");
+            return error.TransportBackpressured;
+        }
+    }
+
+    fn recordFailure(self: *RemoteSocketClusterTransport, attempts: usize, err: anyerror, detail: []const u8) void {
+        recordTransportFailure(&self.lifecycle, &self.last_failure, .production_socket, attempts, err, detail);
+    }
+
+    fn sendOpaque(ptr: *anyopaque, allocator: Allocator, request: ClusterTransportRequest) anyerror!ClusterTransportResponse {
+        const self: *RemoteSocketClusterTransport = @ptrCast(@alignCast(ptr));
         return self.send(allocator, request);
     }
 };
@@ -728,7 +997,7 @@ pub fn formatClusterTransportRequestJson(allocator: Allocator, request: ClusterT
     try output.appendSlice(allocator, ",\"auth_mode\":");
     try appendJsonString(&output, allocator, @tagName(request.auth.mode));
     try output.appendSlice(allocator, ",\"auth_credential\":");
-    try appendOptionalJsonString(&output, allocator, request.auth.credential);
+    try appendOptionalJsonString(&output, allocator, if (request.auth.credential != null) causal.causal_redaction_marker else null);
     try output.appendSlice(allocator, ",\"trace_id\":");
     try appendOptionalJsonU64(&output, allocator, request.trace_id);
     try output.appendSlice(allocator, ",\"span_id\":");
@@ -893,6 +1162,47 @@ pub fn clusterTransportSocketFrameBody(frame: []const u8) ClusterTransportError!
     if (!std.mem.startsWith(u8, header, prefix)) return error.CorruptTransportMessage;
     const expected_len = std.fmt.parseInt(usize, header[prefix.len..], 10) catch return error.CorruptTransportMessage;
     if (body.len != expected_len) return error.CorruptTransportMessage;
+    return body;
+}
+
+fn writeSocketFrame(stream: std.Io.net.Stream, io: std.Io, frame: []const u8) !void {
+    var offset: usize = 0;
+    while (offset < frame.len) {
+        const chunk = [_][]const u8{frame[offset..]};
+        const written = try io.vtable.netWrite(io.userdata, stream.socket.handle, "", &chunk, 1);
+        if (written == 0) return error.TransportUnavailable;
+        offset += written;
+    }
+}
+
+fn readSocketFrame(allocator: Allocator, stream: std.Io.net.Stream, io: std.Io, max_bytes: usize) ![]const u8 {
+    var header_buf: [64]u8 = undefined;
+    var header_len: usize = 0;
+    while (true) {
+        var byte_buf: [1]u8 = undefined;
+        var parts = [_][]u8{byte_buf[0..]};
+        const n = try io.vtable.netRead(io.userdata, stream.socket.handle, &parts);
+        if (n == 0) return error.CorruptTransportMessage;
+        if (byte_buf[0] == '\n') break;
+        if (header_len == header_buf.len) return error.CorruptTransportMessage;
+        header_buf[header_len] = byte_buf[0];
+        header_len += 1;
+    }
+
+    const header = header_buf[0..header_len];
+    const prefix = "ZIGFX/1 ";
+    if (!std.mem.startsWith(u8, header, prefix)) return error.CorruptTransportMessage;
+    const expected_len = std.fmt.parseInt(usize, header[prefix.len..], 10) catch return error.CorruptTransportMessage;
+    if (expected_len > max_bytes) return error.TransportPayloadTooLarge;
+    const body = try allocator.alloc(u8, expected_len);
+    errdefer allocator.free(body);
+    var offset: usize = 0;
+    while (offset < expected_len) {
+        var parts = [_][]u8{body[offset..]};
+        const n = try io.vtable.netRead(io.userdata, stream.socket.handle, &parts);
+        if (n == 0) return error.CorruptTransportMessage;
+        offset += n;
+    }
     return body;
 }
 

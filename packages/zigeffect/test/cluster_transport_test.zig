@@ -17,6 +17,8 @@ test "cluster transport public exports are available" {
     try std.testing.expect(@hasDecl(fx.cluster, "ClusterTransportFailureReport"));
     try std.testing.expect(@hasDecl(fx.cluster, "InProcessClusterTransport"));
     try std.testing.expect(@hasDecl(fx.cluster, "LoopbackHttpClusterTransport"));
+    try std.testing.expect(@hasDecl(fx.cluster, "LoopbackSocketClusterTransport"));
+    try std.testing.expect(@hasDecl(fx.cluster, "RemoteSocketClusterTransport"));
     try std.testing.expect(@hasDecl(fx.cluster, "ProductionHttpClusterTransport"));
     try std.testing.expect(@hasDecl(fx.cluster, "ProductionSocketClusterTransport"));
     try std.testing.expect(@hasDecl(fx.cluster, "formatClusterTransportSocketFrame"));
@@ -24,6 +26,8 @@ test "cluster transport public exports are available" {
     try std.testing.expect(@hasDecl(fx.cluster, "formatClusterTransportFailureReport"));
     try std.testing.expect(@hasDecl(fx.cluster, "chunkedClusterTransportRequest"));
     try std.testing.expect(@hasDecl(fx, "ClusterTransport"));
+    try std.testing.expect(@hasDecl(fx, "LoopbackSocketClusterTransport"));
+    try std.testing.expect(@hasDecl(fx, "RemoteSocketClusterTransport"));
     try std.testing.expect(@hasDecl(fx, "ProductionHttpClusterTransport"));
     try std.testing.expect(@hasDecl(fx, "ProductionSocketClusterTransport"));
 }
@@ -56,7 +60,7 @@ test "transport request json round-trips" {
     try std.testing.expectEqual(@as(usize, 2), parsed.policy.max_retries);
 }
 
-test "transport request json preserves auth trace and chunk metadata" {
+test "transport request json redacts auth credential while preserving trace and chunk metadata" {
     const request = fx.ClusterTransportRequest{
         .kind = .request,
         .address = fx.entityAddress("counter", "transport-metadata"),
@@ -74,16 +78,34 @@ test "transport request json preserves auth trace and chunk metadata" {
 
     const json = try fx.formatClusterTransportRequestJson(std.testing.allocator, request);
     defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "token-1") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, fx.causal_redaction_marker) != null);
 
     var parsed = try fx.parseClusterTransportRequestJson(std.testing.allocator, json);
     defer parsed.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(fx.ClusterTransportAuthMode.bearer_token, parsed.auth.mode);
-    try std.testing.expectEqualStrings("token-1", parsed.auth.credential.?);
+    try std.testing.expectEqualStrings(fx.causal_redaction_marker, parsed.auth.credential.?);
     try std.testing.expectEqual(@as(?u64, 7001), parsed.trace_id);
     try std.testing.expectEqual(@as(?u64, 7002), parsed.span_id);
     try std.testing.expectEqual(@as(?u32, 0), parsed.chunk_index);
     try std.testing.expectEqual(@as(?u32, 3), parsed.chunk_count);
+}
+
+test "transport request json never serializes sentinel auth credentials" {
+    const request = fx.ClusterTransportRequest{
+        .kind = .tell,
+        .address = fx.entityAddress("counter", "transport-secret"),
+        .payload_type_name = "text",
+        .payload = "inc",
+        .redacted_detail = "auth metadata",
+        .auth = .{ .mode = .shared_secret, .credential = "sentinel-transport-secret-123" },
+    };
+
+    const json = try fx.formatClusterTransportRequestJson(std.testing.allocator, request);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "sentinel-transport-secret-123") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, fx.causal_redaction_marker) != null);
 }
 
 test "transport response json round-trips" {
@@ -801,6 +823,261 @@ test "cluster runner processes ask sent through production socket transport" {
         message_storage_state.asMessageStorage(),
         .production_socket,
     );
+}
+
+test "loopback socket transport crosses real localhost TCP and preserves envelope fields" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runner_storage_state = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer runner_storage_state.deinit();
+    var message_storage_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_state.deinit();
+
+    var transport_state = try fx.LoopbackSocketClusterTransport.init(
+        std.testing.allocator,
+        std.testing.io,
+        message_storage_state.asMessageStorage(),
+        .{ .shard_count = 8, .port = 19391 },
+    );
+    defer transport_state.deinit();
+
+    try expectRunnerProcessesTransportAsk(
+        transport_state.asClusterTransport(),
+        runner_storage_state.asRunnerStorage(),
+        message_storage_state.asMessageStorage(),
+        .production_socket,
+    );
+
+    const metrics = transport_state.snapshotMetrics();
+    try std.testing.expectEqual(@as(usize, 1), metrics.sends);
+    try std.testing.expectEqual(@as(usize, 1), metrics.successes);
+    try std.testing.expect(metrics.bytes_sent > 0);
+    try std.testing.expect(metrics.bytes_received > 0);
+}
+
+test "loopback socket transport trace is structurally equivalent to in-process transport trace" {
+    var in_process_trace = fx.CausalStore.init(std.testing.allocator);
+    defer in_process_trace.deinit();
+    try recordTransportAcceptanceTrace(&in_process_trace, .in_process, 0);
+
+    var loopback_trace = fx.CausalStore.init(std.testing.allocator);
+    defer loopback_trace.deinit();
+    try recordTransportAcceptanceTrace(&loopback_trace, .loopback_socket, 19392);
+
+    var in_process_snapshot = try in_process_trace.snapshot(std.testing.allocator);
+    defer in_process_snapshot.deinit();
+    var loopback_snapshot = try loopback_trace.snapshot(std.testing.allocator);
+    defer loopback_snapshot.deinit();
+
+    try std.testing.expect(try fx.causalStructurallyEquivalent(
+        std.testing.allocator,
+        in_process_snapshot.events,
+        loopback_snapshot.events,
+    ));
+}
+
+test "remote socket transport rejects wrong auth before durable submission" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var message_storage_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_state.deinit();
+
+    var transport_state = try fx.RemoteSocketClusterTransport.init(
+        std.testing.allocator,
+        std.testing.io,
+        message_storage_state.asMessageStorage(),
+        .{
+            .shard_count = 8,
+            .port = 19393,
+            .auth = .{ .mode = .shared_secret, .credential = "server-secret" },
+            .pool_size = 2,
+            .reconnect_attempts = 1,
+        },
+    );
+    defer transport_state.deinit();
+
+    const address = fx.entityAddress("counter", "remote-auth-reject");
+    const shard_id = try fx.shardIdForAddress(address, 8);
+
+    try std.testing.expectError(error.TransportUnauthorized, transport_state.asClusterTransport().send(std.testing.allocator, .{
+        .kind = .tell,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "inc",
+        .redacted_detail = "auth failure",
+        .auth = .{ .mode = .shared_secret, .credential = "wrong-secret" },
+    }));
+
+    var by_shard = try message_storage_state.asMessageStorage().unprocessedByShard(shard_id, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 0), by_shard.records.len);
+    const metrics = transport_state.snapshotMetrics();
+    try std.testing.expectEqual(@as(usize, 1), metrics.failures);
+    try std.testing.expectEqualStrings("TransportUnauthorized", metrics.last_error_name);
+    const failure = transport_state.lastFailure().?;
+    try std.testing.expect(std.mem.indexOf(u8, failure.redacted_detail, "server-secret") == null);
+    try std.testing.expect(std.mem.indexOf(u8, failure.redacted_detail, "wrong-secret") == null);
+}
+
+test "remote socket transport sends over socket path with matching auth" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var message_storage_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_state.deinit();
+
+    var transport_state = try fx.RemoteSocketClusterTransport.init(
+        std.testing.allocator,
+        std.testing.io,
+        message_storage_state.asMessageStorage(),
+        .{
+            .shard_count = 8,
+            .port = 19394,
+            .auth = .{ .mode = .shared_secret, .credential = "server-secret" },
+            .pool_size = 2,
+            .reconnect_attempts = 1,
+        },
+    );
+    defer transport_state.deinit();
+
+    const address = fx.entityAddress("counter", "remote-auth-ok");
+    var response = try transport_state.asClusterTransport().send(std.testing.allocator, .{
+        .kind = .request,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "get",
+        .redacted_detail = "remote read",
+        .idempotency_key = "remote-auth-ok-key",
+        .auth = .{ .mode = .shared_secret, .credential = "server-secret" },
+        .trace_id = 14001,
+        .span_id = 14002,
+    });
+    defer response.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(fx.ClusterTransportKind.production_socket, response.transport);
+    try std.testing.expect(response.correlation_id != null);
+    const metrics = transport_state.snapshotMetrics();
+    try std.testing.expectEqual(@as(usize, 1), metrics.sends);
+    try std.testing.expectEqual(@as(usize, 1), metrics.successes);
+    try std.testing.expect(metrics.bytes_sent > 0);
+    try std.testing.expect(metrics.bytes_received > 0);
+}
+
+const TraceTransportKind = enum {
+    in_process,
+    loopback_socket,
+};
+
+fn recordTransportAcceptanceTrace(store: *fx.CausalStore, kind: TraceTransportKind, port: u16) !void {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runner_storage_state = try fx.FileRunnerStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer runner_storage_state.deinit();
+    var message_storage_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_state.deinit();
+
+    switch (kind) {
+        .in_process => {
+            var transport_state = try fx.InProcessClusterTransport.init(
+                std.testing.allocator,
+                message_storage_state.asMessageStorage(),
+                .{ .shard_count = 8 },
+            );
+            defer transport_state.deinit();
+            try recordTransportAcceptanceTraceWithTransport(
+                store,
+                transport_state.asClusterTransport(),
+                runner_storage_state.asRunnerStorage(),
+                message_storage_state.asMessageStorage(),
+            );
+        },
+        .loopback_socket => {
+            var transport_state = try fx.LoopbackSocketClusterTransport.init(
+                std.testing.allocator,
+                std.testing.io,
+                message_storage_state.asMessageStorage(),
+                .{ .shard_count = 8, .port = port },
+            );
+            defer transport_state.deinit();
+            try recordTransportAcceptanceTraceWithTransport(
+                store,
+                transport_state.asClusterTransport(),
+                runner_storage_state.asRunnerStorage(),
+                message_storage_state.asMessageStorage(),
+            );
+        },
+    }
+}
+
+fn recordTransportAcceptanceTraceWithTransport(
+    store: *fx.CausalStore,
+    transport: fx.ClusterTransport,
+    runner_storage: fx.RunnerStorage,
+    message_storage: fx.MessageStorage,
+) !void {
+    var runner = try fx.LocalClusterRunner.init(std.testing.allocator, .{
+        .runner = fx.runnerAddress("machine-trace", "runner-trace"),
+        .runner_storage = runner_storage,
+        .message_storage = message_storage,
+        .shard_count = 8,
+        .runner_index = 0,
+        .runner_count = 1,
+        .lease_options = .{ .ttl_ms = 1_000, .refresh_interval_ms = 250 },
+    });
+    defer runner.deinit();
+
+    const run_id = store.nextRunId();
+    const run = try store.record(.{ .kind = .run_started, .run_id = run_id, .status = "started", .label = "transport trace" });
+
+    var plan = try runner.acquireBalancedShards(1_000);
+    defer plan.deinit();
+    try std.testing.expectEqual(@as(usize, 8), plan.shards.len);
+    const runner_event = try store.record(.{ .kind = .cluster_runner_registered, .run_id = run_id, .parent_id = run, .status = "registered" });
+
+    const address = fx.entityAddress("counter", "transport-trace-acceptance");
+    _ = try runner.registerEntity(.{ .address = address, .name = "transport-counter" }, 1_000);
+    const entity_event = try store.record(.{ .kind = .cluster_entity_registered, .run_id = run_id, .parent_id = runner_event, .status = "registered" });
+
+    var response = try transport.send(std.testing.allocator, .{
+        .kind = .request,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "get",
+        .redacted_detail = "read through trace transport",
+        .idempotency_key = "transport-trace-acceptance-key",
+        .trace_id = 13001,
+        .span_id = 13002,
+    });
+    defer response.deinit(std.testing.allocator);
+    const submitted_event = try store.record(.{ .kind = .cluster_message_submitted, .run_id = run_id, .parent_id = entity_event, .trace_id = 13001, .span_id = 13002, .status = "submitted" });
+
+    var before_tick = try message_storage.unprocessedByShard(response.shard_id, std.testing.allocator);
+    defer before_tick.deinit();
+    try std.testing.expectEqual(@as(usize, 1), before_tick.records.len);
+    const claimed_event = try store.record(.{ .kind = .cluster_message_claimed, .run_id = run_id, .parent_id = submitted_event, .trace_id = 13001, .span_id = 13002, .status = "claimed" });
+
+    const Handler = struct {
+        pub fn handle(_: *fx.EntityScope, envelope: fx.EntityEnvelope) !fx.EntityHandlerResult {
+            try std.testing.expectEqual(fx.EntityEnvelopeKind.ask, envelope.kind);
+            try std.testing.expectEqualStrings("get", envelope.payload);
+            return .{ .reply = "value=trace" };
+        }
+    };
+
+    const report = try runner.tick(Handler, 1_100);
+    try std.testing.expectEqual(@as(usize, 1), report.scanned);
+    try std.testing.expectEqual(@as(usize, 1), report.dispatched);
+    try std.testing.expectEqual(@as(usize, 1), report.replied);
+    try std.testing.expectEqual(@as(usize, 1), report.acked);
+    const processed_event = try store.record(.{ .kind = .cluster_entity_processed, .run_id = run_id, .parent_id = claimed_event, .trace_id = 13001, .span_id = 13002, .status = "processed" });
+
+    const reply = (try message_storage.reply(response.correlation_id.?, std.testing.allocator)).?;
+    defer fx.deinitMessageEnvelope(std.testing.allocator, reply);
+    try std.testing.expectEqual(fx.MessageEnvelopeKind.reply, reply.kind);
+    try std.testing.expectEqualStrings("value=trace", reply.payload);
+    const replied_event = try store.record(.{ .kind = .cluster_message_replied, .run_id = run_id, .parent_id = processed_event, .trace_id = 13001, .span_id = 13002, .status = "replied" });
+    const acked_event = try store.record(.{ .kind = .cluster_message_acked, .run_id = run_id, .parent_id = replied_event, .trace_id = 13001, .span_id = 13002, .status = "acked" });
+    _ = try store.record(.{ .kind = .cluster_trace_propagated, .run_id = run_id, .parent_id = acked_event, .trace_id = 13001, .span_id = 13002, .status = "propagated" });
+    _ = try store.record(.{ .kind = .run_completed, .run_id = run_id, .parent_id = run, .status = "success", .label = "transport trace" });
 }
 
 fn expectRunnerProcessesTransportAsk(

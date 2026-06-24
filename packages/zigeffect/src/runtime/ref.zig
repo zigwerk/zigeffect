@@ -1,11 +1,9 @@
 //! M5.1 — `Ref(T)`, the atomic cell primitive.
 //!
-//! Single-threaded v1: `get`/`set`/`update` are plain reads and writes. The
-//! engine's v1 production posture is single-executor (see Working Default #4 in
-//! the vision-completion roadmap), so a non-atomic cell is sound today. The
-//! public API is designed so that lifting to thread-safe in v2 — by swapping
-//! the field to `std.atomic.Value(T)` and the methods to load/store/cmpxchg —
-//! is source-compatible: no caller can observe the difference.
+//! Thread-safe write path: `get`/`set`/`update` are serialized by a `SpinLock`, so
+//! OS-thread executors do not lose read-modify-write updates. Keep read-side
+//! inspection at a quiescent barrier when combining this with broader runtime
+//! snapshots or host services.
 //!
 //! `Ref` is the foundation for `SynchronizedRef` (M5.2 — effectful update under
 //! a semaphore), `FiberRef` (M5.3 — fiber-local with auto-propagation), and
@@ -85,8 +83,9 @@ pub fn Ref(comptime T: type) type {
 }
 
 /// M5.2 — `SynchronizedRef(T)`, a `Ref` whose `update` is serialized through a
-/// 1-permit semaphore. Single-threaded v1: the semaphore is effectively a
-/// reentrancy guard; in v2 (multi-executor), it becomes the actual mutex.
+/// 1-permit semaphore. `Ref` itself already protects the cell with a `SpinLock`;
+/// the semaphore remains the effect-level serialization boundary for callers
+/// that need update ordering to compose with other fiber primitives.
 ///
 /// Reads (`get`) are NOT guarded — the semaphore protects the
 /// read-transform-write window, not snapshot reads. The convention matches

@@ -11,6 +11,8 @@ A `causal_*` tool may exist only if it appears below. To add a new tool:
 2. A human reviewer (not an agent) adds/confirms the `approved:` marker.
 3. The tool must import from or exercise `src/` — it must add runtime capability,
    not paperwork. Text-only "describe another tool's output" tools are rejected.
+   The hygiene checker enforces this for new `.zig` tools unless a human adds a
+   narrow `//hygiene:allow-no-runtime-import reason=<...>` marker.
 
 There are currently **46 tools**. The cap is 60 (`check_tool_hygiene.sh`). If you
 are near the cap, the answer is almost always to extend an existing tool or to
@@ -23,7 +25,7 @@ near-duplicate tools (`*_level_*` counter tiers and
 `*_evaluation_report_evaluation_report_*` recursion chains), each a ~1,800-line
 record-only printer. `tools/` grew ~178,000 lines while runtime `src/` grew ~95.
 All 120 were removed; this registry and the hygiene check exist so it cannot
-recur. See `docs/roadmap.md` for the forward plan.
+recur. See [roadmap.md](roadmap.md) for the forward plan.
 
 ## Approved tools
 

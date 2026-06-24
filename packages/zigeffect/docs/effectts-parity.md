@@ -159,7 +159,10 @@ default, but real concurrency now runs through the same surface:
   the race family run on the deterministic backend, on **real zio coroutines**
   (`packages/zigeffect-zio`), or on a **real OS-thread pool**
   (`ThreadPoolExecutor`). The D2 invariant holds across all three: the same
-  program yields a structurally-equivalent causal trace.
+  program yields a structurally-equivalent causal trace, meaning the same event
+  kinds, cause and parent edge kinds, id-insensitive scope/resource/fiber
+  ownership facts, finding-evidence owner states, and per-fiber terminal
+  lifecycle states independent of concrete ids and scheduler ordering.
 - **The `AsyncBackend` vtable is fully implemented on zio** — suspend/wake/
   schedule-timer/interrupt/register-io/complete-io/poll-wake — as a registration
   + wake-queue with real timer coroutines and real `zio.net` socket IO.

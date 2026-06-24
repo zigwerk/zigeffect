@@ -37,7 +37,10 @@ const result = try Program
   **three executors**: the deterministic backend, real **[zio](https://github.com/lalinsky/zio)
   coroutines** (`packages/zigeffect-zio`, built), and a real **OS-thread pool**
   (`ThreadPoolExecutor`). The same program yields a structurally-equivalent causal
-  trace on all three. See [docs/roadmap.md](docs/roadmap.md).
+  trace on all three: same event kinds, cause and parent edge kinds,
+  id-insensitive scope/resource/fiber ownership facts, finding-evidence owner
+  states, and per-fiber terminal lifecycle states, while ignoring concrete ids
+  and scheduling order. See [docs/roadmap.md](docs/roadmap.md).
 - **Concurrency**: `forEachPar`, `zipPar`, and the race family — `raceFirst`,
   `raceAll`, `race` (prefer-success), `both` (fail-fast).
 - **`Deferred`, `Queue`, `Semaphore`**: coordination primitives with explicit
@@ -210,7 +213,8 @@ tool are in [docs/tool-roadmap.md](docs/tool-roadmap.md).
 
 **Tool hygiene is enforced.** `tools/check_tool_hygiene.sh` (run in CI and as a
 pre-commit hook) blocks recursive "report-about-a-report" names, numbered tier
-clones, oversized files, and tool-count blowups. A new tool must add runtime
+clones, oversized files, tool-count blowups, and new `.zig` tools that do not
+import or explicitly exercise runtime symbols. A new tool must add runtime
 capability, not paperwork — see the Tool Hygiene Policy in `AGENTS.md` /
 `CLAUDE.md`. This guardrail exists because an autonomous loop once generated ~120
 record-only clone tools; see [docs/roadmap.md](docs/roadmap.md).

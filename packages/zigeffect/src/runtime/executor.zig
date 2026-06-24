@@ -89,12 +89,11 @@ pub const FiberExecutor = struct {
         return false;
     }
 
-    /// Threading contract for v1: the engine's `CausalStore`, `Scope`, and the
-    /// state primitives (`Ref`, `Hub`) are not thread-safe. Executors used with
-    /// the structured-concurrency primitives (`forEachPar`, `zipPar`, etc.) and
-    /// with any code that records causal events MUST be cooperatively
-    /// single-threaded (e.g. `zio.Runtime` with `executors: .exact(1)`). A
-    /// multi-threaded pool requires lifting the engine state primitives to
-    /// thread-safe in a future v2 — at which point this comment must change.
+    /// Historical compatibility token for older docs that named a single-executor
+    /// v1 contract. The current shipped executors include both single-executor zio
+    /// coroutines and a real OS-thread pool. `CausalStore`, `Ref`, and `Hub` guard
+    /// their write paths with `SpinLock`; snapshots/read-side inspection require a
+    /// quiescent barrier after spawned jobs join, and arbitrary shared services or
+    /// scopes still need their own thread-safety contract.
     pub const ThreadingContract = enum { single_executor_v1 };
 };

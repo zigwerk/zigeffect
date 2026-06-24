@@ -227,18 +227,17 @@ pub fn ZipWithEffect(
 // the deep integration; these primitives are the user-facing surface that
 // dogfoods it.
 //
-// Threading contract (v1): the configured executor MUST be cooperatively
-// single-threaded (see `FiberExecutor.ThreadingContract`). The engine's
-// `CausalStore`, `Scope`, and the state primitives are not thread-safe, and
-// the per-job `Context` is a shallow copy that still shares pointers to those
-// objects. A multi-threaded executor would race on them.
+// Threading contract: the configured executor may be single-executor cooperative
+// (zio) or a real OS-thread executor. `CausalStore`, `Ref`, and `Hub` guard their
+// write paths, but the per-job `Context` is still a shallow copy that may share
+// host-provided services, scopes, and allocators. Those shared values must be
+// thread-safe for OS-thread executors; read-side inspection still needs a
+// quiescent barrier after all spawned jobs join.
 //
-// Failure semantics in this v1 (without `FiberExecutor.interrupt`): on
-// failure the primitive joins all in-flight fibers (lets them finish) and
-// returns the **lowest-indexed** failure — deterministic across executors,
-// independent of completion order. True short-circuit cancellation (race /
-// both with loser-interrupt) lands when M7.8 wires the executor interrupt
-// vtable method.
+// Failure semantics: the parallel family joins every spawned branch before it
+// returns unless the primitive explicitly short-circuits via an executor
+// `interrupt`/`waitAny` path (`race*` / `both`). This preserves structured
+// cleanup and gives snapshots a quiescent point.
 //
 // Result-lifetime contract: per-item `Result` values that succeed are NOT
 // freed by the primitive on partial failure. If `Result` owns heap

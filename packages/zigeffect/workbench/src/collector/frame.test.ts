@@ -55,6 +55,22 @@ test("empty status maps to 'unknown' (the frontend requires a string status)", (
   expect(isLiveFrame(frame)).toBe(true);
 });
 
+test("collector frames redact sentinel secrets before they reach the workbench", () => {
+  const frame = causalLineToFrame(
+    engineLine({
+      label:
+        "Authorization: Bearer sentinel-bearer-token-123 api_key=sk-sentinel-api-key-123 Cookie: sid=sentinel-cookie-123",
+    }),
+    1,
+  );
+
+  expect(frame).not.toBeNull();
+  expect(frame!.label).not.toContain("sentinel-bearer-token-123");
+  expect(frame!.label).not.toContain("sk-sentinel-api-key-123");
+  expect(frame!.label).not.toContain("sentinel-cookie-123");
+  expect(frame!.label).toContain("<redacted>");
+});
+
 test("malformed / incomplete lines are rejected (never break the stream)", () => {
   expect(causalLineToFrame("", 1)).toBeNull();
   expect(causalLineToFrame("   ", 1)).toBeNull();

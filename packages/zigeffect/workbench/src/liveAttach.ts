@@ -7,11 +7,11 @@
 // artifact model every existing view (timeline, graph, findings, …) already
 // renders — so live mode reuses the whole UI rather than adding a parallel one.
 //
-// HONEST BOUNDARY: the real transport (`webSocketLiveSource`) needs the
-// engine-side live-attach collector endpoint, which is not yet built. Everything
-// here is transport-agnostic and unit-tested through `LiveSource`; the socket
-// itself is exercised only against a running collector (manual / flagged). The
-// message framing (`parseFrameMessage`) is pure and fully tested.
+// HONEST BOUNDARY: the collector endpoint now exists under `src/collector/` and
+// maps engine NDJSON into LiveFrame WebSocket messages. The remaining proof gap
+// is browser-level verification that a real collector stream renders in the
+// workbench DOM, not only unit tests around the transport abstraction and frame
+// parser.
 
 import { createSignal, onCleanup } from "solid-js";
 import type { UnknownRecord } from "./causalArtifact";

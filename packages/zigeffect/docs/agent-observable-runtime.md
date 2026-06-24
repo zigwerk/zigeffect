@@ -944,9 +944,11 @@ The concrete `opentelemetry` adapter is `CausalOtelBackendState`. It maps
 stored causal events into typed `CausalOtelRecord` values with `span_event` or
 `log_record` signal classification, OTel-style trace/span hex strings where
 local ids exist, and `zigeffect.causal.*` attributes for runtime facts. This is
-an exporter-neutral bridge; OTLP serialization, SDK integration, resources, and
-collector delivery remain future adapter work. Its focused gate is
-`zig build causal-otel-backend`.
+an exporter-neutral bridge; OTLP/JSON serialization now lives in
+`CausalOtlpJson` and produces the exact `resourceLogs` bytes a host can POST to
+an OpenTelemetry collector. The core still does not own host HTTP delivery to an
+external OTel collector. Its focused gates are `zig build causal-otel-backend`
+and the OTLP/JSON tests under the package gate.
 
 The concrete `nendb_graph` adapter is `CausalGraphHistoryBackendState`. It
 clones stored causal events into an adapter-owned history and answers

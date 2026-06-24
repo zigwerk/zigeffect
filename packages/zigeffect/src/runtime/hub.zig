@@ -16,9 +16,10 @@
 //! and `hub_received` once per subscriber that successfully accepted the item
 //! (the load-bearing cause edge for downstream subscriber-resume queries).
 //!
-//! Single-threaded v1 — no atomics. Lifting to thread-safe in v2 (mutex around
-//! `subscribers` + per-subscriber atomic queue) is source-compatible: callers
-//! observe no difference.
+//! Thread-safe write path: subscriber bookkeeping and per-subscriber queues are
+//! guarded by a `SpinLock`, so concurrent publish/take/subscribe from executor
+//! threads is safe. As with the causal store, callers should take snapshots or
+//! perform broad inspection after spawned work reaches a quiescent barrier.
 //!
 //! Hub is the substrate for:
 //!   - Workbench live-attach (M10.1): a `CausalHubBackend` publishes events as

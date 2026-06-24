@@ -34,12 +34,12 @@ const zio = @import("zio");
 ///   - A live zio runtime must be active on the calling thread (i.e. you are
 ///     running under `zio.Runtime.init` / inside a zio task). `fork` calls
 ///     `zio.spawn`, which panics if invoked with no current executor.
-///   - The zio runtime must be SINGLE-EXECUTOR (the default `.exact(1)`). The
-///     engine's `CausalStore` (and typically the services the fibers touch) is
-///     not thread-safe — it relies on cooperative single-threaded scheduling so
-///     that `CausalStore.record` runs atomically between yields (see the
-///     invariant on `CausalStore.record`). A multi-executor runtime would run
-///     fibers in true parallel and race on the store.
+///   - The tested default is a SINGLE-EXECUTOR zio runtime (`.exact(1)`), which
+///     makes interleaving deterministic enough for the structural-equivalence
+///     proofs. `CausalStore`, `Ref`, and `Hub` now guard their write paths with
+///     `SpinLock`, but snapshots still require a quiescent barrier and arbitrary
+///     host-provided services / scopes need their own thread-safety contract
+///     before using a multi-executor zio runtime.
 ///   - The zio runtime must outlive the `FiberRuntime`: a fiber forked but never
 ///     joined is awaited at the `FiberRuntime`'s deinit, which requires the
 ///     backing runtime to still be able to complete it.
@@ -352,8 +352,8 @@ pub fn recordZioCoordinationScenario(store: *fx.CausalStore) !void {
 /// uses the core SuspensionCoordinator.delay; under zio the bodies are spawned as
 /// coroutines (a short-delay fiber resumes before a long-delay one, so the events
 /// genuinely reorder), while under the deterministic backend the same bodies run
-/// sequentially. The structural invariants (event-kind multiset + per-fiber net
-/// state) are identical — proving the H5 equivalence holds under real reordering.
+/// sequentially. The structural invariants are id/order-insensitive semantic
+/// graph facts, so the H5 equivalence holds under real reordering.
 fn d2FiberBody(allocator: std.mem.Allocator, store: *fx.CausalStore, backend: fx.AsyncBackend, run_id: u64, scope_id: u64, fiber_id: u64, forked_id: u64, delay_ms: u64) !void {
     const started = try store.record(.{ .kind = .fiber_started, .run_id = run_id, .scope_id = scope_id, .fiber_id = fiber_id, .parent_id = forked_id, .status = "running", .label = "worker fiber" });
     var coord = fx.SuspensionCoordinator.init(allocator, store, backend);
@@ -1333,8 +1333,8 @@ test "Z1: zio-backed delay suspends for real and yields a structurally-equal cau
     var det_snap = try det_store.snapshot(allocator);
     defer det_snap.deinit();
 
-    // Structural equivalence: same event-kind multiset, including the load-bearing
-    // suspend/timer/resume kinds that prove a real suspend->resume happened.
+    // Load-bearing event counts prove a real suspend->resume happened before the
+    // full structural-equivalence check below compares the semantic graph facts.
     try std.testing.expectEqual(det_snap.events.len, zio_snap.events.len);
     try std.testing.expectEqual(kindCount(det_snap.events, .fiber_suspended), kindCount(zio_snap.events, .fiber_suspended));
     try std.testing.expectEqual(kindCount(det_snap.events, .timer_scheduled), kindCount(zio_snap.events, .timer_scheduled));

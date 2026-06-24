@@ -16,6 +16,7 @@ const Event = struct {
     cause_event_id: ?u64 = null,
     fiber_id: ?u64 = null,
     scope_id: ?u64 = null,
+    resource_id: ?u64 = null,
     trace_id: ?u64 = null,
     span_id: ?u64 = null,
     label: []const u8 = "",
@@ -308,6 +309,136 @@ fn isFiberLifecycle(kind: []const u8) bool {
         std.mem.eql(u8, kind, "fiber_interrupted");
 }
 
+fn isResourceLifecycle(kind: []const u8) bool {
+    return std.mem.eql(u8, kind, "resource_acquired") or
+        std.mem.eql(u8, kind, "resource_finalized");
+}
+
+fn isFindingEvidenceKind(kind: []const u8) bool {
+    return std.mem.eql(u8, kind, "service_required") or
+        std.mem.eql(u8, kind, "scope_closed") or
+        std.mem.eql(u8, kind, "resource_acquired") or
+        std.mem.eql(u8, kind, "resource_finalized") or
+        std.mem.eql(u8, kind, "fiber_forked") or
+        std.mem.eql(u8, kind, "fiber_started") or
+        std.mem.eql(u8, kind, "fiber_joined") or
+        std.mem.eql(u8, kind, "fiber_interrupted") or
+        std.mem.eql(u8, kind, "fiber_suspended") or
+        std.mem.eql(u8, kind, "fiber_resumed") or
+        std.mem.eql(u8, kind, "timer_scheduled") or
+        std.mem.eql(u8, kind, "timer_fired") or
+        std.mem.eql(u8, kind, "io_wait_started") or
+        std.mem.eql(u8, kind, "io_completed") or
+        std.mem.eql(u8, kind, "deferred_completed") or
+        std.mem.eql(u8, kind, "queue_item_available") or
+        std.mem.eql(u8, kind, "signal_raised") or
+        std.mem.eql(u8, kind, "activity_completed") or
+        std.mem.eql(u8, kind, "external_signal_received") or
+        std.mem.eql(u8, kind, "hub_published") or
+        std.mem.eql(u8, kind, "hub_received") or
+        std.mem.eql(u8, kind, "remediation_requested") or
+        std.mem.eql(u8, kind, "remediation_decided") or
+        std.mem.eql(u8, kind, "remediation_applied") or
+        std.mem.eql(u8, kind, "schedule_decision") or
+        std.mem.eql(u8, kind, "assertion_recorded") or
+        std.mem.eql(u8, kind, "workflow_event_recorded") or
+        std.mem.eql(u8, kind, "supervisor_child_started") or
+        std.mem.eql(u8, kind, "supervisor_restart_decided") or
+        std.mem.eql(u8, kind, "supervisor_escalated") or
+        std.mem.eql(u8, kind, "supervisor_shutdown_ordered") or
+        std.mem.eql(u8, kind, "cluster_shard_lease_acquired") or
+        std.mem.eql(u8, kind, "cluster_shard_lease_refreshed") or
+        std.mem.eql(u8, kind, "cluster_shard_lease_released") or
+        std.mem.eql(u8, kind, "cluster_shard_lease_conflict") or
+        std.mem.eql(u8, kind, "cluster_shard_handoff_started") or
+        std.mem.eql(u8, kind, "cluster_shard_recovery_started") or
+        std.mem.eql(u8, kind, "cluster_shard_recovery_completed") or
+        std.mem.eql(u8, kind, "cluster_runner_registered") or
+        std.mem.eql(u8, kind, "cluster_runner_heartbeat") or
+        std.mem.eql(u8, kind, "cluster_message_submitted") or
+        std.mem.eql(u8, kind, "cluster_message_claimed") or
+        std.mem.eql(u8, kind, "cluster_message_acked") or
+        std.mem.eql(u8, kind, "cluster_message_replied") or
+        std.mem.eql(u8, kind, "cluster_entity_registered") or
+        std.mem.eql(u8, kind, "cluster_entity_processed") or
+        std.mem.eql(u8, kind, "cluster_entity_failed") or
+        std.mem.eql(u8, kind, "cluster_trace_propagated");
+}
+
+fn sortedNames(a: []const u8, b: []const u8) struct { first: []const u8, second: []const u8 } {
+    if (std.mem.lessThan(u8, b, a)) return .{ .first = b, .second = a };
+    return .{ .first = a, .second = b };
+}
+
+fn appendOrderedPairFact(
+    allocator: std.mem.Allocator,
+    facts: *std.ArrayList(StructuralFact),
+    prefix: []const u8,
+    parent_kind: []const u8,
+    child_kind: []const u8,
+) !void {
+    const key = try std.fmt.allocPrint(allocator, "{s}:{s}->{s}", .{ prefix, parent_kind, child_kind });
+    defer allocator.free(key);
+    try bumpFact(allocator, facts, key);
+}
+
+fn appendUnorderedPairFact(
+    allocator: std.mem.Allocator,
+    facts: *std.ArrayList(StructuralFact),
+    prefix: []const u8,
+    left_kind: []const u8,
+    right_kind: []const u8,
+) !void {
+    const names = sortedNames(left_kind, right_kind);
+    const key = try std.fmt.allocPrint(allocator, "{s}:{s}|{s}", .{ prefix, names.first, names.second });
+    defer allocator.free(key);
+    try bumpFact(allocator, facts, key);
+}
+
+fn fiberScopeRelation(left: Event, right: Event) []const u8 {
+    if (left.scope_id == null and right.scope_id == null) return "none";
+    if (left.scope_id == null or right.scope_id == null) return "partial";
+    if (left.scope_id.? == right.scope_id.?) return "same";
+    return "different";
+}
+
+const OwnerState = enum { absent, known, unknown };
+
+fn ownerStateName(state: OwnerState) []const u8 {
+    return switch (state) {
+        .absent => "absent",
+        .known => "known",
+        .unknown => "unknown",
+    };
+}
+
+fn scopeOwnerState(events: []const Event, scope_id: ?u64) OwnerState {
+    const expected = scope_id orelse return .absent;
+    for (events) |event| {
+        if (event.scope_id != expected) continue;
+        if (std.mem.eql(u8, event.kind, "scope_opened") or std.mem.eql(u8, event.kind, "scope_closed")) return .known;
+    }
+    return .unknown;
+}
+
+fn resourceOwnerState(events: []const Event, resource_id: ?u64) OwnerState {
+    const expected = resource_id orelse return .absent;
+    for (events) |event| {
+        if (event.resource_id != expected) continue;
+        if (isResourceLifecycle(event.kind)) return .known;
+    }
+    return .unknown;
+}
+
+fn fiberOwnerState(events: []const Event, fiber_id: ?u64) OwnerState {
+    const expected = fiber_id orelse return .absent;
+    for (events) |event| {
+        if (event.fiber_id != expected) continue;
+        if (isFiberLifecycle(event.kind)) return .known;
+    }
+    return .unknown;
+}
+
 fn bumpFact(allocator: std.mem.Allocator, facts: *std.ArrayList(StructuralFact), key: []const u8) !void {
     for (facts.items) |*fact| {
         if (std.mem.eql(u8, fact.key, key)) {
@@ -331,9 +462,9 @@ fn factCountFor(facts: []const StructuralFact, key: []const u8) usize {
 }
 
 // Structural invariants that hold across backends (deterministic vs zio) for the
-// same program even though event ids and ordering vary: the multiset of event
-// kinds, the multiset of cause-edge kind pairs (cause.kind -> effect.kind), and
-// each fiber's net (latest) lifecycle kind.
+// same program even though event ids and ordering vary: event kinds, cause and
+// parent kind edges, scope/resource/fiber grouping facts, finding-evidence owner
+// facts, and each fiber's net (latest) lifecycle kind.
 fn buildStructuralFacts(allocator: std.mem.Allocator, events: []const Event) !std.ArrayList(StructuralFact) {
     var facts = std.ArrayList(StructuralFact).empty;
     errdefer freeFacts(allocator, &facts);
@@ -346,7 +477,65 @@ fn buildStructuralFacts(allocator: std.mem.Allocator, events: []const Event) !st
     for (events) |event| {
         const cause_id = event.cause_event_id orelse continue;
         const cause = findEvent(events, cause_id) orelse continue;
-        const key = try std.fmt.allocPrint(allocator, "cause:{s}->{s}", .{ cause.kind, event.kind });
+        try appendOrderedPairFact(allocator, &facts, "cause", cause.kind, event.kind);
+    }
+    for (events) |event| {
+        const parent_id = event.parent_id orelse continue;
+        const parent = findEvent(events, parent_id) orelse continue;
+        try appendOrderedPairFact(allocator, &facts, "parent", parent.kind, event.kind);
+    }
+    var scope_i: usize = 0;
+    while (scope_i < events.len) : (scope_i += 1) {
+        const event = events[scope_i];
+        const scope_id = event.scope_id orelse continue;
+        var scope_j = scope_i + 1;
+        while (scope_j < events.len) : (scope_j += 1) {
+            const other = events[scope_j];
+            if (other.scope_id == null or other.scope_id.? != scope_id) continue;
+            try appendUnorderedPairFact(allocator, &facts, "scope-pair", event.kind, other.kind);
+        }
+    }
+    var resource_i: usize = 0;
+    while (resource_i < events.len) : (resource_i += 1) {
+        const event = events[resource_i];
+        if (!isResourceLifecycle(event.kind)) continue;
+        const resource_id = event.resource_id orelse continue;
+        var resource_j = resource_i + 1;
+        while (resource_j < events.len) : (resource_j += 1) {
+            const other = events[resource_j];
+            if (!isResourceLifecycle(other.kind)) continue;
+            if (other.resource_id == null or other.resource_id.? != resource_id) continue;
+            try appendUnorderedPairFact(allocator, &facts, "resource-pair", event.kind, other.kind);
+        }
+    }
+    var fiber_i: usize = 0;
+    while (fiber_i < events.len) : (fiber_i += 1) {
+        const event = events[fiber_i];
+        if (!isFiberLifecycle(event.kind)) continue;
+        const fiber_id = event.fiber_id orelse continue;
+        var fiber_j = fiber_i + 1;
+        while (fiber_j < events.len) : (fiber_j += 1) {
+            const other = events[fiber_j];
+            if (!isFiberLifecycle(other.kind)) continue;
+            if (other.fiber_id == null or other.fiber_id.? != fiber_id) continue;
+            const names = sortedNames(event.kind, other.kind);
+            const key = try std.fmt.allocPrint(allocator, "fiber-pair:{s}|{s}:scope={s}", .{
+                names.first,
+                names.second,
+                fiberScopeRelation(event, other),
+            });
+            defer allocator.free(key);
+            try bumpFact(allocator, &facts, key);
+        }
+    }
+    for (events) |event| {
+        if (!isFindingEvidenceKind(event.kind)) continue;
+        const key = try std.fmt.allocPrint(allocator, "finding-owner:{s}:scope={s}:fiber={s}:resource={s}", .{
+            event.kind,
+            ownerStateName(scopeOwnerState(events, event.scope_id)),
+            ownerStateName(fiberOwnerState(events, event.fiber_id)),
+            ownerStateName(resourceOwnerState(events, event.resource_id)),
+        });
         defer allocator.free(key);
         try bumpFact(allocator, &facts, key);
     }
@@ -385,7 +574,7 @@ pub fn runStructuralCompare(allocator: std.mem.Allocator, before_json_input: []c
     var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
     try output.appendSlice(allocator, "zigeffect causal structural compare\n");
-    try output.appendSlice(allocator, "(invariants: event-kind multiset, cause-edge kind pairs, fiber net states)\n");
+    try output.appendSlice(allocator, "(invariants: event kinds, cause/parent edges, scope/resource/fiber ownership, finding owners, fiber net states)\n");
 
     var equal = true;
     for (before_facts.items) |fact| {
@@ -490,7 +679,7 @@ test "structural compare: a dropped resume compares not-equal" {
 
 test "structural compare: same event kinds but a different cause edge compares not-equal" {
     const allocator = std.testing.allocator;
-    // Same event-kind multiset (timer_fired, io_completed, fiber_resumed) but the
+    // Same event kinds (timer_fired, io_completed, fiber_resumed) but the
     // resume is caused by a different kind of event — isolates the cause-edge invariant.
     const a =
         \\{"events":[
@@ -504,6 +693,50 @@ test "structural compare: same event kinds but a different cause edge compares n
         \\{"id":1,"kind":"timer_fired","fiber_id":1,"cause_event_id":null,"status":"ready"},
         \\{"id":2,"kind":"io_completed","fiber_id":1,"cause_event_id":null,"status":"ready"},
         \\{"id":3,"kind":"fiber_resumed","fiber_id":1,"cause_event_id":2,"status":"running"}
+        \\]}
+    ;
+    const report = try runStructuralCompare(allocator, a, b);
+    defer allocator.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "structural: not-equal") != null);
+}
+
+test "structural compare: same kinds but different parent lineage compares not-equal" {
+    const allocator = std.testing.allocator;
+    const a =
+        \\{"events":[
+        \\{"id":1,"kind":"run_started","parent_id":null},
+        \\{"id":2,"kind":"effect_started","parent_id":1},
+        \\{"id":3,"kind":"effect_completed","parent_id":2}
+        \\]}
+    ;
+    const b =
+        \\{"events":[
+        \\{"id":10,"kind":"run_started","parent_id":null},
+        \\{"id":20,"kind":"effect_started","parent_id":null},
+        \\{"id":30,"kind":"effect_completed","parent_id":10}
+        \\]}
+    ;
+    const report = try runStructuralCompare(allocator, a, b);
+    defer allocator.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "structural: not-equal") != null);
+}
+
+test "structural compare: same kinds but mismatched resource pairing compares not-equal" {
+    const allocator = std.testing.allocator;
+    const a =
+        \\{"events":[
+        \\{"id":1,"kind":"scope_opened","scope_id":1},
+        \\{"id":2,"kind":"resource_acquired","scope_id":1,"resource_id":9},
+        \\{"id":3,"kind":"resource_finalized","scope_id":1,"resource_id":9},
+        \\{"id":4,"kind":"scope_closed","scope_id":1}
+        \\]}
+    ;
+    const b =
+        \\{"events":[
+        \\{"id":10,"kind":"scope_opened","scope_id":1},
+        \\{"id":20,"kind":"resource_acquired","scope_id":1,"resource_id":9},
+        \\{"id":30,"kind":"resource_finalized","scope_id":1,"resource_id":10},
+        \\{"id":40,"kind":"scope_closed","scope_id":1}
         \\]}
     ;
     const report = try runStructuralCompare(allocator, a, b);

@@ -47,6 +47,16 @@ function derivePriority(event: CausalEventRecord): string {
   return "normal";
 }
 
+function redactFrameText(value: string): string {
+  return value
+    .replace(/\b(authorization|proxy-authorization)\s*:\s*(bearer|basic)\s+[^;\s,]+/gi, "$1: $2 <redacted>")
+    .replace(/\bcookie\s*:\s*[^,\n\r]+/gi, "Cookie: <redacted>")
+    .replace(
+      /\b(api[_-]?key|x-api-key|token|password|secret|session(?:_id)?|sid)\b\s*[:=]\s*("[^"]*"|'[^']*'|[^;\s,]+)/gi,
+      "$1=<redacted>",
+    );
+}
+
 /**
  * Map one engine NDJSON CausalEvent line to a `LiveFrame` with the given
  * sequence number. Returns null for blank lines, non-JSON, non-objects, or
@@ -76,7 +86,7 @@ export function causalLineToFrame(line: string, sequence: number): LiveFrame | n
     event_id: eventId,
     event_kind: event.kind,
     status: typeof event.status === "string" && event.status.length > 0 ? event.status : "unknown",
-    label: typeof event.label === "string" ? event.label : "",
+    label: typeof event.label === "string" ? redactFrameText(event.label) : "",
     lane: deriveLane(event),
     parent_id: safeIdOrNull(event.parent_id),
     finding_kind: null,

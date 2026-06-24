@@ -20,7 +20,9 @@ What is real and verified here:
   on zio via real `zio.sleep` (parks the coroutine on io_uring / epoll / kqueue).
   The SAME engine code (`SuspensionCoordinator.delay`) drives both
   deterministic and zio backends and produces **structurally equal causal
-  traces** (proven via `causalStructurallyEquivalent`).
+  traces** (same event kinds, cause and parent edge kinds, id-insensitive
+  scope/resource/fiber ownership facts, finding-evidence owner states, and
+  per-fiber terminal lifecycle states, proven via `causalStructurallyEquivalent`).
 - **D2 — engine fibers as real coroutines.** Two engine fibers, each driven by
   `coordinator.delay`, run as real interleaving zio coroutines and yet remain
   structurally equal to the deterministic *sequential* run.
@@ -31,18 +33,25 @@ What is real and verified here:
 - **Z1 / Z2 / Z3 / Z3b** primitives verified — real timer suspension, real
   socket IO via `zio.net`, real cancellation via `zio.Group`, real coordination
   via `zio.Channel`.
+- **AsyncBackend vtable filled.** `suspend_runtime` / `wake` / `schedule_timer` /
+  `interrupt` / `register_io_wait` / `complete_io` / `poll_wake` are implemented
+  as a registration + wake-queue backed by real zio timer coroutines where needed.
+- **Workflow scheduler on zio.** The scheduler reconciles deterministic virtual
+  time with zio's real-clock timer model via the `real_clock` capability and
+  `pumpAsyncUntilIdle`.
 - **Cancellation correctness.** A `delay` cancelled mid-wait records
   `fiber_interrupted` — never a fabricated `timer_fired` / `fiber_resumed`.
 
-What is **not** done yet (tracked in
-[Track 7](../../docs/superpowers/plans/2026-06-20-zigeffect-vision-completion-roadmap.md)):
+What is **not** done yet:
 
-- 6 of 9 `AsyncBackend` vtable methods still return
-  `error.UnsupportedBackendCapability`: `suspend_runtime` / `wake` /
-  `schedule_timer` / `interrupt` / `register_io_wait` / `complete_io`. The Z1/Z2/
-  Z3 proofs work because the scenarios drive zio directly; the vtable seam
-  itself isn't yet exercised end-to-end. Filling these is Track 7 of the
-  vision-completion roadmap.
+- Production cluster transports are still not remote deployment transports. The
+  core package now has `LoopbackSocketClusterTransport`, which crosses localhost
+  TCP once behind `ClusterTransport`; the zio adapter can build on that for
+  long-lived remote sockets later.
+- Browser rendering of a live stream has a captured proof in
+  `docs/superpowers/specs/2026-06-24-zigeffect-live-debugging-browser-proof.md`;
+  turning that browser proof into CI still needs an accepted browser/DOM test
+  dependency.
 
 ## Run it
 
