@@ -96,6 +96,9 @@ semantic fact comparison, not exact event-id graph isomorphism.
 - **Eval diff artifact writer sink.** `runAgentEvalAndWriteDiffArtifact` emits
   the same linked diff artifact to a caller-provided sink, giving dev-loop tools
   a persistence hook without putting filesystem writes in the core service.
+- **Eval diff artifact link JSON.** `formatAgentEvalDiffArtifactLinkJson` emits
+  `zigeffect.causal.agent-eval-diff-link.v1`, a compact cross-link shape that
+  ties persisted eval diff artifacts back to remediation event ids.
 - **Bidirectional live debugging transport primitives.** The Bun collector now
   accepts `POST /command`, broadcasts redacted command frames, and the workbench
   live layer can send bounded command requests. Applying commands still belongs
@@ -107,6 +110,10 @@ semantic fact comparison, not exact event-id graph isomorphism.
   validates collector command inbox responses in local tooling, and
   `runCausalLiveCommandPolledBatch` applies decoded command envelopes while
   carrying the next inbox cursor through the engine policy boundary.
+- **Local command polling loop.** `runLiveCommandPollingLoop` repeatedly fetches
+  collector command batches from local TypeScript tooling, advances the inbox
+  cursor, calls a caller-owned handler, and stops on an empty batch or fixed
+  poll budget.
 - **Bounded live command poll loop.** `runCausalLiveCommandPollLoop` repeatedly
   calls a caller-provided poller up to a fixed limit, applies decoded command
   batches through engine policy, aggregates tap counters, and stops on an empty
@@ -128,6 +135,10 @@ semantic fact comparison, not exact event-id graph isomorphism.
 - **Access-controlled ops artifact response.** `formatCausalOpsArtifactResponseJson`
   formats allowed/denied operator artifact reads as redacted JSON, with event
   evidence present only when `CausalOpsPolicy` grants access.
+- **HTTP-shaped ops artifact response.** `formatCausalOpsArtifactHttpResponse`
+  wraps the same policy-gated JSON in an adapter-friendly status/body pair: 200
+  for allowed reads, 403 for denied reads, without hosting an HTTP server in the
+  core.
 - **Ops alert/runbook adapter.** `emitCausalOpsAlerts` forwards alert facts to a
   caller-provided sink, and `formatCausalOpsRunbookJson` emits a redacted local
   operator runbook artifact.
@@ -145,9 +156,14 @@ semantic fact comparison, not exact event-id graph isomorphism.
 - **Runner deployment metadata validation.** `validateCausalRunnerDeployments`
   reports missing TLS, missing address, unhealthy runners, and stale auth epochs
   before deployment metadata is trusted as lineage evidence.
+- **Transport service-discovery validation.**
+  `validateClusterTransportServiceDiscovery` checks discovered remote transport
+  endpoints for host, port, TLS, health, and auth epoch before pool candidates
+  are trusted.
 - **Schema governance for the agentic artifact surface.** The schema governance
-  inventory now tracks semantic diff, eval diff, ops artifact response, ops
-  runbook, ops alert delivery, and runner lineage artifact families.
+  inventory now tracks semantic diff, eval diff, eval diff links, ops artifact
+  response, ops runbook, ops alert delivery, and runner lineage artifact
+  families.
 - App-facing causal traces (`CausalAppTrace`) emitting `zigeffect.causal.v1` from
   Worker-shaped request/job paths.
 - Export adapters as sinks (JSONL, DOT, OTel-shaped, **OTLP/JSON**, graph-history,
@@ -207,27 +223,29 @@ substrates into real deployed systems:
 
 1. **Network-connected command taps.** `applyCausalLiveCommand`,
    `runCausalLiveCommandTapBatch`, the collector's pollable command inbox,
-   typed inbox client, core poll bridge, and bounded poll loop exist, but a
-   running engine still needs a real daemon/client process that repeatedly polls
-   command frames over the network and streams resulting causal facts back to the
-   browser.
+   typed inbox client, local TypeScript polling loop, core poll bridge, and
+   bounded engine poll loop exist, but a running engine still needs a real
+   daemon/client process that owns process supervision, repeatedly polls command
+   frames over the network, calls engine policy, and streams resulting causal
+   facts back to the browser.
 2. **Real multi-node cluster deployment.** The transport validates TLS/pool/
    backpressure policy and propagates origin causal ids, and
    `stitchCausalRunnerLineage` can merge runner traces, emit deployment metadata
-   artifacts, and validate metadata posture. Next: real TLS handshakes, service
-   discovery, auth rotation, health-checked pools, and stitched lineage from
-   separate runner processes.
+   artifacts, validate metadata posture, and reject unsafe discovered endpoints.
+   Next: real TLS handshakes, a service-discovery backend, auth rotation,
+   health-checked pool selection, and stitched lineage from separate runner
+   processes.
 3. **Diff/eval integration.** The workbench renders portable `semantic_diff`
    payloads, evals can emit linked diff artifacts, the new artifact schemas are
-   governed, and evals can write artifacts to a caller sink. Next: have dev-loop
-   tools persist those artifacts automatically and cross-link them from
-   remediation chains.
+   governed, evals can write artifacts to a caller sink, and the runtime can
+   format remediation-chain artifact links. Next: have dev-loop tools persist
+   those artifacts automatically and attach the links from remediation chains.
 4. **External operator integrations.** `CausalOpsPolicy`, NenDB reads, alert
    sinks, access-controlled artifact responses, local runbook JSON, alert
-   delivery envelopes, and delivery-sink hooks exist. Next: actual external
-   alert provider adapters, served artifact endpoints, deployment metadata
-   ingestion from real deployments, and operator-facing runbooks generated from
-   live deployments.
+   delivery envelopes, delivery-sink hooks, and HTTP-shaped artifact responses
+   exist. Next: actual external alert provider adapters, served artifact
+   endpoints, deployment metadata ingestion from real deployments, and
+   operator-facing runbooks generated from live deployments.
 
 ## Hardening milestone roadmap
 
@@ -879,6 +897,72 @@ delivery adapters without sending alerts directly from the core.
 - Tests prove the sink receives the delivery schema and does not see sentinel
   secrets.
 
+### M36 — Local command polling loop
+
+**Status:** delivered on 2026-06-24 via `runLiveCommandPollingLoop`.
+
+**Goal:** let local tooling repeatedly poll the collector command inbox without
+inventing a daemon or binding the Zig core to Bun.
+
+**Work:**
+- Add a TypeScript async loop around `fetchLiveCommands`.
+- Advance the command cursor, call a caller-provided handler, and stop on empty
+  batches or `maxPolls`.
+
+**Acceptance:**
+- Tests prove multiple command batches are handled, cursors advance, and polling
+  stops when an empty batch arrives.
+
+### M37 — Eval diff artifact remediation link
+
+**Status:** delivered on 2026-06-24 via
+`formatAgentEvalDiffArtifactLinkJson`.
+
+**Goal:** give remediation chains a compact, governed JSON reference to persisted
+eval diff artifacts without embedding whole artifacts everywhere.
+
+**Work:**
+- Add `zigeffect.causal.agent-eval-diff-link.v1`.
+- Include artifact path/id, pass/fail state, remediation event ids, and diff
+  summary counts.
+- Register the schema in causal schema governance.
+
+**Acceptance:**
+- Tests prove the link includes the artifact path and remediation event ids, and
+  schema governance tracks the new artifact family.
+
+### M38 — Remote transport service discovery validation
+
+**Status:** delivered on 2026-06-24 via
+`validateClusterTransportServiceDiscovery`.
+
+**Goal:** check discovered remote transport endpoints before they become
+connection-pool candidates.
+
+**Work:**
+- Add endpoint facts for host, port, TLS, health, and auth epoch.
+- Return a compact count-based validation report for unsafe candidates.
+
+**Acceptance:**
+- Tests prove missing host, invalid port, missing TLS, unhealthy endpoints, and
+  stale auth epochs are reported.
+
+### M39 — HTTP-shaped ops artifact response
+
+**Status:** delivered on 2026-06-24 via
+`formatCausalOpsArtifactHttpResponse`.
+
+**Goal:** provide adapter-ready status/body semantics for policy-gated ops
+artifact reads without hosting HTTP inside the core service.
+
+**Work:**
+- Wrap `formatCausalOpsArtifactResponseJson` in a status/body response object.
+- Return 200 for allowed reads and 403 for denied reads.
+
+**Acceptance:**
+- Tests prove allowed reads return 200 with event counts and denied reads return
+  403 without event bodies.
+
 ## Delivered since 2026-06-20
 
 The forward sequence from the prior roadmap is largely done. Tracked in
@@ -896,14 +980,16 @@ The forward sequence from the prior roadmap is largely done. Tracked in
 - One loopback cluster transport crosses localhost TCP, and the remote socket
   wrapper adds auth preflight, reconnect attempts, transport policy validation,
   origin causal ids, metrics, and redacted failure handling.
-- The M6-M35 agentic engine layer now covers bounded interventions,
+- The M6-M39 agentic engine layer now covers bounded interventions,
   counterfactual trace forks, reusable invariants, semantic graph diffs, live
   command transport primitives plus engine execution/taps, collector polling,
-  typed inbox validation, poll-batch cursor bridging, and bounded poll loops,
-  concurrency annotations, transport hardening, ops guardrails/storage/alert/
-  artifact/delivery adapters with delivery sinks, schema-governed visual/
-  emitted/eval-linked diff evidence with writer sinks, and multi-runner lineage
-  stitching with deployment artifact metadata and validation.
+  typed inbox validation, local polling, poll-batch cursor bridging, and bounded
+  poll loops, concurrency annotations, transport hardening plus service-discovery
+  validation, ops guardrails/storage/alert/artifact/delivery adapters with
+  delivery sinks and HTTP-shaped responses, schema-governed visual/emitted/
+  eval-linked diff evidence with writer sinks and remediation links, and
+  multi-runner lineage stitching with deployment artifact metadata and
+  validation.
 
 ## June 2026 cleanup note
 

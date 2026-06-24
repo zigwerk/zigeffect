@@ -130,3 +130,38 @@ test "agent eval writes semantic diff artifact to caller sink" {
     try std.testing.expect(capture.saw_schema);
     try std.testing.expect(capture.saw_semantic_diff);
 }
+
+test "agent eval formats diff artifact link for remediation chains" {
+    const policy = (fx.AgentInterventionPolicy{})
+        .withApplyEnabled(true)
+        .withKindPolicy(.interrupt_fiber, .auto_approve);
+    const invariants = fx.CausalInvariantBuilder.init().requireSuspendedFibersResolve();
+
+    var artifact = try fx.runAgentEvalWithDiffArtifact(std.testing.allocator, .{
+        .name = "interrupt hung fiber",
+        .baseline = &baseline,
+        .policy = policy,
+        .request = .{
+            .kind = .interrupt_fiber,
+            .run_id = 1,
+            .fiber_id = 9,
+            .reason = "eval interrupt",
+        },
+        .invariants = invariants,
+        .expect_improvement = true,
+    }, "baseline", "after-interrupt");
+    defer artifact.deinit();
+
+    const link = try fx.formatAgentEvalDiffArtifactLinkJson(std.testing.allocator, .{
+        .eval_name = "interrupt hung fiber",
+        .artifact_path = ".zig-cache/causal-artifacts/eval-diff.json",
+        .result = artifact.result,
+    });
+    defer std.testing.allocator.free(link);
+
+    try std.testing.expect(std.mem.indexOf(u8, link, "\"schema\":\"zigeffect.causal.agent-eval-diff-link.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, link, "\"artifact_path\":\".zig-cache/causal-artifacts/eval-diff.json\"") != null);
+    var requested_buf: [64]u8 = undefined;
+    const requested = try std.fmt.bufPrint(&requested_buf, "\"requested\":{d}", .{artifact.result.counterfactual.intervention.requested_event_id.?});
+    try std.testing.expect(std.mem.indexOf(u8, link, requested) != null);
+}

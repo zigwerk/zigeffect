@@ -998,6 +998,37 @@ test "remote socket transport validates TLS and pool policy before start" {
     ));
 }
 
+test "remote transport service discovery validation reports unsafe endpoints" {
+    const endpoints = [_]fx.ClusterTransportDiscoveredEndpoint{
+        .{
+            .host = "runner-a.internal",
+            .port = 7001,
+            .tls_enabled = false,
+            .healthy = false,
+            .auth_epoch = 2,
+        },
+        .{
+            .host = "runner-b.internal",
+            .port = 7001,
+            .tls_enabled = true,
+            .healthy = true,
+            .auth_epoch = 10,
+        },
+    };
+
+    const report = fx.validateClusterTransportServiceDiscovery(&endpoints, .{
+        .require_tls = true,
+        .require_healthy = true,
+        .min_auth_epoch = 5,
+    });
+
+    try std.testing.expect(!report.ok());
+    try std.testing.expectEqual(@as(usize, 2), report.checked);
+    try std.testing.expectEqual(@as(usize, 1), report.missing_tls);
+    try std.testing.expectEqual(@as(usize, 1), report.unhealthy);
+    try std.testing.expectEqual(@as(usize, 1), report.stale_auth_epoch);
+}
+
 test "remote socket transport applies reject backpressure before durable submission" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

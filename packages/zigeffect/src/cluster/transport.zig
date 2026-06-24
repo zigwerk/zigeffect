@@ -537,6 +537,52 @@ pub const RemoteSocketClusterTransportOptions = struct {
     reconnect_attempts: usize = 0,
 };
 
+pub const ClusterTransportDiscoveredEndpoint = struct {
+    host: []const u8,
+    port: u16,
+    tls_enabled: bool = false,
+    healthy: bool = false,
+    auth_epoch: u64 = 0,
+};
+
+pub const ClusterTransportServiceDiscoveryRequirements = struct {
+    require_tls: bool = true,
+    require_healthy: bool = true,
+    min_auth_epoch: u64 = 0,
+};
+
+pub const ClusterTransportServiceDiscoveryReport = struct {
+    checked: usize = 0,
+    missing_host: usize = 0,
+    invalid_port: usize = 0,
+    missing_tls: usize = 0,
+    unhealthy: usize = 0,
+    stale_auth_epoch: usize = 0,
+
+    pub fn ok(self: ClusterTransportServiceDiscoveryReport) bool {
+        return self.missing_host == 0 and
+            self.invalid_port == 0 and
+            self.missing_tls == 0 and
+            self.unhealthy == 0 and
+            self.stale_auth_epoch == 0;
+    }
+};
+
+pub fn validateClusterTransportServiceDiscovery(
+    endpoints: []const ClusterTransportDiscoveredEndpoint,
+    requirements: ClusterTransportServiceDiscoveryRequirements,
+) ClusterTransportServiceDiscoveryReport {
+    var report = ClusterTransportServiceDiscoveryReport{ .checked = endpoints.len };
+    for (endpoints) |endpoint| {
+        if (endpoint.host.len == 0) report.missing_host += 1;
+        if (endpoint.port == 0) report.invalid_port += 1;
+        if (requirements.require_tls and !endpoint.tls_enabled) report.missing_tls += 1;
+        if (requirements.require_healthy and !endpoint.healthy) report.unhealthy += 1;
+        if (endpoint.auth_epoch < requirements.min_auth_epoch) report.stale_auth_epoch += 1;
+    }
+    return report;
+}
+
 pub const RemoteSocketClusterTransport = struct {
     endpoint_host: []const u8,
     auth: ClusterTransportAuth = .{},

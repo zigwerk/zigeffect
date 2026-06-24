@@ -14,6 +14,7 @@ import {
   mockLiveSource,
   parseCommandMessage,
   parseFrameMessage,
+  runLiveCommandPollingLoop,
   sendLiveCommand,
   webSocketLiveSource,
   type LiveCommandRequest,
@@ -142,6 +143,60 @@ test("fetchLiveCommands rejects invalid command inbox payloads", async () => {
   await expect(fetchLiveCommands("http://127.0.0.1:4500/commands", 8, fetcher)).rejects.toThrow(
     "live command inbox returned an invalid response",
   );
+});
+
+test("runLiveCommandPollingLoop advances cursors and stops on empty batches", async () => {
+  const batches: LiveCommandInboxResponse[] = [
+    {
+      next_after: 1,
+      commands: [
+        {
+          sequence: 1,
+          command_id: "cmd-1",
+          command_kind: "interrupt_fiber",
+          status: "received",
+          fiber_id: 9,
+        },
+      ],
+    },
+    {
+      next_after: 2,
+      commands: [
+        {
+          sequence: 2,
+          command_id: "cmd-2",
+          command_kind: "fire_timer",
+          status: "received",
+          schedule_id: 7,
+        },
+      ],
+    },
+    { next_after: 2, commands: [] },
+  ];
+  const urls: string[] = [];
+  const seen: string[] = [];
+  const fetcher = async (url: string) => {
+    urls.push(url);
+    const response = batches.shift();
+    return new Response(JSON.stringify(response), { headers: { "content-type": "application/json" } });
+  };
+
+  const result = await runLiveCommandPollingLoop(
+    "http://127.0.0.1:4500/commands",
+    (inbox) => {
+      seen.push(...inbox.commands.map((command) => command.command_kind));
+    },
+    { startAfter: 0, maxPolls: 5 },
+    fetcher,
+  );
+
+  expect(urls).toEqual([
+    "http://127.0.0.1:4500/commands?after=0",
+    "http://127.0.0.1:4500/commands?after=1",
+    "http://127.0.0.1:4500/commands?after=2",
+  ]);
+  expect(seen).toEqual(["interrupt_fiber", "fire_timer"]);
+  expect(result).toEqual({ polls: 3, commands: 2, next_after: 2 });
 });
 
 test("LiveCausalBuffer accumulates frames in causal (sequence) order", () => {

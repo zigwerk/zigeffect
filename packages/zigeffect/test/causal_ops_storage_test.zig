@@ -138,3 +138,38 @@ test "ops artifact endpoint response gates and redacts event evidence" {
     try std.testing.expect(std.mem.indexOf(u8, allowed, fx.causal_redaction_marker) != null);
     try std.testing.expect(std.mem.indexOf(u8, allowed, "sentinel-secret") == null);
 }
+
+test "ops artifact http response wraps policy result with status code" {
+    var storage = fx.CausalNendbStorageBackendState.init(std.testing.allocator, noOpWriter(), .{});
+    defer storage.deinit();
+
+    var store = fx.CausalStore.init(std.testing.allocator);
+    store.attachBackend(storage.backend());
+    defer store.deinit();
+
+    _ = try store.record(.{
+        .kind = .resource_acquired,
+        .scope_id = 10,
+        .label = "allowed resource",
+        .type_name = "Db",
+        .status = "success",
+    });
+
+    var denied = try fx.formatCausalOpsArtifactHttpResponse(std.testing.allocator, &storage, opsPolicy(), .{
+        .actor_id = "other-agent",
+        .scope_id = 10,
+    });
+    defer denied.deinit();
+    try std.testing.expectEqual(@as(u16, 403), denied.status);
+    try std.testing.expect(std.mem.indexOf(u8, denied.body, "\"allowed\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, denied.body, "\"events\"") == null);
+
+    var allowed = try fx.formatCausalOpsArtifactHttpResponse(std.testing.allocator, &storage, opsPolicy(), .{
+        .actor_id = "agent-1",
+        .scope_id = 10,
+    });
+    defer allowed.deinit();
+    try std.testing.expectEqual(@as(u16, 200), allowed.status);
+    try std.testing.expect(std.mem.indexOf(u8, allowed.body, "\"allowed\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, allowed.body, "\"event_count\":1") != null);
+}

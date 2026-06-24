@@ -30,6 +30,17 @@ pub const CausalOpsArtifactReadResult = struct {
     }
 };
 
+pub const CausalOpsArtifactHttpResponse = struct {
+    allocator: Allocator,
+    status: u16,
+    body: []const u8,
+
+    pub fn deinit(self: *CausalOpsArtifactHttpResponse) void {
+        if (self.body.len > 0) self.allocator.free(self.body);
+        self.body = "";
+    }
+};
+
 pub fn readCausalOpsArtifact(
     allocator: Allocator,
     storage: *const CausalNendbStorageBackendState,
@@ -113,6 +124,21 @@ pub fn formatCausalOpsArtifactResponseJson(
     }
     try output.appendSlice(allocator, "]}");
     return output.toOwnedSlice(allocator);
+}
+
+pub fn formatCausalOpsArtifactHttpResponse(
+    allocator: Allocator,
+    storage: *const CausalNendbStorageBackendState,
+    policy: CausalOpsPolicy,
+    request: CausalOpsReadRequest,
+) Allocator.Error!CausalOpsArtifactHttpResponse {
+    const allowed = policy.canRead(request);
+    const body = try formatCausalOpsArtifactResponseJson(allocator, storage, policy, request);
+    return .{
+        .allocator = allocator,
+        .status = if (allowed) 200 else 403,
+        .body = body,
+    };
 }
 
 fn appendRedactedJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []const u8) Allocator.Error!void {

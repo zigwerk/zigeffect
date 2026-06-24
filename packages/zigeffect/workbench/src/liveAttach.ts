@@ -59,6 +59,19 @@ export type LiveCommandInboxResponse = {
   next_after: number;
 };
 
+export type LiveCommandPollingOptions = {
+  startAfter?: number;
+  maxPolls?: number;
+};
+
+export type LiveCommandPollingResult = {
+  polls: number;
+  commands: number;
+  next_after: number;
+};
+
+export type LiveCommandBatchHandler = (inbox: LiveCommandInboxResponse) => void | Promise<void>;
+
 export type LiveStreamMeta = {
   schema?: string;
   schemaVersion?: number | string;
@@ -207,6 +220,32 @@ export async function fetchLiveCommands(
     throw new Error("live command inbox returned an invalid response");
   }
   return parsed;
+}
+
+export async function runLiveCommandPollingLoop(
+  url: string,
+  handler: LiveCommandBatchHandler,
+  options: LiveCommandPollingOptions = {},
+  fetcher: LiveCommandFetcher = fetch,
+): Promise<LiveCommandPollingResult> {
+  const maxPolls = options.maxPolls ?? 1;
+  if (!Number.isSafeInteger(maxPolls) || maxPolls < 0) {
+    throw new Error("live command polling maxPolls must be a non-negative safe integer");
+  }
+  let cursor = options.startAfter ?? 0;
+  let polls = 0;
+  let commands = 0;
+  while (polls < maxPolls) {
+    const inbox = await fetchLiveCommands(url, cursor, fetcher);
+    polls += 1;
+    commands += inbox.commands.length;
+    await handler(inbox);
+    cursor = inbox.next_after;
+    if (inbox.commands.length === 0) {
+      break;
+    }
+  }
+  return { polls, commands, next_after: cursor };
 }
 
 /** Pull `frames` out of a full live-stream document (the sample fixture shape). */
