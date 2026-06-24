@@ -165,3 +165,70 @@ test "agent eval formats diff artifact link for remediation chains" {
     const requested = try std.fmt.bufPrint(&requested_buf, "\"requested\":{d}", .{artifact.result.counterfactual.intervention.requested_event_id.?});
     try std.testing.expect(std.mem.indexOf(u8, link, requested) != null);
 }
+
+const LinkedEvalArtifactCapture = struct {
+    artifact_writes: usize = 0,
+    link_writes: usize = 0,
+    saw_artifact_schema: bool = false,
+    saw_link_schema: bool = false,
+    saw_requested_event_id: bool = false,
+
+    fn artifactSink(self: *LinkedEvalArtifactCapture) fx.AgentEvalDiffArtifactSink {
+        return .{
+            .state = self,
+            .write = writeArtifact,
+        };
+    }
+
+    fn linkSink(self: *LinkedEvalArtifactCapture) fx.AgentEvalDiffArtifactSink {
+        return .{
+            .state = self,
+            .write = writeLink,
+        };
+    }
+
+    fn writeArtifact(raw: ?*anyopaque, json: []const u8) anyerror!void {
+        const self: *LinkedEvalArtifactCapture = @ptrCast(@alignCast(raw.?));
+        self.artifact_writes += 1;
+        self.saw_artifact_schema = std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.agent-eval-diff.v1\"") != null;
+    }
+
+    fn writeLink(raw: ?*anyopaque, json: []const u8) anyerror!void {
+        const self: *LinkedEvalArtifactCapture = @ptrCast(@alignCast(raw.?));
+        self.link_writes += 1;
+        self.saw_link_schema = std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.agent-eval-diff-link.v1\"") != null;
+        self.saw_requested_event_id = std.mem.indexOf(u8, json, "\"requested\":") != null and
+            std.mem.indexOf(u8, json, "\"artifact_path\":\".zig-cache/causal-artifacts/eval-diff.json\"") != null;
+    }
+};
+
+test "agent eval writes diff artifact and remediation link to caller sinks" {
+    const policy = (fx.AgentInterventionPolicy{})
+        .withApplyEnabled(true)
+        .withKindPolicy(.interrupt_fiber, .auto_approve);
+    const invariants = fx.CausalInvariantBuilder.init().requireSuspendedFibersResolve();
+    var capture = LinkedEvalArtifactCapture{};
+
+    const result = try fx.runAgentEvalAndWriteLinkedDiffArtifact(std.testing.allocator, .{
+        .name = "interrupt hung fiber",
+        .baseline = &baseline,
+        .policy = policy,
+        .request = .{
+            .kind = .interrupt_fiber,
+            .run_id = 1,
+            .fiber_id = 9,
+            .reason = "eval interrupt",
+        },
+        .invariants = invariants,
+        .expect_improvement = true,
+    }, "baseline", "after-interrupt", .{
+        .artifact_path = ".zig-cache/causal-artifacts/eval-diff.json",
+    }, capture.artifactSink(), capture.linkSink());
+
+    try std.testing.expect(result.passed);
+    try std.testing.expectEqual(@as(usize, 1), capture.artifact_writes);
+    try std.testing.expectEqual(@as(usize, 1), capture.link_writes);
+    try std.testing.expect(capture.saw_artifact_schema);
+    try std.testing.expect(capture.saw_link_schema);
+    try std.testing.expect(capture.saw_requested_event_id);
+}

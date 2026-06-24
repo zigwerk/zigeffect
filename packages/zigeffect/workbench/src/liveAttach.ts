@@ -72,6 +72,24 @@ export type LiveCommandPollingResult = {
 
 export type LiveCommandBatchHandler = (inbox: LiveCommandInboxResponse) => void | Promise<void>;
 
+export type LiveCommandDaemonOptions = {
+  startAfter?: number;
+  maxCycles?: number;
+  maxPollsPerCycle?: number;
+  shouldStop?: () => boolean | Promise<boolean>;
+  delay?: (cycle: LiveCommandPollingResult) => void | Promise<void>;
+  continueOnError?: boolean;
+};
+
+export type LiveCommandDaemonResult = {
+  cycles: number;
+  polls: number;
+  commands: number;
+  errors: number;
+  next_after: number;
+  stopped: boolean;
+};
+
 export type LiveStreamMeta = {
   schema?: string;
   schemaVersion?: number | string;
@@ -246,6 +264,71 @@ export async function runLiveCommandPollingLoop(
     }
   }
   return { polls, commands, next_after: cursor };
+}
+
+export async function runLiveCommandDaemon(
+  url: string,
+  handler: LiveCommandBatchHandler,
+  options: LiveCommandDaemonOptions = {},
+  fetcher: LiveCommandFetcher = fetch,
+): Promise<LiveCommandDaemonResult> {
+  const maxCycles = options.maxCycles ?? 1;
+  const maxPollsPerCycle = options.maxPollsPerCycle ?? 1;
+  if (!Number.isSafeInteger(maxCycles) || maxCycles < 0) {
+    throw new Error("live command daemon maxCycles must be a non-negative safe integer");
+  }
+  if (!Number.isSafeInteger(maxPollsPerCycle) || maxPollsPerCycle < 0) {
+    throw new Error("live command daemon maxPollsPerCycle must be a non-negative safe integer");
+  }
+
+  let cursor = options.startAfter ?? 0;
+  let cycles = 0;
+  let polls = 0;
+  let commands = 0;
+  let errors = 0;
+  let stopped = false;
+
+  while (cycles < maxCycles) {
+    if (options.shouldStop && (await options.shouldStop())) {
+      stopped = true;
+      break;
+    }
+
+    let cycle: LiveCommandPollingResult;
+    try {
+      cycle = await runLiveCommandPollingLoop(
+        url,
+        handler,
+        { startAfter: cursor, maxPolls: maxPollsPerCycle },
+        fetcher,
+      );
+    } catch (error) {
+      errors += 1;
+      if (!options.continueOnError) {
+        throw error;
+      }
+      cycles += 1;
+      continue;
+    }
+
+    cycles += 1;
+    polls += cycle.polls;
+    commands += cycle.commands;
+    cursor = cycle.next_after;
+
+    if (options.shouldStop && (await options.shouldStop())) {
+      stopped = true;
+      break;
+    }
+    if (cycle.commands === 0) {
+      break;
+    }
+    if (cycles < maxCycles && options.delay) {
+      await options.delay(cycle);
+    }
+  }
+
+  return { cycles, polls, commands, errors, next_after: cursor, stopped };
 }
 
 /** Pull `frames` out of a full live-stream document (the sample fixture shape). */

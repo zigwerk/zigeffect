@@ -173,3 +173,58 @@ test "ops artifact http response wraps policy result with status code" {
     try std.testing.expect(std.mem.indexOf(u8, allowed.body, "\"allowed\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, allowed.body, "\"event_count\":1") != null);
 }
+
+test "ops artifact http request adapter gates method path and policy" {
+    var storage = fx.CausalNendbStorageBackendState.init(std.testing.allocator, noOpWriter(), .{});
+    defer storage.deinit();
+
+    var store = fx.CausalStore.init(std.testing.allocator);
+    store.attachBackend(storage.backend());
+    defer store.deinit();
+
+    _ = try store.record(.{
+        .kind = .resource_acquired,
+        .scope_id = 10,
+        .label = "allowed resource",
+        .type_name = "Db",
+        .status = "success",
+    });
+
+    var wrong_method = try fx.serveCausalOpsArtifactHttpRequest(std.testing.allocator, &storage, opsPolicy(), .{
+        .method = "POST",
+        .path = "/causal-artifacts",
+        .actor_id = "agent-1",
+        .scope_id = 10,
+    });
+    defer wrong_method.deinit();
+    try std.testing.expectEqual(@as(u16, 405), wrong_method.status);
+
+    var wrong_path = try fx.serveCausalOpsArtifactHttpRequest(std.testing.allocator, &storage, opsPolicy(), .{
+        .method = "GET",
+        .path = "/not-causal-artifacts",
+        .actor_id = "agent-1",
+        .scope_id = 10,
+    });
+    defer wrong_path.deinit();
+    try std.testing.expectEqual(@as(u16, 404), wrong_path.status);
+
+    var denied = try fx.serveCausalOpsArtifactHttpRequest(std.testing.allocator, &storage, opsPolicy(), .{
+        .method = "GET",
+        .path = "/causal-artifacts",
+        .actor_id = "other-agent",
+        .scope_id = 10,
+    });
+    defer denied.deinit();
+    try std.testing.expectEqual(@as(u16, 403), denied.status);
+    try std.testing.expect(std.mem.indexOf(u8, denied.body, "\"events\"") == null);
+
+    var allowed = try fx.serveCausalOpsArtifactHttpRequest(std.testing.allocator, &storage, opsPolicy(), .{
+        .method = "GET",
+        .path = "/causal-artifacts",
+        .actor_id = "agent-1",
+        .scope_id = 10,
+    });
+    defer allowed.deinit();
+    try std.testing.expectEqual(@as(u16, 200), allowed.status);
+    try std.testing.expect(std.mem.indexOf(u8, allowed.body, "\"event_count\":1") != null);
+}

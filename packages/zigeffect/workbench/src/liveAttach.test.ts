@@ -15,6 +15,7 @@ import {
   parseCommandMessage,
   parseFrameMessage,
   runLiveCommandPollingLoop,
+  runLiveCommandDaemon,
   sendLiveCommand,
   webSocketLiveSource,
   type LiveCommandRequest,
@@ -197,6 +198,68 @@ test("runLiveCommandPollingLoop advances cursors and stops on empty batches", as
   ]);
   expect(seen).toEqual(["interrupt_fiber", "fire_timer"]);
   expect(result).toEqual({ polls: 3, commands: 2, next_after: 2 });
+});
+
+test("runLiveCommandDaemon advances cursors across cycles and stops on signal", async () => {
+  const batches: LiveCommandInboxResponse[] = [
+    {
+      next_after: 1,
+      commands: [
+        {
+          sequence: 1,
+          command_id: "cmd-1",
+          command_kind: "interrupt_fiber",
+          status: "received",
+          fiber_id: 9,
+        },
+      ],
+    },
+    {
+      next_after: 2,
+      commands: [
+        {
+          sequence: 2,
+          command_id: "cmd-2",
+          command_kind: "fire_timer",
+          status: "received",
+          schedule_id: 7,
+        },
+      ],
+    },
+  ];
+  const urls: string[] = [];
+  const handled: string[] = [];
+  let delays = 0;
+  const fetcher = async (url: string) => {
+    urls.push(url);
+    const response = batches.shift() ?? { next_after: 2, commands: [] };
+    return new Response(JSON.stringify(response), { headers: { "content-type": "application/json" } });
+  };
+
+  const result = await runLiveCommandDaemon(
+    "http://127.0.0.1:4500/commands",
+    (inbox) => {
+      handled.push(...inbox.commands.map((command) => command.command_kind));
+    },
+    {
+      startAfter: 0,
+      maxCycles: 5,
+      maxPollsPerCycle: 1,
+      shouldStop: () => handled.length >= 2,
+      delay: () => {
+        delays += 1;
+      },
+    },
+    fetcher,
+  );
+
+  expect(urls).toEqual([
+    "http://127.0.0.1:4500/commands?after=0",
+    "http://127.0.0.1:4500/commands?after=1",
+  ]);
+  expect(handled).toEqual(["interrupt_fiber", "fire_timer"]);
+  expect(delays).toBe(1);
+  expect(result).toEqual({ cycles: 2, polls: 2, commands: 2, errors: 0, next_after: 2, stopped: true });
 });
 
 test("LiveCausalBuffer accumulates frames in causal (sequence) order", () => {

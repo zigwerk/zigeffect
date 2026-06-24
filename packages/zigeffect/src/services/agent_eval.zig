@@ -49,6 +49,11 @@ pub const AgentEvalDiffArtifactLinkOptions = struct {
     result: AgentEvalResult,
 };
 
+pub const AgentEvalDiffArtifactLinkWriteOptions = struct {
+    artifact_path: []const u8,
+    artifact_id: []const u8 = "",
+};
+
 fn replayEvents(store: *causal.CausalStore, events: []const causal.CausalEvent) std.mem.Allocator.Error!void {
     for (events) |event| {
         _ = try store.record(event);
@@ -128,6 +133,31 @@ pub fn runAgentEvalAndWriteDiffArtifact(
     var artifact = try runAgentEvalWithDiffArtifact(allocator, options, before_artifact, after_artifact);
     defer artifact.deinit();
     try sink.write(sink.state, artifact.json);
+    return artifact.result;
+}
+
+pub fn runAgentEvalAndWriteLinkedDiffArtifact(
+    allocator: std.mem.Allocator,
+    options: AgentEvalOptions,
+    before_artifact: []const u8,
+    after_artifact: []const u8,
+    link_options: AgentEvalDiffArtifactLinkWriteOptions,
+    artifact_sink: AgentEvalDiffArtifactSink,
+    link_sink: AgentEvalDiffArtifactSink,
+) anyerror!AgentEvalResult {
+    var artifact = try runAgentEvalWithDiffArtifact(allocator, options, before_artifact, after_artifact);
+    defer artifact.deinit();
+    try artifact_sink.write(artifact_sink.state, artifact.json);
+
+    const link = try formatAgentEvalDiffArtifactLinkJson(allocator, .{
+        .eval_name = options.name,
+        .artifact_path = link_options.artifact_path,
+        .artifact_id = link_options.artifact_id,
+        .result = artifact.result,
+    });
+    defer allocator.free(link);
+    try link_sink.write(link_sink.state, link);
+
     return artifact.result;
 }
 

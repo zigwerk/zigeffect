@@ -36,8 +36,8 @@ semantic fact comparison, not exact event-id graph isomorphism.
 | 9 | Visual workbench (SolidJS / zig-webui) | **live-attach** (static + streaming via collector) | `workbench/`, `workbench/src/collector/` |
 | 10 | Export adapters (JSONL/DOT/OTel/OTLP/graph-history/NenDB) | **OTLP + collector live end-to-end** | `src/services/causal_*_backend.zig`, `causal_otlp_json.zig` |
 | 11 | Durable workflows + clustering | **scheduler runs on zio; loopback + remote socket wrappers cross the transport boundary** | `src/workflow/*`, `src/cluster/*` |
-| 12 | Agent-operable runtime layer | **bounded interventions, counterfactuals, invariants, evals, semantic diffs, live command executor/tap, poll bridge, eval diff artifacts** | `src/services/agent_intervention.zig`, `counterfactual.zig`, `causal_invariant.zig`, `agent_eval.zig`, `causal_diff.zig`, `causal_live_command.zig` |
-| 13 | Production-operable guardrails | **live commands, concurrency facts, transport policy, ops storage/alert policy, gated ops artifact responses, alert delivery envelopes** | `workbench/src/collector`, `src/services/causal_concurrency.zig`, `src/services/causal_ops.zig`, `causal_ops_storage.zig`, `causal_ops_alert.zig`, `src/cluster/transport.zig` |
+| 12 | Agent-operable runtime layer | **bounded interventions, counterfactuals, invariants, evals, semantic diffs, live command executor/tap, poll bridge, local daemon harness, eval diff artifacts/links** | `src/services/agent_intervention.zig`, `counterfactual.zig`, `causal_invariant.zig`, `agent_eval.zig`, `causal_diff.zig`, `causal_live_command.zig` |
+| 13 | Production-operable guardrails | **live commands, concurrency facts, transport policy/discovery selection, ops storage/alert policy, gated ops artifact responses, alert delivery envelopes** | `workbench/src/collector`, `src/services/causal_concurrency.zig`, `src/services/causal_ops.zig`, `causal_ops_storage.zig`, `causal_ops_alert.zig`, `src/cluster/transport.zig` |
 | 14 | Multi-runner causal evidence | **local lineage stitcher plus deployment artifact metadata** | `src/services/causal_runner_lineage.zig` |
 
 ## What is real today
@@ -99,6 +99,9 @@ semantic fact comparison, not exact event-id graph isomorphism.
 - **Eval diff artifact link JSON.** `formatAgentEvalDiffArtifactLinkJson` emits
   `zigeffect.causal.agent-eval-diff-link.v1`, a compact cross-link shape that
   ties persisted eval diff artifacts back to remediation event ids.
+- **Linked eval diff artifact writer.**
+  `runAgentEvalAndWriteLinkedDiffArtifact` writes both the eval diff artifact
+  and its remediation-chain link through caller-owned sinks.
 - **Bidirectional live debugging transport primitives.** The Bun collector now
   accepts `POST /command`, broadcasts redacted command frames, and the workbench
   live layer can send bounded command requests. Applying commands still belongs
@@ -114,6 +117,9 @@ semantic fact comparison, not exact event-id graph isomorphism.
   collector command batches from local TypeScript tooling, advances the inbox
   cursor, calls a caller-owned handler, and stops on an empty batch or fixed
   poll budget.
+- **Local command daemon harness.** `runLiveCommandDaemon` repeats local command
+  polling cycles, honors a caller-owned stop signal, awaits a caller-owned delay
+  hook between non-empty cycles, and reports cycle/poll/command/error counts.
 - **Bounded live command poll loop.** `runCausalLiveCommandPollLoop` repeatedly
   calls a caller-provided poller up to a fixed limit, applies decoded command
   batches through engine policy, aggregates tap counters, and stops on an empty
@@ -139,6 +145,9 @@ semantic fact comparison, not exact event-id graph isomorphism.
   wraps the same policy-gated JSON in an adapter-friendly status/body pair: 200
   for allowed reads, 403 for denied reads, without hosting an HTTP server in the
   core.
+- **Ops artifact HTTP request adapter.** `serveCausalOpsArtifactHttpRequest`
+  rejects unsupported methods and paths before delegating valid requests to the
+  same policy-gated status/body formatter.
 - **Ops alert/runbook adapter.** `emitCausalOpsAlerts` forwards alert facts to a
   caller-provided sink, and `formatCausalOpsRunbookJson` emits a redacted local
   operator runbook artifact.
@@ -160,6 +169,10 @@ semantic fact comparison, not exact event-id graph isomorphism.
   `validateClusterTransportServiceDiscovery` checks discovered remote transport
   endpoints for host, port, TLS, health, and auth epoch before pool candidates
   are trusted.
+- **Transport service-discovery selection.**
+  `selectClusterTransportServiceDiscoveryEndpoint` chooses the first endpoint
+  that satisfies host, port, TLS, health, and auth-epoch requirements while still
+  returning the full validation report.
 - **Schema governance for the agentic artifact surface.** The schema governance
   inventory now tracks semantic diff, eval diff, eval diff links, ops artifact
   response, ops runbook, ops alert delivery, and runner lineage artifact
@@ -223,29 +236,30 @@ substrates into real deployed systems:
 
 1. **Network-connected command taps.** `applyCausalLiveCommand`,
    `runCausalLiveCommandTapBatch`, the collector's pollable command inbox,
-   typed inbox client, local TypeScript polling loop, core poll bridge, and
-   bounded engine poll loop exist, but a running engine still needs a real
-   daemon/client process that owns process supervision, repeatedly polls command
-   frames over the network, calls engine policy, and streams resulting causal
-   facts back to the browser.
+   typed inbox client, local TypeScript polling loop, local daemon harness, core
+   poll bridge, and bounded engine poll loop exist, but a running engine still
+   needs a real process wrapper that wires the local harness to the engine poll
+   bridge, owns lifecycle supervision, and streams resulting causal facts back to
+   the browser.
 2. **Real multi-node cluster deployment.** The transport validates TLS/pool/
    backpressure policy and propagates origin causal ids, and
    `stitchCausalRunnerLineage` can merge runner traces, emit deployment metadata
-   artifacts, validate metadata posture, and reject unsafe discovered endpoints.
-   Next: real TLS handshakes, a service-discovery backend, auth rotation,
-   health-checked pool selection, and stitched lineage from separate runner
-   processes.
+   artifacts, validate metadata posture, reject unsafe discovered endpoints, and
+   select the first safe candidate. Next: real TLS handshakes, a
+   service-discovery backend, auth rotation, live health-checked pool
+   maintenance, and stitched lineage from separate runner processes.
 3. **Diff/eval integration.** The workbench renders portable `semantic_diff`
    payloads, evals can emit linked diff artifacts, the new artifact schemas are
-   governed, evals can write artifacts to a caller sink, and the runtime can
-   format remediation-chain artifact links. Next: have dev-loop tools persist
-   those artifacts automatically and attach the links from remediation chains.
+   governed, evals can write artifacts to caller sinks, and the runtime can write
+   remediation-chain artifact links alongside diff artifacts. Next: have dev-loop
+   tools call the linked writer from real remediation flows and persist the
+   resulting artifacts automatically.
 4. **External operator integrations.** `CausalOpsPolicy`, NenDB reads, alert
    sinks, access-controlled artifact responses, local runbook JSON, alert
-   delivery envelopes, delivery-sink hooks, and HTTP-shaped artifact responses
-   exist. Next: actual external alert provider adapters, served artifact
-   endpoints, deployment metadata ingestion from real deployments, and
-   operator-facing runbooks generated from live deployments.
+   delivery envelopes, delivery-sink hooks, HTTP-shaped artifact responses, and
+   method/path-gated request adapters exist. Next: actual external alert provider
+   adapters, served artifact endpoints, deployment metadata ingestion from real
+   deployments, and operator-facing runbooks generated from live deployments.
 
 ## Hardening milestone roadmap
 
@@ -963,6 +977,71 @@ artifact reads without hosting HTTP inside the core service.
 - Tests prove allowed reads return 200 with event counts and denied reads return
   403 without event bodies.
 
+### M40 — Local command daemon harness
+
+**Status:** delivered on 2026-06-24 via `runLiveCommandDaemon`.
+
+**Goal:** provide the reusable local loop a real engine-side process wrapper can
+call without introducing process supervision into the workbench module.
+
+**Work:**
+- Compose repeated `runLiveCommandPollingLoop` cycles.
+- Honor a caller-owned stop signal and delay hook.
+- Return cycle, poll, command, cursor, and error counters.
+
+**Acceptance:**
+- Tests prove cursors advance across cycles, the delay hook runs between
+  non-empty cycles, and the stop signal terminates the harness.
+
+### M41 — Linked eval diff artifact writer
+
+**Status:** delivered on 2026-06-24 via
+`runAgentEvalAndWriteLinkedDiffArtifact`.
+
+**Goal:** let dev-loop callers persist eval diff artifacts and remediation-chain
+links together through caller-owned sinks.
+
+**Work:**
+- Add link write options.
+- Write the eval diff artifact, format the link from the same result, and write
+  the link artifact.
+
+**Acceptance:**
+- Tests prove both schemas are written and the link contains remediation event
+  ids plus the artifact path.
+
+### M42 — Service-discovery endpoint selection
+
+**Status:** delivered on 2026-06-24 via
+`selectClusterTransportServiceDiscoveryEndpoint`.
+
+**Goal:** turn validation into a first usable candidate-selection primitive.
+
+**Work:**
+- Return the full validation report.
+- Select the first endpoint satisfying host, port, TLS, health, and auth epoch.
+
+**Acceptance:**
+- Tests prove unsafe candidates are skipped and all-unsafe candidate sets select
+  nothing.
+
+### M43 — Ops artifact HTTP request adapter
+
+**Status:** delivered on 2026-06-24 via
+`serveCausalOpsArtifactHttpRequest`.
+
+**Goal:** provide host adapters with method/path-gated artifact read semantics
+without hosting HTTP inside the core.
+
+**Work:**
+- Reject non-GET requests with 405.
+- Reject unsupported paths with 404.
+- Delegate valid requests to `formatCausalOpsArtifactHttpResponse`.
+
+**Acceptance:**
+- Tests prove 405, 404, 403, and 200 responses are produced for method, path,
+  policy-denied, and policy-allowed cases.
+
 ## Delivered since 2026-06-20
 
 The forward sequence from the prior roadmap is largely done. Tracked in
@@ -980,16 +1059,16 @@ The forward sequence from the prior roadmap is largely done. Tracked in
 - One loopback cluster transport crosses localhost TCP, and the remote socket
   wrapper adds auth preflight, reconnect attempts, transport policy validation,
   origin causal ids, metrics, and redacted failure handling.
-- The M6-M39 agentic engine layer now covers bounded interventions,
+- The M6-M43 agentic engine layer now covers bounded interventions,
   counterfactual trace forks, reusable invariants, semantic graph diffs, live
   command transport primitives plus engine execution/taps, collector polling,
-  typed inbox validation, local polling, poll-batch cursor bridging, and bounded
-  poll loops, concurrency annotations, transport hardening plus service-discovery
-  validation, ops guardrails/storage/alert/artifact/delivery adapters with
-  delivery sinks and HTTP-shaped responses, schema-governed visual/emitted/
-  eval-linked diff evidence with writer sinks and remediation links, and
-  multi-runner lineage stitching with deployment artifact metadata and
-  validation.
+  typed inbox validation, local polling and daemon harnesses, poll-batch cursor
+  bridging, and bounded poll loops, concurrency annotations, transport hardening
+  plus service-discovery validation/selection, ops guardrails/storage/alert/
+  artifact/delivery adapters with delivery sinks, HTTP-shaped responses, and
+  method/path-gated request adapters, schema-governed visual/emitted/eval-linked
+  diff evidence with writer sinks and remediation links, and multi-runner
+  lineage stitching with deployment artifact metadata and validation.
 
 ## June 2026 cleanup note
 

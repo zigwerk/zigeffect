@@ -1029,6 +1029,43 @@ test "remote transport service discovery validation reports unsafe endpoints" {
     try std.testing.expectEqual(@as(usize, 1), report.stale_auth_epoch);
 }
 
+test "remote transport service discovery selection skips unsafe candidates" {
+    const endpoints = [_]fx.ClusterTransportDiscoveredEndpoint{
+        .{
+            .host = "",
+            .port = 0,
+            .tls_enabled = false,
+            .healthy = false,
+            .auth_epoch = 1,
+        },
+        .{
+            .host = "runner-b.internal",
+            .port = 7001,
+            .tls_enabled = true,
+            .healthy = true,
+            .auth_epoch = 9,
+        },
+    };
+
+    const selection = fx.selectClusterTransportServiceDiscoveryEndpoint(&endpoints, .{
+        .require_tls = true,
+        .require_healthy = true,
+        .min_auth_epoch = 5,
+    });
+
+    try std.testing.expect(selection.selected != null);
+    try std.testing.expectEqual(@as(?usize, 1), selection.selected_index);
+    try std.testing.expectEqualStrings("runner-b.internal", selection.selected.?.host);
+    try std.testing.expect(!selection.report.ok());
+
+    const unsafe = [_]fx.ClusterTransportDiscoveredEndpoint{
+        .{ .host = "", .port = 0 },
+    };
+    const none = fx.selectClusterTransportServiceDiscoveryEndpoint(&unsafe, .{});
+    try std.testing.expect(none.selected == null);
+    try std.testing.expectEqual(@as(?usize, null), none.selected_index);
+}
+
 test "remote socket transport applies reject backpressure before durable submission" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

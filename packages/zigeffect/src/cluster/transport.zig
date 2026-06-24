@@ -568,6 +568,12 @@ pub const ClusterTransportServiceDiscoveryReport = struct {
     }
 };
 
+pub const ClusterTransportServiceDiscoverySelection = struct {
+    report: ClusterTransportServiceDiscoveryReport,
+    selected_index: ?usize = null,
+    selected: ?ClusterTransportDiscoveredEndpoint = null,
+};
+
 pub fn validateClusterTransportServiceDiscovery(
     endpoints: []const ClusterTransportDiscoveredEndpoint,
     requirements: ClusterTransportServiceDiscoveryRequirements,
@@ -581,6 +587,34 @@ pub fn validateClusterTransportServiceDiscovery(
         if (endpoint.auth_epoch < requirements.min_auth_epoch) report.stale_auth_epoch += 1;
     }
     return report;
+}
+
+pub fn selectClusterTransportServiceDiscoveryEndpoint(
+    endpoints: []const ClusterTransportDiscoveredEndpoint,
+    requirements: ClusterTransportServiceDiscoveryRequirements,
+) ClusterTransportServiceDiscoverySelection {
+    const report = validateClusterTransportServiceDiscovery(endpoints, requirements);
+    for (endpoints, 0..) |endpoint, index| {
+        if (clusterTransportEndpointSatisfiesDiscovery(endpoint, requirements)) {
+            return .{
+                .report = report,
+                .selected_index = index,
+                .selected = endpoint,
+            };
+        }
+    }
+    return .{ .report = report };
+}
+
+fn clusterTransportEndpointSatisfiesDiscovery(
+    endpoint: ClusterTransportDiscoveredEndpoint,
+    requirements: ClusterTransportServiceDiscoveryRequirements,
+) bool {
+    return endpoint.host.len > 0 and
+        endpoint.port != 0 and
+        (!requirements.require_tls or endpoint.tls_enabled) and
+        (!requirements.require_healthy or endpoint.healthy) and
+        endpoint.auth_epoch >= requirements.min_auth_epoch;
 }
 
 pub const RemoteSocketClusterTransport = struct {

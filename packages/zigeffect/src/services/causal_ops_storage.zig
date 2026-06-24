@@ -13,6 +13,7 @@ pub const CausalOpsRetentionDecision = causal_ops.CausalOpsRetentionDecision;
 
 pub const causal_ops_artifact_response_schema = "zigeffect.causal.ops-artifact-response.v1";
 pub const causal_ops_artifact_response_schema_version: u32 = 1;
+pub const causal_ops_artifact_http_path = "/causal-artifacts";
 
 pub const CausalOpsArtifactReadResult = struct {
     allowed: bool,
@@ -39,6 +40,13 @@ pub const CausalOpsArtifactHttpResponse = struct {
         if (self.body.len > 0) self.allocator.free(self.body);
         self.body = "";
     }
+};
+
+pub const CausalOpsArtifactHttpRequest = struct {
+    method: []const u8,
+    path: []const u8 = causal_ops_artifact_http_path,
+    actor_id: []const u8,
+    scope_id: ?u64 = null,
 };
 
 pub fn readCausalOpsArtifact(
@@ -138,6 +146,46 @@ pub fn formatCausalOpsArtifactHttpResponse(
         .allocator = allocator,
         .status = if (allowed) 200 else 403,
         .body = body,
+    };
+}
+
+pub fn serveCausalOpsArtifactHttpRequest(
+    allocator: Allocator,
+    storage: *const CausalNendbStorageBackendState,
+    policy: CausalOpsPolicy,
+    request: CausalOpsArtifactHttpRequest,
+) Allocator.Error!CausalOpsArtifactHttpResponse {
+    if (!std.mem.eql(u8, request.method, "GET")) {
+        return causalOpsArtifactHttpError(allocator, 405, "method not allowed");
+    }
+    if (!std.mem.eql(u8, request.path, causal_ops_artifact_http_path)) {
+        return causalOpsArtifactHttpError(allocator, 404, "not found");
+    }
+    return formatCausalOpsArtifactHttpResponse(allocator, storage, policy, .{
+        .actor_id = request.actor_id,
+        .scope_id = request.scope_id,
+    });
+}
+
+fn causalOpsArtifactHttpError(
+    allocator: Allocator,
+    status: u16,
+    reason: []const u8,
+) Allocator.Error!CausalOpsArtifactHttpResponse {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\"schema\":");
+    try appendJsonString(&output, allocator, causal_ops_artifact_response_schema);
+    try output.print(allocator, ",\"schema_version\":{d}", .{causal_ops_artifact_response_schema_version});
+    try output.appendSlice(allocator, ",\"allowed\":false,\"reason\":");
+    try appendJsonString(&output, allocator, reason);
+    try output.appendSlice(allocator, ",\"event_count\":0}");
+
+    return .{
+        .allocator = allocator,
+        .status = status,
+        .body = try output.toOwnedSlice(allocator),
     };
 }
 
