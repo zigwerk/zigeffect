@@ -19,6 +19,7 @@ import {
   runLiveCommandPollingLoop,
   runLiveCommandDaemon,
   runLiveEngineCommandDaemon,
+  serveLiveEngineCommandApplyRequest,
   sendLiveCommand,
   webSocketLiveSource,
   type LiveCommandRequest,
@@ -441,6 +442,87 @@ test("createHttpLiveEngineCommandBridge posts command batches and emitted frames
       body: returnedFrame,
     },
   ]);
+});
+
+test("serveLiveEngineCommandApplyRequest validates inboxes and formats engine results", async () => {
+  const inbox: LiveCommandInboxResponse = {
+    next_after: 12,
+    commands: [
+      {
+        sequence: 12,
+        command_id: "cmd-12",
+        command_kind: "interrupt_fiber",
+        status: "received",
+        run_id: 1,
+        fiber_id: 9,
+      },
+    ],
+  };
+  const appliedInboxes: LiveCommandInboxResponse[] = [];
+  const response = await serveLiveEngineCommandApplyRequest(
+    new Request("http://127.0.0.1:4600/apply-commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(inbox),
+    }),
+    {
+      applyBatch: (nextInbox) => {
+        appliedInboxes.push(nextInbox);
+        return {
+          processed: 1,
+          applied: 1,
+          rejected: 0,
+          needs_human_review: 0,
+          frames: [
+            frame({
+              sequence: 13,
+              event_id: 113,
+              event_kind: "remediation_applied",
+              status: "applied",
+            }),
+          ],
+        };
+      },
+    },
+  );
+
+  expect(response.status).toBe(200);
+  expect(response.headers.get("content-type")).toContain("application/json");
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(appliedInboxes).toEqual([inbox]);
+  expect(await response.json()).toEqual({
+    processed: 1,
+    applied: 1,
+    rejected: 0,
+    needs_human_review: 0,
+    frames: [
+      {
+        sequence: 13,
+        event_id: 113,
+        event_kind: "remediation_applied",
+        status: "applied",
+        label: "event 113",
+      },
+    ],
+  });
+
+  const methodRejected = await serveLiveEngineCommandApplyRequest(
+    new Request("http://127.0.0.1:4600/apply-commands", { method: "GET" }),
+    { applyBatch: () => ({ processed: 0, applied: 0, rejected: 0, needs_human_review: 0 }) },
+  );
+  expect(methodRejected.status).toBe(405);
+  expect(await methodRejected.json()).toEqual({ error: "method_not_allowed" });
+
+  const invalidInbox = await serveLiveEngineCommandApplyRequest(
+    new Request("http://127.0.0.1:4600/apply-commands", {
+      method: "POST",
+      body: JSON.stringify({ commands: [{ sequence: 2 }], next_after: 1 }),
+    }),
+    { applyBatch: () => ({ processed: 0, applied: 0, rejected: 0, needs_human_review: 0 }) },
+  );
+  expect(invalidInbox.status).toBe(400);
+  expect(await invalidInbox.json()).toEqual({ error: "invalid_live_command_inbox" });
 });
 
 test("LiveCausalBuffer accumulates frames in causal (sequence) order", () => {

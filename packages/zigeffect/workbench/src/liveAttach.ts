@@ -251,6 +251,46 @@ export function isLiveCommandEngineBatchResult(value: unknown): value is LiveCom
 
 export type LiveCommandFetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
+export const liveEngineCommandApplyHeaders = {
+  "content-type": "application/json",
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff",
+} as const;
+
+function liveEngineCommandJsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: liveEngineCommandApplyHeaders,
+  });
+}
+
+export async function serveLiveEngineCommandApplyRequest(
+  request: Request,
+  bridge: LiveCommandEngineBridge,
+): Promise<Response> {
+  if (request.method.toUpperCase() !== "POST") {
+    return liveEngineCommandJsonResponse(405, { error: "method_not_allowed" });
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = await request.json();
+  } catch {
+    return liveEngineCommandJsonResponse(400, { error: "invalid_json" });
+  }
+
+  if (!isLiveCommandInboxResponse(parsed)) {
+    return liveEngineCommandJsonResponse(400, { error: "invalid_live_command_inbox" });
+  }
+
+  const result = await bridge.applyBatch(parsed);
+  if (!isLiveCommandEngineBatchResult(result)) {
+    return liveEngineCommandJsonResponse(502, { error: "invalid_live_engine_batch_result" });
+  }
+
+  return liveEngineCommandJsonResponse(200, result);
+}
+
 export async function sendLiveCommand(
   url: string,
   command: LiveCommandRequest,

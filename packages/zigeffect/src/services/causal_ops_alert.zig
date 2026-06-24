@@ -78,6 +78,19 @@ pub const CausalOpsAlertWebhookOptions = struct {
     delivery: CausalOpsAlertDeliveryOptions,
 };
 
+pub const CausalOpsAlertProviderKind = enum {
+    generic_webhook,
+    slack_webhook,
+    pagerduty_events_v2,
+};
+
+pub const CausalOpsAlertProviderOptions = struct {
+    provider: CausalOpsAlertProviderKind,
+    endpoint_url: []const u8,
+    secret_ref: []const u8 = "",
+    delivery: CausalOpsAlertDeliveryOptions,
+};
+
 pub const CausalOpsAlertHttpSink = struct {
     state: ?*anyopaque = null,
     send: *const fn (?*anyopaque, CausalOpsAlertHttpRequest) anyerror!void,
@@ -208,6 +221,85 @@ pub fn deliverCausalOpsAlertWebhook(
     var request = try formatCausalOpsAlertWebhookRequest(allocator, options);
     defer request.deinit();
     try sink.send(sink.state, request);
+}
+
+pub fn formatCausalOpsAlertProviderRequest(
+    allocator: Allocator,
+    options: CausalOpsAlertProviderOptions,
+) Allocator.Error!CausalOpsAlertHttpRequest {
+    const delivery_json = try formatCausalOpsAlertDeliveryJson(allocator, options.delivery);
+    if (options.provider == .generic_webhook) {
+        return .{
+            .allocator = allocator,
+            .method = "POST",
+            .url = options.endpoint_url,
+            .body = delivery_json,
+        };
+    }
+
+    defer allocator.free(delivery_json);
+    const body = switch (options.provider) {
+        .generic_webhook => unreachable,
+        .slack_webhook => try formatCausalOpsSlackAlertBody(allocator, options, delivery_json),
+        .pagerduty_events_v2 => try formatCausalOpsPagerDutyAlertBody(allocator, options, delivery_json),
+    };
+
+    return .{
+        .allocator = allocator,
+        .method = "POST",
+        .url = options.endpoint_url,
+        .body = body,
+    };
+}
+
+pub fn deliverCausalOpsAlertProvider(
+    allocator: Allocator,
+    options: CausalOpsAlertProviderOptions,
+    sink: CausalOpsAlertHttpSink,
+) anyerror!void {
+    var request = try formatCausalOpsAlertProviderRequest(allocator, options);
+    defer request.deinit();
+    try sink.send(sink.state, request);
+}
+
+fn formatCausalOpsSlackAlertBody(
+    allocator: Allocator,
+    options: CausalOpsAlertProviderOptions,
+    delivery_json: []const u8,
+) Allocator.Error![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\"provider\":\"slack_webhook\",\"text\":");
+    try output.print(allocator, "\"zigeffect alert {d}\"", .{options.delivery.event.id});
+    try output.appendSlice(allocator, ",\"delivery\":");
+    try output.appendSlice(allocator, delivery_json);
+    try output.appendSlice(allocator, "}");
+
+    return output.toOwnedSlice(allocator);
+}
+
+fn formatCausalOpsPagerDutyAlertBody(
+    allocator: Allocator,
+    options: CausalOpsAlertProviderOptions,
+    delivery_json: []const u8,
+) Allocator.Error![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\"provider\":\"pagerduty_events_v2\",\"routing_key_secret_ref\":");
+    try appendRedactedJsonString(&output, allocator, options.secret_ref);
+    try output.appendSlice(allocator, ",\"event_action\":\"trigger\",\"dedup_key\":");
+    try output.print(allocator, "\"zigeffect-alert-{d}\"", .{options.delivery.event.id});
+    try output.appendSlice(allocator, ",\"payload\":{\"summary\":");
+    try appendRedactedJsonString(&output, allocator, options.delivery.event.label);
+    try output.appendSlice(allocator, ",\"source\":");
+    try appendRedactedJsonString(&output, allocator, options.delivery.deployment.service);
+    try output.appendSlice(allocator, ",\"severity\":\"warning\",\"custom_details\":");
+    try output.appendSlice(allocator, delivery_json);
+    try output.appendSlice(allocator, "}}");
+
+    return output.toOwnedSlice(allocator);
 }
 
 fn appendRedactedJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []const u8) Allocator.Error!void {

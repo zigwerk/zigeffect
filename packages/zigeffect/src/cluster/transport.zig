@@ -798,6 +798,17 @@ pub fn parseClusterTransportServiceDiscoverySnapshotJson(
     };
 }
 
+pub fn loadClusterTransportServiceDiscoverySnapshotJsonFile(
+    allocator: Allocator,
+    io: std.Io,
+    dir: *std.Io.Dir,
+    path: []const u8,
+) !ClusterTransportOwnedServiceDiscoverySnapshot {
+    const content = try dir.readFileAlloc(io, path, allocator, .limited(1024 * 1024));
+    defer allocator.free(content);
+    return try parseClusterTransportServiceDiscoverySnapshotJson(allocator, content);
+}
+
 pub const RemoteSocketClusterTransport = struct {
     endpoint_host: []const u8,
     auth: ClusterTransportAuth = .{},

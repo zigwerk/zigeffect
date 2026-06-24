@@ -1372,6 +1372,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     causal_remediation_decision_tool_module.addImport("causal_run", causal_run_tool_module);
+    causal_remediation_decision_tool_module.addImport("zigeffect", zigeffect);
 
     const causal_remediation_decision_tool_tests = b.addTest(.{
         .name = "zigeffect-causal-remediation-decision-tests",

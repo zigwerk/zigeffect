@@ -234,3 +234,58 @@ test "ops alert webhook adapter sends redacted http request shape" {
     try std.testing.expect(capture.saw_schema);
     try std.testing.expect(!capture.saw_secret);
 }
+
+test "ops alert provider adapter formats slack and pagerduty request shapes" {
+    const delivery = fx.CausalOpsAlertDeliveryOptions{
+        .deployment = .{
+            .service = "zigeffect",
+            .environment = "prod",
+            .region = "eu-west",
+            .cluster_id = "cluster-a",
+        },
+        .delivery_kind = "provider",
+        .endpoint_id = "primary-alerts",
+        .event = .{
+            .id = 45,
+            .kind = .alert_emitted,
+            .status = "emitted",
+            .label = "retention password=sentinel-secret threshold",
+            .type_name = "retention.threshold",
+            .redacted_detail = "token=sentinel-secret",
+        },
+    };
+
+    var slack = try fx.formatCausalOpsAlertProviderRequest(std.testing.allocator, .{
+        .provider = .slack_webhook,
+        .endpoint_url = "https://hooks.slack.test/services/primary",
+        .delivery = delivery,
+    });
+    defer slack.deinit();
+
+    try std.testing.expectEqualStrings("POST", slack.method);
+    try std.testing.expectEqualStrings("https://hooks.slack.test/services/primary", slack.url);
+    try std.testing.expect(hasAlertHeader(slack.headers, "content-type", "application/json"));
+    try std.testing.expect(hasAlertHeader(slack.headers, "cache-control", "no-store"));
+    try std.testing.expect(hasAlertHeader(slack.headers, "x-content-type-options", "nosniff"));
+    try std.testing.expect(std.mem.indexOf(u8, slack.body, "\"text\":\"zigeffect alert 45\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, slack.body, "\"provider\":\"slack_webhook\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, slack.body, "sentinel-secret") == null);
+    try std.testing.expect(std.mem.indexOf(u8, slack.body, fx.causal_redaction_marker) != null);
+
+    var pagerduty = try fx.formatCausalOpsAlertProviderRequest(std.testing.allocator, .{
+        .provider = .pagerduty_events_v2,
+        .endpoint_url = "https://events.pagerduty.test/v2/enqueue",
+        .secret_ref = "pd-routing-key-prod",
+        .delivery = delivery,
+    });
+    defer pagerduty.deinit();
+
+    try std.testing.expectEqualStrings("POST", pagerduty.method);
+    try std.testing.expectEqualStrings("https://events.pagerduty.test/v2/enqueue", pagerduty.url);
+    try std.testing.expect(hasAlertHeader(pagerduty.headers, "content-type", "application/json"));
+    try std.testing.expect(std.mem.indexOf(u8, pagerduty.body, "\"event_action\":\"trigger\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pagerduty.body, "\"routing_key_secret_ref\":\"pd-routing-key-prod\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pagerduty.body, "\"severity\":\"warning\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pagerduty.body, "sentinel-secret") == null);
+    try std.testing.expect(std.mem.indexOf(u8, pagerduty.body, fx.causal_redaction_marker) != null);
+}

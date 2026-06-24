@@ -1,5 +1,6 @@
 const std = @import("std");
 const causal_run = @import("causal_run");
+const fx = @import("zigeffect");
 
 const audit_schema = "zigeffect.causal.remediation-audit.v1";
 const decision_schema = "zigeffect.causal.remediation-decision.v1";
@@ -48,6 +49,19 @@ const DecisionInput = struct {
     options: DecisionOptions,
 };
 
+const DecisionEvalArtifactPaths = struct {
+    diff_path: []const u8,
+    link_path: []const u8,
+    manifest_path: []const u8,
+    decision_json_path: []const u8,
+};
+
+const DecisionEvalArtifactSinks = struct {
+    diff: fx.AgentEvalDiffArtifactSink,
+    link: fx.AgentEvalDiffArtifactSink,
+    manifest: fx.AgentEvalDiffArtifactSink,
+};
+
 fn localAuditJsonPath() []const u8 {
     return causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-remediation-audit.json";
 }
@@ -80,6 +94,42 @@ fn localDecisionTextPathForScenario(allocator: std.mem.Allocator, scenario_slug:
     return std.fmt.allocPrint(
         allocator,
         "{s}/zigeffect-causal-dev-loop-{s}-remediation-decision.txt",
+        .{ causal_run.artifact_dir, scenario_slug },
+    );
+}
+
+fn localDecisionEvalDiffPath() []const u8 {
+    return causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-remediation-eval-diff.json";
+}
+
+fn localDecisionEvalLinkPath() []const u8 {
+    return causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-remediation-eval-link.json";
+}
+
+fn localDecisionEvalManifestPath() []const u8 {
+    return causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-remediation-eval-manifest.json";
+}
+
+fn localDecisionEvalDiffPathForScenario(allocator: std.mem.Allocator, scenario_slug: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{s}/zigeffect-causal-dev-loop-{s}-remediation-eval-diff.json",
+        .{ causal_run.artifact_dir, scenario_slug },
+    );
+}
+
+fn localDecisionEvalLinkPathForScenario(allocator: std.mem.Allocator, scenario_slug: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{s}/zigeffect-causal-dev-loop-{s}-remediation-eval-link.json",
+        .{ causal_run.artifact_dir, scenario_slug },
+    );
+}
+
+fn localDecisionEvalManifestPathForScenario(allocator: std.mem.Allocator, scenario_slug: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{s}/zigeffect-causal-dev-loop-{s}-remediation-eval-manifest.json",
         .{ causal_run.artifact_dir, scenario_slug },
     );
 }
@@ -351,6 +401,57 @@ fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
     try cwd.writeFile(io, .{ .sub_path = path, .data = contents });
 }
 
+const DecisionEvalArtifactFileSink = struct {
+    io: std.Io,
+    path: []const u8,
+
+    fn sink(self: *DecisionEvalArtifactFileSink) fx.AgentEvalDiffArtifactSink {
+        return .{ .state = self, .write = write };
+    }
+
+    fn write(raw: ?*anyopaque, json: []const u8) anyerror!void {
+        const self: *DecisionEvalArtifactFileSink = @ptrCast(@alignCast(raw.?));
+        try writeArtifact(self.io, self.path, json);
+    }
+};
+
+fn writeDecisionEvalArtifacts(
+    allocator: std.mem.Allocator,
+    input: DecisionInput,
+    paths: DecisionEvalArtifactPaths,
+    sinks: DecisionEvalArtifactSinks,
+) anyerror!fx.AgentEvalResult {
+    std.debug.assert(input.options.kind == .approved);
+
+    const baseline = [_]fx.CausalEvent{
+        .{ .id = 1, .kind = .run_started, .run_id = 1, .status = "started" },
+        .{ .id = 2, .kind = .fiber_suspended, .run_id = 1, .fiber_id = 9, .status = "suspended", .label = "remediation decision eval suspended fiber" },
+    };
+    const policy = (fx.AgentInterventionPolicy{})
+        .withApplyEnabled(true)
+        .withKindPolicy(.interrupt_fiber, .auto_approve);
+    const invariants = fx.CausalInvariantBuilder.init().requireSuspendedFibersResolve();
+    const eval_name = try std.fmt.allocPrint(allocator, "remediation decision eval: {s}", .{paths.decision_json_path});
+    defer allocator.free(eval_name);
+
+    return try fx.runAgentEvalAndWriteLinkedDiffManifest(allocator, .{
+        .name = eval_name,
+        .baseline = &baseline,
+        .policy = policy,
+        .request = .{
+            .kind = .interrupt_fiber,
+            .run_id = 1,
+            .fiber_id = 9,
+            .reason = "remediation decision built-in eval interrupt",
+        },
+        .invariants = invariants,
+        .expect_improvement = true,
+    }, input.audit.source.verdict, paths.decision_json_path, .{
+        .diff_artifact_path = paths.diff_path,
+        .link_artifact_path = paths.link_path,
+    }, sinks.diff, sinks.link, sinks.manifest);
+}
+
 fn runLocal(init: std.process.Init, options: DecisionOptions) !void {
     const allocator = init.gpa;
     const audit_path = if (options.scenario_slug) |slug| try localAuditJsonPathForScenario(allocator, slug) else localAuditJsonPath();
@@ -359,6 +460,12 @@ fn runLocal(init: std.process.Init, options: DecisionOptions) !void {
     defer if (options.scenario_slug != null) allocator.free(decision_json_path);
     const decision_text_path = if (options.scenario_slug) |slug| try localDecisionTextPathForScenario(allocator, slug) else localDecisionTextPath();
     defer if (options.scenario_slug != null) allocator.free(decision_text_path);
+    const eval_diff_path = if (options.scenario_slug) |slug| try localDecisionEvalDiffPathForScenario(allocator, slug) else localDecisionEvalDiffPath();
+    defer if (options.scenario_slug != null) allocator.free(eval_diff_path);
+    const eval_link_path = if (options.scenario_slug) |slug| try localDecisionEvalLinkPathForScenario(allocator, slug) else localDecisionEvalLinkPath();
+    defer if (options.scenario_slug != null) allocator.free(eval_link_path);
+    const eval_manifest_path = if (options.scenario_slug) |slug| try localDecisionEvalManifestPathForScenario(allocator, slug) else localDecisionEvalManifestPath();
+    defer if (options.scenario_slug != null) allocator.free(eval_manifest_path);
 
     const audit_json = try readArtifact(init.io, allocator, audit_path);
     defer allocator.free(audit_json);
@@ -379,6 +486,21 @@ fn runLocal(init: std.process.Init, options: DecisionOptions) !void {
 
     try writeArtifact(init.io, decision_json_path, json_report);
     try writeArtifact(init.io, decision_text_path, text_report);
+    if (options.kind == .approved) {
+        var diff_sink = DecisionEvalArtifactFileSink{ .io = init.io, .path = eval_diff_path };
+        var link_sink = DecisionEvalArtifactFileSink{ .io = init.io, .path = eval_link_path };
+        var manifest_sink = DecisionEvalArtifactFileSink{ .io = init.io, .path = eval_manifest_path };
+        _ = try writeDecisionEvalArtifacts(allocator, input, .{
+            .diff_path = eval_diff_path,
+            .link_path = eval_link_path,
+            .manifest_path = eval_manifest_path,
+            .decision_json_path = decision_json_path,
+        }, .{
+            .diff = diff_sink.sink(),
+            .link = link_sink.sink(),
+            .manifest = manifest_sink.sink(),
+        });
+    }
     std.debug.print("{s}", .{text_report});
 }
 
@@ -564,6 +686,88 @@ test "decision text records rejection reason and guardrails" {
     try std.testing.expect(std.mem.indexOf(u8, text, "decision: rejected") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "reason: intentional fixture") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "Rejected proposals must not be used as permission for source edits.") != null);
+}
+
+const DecisionEvalArtifactCapture = struct {
+    diff_writes: usize = 0,
+    link_writes: usize = 0,
+    manifest_writes: usize = 0,
+    saw_diff_schema: bool = false,
+    saw_link_schema: bool = false,
+    saw_manifest_schema: bool = false,
+    saw_manifest_decision_path: bool = false,
+
+    fn diffSink(self: *DecisionEvalArtifactCapture) fx.AgentEvalDiffArtifactSink {
+        return .{ .state = self, .write = writeDiff };
+    }
+
+    fn linkSink(self: *DecisionEvalArtifactCapture) fx.AgentEvalDiffArtifactSink {
+        return .{ .state = self, .write = writeLink };
+    }
+
+    fn manifestSink(self: *DecisionEvalArtifactCapture) fx.AgentEvalDiffArtifactSink {
+        return .{ .state = self, .write = writeManifest };
+    }
+
+    fn writeDiff(raw: ?*anyopaque, json: []const u8) anyerror!void {
+        const self: *DecisionEvalArtifactCapture = @ptrCast(@alignCast(raw.?));
+        self.diff_writes += 1;
+        self.saw_diff_schema = std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.agent-eval-diff.v1\"") != null;
+    }
+
+    fn writeLink(raw: ?*anyopaque, json: []const u8) anyerror!void {
+        const self: *DecisionEvalArtifactCapture = @ptrCast(@alignCast(raw.?));
+        self.link_writes += 1;
+        self.saw_link_schema = std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.agent-eval-diff-link.v1\"") != null;
+    }
+
+    fn writeManifest(raw: ?*anyopaque, json: []const u8) anyerror!void {
+        const self: *DecisionEvalArtifactCapture = @ptrCast(@alignCast(raw.?));
+        self.manifest_writes += 1;
+        self.saw_manifest_schema = std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.agent-eval-linked-manifest.v1\"") != null;
+        self.saw_manifest_decision_path = std.mem.indexOf(u8, json, "zigeffect-causal-dev-loop-remediation-decision.json") != null;
+    }
+};
+
+test "approved remediation decision writes linked eval manifest artifacts" {
+    var parsed = try std.json.parseFromSlice(AuditRecord, std.testing.allocator, approved_audit_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    var capture = DecisionEvalArtifactCapture{};
+    const result = try writeDecisionEvalArtifacts(
+        std.testing.allocator,
+        .{
+            .audit_path = ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-audit.json",
+            .audit = parsed.value,
+            .options = .{
+                .mode = "local",
+                .kind = .approved,
+                .decided_by = "local-reviewer",
+                .policy = "manual-review",
+                .reason = "reviewed local remediation audit",
+            },
+        },
+        .{
+            .diff_path = ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-eval-diff.json",
+            .link_path = ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-eval-link.json",
+            .manifest_path = ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-eval-manifest.json",
+            .decision_json_path = ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-decision.json",
+        },
+        .{
+            .diff = capture.diffSink(),
+            .link = capture.linkSink(),
+            .manifest = capture.manifestSink(),
+        },
+    );
+
+    try std.testing.expect(result.passed);
+    try std.testing.expectEqual(@as(usize, 1), capture.diff_writes);
+    try std.testing.expectEqual(@as(usize, 1), capture.link_writes);
+    try std.testing.expectEqual(@as(usize, 1), capture.manifest_writes);
+    try std.testing.expect(capture.saw_diff_schema);
+    try std.testing.expect(capture.saw_link_schema);
+    try std.testing.expect(capture.saw_manifest_schema);
+    try std.testing.expect(capture.saw_manifest_decision_path);
 }
 
 test "usage names local decision shape" {
