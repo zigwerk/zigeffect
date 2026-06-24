@@ -1,6 +1,6 @@
 # zigeffect EffectTS Parity
 
-Date: 2026-06-05
+Date: 2026-06-24
 
 This document tracks what “style parity” means for `zigeffect`. EffectTS is a
 large production ecosystem. `zigeffect` is not trying to clone it API-for-API;
@@ -53,6 +53,8 @@ edge combinators to compose stdlib services:
 - pairing / gather: `zip`, `zipWith`, `fx.all` (sequential, homogeneous slice)
 - conditional: `when`, `unless`
 - traversal: `fx.forEachAlloc`, `fx.forEachDiscard`
+- **parallel**: `forEachPar`, `zipPar` (run on any `FiberExecutor`)
+- **racing**: `raceFirst`, `raceAll`, `race` (prefer-success), `both` (fail-fast)
 - recovery: `mapError`, `catchAll`, `orElse`, `tapError`
 - lifecycle observation: `onExit`, `ensuring`
 - scheduling: `retry`, `repeat`
@@ -151,12 +153,29 @@ surface:
   primitives, including queue shutdown and scoped semaphore permits
 
 The core runtime remains deterministic and run-to-completion on `join` by
-default. `LocalAsyncBackendState` now provides the first real async backend
-surface for backend-owned suspension, timer wakeups, typed network/file waits,
-and cancellation wakeups. Direct-style effects opt into that surface through
-`RuntimeDecision.suspended` or context async backend helpers; stackful coroutine
-lowering and task groups can target the same backend contract without changing
-the deterministic compatibility suite.
+default, but real concurrency now runs through the same surface:
+
+- **Three executors, one `FiberExecutor` vtable.** `fork`/`forEachPar`/`zipPar`/
+  the race family run on the deterministic backend, on **real zio coroutines**
+  (`packages/zigeffect-zio`), or on a **real OS-thread pool**
+  (`ThreadPoolExecutor`). The D2 invariant holds across all three: the same
+  program yields a structurally-equivalent causal trace.
+- **The `AsyncBackend` vtable is fully implemented on zio** — suspend/wake/
+  schedule-timer/interrupt/register-io/complete-io/poll-wake — as a registration
+  + wake-queue with real timer coroutines and real `zio.net` socket IO.
+  `LocalAsyncBackendState` is the deterministic reference; a `real_clock`
+  capability + `WorkflowScheduler.pumpAsyncUntilIdle` reconcile the virtual-clock
+  PULL model with zio's real-clock PUSH model so durable workflows run on zio.
+- **STM** (`TRef`, `Stm.atomically`) with optimistic conflict-retry, including
+  **heterogeneous transactions** (`atomicallyMixed` across `TRef`s of different
+  value types). `Ref`/`Hub`/`CausalStore` are thread-safe (SpinLock), proven by
+  an 8-thread stress test + mutation testing.
+- **Fiber-local `FiberRef`** with auto-propagation across `fork` (inline `Context`
+  slots for `@sizeOf(T) <= 8`).
+
+Honest limit: thread-pool `interrupt` is cooperative (OS threads can't be
+async-preempted), so a thread-pool race returns the correct result but does not
+short-circuit a loser's work — zio's coroutine cancel does.
 
 ### Durable Workflows And Cluster
 
@@ -267,10 +286,16 @@ adapters and agent tools can build on.
 
 ## Next Parity Priorities
 
-1. Coroutine lowering and task groups on top of the async backend contract.
-2. Production causal adapters for JSON Lines, OpenTelemetry, embedded graph
-   queries, and durable history.
-3. Deterministic replay/forking for selected effect inputs.
-4. Policy-controlled remediation for retries, graph restarts, provider
-   replacement, and fiber interruption.
-5. Compile-time assertions for common effect composition mistakes.
+Done since the 2026-06-05 baseline (struck from the list): coroutine lowering +
+task groups on the async backend (zio coroutines + thread-pool executor); OTLP/
+JSON + the live-attach collector; policy-controlled remediation (the closed loop
+with retry/interrupt/replace-provider/replay executors, gate-off by default).
+
+Remaining:
+
+1. Deterministic replay/forking for selected effect inputs.
+2. Compile-time assertions for common effect composition mistakes.
+3. The full cluster transport on a real socket (the workflow scheduler already
+   runs on zio; the transport vtable still routes in-process).
+4. Recursive schedule programs and richer test fixtures/golden output, as real
+   stdlib code demands them.

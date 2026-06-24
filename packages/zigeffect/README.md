@@ -32,14 +32,21 @@ const result = try Program
 - **`Effect`**: `fromFn`, `succeed`, `fail`, `sync`, `run`, `exit`, `retry`,
   `repeat`, `map`, `flatMap`, `tap`, `onExit`, `ensuring`, and recovery helpers.
 - **`Runtime` / `FiberRuntime` / `Fiber`**: engine-managed scopes with automatic
-  cleanup, and deterministic fork/join/interrupt with scoped leases. The fiber
-  runtime is semantic-first and deterministic — it does not claim real
-  green-thread suspension; an optional [zio](https://github.com/lalinsky/zio)
-  adapter (`packages/zigeffect-zio`, planned) provides the stackful-coroutine and
-  `std.Io` backend, keeping the core dependency-free. See
-  [docs/roadmap.md](docs/roadmap.md).
-- **`Deferred`, `Queue`, `Semaphore`**: deterministic coordination primitives
-  with explicit wait-state/backpressure inspection.
+  cleanup, and fork/join/interrupt with scoped leases. The core stays
+  deterministic and dependency-free, but the same `FiberExecutor` vtable runs on
+  **three executors**: the deterministic backend, real **[zio](https://github.com/lalinsky/zio)
+  coroutines** (`packages/zigeffect-zio`, built), and a real **OS-thread pool**
+  (`ThreadPoolExecutor`). The same program yields a structurally-equivalent causal
+  trace on all three. See [docs/roadmap.md](docs/roadmap.md).
+- **Concurrency**: `forEachPar`, `zipPar`, and the race family — `raceFirst`,
+  `raceAll`, `race` (prefer-success), `both` (fail-fast).
+- **`Deferred`, `Queue`, `Semaphore`**: coordination primitives with explicit
+  wait-state/backpressure inspection; they suspend/resume for real on the zio
+  backend.
+- **`STM` / `TRef`**: optimistic-concurrency transactions (`atomically`), including
+  **heterogeneous** transactions (`atomicallyMixed`) over `TRef`s of different
+  value types. `Ref`/`Hub`/`CausalStore` are thread-safe; `FiberRef` is fiber-local
+  with auto-propagation across `fork`.
 - **`Context`**, **`acquireRelease`**, **`Scope`**: typed service access and
   scoped, reverse-order, exit-aware finalization.
 - **`Layer` / `layerGraph`**: dependency environments, scoped builders, typed
@@ -152,6 +159,18 @@ and chain views:
 zig build causal-test
 zig build causal-workbench -- .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json
 zig build causal-workbench -- --server-only <artifact.json>   # for agent/browser inspection
+```
+
+**Live-attach.** Beyond static artifacts, the workbench can stream a *running*
+engine. `CausalNdjsonTap` emits recorded events as NDJSON; a Bun WebSocket
+collector (`workbench/src/collector/`) maps them to `LiveFrame`s and fans them out
+one-per-message; the workbench consumes them via `?live=ws://…/live` — the same
+timeline/graph/findings views, updating live.
+
+```bash
+zig build live-stream-example
+./zig-out/bin/zigeffect-live-stream-example | bun workbench/src/collector/collector.ts
+# then open the workbench at ?live=ws://127.0.0.1:4500/live
 ```
 
 ### Export adapters
