@@ -31,6 +31,28 @@ pub const CausalRunnerDeploymentMetadata = struct {
     auth_epoch: u64 = 0,
 };
 
+pub const CausalRunnerDeploymentRequirements = struct {
+    require_tls: bool = true,
+    require_address: bool = true,
+    require_healthy: bool = true,
+    min_auth_epoch: u64 = 0,
+};
+
+pub const CausalRunnerDeploymentValidationReport = struct {
+    checked: usize = 0,
+    missing_tls: usize = 0,
+    missing_address: usize = 0,
+    unhealthy: usize = 0,
+    stale_auth_epoch: usize = 0,
+
+    pub fn ok(self: CausalRunnerDeploymentValidationReport) bool {
+        return self.missing_tls == 0 and
+            self.missing_address == 0 and
+            self.unhealthy == 0 and
+            self.stale_auth_epoch == 0;
+    }
+};
+
 pub const CausalRunnerLineageArtifactOptions = struct {
     deployment_id: []const u8 = "",
     deployments: []const CausalRunnerDeploymentMetadata = &.{},
@@ -58,6 +80,20 @@ pub const CausalRunnerLineage = struct {
         };
     }
 };
+
+pub fn validateCausalRunnerDeployments(
+    deployments: []const CausalRunnerDeploymentMetadata,
+    requirements: CausalRunnerDeploymentRequirements,
+) CausalRunnerDeploymentValidationReport {
+    var report = CausalRunnerDeploymentValidationReport{ .checked = deployments.len };
+    for (deployments) |deployment| {
+        if (requirements.require_tls and !deployment.tls_enabled) report.missing_tls += 1;
+        if (requirements.require_address and deployment.address.len == 0) report.missing_address += 1;
+        if (requirements.require_healthy and !std.mem.eql(u8, deployment.health, "healthy")) report.unhealthy += 1;
+        if (deployment.auth_epoch < requirements.min_auth_epoch) report.stale_auth_epoch += 1;
+    }
+    return report;
+}
 
 pub fn formatCausalRunnerLineageJson(
     allocator: Allocator,

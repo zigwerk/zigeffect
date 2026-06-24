@@ -109,3 +109,42 @@ test "runner lineage artifact includes deployment metadata and cross-runner edge
     try std.testing.expect(std.mem.indexOf(u8, json, "\"from_runner_id\":\"runner-a\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"to_runner_id\":\"runner-b\"") != null);
 }
+
+test "runner deployment metadata validation reports unsafe deployment evidence" {
+    const deployments = [_]fx.CausalRunnerDeploymentMetadata{
+        .{
+            .runner_id = "runner-a",
+            .service = "zigeffect",
+            .environment = "prod",
+            .region = "lhr",
+            .address = "",
+            .health = "degraded",
+            .tls_enabled = false,
+            .auth_epoch = 3,
+        },
+        .{
+            .runner_id = "runner-b",
+            .service = "zigeffect",
+            .environment = "prod",
+            .region = "ams",
+            .address = "tcp://runner-b.internal:7001",
+            .health = "healthy",
+            .tls_enabled = true,
+            .auth_epoch = 12,
+        },
+    };
+
+    const report = fx.validateCausalRunnerDeployments(&deployments, .{
+        .require_tls = true,
+        .require_address = true,
+        .require_healthy = true,
+        .min_auth_epoch = 10,
+    });
+
+    try std.testing.expect(!report.ok());
+    try std.testing.expectEqual(@as(usize, 2), report.checked);
+    try std.testing.expectEqual(@as(usize, 1), report.missing_tls);
+    try std.testing.expectEqual(@as(usize, 1), report.missing_address);
+    try std.testing.expectEqual(@as(usize, 1), report.unhealthy);
+    try std.testing.expectEqual(@as(usize, 1), report.stale_auth_epoch);
+}

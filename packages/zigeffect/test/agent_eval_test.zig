@@ -83,3 +83,50 @@ test "agent eval emits semantic diff artifact linked to remediation events" {
     const requested = try std.fmt.bufPrint(&requested_buf, "\"requested\":{d}", .{artifact.result.counterfactual.intervention.requested_event_id.?});
     try std.testing.expect(std.mem.indexOf(u8, artifact.json, requested) != null);
 }
+
+const EvalArtifactCapture = struct {
+    writes: usize = 0,
+    saw_schema: bool = false,
+    saw_semantic_diff: bool = false,
+
+    fn sink(self: *EvalArtifactCapture) fx.AgentEvalDiffArtifactSink {
+        return .{
+            .state = self,
+            .write = write,
+        };
+    }
+
+    fn write(raw: ?*anyopaque, json: []const u8) anyerror!void {
+        const self: *EvalArtifactCapture = @ptrCast(@alignCast(raw.?));
+        self.writes += 1;
+        self.saw_schema = std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.agent-eval-diff.v1\"") != null;
+        self.saw_semantic_diff = std.mem.indexOf(u8, json, "\"semantic_diff\":{\"schema\":\"zigeffect.causal.semantic-diff.v1\"") != null;
+    }
+};
+
+test "agent eval writes semantic diff artifact to caller sink" {
+    const policy = (fx.AgentInterventionPolicy{})
+        .withApplyEnabled(true)
+        .withKindPolicy(.interrupt_fiber, .auto_approve);
+    const invariants = fx.CausalInvariantBuilder.init().requireSuspendedFibersResolve();
+    var capture = EvalArtifactCapture{};
+
+    const result = try fx.runAgentEvalAndWriteDiffArtifact(std.testing.allocator, .{
+        .name = "interrupt hung fiber",
+        .baseline = &baseline,
+        .policy = policy,
+        .request = .{
+            .kind = .interrupt_fiber,
+            .run_id = 1,
+            .fiber_id = 9,
+            .reason = "eval interrupt",
+        },
+        .invariants = invariants,
+        .expect_improvement = true,
+    }, "baseline", "after-interrupt", capture.sink());
+
+    try std.testing.expect(result.passed);
+    try std.testing.expectEqual(@as(usize, 1), capture.writes);
+    try std.testing.expect(capture.saw_schema);
+    try std.testing.expect(capture.saw_semantic_diff);
+}

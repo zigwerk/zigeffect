@@ -56,6 +56,22 @@ pub const CausalLiveCommandPollResult = struct {
     tap: CausalLiveCommandTapResult,
 };
 
+pub const CausalLiveCommandPoller = struct {
+    state: ?*anyopaque = null,
+    poll: *const fn (?*anyopaque, after: u64) anyerror!CausalLiveCommandPollBatch,
+};
+
+pub const CausalLiveCommandPollLoopOptions = struct {
+    start_after: u64 = 0,
+    max_polls: usize = 1,
+};
+
+pub const CausalLiveCommandPollLoopResult = struct {
+    polls: usize = 0,
+    next_after: u64 = 0,
+    tap: CausalLiveCommandTapResult = .{},
+};
+
 pub fn applyCausalLiveCommand(
     store: *CausalStore,
     policy: AgentInterventionPolicy,
@@ -140,6 +156,41 @@ pub fn runCausalLiveCommandPolledBatch(
         .next_after = cursor,
         .tap = tap,
     };
+}
+
+pub fn runCausalLiveCommandPollLoop(
+    store: *CausalStore,
+    policy: AgentInterventionPolicy,
+    poller: CausalLiveCommandPoller,
+    options: CausalLiveCommandPollLoopOptions,
+) anyerror!CausalLiveCommandPollLoopResult {
+    var output = CausalLiveCommandPollLoopResult{
+        .next_after = options.start_after,
+    };
+
+    var cursor = options.start_after;
+    var polls: usize = 0;
+    while (polls < options.max_polls) : (polls += 1) {
+        const batch = try poller.poll(poller.state, cursor);
+        output.polls += 1;
+
+        const result = try runCausalLiveCommandPolledBatch(store, policy, batch);
+        cursor = result.next_after;
+        output.next_after = cursor;
+        addTapResult(&output.tap, result.tap);
+
+        if (batch.envelopes.len == 0) break;
+    }
+
+    return output;
+}
+
+fn addTapResult(output: *CausalLiveCommandTapResult, next: CausalLiveCommandTapResult) void {
+    output.processed += next.processed;
+    output.applied += next.applied;
+    output.rejected += next.rejected;
+    output.needs_human_review += next.needs_human_review;
+    if (next.last_sequence) |sequence| output.last_sequence = sequence;
 }
 
 fn liveCommandKind(command_kind: []const u8) ?AgentInterventionKind {

@@ -88,3 +88,50 @@ test "ops alert delivery json redacts alert evidence for external adapters" {
     try std.testing.expect(std.mem.indexOf(u8, json, "sentinel-secret") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, fx.causal_redaction_marker) != null);
 }
+
+const DeliveryCapture = struct {
+    delivered: usize = 0,
+    saw_delivery_schema: bool = false,
+    saw_secret: bool = false,
+
+    fn sink(self: *DeliveryCapture) fx.CausalOpsAlertDeliverySink {
+        return .{
+            .state = self,
+            .deliver = deliver,
+        };
+    }
+
+    fn deliver(raw: ?*anyopaque, json: []const u8) anyerror!void {
+        const self: *DeliveryCapture = @ptrCast(@alignCast(raw.?));
+        self.delivered += 1;
+        self.saw_delivery_schema = std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.ops-alert-delivery.v1\"") != null;
+        self.saw_secret = std.mem.indexOf(u8, json, "sentinel-secret") != null;
+    }
+};
+
+test "ops alert delivery sink receives redacted delivery envelope" {
+    var capture = DeliveryCapture{};
+
+    try fx.deliverCausalOpsAlert(std.testing.allocator, .{
+        .deployment = .{
+            .service = "zigeffect",
+            .environment = "prod",
+            .region = "eu-west",
+            .cluster_id = "cluster-a",
+        },
+        .delivery_kind = "webhook",
+        .endpoint_id = "pager-duty-primary",
+        .event = .{
+            .id = 43,
+            .kind = .alert_emitted,
+            .status = "emitted",
+            .label = "retention password=sentinel-secret threshold",
+            .type_name = "retention.threshold",
+            .redacted_detail = "token=sentinel-secret",
+        },
+    }, capture.sink());
+
+    try std.testing.expectEqual(@as(usize, 1), capture.delivered);
+    try std.testing.expect(capture.saw_delivery_schema);
+    try std.testing.expect(!capture.saw_secret);
+}

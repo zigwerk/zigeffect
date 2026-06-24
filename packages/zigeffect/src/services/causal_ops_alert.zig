@@ -37,6 +37,11 @@ pub const CausalOpsAlertDeliveryOptions = struct {
     event: CausalEvent,
 };
 
+pub const CausalOpsAlertDeliverySink = struct {
+    state: ?*anyopaque = null,
+    deliver: *const fn (?*anyopaque, json: []const u8) anyerror!void,
+};
+
 pub fn emitCausalOpsAlerts(
     store: *const CausalStore,
     sink: CausalOpsAlertSink,
@@ -119,6 +124,16 @@ pub fn formatCausalOpsAlertDeliveryJson(
     try appendRedactedJsonString(&output, allocator, options.event.redacted_detail);
     try output.appendSlice(allocator, "}}");
     return output.toOwnedSlice(allocator);
+}
+
+pub fn deliverCausalOpsAlert(
+    allocator: Allocator,
+    options: CausalOpsAlertDeliveryOptions,
+    sink: CausalOpsAlertDeliverySink,
+) anyerror!void {
+    const json = try formatCausalOpsAlertDeliveryJson(allocator, options);
+    defer allocator.free(json);
+    try sink.deliver(sink.state, json);
 }
 
 fn appendRedactedJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []const u8) Allocator.Error!void {

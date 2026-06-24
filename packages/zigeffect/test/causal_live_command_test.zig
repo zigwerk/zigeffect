@@ -136,3 +136,71 @@ test "live command polled batch carries inbox cursor while applying commands" {
     try std.testing.expectEqual(@as(usize, 4), snapshot.events.len);
     try std.testing.expectEqual(fx.CausalEventKind.timer_fired, snapshot.events[3].kind);
 }
+
+const FakeCommandPoller = struct {
+    calls: usize = 0,
+    seen_after: [3]u64 = .{ 0, 0, 0 },
+    first: [1]fx.CausalLiveCommandEnvelope = .{.{
+        .sequence = 1,
+        .request = .{
+            .command_id = "cmd-1",
+            .command_kind = "fire_timer",
+            .actor = "agent",
+            .run_id = 1,
+            .schedule_id = 10,
+            .reason = "wake first timer",
+        },
+    }},
+    second: [1]fx.CausalLiveCommandEnvelope = .{.{
+        .sequence = 2,
+        .request = .{
+            .command_id = "cmd-2",
+            .command_kind = "fire_timer",
+            .actor = "agent",
+            .run_id = 1,
+            .schedule_id = 11,
+            .reason = "wake second timer",
+        },
+    }},
+
+    fn poll(raw: ?*anyopaque, after: u64) anyerror!fx.CausalLiveCommandPollBatch {
+        const self: *FakeCommandPoller = @ptrCast(@alignCast(raw.?));
+        self.seen_after[self.calls] = after;
+        self.calls += 1;
+        return switch (self.calls) {
+            1 => .{ .next_after = 1, .envelopes = self.first[0..] },
+            2 => .{ .next_after = 2, .envelopes = self.second[0..] },
+            else => .{ .next_after = after, .envelopes = &.{} },
+        };
+    }
+};
+
+test "live command poll loop processes bounded batches until empty" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    const policy = (fx.AgentInterventionPolicy{})
+        .withApplyEnabled(true)
+        .withKindPolicy(.fire_timer, .auto_approve);
+    var poller_state = FakeCommandPoller{};
+
+    const result = try fx.runCausalLiveCommandPollLoop(&store, policy, .{
+        .state = &poller_state,
+        .poll = FakeCommandPoller.poll,
+    }, .{
+        .start_after = 0,
+        .max_polls = 5,
+    });
+
+    try std.testing.expectEqual(@as(usize, 3), result.polls);
+    try std.testing.expectEqual(@as(u64, 2), result.next_after);
+    try std.testing.expectEqual(@as(usize, 2), result.tap.processed);
+    try std.testing.expectEqual(@as(usize, 2), result.tap.applied);
+    try std.testing.expectEqual(@as(u64, 0), poller_state.seen_after[0]);
+    try std.testing.expectEqual(@as(u64, 1), poller_state.seen_after[1]);
+    try std.testing.expectEqual(@as(u64, 2), poller_state.seen_after[2]);
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 8), snapshot.events.len);
+}

@@ -35,6 +35,11 @@ pub const AgentEvalDiffArtifact = struct {
     }
 };
 
+pub const AgentEvalDiffArtifactSink = struct {
+    state: ?*anyopaque = null,
+    write: *const fn (?*anyopaque, json: []const u8) anyerror!void,
+};
+
 fn replayEvents(store: *causal.CausalStore, events: []const causal.CausalEvent) std.mem.Allocator.Error!void {
     for (events) |event| {
         _ = try store.record(event);
@@ -102,6 +107,19 @@ pub fn runAgentEvalWithDiffArtifact(
         .result = result,
         .json = try output.toOwnedSlice(allocator),
     };
+}
+
+pub fn runAgentEvalAndWriteDiffArtifact(
+    allocator: std.mem.Allocator,
+    options: AgentEvalOptions,
+    before_artifact: []const u8,
+    after_artifact: []const u8,
+    sink: AgentEvalDiffArtifactSink,
+) anyerror!AgentEvalResult {
+    var artifact = try runAgentEvalWithDiffArtifact(allocator, options, before_artifact, after_artifact);
+    defer artifact.deinit();
+    try sink.write(sink.state, artifact.json);
+    return artifact.result;
 }
 
 fn buildEvalSemanticDiffJson(
