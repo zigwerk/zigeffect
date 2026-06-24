@@ -117,6 +117,15 @@ export type LiveEngineCommandDaemonResult = LiveCommandDaemonResult & {
   emitted_frames: number;
 };
 
+export type LiveEngineHost = {
+  handleApplyRequest: (request: Request) => Promise<Response>;
+  runCommandDaemon: (
+    url: string,
+    options?: LiveCommandDaemonOptions,
+    fetcher?: LiveCommandFetcher,
+  ) => Promise<LiveEngineCommandDaemonResult>;
+};
+
 export type LiveCommandDaemonLifecycleEvent =
   | { kind: "started"; next_after: number }
   | ({ kind: "cycle"; cycle: number } & LiveCommandPollingResult)
@@ -471,6 +480,13 @@ export async function runLiveEngineCommandDaemon(
   );
 
   return { ...daemon, ...engine };
+}
+
+export function createLiveEngineHost(bridge: LiveCommandEngineBridge): LiveEngineHost {
+  return {
+    handleApplyRequest: (request) => serveLiveEngineCommandApplyRequest(request, bridge),
+    runCommandDaemon: (url, options = {}, fetcher = fetch) => runLiveEngineCommandDaemon(url, bridge, options, fetcher),
+  };
 }
 
 export function createHttpLiveEngineCommandBridge(options: HttpLiveEngineCommandBridgeOptions): LiveCommandEngineBridge {

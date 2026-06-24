@@ -1386,6 +1386,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     causal_patch_proposal_tool_module.addImport("causal_run", causal_run_tool_module);
+    causal_patch_proposal_tool_module.addImport("zigeffect", zigeffect);
 
     const causal_patch_proposal_tool_tests = b.addTest(.{
         .name = "zigeffect-causal-patch-proposal-tests",

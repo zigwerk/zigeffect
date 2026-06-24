@@ -3,6 +3,7 @@ import { createRoot } from "solid-js";
 import { deriveWorkbenchModel } from "./causalArtifact";
 import {
   LiveCausalBuffer,
+  createLiveEngineHost,
   createHttpLiveEngineCommandBridge,
   createLiveArtifact,
   fetchLiveCommands,
@@ -523,6 +524,103 @@ test("serveLiveEngineCommandApplyRequest validates inboxes and formats engine re
   );
   expect(invalidInbox.status).toBe(400);
   expect(await invalidInbox.json()).toEqual({ error: "invalid_live_command_inbox" });
+});
+
+test("createLiveEngineHost wires apply requests and collector command daemon", async () => {
+  const appliedCommandIds: string[] = [];
+  const emittedFrames: number[] = [];
+  const host = createLiveEngineHost({
+    applyBatch: (inbox) => {
+      appliedCommandIds.push(...inbox.commands.map((command) => command.command_id));
+      return {
+        processed: inbox.commands.length,
+        applied: inbox.commands.length,
+        rejected: 0,
+        needs_human_review: 0,
+        frames: inbox.commands.map((command, index) =>
+          frame({
+            sequence: command.sequence + 100,
+            event_id: 200 + index,
+            event_kind: "remediation_applied",
+            status: "applied",
+          }),
+        ),
+      };
+    },
+    emitFrame: (nextFrame) => {
+      emittedFrames.push(nextFrame.event_id);
+    },
+  });
+
+  const applyInbox: LiveCommandInboxResponse = {
+    next_after: 30,
+    commands: [
+      {
+        sequence: 30,
+        command_id: "cmd-apply",
+        command_kind: "interrupt_fiber",
+        status: "received",
+        run_id: 1,
+        fiber_id: 9,
+      },
+    ],
+  };
+  const applyResponse = await host.handleApplyRequest(
+    new Request("http://127.0.0.1:4600/apply-commands", {
+      method: "POST",
+      body: JSON.stringify(applyInbox),
+    }),
+  );
+  expect(applyResponse.status).toBe(200);
+  expect(await applyResponse.json()).toEqual({
+    processed: 1,
+    applied: 1,
+    rejected: 0,
+    needs_human_review: 0,
+    frames: [
+      {
+        sequence: 130,
+        event_id: 200,
+        event_kind: "remediation_applied",
+        status: "applied",
+        label: "event 200",
+      },
+    ],
+  });
+
+  const fetcher = async (url: string) => {
+    const after = new URL(url).searchParams.get("after");
+    const body =
+      after === "0"
+        ? {
+            next_after: 31,
+            commands: [
+              {
+                sequence: 31,
+                command_id: "cmd-daemon",
+                command_kind: "interrupt_fiber",
+                status: "received",
+                run_id: 1,
+                fiber_id: 10,
+              },
+            ],
+          }
+        : { next_after: 31, commands: [] };
+    return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+  };
+
+  const daemon = await host.runCommandDaemon(
+    "http://127.0.0.1:4500/commands",
+    { maxCycles: 2, maxPollsPerCycle: 1 },
+    fetcher,
+  );
+
+  expect(appliedCommandIds).toEqual(["cmd-apply", "cmd-daemon"]);
+  expect(emittedFrames).toEqual([200]);
+  expect(daemon.processed).toBe(1);
+  expect(daemon.applied).toBe(1);
+  expect(daemon.emitted_frames).toBe(1);
+  expect(daemon.next_after).toBe(31);
 });
 
 test("LiveCausalBuffer accumulates frames in causal (sequence) order", () => {

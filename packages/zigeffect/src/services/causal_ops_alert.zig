@@ -91,6 +91,11 @@ pub const CausalOpsAlertProviderOptions = struct {
     delivery: CausalOpsAlertDeliveryOptions,
 };
 
+pub const CausalOpsAlertProviderSecretResolver = struct {
+    state: ?*anyopaque = null,
+    resolve: *const fn (?*anyopaque, secret_ref: []const u8) anyerror![]const u8,
+};
+
 pub const CausalOpsAlertHttpSink = struct {
     state: ?*anyopaque = null,
     send: *const fn (?*anyopaque, CausalOpsAlertHttpRequest) anyerror!void,
@@ -262,6 +267,22 @@ pub fn deliverCausalOpsAlertProvider(
     try sink.send(sink.state, request);
 }
 
+pub fn deliverCausalOpsAlertProviderWithSecret(
+    allocator: Allocator,
+    options: CausalOpsAlertProviderOptions,
+    resolver: CausalOpsAlertProviderSecretResolver,
+    sink: CausalOpsAlertHttpSink,
+) anyerror!void {
+    if (options.provider != .pagerduty_events_v2 or options.secret_ref.len == 0) {
+        return try deliverCausalOpsAlertProvider(allocator, options, sink);
+    }
+
+    const routing_key = try resolver.resolve(resolver.state, options.secret_ref);
+    var request = try formatCausalOpsPagerDutyAlertRequestWithRoutingKey(allocator, options, routing_key);
+    defer request.deinit();
+    try sink.send(sink.state, request);
+}
+
 fn formatCausalOpsSlackAlertBody(
     allocator: Allocator,
     options: CausalOpsAlertProviderOptions,
@@ -277,6 +298,37 @@ fn formatCausalOpsSlackAlertBody(
     try output.appendSlice(allocator, "}");
 
     return output.toOwnedSlice(allocator);
+}
+
+fn formatCausalOpsPagerDutyAlertRequestWithRoutingKey(
+    allocator: Allocator,
+    options: CausalOpsAlertProviderOptions,
+    routing_key: []const u8,
+) Allocator.Error!CausalOpsAlertHttpRequest {
+    const delivery_json = try formatCausalOpsAlertDeliveryJson(allocator, options.delivery);
+    defer allocator.free(delivery_json);
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\"provider\":\"pagerduty_events_v2\",\"routing_key\":");
+    try appendJsonString(&output, allocator, routing_key);
+    try output.appendSlice(allocator, ",\"event_action\":\"trigger\",\"dedup_key\":");
+    try output.print(allocator, "\"zigeffect-alert-{d}\"", .{options.delivery.event.id});
+    try output.appendSlice(allocator, ",\"payload\":{\"summary\":");
+    try appendRedactedJsonString(&output, allocator, options.delivery.event.label);
+    try output.appendSlice(allocator, ",\"source\":");
+    try appendRedactedJsonString(&output, allocator, options.delivery.deployment.service);
+    try output.appendSlice(allocator, ",\"severity\":\"warning\",\"custom_details\":");
+    try output.appendSlice(allocator, delivery_json);
+    try output.appendSlice(allocator, "}}");
+
+    return .{
+        .allocator = allocator,
+        .method = "POST",
+        .url = options.endpoint_url,
+        .body = try output.toOwnedSlice(allocator),
+    };
 }
 
 fn formatCausalOpsPagerDutyAlertBody(

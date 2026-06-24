@@ -289,3 +289,79 @@ test "ops alert provider adapter formats slack and pagerduty request shapes" {
     try std.testing.expect(std.mem.indexOf(u8, pagerduty.body, "sentinel-secret") == null);
     try std.testing.expect(std.mem.indexOf(u8, pagerduty.body, fx.causal_redaction_marker) != null);
 }
+
+const ProviderSecretDeliveryCapture = struct {
+    resolved: usize = 0,
+    sent: usize = 0,
+    saw_ref: bool = false,
+    saw_method: bool = false,
+    saw_headers: bool = false,
+    saw_routing_key: bool = false,
+    saw_secret_ref_field: bool = false,
+    saw_secret_alert_evidence: bool = false,
+
+    fn resolver(self: *ProviderSecretDeliveryCapture) fx.CausalOpsAlertProviderSecretResolver {
+        return .{ .state = self, .resolve = resolve };
+    }
+
+    fn sink(self: *ProviderSecretDeliveryCapture) fx.CausalOpsAlertHttpSink {
+        return .{ .state = self, .send = send };
+    }
+
+    fn resolve(raw: ?*anyopaque, secret_ref: []const u8) anyerror![]const u8 {
+        const self: *ProviderSecretDeliveryCapture = @ptrCast(@alignCast(raw.?));
+        self.resolved += 1;
+        self.saw_ref = std.mem.eql(u8, secret_ref, "pd-routing-key-prod");
+        return "pd_test_routing_key_123";
+    }
+
+    fn send(raw: ?*anyopaque, request: fx.CausalOpsAlertHttpRequest) anyerror!void {
+        const self: *ProviderSecretDeliveryCapture = @ptrCast(@alignCast(raw.?));
+        self.sent += 1;
+        self.saw_method = std.mem.eql(u8, request.method, "POST");
+        self.saw_headers =
+            hasAlertHeader(request.headers, "content-type", "application/json") and
+            hasAlertHeader(request.headers, "cache-control", "no-store") and
+            hasAlertHeader(request.headers, "x-content-type-options", "nosniff");
+        self.saw_routing_key = std.mem.indexOf(u8, request.body, "\"routing_key\":\"pd_test_routing_key_123\"") != null;
+        self.saw_secret_ref_field = std.mem.indexOf(u8, request.body, "routing_key_secret_ref") != null;
+        self.saw_secret_alert_evidence = std.mem.indexOf(u8, request.body, "sentinel-secret") != null;
+    }
+};
+
+test "ops alert provider delivery injects pagerduty secret through caller-owned resolver" {
+    var capture = ProviderSecretDeliveryCapture{};
+
+    try fx.deliverCausalOpsAlertProviderWithSecret(std.testing.allocator, .{
+        .provider = .pagerduty_events_v2,
+        .endpoint_url = "https://events.pagerduty.test/v2/enqueue",
+        .secret_ref = "pd-routing-key-prod",
+        .delivery = .{
+            .deployment = .{
+                .service = "zigeffect",
+                .environment = "prod",
+                .region = "eu-west",
+                .cluster_id = "cluster-a",
+            },
+            .delivery_kind = "provider",
+            .endpoint_id = "primary-alerts",
+            .event = .{
+                .id = 46,
+                .kind = .alert_emitted,
+                .status = "emitted",
+                .label = "retention password=sentinel-secret threshold",
+                .type_name = "retention.threshold",
+                .redacted_detail = "token=sentinel-secret",
+            },
+        },
+    }, capture.resolver(), capture.sink());
+
+    try std.testing.expectEqual(@as(usize, 1), capture.resolved);
+    try std.testing.expectEqual(@as(usize, 1), capture.sent);
+    try std.testing.expect(capture.saw_ref);
+    try std.testing.expect(capture.saw_method);
+    try std.testing.expect(capture.saw_headers);
+    try std.testing.expect(capture.saw_routing_key);
+    try std.testing.expect(!capture.saw_secret_ref_field);
+    try std.testing.expect(!capture.saw_secret_alert_evidence);
+}

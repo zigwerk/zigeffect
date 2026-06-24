@@ -614,6 +614,23 @@ pub const ClusterTransportServiceDiscoveryRefreshReport = struct {
     selection: ClusterTransportServiceDiscoverySelection,
 };
 
+pub const ClusterTransportServiceDiscoveryHttpRequest = struct {
+    allocator: Allocator,
+    method: []const u8 = "GET",
+    url: []const u8,
+    accept: []const u8 = "application/json",
+
+    pub fn deinit(self: *ClusterTransportServiceDiscoveryHttpRequest) void {
+        if (self.url.len > 0) self.allocator.free(self.url);
+        self.url = "";
+    }
+};
+
+pub const ClusterTransportServiceDiscoveryHttpResponse = struct {
+    status: u16,
+    body: []const u8,
+};
+
 pub const InMemoryClusterTransportServiceDiscovery = struct {
     allocator: Allocator,
     requirements: ClusterTransportServiceDiscoveryRequirements,
@@ -807,6 +824,24 @@ pub fn loadClusterTransportServiceDiscoverySnapshotJsonFile(
     const content = try dir.readFileAlloc(io, path, allocator, .limited(1024 * 1024));
     defer allocator.free(content);
     return try parseClusterTransportServiceDiscoverySnapshotJson(allocator, content);
+}
+
+pub fn formatClusterTransportServiceDiscoveryHttpRequest(
+    allocator: Allocator,
+    url: []const u8,
+) Allocator.Error!ClusterTransportServiceDiscoveryHttpRequest {
+    return .{
+        .allocator = allocator,
+        .url = try allocator.dupe(u8, url),
+    };
+}
+
+pub fn parseClusterTransportServiceDiscoveryHttpResponse(
+    allocator: Allocator,
+    response: ClusterTransportServiceDiscoveryHttpResponse,
+) !ClusterTransportOwnedServiceDiscoverySnapshot {
+    if (response.status != 200) return error.TransportUnavailable;
+    return try parseClusterTransportServiceDiscoverySnapshotJson(allocator, response.body);
 }
 
 pub const RemoteSocketClusterTransport = struct {

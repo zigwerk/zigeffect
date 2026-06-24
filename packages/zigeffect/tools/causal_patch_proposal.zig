@@ -1,5 +1,6 @@
 const std = @import("std");
 const causal_run = @import("causal_run");
+const fx = @import("zigeffect");
 
 const audit_schema = "zigeffect.causal.remediation-audit.v1";
 const decision_schema = "zigeffect.causal.remediation-decision.v1";
@@ -86,6 +87,19 @@ const ProposalInput = struct {
     claim_guardrails: []const []const u8,
 };
 
+const PatchProposalEvalArtifactPaths = struct {
+    diff_path: []const u8,
+    link_path: []const u8,
+    manifest_path: []const u8,
+    proposal_json_path: []const u8,
+};
+
+const PatchProposalEvalArtifactSinks = struct {
+    diff: fx.AgentEvalDiffArtifactSink,
+    link: fx.AgentEvalDiffArtifactSink,
+    manifest: fx.AgentEvalDiffArtifactSink,
+};
+
 fn localProposalJsonPath() []const u8 {
     return causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-patch-proposal.json";
 }
@@ -106,6 +120,42 @@ fn localProposalTextPathForScenario(allocator: std.mem.Allocator, scenario_slug:
     return std.fmt.allocPrint(
         allocator,
         "{s}/zigeffect-causal-dev-loop-{s}-patch-proposal.txt",
+        .{ causal_run.artifact_dir, scenario_slug },
+    );
+}
+
+fn localProposalEvalDiffPath() []const u8 {
+    return causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-patch-proposal-eval-diff.json";
+}
+
+fn localProposalEvalLinkPath() []const u8 {
+    return causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-patch-proposal-eval-link.json";
+}
+
+fn localProposalEvalManifestPath() []const u8 {
+    return causal_run.artifact_dir ++ "/zigeffect-causal-dev-loop-patch-proposal-eval-manifest.json";
+}
+
+fn localProposalEvalDiffPathForScenario(allocator: std.mem.Allocator, scenario_slug: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{s}/zigeffect-causal-dev-loop-{s}-patch-proposal-eval-diff.json",
+        .{ causal_run.artifact_dir, scenario_slug },
+    );
+}
+
+fn localProposalEvalLinkPathForScenario(allocator: std.mem.Allocator, scenario_slug: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{s}/zigeffect-causal-dev-loop-{s}-patch-proposal-eval-link.json",
+        .{ causal_run.artifact_dir, scenario_slug },
+    );
+}
+
+fn localProposalEvalManifestPathForScenario(allocator: std.mem.Allocator, scenario_slug: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{s}/zigeffect-causal-dev-loop-{s}-patch-proposal-eval-manifest.json",
         .{ causal_run.artifact_dir, scenario_slug },
     );
 }
@@ -474,6 +524,57 @@ fn writeArtifact(io: std.Io, path: []const u8, contents: []const u8) !void {
     try cwd.writeFile(io, .{ .sub_path = path, .data = contents });
 }
 
+const PatchProposalEvalArtifactFileSink = struct {
+    io: std.Io,
+    path: []const u8,
+
+    fn sink(self: *PatchProposalEvalArtifactFileSink) fx.AgentEvalDiffArtifactSink {
+        return .{ .state = self, .write = write };
+    }
+
+    fn write(raw: ?*anyopaque, json: []const u8) anyerror!void {
+        const self: *PatchProposalEvalArtifactFileSink = @ptrCast(@alignCast(raw.?));
+        try writeArtifact(self.io, self.path, json);
+    }
+};
+
+fn writePatchProposalEvalArtifacts(
+    allocator: std.mem.Allocator,
+    input: ProposalInput,
+    paths: PatchProposalEvalArtifactPaths,
+    sinks: PatchProposalEvalArtifactSinks,
+) anyerror!fx.AgentEvalResult {
+    std.debug.assert(input.options.status == .approved);
+
+    const baseline = [_]fx.CausalEvent{
+        .{ .id = 1, .kind = .run_started, .run_id = 1, .status = "started" },
+        .{ .id = 2, .kind = .fiber_suspended, .run_id = 1, .fiber_id = 9, .status = "suspended", .label = "patch proposal eval suspended fiber" },
+    };
+    const policy = (fx.AgentInterventionPolicy{})
+        .withApplyEnabled(true)
+        .withKindPolicy(.interrupt_fiber, .auto_approve);
+    const invariants = fx.CausalInvariantBuilder.init().requireSuspendedFibersResolve();
+    const eval_name = try std.fmt.allocPrint(allocator, "patch proposal eval: {s}", .{paths.proposal_json_path});
+    defer allocator.free(eval_name);
+
+    return try fx.runAgentEvalAndWriteLinkedDiffManifest(allocator, .{
+        .name = eval_name,
+        .baseline = &baseline,
+        .policy = policy,
+        .request = .{
+            .kind = .interrupt_fiber,
+            .run_id = 1,
+            .fiber_id = 9,
+            .reason = "patch proposal built-in eval interrupt",
+        },
+        .invariants = invariants,
+        .expect_improvement = true,
+    }, input.source.artifacts.verdict, paths.proposal_json_path, .{
+        .diff_artifact_path = paths.diff_path,
+        .link_artifact_path = paths.link_path,
+    }, sinks.diff, sinks.link, sinks.manifest);
+}
+
 fn writeProposal(init: std.process.Init, proposal_json_path: []const u8, proposal_text_path: []const u8, input: ProposalInput) !void {
     const allocator = init.gpa;
     const json_report = try formatProposalJson(allocator, input);
@@ -497,6 +598,12 @@ fn runLocal(init: std.process.Init, options: ProposalOptions) !void {
     defer if (options.scenario_slug != null) allocator.free(proposal_json_path);
     const proposal_text_path = if (options.scenario_slug) |slug| try localProposalTextPathForScenario(allocator, slug) else localProposalTextPath();
     defer if (options.scenario_slug != null) allocator.free(proposal_text_path);
+    const eval_diff_path = if (options.scenario_slug) |slug| try localProposalEvalDiffPathForScenario(allocator, slug) else localProposalEvalDiffPath();
+    defer if (options.scenario_slug != null) allocator.free(eval_diff_path);
+    const eval_link_path = if (options.scenario_slug) |slug| try localProposalEvalLinkPathForScenario(allocator, slug) else localProposalEvalLinkPath();
+    defer if (options.scenario_slug != null) allocator.free(eval_link_path);
+    const eval_manifest_path = if (options.scenario_slug) |slug| try localProposalEvalManifestPathForScenario(allocator, slug) else localProposalEvalManifestPath();
+    defer if (options.scenario_slug != null) allocator.free(eval_manifest_path);
 
     switch (options.status) {
         .draft => {
@@ -521,7 +628,21 @@ fn runLocal(init: std.process.Init, options: ProposalOptions) !void {
             defer parsed_decision.deinit();
             try validateDecisionRecord(parsed_decision.value);
 
-            try writeProposal(init, proposal_json_path, proposal_text_path, proposalInputFromDecision(options, decision_path, parsed_decision.value));
+            const input = proposalInputFromDecision(options, decision_path, parsed_decision.value);
+            try writeProposal(init, proposal_json_path, proposal_text_path, input);
+            var diff_sink = PatchProposalEvalArtifactFileSink{ .io = init.io, .path = eval_diff_path };
+            var link_sink = PatchProposalEvalArtifactFileSink{ .io = init.io, .path = eval_link_path };
+            var manifest_sink = PatchProposalEvalArtifactFileSink{ .io = init.io, .path = eval_manifest_path };
+            _ = try writePatchProposalEvalArtifacts(allocator, input, .{
+                .diff_path = eval_diff_path,
+                .link_path = eval_link_path,
+                .manifest_path = eval_manifest_path,
+                .proposal_json_path = proposal_json_path,
+            }, .{
+                .diff = diff_sink.sink(),
+                .link = link_sink.sink(),
+                .manifest = manifest_sink.sink(),
+            });
         },
     }
 }
@@ -807,4 +928,83 @@ test "approved proposal JSON carries decision evidence without applying source c
     try std.testing.expect(std.mem.indexOf(u8, json, "\"decision\": \".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-decision.json\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"audit\": \".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-audit.json\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"Approval permits reviewable patch work but does not prove the fix.\"") != null);
+}
+
+const PatchProposalEvalArtifactCapture = struct {
+    diff_writes: usize = 0,
+    link_writes: usize = 0,
+    manifest_writes: usize = 0,
+    saw_diff_schema: bool = false,
+    saw_link_schema: bool = false,
+    saw_manifest_schema: bool = false,
+    saw_manifest_proposal_path: bool = false,
+
+    fn diffSink(self: *PatchProposalEvalArtifactCapture) fx.AgentEvalDiffArtifactSink {
+        return .{ .state = self, .write = writeDiff };
+    }
+
+    fn linkSink(self: *PatchProposalEvalArtifactCapture) fx.AgentEvalDiffArtifactSink {
+        return .{ .state = self, .write = writeLink };
+    }
+
+    fn manifestSink(self: *PatchProposalEvalArtifactCapture) fx.AgentEvalDiffArtifactSink {
+        return .{ .state = self, .write = writeManifest };
+    }
+
+    fn writeDiff(raw: ?*anyopaque, json: []const u8) anyerror!void {
+        const self: *PatchProposalEvalArtifactCapture = @ptrCast(@alignCast(raw.?));
+        self.diff_writes += 1;
+        self.saw_diff_schema = std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.agent-eval-diff.v1\"") != null;
+    }
+
+    fn writeLink(raw: ?*anyopaque, json: []const u8) anyerror!void {
+        const self: *PatchProposalEvalArtifactCapture = @ptrCast(@alignCast(raw.?));
+        self.link_writes += 1;
+        self.saw_link_schema = std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.agent-eval-diff-link.v1\"") != null;
+    }
+
+    fn writeManifest(raw: ?*anyopaque, json: []const u8) anyerror!void {
+        const self: *PatchProposalEvalArtifactCapture = @ptrCast(@alignCast(raw.?));
+        self.manifest_writes += 1;
+        self.saw_manifest_schema = std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.agent-eval-linked-manifest.v1\"") != null;
+        self.saw_manifest_proposal_path = std.mem.indexOf(u8, json, "zigeffect-causal-dev-loop-patch-proposal.json") != null;
+    }
+};
+
+test "approved patch proposal writes linked eval manifest artifacts" {
+    var parsed = try std.json.parseFromSlice(DecisionRecord, std.testing.allocator, approved_decision_json, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    const input = proposalInputFromDecision(
+        .{
+            .mode = "local",
+            .status = .approved,
+            .summary = "record scoped fiber interruption",
+            .file = "packages/zigeffect/src/runtime/fiber.zig",
+            .change = "emit interrupted event before release evidence",
+        },
+        ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-decision.json",
+        parsed.value,
+    );
+
+    var capture = PatchProposalEvalArtifactCapture{};
+    const result = try writePatchProposalEvalArtifacts(std.testing.allocator, input, .{
+        .diff_path = ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-patch-proposal-eval-diff.json",
+        .link_path = ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-patch-proposal-eval-link.json",
+        .manifest_path = ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-patch-proposal-eval-manifest.json",
+        .proposal_json_path = ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-patch-proposal.json",
+    }, .{
+        .diff = capture.diffSink(),
+        .link = capture.linkSink(),
+        .manifest = capture.manifestSink(),
+    });
+
+    try std.testing.expect(result.passed);
+    try std.testing.expectEqual(@as(usize, 1), capture.diff_writes);
+    try std.testing.expectEqual(@as(usize, 1), capture.link_writes);
+    try std.testing.expectEqual(@as(usize, 1), capture.manifest_writes);
+    try std.testing.expect(capture.saw_diff_schema);
+    try std.testing.expect(capture.saw_link_schema);
+    try std.testing.expect(capture.saw_manifest_schema);
+    try std.testing.expect(capture.saw_manifest_proposal_path);
 }

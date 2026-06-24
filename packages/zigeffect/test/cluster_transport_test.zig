@@ -1216,6 +1216,53 @@ test "service discovery loads provider snapshot json from file" {
     try std.testing.expectEqualStrings("runner-file-safe.internal", refresh.selection.selected.?.host);
 }
 
+test "service discovery parses governed snapshot http response" {
+    var request = try fx.formatClusterTransportServiceDiscoveryHttpRequest(
+        std.testing.allocator,
+        "https://discovery.internal/snapshot",
+    );
+    defer request.deinit();
+
+    try std.testing.expectEqualStrings("GET", request.method);
+    try std.testing.expectEqualStrings("https://discovery.internal/snapshot", request.url);
+    try std.testing.expectEqualStrings("application/json", request.accept);
+
+    const json =
+        \\{
+        \\  "schema": "zigeffect.cluster.service-discovery-snapshot.v1",
+        \\  "schema_version": 1,
+        \\  "source": "http-provider",
+        \\  "observed_at_ms": 7890,
+        \\  "endpoints": [
+        \\    {"host":"runner-http-unsafe.internal","port":7001,"tls_enabled":false,"healthy":true,"auth_epoch":29},
+        \\    {"host":"runner-http-safe.internal","port":7002,"tls_enabled":true,"healthy":true,"auth_epoch":31}
+        \\  ]
+        \\}
+    ;
+    var snapshot = try fx.parseClusterTransportServiceDiscoveryHttpResponse(std.testing.allocator, .{
+        .status = 200,
+        .body = json,
+    });
+    defer snapshot.deinit();
+
+    var discovery = fx.InMemoryClusterTransportServiceDiscovery.init(std.testing.allocator, .{
+        .require_tls = true,
+        .require_healthy = true,
+        .min_auth_epoch = 30,
+    });
+    defer discovery.deinit();
+
+    const refresh = try discovery.refreshFromSnapshot(snapshot.asSnapshot());
+    try std.testing.expectEqualStrings("http-provider", snapshot.source);
+    try std.testing.expect(refresh.selection.selected != null);
+    try std.testing.expectEqualStrings("runner-http-safe.internal", refresh.selection.selected.?.host);
+
+    try std.testing.expectError(error.TransportUnavailable, fx.parseClusterTransportServiceDiscoveryHttpResponse(std.testing.allocator, .{
+        .status = 503,
+        .body = json,
+    }));
+}
+
 test "remote socket transport applies reject backpressure before durable submission" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
