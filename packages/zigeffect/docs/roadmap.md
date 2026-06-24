@@ -33,9 +33,9 @@ semantic fact comparison, not exact event-id graph isomorphism.
 | 6 | Causal dev loop (compare/advice/verdict) | **done** | `tools/causal_dev_loop`, `causal_compare`, `causal_advice`, `causal_verdict` |
 | 7 | Guarded remediation + agent interventions | **closed loop, gate-off by default** | `src/services/policy_engine.zig`, `src/services/agent_intervention.zig`, `tools/causal_*remediation*` |
 | 8 | App-facing causal trace | **done** | `src/services/causal_app_runtime.zig` |
-| 9 | Visual workbench (SolidJS / zig-webui) | **live-attach** (static + streaming via collector plus host-frame ingest, host apply adapter, host runner bundle, supervised host loop, and NDJSON fact tap) | `workbench/`, `workbench/src/collector/` |
+| 9 | Visual workbench (SolidJS / zig-webui) | **live-attach** (static + streaming via collector plus host-frame ingest, host apply adapter, host runner bundle, supervised host loop, NDJSON fact tap, host request router, and runtime runner) | `workbench/`, `workbench/src/collector/` |
 | 10 | Export adapters (JSONL/DOT/OTel/OTLP/graph-history/NenDB) | **OTLP + collector live end-to-end** | `src/services/causal_*_backend.zig`, `causal_otlp_json.zig` |
-| 11 | Durable workflows + clustering | **scheduler runs on zio; loopback + remote socket wrappers cross the transport boundary; discovery JSON/file/HTTP snapshots and caller-owned HTTP fetchers refresh the local registry** | `src/workflow/*`, `src/cluster/*` |
+| 11 | Durable workflows + clustering | **scheduler runs on zio; loopback + remote socket wrappers cross the transport boundary; discovery JSON/file/HTTP snapshots, caller-owned HTTP refresh loops, and auth-epoch-aware selection feed the local registry** | `src/workflow/*`, `src/cluster/*` |
 | 12 | Agent-operable runtime layer | **bounded interventions, counterfactuals, invariants, evals, semantic diffs, live command executor/tap, poll bridge, local daemon/HTTP engine bridge, eval diff artifacts/links/manifests, dev-loop/remediation-decision/patch-proposal eval persistence** | `src/services/agent_intervention.zig`, `counterfactual.zig`, `causal_invariant.zig`, `agent_eval.zig`, `causal_diff.zig`, `causal_live_command.zig` |
 | 13 | Production-operable guardrails | **live commands, concurrency facts, transport policy/discovery registry, ops storage/alert policy, gated ops artifact responses, alert delivery/webhook/provider envelopes, provider secret injection and retry reporting, endpoint-aware runbooks** | `workbench/src/collector`, `src/services/causal_concurrency.zig`, `src/services/causal_ops.zig`, `causal_ops_storage.zig`, `causal_ops_alert.zig`, `src/cluster/transport.zig` |
 | 14 | Multi-runner causal evidence | **local lineage stitcher plus deployment artifact metadata** | `src/services/causal_runner_lineage.zig` |
@@ -160,6 +160,12 @@ semantic fact comparison, not exact event-id graph isomorphism.
 - **Continuous NDJSON fact tap.** `runLiveEngineNdjsonTap` reads engine NDJSON
   byte streams, posts complete lines to the collector's ingest endpoint, flushes
   trailing partial lines, and reports chunk/line/post/ingest counts.
+- **Live engine host request router.** `serveLiveEngineHostRequest` routes a
+  configured apply endpoint to the host bridge, exposes fixed-header JSON health,
+  and rejects wrong methods/paths with JSON errors.
+- **Live engine host runtime runner.** `runLiveEngineHostRuntime` composes the
+  supervised command loop and optional NDJSON fact tap in one host-owned runtime
+  call and returns both reports.
 - **Bounded live command poll loop.** `runCausalLiveCommandPollLoop` repeatedly
   calls a caller-provided poller up to a fixed limit, applies decoded command
   batches through engine policy, aggregates tap counters, and stops on an empty
@@ -257,6 +263,14 @@ semantic fact comparison, not exact event-id graph isomorphism.
   `refreshClusterTransportServiceDiscoveryFromHttp` formats the discovery
   request, calls a caller-owned fetcher, parses the governed response, and
   refreshes the in-memory registry while keeping source metadata stable.
+- **Bounded HTTP discovery refresh loop.**
+  `runClusterTransportServiceDiscoveryHttpRefreshLoop` retries caller-owned
+  discovery fetches up to a fixed count, records transient failures, and can stop
+  once a safe endpoint is selected.
+- **Freshest auth-epoch discovery selection.**
+  `selectFreshestClusterTransportServiceDiscoveryEndpoint` keeps the first-safe
+  selector intact while offering an auth-rotation-aware choice of the safe
+  endpoint with the highest auth epoch.
 - **Schema governance for the agentic artifact surface.** The schema governance
   inventory now tracks semantic diff, eval diff, eval diff links, ops artifact
   response, ops runbook, ops alert delivery, and runner lineage artifact
@@ -326,8 +340,10 @@ substrates into real deployed systems:
    engine bridge client, host apply request adapter, and collector `POST /frames`
    endpoint, and `createLiveEngineHost` bundles apply handling with collector
    command polling. The supervised host loop and continuous NDJSON fact tap
-   exist as testable inner-loop helpers; next is a real long-lived host process
-   with OS-level lifecycle management and deployment wiring.
+   exist as testable inner-loop helpers, and the host request router/runtime
+   runner now compose those pieces behind local `Request`/runtime boundaries.
+   Next is a real long-lived host process with OS-level lifecycle management,
+   socket binding, and deployment wiring.
 2. **Real multi-node cluster deployment.** The transport validates TLS/pool/
    backpressure policy and propagates origin causal ids, and
    `stitchCausalRunnerLineage` can merge runner traces, emit deployment metadata
@@ -335,10 +351,10 @@ substrates into real deployed systems:
    select the first safe candidate, keep an in-memory discovery registry, refresh
    it from external discovery snapshots, parse snapshot JSON documents, and load
    governed snapshots from local files. The HTTP-shaped discovery request/
-   response seam and caller-owned fetcher refresh helper exist; next are real
-   TLS handshakes, concrete HTTP discovery clients, auth rotation, live
-   health-checked pool maintenance, and stitched lineage from separate runner
-   processes.
+   response seam, caller-owned fetcher refresh helper, bounded refresh loop, and
+   freshest-auth selector exist; next are real TLS handshakes, concrete HTTP
+   discovery clients, live health-checked pool maintenance, connection pooling,
+   and stitched lineage from separate runner processes.
 3. **Diff/eval integration.** The workbench renders portable `semantic_diff`
    payloads, evals can emit linked diff artifacts, the new artifact schemas are
    governed, evals can write artifacts to caller sinks, the runtime can write
@@ -1545,6 +1561,72 @@ with a bounded attempts report.
   succeeds, attempts/failures are reported, and sentinel alert evidence stays
   redacted.
 
+### M68 — Live engine host request router
+
+**Status:** delivered on 2026-06-24 via `serveLiveEngineHostRequest`.
+
+**Goal:** give a local host process a tested `Request` router for apply and
+health endpoints without owning a server socket.
+
+**Work:**
+- Route a configured apply path to `host.handleApplyRequest`.
+- Expose fixed-header JSON health metadata.
+- Return JSON 405/404 responses for wrong methods and unknown paths.
+
+**Acceptance:**
+- Bun tests prove apply delegation, health JSON, wrong-method handling, and
+  not-found handling.
+
+### M69 — Live engine host runtime runner
+
+**Status:** delivered on 2026-06-24 via `runLiveEngineHostRuntime`.
+
+**Goal:** compose the supervised command loop and optional NDJSON fact tap as one
+host-owned runtime call.
+
+**Work:**
+- Run `runLiveEngineHostSupervisor` against the collector command inbox.
+- Optionally run `runLiveEngineNdjsonTap` against a provided engine stream.
+- Return both reports from one runtime helper.
+
+**Acceptance:**
+- Bun tests prove the supervisor and fact tap both run and report through the
+  composed helper.
+
+### M70 — Bounded HTTP discovery refresh loop
+
+**Status:** delivered on 2026-06-24 via
+`runClusterTransportServiceDiscoveryHttpRefreshLoop`.
+
+**Goal:** let host-owned discovery fetchers refresh the registry repeatedly with
+failure accounting and a bounded stop condition.
+
+**Work:**
+- Add loop options/report types.
+- Record transient fetch/parse failures without losing later refresh attempts.
+- Stop early once a safe endpoint is selected when configured.
+
+**Acceptance:**
+- Zig tests prove one transient failure is recorded, a later governed snapshot
+  refreshes the registry, and the loop stops on selection.
+
+### M71 — Freshest auth-epoch discovery selection
+
+**Status:** delivered on 2026-06-24 via
+`selectFreshestClusterTransportServiceDiscoveryEndpoint`.
+
+**Goal:** support auth-rotation-aware endpoint selection while preserving the
+existing first-safe selector.
+
+**Work:**
+- Keep `selectClusterTransportServiceDiscoveryEndpoint` first-safe.
+- Add a new selector that chooses the safe endpoint with the highest auth epoch.
+- Preserve validation reporting in the returned selection.
+
+**Acceptance:**
+- Zig tests prove first-safe behavior remains and the new selector chooses the
+  freshest safe auth epoch.
+
 ## Delivered since 2026-06-20
 
 The forward sequence from the prior roadmap is largely done. Tracked in
@@ -1562,17 +1644,19 @@ The forward sequence from the prior roadmap is largely done. Tracked in
 - One loopback cluster transport crosses localhost TCP, and the remote socket
   wrapper adds auth preflight, reconnect attempts, transport policy validation,
   origin causal ids, metrics, and redacted failure handling.
-- The M6-M67 agentic engine layer now covers bounded interventions,
+- The M6-M71 agentic engine layer now covers bounded interventions,
   counterfactual trace forks, reusable invariants, semantic graph diffs, live
   command transport primitives plus engine execution/taps, collector polling,
   typed inbox validation, local polling and daemon harnesses with lifecycle
   evidence, live engine bridge wiring, HTTP engine bridge clients, host apply
   request adapters, host runner bundles, supervised host loops, continuous
-  NDJSON fact taps, collector frame ingest, poll-batch cursor bridging, and
-  bounded poll loops, concurrency annotations, transport hardening plus
+  NDJSON fact taps, host request routers, runtime runners, collector frame
+  ingest, poll-batch cursor bridging, and bounded poll loops, concurrency
+  annotations, transport hardening plus
   service-discovery validation/selection, an in-memory registry, snapshot
   refresh, snapshot JSON parsing, file-backed snapshot loading, and HTTP-shaped
-  discovery response parsing plus caller-owned HTTP fetcher refresh, ops
+  discovery response parsing plus caller-owned HTTP fetcher refresh, bounded
+  discovery refresh loops, and freshest-auth endpoint selection, ops
   guardrails/storage/alert/artifact/delivery adapters with delivery sinks,
   webhook and provider-shaped request bodies, endpoint-aware runbooks,
   provider secret injection, provider retry reporting, HTTP-shaped responses,

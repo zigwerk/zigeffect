@@ -1066,6 +1066,44 @@ test "remote transport service discovery selection skips unsafe candidates" {
     try std.testing.expectEqual(@as(?usize, null), none.selected_index);
 }
 
+test "service discovery can select freshest safe auth epoch" {
+    const endpoints = [_]fx.ClusterTransportDiscoveredEndpoint{
+        .{
+            .host = "runner-first-safe.internal",
+            .port = 7001,
+            .tls_enabled = true,
+            .healthy = true,
+            .auth_epoch = 10,
+        },
+        .{
+            .host = "runner-freshest-safe.internal",
+            .port = 7002,
+            .tls_enabled = true,
+            .healthy = true,
+            .auth_epoch = 15,
+        },
+        .{
+            .host = "runner-freshest-unsafe.internal",
+            .port = 7003,
+            .tls_enabled = false,
+            .healthy = true,
+            .auth_epoch = 50,
+        },
+    };
+
+    const requirements = fx.ClusterTransportServiceDiscoveryRequirements{
+        .require_tls = true,
+        .require_healthy = true,
+        .min_auth_epoch = 5,
+    };
+    const first = fx.selectClusterTransportServiceDiscoveryEndpoint(&endpoints, requirements);
+    try std.testing.expectEqualStrings("runner-first-safe.internal", first.selected.?.host);
+
+    const freshest = fx.selectFreshestClusterTransportServiceDiscoveryEndpoint(&endpoints, requirements);
+    try std.testing.expectEqual(@as(?usize, 1), freshest.selected_index);
+    try std.testing.expectEqualStrings("runner-freshest-safe.internal", freshest.selected.?.host);
+}
+
 test "in-memory remote transport service discovery owns endpoints and selects safe candidate" {
     var discovery = fx.InMemoryClusterTransportServiceDiscovery.init(std.testing.allocator, .{
         .require_tls = true,
@@ -1335,6 +1373,65 @@ test "service discovery refreshes registry through caller-owned http fetcher" {
         "https://discovery.internal/snapshot",
         capture.fetcher(),
     ));
+}
+
+const ServiceDiscoveryRefreshLoopCapture = struct {
+    calls: usize = 0,
+    body: []const u8,
+
+    fn fetcher(self: *ServiceDiscoveryRefreshLoopCapture) fx.ClusterTransportServiceDiscoveryHttpFetcher {
+        return .{
+            .state = self,
+            .fetch = fetch,
+        };
+    }
+
+    fn fetch(raw: ?*anyopaque, request: fx.ClusterTransportServiceDiscoveryHttpRequest) anyerror!fx.ClusterTransportServiceDiscoveryHttpResponse {
+        const self: *ServiceDiscoveryRefreshLoopCapture = @ptrCast(@alignCast(raw.?));
+        self.calls += 1;
+        try std.testing.expectEqualStrings("GET", request.method);
+        return .{
+            .status = if (self.calls == 1) 503 else 200,
+            .body = self.body,
+        };
+    }
+};
+
+test "service discovery http refresh loop records transient failures and stops on selection" {
+    const json =
+        \\{
+        \\  "schema": "zigeffect.cluster.service-discovery-snapshot.v1",
+        \\  "schema_version": 1,
+        \\  "source": "loop-provider",
+        \\  "observed_at_ms": 9012,
+        \\  "endpoints": [
+        \\    {"host":"runner-loop-safe.internal","port":7002,"tls_enabled":true,"healthy":true,"auth_epoch":51}
+        \\  ]
+        \\}
+    ;
+    var capture = ServiceDiscoveryRefreshLoopCapture{ .body = json };
+    var discovery = fx.InMemoryClusterTransportServiceDiscovery.init(std.testing.allocator, .{
+        .require_tls = true,
+        .require_healthy = true,
+        .min_auth_epoch = 50,
+    });
+    defer discovery.deinit();
+
+    const report = try fx.runClusterTransportServiceDiscoveryHttpRefreshLoop(
+        std.testing.allocator,
+        &discovery,
+        "https://discovery.internal/snapshot",
+        capture.fetcher(),
+        .{ .max_refreshes = 3, .stop_on_selected = true },
+    );
+
+    try std.testing.expectEqual(@as(usize, 2), capture.calls);
+    try std.testing.expectEqual(@as(usize, 2), report.refreshes);
+    try std.testing.expectEqual(@as(usize, 1), report.failures);
+    try std.testing.expectEqualStrings("TransportUnavailable", report.last_error_name);
+    try std.testing.expect(report.last_refresh != null);
+    try std.testing.expect(report.last_refresh.?.selection.selected != null);
+    try std.testing.expectEqualStrings("runner-loop-safe.internal", report.last_refresh.?.selection.selected.?.host);
 }
 
 test "remote socket transport applies reject backpressure before durable submission" {

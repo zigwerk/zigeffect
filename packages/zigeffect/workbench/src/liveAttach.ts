@@ -126,6 +126,13 @@ export type LiveEngineHost = {
   ) => Promise<LiveEngineCommandDaemonResult>;
 };
 
+export type LiveEngineHostRequestRouterOptions = {
+  applyPath?: string;
+  healthPath?: string;
+  commandsPath?: string;
+  ingestPath?: string;
+};
+
 export type LiveEngineHostSupervisorResult = {
   runs: number;
   restarts: number;
@@ -166,6 +173,19 @@ export type LiveEngineNdjsonTapResult = {
   posts: number;
   ingested: number;
   errors: number;
+};
+
+export type LiveEngineHostRuntimeOptions = {
+  commandsUrl: string;
+  supervisorOptions?: LiveEngineHostSupervisorOptions;
+  ndjsonStream?: ReadableStream<Uint8Array>;
+  ingestUrl?: string;
+  tapOptions?: LiveEngineNdjsonTapOptions;
+};
+
+export type LiveEngineHostRuntimeResult = {
+  supervisor: LiveEngineHostSupervisorResult;
+  ndjson_tap?: LiveEngineNdjsonTapResult;
 };
 
 export type LiveCommandDaemonLifecycleEvent =
@@ -531,6 +551,38 @@ export function createLiveEngineHost(bridge: LiveCommandEngineBridge): LiveEngin
   };
 }
 
+export async function serveLiveEngineHostRequest(
+  request: Request,
+  host: LiveEngineHost,
+  options: LiveEngineHostRequestRouterOptions = {},
+): Promise<Response> {
+  const url = new URL(request.url);
+  const applyPath = options.applyPath ?? "/apply-commands";
+  const healthPath = options.healthPath ?? "/health";
+  const method = request.method.toUpperCase();
+
+  if (url.pathname === healthPath) {
+    if (method !== "GET") {
+      return liveEngineCommandJsonResponse(405, { error: "method_not_allowed" });
+    }
+    return liveEngineCommandJsonResponse(200, {
+      ok: true,
+      apply_path: applyPath,
+      commands_path: options.commandsPath ?? "/commands",
+      ingest_path: options.ingestPath ?? "/ingest",
+    });
+  }
+
+  if (url.pathname === applyPath) {
+    if (method !== "POST") {
+      return liveEngineCommandJsonResponse(405, { error: "method_not_allowed" });
+    }
+    return host.handleApplyRequest(request);
+  }
+
+  return liveEngineCommandJsonResponse(404, { error: "not_found" });
+}
+
 export async function runLiveEngineHostSupervisor(
   host: LiveEngineHost,
   url: string,
@@ -699,6 +751,23 @@ export async function runLiveEngineNdjsonTap(
   }
   await flushPending(true);
   return result;
+}
+
+export async function runLiveEngineHostRuntime(
+  host: LiveEngineHost,
+  options: LiveEngineHostRuntimeOptions,
+  fetcher: LiveCommandFetcher = fetch,
+): Promise<LiveEngineHostRuntimeResult> {
+  if (options.ndjsonStream && !options.ingestUrl) {
+    throw new Error("live engine host runtime requires ingestUrl when ndjsonStream is provided");
+  }
+
+  const supervisorPromise = runLiveEngineHostSupervisor(host, options.commandsUrl, options.supervisorOptions ?? {}, fetcher);
+  const tapPromise = options.ndjsonStream
+    ? runLiveEngineNdjsonTap(options.ndjsonStream, options.ingestUrl!, options.tapOptions ?? {}, fetcher)
+    : Promise.resolve(undefined);
+  const [supervisor, ndjsonTap] = await Promise.all([supervisorPromise, tapPromise]);
+  return ndjsonTap ? { supervisor, ndjson_tap: ndjsonTap } : { supervisor };
 }
 
 export function createHttpLiveEngineCommandBridge(options: HttpLiveEngineCommandBridgeOptions): LiveCommandEngineBridge {

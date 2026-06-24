@@ -636,6 +636,18 @@ pub const ClusterTransportServiceDiscoveryHttpFetcher = struct {
     fetch: *const fn (?*anyopaque, ClusterTransportServiceDiscoveryHttpRequest) anyerror!ClusterTransportServiceDiscoveryHttpResponse,
 };
 
+pub const ClusterTransportServiceDiscoveryRefreshLoopOptions = struct {
+    max_refreshes: usize = 1,
+    stop_on_selected: bool = true,
+};
+
+pub const ClusterTransportServiceDiscoveryRefreshLoopReport = struct {
+    refreshes: usize = 0,
+    failures: usize = 0,
+    last_error_name: []const u8 = "",
+    last_refresh: ?ClusterTransportServiceDiscoveryRefreshReport = null,
+};
+
 pub const InMemoryClusterTransportServiceDiscovery = struct {
     allocator: Allocator,
     requirements: ClusterTransportServiceDiscoveryRequirements,
@@ -752,6 +764,27 @@ pub fn selectClusterTransportServiceDiscoveryEndpoint(
         }
     }
     return .{ .report = report };
+}
+
+pub fn selectFreshestClusterTransportServiceDiscoveryEndpoint(
+    endpoints: []const ClusterTransportDiscoveredEndpoint,
+    requirements: ClusterTransportServiceDiscoveryRequirements,
+) ClusterTransportServiceDiscoverySelection {
+    const report = validateClusterTransportServiceDiscovery(endpoints, requirements);
+    var selected_index: ?usize = null;
+    var selected: ?ClusterTransportDiscoveredEndpoint = null;
+    for (endpoints, 0..) |endpoint, index| {
+        if (!clusterTransportEndpointSatisfiesDiscovery(endpoint, requirements)) continue;
+        if (selected == null or endpoint.auth_epoch > selected.?.auth_epoch) {
+            selected_index = index;
+            selected = endpoint;
+        }
+    }
+    return .{
+        .report = report,
+        .selected_index = selected_index,
+        .selected = selected,
+    };
 }
 
 fn clusterTransportEndpointSatisfiesDiscovery(
@@ -871,6 +904,30 @@ pub fn refreshClusterTransportServiceDiscoveryFromHttp(
     defer snapshot.deinit();
 
     return try registry.refreshFromSnapshot(snapshot.asSnapshot());
+}
+
+pub fn runClusterTransportServiceDiscoveryHttpRefreshLoop(
+    allocator: Allocator,
+    registry: *InMemoryClusterTransportServiceDiscovery,
+    url: []const u8,
+    fetcher: ClusterTransportServiceDiscoveryHttpFetcher,
+    options: ClusterTransportServiceDiscoveryRefreshLoopOptions,
+) !ClusterTransportServiceDiscoveryRefreshLoopReport {
+    if (options.max_refreshes == 0) return error.InvalidTransportLimits;
+
+    var report = ClusterTransportServiceDiscoveryRefreshLoopReport{};
+    while (report.refreshes < options.max_refreshes) {
+        report.refreshes += 1;
+        const refresh = refreshClusterTransportServiceDiscoveryFromHttp(allocator, registry, url, fetcher) catch |err| {
+            if (err == error.OutOfMemory) return err;
+            report.failures += 1;
+            report.last_error_name = @errorName(err);
+            continue;
+        };
+        report.last_refresh = refresh;
+        if (options.stop_on_selected and refresh.selection.selected != null) break;
+    }
+    return report;
 }
 
 pub const RemoteSocketClusterTransport = struct {

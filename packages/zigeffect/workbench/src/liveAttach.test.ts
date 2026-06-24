@@ -21,7 +21,9 @@ import {
   runLiveCommandDaemon,
   runLiveEngineCommandDaemon,
   runLiveEngineHostSupervisor,
+  runLiveEngineHostRuntime,
   runLiveEngineNdjsonTap,
+  serveLiveEngineHostRequest,
   serveLiveEngineCommandApplyRequest,
   sendLiveCommand,
   webSocketLiveSource,
@@ -625,6 +627,66 @@ test("createLiveEngineHost wires apply requests and collector command daemon", a
   expect(daemon.next_after).toBe(31);
 });
 
+test("serveLiveEngineHostRequest routes apply and health requests", async () => {
+  const seenMethods: string[] = [];
+  const host = {
+    handleApplyRequest: async (request: Request) => {
+      seenMethods.push(request.method);
+      return new Response(JSON.stringify({ applied: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+    runCommandDaemon: async () => ({
+      cycles: 0,
+      polls: 0,
+      commands: 0,
+      errors: 0,
+      next_after: 0,
+      stopped: false,
+      processed: 0,
+      applied: 0,
+      rejected: 0,
+      needs_human_review: 0,
+      emitted_frames: 0,
+    }),
+  };
+
+  const apply = await serveLiveEngineHostRequest(new Request("http://127.0.0.1:4600/apply", { method: "POST" }), host, {
+    applyPath: "/apply",
+  });
+  expect(apply.status).toBe(200);
+  expect(await apply.json()).toEqual({ applied: true });
+  expect(seenMethods).toEqual(["POST"]);
+
+  const health = await serveLiveEngineHostRequest(new Request("http://127.0.0.1:4600/health"), host, {
+    applyPath: "/apply",
+    commandsPath: "/commands",
+    ingestPath: "/ingest",
+  });
+  expect(health.status).toBe(200);
+  expect(health.headers.get("cache-control")).toBe("no-store");
+  expect(health.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(await health.json()).toEqual({
+    ok: true,
+    apply_path: "/apply",
+    commands_path: "/commands",
+    ingest_path: "/ingest",
+  });
+
+  const wrongMethod = await serveLiveEngineHostRequest(new Request("http://127.0.0.1:4600/apply"), host, {
+    applyPath: "/apply",
+  });
+  expect(wrongMethod.status).toBe(405);
+  expect(await wrongMethod.json()).toEqual({ error: "method_not_allowed" });
+
+  const missing = await serveLiveEngineHostRequest(new Request("http://127.0.0.1:4600/nope"), host, {
+    applyPath: "/apply",
+  });
+  expect(missing.status).toBe(404);
+  expect(await missing.json()).toEqual({ error: "not_found" });
+});
+
 test("runLiveEngineHostSupervisor restarts failed daemon runs and aggregates counters", async () => {
   const lifecycle: string[] = [];
   const runUrls: string[] = [];
@@ -724,6 +786,60 @@ test("runLiveEngineNdjsonTap posts complete engine lines and flushes trailing pa
     ingested: 3,
     errors: 0,
   });
+});
+
+test("runLiveEngineHostRuntime composes supervisor and ndjson tap reports", async () => {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode('{"id":10}\n'));
+      controller.close();
+    },
+  });
+  let daemonRuns = 0;
+  const host = {
+    handleApplyRequest: async () => new Response("{}"),
+    runCommandDaemon: async () => {
+      daemonRuns += 1;
+      return {
+        cycles: 1,
+        polls: 1,
+        commands: 1,
+        errors: 0,
+        next_after: 10,
+        stopped: false,
+        processed: 1,
+        applied: 1,
+        rejected: 0,
+        needs_human_review: 0,
+        emitted_frames: 1,
+      };
+    },
+  };
+  const ingestBodies: string[] = [];
+  const fetcher = async (url: string, init?: RequestInit) => {
+    expect(url).toBe("http://127.0.0.1:4500/ingest");
+    ingestBodies.push(String(init?.body ?? ""));
+    return new Response(JSON.stringify({ ingested: 1 }), { headers: { "content-type": "application/json" } });
+  };
+
+  const result = await runLiveEngineHostRuntime(
+    host,
+    {
+      commandsUrl: "http://127.0.0.1:4500/commands",
+      ndjsonStream: stream,
+      ingestUrl: "http://127.0.0.1:4500/ingest",
+      supervisorOptions: { maxRestarts: 0 },
+      tapOptions: { maxLinesPerPost: 1 },
+    },
+    fetcher,
+  );
+
+  expect(daemonRuns).toBe(1);
+  expect(ingestBodies).toEqual(['{"id":10}']);
+  expect(result.supervisor.processed).toBe(1);
+  expect(result.supervisor.emitted_frames).toBe(1);
+  expect(result.ndjson_tap).toEqual({ chunks: 1, lines: 1, posts: 1, ingested: 1, errors: 0 });
 });
 
 test("LiveCausalBuffer accumulates frames in causal (sequence) order", () => {
