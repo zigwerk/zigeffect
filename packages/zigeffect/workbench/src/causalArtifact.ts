@@ -296,6 +296,60 @@ export type GovernanceModel = {
   warnings: string[];
 };
 
+export type SemanticDiffSummary = {
+  resolvedFindings: number;
+  introducedFindings: number;
+  addedFiberTerminals: number;
+  removedFiberTerminals: number;
+  addedResourceFinalizations: number;
+  removedResourceFinalizations: number;
+  addedLineageEdges: number;
+  removedLineageEdges: number;
+};
+
+export type SemanticDiffFinding = {
+  kind: string;
+  eventId: string;
+  owner: string;
+};
+
+export type SemanticDiffFiberTerminal = {
+  fiberId: string;
+  terminalKind: string;
+  status: string;
+  eventId: string;
+};
+
+export type SemanticDiffResourceFinalization = {
+  scopeId: string;
+  resourceId: string;
+  typeName: string;
+  eventId: string;
+};
+
+export type SemanticDiffLineageEdge = {
+  fromEventId: string;
+  toEventId: string;
+  edgeKind: string;
+};
+
+export type SemanticDiffModel = {
+  artifactPath: string;
+  schema: string;
+  beforeArtifact: string;
+  afterArtifact: string;
+  summary: SemanticDiffSummary;
+  resolvedFindings: SemanticDiffFinding[];
+  introducedFindings: SemanticDiffFinding[];
+  addedFiberTerminals: SemanticDiffFiberTerminal[];
+  removedFiberTerminals: SemanticDiffFiberTerminal[];
+  addedResourceFinalizations: SemanticDiffResourceFinalization[];
+  removedResourceFinalizations: SemanticDiffResourceFinalization[];
+  addedLineageEdges: SemanticDiffLineageEdge[];
+  removedLineageEdges: SemanticDiffLineageEdge[];
+  warnings: string[];
+};
+
 export type WorkbenchModel = {
   artifactPath: string;
   schema: string;
@@ -934,6 +988,52 @@ export function deriveGovernanceModel(raw: unknown, options: WorkbenchOptions): 
   };
 }
 
+export function deriveSemanticDiffModel(raw: unknown, options: WorkbenchOptions): SemanticDiffModel | null {
+  const artifact = isRecord(raw) ? raw : {};
+  const source = isRecord(artifact.semantic_diff) ? artifact.semantic_diff : artifact;
+  const schema = textValue(source.schema, "");
+  const hasSemanticDiff = schema === "zigeffect.causal.semantic-diff.v1" || isRecord(artifact.semantic_diff);
+  if (!hasSemanticDiff) {
+    return null;
+  }
+
+  const warnings: string[] = [];
+  if (schema.length === 0) {
+    warnings.push("semantic diff schema is missing");
+  }
+  if (!isRecord(source.summary)) {
+    warnings.push("semantic diff summary is missing");
+  }
+
+  const summary = isRecord(source.summary) ? source.summary : {};
+
+  return {
+    artifactPath: options.artifactPath,
+    schema: schema.length > 0 ? schema : "unknown",
+    beforeArtifact: textValue(source.before, textValue(source.before_artifact, "unknown")),
+    afterArtifact: textValue(source.after, textValue(source.after_artifact, "unknown")),
+    summary: {
+      resolvedFindings: numericValue(summary.resolved_findings) ?? 0,
+      introducedFindings: numericValue(summary.introduced_findings) ?? 0,
+      addedFiberTerminals: numericValue(summary.added_fiber_terminals) ?? 0,
+      removedFiberTerminals: numericValue(summary.removed_fiber_terminals) ?? 0,
+      addedResourceFinalizations: numericValue(summary.added_resource_finalizations) ?? 0,
+      removedResourceFinalizations: numericValue(summary.removed_resource_finalizations) ?? 0,
+      addedLineageEdges: numericValue(summary.added_lineage_edges) ?? 0,
+      removedLineageEdges: numericValue(summary.removed_lineage_edges) ?? 0,
+    },
+    resolvedFindings: semanticDiffFindings(source.resolved_findings),
+    introducedFindings: semanticDiffFindings(source.introduced_findings),
+    addedFiberTerminals: semanticDiffFiberTerminals(source.added_fiber_terminals),
+    removedFiberTerminals: semanticDiffFiberTerminals(source.removed_fiber_terminals),
+    addedResourceFinalizations: semanticDiffResourceFinalizations(source.added_resource_finalizations),
+    removedResourceFinalizations: semanticDiffResourceFinalizations(source.removed_resource_finalizations),
+    addedLineageEdges: semanticDiffLineageEdges(source.added_lineage_edges),
+    removedLineageEdges: semanticDiffLineageEdges(source.removed_lineage_edges),
+    warnings,
+  };
+}
+
 function deriveFindings(events: CausalEvent[]): CausalFinding[] {
   const findings: CausalFinding[] = [];
 
@@ -998,6 +1098,52 @@ function deriveFindings(events: CausalEvent[]): CausalFinding[] {
   }
 
   return findings;
+}
+
+function semanticDiffFindings(value: unknown): SemanticDiffFinding[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(isRecord).map((entry) => ({
+    kind: textValue(entry.kind, "unknown"),
+    eventId: idValue(entry.event_id) ?? "unknown",
+    owner: textValue(entry.owner, "unknown"),
+  }));
+}
+
+function semanticDiffFiberTerminals(value: unknown): SemanticDiffFiberTerminal[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(isRecord).map((entry) => ({
+    fiberId: idValue(entry.fiber_id) ?? "unknown",
+    terminalKind: textValue(entry.terminal_kind, textValue(entry.kind, "unknown")),
+    status: textValue(entry.status, "unknown"),
+    eventId: idValue(entry.event_id) ?? "unknown",
+  }));
+}
+
+function semanticDiffResourceFinalizations(value: unknown): SemanticDiffResourceFinalization[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(isRecord).map((entry) => ({
+    scopeId: idValue(entry.scope_id) ?? "unknown",
+    resourceId: idValue(entry.resource_id) ?? "unknown",
+    typeName: textValue(entry.type_name, "unknown"),
+    eventId: idValue(entry.event_id) ?? "unknown",
+  }));
+}
+
+function semanticDiffLineageEdges(value: unknown): SemanticDiffLineageEdge[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(isRecord).map((entry) => ({
+    fromEventId: idValue(entry.from_event_id) ?? "unknown",
+    toEventId: idValue(entry.to_event_id) ?? "unknown",
+    edgeKind: textValue(entry.edge_kind, "unknown"),
+  }));
 }
 
 function eventMap(events: CausalEvent[]): Map<string, CausalEvent> {

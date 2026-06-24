@@ -55,12 +55,15 @@ comptime {
     _ = @import("causal_hub_backend_test.zig");
     _ = @import("causal_redaction_sentinel_test.zig");
     _ = @import("agent_intervention_test.zig");
+    _ = @import("causal_live_command_test.zig");
     _ = @import("counterfactual_test.zig");
     _ = @import("causal_invariant_test.zig");
     _ = @import("agent_eval_test.zig");
     _ = @import("causal_diff_test.zig");
     _ = @import("causal_concurrency_test.zig");
     _ = @import("causal_ops_test.zig");
+    _ = @import("causal_ops_storage_test.zig");
+    _ = @import("causal_runner_lineage_test.zig");
     _ = @import("causal_app_runtime_test.zig");
     _ = @import("invariants_test.zig");
     _ = @import("layer_test.zig");

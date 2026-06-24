@@ -9,6 +9,7 @@ test("workbenchTabsForArtifact exposes the surviving workbench tabs", () => {
     "findings",
     "graph",
     "visual-graph",
+    "diff",
     "chain",
     "queries",
     "metadata",

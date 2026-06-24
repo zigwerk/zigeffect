@@ -698,6 +698,64 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.diff-summary {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.diff-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.diff-panel {
+  border: 1px solid #d9dfd4;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.diff-entry-list {
+  display: grid;
+  gap: 8px;
+}
+
+.diff-entry {
+  display: grid;
+  grid-template-columns: minmax(84px, 0.8fr) minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #e8ede3;
+  border-radius: 6px;
+  padding: 8px;
+  background: #fbfcfa;
+}
+
+.diff-entry.ok {
+  border-color: #b9d7c0;
+}
+
+.diff-entry.warning {
+  border-color: #ead2a1;
+  background: #fffaf0;
+}
+
+.diff-entry span,
+.diff-entry small,
+.diff-entry strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.diff-entry span,
+.diff-entry small {
+  color: #5f6b5b;
+}
+
+.diff-entry strong {
+  color: #20251f;
+}
+
 .visual-detail-body {
   display: grid;
   gap: 6px;

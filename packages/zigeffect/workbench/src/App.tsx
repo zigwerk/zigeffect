@@ -13,12 +13,18 @@ import {
   type QueryCommand,
   type RemediationChainModel,
   type ChainSourceStep,
+  type SemanticDiffFinding,
+  type SemanticDiffFiberTerminal,
+  type SemanticDiffLineageEdge,
+  type SemanticDiffModel,
+  type SemanticDiffResourceFinalization,
   type VisualGraphLayoutMode,
   type VisualGraphModel,
   type VisualGraphPerspective,
   causePathForEvent,
   deriveGovernanceModel,
   deriveGraphModel,
+  deriveSemanticDiffModel,
   deriveVisualGraphModel,
   deriveWorkbenchModel,
   filterEvents,
@@ -33,7 +39,7 @@ const VisualGraphCanvas = lazy(async () => {
   return { default: module.VisualGraphCanvas };
 });
 
-type Tab = "timeline" | "findings" | "graph" | "visual-graph" | "chain" | "queries" | "metadata";
+type Tab = "timeline" | "findings" | "graph" | "visual-graph" | "diff" | "chain" | "queries" | "metadata";
 type WorkbenchTab = { id: Tab; label: string };
 
 const tabs: WorkbenchTab[] = [
@@ -41,6 +47,7 @@ const tabs: WorkbenchTab[] = [
   { id: "findings", label: "Findings" },
   { id: "graph", label: "Graph" },
   { id: "visual-graph", label: "Visual Graph" },
+  { id: "diff", label: "Diff" },
   { id: "chain", label: "Chain" },
   { id: "queries", label: "Queries" },
   { id: "metadata", label: "Metadata" },
@@ -98,6 +105,7 @@ export function App() {
       return {
         model: deriveWorkbenchModel(raw, { artifactPath }),
         governance: deriveGovernanceModel(raw, { artifactPath }),
+        semanticDiff: deriveSemanticDiffModel(raw, { artifactPath }),
         raw,
         session: loaded.session,
         error: null,
@@ -106,6 +114,7 @@ export function App() {
       return {
         model: null,
         governance: null,
+        semanticDiff: null,
         raw: null,
         session: loaded.session,
         error: error instanceof Error ? error.message : "failed to parse artifact",
@@ -115,6 +124,7 @@ export function App() {
 
   const model = createMemo(() => parsed()?.model ?? null);
   const governance = createMemo(() => parsed()?.governance ?? null);
+  const semanticDiff = createMemo(() => parsed()?.semanticDiff ?? null);
   const availableTabs = createMemo(() => workbenchTabsForArtifact());
   const graphModel = createMemo(() => {
     const current = model();
@@ -288,6 +298,9 @@ export function App() {
                       onSelectEvent={setSelectedId}
                     />
                   </Match>
+                  <Match when={activeTab() === "diff"}>
+                    <DiffView diff={semanticDiff()} />
+                  </Match>
                   <Match when={activeTab() === "queries"}>
                     <Queries
                       artifactPath={current().artifactPath}
@@ -316,6 +329,145 @@ export function App() {
         )}
       </Show>
     </main>
+  );
+}
+
+function DiffView(props: { diff: SemanticDiffModel | null }) {
+  return (
+    <div class="view-stack">
+      <div class="view-heading">
+        <h2>Diff</h2>
+        <span>{props.diff?.schema ?? "no semantic diff"}</span>
+      </div>
+
+      <Show when={props.diff} fallback={<EmptyState label="Loaded artifact has no semantic graph diff" />}>
+        {(diff) => (
+          <>
+            <div class="graph-summary diff-summary">
+              <Metric label="resolved findings" value={String(diff().summary.resolvedFindings)} tone={diff().summary.resolvedFindings ? "ok" : undefined} />
+              <Metric label="introduced findings" value={String(diff().summary.introducedFindings)} tone={diff().summary.introducedFindings ? "warn" : "ok"} />
+              <Metric label="fiber terminals +" value={String(diff().summary.addedFiberTerminals)} />
+              <Metric label="resources +" value={String(diff().summary.addedResourceFinalizations)} />
+              <Metric label="lineage edges +" value={String(diff().summary.addedLineageEdges)} />
+            </div>
+
+            <section class="chain-panel">
+              <h3>Artifacts</h3>
+              <div class="metadata-grid">
+                <Meta label="before" value={diff().beforeArtifact} />
+                <Meta label="after" value={diff().afterArtifact} />
+                <Meta label="source" value={diff().artifactPath} />
+              </div>
+            </section>
+
+            <div class="diff-grid">
+              <DiffFindingList title="Resolved findings" entries={diff().resolvedFindings} tone="ok" />
+              <DiffFindingList title="Introduced findings" entries={diff().introducedFindings} tone="warn" />
+              <DiffFiberList title="Added fiber terminals" entries={diff().addedFiberTerminals} />
+              <DiffFiberList title="Removed fiber terminals" entries={diff().removedFiberTerminals} />
+              <DiffResourceList title="Added resource finalizations" entries={diff().addedResourceFinalizations} />
+              <DiffResourceList title="Removed resource finalizations" entries={diff().removedResourceFinalizations} />
+              <DiffLineageList title="Added lineage edges" entries={diff().addedLineageEdges} />
+              <DiffLineageList title="Removed lineage edges" entries={diff().removedLineageEdges} />
+            </div>
+
+            <Show when={diff().warnings.length > 0}>
+              <div class="warning-list">
+                <For each={diff().warnings}>{(warning) => <span>{warning}</span>}</For>
+              </div>
+            </Show>
+          </>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+function DiffFindingList(props: { title: string; entries: SemanticDiffFinding[]; tone: "ok" | "warn" }) {
+  return (
+    <section class="diff-panel">
+      <div class="lane-section-head">
+        <h3>{props.title}</h3>
+        <span>{props.entries.length}</span>
+      </div>
+      <div class="diff-entry-list">
+        <For each={props.entries} fallback={<EmptyState label="No entries" compact />}>
+          {(entry) => (
+            <div classList={{ "diff-entry": true, ok: props.tone === "ok", warning: props.tone === "warn" }}>
+              <span>#{entry.eventId}</span>
+              <strong>{entry.kind}</strong>
+              <small>{entry.owner}</small>
+            </div>
+          )}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function DiffFiberList(props: { title: string; entries: SemanticDiffFiberTerminal[] }) {
+  return (
+    <section class="diff-panel">
+      <div class="lane-section-head">
+        <h3>{props.title}</h3>
+        <span>{props.entries.length}</span>
+      </div>
+      <div class="diff-entry-list">
+        <For each={props.entries} fallback={<EmptyState label="No entries" compact />}>
+          {(entry) => (
+            <div class="diff-entry">
+              <span>fiber {entry.fiberId}</span>
+              <strong>{entry.terminalKind}</strong>
+              <small>#{entry.eventId} / {entry.status}</small>
+            </div>
+          )}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function DiffResourceList(props: { title: string; entries: SemanticDiffResourceFinalization[] }) {
+  return (
+    <section class="diff-panel">
+      <div class="lane-section-head">
+        <h3>{props.title}</h3>
+        <span>{props.entries.length}</span>
+      </div>
+      <div class="diff-entry-list">
+        <For each={props.entries} fallback={<EmptyState label="No entries" compact />}>
+          {(entry) => (
+            <div class="diff-entry">
+              <span>scope {entry.scopeId}</span>
+              <strong>{entry.typeName}</strong>
+              <small>resource {entry.resourceId} / event #{entry.eventId}</small>
+            </div>
+          )}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function DiffLineageList(props: { title: string; entries: SemanticDiffLineageEdge[] }) {
+  return (
+    <section class="diff-panel">
+      <div class="lane-section-head">
+        <h3>{props.title}</h3>
+        <span>{props.entries.length}</span>
+      </div>
+      <div class="diff-entry-list">
+        <For each={props.entries} fallback={<EmptyState label="No entries" compact />}>
+          {(entry) => (
+            <div class="diff-entry">
+              <span>#{entry.fromEventId} -&gt; #{entry.toEventId}</span>
+              <strong>{entry.edgeKind}</strong>
+              <small>semantic edge</small>
+            </div>
+          )}
+        </For>
+      </div>
+    </section>
   );
 }
 

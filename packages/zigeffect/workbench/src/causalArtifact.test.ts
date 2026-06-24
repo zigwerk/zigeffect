@@ -4,6 +4,7 @@ import {
   causePathForEvent,
   deriveAppRemediationModel,
   deriveGovernanceModel,
+  deriveSemanticDiffModel,
   deriveVisualGraphModel,
   deriveWorkbenchModel,
   deriveGraphModel,
@@ -198,6 +199,44 @@ const sampleAppAudit = {
   policy_gates: ["config-only", "source-only"],
   verification_commands: ["zig build causal-query -- --file .zig-cache/causal-artifacts/app.json cause 2"],
   claim_guardrails: ["Do not claim an app fix without rerunning the app request/job scenario."],
+};
+
+const sampleSemanticDiffArtifact = {
+  schema: "zigeffect.causal.v1",
+  schema_version: 1,
+  event_taxonomy_version: 1,
+  semantic_diff: {
+    schema: "zigeffect.causal.semantic-diff.v1",
+    before: "before.json",
+    after: "after.json",
+    summary: {
+      resolved_findings: 2,
+      introduced_findings: 1,
+      added_fiber_terminals: 1,
+      removed_fiber_terminals: 0,
+      added_resource_finalizations: 1,
+      removed_resource_finalizations: 0,
+      added_lineage_edges: 2,
+      removed_lineage_edges: 0,
+    },
+    resolved_findings: [
+      { kind: "fiber_pending_after_scope_close", event_id: 5, owner: "fiber:42" },
+    ],
+    introduced_findings: [
+      { kind: "assertion_failure", event_id: 9, owner: "run:1" },
+    ],
+    added_fiber_terminals: [
+      { fiber_id: 42, terminal_kind: "fiber_interrupted", status: "interrupted", event_id: 10 },
+    ],
+    added_resource_finalizations: [
+      { scope_id: 1, resource_id: 7, type_name: "Db", event_id: 11 },
+    ],
+    added_lineage_edges: [
+      { from_event_id: 5, to_event_id: 10, edge_kind: "parent" },
+      { from_event_id: 10, to_event_id: 11, edge_kind: "cause" },
+    ],
+  },
+  events: [],
 };
 
 const sampleAppPolicy = {
@@ -427,6 +466,33 @@ test("deriveWorkbenchModel computes runtime-aligned findings", () => {
     "assertion_failure",
   ]);
   expect(model.findings[0]?.eventId).toBe("3");
+});
+
+test("deriveSemanticDiffModel normalizes graph diff summary and entries", () => {
+  const diff = deriveSemanticDiffModel(sampleSemanticDiffArtifact, {
+    artifactPath: "semantic-diff.json",
+  });
+
+  expect(diff).not.toBeNull();
+  const model = diff!;
+
+  expect(model.schema).toBe("zigeffect.causal.semantic-diff.v1");
+  expect(model.beforeArtifact).toBe("before.json");
+  expect(model.afterArtifact).toBe("after.json");
+  expect(model.summary.resolvedFindings).toBe(2);
+  expect(model.summary.addedLineageEdges).toBe(2);
+  expect(model.resolvedFindings[0]).toEqual({
+    kind: "fiber_pending_after_scope_close",
+    eventId: "5",
+    owner: "fiber:42",
+  });
+  expect(model.addedFiberTerminals[0]?.fiberId).toBe("42");
+  expect(model.addedResourceFinalizations[0]?.typeName).toBe("Db");
+  expect(model.addedLineageEdges[1]).toEqual({
+    fromEventId: "10",
+    toEventId: "11",
+    edgeKind: "cause",
+  });
 });
 
 test("filterEvents supports text kind and status filters", () => {
