@@ -4,6 +4,9 @@ const causal = @import("causal.zig");
 pub const Allocator = std.mem.Allocator;
 pub const CausalEvent = causal.CausalEvent;
 
+pub const causal_runner_lineage_schema = "zigeffect.causal.runner-lineage.v1";
+pub const causal_runner_lineage_schema_version: u32 = 1;
+
 pub const CausalRunnerTrace = struct {
     runner_id: []const u8,
     events: []const CausalEvent,
@@ -15,6 +18,22 @@ pub const CausalRunnerLineageEdge = struct {
     from_event_id: u64,
     to_event_id: u64,
     edge_kind: []const u8,
+};
+
+pub const CausalRunnerDeploymentMetadata = struct {
+    runner_id: []const u8,
+    service: []const u8 = "",
+    environment: []const u8 = "",
+    region: []const u8 = "",
+    address: []const u8 = "",
+    health: []const u8 = "",
+    tls_enabled: bool = false,
+    auth_epoch: u64 = 0,
+};
+
+pub const CausalRunnerLineageArtifactOptions = struct {
+    deployment_id: []const u8 = "",
+    deployments: []const CausalRunnerDeploymentMetadata = &.{},
 };
 
 pub const CausalRunnerLineage = struct {
@@ -39,6 +58,28 @@ pub const CausalRunnerLineage = struct {
         };
     }
 };
+
+pub fn formatCausalRunnerLineageJson(
+    allocator: Allocator,
+    lineage: CausalRunnerLineage,
+    options: CausalRunnerLineageArtifactOptions,
+) Allocator.Error![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\"schema\":");
+    try appendJsonString(&output, allocator, causal_runner_lineage_schema);
+    try output.print(allocator, ",\"schema_version\":{d}", .{causal_runner_lineage_schema_version});
+    try output.appendSlice(allocator, ",\"deployment_id\":");
+    try appendJsonString(&output, allocator, options.deployment_id);
+    try output.print(allocator, ",\"event_count\":{d}", .{lineage.events.len});
+    try output.print(allocator, ",\"cross_runner_edge_count\":{d}", .{lineage.cross_runner_edges.len});
+    try appendDeploymentArray(&output, allocator, options.deployments);
+    try appendEdgeArray(&output, allocator, lineage.cross_runner_edges);
+    try output.appendSlice(allocator, "}");
+
+    return output.toOwnedSlice(allocator);
+}
 
 pub fn stitchCausalRunnerLineage(
     allocator: Allocator,
@@ -117,6 +158,69 @@ fn findRunnerForEvent(traces: []const CausalRunnerTrace, event_id: u64) ?RunnerL
 fn cloneSlice(allocator: Allocator, value: []const u8) Allocator.Error![]const u8 {
     if (value.len == 0) return "";
     return allocator.dupe(u8, value);
+}
+
+fn appendDeploymentArray(
+    output: *std.ArrayList(u8),
+    allocator: Allocator,
+    deployments: []const CausalRunnerDeploymentMetadata,
+) Allocator.Error!void {
+    try output.appendSlice(allocator, ",\"deployments\":[");
+    for (deployments, 0..) |deployment, index| {
+        if (index > 0) try output.appendSlice(allocator, ",");
+        try output.appendSlice(allocator, "{\"runner_id\":");
+        try appendJsonString(output, allocator, deployment.runner_id);
+        try output.appendSlice(allocator, ",\"service\":");
+        try appendJsonString(output, allocator, deployment.service);
+        try output.appendSlice(allocator, ",\"environment\":");
+        try appendJsonString(output, allocator, deployment.environment);
+        try output.appendSlice(allocator, ",\"region\":");
+        try appendJsonString(output, allocator, deployment.region);
+        try output.appendSlice(allocator, ",\"address\":");
+        try appendJsonString(output, allocator, deployment.address);
+        try output.appendSlice(allocator, ",\"health\":");
+        try appendJsonString(output, allocator, deployment.health);
+        try output.print(allocator, ",\"tls_enabled\":{s}", .{if (deployment.tls_enabled) "true" else "false"});
+        try output.print(allocator, ",\"auth_epoch\":{d}", .{deployment.auth_epoch});
+        try output.appendSlice(allocator, "}");
+    }
+    try output.appendSlice(allocator, "]");
+}
+
+fn appendEdgeArray(
+    output: *std.ArrayList(u8),
+    allocator: Allocator,
+    edges: []const CausalRunnerLineageEdge,
+) Allocator.Error!void {
+    try output.appendSlice(allocator, ",\"cross_runner_edges\":[");
+    for (edges, 0..) |edge, index| {
+        if (index > 0) try output.appendSlice(allocator, ",");
+        try output.appendSlice(allocator, "{\"from_runner_id\":");
+        try appendJsonString(output, allocator, edge.from_runner_id);
+        try output.appendSlice(allocator, ",\"to_runner_id\":");
+        try appendJsonString(output, allocator, edge.to_runner_id);
+        try output.print(allocator, ",\"from_event_id\":{d}", .{edge.from_event_id});
+        try output.print(allocator, ",\"to_event_id\":{d}", .{edge.to_event_id});
+        try output.appendSlice(allocator, ",\"edge_kind\":");
+        try appendJsonString(output, allocator, edge.edge_kind);
+        try output.appendSlice(allocator, "}");
+    }
+    try output.appendSlice(allocator, "]");
+}
+
+fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []const u8) Allocator.Error!void {
+    try output.append(allocator, '"');
+    for (value) |byte| {
+        switch (byte) {
+            '"' => try output.appendSlice(allocator, "\\\""),
+            '\\' => try output.appendSlice(allocator, "\\\\"),
+            '\n' => try output.appendSlice(allocator, "\\n"),
+            '\r' => try output.appendSlice(allocator, "\\r"),
+            '\t' => try output.appendSlice(allocator, "\\t"),
+            else => try output.append(allocator, byte),
+        }
+    }
+    try output.append(allocator, '"');
 }
 
 fn cloneEvent(allocator: Allocator, event: CausalEvent) Allocator.Error!CausalEvent {

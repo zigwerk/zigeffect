@@ -144,6 +144,35 @@ test("POST /command broadcasts a redacted policy-gated command frame", async () 
   }
 });
 
+test("GET /commands exposes posted commands for an engine-side tap by sequence", async () => {
+  const { origin } = serve();
+
+  const first = await fetch(`http://${origin}/command`, {
+    method: "POST",
+    body: JSON.stringify({ kind: "interrupt_fiber", reason: "first", run_id: 1, fiber_id: 9 }),
+  });
+  expect(first.ok).toBe(true);
+  const second = await fetch(`http://${origin}/command`, {
+    method: "POST",
+    body: JSON.stringify({ kind: "fire_timer", reason: "second", run_id: 1, schedule_id: 7 }),
+  });
+  expect(second.ok).toBe(true);
+
+  const all = await (await fetch(`http://${origin}/commands?after=0`)).json();
+  expect(all.next_after).toBe(2);
+  expect(all.commands.map((command: LiveCommandFrame) => command.command_kind)).toEqual([
+    "interrupt_fiber",
+    "fire_timer",
+  ]);
+
+  const onlySecond = await (await fetch(`http://${origin}/commands?after=1`)).json();
+  expect(onlySecond.next_after).toBe(2);
+  expect(onlySecond.commands.map((command: LiveCommandFrame) => command.command_kind)).toEqual(["fire_timer"]);
+
+  const none = await (await fetch(`http://${origin}/commands?after=2`)).json();
+  expect(none).toEqual({ commands: [], next_after: 2 });
+});
+
 function collectFrames(ws: WebSocket, count: number, timeoutMs = 3000): Promise<LiveFrame[]> {
   return new Promise((resolve, reject) => {
     const frames: LiveFrame[] = [];

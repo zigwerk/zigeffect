@@ -44,3 +44,68 @@ test "runner lineage stitcher reports cross-runner cause edges" {
     try std.testing.expectEqualStrings("runner-b", stitched.cross_runner_edges[0].to_runner_id);
     try std.testing.expectEqualStrings("cause_event_id", stitched.cross_runner_edges[0].edge_kind);
 }
+
+test "runner lineage artifact includes deployment metadata and cross-runner edges" {
+    const runner_a_events = [_]fx.CausalEvent{
+        .{
+            .id = 1,
+            .kind = .cluster_message_submitted,
+            .run_id = 100,
+            .label = "submit from runner a",
+            .status = "submitted",
+        },
+    };
+    const runner_b_events = [_]fx.CausalEvent{
+        .{
+            .id = 2,
+            .kind = .cluster_message_replied,
+            .run_id = 200,
+            .cause_event_id = 1,
+            .label = "reply from runner b",
+            .status = "replied",
+        },
+    };
+
+    var stitched = try fx.stitchCausalRunnerLineage(std.testing.allocator, &.{
+        .{ .runner_id = "runner-a", .events = &runner_a_events },
+        .{ .runner_id = "runner-b", .events = &runner_b_events },
+    });
+    defer stitched.deinit();
+
+    const deployments = [_]fx.CausalRunnerDeploymentMetadata{
+        .{
+            .runner_id = "runner-a",
+            .service = "zigeffect",
+            .environment = "prod",
+            .region = "lhr",
+            .address = "tcp://runner-a.internal:7001",
+            .health = "healthy",
+            .tls_enabled = true,
+            .auth_epoch = 41,
+        },
+        .{
+            .runner_id = "runner-b",
+            .service = "zigeffect",
+            .environment = "prod",
+            .region = "ams",
+            .address = "tcp://runner-b.internal:7001",
+            .health = "healthy",
+            .tls_enabled = true,
+            .auth_epoch = 42,
+        },
+    };
+
+    const json = try fx.formatCausalRunnerLineageJson(std.testing.allocator, stitched, .{
+        .deployment_id = "deploy-2026-06-24",
+        .deployments = &deployments,
+    });
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.runner-lineage.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"deployment_id\":\"deploy-2026-06-24\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"runner_id\":\"runner-a\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"auth_epoch\":42") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"tls_enabled\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"from_runner_id\":\"runner-a\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"to_runner_id\":\"runner-b\"") != null);
+}

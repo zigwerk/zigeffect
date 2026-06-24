@@ -23,12 +23,15 @@ export type Collector = {
   ingestBody: (body: string) => number;
   /** Validate and broadcast one policy-gated live command intent. */
   ingestCommand: (body: unknown) => LiveCommandFrame | null;
+  /** Return command frames newer than the provided command sequence. */
+  commandsSince: (afterSequence: number) => LiveCommandFrame[];
   /** Number of currently-connected WebSocket clients. */
   clientCount: () => number;
 };
 
 export function createCollector(): Collector {
   const clients = new Set<ServerWebSocket<undefined>>();
+  const commandHistory: LiveCommandFrame[] = [];
   let sequence = 0;
   let commandSequence = 0;
 
@@ -95,8 +98,13 @@ export function createCollector(): Collector {
       schedule_id: optionalNumber(record, "schedule_id"),
       resource_id: optionalNumber(record, "resource_id"),
     };
+    commandHistory.push(frame);
     broadcast(frame);
     return frame;
+  }
+
+  function commandsSince(afterSequence: number): LiveCommandFrame[] {
+    return commandHistory.filter((command) => command.sequence > afterSequence);
   }
 
   const websocket: WebSocketHandler<undefined> = {
@@ -141,6 +149,19 @@ export function createCollector(): Collector {
       );
     }
 
+    if (url.pathname === "/commands" && request.method === "GET") {
+      const rawAfter = url.searchParams.get("after") ?? "0";
+      const after = Number(rawAfter);
+      if (!Number.isSafeInteger(after) || after < 0) {
+        return new Response("invalid after cursor", { status: 400 });
+      }
+      const commands = commandsSince(after);
+      const nextAfter = commands.length > 0 ? commands[commands.length - 1]!.sequence : Math.max(after, commandSequence);
+      return new Response(JSON.stringify({ commands, next_after: nextAfter }), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+
     if (url.pathname === "/health") {
       return new Response(JSON.stringify({ ok: true, clients: clients.size }), {
         headers: { "content-type": "application/json" },
@@ -150,7 +171,7 @@ export function createCollector(): Collector {
     return new Response("not found", { status: 404 });
   }
 
-  return { fetch, websocket, ingestLine, ingestBody, ingestCommand, clientCount: () => clients.size };
+  return { fetch, websocket, ingestLine, ingestBody, ingestCommand, commandsSince, clientCount: () => clients.size };
 }
 
 // `engine | bun collector.ts` — serve + pipe stdin NDJSON to connected clients.
@@ -160,7 +181,7 @@ if (import.meta.main) {
   const server = Bun.serve({ port, fetch: collector.fetch, websocket: collector.websocket });
   // eslint-disable-next-line no-console
   console.log(
-    `zigeffect live-attach collector on http://127.0.0.1:${server.port}  (ws: /live, ingest: POST /ingest)`,
+    `zigeffect live-attach collector on http://127.0.0.1:${server.port}  (ws: /live, ingest: POST /ingest, commands: /command + /commands)`,
   );
 
   void (async () => {

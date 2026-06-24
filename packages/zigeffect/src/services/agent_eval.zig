@@ -5,6 +5,9 @@ const counterfactual = @import("counterfactual.zig");
 const causal_diff = @import("causal_diff.zig");
 const causal_invariant = @import("causal_invariant.zig");
 
+pub const agent_eval_diff_artifact_schema = "zigeffect.causal.agent-eval-diff.v1";
+pub const agent_eval_diff_artifact_schema_version: u32 = 1;
+
 pub const AgentEvalOptions = struct {
     name: []const u8,
     baseline: []const causal.CausalEvent,
@@ -19,6 +22,17 @@ pub const AgentEvalResult = struct {
     counterfactual: counterfactual.CounterfactualResult,
     diff_summary: causal_diff.CausalGraphDiffSummary,
     invariant_violations: usize,
+};
+
+pub const AgentEvalDiffArtifact = struct {
+    allocator: std.mem.Allocator,
+    result: AgentEvalResult,
+    json: []const u8,
+
+    pub fn deinit(self: *AgentEvalDiffArtifact) void {
+        if (self.json.len > 0) self.allocator.free(self.json);
+        self.json = "";
+    }
 };
 
 fn replayEvents(store: *causal.CausalStore, events: []const causal.CausalEvent) std.mem.Allocator.Error!void {
@@ -48,4 +62,92 @@ pub fn runAgentEval(allocator: std.mem.Allocator, options: AgentEvalOptions) std
         .diff_summary = cf.diff_summary,
         .invariant_violations = invariant_check.violations.len,
     };
+}
+
+pub fn runAgentEvalWithDiffArtifact(
+    allocator: std.mem.Allocator,
+    options: AgentEvalOptions,
+    before_artifact: []const u8,
+    after_artifact: []const u8,
+) std.mem.Allocator.Error!AgentEvalDiffArtifact {
+    const result = try runAgentEval(allocator, options);
+    const semantic_diff_json = try buildEvalSemanticDiffJson(allocator, options, before_artifact, after_artifact);
+    defer allocator.free(semantic_diff_json);
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\"schema\":");
+    try appendJsonString(&output, allocator, agent_eval_diff_artifact_schema);
+    try output.print(allocator, ",\"schema_version\":{d}", .{agent_eval_diff_artifact_schema_version});
+    try output.appendSlice(allocator, ",\"eval_name\":");
+    try appendJsonString(&output, allocator, options.name);
+    try output.print(allocator, ",\"passed\":{s}", .{if (result.passed) "true" else "false"});
+    try output.print(allocator, ",\"invariant_violations\":{d}", .{result.invariant_violations});
+    try output.appendSlice(allocator, ",\"remediation_event_ids\":{");
+    try output.appendSlice(allocator, "\"requested\":");
+    try appendOptionalU64(&output, allocator, result.counterfactual.intervention.requested_event_id);
+    try output.appendSlice(allocator, ",\"decided\":");
+    try appendOptionalU64(&output, allocator, result.counterfactual.intervention.decided_event_id);
+    try output.appendSlice(allocator, ",\"applied\":");
+    try appendOptionalU64(&output, allocator, result.counterfactual.intervention.applied_event_id);
+    try output.appendSlice(allocator, ",\"effect\":");
+    try appendOptionalU64(&output, allocator, result.counterfactual.intervention.effect_event_id);
+    try output.appendSlice(allocator, "},\"semantic_diff\":");
+    try output.appendSlice(allocator, semantic_diff_json);
+    try output.appendSlice(allocator, "}");
+
+    return .{
+        .allocator = allocator,
+        .result = result,
+        .json = try output.toOwnedSlice(allocator),
+    };
+}
+
+fn buildEvalSemanticDiffJson(
+    allocator: std.mem.Allocator,
+    options: AgentEvalOptions,
+    before_artifact: []const u8,
+    after_artifact: []const u8,
+) std.mem.Allocator.Error![]const u8 {
+    var before = causal.CausalStore.init(allocator);
+    defer before.deinit();
+    try replayEvents(&before, options.baseline);
+
+    var after = causal.CausalStore.init(allocator);
+    defer after.deinit();
+    try replayEvents(&after, options.baseline);
+    _ = try agent_intervention.applyAgentIntervention(&after, options.policy, options.request);
+
+    var before_snapshot = try before.snapshot(allocator);
+    defer before_snapshot.deinit();
+    var after_snapshot = try after.snapshot(allocator);
+    defer after_snapshot.deinit();
+
+    var diff = try causal_diff.diffCausalGraphs(allocator, before_snapshot.events, after_snapshot.events);
+    defer diff.deinit();
+    return causal_diff.formatCausalGraphDiffJson(allocator, diff, before_artifact, after_artifact);
+}
+
+fn appendOptionalU64(output: *std.ArrayList(u8), allocator: std.mem.Allocator, value: ?u64) std.mem.Allocator.Error!void {
+    if (value) |number| {
+        try output.print(allocator, "{d}", .{number});
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+}
+
+fn appendJsonString(output: *std.ArrayList(u8), allocator: std.mem.Allocator, value: []const u8) std.mem.Allocator.Error!void {
+    try output.append(allocator, '"');
+    for (value) |byte| {
+        switch (byte) {
+            '"' => try output.appendSlice(allocator, "\\\""),
+            '\\' => try output.appendSlice(allocator, "\\\\"),
+            '\n' => try output.appendSlice(allocator, "\\n"),
+            '\r' => try output.appendSlice(allocator, "\\r"),
+            '\t' => try output.appendSlice(allocator, "\\t"),
+            else => try output.append(allocator, byte),
+        }
+    }
+    try output.append(allocator, '"');
 }
