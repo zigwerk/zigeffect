@@ -262,6 +262,27 @@ test("runLiveCommandDaemon advances cursors across cycles and stops on signal", 
   expect(result).toEqual({ cycles: 2, polls: 2, commands: 2, errors: 0, next_after: 2, stopped: true });
 });
 
+test("runLiveCommandDaemon emits lifecycle evidence", async () => {
+  const fetcher = async () =>
+    new Response(JSON.stringify({ next_after: 0, commands: [] }), { headers: { "content-type": "application/json" } });
+  const events: string[] = [];
+
+  const result = await runLiveCommandDaemon(
+    "http://127.0.0.1:4500/commands",
+    () => {},
+    {
+      maxCycles: 1,
+      onLifecycle: (event) => {
+        events.push(event.kind);
+      },
+    },
+    fetcher,
+  );
+
+  expect(result).toEqual({ cycles: 1, polls: 1, commands: 0, errors: 0, next_after: 0, stopped: false });
+  expect(events).toEqual(["started", "cycle", "stopped"]);
+});
+
 test("LiveCausalBuffer accumulates frames in causal (sequence) order", () => {
   const buffer = new LiveCausalBuffer();
   // Ingest out of order — buffer must re-order by sequence.

@@ -220,6 +220,7 @@ pub const ClusterTransportDiscoveredEndpoint = transport.ClusterTransportDiscove
 pub const ClusterTransportServiceDiscoveryRequirements = transport.ClusterTransportServiceDiscoveryRequirements;
 pub const ClusterTransportServiceDiscoveryReport = transport.ClusterTransportServiceDiscoveryReport;
 pub const ClusterTransportServiceDiscoverySelection = transport.ClusterTransportServiceDiscoverySelection;
+pub const InMemoryClusterTransportServiceDiscovery = transport.InMemoryClusterTransportServiceDiscovery;
 pub const ClusterTransportLifecycleState = transport.ClusterTransportLifecycleState;
 pub const ClusterTransportMetricsSnapshot = transport.ClusterTransportMetricsSnapshot;
 pub const ClusterTransportFailureReport = transport.ClusterTransportFailureReport;

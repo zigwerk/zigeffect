@@ -7,6 +7,17 @@ fn noOpWriter() fx.CausalNendbGraphWriter {
     return .{ .write = noOpNendbWrite };
 }
 
+fn hasHttpHeader(
+    headers: []const fx.CausalOpsArtifactHttpHeader,
+    name: []const u8,
+    value: []const u8,
+) bool {
+    for (headers) |header| {
+        if (std.mem.eql(u8, header.name, name) and std.mem.eql(u8, header.value, value)) return true;
+    }
+    return false;
+}
+
 fn opsPolicy() fx.CausalOpsPolicy {
     return .{
         .deployment = .{
@@ -198,6 +209,7 @@ test "ops artifact http request adapter gates method path and policy" {
     });
     defer wrong_method.deinit();
     try std.testing.expectEqual(@as(u16, 405), wrong_method.status);
+    try std.testing.expect(hasHttpHeader(wrong_method.headers, "cache-control", "no-store"));
 
     var wrong_path = try fx.serveCausalOpsArtifactHttpRequest(std.testing.allocator, &storage, opsPolicy(), .{
         .method = "GET",
@@ -207,6 +219,7 @@ test "ops artifact http request adapter gates method path and policy" {
     });
     defer wrong_path.deinit();
     try std.testing.expectEqual(@as(u16, 404), wrong_path.status);
+    try std.testing.expect(hasHttpHeader(wrong_path.headers, "content-type", "application/json"));
 
     var denied = try fx.serveCausalOpsArtifactHttpRequest(std.testing.allocator, &storage, opsPolicy(), .{
         .method = "GET",
@@ -216,6 +229,7 @@ test "ops artifact http request adapter gates method path and policy" {
     });
     defer denied.deinit();
     try std.testing.expectEqual(@as(u16, 403), denied.status);
+    try std.testing.expect(hasHttpHeader(denied.headers, "x-content-type-options", "nosniff"));
     try std.testing.expect(std.mem.indexOf(u8, denied.body, "\"events\"") == null);
 
     var allowed = try fx.serveCausalOpsArtifactHttpRequest(std.testing.allocator, &storage, opsPolicy(), .{
@@ -226,5 +240,6 @@ test "ops artifact http request adapter gates method path and policy" {
     });
     defer allowed.deinit();
     try std.testing.expectEqual(@as(u16, 200), allowed.status);
+    try std.testing.expect(hasHttpHeader(allowed.headers, "cache-control", "no-store"));
     try std.testing.expect(std.mem.indexOf(u8, allowed.body, "\"event_count\":1") != null);
 }

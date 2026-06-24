@@ -1066,6 +1066,43 @@ test "remote transport service discovery selection skips unsafe candidates" {
     try std.testing.expectEqual(@as(?usize, null), none.selected_index);
 }
 
+test "in-memory remote transport service discovery owns endpoints and selects safe candidate" {
+    var discovery = fx.InMemoryClusterTransportServiceDiscovery.init(std.testing.allocator, .{
+        .require_tls = true,
+        .require_healthy = true,
+        .min_auth_epoch = 3,
+    });
+    defer discovery.deinit();
+
+    try discovery.upsert(.{
+        .host = "runner-a.internal",
+        .port = 7001,
+        .tls_enabled = false,
+        .healthy = true,
+        .auth_epoch = 3,
+    });
+    try discovery.upsert(.{
+        .host = "runner-b.internal",
+        .port = 7002,
+        .tls_enabled = true,
+        .healthy = true,
+        .auth_epoch = 7,
+    });
+    try discovery.upsert(.{
+        .host = "runner-a.internal",
+        .port = 7001,
+        .tls_enabled = true,
+        .healthy = true,
+        .auth_epoch = 4,
+    });
+
+    try std.testing.expectEqual(@as(usize, 2), discovery.endpointCount());
+    const selection = discovery.select();
+    try std.testing.expect(selection.selected != null);
+    try std.testing.expectEqual(@as(?usize, 0), selection.selected_index);
+    try std.testing.expectEqualStrings("runner-a.internal", selection.selected.?.host);
+}
+
 test "remote socket transport applies reject backpressure before durable submission" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

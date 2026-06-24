@@ -9,6 +9,8 @@ pub const agent_eval_diff_artifact_schema = "zigeffect.causal.agent-eval-diff.v1
 pub const agent_eval_diff_artifact_schema_version: u32 = 1;
 pub const agent_eval_diff_artifact_link_schema = "zigeffect.causal.agent-eval-diff-link.v1";
 pub const agent_eval_diff_artifact_link_schema_version: u32 = 1;
+pub const agent_eval_linked_diff_manifest_schema = "zigeffect.causal.agent-eval-linked-manifest.v1";
+pub const agent_eval_linked_diff_manifest_schema_version: u32 = 1;
 
 pub const AgentEvalOptions = struct {
     name: []const u8,
@@ -52,6 +54,15 @@ pub const AgentEvalDiffArtifactLinkOptions = struct {
 pub const AgentEvalDiffArtifactLinkWriteOptions = struct {
     artifact_path: []const u8,
     artifact_id: []const u8 = "",
+};
+
+pub const AgentEvalLinkedDiffManifestOptions = struct {
+    eval_name: []const u8,
+    diff_artifact_path: []const u8,
+    link_artifact_path: []const u8,
+    diff_artifact_id: []const u8 = "",
+    link_artifact_id: []const u8 = "",
+    result: AgentEvalResult,
 };
 
 fn replayEvents(store: *causal.CausalStore, events: []const causal.CausalEvent) std.mem.Allocator.Error!void {
@@ -190,6 +201,46 @@ pub fn formatAgentEvalDiffArtifactLinkJson(
     try output.appendSlice(allocator, "},\"diff_summary\":{");
     try output.print(allocator, "\"resolved_findings\":{d}", .{options.result.diff_summary.resolved_findings});
     try output.print(allocator, ",\"introduced_findings\":{d}", .{options.result.diff_summary.introduced_findings});
+    try output.appendSlice(allocator, "}}");
+
+    return output.toOwnedSlice(allocator);
+}
+
+pub fn formatAgentEvalLinkedDiffManifestJson(
+    allocator: std.mem.Allocator,
+    options: AgentEvalLinkedDiffManifestOptions,
+) std.mem.Allocator.Error![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.appendSlice(allocator, "{\"schema\":");
+    try appendJsonString(&output, allocator, agent_eval_linked_diff_manifest_schema);
+    try output.print(allocator, ",\"schema_version\":{d}", .{agent_eval_linked_diff_manifest_schema_version});
+    try output.appendSlice(allocator, ",\"eval_name\":");
+    try appendJsonString(&output, allocator, options.eval_name);
+    try output.print(allocator, ",\"passed\":{s}", .{if (options.result.passed) "true" else "false"});
+    try output.appendSlice(allocator, ",\"diff_artifact_path\":");
+    try appendJsonString(&output, allocator, options.diff_artifact_path);
+    try output.appendSlice(allocator, ",\"link_artifact_path\":");
+    try appendJsonString(&output, allocator, options.link_artifact_path);
+    try output.appendSlice(allocator, ",\"artifacts\":{");
+    try output.appendSlice(allocator, "\"diff\":{\"path\":");
+    try appendJsonString(&output, allocator, options.diff_artifact_path);
+    try output.appendSlice(allocator, ",\"id\":");
+    try appendJsonString(&output, allocator, options.diff_artifact_id);
+    try output.appendSlice(allocator, "},\"link\":{\"path\":");
+    try appendJsonString(&output, allocator, options.link_artifact_path);
+    try output.appendSlice(allocator, ",\"id\":");
+    try appendJsonString(&output, allocator, options.link_artifact_id);
+    try output.appendSlice(allocator, "}},\"remediation_event_ids\":{");
+    try output.appendSlice(allocator, "\"requested\":");
+    try appendOptionalU64(&output, allocator, options.result.counterfactual.intervention.requested_event_id);
+    try output.appendSlice(allocator, ",\"decided\":");
+    try appendOptionalU64(&output, allocator, options.result.counterfactual.intervention.decided_event_id);
+    try output.appendSlice(allocator, ",\"applied\":");
+    try appendOptionalU64(&output, allocator, options.result.counterfactual.intervention.applied_event_id);
+    try output.appendSlice(allocator, ",\"effect\":");
+    try appendOptionalU64(&output, allocator, options.result.counterfactual.intervention.effect_event_id);
     try output.appendSlice(allocator, "}}");
 
     return output.toOwnedSlice(allocator);

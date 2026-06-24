@@ -232,3 +232,37 @@ test "agent eval writes diff artifact and remediation link to caller sinks" {
     try std.testing.expect(capture.saw_link_schema);
     try std.testing.expect(capture.saw_requested_event_id);
 }
+
+test "agent eval formats linked diff artifact manifest" {
+    const policy = (fx.AgentInterventionPolicy{})
+        .withApplyEnabled(true)
+        .withKindPolicy(.interrupt_fiber, .auto_approve);
+    const invariants = fx.CausalInvariantBuilder.init().requireSuspendedFibersResolve();
+
+    const result = try fx.runAgentEval(std.testing.allocator, .{
+        .name = "interrupt hung fiber",
+        .baseline = &baseline,
+        .policy = policy,
+        .request = .{
+            .kind = .interrupt_fiber,
+            .run_id = 1,
+            .fiber_id = 9,
+            .reason = "eval interrupt",
+        },
+        .invariants = invariants,
+        .expect_improvement = true,
+    });
+
+    const manifest = try fx.formatAgentEvalLinkedDiffManifestJson(std.testing.allocator, .{
+        .eval_name = "interrupt hung fiber",
+        .diff_artifact_path = ".zig-cache/causal-artifacts/eval-diff.json",
+        .link_artifact_path = ".zig-cache/causal-artifacts/eval-link.json",
+        .result = result,
+    });
+    defer std.testing.allocator.free(manifest);
+
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"schema\":\"zigeffect.causal.agent-eval-linked-manifest.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"diff_artifact_path\":\".zig-cache/causal-artifacts/eval-diff.json\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"link_artifact_path\":\".zig-cache/causal-artifacts/eval-link.json\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"requested\":") != null);
+}

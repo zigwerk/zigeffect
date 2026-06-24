@@ -78,6 +78,7 @@ export type LiveCommandDaemonOptions = {
   maxPollsPerCycle?: number;
   shouldStop?: () => boolean | Promise<boolean>;
   delay?: (cycle: LiveCommandPollingResult) => void | Promise<void>;
+  onLifecycle?: (event: LiveCommandDaemonLifecycleEvent) => void | Promise<void>;
   continueOnError?: boolean;
 };
 
@@ -89,6 +90,12 @@ export type LiveCommandDaemonResult = {
   next_after: number;
   stopped: boolean;
 };
+
+export type LiveCommandDaemonLifecycleEvent =
+  | { kind: "started"; next_after: number }
+  | ({ kind: "cycle"; cycle: number } & LiveCommandPollingResult)
+  | { kind: "error"; cycle: number; error: unknown; next_after: number }
+  | ({ kind: "stopped" } & LiveCommandDaemonResult);
 
 export type LiveStreamMeta = {
   schema?: string;
@@ -287,6 +294,13 @@ export async function runLiveCommandDaemon(
   let commands = 0;
   let errors = 0;
   let stopped = false;
+  const emitLifecycle = async (event: LiveCommandDaemonLifecycleEvent) => {
+    if (options.onLifecycle) {
+      await options.onLifecycle(event);
+    }
+  };
+
+  await emitLifecycle({ kind: "started", next_after: cursor });
 
   while (cycles < maxCycles) {
     if (options.shouldStop && (await options.shouldStop())) {
@@ -304,6 +318,7 @@ export async function runLiveCommandDaemon(
       );
     } catch (error) {
       errors += 1;
+      await emitLifecycle({ kind: "error", cycle: cycles + 1, error, next_after: cursor });
       if (!options.continueOnError) {
         throw error;
       }
@@ -315,6 +330,7 @@ export async function runLiveCommandDaemon(
     polls += cycle.polls;
     commands += cycle.commands;
     cursor = cycle.next_after;
+    await emitLifecycle({ kind: "cycle", cycle: cycles, ...cycle });
 
     if (options.shouldStop && (await options.shouldStop())) {
       stopped = true;
@@ -328,7 +344,9 @@ export async function runLiveCommandDaemon(
     }
   }
 
-  return { cycles, polls, commands, errors, next_after: cursor, stopped };
+  const result = { cycles, polls, commands, errors, next_after: cursor, stopped };
+  await emitLifecycle({ kind: "stopped", ...result });
+  return result;
 }
 
 /** Pull `frames` out of a full live-stream document (the sample fixture shape). */

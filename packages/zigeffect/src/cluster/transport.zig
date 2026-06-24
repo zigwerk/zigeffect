@@ -574,6 +574,67 @@ pub const ClusterTransportServiceDiscoverySelection = struct {
     selected: ?ClusterTransportDiscoveredEndpoint = null,
 };
 
+pub const InMemoryClusterTransportServiceDiscovery = struct {
+    allocator: Allocator,
+    requirements: ClusterTransportServiceDiscoveryRequirements,
+    endpoints: std.ArrayList(ClusterTransportDiscoveredEndpoint) = .empty,
+
+    pub fn init(
+        allocator: Allocator,
+        requirements: ClusterTransportServiceDiscoveryRequirements,
+    ) InMemoryClusterTransportServiceDiscovery {
+        return .{
+            .allocator = allocator,
+            .requirements = requirements,
+        };
+    }
+
+    pub fn deinit(self: *InMemoryClusterTransportServiceDiscovery) void {
+        for (self.endpoints.items) |endpoint| {
+            self.allocator.free(endpoint.host);
+        }
+        self.endpoints.deinit(self.allocator);
+        self.* = .{
+            .allocator = self.allocator,
+            .requirements = self.requirements,
+        };
+    }
+
+    pub fn endpointCount(self: *const InMemoryClusterTransportServiceDiscovery) usize {
+        return self.endpoints.items.len;
+    }
+
+    pub fn upsert(
+        self: *InMemoryClusterTransportServiceDiscovery,
+        endpoint: ClusterTransportDiscoveredEndpoint,
+    ) Allocator.Error!void {
+        const owned_host = try self.allocator.dupe(u8, endpoint.host);
+        errdefer self.allocator.free(owned_host);
+
+        const owned = ClusterTransportDiscoveredEndpoint{
+            .host = owned_host,
+            .port = endpoint.port,
+            .tls_enabled = endpoint.tls_enabled,
+            .healthy = endpoint.healthy,
+            .auth_epoch = endpoint.auth_epoch,
+        };
+
+        for (self.endpoints.items) |*existing| {
+            if (std.mem.eql(u8, existing.host, endpoint.host) and existing.port == endpoint.port) {
+                self.allocator.free(existing.host);
+                existing.* = owned;
+                return;
+            }
+        }
+
+        try self.endpoints.append(self.allocator, owned);
+    }
+
+    pub fn select(self: *const InMemoryClusterTransportServiceDiscovery) ClusterTransportServiceDiscoverySelection {
+        return selectClusterTransportServiceDiscoveryEndpoint(self.endpoints.items, self.requirements);
+    }
+};
+
 pub fn validateClusterTransportServiceDiscovery(
     endpoints: []const ClusterTransportDiscoveredEndpoint,
     requirements: ClusterTransportServiceDiscoveryRequirements,

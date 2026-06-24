@@ -15,6 +15,17 @@ pub const causal_ops_artifact_response_schema = "zigeffect.causal.ops-artifact-r
 pub const causal_ops_artifact_response_schema_version: u32 = 1;
 pub const causal_ops_artifact_http_path = "/causal-artifacts";
 
+pub const CausalOpsArtifactHttpHeader = struct {
+    name: []const u8,
+    value: []const u8,
+};
+
+pub const causal_ops_artifact_http_headers: []const CausalOpsArtifactHttpHeader = &.{
+    .{ .name = "content-type", .value = "application/json" },
+    .{ .name = "cache-control", .value = "no-store" },
+    .{ .name = "x-content-type-options", .value = "nosniff" },
+};
+
 pub const CausalOpsArtifactReadResult = struct {
     allowed: bool,
     reason: []const u8,
@@ -35,6 +46,7 @@ pub const CausalOpsArtifactHttpResponse = struct {
     allocator: Allocator,
     status: u16,
     body: []const u8,
+    headers: []const CausalOpsArtifactHttpHeader = causal_ops_artifact_http_headers,
 
     pub fn deinit(self: *CausalOpsArtifactHttpResponse) void {
         if (self.body.len > 0) self.allocator.free(self.body);
