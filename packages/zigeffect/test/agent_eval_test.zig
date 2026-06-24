@@ -266,3 +266,88 @@ test "agent eval formats linked diff artifact manifest" {
     try std.testing.expect(std.mem.indexOf(u8, manifest, "\"link_artifact_path\":\".zig-cache/causal-artifacts/eval-link.json\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, manifest, "\"requested\":") != null);
 }
+
+const LinkedManifestCapture = struct {
+    artifact_writes: usize = 0,
+    link_writes: usize = 0,
+    manifest_writes: usize = 0,
+    saw_artifact_schema: bool = false,
+    saw_link_schema: bool = false,
+    saw_manifest_schema: bool = false,
+    saw_manifest_paths: bool = false,
+
+    fn artifactSink(self: *LinkedManifestCapture) fx.AgentEvalDiffArtifactSink {
+        return .{
+            .state = self,
+            .write = writeArtifact,
+        };
+    }
+
+    fn linkSink(self: *LinkedManifestCapture) fx.AgentEvalDiffArtifactSink {
+        return .{
+            .state = self,
+            .write = writeLink,
+        };
+    }
+
+    fn manifestSink(self: *LinkedManifestCapture) fx.AgentEvalDiffArtifactSink {
+        return .{
+            .state = self,
+            .write = writeManifest,
+        };
+    }
+
+    fn writeArtifact(raw: ?*anyopaque, json: []const u8) anyerror!void {
+        const self: *LinkedManifestCapture = @ptrCast(@alignCast(raw.?));
+        self.artifact_writes += 1;
+        self.saw_artifact_schema = std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.agent-eval-diff.v1\"") != null;
+    }
+
+    fn writeLink(raw: ?*anyopaque, json: []const u8) anyerror!void {
+        const self: *LinkedManifestCapture = @ptrCast(@alignCast(raw.?));
+        self.link_writes += 1;
+        self.saw_link_schema = std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.agent-eval-diff-link.v1\"") != null;
+    }
+
+    fn writeManifest(raw: ?*anyopaque, json: []const u8) anyerror!void {
+        const self: *LinkedManifestCapture = @ptrCast(@alignCast(raw.?));
+        self.manifest_writes += 1;
+        self.saw_manifest_schema = std.mem.indexOf(u8, json, "\"schema\":\"zigeffect.causal.agent-eval-linked-manifest.v1\"") != null;
+        self.saw_manifest_paths = std.mem.indexOf(u8, json, "\"diff_artifact_path\":\".zig-cache/causal-artifacts/eval-diff.json\"") != null and
+            std.mem.indexOf(u8, json, "\"link_artifact_path\":\".zig-cache/causal-artifacts/eval-link.json\"") != null;
+    }
+};
+
+test "agent eval writes diff artifact link and manifest to caller sinks" {
+    const policy = (fx.AgentInterventionPolicy{})
+        .withApplyEnabled(true)
+        .withKindPolicy(.interrupt_fiber, .auto_approve);
+    const invariants = fx.CausalInvariantBuilder.init().requireSuspendedFibersResolve();
+    var capture = LinkedManifestCapture{};
+
+    const result = try fx.runAgentEvalAndWriteLinkedDiffManifest(std.testing.allocator, .{
+        .name = "interrupt hung fiber",
+        .baseline = &baseline,
+        .policy = policy,
+        .request = .{
+            .kind = .interrupt_fiber,
+            .run_id = 1,
+            .fiber_id = 9,
+            .reason = "eval interrupt",
+        },
+        .invariants = invariants,
+        .expect_improvement = true,
+    }, "baseline", "after-interrupt", .{
+        .diff_artifact_path = ".zig-cache/causal-artifacts/eval-diff.json",
+        .link_artifact_path = ".zig-cache/causal-artifacts/eval-link.json",
+    }, capture.artifactSink(), capture.linkSink(), capture.manifestSink());
+
+    try std.testing.expect(result.passed);
+    try std.testing.expectEqual(@as(usize, 1), capture.artifact_writes);
+    try std.testing.expectEqual(@as(usize, 1), capture.link_writes);
+    try std.testing.expectEqual(@as(usize, 1), capture.manifest_writes);
+    try std.testing.expect(capture.saw_artifact_schema);
+    try std.testing.expect(capture.saw_link_schema);
+    try std.testing.expect(capture.saw_manifest_schema);
+    try std.testing.expect(capture.saw_manifest_paths);
+}

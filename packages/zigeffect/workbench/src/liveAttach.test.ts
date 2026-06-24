@@ -16,6 +16,7 @@ import {
   parseFrameMessage,
   runLiveCommandPollingLoop,
   runLiveCommandDaemon,
+  runLiveEngineCommandDaemon,
   sendLiveCommand,
   webSocketLiveSource,
   type LiveCommandRequest,
@@ -281,6 +282,95 @@ test("runLiveCommandDaemon emits lifecycle evidence", async () => {
 
   expect(result).toEqual({ cycles: 1, polls: 1, commands: 0, errors: 0, next_after: 0, stopped: false });
   expect(events).toEqual(["started", "cycle", "stopped"]);
+});
+
+test("runLiveEngineCommandDaemon bridges command batches to engine frames", async () => {
+  const batches: LiveCommandInboxResponse[] = [
+    {
+      next_after: 1,
+      commands: [
+        {
+          sequence: 1,
+          command_id: "cmd-1",
+          command_kind: "interrupt_fiber",
+          status: "received",
+          run_id: 1,
+          fiber_id: 9,
+        },
+      ],
+    },
+    {
+      next_after: 2,
+      commands: [
+        {
+          sequence: 2,
+          command_id: "cmd-2",
+          command_kind: "unknown_command",
+          status: "received",
+          reason: "exercise rejection path",
+        },
+      ],
+    },
+    { next_after: 2, commands: [] },
+  ];
+  const urls: string[] = [];
+  const appliedKinds: string[] = [];
+  const emitted: LiveFrame[] = [];
+  const fetcher = async (url: string) => {
+    urls.push(url);
+    const response = batches.shift() ?? { next_after: 2, commands: [] };
+    return new Response(JSON.stringify(response), { headers: { "content-type": "application/json" } });
+  };
+
+  const result = await runLiveEngineCommandDaemon(
+    "http://127.0.0.1:4500/commands",
+    {
+      applyBatch: (inbox) => {
+        appliedKinds.push(...inbox.commands.map((command) => command.command_kind));
+        return {
+          processed: inbox.commands.length,
+          applied: inbox.commands.filter((command) => command.command_kind === "interrupt_fiber").length,
+          rejected: inbox.commands.filter((command) => command.command_kind !== "interrupt_fiber").length,
+          needs_human_review: 0,
+          frames: inbox.commands.map((command) =>
+            frame({
+              sequence: command.sequence,
+              event_id: 100 + command.sequence,
+              event_kind: command.command_kind === "interrupt_fiber" ? "remediation_applied" : "alert_emitted",
+              status: command.command_kind === "interrupt_fiber" ? "applied" : "rejected",
+              label: command.command_id,
+            }),
+          ),
+        };
+      },
+      emitFrame: (nextFrame) => {
+        emitted.push(nextFrame);
+      },
+    },
+    { maxCycles: 3, maxPollsPerCycle: 1 },
+    fetcher,
+  );
+
+  expect(urls).toEqual([
+    "http://127.0.0.1:4500/commands?after=0",
+    "http://127.0.0.1:4500/commands?after=1",
+    "http://127.0.0.1:4500/commands?after=2",
+  ]);
+  expect(appliedKinds).toEqual(["interrupt_fiber", "unknown_command"]);
+  expect(emitted.map((nextFrame) => nextFrame.event_id)).toEqual([101, 102]);
+  expect(result).toEqual({
+    cycles: 3,
+    polls: 3,
+    commands: 2,
+    errors: 0,
+    next_after: 2,
+    stopped: false,
+    processed: 2,
+    applied: 1,
+    rejected: 1,
+    needs_human_review: 0,
+    emitted_frames: 2,
+  });
 });
 
 test("LiveCausalBuffer accumulates frames in causal (sequence) order", () => {

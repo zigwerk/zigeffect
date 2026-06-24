@@ -35,9 +35,9 @@ semantic fact comparison, not exact event-id graph isomorphism.
 | 8 | App-facing causal trace | **done** | `src/services/causal_app_runtime.zig` |
 | 9 | Visual workbench (SolidJS / zig-webui) | **live-attach** (static + streaming via collector) | `workbench/`, `workbench/src/collector/` |
 | 10 | Export adapters (JSONL/DOT/OTel/OTLP/graph-history/NenDB) | **OTLP + collector live end-to-end** | `src/services/causal_*_backend.zig`, `causal_otlp_json.zig` |
-| 11 | Durable workflows + clustering | **scheduler runs on zio; loopback + remote socket wrappers cross the transport boundary** | `src/workflow/*`, `src/cluster/*` |
-| 12 | Agent-operable runtime layer | **bounded interventions, counterfactuals, invariants, evals, semantic diffs, live command executor/tap, poll bridge, local daemon harness, eval diff artifacts/links/manifests** | `src/services/agent_intervention.zig`, `counterfactual.zig`, `causal_invariant.zig`, `agent_eval.zig`, `causal_diff.zig`, `causal_live_command.zig` |
-| 13 | Production-operable guardrails | **live commands, concurrency facts, transport policy/discovery registry, ops storage/alert policy, gated ops artifact responses, alert delivery envelopes** | `workbench/src/collector`, `src/services/causal_concurrency.zig`, `src/services/causal_ops.zig`, `causal_ops_storage.zig`, `causal_ops_alert.zig`, `src/cluster/transport.zig` |
+| 11 | Durable workflows + clustering | **scheduler runs on zio; loopback + remote socket wrappers cross the transport boundary; discovery snapshots refresh the local registry** | `src/workflow/*`, `src/cluster/*` |
+| 12 | Agent-operable runtime layer | **bounded interventions, counterfactuals, invariants, evals, semantic diffs, live command executor/tap, poll bridge, local daemon/engine bridge, eval diff artifacts/links/manifests** | `src/services/agent_intervention.zig`, `counterfactual.zig`, `causal_invariant.zig`, `agent_eval.zig`, `causal_diff.zig`, `causal_live_command.zig` |
+| 13 | Production-operable guardrails | **live commands, concurrency facts, transport policy/discovery registry, ops storage/alert policy, gated ops artifact responses, alert delivery/webhook envelopes** | `workbench/src/collector`, `src/services/causal_concurrency.zig`, `src/services/causal_ops.zig`, `causal_ops_storage.zig`, `causal_ops_alert.zig`, `src/cluster/transport.zig` |
 | 14 | Multi-runner causal evidence | **local lineage stitcher plus deployment artifact metadata** | `src/services/causal_runner_lineage.zig` |
 
 ## What is real today
@@ -105,6 +105,10 @@ semantic fact comparison, not exact event-id graph isomorphism.
 - **Linked eval diff manifest.** `formatAgentEvalLinkedDiffManifestJson` emits
   `zigeffect.causal.agent-eval-linked-manifest.v1` to point at the diff artifact
   and link artifact from one manifest.
+- **Linked eval diff manifest writer.**
+  `runAgentEvalAndWriteLinkedDiffManifest` writes the eval diff artifact,
+  remediation link, and linked manifest through caller-owned sinks in one eval
+  flow.
 - **Bidirectional live debugging transport primitives.** The Bun collector now
   accepts `POST /command`, broadcasts redacted command frames, and the workbench
   live layer can send bounded command requests. Applying commands still belongs
@@ -125,6 +129,9 @@ semantic fact comparison, not exact event-id graph isomorphism.
   hook between non-empty cycles, and reports cycle/poll/command/error counts.
 - **Daemon lifecycle evidence.** `runLiveCommandDaemon` can emit caller-owned
   lifecycle events for start, cycle, error, and stop transitions.
+- **Live engine command daemon bridge.** `runLiveEngineCommandDaemon` wires the
+  local command daemon to a caller-owned engine bridge, aggregates tap counters,
+  and forwards engine-produced `LiveFrame`s to a caller-owned emitter.
 - **Bounded live command poll loop.** `runCausalLiveCommandPollLoop` repeatedly
   calls a caller-provided poller up to a fixed limit, applies decoded command
   batches through engine policy, aggregates tap counters, and stops on an empty
@@ -160,10 +167,13 @@ semantic fact comparison, not exact event-id graph isomorphism.
   caller-provided sink, and `formatCausalOpsRunbookJson` emits a redacted local
   operator runbook artifact.
 - **Ops alert delivery envelope.** `formatCausalOpsAlertDeliveryJson` turns an
-  alert fact into redacted `zigeffect.causal.ops-alert-delivery.v1` JSON that a
-  future external delivery adapter can send without seeing raw sentinel text.
+  alert fact into redacted `zigeffect.causal.ops-alert-delivery.v1` JSON that
+  external delivery adapters can send without seeing raw sentinel text.
 - **Ops alert delivery sink.** `deliverCausalOpsAlert` formats the redacted
   delivery envelope and hands it to a caller-provided delivery sink.
+- **Ops alert webhook request adapter.** `deliverCausalOpsAlertWebhook` formats a
+  redacted alert delivery body, attaches fixed JSON/no-store/nosniff headers,
+  and hands the `POST` request shape to a caller-owned HTTP sink.
 - **Multi-runner lineage stitching.** `stitchCausalRunnerLineage` merges
   runner-labeled causal traces and reports cross-runner `cause_event_id` edges as
   structured facts for agents.
@@ -185,6 +195,9 @@ semantic fact comparison, not exact event-id graph isomorphism.
   `InMemoryClusterTransportServiceDiscovery` owns discovered endpoint host
   strings, supports upsert, and selects safe candidates against the configured
   requirements.
+- **External service-discovery snapshot refresh.**
+  `refreshFromSnapshot` imports caller-provided discovered endpoints into the
+  owned registry and returns source metadata plus the validated selection.
 - **Schema governance for the agentic artifact surface.** The schema governance
   inventory now tracks semantic diff, eval diff, eval diff links, ops artifact
   response, ops runbook, ops alert delivery, and runner lineage artifact
@@ -249,31 +262,33 @@ substrates into real deployed systems:
 1. **Network-connected command taps.** `applyCausalLiveCommand`,
    `runCausalLiveCommandTapBatch`, the collector's pollable command inbox,
    typed inbox client, local TypeScript polling loop, local daemon harness with
-   lifecycle evidence, core poll bridge, and bounded engine poll loop exist, but
-   a running engine still needs a real process wrapper that wires the local
-   harness to the engine poll bridge and streams resulting causal facts back to
-   the browser.
+   lifecycle evidence, core poll bridge, bounded engine poll loop, and
+   `runLiveEngineCommandDaemon` bridge exist. A running engine still needs a
+   real host process that supplies the bridge implementation and streams its
+   engine-produced facts back to the browser.
 2. **Real multi-node cluster deployment.** The transport validates TLS/pool/
    backpressure policy and propagates origin causal ids, and
    `stitchCausalRunnerLineage` can merge runner traces, emit deployment metadata
    artifacts, validate metadata posture, reject unsafe discovered endpoints,
-   select the first safe candidate, and keep an in-memory discovery registry.
-   Next: real TLS handshakes, an external service-discovery backend, auth
-   rotation, live health-checked pool maintenance, and stitched lineage from
-   separate runner processes.
+   select the first safe candidate, keep an in-memory discovery registry, and
+   refresh it from external discovery snapshots. Next: real TLS handshakes, a
+   concrete discovery provider, auth rotation, live health-checked pool
+   maintenance, and stitched lineage from separate runner processes.
 3. **Diff/eval integration.** The workbench renders portable `semantic_diff`
    payloads, evals can emit linked diff artifacts, the new artifact schemas are
    governed, evals can write artifacts to caller sinks, the runtime can write
-   remediation-chain artifact links alongside diff artifacts, and a manifest can
-   bind both artifact paths. Next: have dev-loop tools call the linked writer
-   from real remediation flows and persist the resulting artifacts automatically.
+   remediation-chain artifact links alongside diff artifacts, a manifest can bind
+   both artifact paths, and one helper can write all three artifacts through
+   caller sinks. Next: have dev-loop tools call the manifest writer from real
+   remediation flows and persist the resulting artifacts automatically.
 4. **External operator integrations.** `CausalOpsPolicy`, NenDB reads, alert
    sinks, access-controlled artifact responses, local runbook JSON, alert
    delivery envelopes, delivery-sink hooks, HTTP-shaped artifact responses,
-   method/path-gated request adapters, and fixed security/cache headers exist.
-   Next: actual external alert provider adapters, served artifact endpoints,
-   deployment metadata ingestion from real deployments, and operator-facing
-   runbooks generated from live deployments.
+   method/path-gated request adapters, fixed security/cache headers, and webhook
+   request shapes for alert providers exist. Next: actual provider-specific
+   delivery implementations, served artifact endpoints, deployment metadata
+   ingestion from real deployments, and operator-facing runbooks generated from
+   live deployments.
 
 ## Hardening milestone roadmap
 
@@ -1116,6 +1131,72 @@ remediation-link artifacts.
 - Tests prove allowed, denied, method-error, and path-error responses carry the
   expected headers.
 
+### M48 — Live engine command daemon bridge
+
+**Status:** delivered on 2026-06-24 via `runLiveEngineCommandDaemon`.
+
+**Goal:** connect the local collector polling daemon to a caller-owned running
+engine bridge without importing Zig into the workbench tooling.
+
+**Work:**
+- Delegate non-empty command inbox batches to a caller-owned `applyBatch`.
+- Aggregate processed/applied/rejected/human-review counts.
+- Forward engine-produced `LiveFrame`s to a caller-owned emitter.
+
+**Acceptance:**
+- Bun tests prove command batches are applied, causal frames are emitted, and tap
+  counters are aggregated.
+
+### M49 — External service-discovery snapshot refresh
+
+**Status:** delivered on 2026-06-24 via
+`InMemoryClusterTransportServiceDiscovery.refreshFromSnapshot`.
+
+**Goal:** let external discovery providers feed the local registry as data while
+preserving deterministic validation and selection.
+
+**Work:**
+- Add a snapshot shape with source and observation metadata.
+- Upsert snapshot endpoints into the owned registry.
+- Return source/import counts, registry size, and validated endpoint selection.
+
+**Acceptance:**
+- Tests prove a snapshot imports unsafe and safe endpoints, keeps source
+  metadata, and selects the safe endpoint.
+
+### M50 — Linked eval diff manifest writer
+
+**Status:** delivered on 2026-06-24 via
+`runAgentEvalAndWriteLinkedDiffManifest`.
+
+**Goal:** make dev-loop/remediation artifact persistence one call rather than
+three duplicated sink writes.
+
+**Work:**
+- Run the eval and build the existing semantic diff artifact.
+- Write diff artifact, remediation link artifact, and linked manifest through
+  caller-owned sinks.
+
+**Acceptance:**
+- Tests prove one eval call writes exactly one diff, one link, and one manifest
+  artifact with the expected schema/path evidence.
+
+### M51 — Ops alert webhook request adapter
+
+**Status:** delivered on 2026-06-24 via `deliverCausalOpsAlertWebhook`.
+
+**Goal:** give external alert providers a redacted HTTP request shape without
+embedding network IO in the deterministic core.
+
+**Work:**
+- Format a `POST` request with fixed JSON/no-store/nosniff headers.
+- Use the existing redacted `ops-alert-delivery.v1` body.
+- Send the request shape to a caller-owned HTTP sink.
+
+**Acceptance:**
+- Tests prove the request method, endpoint, headers, schema body, and sentinel
+  redaction.
+
 ## Delivered since 2026-06-20
 
 The forward sequence from the prior roadmap is largely done. Tracked in
@@ -1133,18 +1214,19 @@ The forward sequence from the prior roadmap is largely done. Tracked in
 - One loopback cluster transport crosses localhost TCP, and the remote socket
   wrapper adds auth preflight, reconnect attempts, transport policy validation,
   origin causal ids, metrics, and redacted failure handling.
-- The M6-M47 agentic engine layer now covers bounded interventions,
+- The M6-M51 agentic engine layer now covers bounded interventions,
   counterfactual trace forks, reusable invariants, semantic graph diffs, live
   command transport primitives plus engine execution/taps, collector polling,
   typed inbox validation, local polling and daemon harnesses with lifecycle
-  evidence, poll-batch cursor bridging, and bounded poll loops, concurrency
-  annotations, transport hardening plus service-discovery validation/selection
-  and an in-memory registry, ops guardrails/storage/alert/artifact/delivery
-  adapters with delivery sinks, HTTP-shaped responses, fixed headers, and
+  evidence, live engine bridge wiring, poll-batch cursor bridging, and bounded
+  poll loops, concurrency annotations, transport hardening plus service-discovery
+  validation/selection, an in-memory registry, and snapshot refresh, ops
+  guardrails/storage/alert/artifact/delivery adapters with delivery sinks,
+  webhook request shapes, HTTP-shaped responses, fixed headers, and
   method/path-gated request adapters, schema-governed visual/emitted/eval-linked
-  diff evidence with writer sinks, remediation links, and linked manifests, and
-  multi-runner lineage stitching with deployment artifact metadata and
-  validation.
+  diff evidence with writer sinks, remediation links, linked manifests, and a
+  manifest writer, and multi-runner lineage stitching with deployment artifact
+  metadata and validation.
 
 ## June 2026 cleanup note
 

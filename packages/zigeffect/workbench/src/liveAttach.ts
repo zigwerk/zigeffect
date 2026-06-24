@@ -7,11 +7,10 @@
 // artifact model every existing view (timeline, graph, findings, …) already
 // renders — so live mode reuses the whole UI rather than adding a parallel one.
 //
-// HONEST BOUNDARY: the collector endpoint now exists under `src/collector/` and
-// maps engine NDJSON into LiveFrame WebSocket messages. The remaining proof gap
-// is browser-level verification that a real collector stream renders in the
-// workbench DOM, not only unit tests around the transport abstraction and frame
-// parser.
+// HONEST BOUNDARY: the collector endpoint now exists under `src/collector/`,
+// maps engine NDJSON into LiveFrame WebSocket messages, and has browser-level
+// proof. The remaining gap is a real long-lived host process that wires the
+// local command polling harness to the engine-side policy bridge.
 
 import { createSignal, onCleanup } from "solid-js";
 import type { UnknownRecord } from "./causalArtifact";
@@ -89,6 +88,27 @@ export type LiveCommandDaemonResult = {
   errors: number;
   next_after: number;
   stopped: boolean;
+};
+
+export type LiveCommandEngineBatchResult = {
+  processed: number;
+  applied: number;
+  rejected: number;
+  needs_human_review: number;
+  frames?: LiveFrame[];
+};
+
+export type LiveCommandEngineBridge = {
+  applyBatch: (inbox: LiveCommandInboxResponse) => LiveCommandEngineBatchResult | Promise<LiveCommandEngineBatchResult>;
+  emitFrame?: (frame: LiveFrame) => void | Promise<void>;
+};
+
+export type LiveEngineCommandDaemonResult = LiveCommandDaemonResult & {
+  processed: number;
+  applied: number;
+  rejected: number;
+  needs_human_review: number;
+  emitted_frames: number;
 };
 
 export type LiveCommandDaemonLifecycleEvent =
@@ -347,6 +367,45 @@ export async function runLiveCommandDaemon(
   const result = { cycles, polls, commands, errors, next_after: cursor, stopped };
   await emitLifecycle({ kind: "stopped", ...result });
   return result;
+}
+
+export async function runLiveEngineCommandDaemon(
+  url: string,
+  bridge: LiveCommandEngineBridge,
+  options: LiveCommandDaemonOptions = {},
+  fetcher: LiveCommandFetcher = fetch,
+): Promise<LiveEngineCommandDaemonResult> {
+  const engine = {
+    processed: 0,
+    applied: 0,
+    rejected: 0,
+    needs_human_review: 0,
+    emitted_frames: 0,
+  };
+
+  const daemon = await runLiveCommandDaemon(
+    url,
+    async (inbox) => {
+      if (inbox.commands.length === 0) {
+        return;
+      }
+      const batch = await bridge.applyBatch(inbox);
+      engine.processed += batch.processed;
+      engine.applied += batch.applied;
+      engine.rejected += batch.rejected;
+      engine.needs_human_review += batch.needs_human_review;
+      if (bridge.emitFrame) {
+        for (const nextFrame of batch.frames ?? []) {
+          await bridge.emitFrame(nextFrame);
+          engine.emitted_frames += 1;
+        }
+      }
+    },
+    options,
+    fetcher,
+  );
+
+  return { ...daemon, ...engine };
 }
 
 /** Pull `frames` out of a full live-stream document (the sample fixture shape). */

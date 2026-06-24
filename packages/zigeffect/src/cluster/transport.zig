@@ -551,6 +551,12 @@ pub const ClusterTransportServiceDiscoveryRequirements = struct {
     min_auth_epoch: u64 = 0,
 };
 
+pub const ClusterTransportServiceDiscoverySnapshot = struct {
+    source: []const u8 = "",
+    observed_at_ms: u64 = 0,
+    endpoints: []const ClusterTransportDiscoveredEndpoint,
+};
+
 pub const ClusterTransportServiceDiscoveryReport = struct {
     checked: usize = 0,
     missing_host: usize = 0,
@@ -572,6 +578,14 @@ pub const ClusterTransportServiceDiscoverySelection = struct {
     report: ClusterTransportServiceDiscoveryReport,
     selected_index: ?usize = null,
     selected: ?ClusterTransportDiscoveredEndpoint = null,
+};
+
+pub const ClusterTransportServiceDiscoveryRefreshReport = struct {
+    source: []const u8 = "",
+    observed_at_ms: u64 = 0,
+    imported: usize = 0,
+    registry_size: usize = 0,
+    selection: ClusterTransportServiceDiscoverySelection,
 };
 
 pub const InMemoryClusterTransportServiceDiscovery = struct {
@@ -628,6 +642,23 @@ pub const InMemoryClusterTransportServiceDiscovery = struct {
         }
 
         try self.endpoints.append(self.allocator, owned);
+    }
+
+    pub fn refreshFromSnapshot(
+        self: *InMemoryClusterTransportServiceDiscovery,
+        snapshot: ClusterTransportServiceDiscoverySnapshot,
+    ) Allocator.Error!ClusterTransportServiceDiscoveryRefreshReport {
+        for (snapshot.endpoints) |endpoint| {
+            try self.upsert(endpoint);
+        }
+
+        return .{
+            .source = snapshot.source,
+            .observed_at_ms = snapshot.observed_at_ms,
+            .imported = snapshot.endpoints.len,
+            .registry_size = self.endpoints.items.len,
+            .selection = self.select(),
+        };
     }
 
     pub fn select(self: *const InMemoryClusterTransportServiceDiscovery) ClusterTransportServiceDiscoverySelection {

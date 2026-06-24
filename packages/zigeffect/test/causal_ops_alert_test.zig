@@ -19,6 +19,15 @@ const AlertCapture = struct {
     }
 };
 
+fn hasAlertHeader(headers: []const fx.CausalOpsAlertHttpHeader, name: []const u8, value: []const u8) bool {
+    for (headers) |header| {
+        if (std.mem.eql(u8, header.name, name) and std.mem.eql(u8, header.value, value)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 test "ops alert sink emits alert facts only" {
     var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
@@ -133,5 +142,67 @@ test "ops alert delivery sink receives redacted delivery envelope" {
 
     try std.testing.expectEqual(@as(usize, 1), capture.delivered);
     try std.testing.expect(capture.saw_delivery_schema);
+    try std.testing.expect(!capture.saw_secret);
+}
+
+const WebhookCapture = struct {
+    sent: usize = 0,
+    saw_method: bool = false,
+    saw_url: bool = false,
+    saw_headers: bool = false,
+    saw_schema: bool = false,
+    saw_secret: bool = false,
+
+    fn sink(self: *WebhookCapture) fx.CausalOpsAlertHttpSink {
+        return .{
+            .state = self,
+            .send = send,
+        };
+    }
+
+    fn send(raw: ?*anyopaque, request: fx.CausalOpsAlertHttpRequest) anyerror!void {
+        const self: *WebhookCapture = @ptrCast(@alignCast(raw.?));
+        self.sent += 1;
+        self.saw_method = std.mem.eql(u8, request.method, "POST");
+        self.saw_url = std.mem.eql(u8, request.url, "https://alerts.internal/hook");
+        self.saw_headers =
+            hasAlertHeader(request.headers, "content-type", "application/json") and
+            hasAlertHeader(request.headers, "cache-control", "no-store") and
+            hasAlertHeader(request.headers, "x-content-type-options", "nosniff");
+        self.saw_schema = std.mem.indexOf(u8, request.body, "\"schema\":\"zigeffect.causal.ops-alert-delivery.v1\"") != null;
+        self.saw_secret = std.mem.indexOf(u8, request.body, "sentinel-secret") != null;
+    }
+};
+
+test "ops alert webhook adapter sends redacted http request shape" {
+    var capture = WebhookCapture{};
+
+    try fx.deliverCausalOpsAlertWebhook(std.testing.allocator, .{
+        .endpoint_url = "https://alerts.internal/hook",
+        .delivery = .{
+            .deployment = .{
+                .service = "zigeffect",
+                .environment = "prod",
+                .region = "eu-west",
+                .cluster_id = "cluster-a",
+            },
+            .delivery_kind = "webhook",
+            .endpoint_id = "pager-duty-primary",
+            .event = .{
+                .id = 44,
+                .kind = .alert_emitted,
+                .status = "emitted",
+                .label = "retention password=sentinel-secret threshold",
+                .type_name = "retention.threshold",
+                .redacted_detail = "token=sentinel-secret",
+            },
+        },
+    }, capture.sink());
+
+    try std.testing.expectEqual(@as(usize, 1), capture.sent);
+    try std.testing.expect(capture.saw_method);
+    try std.testing.expect(capture.saw_url);
+    try std.testing.expect(capture.saw_headers);
+    try std.testing.expect(capture.saw_schema);
     try std.testing.expect(!capture.saw_secret);
 }

@@ -1103,6 +1103,45 @@ test "in-memory remote transport service discovery owns endpoints and selects sa
     try std.testing.expectEqualStrings("runner-a.internal", selection.selected.?.host);
 }
 
+test "service discovery refresh imports external snapshots and selects safe endpoint" {
+    var discovery = fx.InMemoryClusterTransportServiceDiscovery.init(std.testing.allocator, .{
+        .require_tls = true,
+        .require_healthy = true,
+        .min_auth_epoch = 5,
+    });
+    defer discovery.deinit();
+
+    const endpoints = [_]fx.ClusterTransportDiscoveredEndpoint{
+        .{
+            .host = "runner-unsafe.internal",
+            .port = 7001,
+            .tls_enabled = false,
+            .healthy = true,
+            .auth_epoch = 5,
+        },
+        .{
+            .host = "runner-safe.internal",
+            .port = 7002,
+            .tls_enabled = true,
+            .healthy = true,
+            .auth_epoch = 8,
+        },
+    };
+
+    const refresh = try discovery.refreshFromSnapshot(.{
+        .source = "consul-dev",
+        .observed_at_ms = 1234,
+        .endpoints = &endpoints,
+    });
+
+    try std.testing.expectEqual(@as(usize, 2), refresh.imported);
+    try std.testing.expectEqual(@as(usize, 2), refresh.registry_size);
+    try std.testing.expectEqual(@as(u64, 1234), refresh.observed_at_ms);
+    try std.testing.expectEqualStrings("consul-dev", refresh.source);
+    try std.testing.expect(refresh.selection.selected != null);
+    try std.testing.expectEqualStrings("runner-safe.internal", refresh.selection.selected.?.host);
+}
+
 test "remote socket transport applies reject backpressure before durable submission" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

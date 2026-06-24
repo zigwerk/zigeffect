@@ -42,6 +42,40 @@ pub const CausalOpsAlertDeliverySink = struct {
     deliver: *const fn (?*anyopaque, json: []const u8) anyerror!void,
 };
 
+pub const CausalOpsAlertHttpHeader = struct {
+    name: []const u8,
+    value: []const u8,
+};
+
+pub const causal_ops_alert_http_headers: []const CausalOpsAlertHttpHeader = &.{
+    .{ .name = "content-type", .value = "application/json" },
+    .{ .name = "cache-control", .value = "no-store" },
+    .{ .name = "x-content-type-options", .value = "nosniff" },
+};
+
+pub const CausalOpsAlertHttpRequest = struct {
+    allocator: Allocator,
+    method: []const u8,
+    url: []const u8,
+    headers: []const CausalOpsAlertHttpHeader = causal_ops_alert_http_headers,
+    body: []const u8,
+
+    pub fn deinit(self: *CausalOpsAlertHttpRequest) void {
+        if (self.body.len > 0) self.allocator.free(self.body);
+        self.body = "";
+    }
+};
+
+pub const CausalOpsAlertWebhookOptions = struct {
+    endpoint_url: []const u8,
+    delivery: CausalOpsAlertDeliveryOptions,
+};
+
+pub const CausalOpsAlertHttpSink = struct {
+    state: ?*anyopaque = null,
+    send: *const fn (?*anyopaque, CausalOpsAlertHttpRequest) anyerror!void,
+};
+
 pub fn emitCausalOpsAlerts(
     store: *const CausalStore,
     sink: CausalOpsAlertSink,
@@ -134,6 +168,29 @@ pub fn deliverCausalOpsAlert(
     const json = try formatCausalOpsAlertDeliveryJson(allocator, options);
     defer allocator.free(json);
     try sink.deliver(sink.state, json);
+}
+
+pub fn formatCausalOpsAlertWebhookRequest(
+    allocator: Allocator,
+    options: CausalOpsAlertWebhookOptions,
+) Allocator.Error!CausalOpsAlertHttpRequest {
+    const body = try formatCausalOpsAlertDeliveryJson(allocator, options.delivery);
+    return .{
+        .allocator = allocator,
+        .method = "POST",
+        .url = options.endpoint_url,
+        .body = body,
+    };
+}
+
+pub fn deliverCausalOpsAlertWebhook(
+    allocator: Allocator,
+    options: CausalOpsAlertWebhookOptions,
+    sink: CausalOpsAlertHttpSink,
+) anyerror!void {
+    var request = try formatCausalOpsAlertWebhookRequest(allocator, options);
+    defer request.deinit();
+    try sink.send(sink.state, request);
 }
 
 fn appendRedactedJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []const u8) Allocator.Error!void {

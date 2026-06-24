@@ -56,6 +56,13 @@ pub const AgentEvalDiffArtifactLinkWriteOptions = struct {
     artifact_id: []const u8 = "",
 };
 
+pub const AgentEvalLinkedDiffArtifactWriteOptions = struct {
+    diff_artifact_path: []const u8,
+    diff_artifact_id: []const u8 = "",
+    link_artifact_path: []const u8,
+    link_artifact_id: []const u8 = "",
+};
+
 pub const AgentEvalLinkedDiffManifestOptions = struct {
     eval_name: []const u8,
     diff_artifact_path: []const u8,
@@ -168,6 +175,43 @@ pub fn runAgentEvalAndWriteLinkedDiffArtifact(
     });
     defer allocator.free(link);
     try link_sink.write(link_sink.state, link);
+
+    return artifact.result;
+}
+
+pub fn runAgentEvalAndWriteLinkedDiffManifest(
+    allocator: std.mem.Allocator,
+    options: AgentEvalOptions,
+    before_artifact: []const u8,
+    after_artifact: []const u8,
+    write_options: AgentEvalLinkedDiffArtifactWriteOptions,
+    artifact_sink: AgentEvalDiffArtifactSink,
+    link_sink: AgentEvalDiffArtifactSink,
+    manifest_sink: AgentEvalDiffArtifactSink,
+) anyerror!AgentEvalResult {
+    var artifact = try runAgentEvalWithDiffArtifact(allocator, options, before_artifact, after_artifact);
+    defer artifact.deinit();
+    try artifact_sink.write(artifact_sink.state, artifact.json);
+
+    const link = try formatAgentEvalDiffArtifactLinkJson(allocator, .{
+        .eval_name = options.name,
+        .artifact_path = write_options.diff_artifact_path,
+        .artifact_id = write_options.diff_artifact_id,
+        .result = artifact.result,
+    });
+    defer allocator.free(link);
+    try link_sink.write(link_sink.state, link);
+
+    const manifest = try formatAgentEvalLinkedDiffManifestJson(allocator, .{
+        .eval_name = options.name,
+        .diff_artifact_path = write_options.diff_artifact_path,
+        .link_artifact_path = write_options.link_artifact_path,
+        .diff_artifact_id = write_options.diff_artifact_id,
+        .link_artifact_id = write_options.link_artifact_id,
+        .result = artifact.result,
+    });
+    defer allocator.free(manifest);
+    try manifest_sink.write(manifest_sink.state, manifest);
 
     return artifact.result;
 }
