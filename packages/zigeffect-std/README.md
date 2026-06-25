@@ -39,10 +39,13 @@ bun run zigeffect:std:test
 - `Env` provides an owned environment map for deterministic local runs.
 - `Config` resolves layered key/value config with redacted display values.
 - `Secrets` provides shared redaction and secret-display helpers.
-- `FileSystem` provides an in-memory file system for tests and local tools.
+- `FileSystem` provides memory and real local file-system adapters plus
+  effect-native read/write/delete/exists operations.
 - `Path` joins, normalizes, and splits project paths.
-- `Workspace` models local project roots, snapshots, and changed files.
-- `Process` provides a fakeable command runner and redacted run receipts.
+- `Workspace` models local project roots, snapshots, changed files, ignore
+  filtering, and effect-native snapshot/diff operations.
+- `Process` provides fake and real local command runners with bounded capture,
+  effect-native execution, and redacted run receipts.
 - `Testing` provides JSON and sentinel-secret assertions.
 - `Clock` provides deterministic fake time.
 - `Schedule` provides deterministic retry/polling steppers.

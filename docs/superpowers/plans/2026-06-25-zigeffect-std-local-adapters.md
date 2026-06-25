@@ -34,7 +34,7 @@ causal facts.
 
 ## Task 1: FileSystem Service And Live Adapter
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests:
 
@@ -51,7 +51,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because effect APIs and local adapter are missing.
 
-- [ ] **Step 2: Implement FileSystem APIs**
+- [x] **Step 2: Implement FileSystem APIs**
 
 Implement:
 
@@ -66,7 +66,7 @@ pub const LocalFileSystem = struct { ... };
 Memory and local adapters must share the same small method surface where
 possible and redact path/content diagnostics.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -78,7 +78,7 @@ Expected: tests pass.
 
 ## Task 2: Process Service And Live Runner
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests:
 
@@ -95,7 +95,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because runner services/effects and live runner are missing.
 
-- [ ] **Step 2: Implement Process APIs**
+- [x] **Step 2: Implement Process APIs**
 
 Implement:
 
@@ -110,7 +110,7 @@ The local runner must use `std.process.run`, enforce stdout/stderr limits, free
 owned process buffers, redact argv/env/cwd/stdout/stderr receipts, and record
 causal facts.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -122,7 +122,7 @@ Expected: tests pass.
 
 ## Task 3: Workspace Service Effects
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests:
 
@@ -140,7 +140,7 @@ cd packages/zigeffect-std && zig build test
 Expected: fail because workspace service/effects and ignore filtering are
 missing.
 
-- [ ] **Step 2: Implement Workspace APIs**
+- [x] **Step 2: Implement Workspace APIs**
 
 Implement:
 
@@ -155,7 +155,7 @@ pub fn diffEffect(...);
 Workspace effects must use the filesystem service and record root/snapshot/diff
 facts while keeping paths secret-safe.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -167,15 +167,15 @@ Expected: tests pass.
 
 ## Task 4: Docs And Gate
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
 Update README and roadmap wording for delivered M6 local adapters.
 
-- [ ] **Step 2: Mark checkboxes complete**
+- [x] **Step 2: Mark checkboxes complete**
 
 Replace completed `- [ ]` with `- [x]`.
 
-- [ ] **Step 3: Final verification**
+- [x] **Step 3: Final verification**
 
 Run:
 
