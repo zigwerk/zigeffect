@@ -1,0 +1,5 @@
+{"sequence":1,"kind":"agent_status","agent_id":"codex","agent_kind":"codex","agent_label":"Codex","status":"running","task":"implementing local session feed"}
+{"sequence":2,"kind":"agent_status","agent_id":"claude-code","agent_kind":"claude-code","agent_label":"Claude Code","status":"reviewing","task":"reviewing local adapter contract"}
+{"sequence":3,"kind":"check_result","label":"bun run zigeffect:workbench:test","status":"pass","command":"bun run zigeffect:workbench:test","detail":"local workbench tests passed"}
+{"sequence":4,"kind":"artifact_link","key":"agent_activity","path":".zig-cache/causal-artifacts/local-agent-activity.jsonl"}
+{"sequence":5,"kind":"guardrail","value":"do not claim verification without a recorded local gate result"}

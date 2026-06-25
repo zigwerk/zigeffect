@@ -333,7 +333,7 @@ export type LocalDevArtifactModel = {
   key: string;
   label: string;
   path: string;
-  kind: "json" | "text" | "markdown" | "other";
+  kind: "json" | "jsonl" | "text" | "markdown" | "other";
   workbenchCommand: string | null;
 };
 
@@ -1765,6 +1765,9 @@ function localDevArtifactLabel(key: string): string {
 function localDevArtifactKind(path: string): LocalDevArtifactModel["kind"] {
   if (path.endsWith(".json")) {
     return "json";
+  }
+  if (path.endsWith(".jsonl") || path.endsWith(".ndjson")) {
+    return "jsonl";
   }
   if (path.endsWith(".md")) {
     return "markdown";

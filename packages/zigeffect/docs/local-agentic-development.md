@@ -39,6 +39,15 @@ bun run zigeffect:workbench:dev -- --port 5178
 
 Then visit `http://127.0.0.1:5178/?sample=dev-session`.
 
+Codex, Claude Code, and local scripts can append activity through the JSONL
+contract in `local-agent-adapters.md`.
+
+Before handing a session to another local agent, run:
+
+```sh
+bun run zigeffect:local-agent-gate
+```
+
 ## What the local cockpit should show
 
 - session goal, target, phase, and status;
