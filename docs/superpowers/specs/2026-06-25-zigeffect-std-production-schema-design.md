@@ -2,6 +2,8 @@
 
 Date: 2026-06-25
 
+Status: delivered on 2026-06-26.
+
 ## Decision
 
 Upgrade `zstd.Schema` from a useful boundary helper into the production data

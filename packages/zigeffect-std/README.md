@@ -26,7 +26,8 @@ bun run zigeffect:std:test
 
 - `Service` provides the effect-native service kernel for providers, access
   effects, layers, and causal service facts.
-- `Schema` validates and decodes JSON/config boundaries with typed errors.
+- `Schema` validates, decodes, encodes, transforms, and derives JSON/config
+  boundaries with path-aware redacted issue lists.
 - `Json` writes deterministic redacted JSON payloads.
 - `Jsonl` appends and parses newline-delimited JSON feeds.
 - `Stream` re-exports engine pull streams and adds local line helpers.
@@ -98,6 +99,49 @@ zstd.Sql
 zstd.Http
 zstd.Agent
 ```
+
+## Schema
+
+Use the simple APIs when a fast-fail boundary is enough:
+
+```zig
+const port = try zstd.Schema.decodeJsonAlloc(
+    allocator,
+    zstd.Schema.integer().min(1).max(65535),
+    "5178",
+);
+```
+
+Use detailed decoding for production CLI/config/API boundaries where callers
+need every failure at once:
+
+```zig
+const AppConfig = struct {
+    name: []const u8,
+    port: i64,
+    enabled: bool,
+    mode: ?[]const u8,
+};
+
+const schema = zstd.Schema.derive(AppConfig, .{
+    .name = zstd.Schema.string().nonEmpty(),
+    .port = zstd.Schema.integer().min(1).max(65535),
+    .enabled = zstd.Schema.boolean(),
+    .mode = zstd.Schema.optional(zstd.Schema.stringEnum(&.{ "local", "ci" })),
+});
+
+var result = try zstd.Schema.decodeDetailedJsonAlloc(allocator, schema, json);
+defer result.deinit();
+
+if (!result.ok()) {
+    const issues_json = try result.issues.jsonAlloc(allocator);
+    defer allocator.free(issues_json);
+}
+```
+
+Schemas support primitive constraints, defaults, arrays, structs, enums, named
+transforms with inverse encoders, config decoding, deterministic JSON encoding,
+and redacted issue JSON.
 
 ## Example
 
