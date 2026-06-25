@@ -3,6 +3,7 @@ const std = @import("std");
 pub const OptionKind = enum {
     string,
     boolean,
+    integer,
 };
 
 pub const OptionSpec = struct {
@@ -25,6 +26,16 @@ pub const CliError = error{
     MissingOptionValue,
     MissingRequiredOption,
     UnknownSubcommand,
+    InvalidInteger,
+};
+
+pub const ExitCode = enum(i32) {
+    success = 0,
+    usage = 64,
+    config = 78,
+    io = 74,
+    interrupted = 130,
+    defect = 70,
 };
 
 pub const ParsedOption = struct {
@@ -100,13 +111,26 @@ pub fn parse(
             const option = findOption(active, name) orelse return CliError.UnknownOption;
             const value: ?[]const u8 = switch (option.kind) {
                 .boolean => "true",
-                .string => blk: {
+                .string, .integer => blk: {
                     if (equals) |eq| break :blk raw[eq + 1 ..];
                     if (index + 1 >= args.len) return CliError.MissingOptionValue;
                     index += 1;
                     break :blk args[index];
                 },
             };
+            try validateOptionValue(option, value);
+            try options.append(allocator, .{ .name = option.name, .value = value });
+        } else if (std.mem.startsWith(u8, arg, "-") and arg.len == 2) {
+            const option = findShortOption(active, arg[1]) orelse return CliError.UnknownOption;
+            const value: ?[]const u8 = switch (option.kind) {
+                .boolean => "true",
+                .string, .integer => blk: {
+                    if (index + 1 >= args.len) return CliError.MissingOptionValue;
+                    index += 1;
+                    break :blk args[index];
+                },
+            };
+            try validateOptionValue(option, value);
             try options.append(allocator, .{ .name = option.name, .value = value });
         } else {
             try positionals.append(allocator, arg);
@@ -140,11 +164,27 @@ pub fn formatHelp(allocator: std.mem.Allocator, spec: CommandSpec) ![]const u8 {
         for (spec.options) |option| {
             switch (option.kind) {
                 .string => try output.print(allocator, "  --{s} <value>  {s}\n", .{ option.name, option.help }),
+                .integer => try output.print(allocator, "  --{s} <int>    {s}\n", .{ option.name, option.help }),
                 .boolean => try output.print(allocator, "  --{s}       {s}\n", .{ option.name, option.help }),
             }
         }
     }
     return output.toOwnedSlice(allocator);
+}
+
+pub fn exitCodeForError(err: anyerror) ExitCode {
+    return switch (err) {
+        CliError.UnknownOption,
+        CliError.MissingOptionValue,
+        CliError.MissingRequiredOption,
+        CliError.UnknownSubcommand,
+        CliError.InvalidInteger,
+        => .usage,
+        error.MissingVariable, error.MissingValue => .config,
+        error.FileNotFound, error.AccessDenied, error.PathAlreadyExists => .io,
+        error.Interrupted => .interrupted,
+        else => .defect,
+    };
 }
 
 pub fn formatRunReceiptJson(allocator: std.mem.Allocator, receipt: CliRunReceipt) ![]const u8 {
@@ -182,6 +222,21 @@ fn findOption(spec: CommandSpec, name: []const u8) ?OptionSpec {
         if (std.mem.eql(u8, option.name, name)) return option;
     }
     return null;
+}
+
+fn findShortOption(spec: CommandSpec, short: u8) ?OptionSpec {
+    for (spec.options) |option| {
+        if (option.short != null and option.short.? == short) return option;
+    }
+    return null;
+}
+
+fn validateOptionValue(option: OptionSpec, value: ?[]const u8) CliError!void {
+    if (option.kind == .integer) {
+        _ = std.fmt.parseInt(i64, value orelse return CliError.MissingOptionValue, 10) catch {
+            return CliError.InvalidInteger;
+        };
+    }
 }
 
 fn hasParsedOption(options: []const ParsedOption, name: []const u8) bool {
@@ -308,4 +363,27 @@ test "Cli formats command run receipt JSON" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"status\": \"success\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\": \"cli_command_started\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"detail\": \"success\"") != null);
+}
+
+test "Cli parses short flags and integer options" {
+    const command = CommandSpec{
+        .name = "zg",
+        .options = &.{
+            .{ .name = "verbose", .short = 'v', .kind = .boolean },
+            .{ .name = "count", .short = 'c', .kind = .integer, .required = true },
+        },
+    };
+
+    var parsed = try parse(std.testing.allocator, command, &.{ "-v", "-c", "3" });
+    defer parsed.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("true", parsed.optionValue("verbose").?);
+    try std.testing.expectEqualStrings("3", parsed.optionValue("count").?);
+}
+
+test "Cli maps errors to deterministic exit codes" {
+    try std.testing.expectEqual(ExitCode.usage, exitCodeForError(CliError.UnknownOption));
+    try std.testing.expectEqual(ExitCode.config, exitCodeForError(error.MissingVariable));
+    try std.testing.expectEqual(ExitCode.io, exitCodeForError(error.FileNotFound));
+    try std.testing.expectEqual(ExitCode.defect, exitCodeForError(error.Unexpected));
 }

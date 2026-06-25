@@ -1,6 +1,6 @@
 # zigeffect-std Expanded Surface Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Implement the approved `zigeffect-std` public surface so local zigeffect applications can import one package for JSON, CLI, config, local workspace, process, SQL/HTTP contracts, and agent session tooling.
 
@@ -36,7 +36,7 @@
 - Create: `packages/zigeffect-std/src/secrets/root.zig`
 - Modify: `packages/zigeffect-std/src/root.zig`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests named:
 
@@ -53,7 +53,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because `Secrets` is not exported.
 
-- [ ] **Step 2: Implement `Secrets`**
+- [x] **Step 2: Implement `Secrets`**
 
 Implement:
 
@@ -70,7 +70,7 @@ pub fn redactAlloc(allocator: std.mem.Allocator, input: []const u8) ![]const u8;
 
 The redactor must detect `sentinel-secret`, `password=`, `token=`, `authorization:`, `bearer `, `sk-`, and URLs with userinfo such as `postgres://user:pass@host/db`.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -87,7 +87,7 @@ Expected: tests pass.
 - Create: `packages/zigeffect-std/src/jsonl/root.zig`
 - Modify: `packages/zigeffect-std/src/root.zig`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests named:
 
@@ -106,7 +106,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because `Json` and `Jsonl` are not exported.
 
-- [ ] **Step 2: Implement `Json`**
+- [x] **Step 2: Implement `Json`**
 
 Implement:
 
@@ -119,7 +119,7 @@ pub fn objectFromFieldsAlloc(allocator: std.mem.Allocator, fields: []const Field
 `objectFromFieldsAlloc` must emit fields in caller-provided order and redact
 fields where `redact` is true or `Secrets.containsSecret(value)` returns true.
 
-- [ ] **Step 3: Implement `Jsonl`**
+- [x] **Step 3: Implement `Jsonl`**
 
 Implement:
 
@@ -133,7 +133,7 @@ pub fn appendRecordAlloc(allocator: std.mem.Allocator, existing: []const u8, rec
 pub fn parseLinesAlloc(allocator: std.mem.Allocator, input: []const u8) !ParsedLines;
 ```
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -152,7 +152,7 @@ Expected: tests pass.
 - Create: `packages/zigeffect-std/src/schedule/root.zig`
 - Modify: `packages/zigeffect-std/src/root.zig`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests named:
 
@@ -171,7 +171,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because the modules are not exported.
 
-- [ ] **Step 2: Implement `Path`**
+- [x] **Step 2: Implement `Path`**
 
 Implement:
 
@@ -183,7 +183,7 @@ pub fn dirname(path: []const u8) []const u8;
 pub fn extension(path: []const u8) []const u8;
 ```
 
-- [ ] **Step 3: Implement `Config`**
+- [x] **Step 3: Implement `Config`**
 
 Implement:
 
@@ -200,7 +200,7 @@ pub const LayeredConfig = struct {
 };
 ```
 
-- [ ] **Step 4: Implement `Clock` and `Schedule`**
+- [x] **Step 4: Implement `Clock` and `Schedule`**
 
 Implement:
 
@@ -222,7 +222,7 @@ pub fn fixed(delay_millis: u64, count: usize) Stepper;
 pub fn exponential(initial_millis: u64, factor: u64, count: usize) Stepper;
 ```
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run:
 
@@ -239,7 +239,7 @@ Expected: tests pass.
 - Create: `packages/zigeffect-std/src/workspace/root.zig`
 - Modify: `packages/zigeffect-std/src/root.zig`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests named:
 
@@ -258,7 +258,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because new filesystem APIs and `Workspace` are missing.
 
-- [ ] **Step 2: Expand `FileSystem`**
+- [x] **Step 2: Expand `FileSystem`**
 
 Add:
 
@@ -268,7 +268,7 @@ pub fn atomicWriteFile(self: *MemoryFileSystem, path: []const u8, content: []con
 pub fn diagnosticPathAlloc(allocator: std.mem.Allocator, path: []const u8) ![]const u8;
 ```
 
-- [ ] **Step 3: Implement `Workspace`**
+- [x] **Step 3: Implement `Workspace`**
 
 Implement:
 
@@ -285,7 +285,7 @@ pub fn freeSnapshot(allocator: std.mem.Allocator, snapshot: []const FileSnapshot
 pub fn freeDiff(allocator: std.mem.Allocator, diff: []const []const u8) void;
 ```
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -303,7 +303,7 @@ Expected: tests pass.
 - Modify: `packages/zigeffect-std/src/cli/root.zig`
 - Modify: `packages/zigeffect-std/src/root.zig`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests named:
 
@@ -322,7 +322,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because modules and CLI APIs are missing.
 
-- [ ] **Step 2: Implement `Process`**
+- [x] **Step 2: Implement `Process`**
 
 Implement:
 
@@ -337,7 +337,7 @@ pub const FakeRunner = struct {
 };
 ```
 
-- [ ] **Step 3: Implement `Testing`**
+- [x] **Step 3: Implement `Testing`**
 
 Implement:
 
@@ -346,7 +346,7 @@ pub fn assertEqualJson(expected: []const u8, actual: []const u8) !void;
 pub fn assertNoSentinelSecrets(text: []const u8) !void;
 ```
 
-- [ ] **Step 4: Expand `Cli`**
+- [x] **Step 4: Expand `Cli`**
 
 Add integer option support, short flag parsing such as `-v`, and:
 
@@ -355,7 +355,7 @@ pub const ExitCode = enum(i32) { success = 0, usage = 64, config = 78, io = 74, 
 pub fn exitCodeForError(err: anyerror) ExitCode;
 ```
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run:
 
@@ -365,14 +365,14 @@ cd packages/zigeffect-std && zig build test
 
 Expected: tests pass.
 
-## Task 6: Sql and Http Contracts
+ Sql and Http Contracts
 
 **Files:**
 - Create: `packages/zigeffect-std/src/sql/root.zig`
 - Create: `packages/zigeffect-std/src/http/root.zig`
 - Modify: `packages/zigeffect-std/src/root.zig`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests named:
 
@@ -391,7 +391,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because modules are missing.
 
-- [ ] **Step 2: Implement `Sql`**
+- [x] **Step 2: Implement `Sql`**
 
 Implement:
 
@@ -407,7 +407,7 @@ pub const FakeDatabase = struct {
 pub fn redactConnectionAlloc(allocator: std.mem.Allocator, connection: []const u8) ![]const u8;
 ```
 
-- [ ] **Step 3: Implement `Http`**
+- [x] **Step 3: Implement `Http`**
 
 Implement:
 
@@ -422,7 +422,7 @@ pub const FakeClient = struct {
 pub fn redactRequestAlloc(allocator: std.mem.Allocator, request: Request) ![]const u8;
 ```
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -439,7 +439,7 @@ Expected: tests pass.
 - Modify: `packages/zigeffect-std/src/root.zig`
 - Modify: `packages/zigeffect-std/README.md`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests named:
 
@@ -456,7 +456,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because `Agent` is missing.
 
-- [ ] **Step 2: Implement `Agent`**
+- [x] **Step 2: Implement `Agent`**
 
 Implement:
 
@@ -468,7 +468,7 @@ pub fn appendEventJsonlAlloc(allocator: std.mem.Allocator, feed: []const u8, eve
 pub fn receiptJsonAlloc(allocator: std.mem.Allocator, receipt: RunReceipt) ![]const u8;
 ```
 
-- [ ] **Step 3: Update README**
+- [x] **Step 3: Update README**
 
 Document the full module list:
 
@@ -492,7 +492,7 @@ zstd.Http
 zstd.Agent
 ```
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
