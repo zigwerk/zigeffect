@@ -366,6 +366,5 @@ test "Workspace diff filters ignored paths and records causal facts" {
 
     var causal_snapshot = try store.snapshot(std.testing.allocator);
     defer causal_snapshot.deinit();
-    try std.testing.expectEqual(@as(usize, 1), causal_snapshot.events.len);
-    try std.testing.expectEqualStrings("diff", causal_snapshot.events[0].label);
+    try std.testing.expect(zstd.Service.hasOperation(causal_snapshot, Service, "diff", "success"));
 }

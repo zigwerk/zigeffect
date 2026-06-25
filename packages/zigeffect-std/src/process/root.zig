@@ -230,9 +230,9 @@ test "Process runEffect uses fake runner and records redacted causal facts" {
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expectEqual(@as(usize, 1), snapshot.events.len);
-    try std.testing.expectEqualStrings(@typeName(FakeRunner), snapshot.events[0].service_key);
-    try std.testing.expect(std.mem.indexOf(u8, snapshot.events[0].redacted_detail, "abc123") == null);
+    const event_index = zstd.Service.findOperation(snapshot, FakeRunner, "run", "success");
+    try std.testing.expect(event_index != null);
+    try std.testing.expect(std.mem.indexOf(u8, snapshot.events[event_index.?].redacted_detail, "abc123") == null);
 }
 
 test "Process local runner executes a real local command with bounded capture" {

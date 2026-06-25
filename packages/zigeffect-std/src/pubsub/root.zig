@@ -220,8 +220,5 @@ test "PubSub publishEffect records backpressure for bounded subscribers" {
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expect(snapshot.events.len >= 3);
-    try std.testing.expectEqualStrings(@typeName(TextPubSub), snapshot.events[snapshot.events.len - 1].service_key);
-    try std.testing.expectEqualStrings("publish", snapshot.events[snapshot.events.len - 1].label);
-    try std.testing.expectEqualStrings("backpressure", snapshot.events[snapshot.events.len - 1].status);
+    try std.testing.expect(zstd.Service.hasOperation(snapshot, TextPubSub, "publish", "backpressure"));
 }

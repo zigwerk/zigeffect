@@ -20,6 +20,7 @@ pub const Env = @import("env/root.zig");
 pub const FileSystem = @import("filesystem/root.zig");
 pub const Workspace = @import("workspace/root.zig");
 pub const Process = @import("process/root.zig");
+pub const Observability = @import("observability/root.zig");
 pub const Testing = @import("testing/root.zig");
 pub const Sql = @import("sql/root.zig");
 pub const Http = @import("http/root.zig");
@@ -27,4 +28,10 @@ pub const Agent = @import("agent/root.zig");
 
 test "zigeffect-std re-exports the engine facade" {
     try std.testing.expect(@hasDecl(fx, "effect"));
+}
+
+test "root exports Observability namespace" {
+    const zstd = @import("root.zig");
+    try std.testing.expect(@hasDecl(zstd, "Observability"));
+    try std.testing.expect(@hasDecl(zstd.Observability, "Recorder"));
 }

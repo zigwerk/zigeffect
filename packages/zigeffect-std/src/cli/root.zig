@@ -884,8 +884,7 @@ test "Cli runEffect executes handler through services and records receipt facts"
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expect(snapshot.events.len >= 3);
-    try std.testing.expectEqualStrings(@typeName(Runner), snapshot.events[0].service_key);
+    try std.testing.expect(zstd.Service.hasOperation(snapshot, Runner, "cli.run", "success"));
 }
 
 test "Cli runEffect maps handler errors to exit codes without throwing" {

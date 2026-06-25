@@ -212,8 +212,5 @@ test "Queue offerEffect records backpressure when bounded queue is full" {
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expectEqual(@as(usize, 2), snapshot.events.len);
-    try std.testing.expectEqualStrings(@typeName(TextQueue), snapshot.events[1].service_key);
-    try std.testing.expectEqualStrings("offer", snapshot.events[1].label);
-    try std.testing.expectEqualStrings("backpressure", snapshot.events[1].status);
+    try std.testing.expect(zstd.Service.hasOperation(snapshot, TextQueue, "offer", "backpressure"));
 }

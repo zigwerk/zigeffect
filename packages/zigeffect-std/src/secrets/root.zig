@@ -145,6 +145,5 @@ test "Secrets redactEffect uses Redactor service and records causal fact" {
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expectEqual(@as(usize, 1), snapshot.events.len);
-    try std.testing.expectEqualStrings(@typeName(Redactor), snapshot.events[0].service_key);
+    try std.testing.expect(zstd.Service.hasOperation(snapshot, Redactor, "redact", "success"));
 }

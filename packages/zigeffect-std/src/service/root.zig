@@ -103,17 +103,27 @@ pub fn recordOperation(
     });
 }
 
-const TestEnv = Env(.{Console.CapturedConsole});
-const TestError = error{OutOfMemory};
-
-fn readConsole(ctx: *fx.Context(TestEnv)) TestError![]const u8 {
-    const console = ctx.service(Console.CapturedConsole);
-    return console.stdoutText();
+pub fn findOperation(
+    snapshot: anytype,
+    comptime Service: type,
+    operation: []const u8,
+    status: ?[]const u8,
+) ?usize {
+    for (snapshot.events, 0..) |event, index| {
+        if (event.kind != fx.CausalEventKind.span_recorded) continue;
+        if (!std.mem.eql(u8, event.service_key, serviceKey(Service))) continue;
+        if (!std.mem.eql(u8, event.label, operation)) continue;
+        if (status) |expected_status| {
+            if (!std.mem.eql(u8, event.status, expected_status)) continue;
+        }
+        return index;
+    }
+    return null;
 }
 
-const ReadConsole = fx.Effect([]const u8, TestError, TestEnv)
-    .fromFn(readConsole)
-    .requires(.{Console.CapturedConsole});
+pub fn hasOperation(snapshot: anytype, comptime Service: type, operation: []const u8, status: ?[]const u8) bool {
+    return findOperation(snapshot, Service, operation, status) != null;
+}
 
 test "Service.Provider resolves multiple services and exposes metadata" {
     var console = Console.CapturedConsole.init(std.testing.allocator);
@@ -144,6 +154,14 @@ test "Service.layerFromEnv provides services through fx.Layer" {
 
     var provider = Provider(.{Console.CapturedConsole}).init(.{&console});
     const layer = layerFromEnv(@TypeOf(provider), &provider, .{Console.CapturedConsole});
+    const ProviderEnv = @TypeOf(provider);
+    const ReadConsole = fx.Effect([]const u8, error{}, ProviderEnv)
+        .fromFn(struct {
+            fn run(ctx: *fx.Context(ProviderEnv)) error{}![]const u8 {
+                return ctx.service(Console.CapturedConsole).stdoutText();
+            }
+        }.run)
+        .requires(.{Console.CapturedConsole});
 
     try std.testing.expectEqualStrings("layer-output", try layer.provide(std.testing.allocator, ReadConsole));
 }
@@ -158,7 +176,7 @@ test "Service.access returns an effect that requires and resolves the service" {
         .provides(.{Console.CapturedConsole});
 
     const AccessConsole = access(Console.CapturedConsole, @TypeOf(provider));
-    var required = try AccessConsole.requiredServices(std.testing.allocator);
+    var required = try @TypeOf(AccessConsole).requiredServices(std.testing.allocator);
     defer required.deinit();
 
     try std.testing.expect(required.contains(@typeName(Console.CapturedConsole)));

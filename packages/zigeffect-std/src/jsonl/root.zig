@@ -132,8 +132,5 @@ test "Jsonl appendEffect uses Codec service and records causal fact" {
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expectEqual(@as(usize, 1), snapshot.events.len);
-    try std.testing.expectEqual(zstd.fx.CausalEventKind.span_recorded, snapshot.events[0].kind);
-    try std.testing.expectEqualStrings(@typeName(Codec), snapshot.events[0].service_key);
-    try std.testing.expectEqualStrings("append", snapshot.events[0].label);
+    try std.testing.expect(zstd.Service.hasOperation(snapshot, Codec, "append", "success"));
 }

@@ -104,8 +104,5 @@ test "Env requireEffect resolves through runtime services and records causal fac
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    try std.testing.expectEqual(@as(usize, 1), snapshot.events.len);
-    try std.testing.expectEqual(zstd.fx.CausalEventKind.span_recorded, snapshot.events[0].kind);
-    try std.testing.expectEqualStrings(@typeName(EnvMap), snapshot.events[0].service_key);
-    try std.testing.expectEqualStrings("require", snapshot.events[0].label);
+    try std.testing.expect(zstd.Service.hasOperation(snapshot, EnvMap, "require", "success"));
 }

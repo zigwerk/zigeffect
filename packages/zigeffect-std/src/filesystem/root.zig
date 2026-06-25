@@ -349,8 +349,9 @@ test "FileSystem memory service effects read write delete and record facts" {
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expect(snapshot.events.len >= 5);
-    try std.testing.expectEqualStrings(@typeName(MemoryFileSystem), snapshot.events[0].service_key);
+    try std.testing.expect(zstd.Service.hasOperation(snapshot, MemoryFileSystem, "writeFile", "success"));
+    try std.testing.expect(zstd.Service.hasOperation(snapshot, MemoryFileSystem, "readFile", "success"));
+    try std.testing.expect(zstd.Service.hasOperation(snapshot, MemoryFileSystem, "deleteFile", "success"));
 }
 
 test "FileSystem local adapter writes reads exists and deletes in a temp dir" {

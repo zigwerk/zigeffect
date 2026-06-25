@@ -46,6 +46,9 @@ bun run zigeffect:std:test
   filtering, and effect-native snapshot/diff operations.
 - `Process` provides fake and real local command runners with bounded capture,
   effect-native execution, and redacted run receipts.
+- `Observability` wraps engine logger, metrics, and tracing services behind one
+  effect-native recorder with redacted workbench JSON and OTLP-shaped JSON
+  exports.
 - `Testing` provides JSON and sentinel-secret assertions.
 - `Clock` provides deterministic fake time.
 - `Schedule` provides deterministic retry/polling steppers.
@@ -54,7 +57,8 @@ bun run zigeffect:std:test
 - `Agent` formats local agent session events and run receipts.
 - `fx` re-exports the base zigeffect engine facade.
 
-`Env`, `Config`, `Secrets`, `Json`, and `Jsonl` also expose effect-native
+`Env`, `Config`, `Secrets`, `Json`, `Jsonl`, `Cli`, `Queue`, `PubSub`, `Sink`,
+`FileSystem`, `Workspace`, `Process`, and `Observability` expose effect-native
 service APIs. Their `*Effect` values declare required services, resolve those
 services through `zstd.Service.Provider`, and record causal service-operation
 facts so local agent workflows can inspect boundary behavior through the engine
@@ -80,6 +84,7 @@ zstd.FileSystem
 zstd.Path
 zstd.Workspace
 zstd.Process
+zstd.Observability
 zstd.Testing
 zstd.Clock
 zstd.Schedule

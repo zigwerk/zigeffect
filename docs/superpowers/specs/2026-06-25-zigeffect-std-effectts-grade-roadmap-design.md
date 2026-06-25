@@ -130,16 +130,19 @@ Deliverables:
 
 ### M7 - Observability
 
+Status: delivered on 2026-06-25.
+
 Build std-level logging, metrics, tracing, and artifact export on top of the
 causal graph.
 
 Deliverables:
 
-- `zstd.Observability` service.
-- log/metric/span APIs as effects.
-- workbench artifact helpers.
-- causal receipt builders.
-- OTLP-compatible export shape where practical.
+- `zstd.Observability` service backed by the engine logger, metrics, and
+  tracing primitives.
+- log/metric/span APIs as effects with service requirements.
+- redacted workbench artifact helpers.
+- causal receipt builders through `zstd.Service.recordOperation`.
+- OTLP-shaped JSON export for local collectors and future bridge adapters.
 
 ### M8 - HTTP and WebSocket
 
@@ -243,4 +246,3 @@ M1 is complete when:
 - service required/provided/operation facts appear in a `CausalStore`.
 - tests prove all of the above inside `packages/zigeffect-std`.
 - `bun run zigeffect:std:test` and `bun run zigeffect:local-agent-gate` pass.
-
