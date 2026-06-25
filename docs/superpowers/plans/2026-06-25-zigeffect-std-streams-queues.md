@@ -36,7 +36,7 @@ existing `Jsonl` line parsing, `bun run zigeffect:std:test`.
 
 ## Task 1: Stream And Sink Helpers
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests:
 
@@ -55,7 +55,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because the new namespaces are missing.
 
-- [ ] **Step 2: Implement Stream/Sink APIs**
+- [x] **Step 2: Implement Stream/Sink APIs**
 
 Implement:
 
@@ -71,7 +71,7 @@ pub fn writeLineEffect(comptime EffectEnv: type, line: []const u8) WriteLineEffe
 
 `LineSink` snapshots and JSONL receipts must redact secret-shaped text.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -83,7 +83,7 @@ Expected: tests pass.
 
 ## Task 2: Queue Service Effects
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests:
 
@@ -100,7 +100,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because `Queue.Service` and effects are missing.
 
-- [ ] **Step 2: Implement Queue APIs**
+- [x] **Step 2: Implement Queue APIs**
 
 Implement:
 
@@ -115,7 +115,7 @@ pub fn shutdownEffect(comptime EffectEnv: type, comptime Item: type) ShutdownEff
 Effects must declare `RequiredServices = .{Service(Item)}` and record causal
 facts for item, empty, backpressure, shutdown, and success states.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -127,7 +127,7 @@ Expected: tests pass.
 
 ## Task 3: PubSub Service Effects
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests:
 
@@ -144,7 +144,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because `PubSub.Service` and effects are missing.
 
-- [ ] **Step 2: Implement PubSub APIs**
+- [x] **Step 2: Implement PubSub APIs**
 
 Implement:
 
@@ -159,7 +159,7 @@ pub fn unsubscribeEffect(comptime EffectEnv: type, comptime Item: type, id: fx.S
 Effects must wrap `fx.Hub(Item)` and record publish/receive/drop/backpressure
 facts.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -171,16 +171,16 @@ Expected: tests pass.
 
 ## Task 4: Docs And Gate
 
-- [ ] **Step 1: Update exports and docs**
+- [x] **Step 1: Update exports and docs**
 
 Export `Stream`, `Sink`, `Queue`, and `PubSub` from `zstd`, update README, and
 update roadmap status.
 
-- [ ] **Step 2: Mark checkboxes complete**
+- [x] **Step 2: Mark checkboxes complete**
 
 Replace completed `- [ ]` with `- [x]`.
 
-- [ ] **Step 3: Final verification**
+- [x] **Step 3: Final verification**
 
 Run:
 

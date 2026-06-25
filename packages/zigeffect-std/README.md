@@ -29,6 +29,10 @@ bun run zigeffect:std:test
 - `Schema` validates and decodes JSON/config boundaries with typed errors.
 - `Json` writes deterministic redacted JSON payloads.
 - `Jsonl` appends and parses newline-delimited JSON feeds.
+- `Stream` re-exports engine pull streams and adds local line helpers.
+- `Sink` provides deterministic memory line sinks with redacted JSONL receipts.
+- `Queue` wraps engine queues as effect-native std services.
+- `PubSub` wraps engine hubs as effect-native multi-subscriber services.
 - `Cli` parses deterministic command specs, nested subcommands, typed defaults,
   completions, effect-native handlers, exit-code mapping, and run receipts.
 - `Console` provides a captured console service for testable command output.
@@ -60,6 +64,10 @@ zstd.Service
 zstd.Schema
 zstd.Json
 zstd.Jsonl
+zstd.Stream
+zstd.Sink
+zstd.Queue
+zstd.PubSub
 zstd.Cli
 zstd.Console
 zstd.Env
