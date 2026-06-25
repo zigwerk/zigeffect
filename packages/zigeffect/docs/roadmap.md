@@ -326,9 +326,9 @@ semantic fact comparison, not exact event-id graph isomorphism.
 
 ## The frontier now
 
-The original "single biggest gap" — real async/concurrency under the causal graph
-— is **substantially closed**. The second gap — an agent-operable runtime that
-can explain and audit its own interventions — now has a tested local substrate
+The original "single biggest gap" - real async/concurrency under the causal graph
+- is **substantially closed**. The second gap - an agent-operable runtime that
+can explain and audit its own interventions - now has a tested local substrate
 and local operator-facing adapters. The next frontier is turning these local
 substrates into real deployed systems:
 
@@ -374,6 +374,111 @@ substrates into real deployed systems:
    runbooks exist. Next: real network sending, served artifact endpoints,
    deployment metadata ingestion from real deployments, and runbook generation
    from live deployment metadata.
+
+5. **Local agentic development cockpit.** Before any hosted control plane, the
+   local workbench must become the place where Codex, Claude Code, and
+   zigeffect's own causal tools share development evidence. The first pass
+   reuses `zigeffect.causal.dev-session.v1` and teaches the workbench to render
+   agents, checks, commands, artifact links, guardrails, and next actions. The
+   ordered sequence is M72 through M77 below.
+
+## Local agentic development roadmap
+
+This is the local-first sequence for making zigeffect useful as the development
+engine for local projects and standard-library work. It intentionally comes
+before hosting or broad distributed orchestration.
+
+### M72 - Local development session protocol
+
+**Goal:** normalize existing dev-session receipts into a workbench-native local
+session model.
+
+**Work:**
+- Reuse `zigeffect.causal.dev-session.v1`.
+- Add a Solid workbench parser/model for session goal, phase, agents, checks,
+  commands, artifact links, next actions, guardrails, and warnings.
+- Derive useful fallback agents/checks from existing command records so older
+  receipts render.
+
+**Acceptance:**
+- Existing session receipts parse without migration.
+- Extended receipts parse with explicit agent/check rows.
+- Partial receipts render as an empty or degraded local session, not a crash.
+
+### M73 - Workbench agent cockpit view
+
+**Goal:** give local agentic development a first-class read-only workbench tab.
+
+**Work:**
+- Add an Agents tab to the existing workbench.
+- Render local session status, agents, checks, commands, artifacts, guardrails,
+  and next actions.
+- Keep non-session artifacts usable by showing an empty state.
+
+**Acceptance:**
+- The Agents tab appears beside Timeline, Graph, Diff, Chain, Queries, and
+  Metadata.
+- A dev-session artifact is visually inspectable from the workbench without
+  leaving the local machine.
+
+### M74 - Dogfood session receipt enrichment
+
+**Goal:** make `causal-dev-session` emit enough structure for Codex/Claude/
+zigeffect local runs to be reviewed by another agent.
+
+**Work:**
+- Add deterministic session identity, title, goal, agent records, and check
+  receipts to the JSON artifact.
+- Keep existing command and artifact fields stable.
+- Update text receipts with concise local-agent status.
+
+**Acceptance:**
+- `start`, `assess`, missing-baseline, and failure paths all emit valid enriched
+  receipts.
+- Zig tests cover JSON and text output.
+
+### M75 - Live agent runtime feed
+
+**Goal:** let live local workbench sessions show agent state changes while engine
+NDJSON is streaming.
+
+**Work:**
+- Define local session frames for agent start/stop, tool run, check result, graph
+  query, and verification.
+- Route frames through the existing collector redaction boundary.
+- Update the workbench session model from live frames.
+
+**Acceptance:**
+- A live session updates the Agents tab without a static artifact reload.
+- Secret-shaped frame fields are redacted before browser delivery.
+
+### M76 - Local Codex and Claude Code adapters
+
+**Goal:** represent external local agents without building a hosting platform.
+
+**Work:**
+- Define a small append-only JSONL or JSON adapter contract.
+- Add fixtures and parser tests for Codex and Claude Code activity.
+- Document ownership, redaction, and failure semantics.
+
+**Acceptance:**
+- A Codex or Claude Code local run can be shown as an agent in the workbench.
+- Adapter ingestion is local-file or stdin based.
+
+### M77 - Local reliability gate
+
+**Goal:** make a local session honest enough for another agent to continue.
+
+**Work:**
+- Add one local verification command that checks session parsing, Zig
+  dev-session receipts, redaction, hygiene, and required artifact links.
+- Extend the existing honesty gate only for stale local-session claims and
+  missing evidence.
+
+**Acceptance:**
+- The gate fails on stale session status claims, leaked sentinel secrets, or
+  missing artifact evidence.
+- The gate requires no network access.
 
 ## Hardening milestone roadmap
 

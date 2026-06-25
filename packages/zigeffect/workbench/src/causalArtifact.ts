@@ -296,6 +296,67 @@ export type GovernanceModel = {
   warnings: string[];
 };
 
+export type LocalDevAgentKind = "codex" | "claude-code" | "zigeffect" | "human" | "other";
+
+export type LocalDevAgentStatus = "idle" | "running" | "reviewing" | "blocked" | "done" | "failed" | "unknown";
+
+export type LocalDevCheckStatus = "pass" | "fail" | "running" | "skipped" | "unknown";
+
+export type LocalDevAgentModel = {
+  id: string;
+  label: string;
+  kind: LocalDevAgentKind;
+  status: LocalDevAgentStatus;
+  currentTask: string | null;
+  lastEventId: string | null;
+  artifactPath: string | null;
+};
+
+export type LocalDevCheckModel = {
+  label: string;
+  command: string | null;
+  status: LocalDevCheckStatus;
+  detail: string;
+  artifactPath: string | null;
+};
+
+export type LocalDevCommandModel = {
+  label: string;
+  command: string;
+  status: LocalDevCheckStatus;
+  exitCode: number | null;
+  stdoutSnippet: string;
+  stderrSnippet: string;
+};
+
+export type LocalDevArtifactModel = {
+  key: string;
+  label: string;
+  path: string;
+  kind: "json" | "text" | "markdown" | "other";
+  workbenchCommand: string | null;
+};
+
+export type LocalDevSessionModel = {
+  artifactPath: string;
+  schema: string;
+  schemaVersion: string;
+  mode: string;
+  sessionId: string;
+  title: string;
+  goal: string;
+  target: string;
+  phase: string;
+  status: string;
+  agents: LocalDevAgentModel[];
+  checks: LocalDevCheckModel[];
+  commands: LocalDevCommandModel[];
+  artifacts: LocalDevArtifactModel[];
+  nextActions: string[];
+  guardrails: string[];
+  warnings: string[];
+};
+
 export type SemanticDiffSummary = {
   resolvedFindings: number;
   introducedFindings: number;
@@ -385,6 +446,10 @@ const graphFailureStatuses = new Set(["failure"]);
 const graphWarningStatuses = new Set(["missing", "exhausted", "pending", "running"]);
 const graphLaneKindOrder: GraphLaneKind[] = ["run", "scope", "fiber", "resource", "retry"];
 const auditChainSchema = "zigeffect.causal.audit-chain.v1";
+const localDevSessionSchemas = new Set([
+  "zigeffect.causal.dev-session.v1",
+  "zigeffect.causal.local-dev-session.v1",
+]);
 const chainSourceKinds: ChainSourceKind[] = ["session", "audit", "decision", "proposal", "before", "after", "compare"];
 const chainSourceLabels: Record<ChainSourceKind, string> = {
   session: "Dev session",
@@ -442,6 +507,49 @@ export function deriveWorkbenchModel(raw: unknown, options: WorkbenchOptions): W
     statuses: uniqueSorted(events.map((event) => event.status)),
     warnings,
     safeToShare: events.some((event) => event.redactedDetail.length > 0) ? "artifact-redacted" : "unknown",
+  };
+}
+
+export function deriveLocalDevSessionModel(raw: unknown, options: WorkbenchOptions): LocalDevSessionModel | null {
+  const artifact = isRecord(raw) ? raw : {};
+  const schema = textValue(artifact.schema, "");
+  if (!localDevSessionSchemas.has(schema)) {
+    return null;
+  }
+
+  const schemaVersion = textValue(artifact.schema_version, "unknown");
+  const warnings = stringList(artifact.warnings);
+  if (schemaVersion === "unknown") {
+    warnings.unshift("artifact schema_version is missing");
+  }
+
+  const mode = textValue(artifact.mode, "local");
+  const target = textValue(artifact.target, "unknown");
+  const phase = textValue(artifact.phase, "unknown");
+  const status = textValue(artifact.status, "unknown");
+  const commands = localDevCommands(artifact.commands);
+  const artifacts = localDevArtifacts(artifact.artifacts);
+  const explicitAgents = localDevAgents(artifact.agents);
+  const explicitChecks = localDevChecks(artifact.checks);
+
+  return {
+    artifactPath: options.artifactPath,
+    schema,
+    schemaVersion,
+    mode,
+    sessionId: textValue(artifact.session_id, options.artifactPath),
+    title: textValue(artifact.title, `${target} local development session`),
+    goal: textValue(artifact.goal, "Develop zigeffect locally with causal evidence."),
+    target,
+    phase,
+    status,
+    agents: explicitAgents.length > 0 ? explicitAgents : fallbackLocalDevAgents(commands, status),
+    checks: explicitChecks.length > 0 ? explicitChecks : commands.map(checkFromLocalDevCommand),
+    commands,
+    artifacts,
+    nextActions: stringList(artifact.next_actions),
+    guardrails: stringList(artifact.guardrails),
+    warnings,
   };
 }
 
@@ -1455,6 +1563,216 @@ function appChangeEvidenceGroups(value: unknown): AppCitationGroup[] {
     { label: "Operation changes", values: stringList(evidence.operation_changes) },
     { label: "Rollback changes", values: stringList(evidence.rollback_changes) },
   ];
+}
+
+function localDevAgents(value: unknown): LocalDevAgentModel[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(isRecord)
+    .map((agent, index) => {
+      const kind = localDevAgentKind(agent.kind);
+      const label = textValue(agent.label, kind === "other" ? `Agent ${index + 1}` : localDevAgentKindLabel(kind));
+      return {
+        id: textValue(agent.id, localDevAgentId(kind, index)),
+        label,
+        kind,
+        status: localDevAgentStatus(agent.status),
+        currentTask: nullableTextValue(agent.current_task),
+        lastEventId: nullableIdValue(agent.last_event_id),
+        artifactPath: nullableTextValue(agent.artifact_path),
+      };
+    });
+}
+
+function localDevChecks(value: unknown): LocalDevCheckModel[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(isRecord)
+    .map((check) => ({
+      label: textValue(check.label, textValue(check.name, "unnamed check")),
+      command: nullableTextValue(check.command),
+      status: localDevCheckStatus(check.status),
+      detail: textValue(check.detail, ""),
+      artifactPath: nullableTextValue(check.artifact_path),
+    }));
+}
+
+function localDevCommands(value: unknown): LocalDevCommandModel[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(isRecord)
+    .map((command) => ({
+      label: textValue(command.name, textValue(command.label, "command")),
+      command: localDevCommandText(command),
+      status: localDevCheckStatus(command.status),
+      exitCode: numericValue(command.exit_code),
+      stdoutSnippet: textValue(command.stdout_snippet, ""),
+      stderrSnippet: textValue(command.stderr_snippet, ""),
+    }));
+}
+
+function localDevCommandText(command: UnknownRecord): string {
+  const explicit = textValue(command.command, "");
+  if (explicit.length > 0) {
+    return explicit;
+  }
+
+  if (!Array.isArray(command.argv)) {
+    return "";
+  }
+
+  return command.argv
+    .map((item) => textValue(item, ""))
+    .filter((item) => item.length > 0)
+    .join(" ");
+}
+
+function localDevArtifacts(value: unknown): LocalDevArtifactModel[] {
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  return Object.entries(value)
+    .map(([key, rawPath]) => {
+      const path = textValue(rawPath, "");
+      if (path.length === 0) {
+        return null;
+      }
+      return {
+        key,
+        label: localDevArtifactLabel(key),
+        path,
+        kind: localDevArtifactKind(path),
+        workbenchCommand: workbenchCommandForPath(path),
+      } satisfies LocalDevArtifactModel;
+    })
+    .filter((artifact): artifact is LocalDevArtifactModel => artifact !== null);
+}
+
+function fallbackLocalDevAgents(commands: LocalDevCommandModel[], sessionStatus: string): LocalDevAgentModel[] {
+  const toolStatus = commands.some((command) => command.status === "fail")
+    ? "failed"
+    : localDevAgentStatusFromSession(sessionStatus);
+
+  return [
+    {
+      id: "zigeffect-tools",
+      label: "zigeffect tools",
+      kind: "zigeffect",
+      status: toolStatus,
+      currentTask: commands[0]?.label ?? null,
+      lastEventId: null,
+      artifactPath: null,
+    },
+  ];
+}
+
+function checkFromLocalDevCommand(command: LocalDevCommandModel): LocalDevCheckModel {
+  const detail = command.stderrSnippet || command.stdoutSnippet;
+  return {
+    label: command.label,
+    command: command.command.length > 0 ? command.command : null,
+    status: command.status,
+    detail,
+    artifactPath: null,
+  };
+}
+
+function localDevAgentKind(value: unknown): LocalDevAgentKind {
+  const kind = textValue(value, "other");
+  if (kind === "codex" || kind === "claude-code" || kind === "zigeffect" || kind === "human") {
+    return kind;
+  }
+  return "other";
+}
+
+function localDevAgentStatus(value: unknown): LocalDevAgentStatus {
+  const status = textValue(value, "unknown");
+  if (
+    status === "idle" ||
+    status === "running" ||
+    status === "reviewing" ||
+    status === "blocked" ||
+    status === "done" ||
+    status === "failed"
+  ) {
+    return status;
+  }
+  return "unknown";
+}
+
+function localDevAgentStatusFromSession(status: string): LocalDevAgentStatus {
+  if (status === "failed" || status === "missing-baseline") {
+    return "failed";
+  }
+  if (status === "audit-ready" || status === "complete") {
+    return "done";
+  }
+  if (status === "blocked") {
+    return "blocked";
+  }
+  return "running";
+}
+
+function localDevCheckStatus(value: unknown): LocalDevCheckStatus {
+  const status = textValue(value, "unknown");
+  if (status === "ok" || status === "pass" || status === "passed" || status === "success") {
+    return "pass";
+  }
+  if (status === "failed" || status === "fail" || status === "failure" || status === "error") {
+    return "fail";
+  }
+  if (status === "running" || status === "pending") {
+    return "running";
+  }
+  if (status === "skipped" || status === "skip") {
+    return "skipped";
+  }
+  return "unknown";
+}
+
+function localDevAgentKindLabel(kind: LocalDevAgentKind): string {
+  switch (kind) {
+    case "codex": return "Codex";
+    case "claude-code": return "Claude Code";
+    case "zigeffect": return "zigeffect tools";
+    case "human": return "Human";
+    case "other": return "Agent";
+  }
+}
+
+function localDevAgentId(kind: LocalDevAgentKind, index: number): string {
+  return kind === "other" ? `agent-${index + 1}` : kind;
+}
+
+function localDevArtifactLabel(key: string): string {
+  return key
+    .split("_")
+    .filter((part) => part.length > 0)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function localDevArtifactKind(path: string): LocalDevArtifactModel["kind"] {
+  if (path.endsWith(".json")) {
+    return "json";
+  }
+  if (path.endsWith(".md")) {
+    return "markdown";
+  }
+  if (path.endsWith(".txt") || path.endsWith(".log")) {
+    return "text";
+  }
+  return "other";
 }
 
 function workbenchCommandForPath(path: string): string | null {

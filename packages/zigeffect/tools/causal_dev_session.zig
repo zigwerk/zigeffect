@@ -320,6 +320,178 @@ fn appendNextActionsJson(allocator: std.mem.Allocator, output: *std.ArrayList(u8
     try output.appendSlice(allocator, "\n  ],\n");
 }
 
+fn formatSessionId(allocator: std.mem.Allocator, record: SessionRecord) ![]const u8 {
+    return std.fmt.allocPrint(allocator, "zigeffect-local-{s}-{s}", .{ record.target, formatPhase(record.phase) });
+}
+
+fn sessionTitle() []const u8 {
+    return "zigeffect local development session";
+}
+
+fn sessionGoal() []const u8 {
+    return "Develop zigeffect locally with agent-visible causal evidence.";
+}
+
+fn zigeffectAgentStatus(record: SessionRecord) []const u8 {
+    return switch (record.phase) {
+        .baseline_captured => "running",
+        .assessed => "done",
+        .failed => "failed",
+    };
+}
+
+fn zigeffectAgentTask(record: SessionRecord) []const u8 {
+    return switch (record.phase) {
+        .baseline_captured => "baseline captured; edit source locally",
+        .assessed => "assessment complete; review audit",
+        .failed => "inspect failed command output",
+    };
+}
+
+fn zigeffectAgentArtifact(record: SessionRecord) []const u8 {
+    return switch (record.phase) {
+        .baseline_captured => record.artifacts.before_json_path,
+        .assessed => record.artifacts.remediation_audit_json_path,
+        .failed => record.artifacts.session_json_path,
+    };
+}
+
+fn appendJsonNullField(
+    allocator: std.mem.Allocator,
+    output: *std.ArrayList(u8),
+    indent: []const u8,
+    name: []const u8,
+    trailing_comma: bool,
+) !void {
+    try output.appendSlice(allocator, indent);
+    try appendJsonString(allocator, output, name);
+    try output.appendSlice(allocator, ": null");
+    if (trailing_comma) try output.append(allocator, ',');
+    try output.append(allocator, '\n');
+}
+
+fn appendSessionIdentityJson(allocator: std.mem.Allocator, output: *std.ArrayList(u8), record: SessionRecord) !void {
+    const session_id = try formatSessionId(allocator, record);
+    defer allocator.free(session_id);
+
+    try appendJsonStringField(allocator, output, "  ", "session_id", session_id, true);
+    try appendJsonStringField(allocator, output, "  ", "title", sessionTitle(), true);
+    try appendJsonStringField(allocator, output, "  ", "goal", sessionGoal(), true);
+}
+
+fn appendAgentJson(
+    allocator: std.mem.Allocator,
+    output: *std.ArrayList(u8),
+    id: []const u8,
+    label: []const u8,
+    kind: []const u8,
+    status: []const u8,
+    task: []const u8,
+    artifact_path: []const u8,
+    trailing_comma: bool,
+) !void {
+    try output.appendSlice(allocator, "    {\n");
+    try appendJsonStringField(allocator, output, "      ", "id", id, true);
+    try appendJsonStringField(allocator, output, "      ", "label", label, true);
+    try appendJsonStringField(allocator, output, "      ", "kind", kind, true);
+    try appendJsonStringField(allocator, output, "      ", "status", status, true);
+    try appendJsonStringField(allocator, output, "      ", "current_task", task, true);
+    if (artifact_path.len == 0) {
+        try appendJsonNullField(allocator, output, "      ", "artifact_path", false);
+    } else {
+        try appendJsonStringField(allocator, output, "      ", "artifact_path", artifact_path, false);
+    }
+    try output.appendSlice(allocator, "    }");
+    if (trailing_comma) try output.append(allocator, ',');
+    try output.append(allocator, '\n');
+}
+
+fn appendSessionAgentsJson(allocator: std.mem.Allocator, output: *std.ArrayList(u8), record: SessionRecord) !void {
+    try output.appendSlice(allocator, "  \"agents\": [\n");
+    try appendAgentJson(
+        allocator,
+        output,
+        "codex",
+        "Codex",
+        "codex",
+        "idle",
+        "not attached to this receipt",
+        "",
+        true,
+    );
+    try appendAgentJson(
+        allocator,
+        output,
+        "claude-code",
+        "Claude Code",
+        "claude-code",
+        "idle",
+        "not attached to this receipt",
+        "",
+        true,
+    );
+    try appendAgentJson(
+        allocator,
+        output,
+        "zigeffect-tools",
+        "zigeffect tools",
+        "zigeffect",
+        zigeffectAgentStatus(record),
+        zigeffectAgentTask(record),
+        zigeffectAgentArtifact(record),
+        false,
+    );
+    try output.appendSlice(allocator, "  ],\n");
+}
+
+fn checkStatus(command: CommandRecord) []const u8 {
+    return switch (command.status) {
+        .ok => "pass",
+        .failed => "fail",
+        .skipped => "skipped",
+    };
+}
+
+fn commandArtifactPath(artifacts: SessionArtifacts, command_name: []const u8) []const u8 {
+    if (std.mem.indexOf(u8, command_name, "baseline") != null) return artifacts.before_json_path;
+    if (std.mem.indexOf(u8, command_name, "after") != null) return artifacts.after_json_path;
+    if (std.mem.eql(u8, command_name, "causal-dev-agent")) return artifacts.verdict_json_path;
+    if (std.mem.eql(u8, command_name, "causal-diagnosis")) return artifacts.diagnosis_text_path;
+    if (std.mem.eql(u8, command_name, "causal-remediation-plan")) return artifacts.remediation_plan_path;
+    if (std.mem.eql(u8, command_name, "causal-remediation-audit")) return artifacts.remediation_audit_json_path;
+    return "";
+}
+
+fn commandDetail(command: CommandRecord) []const u8 {
+    if (command.stderr_snippet.len != 0) return command.stderr_snippet;
+    return command.stdout_snippet;
+}
+
+fn appendSessionChecksJson(allocator: std.mem.Allocator, output: *std.ArrayList(u8), record: SessionRecord) !void {
+    try output.appendSlice(allocator, "  \"checks\": [\n");
+    for (record.commands, 0..) |command, index| {
+        var command_text = std.ArrayList(u8).empty;
+        defer command_text.deinit(allocator);
+        try appendArgv(allocator, &command_text, command.argv);
+
+        try output.appendSlice(allocator, "    {\n");
+        try appendJsonStringField(allocator, output, "      ", "label", command.name, true);
+        try appendJsonStringField(allocator, output, "      ", "command", command_text.items, true);
+        try appendJsonStringField(allocator, output, "      ", "status", checkStatus(command), true);
+        try appendJsonStringField(allocator, output, "      ", "detail", commandDetail(command), true);
+        const artifact_path = commandArtifactPath(record.artifacts, command.name);
+        if (artifact_path.len == 0) {
+            try appendJsonNullField(allocator, output, "      ", "artifact_path", false);
+        } else {
+            try appendJsonStringField(allocator, output, "      ", "artifact_path", artifact_path, false);
+        }
+        try output.appendSlice(allocator, "    }");
+        if (index + 1 != record.commands.len) try output.append(allocator, ',');
+        try output.append(allocator, '\n');
+    }
+    try output.appendSlice(allocator, "  ],\n");
+}
+
 fn formatSessionJson(allocator: std.mem.Allocator, record: SessionRecord) ![]const u8 {
     var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
@@ -331,6 +503,7 @@ fn formatSessionJson(allocator: std.mem.Allocator, record: SessionRecord) ![]con
     try appendJsonStringField(allocator, &output, "  ", "target", record.target, true);
     try appendJsonStringField(allocator, &output, "  ", "phase", formatPhase(record.phase), true);
     try appendJsonStringField(allocator, &output, "  ", "status", record.status, true);
+    try appendSessionIdentityJson(allocator, &output, record);
 
     try output.appendSlice(allocator, "  \"commands\": [\n");
     for (record.commands, 0..) |command, index| {
@@ -355,6 +528,8 @@ fn formatSessionJson(allocator: std.mem.Allocator, record: SessionRecord) ![]con
         try output.append(allocator, '\n');
     }
     try output.appendSlice(allocator, "  ],\n");
+    try appendSessionChecksJson(allocator, &output, record);
+    try appendSessionAgentsJson(allocator, &output, record);
 
     try output.appendSlice(allocator, "  \"artifacts\": {\n");
     try appendJsonStringField(allocator, &output, "    ", "session_json", record.artifacts.session_json_path, true);
@@ -380,11 +555,16 @@ fn formatSessionJson(allocator: std.mem.Allocator, record: SessionRecord) ![]con
 fn formatSessionText(allocator: std.mem.Allocator, record: SessionRecord) ![]const u8 {
     var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
+    const session_id = try formatSessionId(allocator, record);
+    defer allocator.free(session_id);
 
     try output.appendSlice(allocator, "zigeffect causal dev session\n");
     try output.print(allocator, "schema: {s}\n", .{record.schema});
     try output.print(allocator, "schema_version: {d}\n", .{record.schema_version});
     try output.print(allocator, "mode: {s}\n", .{record.mode});
+    try output.print(allocator, "session_id: {s}\n", .{session_id});
+    try output.print(allocator, "title: {s}\n", .{sessionTitle()});
+    try output.print(allocator, "goal: {s}\n", .{sessionGoal()});
     try output.print(allocator, "target: {s}\n", .{record.target});
     try output.print(allocator, "phase: {s}\n", .{formatPhase(record.phase)});
     try output.print(allocator, "status: {s}\n\n", .{record.status});
@@ -399,6 +579,26 @@ fn formatSessionText(allocator: std.mem.Allocator, record: SessionRecord) ![]con
     try output.print(allocator, "- remediation plan: {s}\n", .{record.artifacts.remediation_plan_path});
     try output.print(allocator, "- audit: {s}\n", .{record.artifacts.remediation_audit_json_path});
     try output.print(allocator, "- audit text: {s}\n\n", .{record.artifacts.remediation_audit_text_path});
+
+    try output.appendSlice(allocator, "agents:\n");
+    try output.appendSlice(allocator, "- Codex status=idle task=not attached to this receipt\n");
+    try output.appendSlice(allocator, "- Claude Code status=idle task=not attached to this receipt\n");
+    try output.print(
+        allocator,
+        "- zigeffect tools status={s} task={s} artifact={s}\n\n",
+        .{ zigeffectAgentStatus(record), zigeffectAgentTask(record), zigeffectAgentArtifact(record) },
+    );
+
+    try output.appendSlice(allocator, "checks:\n");
+    for (record.commands) |command| {
+        try output.print(allocator, "- {s} status={s}", .{ command.name, checkStatus(command) });
+        const artifact_path = commandArtifactPath(record.artifacts, command.name);
+        if (artifact_path.len != 0) try output.print(allocator, " artifact={s}", .{artifact_path});
+        const detail = commandDetail(command);
+        if (detail.len != 0) try output.print(allocator, " detail={s}", .{detail});
+        try output.append(allocator, '\n');
+    }
+    try output.append(allocator, '\n');
 
     try output.appendSlice(allocator, "commands:\n");
     for (record.commands) |command| {
@@ -818,8 +1018,77 @@ test "assessed session text points at remediation audit and decision command" {
     try std.testing.expect(std.mem.indexOf(u8, report, "next: zig build causal-remediation-decision -- local approve|reject causal-scoped-fiber") != null);
 }
 
+test "session json includes local agents and command checks" {
+    const commands = [_]CommandRecord{
+        .{
+            .name = "causal-dev-loop after",
+            .argv = &.{ "zig", "build", "causal-dev-loop", "--", "after" },
+            .status = .ok,
+            .exit_code = 0,
+            .stdout_snippet = "after artifact captured",
+        },
+        .{
+            .name = "causal-remediation-audit",
+            .argv = &.{ "zig", "build", "causal-remediation-audit", "--", "local" },
+            .status = .ok,
+            .exit_code = 0,
+            .stdout_snippet = "audit ready",
+        },
+    };
+    const record = SessionRecord{
+        .schema = schema_name,
+        .schema_version = 1,
+        .mode = "local",
+        .target = "dogfood",
+        .phase = .assessed,
+        .status = "audit-ready",
+        .commands = commands[0..],
+        .artifacts = defaultSessionArtifacts(),
+    };
+    const json = try formatSessionJson(std.testing.allocator, record);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"session_id\": \"zigeffect-local-dogfood-assessed\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\": \"codex\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"id\": \"claude-code\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"id\": \"zigeffect-tools\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"checks\": [") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"label\": \"causal-dev-loop after\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"status\": \"pass\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"artifact_path\": \".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json\"") != null);
+}
+
+test "session text includes local agents and command checks" {
+    const commands = [_]CommandRecord{
+        .{
+            .name = "causal-dev-loop baseline",
+            .argv = &.{ "zig", "build", "causal-dev-loop", "--", "baseline" },
+            .status = .ok,
+            .exit_code = 0,
+        },
+    };
+    const record = SessionRecord{
+        .schema = schema_name,
+        .schema_version = 1,
+        .mode = "local",
+        .target = "dogfood",
+        .phase = .baseline_captured,
+        .status = "ready-for-edit",
+        .commands = commands[0..],
+        .artifacts = defaultSessionArtifacts(),
+    };
+    const report = try formatSessionText(std.testing.allocator, record);
+    defer std.testing.allocator.free(report);
+
+    try std.testing.expect(std.mem.indexOf(u8, report, "agents:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "- Codex status=idle task=not attached to this receipt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "- zigeffect tools status=running task=baseline captured; edit source locally") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "checks:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "- causal-dev-loop baseline status=pass artifact=.zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json") != null);
+}
+
 test "parse options accepts start without scenario" {
-    const options = try parseOptions(&.{ "start" });
+    const options = try parseOptions(&.{"start"});
 
     try std.testing.expectEqual(SessionAction.start, options.action);
     try std.testing.expectEqual(@as(?[]const u8, null), options.scenario_slug);

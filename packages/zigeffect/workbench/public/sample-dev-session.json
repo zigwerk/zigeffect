@@ -1,0 +1,105 @@
+{
+  "schema": "zigeffect.causal.dev-session.v1",
+  "schema_version": 1,
+  "mode": "local",
+  "session_id": "zigeffect-local-dogfood-assessed",
+  "title": "zigeffect local development session",
+  "goal": "Develop zigeffect locally with agent-visible causal evidence.",
+  "target": "dogfood",
+  "phase": "assessed",
+  "status": "audit-ready",
+  "commands": [
+    {
+      "name": "causal-dev-loop after",
+      "status": "ok",
+      "exit_code": 0,
+      "argv": ["zig", "build", "causal-dev-loop", "--", "after"],
+      "stdout_snippet": "after artifact captured",
+      "stderr_snippet": ""
+    },
+    {
+      "name": "causal-dev-agent",
+      "status": "ok",
+      "exit_code": 0,
+      "argv": ["zig", "build", "causal-dev-agent", "--", "local"],
+      "stdout_snippet": "verdict ready",
+      "stderr_snippet": ""
+    },
+    {
+      "name": "causal-remediation-audit",
+      "status": "ok",
+      "exit_code": 0,
+      "argv": ["zig", "build", "causal-remediation-audit", "--", "local"],
+      "stdout_snippet": "audit ready",
+      "stderr_snippet": ""
+    }
+  ],
+  "checks": [
+    {
+      "label": "causal-dev-loop after",
+      "command": "zig build causal-dev-loop -- after",
+      "status": "pass",
+      "detail": "after artifact captured",
+      "artifact_path": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json"
+    },
+    {
+      "label": "causal-dev-agent",
+      "command": "zig build causal-dev-agent -- local",
+      "status": "pass",
+      "detail": "verdict ready",
+      "artifact_path": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-verdict.json"
+    },
+    {
+      "label": "causal-remediation-audit",
+      "command": "zig build causal-remediation-audit -- local",
+      "status": "pass",
+      "detail": "audit ready",
+      "artifact_path": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-audit.json"
+    }
+  ],
+  "agents": [
+    {
+      "id": "codex",
+      "label": "Codex",
+      "kind": "codex",
+      "status": "reviewing",
+      "current_task": "Implement local cockpit milestones"
+    },
+    {
+      "id": "claude-code",
+      "label": "Claude Code",
+      "kind": "claude-code",
+      "status": "idle",
+      "current_task": "not attached to this receipt"
+    },
+    {
+      "id": "zigeffect-tools",
+      "label": "zigeffect tools",
+      "kind": "zigeffect",
+      "status": "done",
+      "current_task": "assessment complete; review audit",
+      "artifact_path": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-audit.json"
+    }
+  ],
+  "artifacts": {
+    "session_json": ".zig-cache/causal-artifacts/zigeffect-causal-dev-session.json",
+    "session_text": ".zig-cache/causal-artifacts/zigeffect-causal-dev-session.txt",
+    "before_json": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json",
+    "after_json": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json",
+    "verdict_json": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-verdict.json",
+    "diagnosis_text": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-diagnosis.txt",
+    "remediation_plan": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-plan.md",
+    "remediation_audit_json": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-audit.json",
+    "remediation_audit_text": ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-audit.txt"
+  },
+  "next_actions": [
+    "zig build causal-remediation-decision -- local approve|reject"
+  ],
+  "guardrails": [
+    "source edits remain outside causal tools",
+    "approval and remediation application require explicit review"
+  ],
+  "warnings": [
+    "development sample artifact"
+  ]
+}

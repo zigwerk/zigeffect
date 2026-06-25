@@ -10,6 +10,8 @@ import {
   type GraphLane,
   type GraphLaneKind,
   type GovernanceModel,
+  type LocalDevArtifactModel,
+  type LocalDevSessionModel,
   type QueryCommand,
   type RemediationChainModel,
   type ChainSourceStep,
@@ -24,6 +26,7 @@ import {
   causePathForEvent,
   deriveGovernanceModel,
   deriveGraphModel,
+  deriveLocalDevSessionModel,
   deriveSemanticDiffModel,
   deriveVisualGraphModel,
   deriveWorkbenchModel,
@@ -39,11 +42,12 @@ const VisualGraphCanvas = lazy(async () => {
   return { default: module.VisualGraphCanvas };
 });
 
-type Tab = "timeline" | "findings" | "graph" | "visual-graph" | "diff" | "chain" | "queries" | "metadata";
+type Tab = "timeline" | "agents" | "findings" | "graph" | "visual-graph" | "diff" | "chain" | "queries" | "metadata";
 type WorkbenchTab = { id: Tab; label: string };
 
 const tabs: WorkbenchTab[] = [
   { id: "timeline", label: "Timeline" },
+  { id: "agents", label: "Agents" },
   { id: "findings", label: "Findings" },
   { id: "graph", label: "Graph" },
   { id: "visual-graph", label: "Visual Graph" },
@@ -106,6 +110,7 @@ export function App() {
         model: deriveWorkbenchModel(raw, { artifactPath }),
         governance: deriveGovernanceModel(raw, { artifactPath }),
         semanticDiff: deriveSemanticDiffModel(raw, { artifactPath }),
+        localDevSession: deriveLocalDevSessionModel(raw, { artifactPath }),
         raw,
         session: loaded.session,
         error: null,
@@ -115,6 +120,7 @@ export function App() {
         model: null,
         governance: null,
         semanticDiff: null,
+        localDevSession: null,
         raw: null,
         session: loaded.session,
         error: error instanceof Error ? error.message : "failed to parse artifact",
@@ -125,6 +131,7 @@ export function App() {
   const model = createMemo(() => parsed()?.model ?? null);
   const governance = createMemo(() => parsed()?.governance ?? null);
   const semanticDiff = createMemo(() => parsed()?.semanticDiff ?? null);
+  const localDevSession = createMemo(() => parsed()?.localDevSession ?? null);
   const availableTabs = createMemo(() => workbenchTabsForArtifact());
   const graphModel = createMemo(() => {
     const current = model();
@@ -261,6 +268,13 @@ export function App() {
                   <Match when={activeTab() === "timeline"}>
                     <Timeline events={visibleEvents()} selected={selectedEvent()} onSelect={setSelectedId} />
                   </Match>
+                  <Match when={activeTab() === "agents"}>
+                    <AgentDevelopmentView
+                      session={localDevSession()}
+                      copiedCommand={copiedCommand()}
+                      onCopy={copyCommand}
+                    />
+                  </Match>
                   <Match when={activeTab() === "findings"}>
                     <Findings events={current().events} findings={current().findings} onSelect={setSelectedId} />
                   </Match>
@@ -329,6 +343,171 @@ export function App() {
         )}
       </Show>
     </main>
+  );
+}
+
+function AgentDevelopmentView(props: {
+  session: LocalDevSessionModel | null;
+  copiedCommand: string | null;
+  onCopy: (command: string) => void;
+}) {
+  const commands = createMemo<QueryCommand[]>(() => {
+    const session = props.session;
+    if (!session) {
+      return [];
+    }
+
+    return [
+      ...session.commands
+        .filter((command) => command.command.length > 0)
+        .map((command) => ({ label: command.label, command: command.command })),
+      ...session.artifacts
+        .filter((artifact) => artifact.workbenchCommand !== null)
+        .map((artifact) => ({ label: artifact.label, command: artifact.workbenchCommand! })),
+    ];
+  });
+
+  return (
+    <div class="view-stack">
+      <div class="view-heading">
+        <h2>Agents</h2>
+        <span>{props.session?.status ?? "no local session"}</span>
+      </div>
+
+      <Show when={props.session} fallback={<EmptyState label="Loaded artifact has no local agent development session" />}>
+        {(session) => (
+          <>
+            <div class="agent-summary">
+              <Metric label="target" value={session().target} />
+              <Metric label="phase" value={session().phase} />
+              <Metric label="status" value={session().status} tone={session().status === "failed" ? "warn" : "ok"} />
+              <Metric label="agents" value={String(session().agents.length)} />
+              <Metric label="checks" value={String(session().checks.length)} />
+              <Metric label="artifacts" value={String(session().artifacts.length)} />
+            </div>
+
+            <section class="agent-panel">
+              <div class="agent-session-head">
+                <div>
+                  <h3>{session().title}</h3>
+                  <p>{session().goal}</p>
+                </div>
+                <Badge value={session().mode} />
+              </div>
+              <dl class="metadata-grid">
+                <Meta label="session" value={session().sessionId} />
+                <Meta label="artifact" value={session().artifactPath} />
+                <Meta label="schema" value={session().schema} />
+                <Meta label="schema version" value={session().schemaVersion} />
+              </dl>
+            </section>
+
+            <div class="agent-grid">
+              <section class="agent-panel">
+                <div class="lane-section-head">
+                  <h3>Local agents</h3>
+                  <span>{session().agents.length}</span>
+                </div>
+                <div class="agent-row-list">
+                  <For each={session().agents} fallback={<EmptyState label="No agents" compact />}>
+                    {(agent) => (
+                      <div classList={{ "agent-row": true, [agent.status]: true }}>
+                        <span>{agent.kind}</span>
+                        <strong>{agent.label}</strong>
+                        <small>{agent.currentTask ?? agent.artifactPath ?? "no active task"}</small>
+                        <Badge value={agent.status} />
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </section>
+
+              <section class="agent-panel">
+                <div class="lane-section-head">
+                  <h3>Checks</h3>
+                  <span>{session().checks.length}</span>
+                </div>
+                <div class="agent-check-list">
+                  <For each={session().checks} fallback={<EmptyState label="No checks" compact />}>
+                    {(check) => (
+                      <div classList={{ "agent-check-row": true, [check.status]: true }}>
+                        <span>{check.status}</span>
+                        <strong>{check.label}</strong>
+                        <small>{check.detail || check.command || check.artifactPath || "no detail"}</small>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </section>
+            </div>
+
+            <section class="agent-panel">
+              <div class="lane-section-head">
+                <h3>Artifacts</h3>
+                <span>{session().artifacts.length}</span>
+              </div>
+              <div class="agent-artifact-list">
+                <For each={session().artifacts} fallback={<EmptyState label="No artifact links" compact />}>
+                  {(artifact) => <AgentArtifactRow artifact={artifact} />}
+                </For>
+              </div>
+            </section>
+
+            <Show when={commands().length > 0}>
+              <section class="agent-panel">
+                <div class="lane-section-head">
+                  <h3>Commands</h3>
+                  <span>{commands().length}</span>
+                </div>
+                <CommandList commands={commands()} copiedCommand={props.copiedCommand} onCopy={props.onCopy} />
+              </section>
+            </Show>
+
+            <div class="agent-grid">
+              <section class="agent-panel">
+                <div class="lane-section-head">
+                  <h3>Next actions</h3>
+                  <span>{session().nextActions.length}</span>
+                </div>
+                <div class="guardrail-list">
+                  <For each={session().nextActions} fallback={<EmptyState label="No next actions" compact />}>
+                    {(action) => <span>{action}</span>}
+                  </For>
+                </div>
+              </section>
+
+              <section class="agent-panel">
+                <div class="lane-section-head">
+                  <h3>Guardrails</h3>
+                  <span>{session().guardrails.length}</span>
+                </div>
+                <div class="guardrail-list">
+                  <For each={session().guardrails} fallback={<EmptyState label="No guardrails" compact />}>
+                    {(guardrail) => <span>{guardrail}</span>}
+                  </For>
+                </div>
+              </section>
+            </div>
+
+            <Show when={session().warnings.length > 0}>
+              <div class="warning-list">
+                <For each={session().warnings}>{(warning) => <span>{warning}</span>}</For>
+              </div>
+            </Show>
+          </>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+function AgentArtifactRow(props: { artifact: LocalDevArtifactModel }) {
+  return (
+    <div class="agent-artifact-row">
+      <span>{props.artifact.kind}</span>
+      <strong>{props.artifact.label}</strong>
+      <code>{props.artifact.path}</code>
+    </div>
   );
 }
 

@@ -81,6 +81,18 @@ test("loadPayloadFromBridge can load the graph visual debugging development samp
   expect(payload.artifactJson).toContain("Project.v1");
 });
 
+test("loadPayloadFromBridge can load the local dev session sample", async () => {
+  const payload = await loadPayloadFromBridge(
+    {},
+    async (sampleName) => readFileSync(new URL(`../public/${sampleName}`, import.meta.url), "utf8"),
+    "?sample=dev-session",
+  );
+
+  expect(payload.session?.artifact_path).toBe("sample-dev-session.json");
+  expect(payload.artifactJson).toContain("zigeffect.causal.dev-session.v1");
+  expect(payload.artifactJson).toContain("Claude Code");
+});
+
 test("workbench HTML loads the WebUI bridge before the Solid bundle", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const webuiScript = html.indexOf('src="/webui.js"');

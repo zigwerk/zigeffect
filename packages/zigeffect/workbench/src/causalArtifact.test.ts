@@ -4,6 +4,7 @@ import {
   causePathForEvent,
   deriveAppRemediationModel,
   deriveGovernanceModel,
+  deriveLocalDevSessionModel,
   deriveSemanticDiffModel,
   deriveVisualGraphModel,
   deriveWorkbenchModel,
@@ -238,6 +239,75 @@ const sampleSemanticDiffArtifact = {
     ],
   },
   events: [],
+};
+
+const sampleLocalDevSession = {
+  schema: "zigeffect.causal.dev-session.v1",
+  schema_version: 1,
+  mode: "local",
+  session_id: "local-dogfood-001",
+  title: "Local agentic dogfood session",
+  goal: "Develop zigeffect locally with agent-visible causal evidence.",
+  target: "dogfood",
+  phase: "assessed",
+  status: "audit-ready",
+  agents: [
+    {
+      id: "codex",
+      label: "Codex",
+      kind: "codex",
+      status: "reviewing",
+      current_task: "Inspect structural diff evidence",
+    },
+    {
+      id: "claude-code",
+      label: "Claude Code",
+      kind: "claude-code",
+      status: "idle",
+    },
+    {
+      id: "zigeffect-tools",
+      label: "zigeffect tools",
+      kind: "zigeffect",
+      status: "done",
+      artifact_path: ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-audit.json",
+    },
+  ],
+  checks: [
+    {
+      label: "causal-dev-loop after",
+      command: "zig build causal-dev-loop -- after",
+      status: "pass",
+      detail: "after artifact captured",
+      artifact_path: ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json",
+    },
+    {
+      label: "causal-remediation-audit",
+      command: "zig build causal-remediation-audit -- local",
+      status: "pass",
+      artifact_path: ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-audit.json",
+    },
+  ],
+  commands: [
+    {
+      name: "causal-dev-loop after",
+      status: "ok",
+      exit_code: 0,
+      argv: ["zig", "build", "causal-dev-loop", "--", "after"],
+      stdout_snippet: "after artifact captured",
+      stderr_snippet: "",
+    },
+  ],
+  artifacts: {
+    session_json: ".zig-cache/causal-artifacts/zigeffect-causal-dev-session.json",
+    before_json: ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json",
+    after_json: ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json",
+    verdict_json: ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-verdict.json",
+    remediation_audit_json: ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-remediation-audit.json",
+  },
+  next_actions: ["zig build causal-remediation-decision -- local approve|reject"],
+  guardrails: ["source edits remain outside causal tools"],
+  warnings: ["local-only session"],
 };
 
 const sampleAppPolicy = {
@@ -569,6 +639,78 @@ test("deriveWorkbenchModel tolerates partial artifacts", () => {
   expect(model.events[0]?.idText).toBe("alpha");
   expect(model.events[0]?.status).toBe("unknown");
   expect(model.warnings).toContain("artifact schema is missing");
+});
+
+test("deriveLocalDevSessionModel normalizes local agent development sessions", () => {
+  const session = deriveLocalDevSessionModel(sampleLocalDevSession, {
+    artifactPath: ".zig-cache/causal-artifacts/zigeffect-causal-dev-session.json",
+  });
+
+  expect(session).not.toBeNull();
+  expect(session?.schema).toBe("zigeffect.causal.dev-session.v1");
+  expect(session?.sessionId).toBe("local-dogfood-001");
+  expect(session?.title).toBe("Local agentic dogfood session");
+  expect(session?.goal).toContain("agent-visible causal evidence");
+  expect(session?.phase).toBe("assessed");
+  expect(session?.status).toBe("audit-ready");
+  expect(session?.agents.map((agent) => `${agent.kind}:${agent.label}:${agent.status}`)).toEqual([
+    "codex:Codex:reviewing",
+    "claude-code:Claude Code:idle",
+    "zigeffect:zigeffect tools:done",
+  ]);
+  expect(session?.checks.map((check) => `${check.label}:${check.status}`)).toEqual([
+    "causal-dev-loop after:pass",
+    "causal-remediation-audit:pass",
+  ]);
+  expect(session?.commands[0]?.command).toBe("zig build causal-dev-loop -- after");
+  expect(session?.artifacts.find((artifact) => artifact.key === "after_json")?.workbenchCommand).toBe(
+    "zig build causal-workbench -- .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json",
+  );
+  expect(session?.nextActions).toEqual(["zig build causal-remediation-decision -- local approve|reject"]);
+  expect(session?.guardrails).toContain("source edits remain outside causal tools");
+  expect(session?.warnings).toContain("local-only session");
+});
+
+test("deriveLocalDevSessionModel derives fallbacks for older dev-session receipts", () => {
+  const session = deriveLocalDevSessionModel({
+    schema: "zigeffect.causal.dev-session.v1",
+    schema_version: 1,
+    mode: "local",
+    target: "dogfood",
+    phase: "baseline-captured",
+    status: "ready-for-edit",
+    commands: [
+      {
+        name: "causal-dev-loop baseline",
+        status: "ok",
+        exit_code: 0,
+        argv: ["zig", "build", "causal-dev-loop", "--", "baseline"],
+      },
+      {
+        name: "causal-dev-agent",
+        status: "skipped",
+        exit_code: null,
+        argv: ["zig", "build", "causal-dev-agent", "--", "local"],
+      },
+    ],
+    artifacts: {
+      session_json: ".zig-cache/causal-artifacts/zigeffect-causal-dev-session.json",
+      before_json: ".zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json",
+    },
+  }, { artifactPath: "older-session.json" });
+
+  expect(session).not.toBeNull();
+  expect(session?.sessionId).toBe("older-session.json");
+  expect(session?.agents.map((agent) => `${agent.id}:${agent.status}`)).toEqual(["zigeffect-tools:running"]);
+  expect(session?.checks.map((check) => `${check.label}:${check.status}`)).toEqual([
+    "causal-dev-loop baseline:pass",
+    "causal-dev-agent:skipped",
+  ]);
+  expect(session?.artifacts.map((artifact) => artifact.key)).toEqual(["session_json", "before_json"]);
+});
+
+test("deriveLocalDevSessionModel ignores unrelated artifacts", () => {
+  expect(deriveLocalDevSessionModel({ schema: "zigeffect.causal.v1" }, { artifactPath: "trace.json" })).toBeNull();
 });
 
 test("deriveGraphModel summarizes roots parent edges and runtime lanes", () => {

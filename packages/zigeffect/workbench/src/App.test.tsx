@@ -6,6 +6,7 @@ test("workbenchTabsForArtifact exposes the surviving workbench tabs", () => {
 
   expect(tabIds).toEqual([
     "timeline",
+    "agents",
     "findings",
     "graph",
     "visual-graph",

@@ -1308,6 +1308,7 @@ pub fn build(b: *std.Build) void {
         .root_module = causal_dev_session_tool_module,
     });
     const run_causal_dev_session_tool_tests = b.addRunArtifact(causal_dev_session_tool_tests);
+    test_step.dependOn(&run_causal_dev_session_tool_tests.step);
 
     const causal_dev_session_tool = b.addExecutable(.{
         .name = "zigeffect-causal-dev-session",
