@@ -58,7 +58,9 @@ bun run zigeffect:std:test
 - `Http` defines effect-native HTTP client/server contracts with fake and live
   local clients, deterministic memory routing, redacted diagnostics, and
   WebSocket frame codecs for local workbench feeds.
-- `Agent` formats local agent session events and run receipts.
+- `Agent` records workbench-compatible local agent JSONL sessions, Codex and
+  Claude Code process adapter commands, guardrails, artifacts, check receipts,
+  and effect-native process-backed agent runs.
 - `fx` re-exports the base zigeffect engine facade.
 
 `Env`, `Config`, `Secrets`, `Json`, `Jsonl`, `Cli`, `Queue`, `PubSub`, `Sink`,

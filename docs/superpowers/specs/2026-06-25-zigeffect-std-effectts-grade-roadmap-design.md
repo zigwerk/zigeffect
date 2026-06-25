@@ -176,17 +176,20 @@ Deliverables:
 
 ### M10 - Agent Toolkit
 
+Status: delivered on 2026-06-25.
+
 Make local agentic development a first-class std-lib runtime.
 
 Deliverables:
 
-- `zstd.Agent` service.
+- `zstd.Agent.Session` service.
 - Codex and Claude Code process adapter contracts.
-- local session model and JSONL feed writer.
+- local session model and workbench-compatible JSONL feed writer.
 - tool/check/artifact events.
-- policy/guardrail hooks.
-- live workbench visualization path.
-- end-to-end local agent run proof.
+- guardrail, warning, and next-action hooks.
+- live workbench visualization path through the existing local dev session feed.
+- end-to-end local agent run proof through `RunAgentEffect` and
+  `zstd.Process` runners.
 
 ## Dependency Order
 
