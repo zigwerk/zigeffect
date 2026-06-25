@@ -161,15 +161,18 @@ Deliverables:
 
 ### M9 - SQL and Postgres Adapter Package
 
+Status: delivered on 2026-06-25.
+
 Keep `zstd.Sql` as the contract and add real Postgres outside std.
 
 Deliverables:
 
 - effect-native SQL contract, fake database, transaction scope, migrations.
-- `packages/zigeffect-postgres` adapter package.
+- `packages/zigeffect-postgres` adapter package backed by local `psql`.
 - connection pool interface.
-- redacted connection metadata.
-- contract tests shared by fake and Postgres adapter.
+- redacted connection metadata and query receipts.
+- contract tests covering fake database behavior, package command construction,
+  and Postgres JSON row parsing.
 
 ### M10 - Agent Toolkit
 

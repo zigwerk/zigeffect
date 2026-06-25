@@ -1,0 +1,17 @@
+.{
+    .name = .zigeffect_postgres,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0x9a6b1aa7d983e9e4,
+    .dependencies = .{
+        .zigeffect_std = .{
+            .path = "../zigeffect-std",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "README.md",
+        "src",
+    },
+}

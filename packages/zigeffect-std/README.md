@@ -52,7 +52,9 @@ bun run zigeffect:std:test
 - `Testing` provides JSON and sentinel-secret assertions.
 - `Clock` provides deterministic fake time.
 - `Schedule` provides deterministic retry/polling steppers.
-- `Sql` defines fakeable SQL query contracts without a real driver.
+- `Sql` defines effect-native SQL query contracts, owned results, fake
+  databases, transactions, migrations, and pool lifecycle facts. The local
+  Postgres adapter lives in `packages/zigeffect-postgres`.
 - `Http` defines effect-native HTTP client/server contracts with fake and live
   local clients, deterministic memory routing, redacted diagnostics, and
   WebSocket frame codecs for local workbench feeds.
