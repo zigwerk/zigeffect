@@ -30,7 +30,7 @@ operation facts through `zstd.Service.recordOperation`.
 
 ## Task 1: Nested Commands And Typed Defaults
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests:
 
@@ -47,7 +47,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because recursive routing and default resolution are missing.
 
-- [ ] **Step 2: Implement parser/default APIs**
+- [x] **Step 2: Implement parser/default APIs**
 
 Implement:
 
@@ -65,7 +65,7 @@ pub fn resolveOptionValue(... ) (CliError || Config.ConfigError || Env.EnvError 
 
 Required-option validation must allow values supplied by default/env/config.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -77,7 +77,7 @@ Expected: tests pass.
 
 ## Task 2: Help And Completion Output
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests:
 
@@ -94,7 +94,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because completion formatting is missing.
 
-- [ ] **Step 2: Implement help/completions**
+- [x] **Step 2: Implement help/completions**
 
 Implement:
 
@@ -104,7 +104,7 @@ pub fn formatCompletions(allocator: std.mem.Allocator, spec: CommandSpec, args: 
 
 Completion output must list subcommands first and options second in spec order.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -116,7 +116,7 @@ Expected: tests pass.
 
 ## Task 3: Effect-Native Runner
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests:
 
@@ -134,7 +134,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because runner service/effect APIs are missing.
 
-- [ ] **Step 2: Implement runner APIs**
+- [x] **Step 2: Implement runner APIs**
 
 Implement:
 
@@ -154,7 +154,7 @@ The runner must:
 - return a `RunSummary` with an owned redacted receipt JSON;
 - write usage/handler errors to captured stderr.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -166,15 +166,15 @@ Expected: tests pass.
 
 ## Task 4: Docs And Gate
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
 Update README and roadmap wording for the delivered CLI framework.
 
-- [ ] **Step 2: Mark checkboxes complete**
+- [x] **Step 2: Mark checkboxes complete**
 
 Replace completed `- [ ]` with `- [x]`.
 
-- [ ] **Step 3: Final verification**
+- [x] **Step 3: Final verification**
 
 Run:
 

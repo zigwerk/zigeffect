@@ -29,7 +29,8 @@ bun run zigeffect:std:test
 - `Schema` validates and decodes JSON/config boundaries with typed errors.
 - `Json` writes deterministic redacted JSON payloads.
 - `Jsonl` appends and parses newline-delimited JSON feeds.
-- `Cli` parses deterministic command specs and emits command run receipts.
+- `Cli` parses deterministic command specs, nested subcommands, typed defaults,
+  completions, effect-native handlers, exit-code mapping, and run receipts.
 - `Console` provides a captured console service for testable command output.
 - `Env` provides an owned environment map for deterministic local runs.
 - `Config` resolves layered key/value config with redacted display values.
