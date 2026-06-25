@@ -1,4 +1,6 @@
 const std = @import("std");
+const StdService = @import("../service/root.zig");
+const fx = @import("zigeffect");
 
 pub const redacted = "[REDACTED]";
 
@@ -27,6 +29,45 @@ pub fn containsSecret(input: []const u8) bool {
 pub fn redactAlloc(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
     if (containsSecret(input)) return allocator.dupe(u8, redacted);
     return allocator.dupe(u8, input);
+}
+
+pub const Redactor = struct {
+    pub fn contains(_: Redactor, input: []const u8) bool {
+        return containsSecret(input);
+    }
+
+    pub fn redactAlloc(_: Redactor, allocator: std.mem.Allocator, input: []const u8) std.mem.Allocator.Error![]const u8 {
+        return @import("root.zig").redactAlloc(allocator, input);
+    }
+};
+
+pub fn RedactEffect(comptime EffectEnv: type) type {
+    return struct {
+        pub const SuccessType = []const u8;
+        pub const FailureType = std.mem.Allocator.Error;
+        pub const EnvType = EffectEnv;
+        pub const RequiredServices = .{Redactor};
+
+        input: []const u8,
+
+        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
+            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
+        }
+
+        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType![]const u8 {
+            const redactor = ctx.service(Redactor);
+            const output = redactor.redactAlloc(ctx.allocator, self.input) catch |err| {
+                _ = StdService.recordOperation(ctx, Redactor, "redact", "failure", self.input);
+                return err;
+            };
+            _ = StdService.recordOperation(ctx, Redactor, "redact", "success", self.input);
+            return output;
+        }
+    };
+}
+
+pub fn redactEffect(comptime EffectEnv: type, input: []const u8) RedactEffect(EffectEnv) {
+    return .{ .input = input };
 }
 
 fn containsInsensitive(haystack: []const u8, needle: []const u8) bool {
@@ -83,4 +124,27 @@ test "SecretString never exposes raw display text" {
 
     try std.testing.expectEqualStrings("sentinel-secret-for-tests", secret.expose());
     try std.testing.expectEqualStrings(redacted, secret.display());
+}
+
+test "Secrets redactEffect uses Redactor service and records causal fact" {
+    const zstd = @import("../root.zig");
+
+    var redactor = Redactor{};
+    var provider = zstd.Service.Provider(.{Redactor}).init(.{&redactor});
+    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
+        .provides(.{Redactor})
+        .withCausalStore(&store);
+
+    const output = try runtime.run(redactEffect(@TypeOf(provider), "token=abc123"));
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expectEqualStrings(redacted, output);
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 1), snapshot.events.len);
+    try std.testing.expectEqualStrings(@typeName(Redactor), snapshot.events[0].service_key);
 }

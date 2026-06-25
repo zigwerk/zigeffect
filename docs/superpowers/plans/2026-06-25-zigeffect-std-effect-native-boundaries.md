@@ -21,7 +21,7 @@
 
 ## Task 1: Env and Config Effects
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests:
 
@@ -38,7 +38,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because effect APIs are missing.
 
-- [ ] **Step 2: Implement Env/Config effect APIs**
+- [x] **Step 2: Implement Env/Config effect APIs**
 
 Implement:
 
@@ -49,7 +49,7 @@ pub fn displayEffect(comptime EffectEnv: type, key: []const u8) DisplayEffect(Ef
 
 Each effect must declare `requiredServices` and call `Service.recordOperation`.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -61,7 +61,7 @@ Expected: tests pass.
 
 ## Task 2: Secrets, Json, and Jsonl Effects
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests:
 
@@ -79,7 +79,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because effect APIs are missing.
 
-- [ ] **Step 2: Implement effects**
+- [x] **Step 2: Implement effects**
 
 Implement:
 
@@ -94,7 +94,7 @@ pub fn appendEffect(comptime EffectEnv: type, existing: []const u8, record_json:
 
 Each effect must declare `requiredServices` and call `Service.recordOperation`.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -106,16 +106,16 @@ Expected: tests pass.
 
 ## Task 3: Docs and Gate
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Mention that `Env`, `Config`, `Secrets`, `Json`, and `Jsonl` now expose
 effect-native service APIs.
 
-- [ ] **Step 2: Mark checkboxes complete**
+- [x] **Step 2: Mark checkboxes complete**
 
 Replace completed `- [ ]` with `- [x]`.
 
-- [ ] **Step 3: Final verification**
+- [x] **Step 3: Final verification**
 
 Run:
 
@@ -126,4 +126,3 @@ git diff --check
 ```
 
 Expected: all commands exit 0.
-

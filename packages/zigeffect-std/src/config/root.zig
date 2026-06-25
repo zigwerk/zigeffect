@@ -1,5 +1,7 @@
 const std = @import("std");
 const Secrets = @import("../secrets/root.zig");
+const StdService = @import("../service/root.zig");
+const fx = @import("zigeffect");
 
 pub const ConfigError = error{MissingValue};
 
@@ -75,6 +77,64 @@ pub const LayeredConfig = struct {
     }
 };
 
+pub fn RequireEffect(comptime EffectEnv: type) type {
+    return struct {
+        pub const SuccessType = []const u8;
+        pub const FailureType = ConfigError;
+        pub const EnvType = EffectEnv;
+        pub const RequiredServices = .{LayeredConfig};
+
+        key: []const u8,
+
+        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
+            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
+        }
+
+        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) ConfigError![]const u8 {
+            const config = ctx.service(LayeredConfig);
+            const value = config.require(self.key) catch |err| {
+                _ = StdService.recordOperation(ctx, LayeredConfig, "require", "failure", self.key);
+                return err;
+            };
+            _ = StdService.recordOperation(ctx, LayeredConfig, "require", "success", self.key);
+            return value;
+        }
+    };
+}
+
+pub fn DisplayEffect(comptime EffectEnv: type) type {
+    return struct {
+        pub const SuccessType = []const u8;
+        pub const FailureType = ConfigError || std.mem.Allocator.Error;
+        pub const EnvType = EffectEnv;
+        pub const RequiredServices = .{LayeredConfig};
+
+        key: []const u8,
+
+        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
+            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
+        }
+
+        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType![]const u8 {
+            const config = ctx.service(LayeredConfig);
+            const value = config.displayValueAlloc(ctx.allocator, self.key) catch |err| {
+                _ = StdService.recordOperation(ctx, LayeredConfig, "display", "failure", self.key);
+                return err;
+            };
+            _ = StdService.recordOperation(ctx, LayeredConfig, "display", "success", self.key);
+            return value;
+        }
+    };
+}
+
+pub fn requireEffect(comptime EffectEnv: type, key: []const u8) RequireEffect(EffectEnv) {
+    return .{ .key = key };
+}
+
+pub fn displayEffect(comptime EffectEnv: type, key: []const u8) DisplayEffect(EffectEnv) {
+    return .{ .key = key };
+}
+
 test "Config resolves layered values and redacts sensitive keys" {
     var config = LayeredConfig.init(std.testing.allocator);
     defer config.deinit();
@@ -89,4 +149,23 @@ test "Config resolves layered values and redacts sensitive keys" {
     try std.testing.expectEqualStrings("[REDACTED]", display);
 
     try std.testing.expectError(ConfigError.MissingValue, config.require("MISSING"));
+}
+
+test "Config requireEffect and displayEffect resolve through runtime services" {
+    const zstd = @import("../root.zig");
+
+    var config = LayeredConfig.init(std.testing.allocator);
+    defer config.deinit();
+    try config.put("MODE", "local", false);
+    try config.put("DATABASE_URL", "postgres://user:pass@localhost/db", true);
+
+    var provider = zstd.Service.Provider(.{LayeredConfig}).init(.{&config});
+    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
+        .provides(.{LayeredConfig});
+
+    try std.testing.expectEqualStrings("local", try runtime.run(requireEffect(@TypeOf(provider), "MODE")));
+
+    const display = try runtime.run(displayEffect(@TypeOf(provider), "DATABASE_URL"));
+    defer std.testing.allocator.free(display);
+    try std.testing.expectEqualStrings("[REDACTED]", display);
 }

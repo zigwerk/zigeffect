@@ -46,6 +46,12 @@ bun run zigeffect:std:test
 - `Agent` formats local agent session events and run receipts.
 - `fx` re-exports the base zigeffect engine facade.
 
+`Env`, `Config`, `Secrets`, `Json`, and `Jsonl` also expose effect-native
+service APIs. Their `*Effect` values declare required services, resolve those
+services through `zstd.Service.Provider`, and record causal service-operation
+facts so local agent workflows can inspect boundary behavior through the engine
+graph instead of ad-hoc logs.
+
 The public surface is:
 
 ```zig

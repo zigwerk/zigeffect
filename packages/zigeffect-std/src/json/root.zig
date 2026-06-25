@@ -1,5 +1,7 @@
 const std = @import("std");
 const Secrets = @import("../secrets/root.zig");
+const StdService = @import("../service/root.zig");
+const fx = @import("zigeffect");
 
 pub const Field = struct {
     name: []const u8,
@@ -49,6 +51,45 @@ pub fn objectFromFieldsAlloc(allocator: std.mem.Allocator, fields: []const Field
     return output.toOwnedSlice(allocator);
 }
 
+pub const Codec = struct {
+    pub fn escapeAlloc(_: Codec, allocator: std.mem.Allocator, value: []const u8) std.mem.Allocator.Error![]const u8 {
+        return escapeStringAlloc(allocator, value);
+    }
+
+    pub fn objectAlloc(_: Codec, allocator: std.mem.Allocator, fields: []const Field) std.mem.Allocator.Error![]const u8 {
+        return objectFromFieldsAlloc(allocator, fields);
+    }
+};
+
+pub fn ObjectEffect(comptime EffectEnv: type) type {
+    return struct {
+        pub const SuccessType = []const u8;
+        pub const FailureType = std.mem.Allocator.Error;
+        pub const EnvType = EffectEnv;
+        pub const RequiredServices = .{Codec};
+
+        fields: []const Field,
+
+        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
+            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
+        }
+
+        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType![]const u8 {
+            const codec = ctx.service(Codec);
+            const output = codec.objectAlloc(ctx.allocator, self.fields) catch |err| {
+                _ = StdService.recordOperation(ctx, Codec, "object", "failure", "json object");
+                return err;
+            };
+            _ = StdService.recordOperation(ctx, Codec, "object", "success", "json object");
+            return output;
+        }
+    };
+}
+
+pub fn objectEffect(comptime EffectEnv: type, fields: []const Field) ObjectEffect(EffectEnv) {
+    return .{ .fields = fields };
+}
+
 test "Json writes stable redacted object fields" {
     const fields = [_]Field{
         .{ .name = "command", .value = "zg hello" },
@@ -69,4 +110,32 @@ test "Json escapes strings deterministically" {
     defer std.testing.allocator.free(escaped);
 
     try std.testing.expectEqualStrings("line\\n\\\"quoted\\\"\\\\tail", escaped);
+}
+
+test "Json objectEffect uses Codec service and records causal fact" {
+    const zstd = @import("../root.zig");
+
+    var codec = Codec{};
+    var provider = zstd.Service.Provider(.{Codec}).init(.{&codec});
+    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
+        .provides(.{Codec})
+        .withCausalStore(&store);
+
+    const fields = [_]Field{
+        .{ .name = "status", .value = "ok" },
+    };
+    const output = try runtime.run(objectEffect(@TypeOf(provider), fields[0..]));
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expectEqualStrings("{\"status\":\"ok\"}", output);
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 1), snapshot.events.len);
+    try std.testing.expectEqual(zstd.fx.CausalEventKind.span_recorded, snapshot.events[0].kind);
+    try std.testing.expectEqualStrings(@typeName(Codec), snapshot.events[0].service_key);
+    try std.testing.expectEqualStrings("object", snapshot.events[0].label);
 }
