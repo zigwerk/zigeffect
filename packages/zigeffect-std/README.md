@@ -53,7 +53,9 @@ bun run zigeffect:std:test
 - `Clock` provides deterministic fake time.
 - `Schedule` provides deterministic retry/polling steppers.
 - `Sql` defines fakeable SQL query contracts without a real driver.
-- `Http` defines fakeable request/response contracts without network access.
+- `Http` defines effect-native HTTP client/server contracts with fake and live
+  local clients, deterministic memory routing, redacted diagnostics, and
+  WebSocket frame codecs for local workbench feeds.
 - `Agent` formats local agent session events and run receipts.
 - `fx` re-exports the base zigeffect engine facade.
 

@@ -146,16 +146,18 @@ Deliverables:
 
 ### M8 - HTTP and WebSocket
 
+Status: delivered on 2026-06-25.
+
 Make HTTP local tools effect-native.
 
 Deliverables:
 
-- HTTP client/server contracts.
-- fake client/server.
-- real local client adapter where Zig std supports it cleanly.
-- request/response schemas.
+- HTTP client/server contracts as effect-native services.
+- fake client and deterministic memory server.
+- real local client adapter through Zig `std.http.Client.fetch`.
+- request/response ownership and deinit contracts.
 - WebSocket frame contracts for workbench/collector flows.
-- redacted header/url/body diagnostics.
+- redacted header/url/body diagnostics and causal service facts.
 
 ### M9 - SQL and Postgres Adapter Package
 
