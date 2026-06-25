@@ -860,6 +860,7 @@ test "loopback socket transport crosses real localhost TCP and preserves envelop
     try std.testing.expectEqual(@as(usize, 1), metrics.successes);
     try std.testing.expect(metrics.bytes_sent > 0);
     try std.testing.expect(metrics.bytes_received > 0);
+    try std.testing.expectEqual(@as(usize, 0), metrics.in_flight);
 }
 
 test "loopback socket transport trace is structurally equivalent to in-process transport trace" {
@@ -926,6 +927,39 @@ test "remote socket transport rejects wrong auth before durable submission" {
     try std.testing.expect(std.mem.indexOf(u8, failure.redacted_detail, "wrong-secret") == null);
 }
 
+test "loopback socket transport applies max in-flight limit before durable submission" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var message_storage_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_state.deinit();
+
+    var transport_state = try fx.LoopbackSocketClusterTransport.init(
+        std.testing.allocator,
+        std.testing.io,
+        message_storage_state.asMessageStorage(),
+        .{ .shard_count = 8, .port = 19406, .limits = .{ .max_in_flight = 1 } },
+    );
+    defer transport_state.deinit();
+    transport_state.lifecycle.in_flight = 1;
+
+    const address = fx.entityAddress("counter", "loopback-in-flight");
+    const shard_id = try fx.shardIdForAddress(address, 8);
+    try std.testing.expectError(error.TransportBackpressured, transport_state.asClusterTransport().send(std.testing.allocator, .{
+        .kind = .tell,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "inc",
+        .redacted_detail = "in-flight pressure",
+    }));
+
+    var by_shard = try message_storage_state.asMessageStorage().unprocessedByShard(shard_id, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 0), by_shard.records.len);
+    const metrics = transport_state.snapshotMetrics();
+    try std.testing.expectEqual(@as(usize, 1), metrics.backpressured);
+    try std.testing.expectEqual(@as(usize, 1), metrics.in_flight);
+}
+
 test "remote socket transport sends over socket path with matching auth" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -967,6 +1001,7 @@ test "remote socket transport sends over socket path with matching auth" {
     try std.testing.expectEqual(@as(usize, 1), metrics.successes);
     try std.testing.expect(metrics.bytes_sent > 0);
     try std.testing.expect(metrics.bytes_received > 0);
+    try std.testing.expectEqual(@as(usize, 0), metrics.in_flight);
 }
 
 test "remote socket transport validates TLS and pool policy before start" {
@@ -1467,6 +1502,39 @@ test "remote socket transport applies reject backpressure before durable submiss
     try std.testing.expectEqual(@as(usize, 0), by_shard.records.len);
     const metrics = transport_state.snapshotMetrics();
     try std.testing.expectEqual(@as(usize, 1), metrics.backpressured);
+}
+
+test "remote socket transport applies max in-flight limit before durable submission" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var message_storage_state = try fx.FileMessageStorage.open(std.testing.allocator, std.testing.io, &tmp.dir, .{});
+    defer message_storage_state.deinit();
+
+    var transport_state = try fx.RemoteSocketClusterTransport.init(
+        std.testing.allocator,
+        std.testing.io,
+        message_storage_state.asMessageStorage(),
+        .{ .shard_count = 8, .port = 19407, .limits = .{ .max_in_flight = 1 } },
+    );
+    defer transport_state.deinit();
+    transport_state.lifecycle.in_flight = 1;
+
+    const address = fx.entityAddress("counter", "remote-in-flight");
+    const shard_id = try fx.shardIdForAddress(address, 8);
+    try std.testing.expectError(error.TransportBackpressured, transport_state.asClusterTransport().send(std.testing.allocator, .{
+        .kind = .tell,
+        .address = address,
+        .payload_type_name = "text",
+        .payload = "inc",
+        .redacted_detail = "remote in-flight pressure",
+    }));
+
+    var by_shard = try message_storage_state.asMessageStorage().unprocessedByShard(shard_id, std.testing.allocator);
+    defer by_shard.deinit();
+    try std.testing.expectEqual(@as(usize, 0), by_shard.records.len);
+    const metrics = transport_state.snapshotMetrics();
+    try std.testing.expectEqual(@as(usize, 1), metrics.backpressured);
+    try std.testing.expectEqual(@as(usize, 1), metrics.in_flight);
 }
 
 test "remote socket transport preserves origin causal event id across socket path" {

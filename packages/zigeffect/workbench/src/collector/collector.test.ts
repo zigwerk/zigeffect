@@ -174,6 +174,33 @@ test("POST /command broadcasts a redacted policy-gated command frame", async () 
   }
 });
 
+test("POST /command redacts secret-shaped command kind before response and broadcast", async () => {
+  const { origin } = serve();
+  const client = await openClient(origin);
+  try {
+    const received = nextCommand(client);
+    const response = await fetch(`http://${origin}/command`, {
+      method: "POST",
+      body: JSON.stringify({
+        kind: "rotate_database_root_password token=sentinel-secret",
+        reason: "operator sent an unsafe command kind",
+      }),
+    });
+
+    const json = await response.json();
+    expect(json.command_kind).toContain("<redacted>");
+    expect(json.command_kind).not.toContain("sentinel-secret");
+    const command = await received;
+    expect(command.command_kind).toContain("<redacted>");
+    expect(command.command_kind).not.toContain("sentinel-secret");
+
+    const all = await (await fetch(`http://${origin}/commands?after=0`)).json();
+    expect(JSON.stringify(all)).not.toContain("sentinel-secret");
+  } finally {
+    client.close();
+  }
+});
+
 test("GET /commands exposes posted commands for an engine-side tap by sequence", async () => {
   const { origin } = serve();
 

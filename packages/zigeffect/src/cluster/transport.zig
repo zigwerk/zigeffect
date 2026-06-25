@@ -430,6 +430,8 @@ pub const LoopbackSocketClusterTransport = struct {
     pub fn send(self: *LoopbackSocketClusterTransport, allocator: Allocator, request: ClusterTransportRequest) !ClusterTransportResponse {
         self.lifecycle.sends += 1;
         try self.preflight(request);
+        self.lifecycle.in_flight += 1;
+        defer self.lifecycle.in_flight -= 1;
 
         const address = try std.Io.net.IpAddress.parseIp4("127.0.0.1", self.port);
         var server = try address.listen(self.io, .{ .reuse_address = true });
@@ -440,25 +442,31 @@ pub const LoopbackSocketClusterTransport = struct {
         const request_frame = try formatClusterTransportSocketFrame(allocator, request_json);
         defer allocator.free(request_frame);
 
+        var stream = address.connect(self.io, .{ .mode = .stream }) catch |err| {
+            self.recordFailure(1, err, "loopback socket connect failed");
+            return err;
+        };
+
         var ctx = LoopbackSocketServeContext{
             .transport = self,
             .server = &server,
             .allocator = allocator,
             .attempts = 1,
         };
-        const thread = try std.Thread.spawn(.{}, serveLoopbackSocketOnce, .{&ctx});
-
-        var stream = try address.connect(self.io, .{ .mode = .stream });
+        const thread = std.Thread.spawn(.{}, serveLoopbackSocketOnce, .{&ctx}) catch |err| {
+            stream.close(self.io);
+            self.recordFailure(1, err, "loopback socket server thread failed");
+            return err;
+        };
+        var thread_joined = false;
+        defer if (!thread_joined) thread.join();
         defer stream.close(self.io);
 
         try writeSocketFrame(stream, self.io, request_frame);
-        const response_frame = readSocketFrame(allocator, stream, self.io, self.limits.max_envelope_bytes) catch |err| {
-            thread.join();
-            if (ctx.err) |server_err| return server_err;
-            return err;
-        };
+        const response_frame = try readSocketFrame(allocator, stream, self.io, self.limits.max_envelope_bytes);
         defer allocator.free(response_frame);
         thread.join();
+        thread_joined = true;
         if (ctx.err) |err| return err;
 
         self.lifecycle.bytes_sent += request_frame.len;
@@ -996,6 +1004,8 @@ pub const RemoteSocketClusterTransport = struct {
     pub fn send(self: *RemoteSocketClusterTransport, allocator: Allocator, request: ClusterTransportRequest) !ClusterTransportResponse {
         self.lifecycle.sends += 1;
         try self.preflight(request);
+        self.lifecycle.in_flight += 1;
+        defer self.lifecycle.in_flight -= 1;
 
         const max_attempts = self.reconnect_attempts + 1;
         var attempts: usize = 0;

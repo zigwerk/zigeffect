@@ -96,8 +96,11 @@ pub const CausalOpsAlertProviderSecretResolver = struct {
     resolve: *const fn (?*anyopaque, secret_ref: []const u8) anyerror![]const u8,
 };
 
+pub const CausalOpsAlertProviderRetryableErrorFn = *const fn (anyerror) bool;
+
 pub const CausalOpsAlertProviderDeliveryPolicy = struct {
     max_attempts: usize = 1,
+    retryable: CausalOpsAlertProviderRetryableErrorFn = defaultCausalOpsAlertProviderRetryableError,
 };
 
 pub const CausalOpsAlertProviderDeliveryReport = struct {
@@ -111,6 +114,15 @@ pub const CausalOpsAlertHttpSink = struct {
     state: ?*anyopaque = null,
     send: *const fn (?*anyopaque, CausalOpsAlertHttpRequest) anyerror!void,
 };
+
+pub fn defaultCausalOpsAlertProviderRetryableError(err: anyerror) bool {
+    return err == error.TransientAlertSinkFailure or
+        err == error.TransportUnavailable or
+        err == error.TransportTimeout or
+        err == error.TemporaryNameServerFailure or
+        err == error.ConnectionResetByPeer or
+        err == error.ConnectionTimedOut;
+}
 
 pub fn emitCausalOpsAlerts(
     store: *const CausalStore,
@@ -310,6 +322,7 @@ pub fn deliverCausalOpsAlertProviderWithSecretRetrying(
             report.failures += 1;
             report.last_error_name = @errorName(err);
             if (report.attempts >= policy.max_attempts) return err;
+            if (!policy.retryable(err)) return err;
             continue;
         };
         report.delivered = true;

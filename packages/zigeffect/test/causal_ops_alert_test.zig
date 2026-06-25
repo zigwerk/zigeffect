@@ -396,6 +396,32 @@ const ProviderSecretRetryCapture = struct {
     }
 };
 
+const ProviderSecretPermanentResolverFailureCapture = struct {
+    resolved: usize = 0,
+    sent: usize = 0,
+
+    fn resolver(self: *ProviderSecretPermanentResolverFailureCapture) fx.CausalOpsAlertProviderSecretResolver {
+        return .{ .state = self, .resolve = resolve };
+    }
+
+    fn sink(self: *ProviderSecretPermanentResolverFailureCapture) fx.CausalOpsAlertHttpSink {
+        return .{ .state = self, .send = send };
+    }
+
+    fn resolve(raw: ?*anyopaque, secret_ref: []const u8) anyerror![]const u8 {
+        const self: *ProviderSecretPermanentResolverFailureCapture = @ptrCast(@alignCast(raw.?));
+        self.resolved += 1;
+        try std.testing.expectEqualStrings("pd-routing-key-prod", secret_ref);
+        return error.PermanentSecretStoreFailure;
+    }
+
+    fn send(raw: ?*anyopaque, request: fx.CausalOpsAlertHttpRequest) anyerror!void {
+        _ = request;
+        const self: *ProviderSecretPermanentResolverFailureCapture = @ptrCast(@alignCast(raw.?));
+        self.sent += 1;
+    }
+};
+
 test "ops alert provider secret delivery retries transient sink failures" {
     var capture = ProviderSecretRetryCapture{};
 
@@ -431,4 +457,36 @@ test "ops alert provider secret delivery retries transient sink failures" {
     try std.testing.expectEqual(@as(usize, 2), capture.sent);
     try std.testing.expect(capture.saw_routing_key);
     try std.testing.expect(!capture.saw_secret_alert_evidence);
+}
+
+test "ops alert provider secret delivery does not retry permanent resolver failures" {
+    var capture = ProviderSecretPermanentResolverFailureCapture{};
+
+    const result = fx.deliverCausalOpsAlertProviderWithSecretRetrying(std.testing.allocator, .{
+        .provider = .pagerduty_events_v2,
+        .endpoint_url = "https://events.pagerduty.test/v2/enqueue",
+        .secret_ref = "pd-routing-key-prod",
+        .delivery = .{
+            .deployment = .{
+                .service = "zigeffect",
+                .environment = "prod",
+                .region = "eu-west",
+                .cluster_id = "cluster-a",
+            },
+            .delivery_kind = "provider",
+            .endpoint_id = "primary-alerts",
+            .event = .{
+                .id = 47,
+                .kind = .alert_emitted,
+                .status = "emitted",
+                .label = "retention threshold",
+                .type_name = "retention.threshold",
+                .redacted_detail = "secret_ref=pd-routing-key-prod",
+            },
+        },
+    }, capture.resolver(), capture.sink(), .{ .max_attempts = 3 });
+
+    try std.testing.expectError(error.PermanentSecretStoreFailure, result);
+    try std.testing.expectEqual(@as(usize, 1), capture.resolved);
+    try std.testing.expectEqual(@as(usize, 0), capture.sent);
 }

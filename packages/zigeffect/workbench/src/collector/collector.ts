@@ -101,6 +101,7 @@ export function createCollector(): Collector {
 
   function redactCommandText(value: string): string {
     return value
+      .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^/?#\s:@]+:[^/?#\s@]+@/gi, "$1<redacted>@")
       .replace(/\b(authorization|proxy-authorization)\s*:\s*(bearer|basic)\s+[^;\s,]+/gi, "$1: $2 <redacted>")
       .replace(/\bcookie\s*:\s*[^,\n\r]+/gi, "Cookie: <redacted>")
       .replace(
@@ -118,11 +119,13 @@ export function createCollector(): Collector {
     if (typeof body !== "object" || body === null) return null;
     const record = body as Record<string, unknown>;
     if (typeof record.kind !== "string" || record.kind.length === 0) return null;
+    const commandKind = redactCommandText(record.kind);
+    if (commandKind.length === 0) return null;
     commandSequence += 1;
     const frame: LiveCommandFrame = {
       sequence: commandSequence,
       command_id: `cmd-${commandSequence}`,
-      command_kind: record.kind,
+      command_kind: commandKind,
       status: "received",
       reason: typeof record.reason === "string" ? redactCommandText(record.reason) : "",
       redacted_detail: typeof record.redacted_detail === "string" ? redactCommandText(record.redacted_detail) : "",
