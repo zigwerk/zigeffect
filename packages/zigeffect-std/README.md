@@ -24,6 +24,8 @@ bun run zigeffect:std:test
 
 ## Modules
 
+- `Service` provides the effect-native service kernel for providers, access
+  effects, layers, and causal service facts.
 - `Json` writes deterministic redacted JSON payloads.
 - `Jsonl` appends and parses newline-delimited JSON feeds.
 - `Cli` parses deterministic command specs and emits command run receipts.
@@ -46,6 +48,7 @@ bun run zigeffect:std:test
 The public surface is:
 
 ```zig
+zstd.Service
 zstd.Json
 zstd.Jsonl
 zstd.Cli

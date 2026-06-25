@@ -1,6 +1,6 @@
 # zigeffect-std Service Kernel Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Implement `zstd.Service`, the effect-native service kernel that all EffectTS-grade `zigeffect-std` modules will use.
 
@@ -22,7 +22,7 @@
 - Create: `packages/zigeffect-std/src/service/root.zig`
 - Modify: `packages/zigeffect-std/src/root.zig`
 
-- [ ] **Step 1: Write failing provider tests**
+- [x] **Step 1: Write failing provider tests**
 
 Add these tests in `packages/zigeffect-std/src/service/root.zig`:
 
@@ -47,7 +47,7 @@ cd packages/zigeffect-std && zig build test
 Expected: fail because `zstd.Service` is not exported and provider APIs are
 missing.
 
-- [ ] **Step 2: Implement provider/env helpers**
+- [x] **Step 2: Implement provider/env helpers**
 
 Implement:
 
@@ -64,7 +64,7 @@ pub fn layerFromEnv(comptime ProviderEnv: type, env: *ProviderEnv, comptime serv
 - implement `providedServices(self, allocator)`;
 - expose `layer(self)` that returns a provided layer.
 
-- [ ] **Step 3: Verify provider tests**
+- [x] **Step 3: Verify provider tests**
 
 Run:
 
@@ -79,7 +79,7 @@ Expected: provider tests pass.
 **Files:**
 - Modify: `packages/zigeffect-std/src/service/root.zig`
 
-- [ ] **Step 1: Write failing access-effect tests**
+- [x] **Step 1: Write failing access-effect tests**
 
 Add tests:
 
@@ -104,7 +104,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because `access` is missing.
 
-- [ ] **Step 2: Implement `access`**
+- [x] **Step 2: Implement `access`**
 
 Implement:
 
@@ -115,7 +115,7 @@ pub fn access(comptime Service: type, comptime EffectEnv: type) fx.effect.Effect
 The returned effect must call `ctx.service(Service)` and declare
 `.requires(.{Service})`.
 
-- [ ] **Step 3: Verify access-effect tests**
+- [x] **Step 3: Verify access-effect tests**
 
 Run:
 
@@ -130,7 +130,7 @@ Expected: tests pass.
 **Files:**
 - Modify: `packages/zigeffect-std/src/service/root.zig`
 
-- [ ] **Step 1: Write failing causal tests**
+- [x] **Step 1: Write failing causal tests**
 
 Add tests:
 
@@ -155,7 +155,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because causal helper APIs are missing.
 
-- [ ] **Step 2: Implement causal helpers**
+- [x] **Step 2: Implement causal helpers**
 
 Implement:
 
@@ -169,7 +169,7 @@ pub fn recordOperation(ctx: anytype, comptime Service: type, operation: []const 
 These helpers must call `ctx.recordCausal` and rely on the core `CausalStore` to
 clone and redact event strings.
 
-- [ ] **Step 3: Verify causal tests**
+- [x] **Step 3: Verify causal tests**
 
 Run:
 
@@ -185,16 +185,16 @@ Expected: tests pass.
 - Modify: `packages/zigeffect-std/README.md`
 - Modify: `docs/superpowers/plans/2026-06-25-zigeffect-std-service-kernel.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Add `Service` to the module list and describe it as the effect-native service
 kernel for providers, access effects, layers, and causal service facts.
 
-- [ ] **Step 2: Mark plan checkboxes complete**
+- [x] **Step 2: Mark plan checkboxes complete**
 
-Replace every completed `- [ ]` in this plan with `- [x]`.
+Replace every completed `- [x]` in this plan with `- [x]`.
 
-- [ ] **Step 3: Run final verification**
+- [x] **Step 3: Run final verification**
 
 Run:
 

@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub const fx = @import("zigeffect");
+pub const Service = @import("service/root.zig");
 pub const Secrets = @import("secrets/root.zig");
 pub const Json = @import("json/root.zig");
 pub const Jsonl = @import("jsonl/root.zig");
