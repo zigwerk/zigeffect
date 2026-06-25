@@ -1,6 +1,6 @@
 # zigeffect-std Schema Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Implement `zstd.Schema`, the typed validation/decode/encode boundary layer for JSON and config inputs.
 
@@ -22,7 +22,7 @@
 - Create: `packages/zigeffect-std/src/schema/root.zig`
 - Modify: `packages/zigeffect-std/src/root.zig`
 
-- [ ] **Step 1: Write failing primitive tests**
+- [x] **Step 1: Write failing primitive tests**
 
 Add tests:
 
@@ -45,7 +45,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because `Schema` is not exported and APIs are missing.
 
-- [ ] **Step 2: Implement primitives and issues**
+- [x] **Step 2: Implement primitives and issues**
 
 Implement:
 
@@ -60,7 +60,7 @@ pub fn boolean() BooleanSchema;
 pub fn decodeJsonValue(schema: anytype, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!@TypeOf(schema).Output;
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -75,7 +75,7 @@ Expected: primitive tests pass.
 **Files:**
 - Modify: `packages/zigeffect-std/src/schema/root.zig`
 
-- [ ] **Step 1: Write failing composite tests**
+- [x] **Step 1: Write failing composite tests**
 
 Add tests:
 
@@ -99,19 +99,19 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because composite APIs are missing.
 
-- [ ] **Step 2: Implement composite schemas**
+- [x] **Step 2: Implement composite schemas**
 
 Implement:
 
 ```zig
 pub fn optional(schema: anytype) OptionalSchema(@TypeOf(schema));
-pub fn array(schema: anytype) ArraySchema(@TypeOf(schema));
+pub fn array(allocator: std.mem.Allocator, schema: anytype) ArraySchema(@TypeOf(schema));
 pub fn stringEnum(comptime choices: []const []const u8) EnumSchema(choices);
 pub fn transform(schema: anytype, comptime Output: type, mapper: *const fn (@TypeOf(schema).Output) SchemaError!Output) TransformSchema(@TypeOf(schema), Output, mapper);
 pub fn freeDecoded(allocator: std.mem.Allocator, value: anytype) void;
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -126,7 +126,7 @@ Expected: composite tests pass.
 **Files:**
 - Modify: `packages/zigeffect-std/src/schema/root.zig`
 
-- [ ] **Step 1: Write failing boundary tests**
+- [x] **Step 1: Write failing boundary tests**
 
 Add tests:
 
@@ -150,7 +150,7 @@ cd packages/zigeffect-std && zig build test
 
 Expected: fail because struct/config APIs are missing.
 
-- [ ] **Step 2: Implement boundary codecs**
+- [x] **Step 2: Implement boundary codecs**
 
 Implement:
 
@@ -164,7 +164,7 @@ pub fn decodeConfig(config: anytype, comptime key: []const u8, schema: anytype) 
 `structSchema` should support string, integer, boolean, optional, enum, and
 transform field schemas for the first milestone.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -180,15 +180,15 @@ Expected: boundary tests pass.
 - Modify: `packages/zigeffect-std/README.md`
 - Modify: `docs/superpowers/plans/2026-06-25-zigeffect-std-schema.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Add `Schema` to the module list and public surface.
 
-- [ ] **Step 2: Mark plan checkboxes complete**
+- [x] **Step 2: Mark plan checkboxes complete**
 
-Replace completed `- [ ]` with `- [x]`.
+Replace completed `- [x]` with `- [x]`.
 
-- [ ] **Step 3: Final verification**
+- [x] **Step 3: Final verification**
 
 Run:
 
@@ -199,4 +199,3 @@ git diff --check
 ```
 
 Expected: all commands exit 0.
-

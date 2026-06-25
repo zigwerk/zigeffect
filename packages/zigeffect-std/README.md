@@ -26,6 +26,7 @@ bun run zigeffect:std:test
 
 - `Service` provides the effect-native service kernel for providers, access
   effects, layers, and causal service facts.
+- `Schema` validates and decodes JSON/config boundaries with typed errors.
 - `Json` writes deterministic redacted JSON payloads.
 - `Jsonl` appends and parses newline-delimited JSON feeds.
 - `Cli` parses deterministic command specs and emits command run receipts.
@@ -49,6 +50,7 @@ The public surface is:
 
 ```zig
 zstd.Service
+zstd.Schema
 zstd.Json
 zstd.Jsonl
 zstd.Cli
