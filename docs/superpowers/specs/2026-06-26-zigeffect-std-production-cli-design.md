@@ -2,6 +2,8 @@
 
 Date: 2026-06-26
 
+Status: delivered on 2026-06-26.
+
 ## Decision
 
 Upgrade `zstd.Cli` from a deterministic parser/effect runner into a production
@@ -26,31 +28,32 @@ const Args = struct {
 
 const command = zstd.Cli.typedCommand(Args, .{
     .name = "serve",
-    .options = .{
-        .workspace = zstd.Cli.option(zstd.Schema.string().nonEmpty(), .{
-            .long = "workspace",
-            .env = "ZG_WORKSPACE",
-            .config_key = "workspace",
-            .help = "workspace root",
-        }),
-        .port = zstd.Cli.option(zstd.Schema.integer().min(1).max(65535), .{
-            .long = "port",
-            .default_value = "5178",
-            .help = "local HTTP port",
-        }),
-        .watch = zstd.Cli.flag(.{
-            .long = "watch",
-            .short = 'w',
-            .help = "rerun on file changes",
-        }),
-        .mode = zstd.Cli.option(zstd.Schema.optional(
-            zstd.Schema.stringEnum(&.{ "local", "ci" }),
-        ), .{
-            .long = "mode",
-            .config_key = "mode",
-            .help = "execution mode",
-        }),
-    },
+    .description = "run local server",
+    .version = "0.1.0",
+}, .{
+    zstd.Cli.option("workspace", zstd.Schema.string().nonEmpty(), .{
+        .long = "workspace",
+        .env = "ZG_WORKSPACE",
+        .config_key = "workspace",
+        .help = "workspace root",
+    }),
+    zstd.Cli.option("port", zstd.Schema.integer().min(1).max(65535), .{
+        .long = "port",
+        .default_value = "5178",
+        .help = "local HTTP port",
+    }),
+    zstd.Cli.flag("watch", .{
+        .long = "watch",
+        .short = 'w',
+        .help = "rerun on file changes",
+    }),
+    zstd.Cli.option("mode", zstd.Schema.optional(
+        zstd.Schema.stringEnum(&.{ "local", "ci" }),
+    ), .{
+        .long = "mode",
+        .config_key = "mode",
+        .help = "execution mode",
+    }),
 });
 
 var decoded = try zstd.Cli.decodeTypedCommandAlloc(
@@ -90,8 +93,8 @@ defer decoded.deinit();
 
 ```zig
 pub fn TypedOptionSpec(comptime SchemaType: type, comptime field_name: []const u8) type;
-pub fn option(comptime field_name: []const u8, schema: anytype, meta: OptionMeta) TypedOptionSpec(@TypeOf(schema), field_name);
-pub fn flag(comptime field_name: []const u8, meta: OptionMeta) TypedOptionSpec(Schema.BooleanSchema, field_name);
+pub fn option(comptime field_name: []const u8, schema: anytype, comptime meta: OptionMeta) TypedOptionSpec(@TypeOf(schema), field_name, meta);
+pub fn flag(comptime field_name: []const u8, comptime meta: OptionMeta) TypedOptionSpec(Schema.BooleanSchema, field_name, meta);
 ```
 
 `OptionMeta` includes:
@@ -110,8 +113,8 @@ Boolean flags default to false when absent unless a source supplies a value.
 ### Typed Command
 
 ```zig
-pub fn TypedCommand(comptime Args: type, comptime Options: type) type;
-pub fn typedCommand(comptime Args: type, meta: TypedCommandMeta, options: anytype) TypedCommand(Args, @TypeOf(options));
+pub fn TypedCommand(comptime Args: type, comptime meta: TypedCommandMeta, comptime Options: type) type;
+pub fn typedCommand(comptime Args: type, comptime meta: TypedCommandMeta, options: anytype) TypedCommand(Args, meta, @TypeOf(options));
 ```
 
 `TypedCommandMeta` includes command name, description, version, and optional
@@ -183,14 +186,15 @@ Add a typed runner beside the existing parsed-command runner:
 
 ```zig
 pub fn TypedHandler(comptime EffectEnv: type, comptime Args: type, comptime Failure: type) type;
-pub fn TypedApplication(comptime EffectEnv: type, comptime Args: type, comptime Failure: type) type;
+pub fn TypedApplication(comptime EffectEnv: type, comptime Args: type, comptime Failure: type, comptime Command: type) type;
 pub fn runTypedEffect(
     comptime EffectEnv: type,
     comptime Args: type,
     comptime Failure: type,
-    app: TypedApplication(EffectEnv, Args, Failure),
+    comptime Command: type,
+    app: TypedApplication(EffectEnv, Args, Failure, Command),
     args: []const []const u8,
-) RunTypedEffect(EffectEnv, Args, Failure);
+) RunTypedEffect(EffectEnv, Args, Failure, Command);
 ```
 
 `runTypedEffect` parses argv, handles built-ins, decodes typed args, calls the

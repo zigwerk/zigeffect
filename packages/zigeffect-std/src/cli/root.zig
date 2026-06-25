@@ -2,6 +2,7 @@ const std = @import("std");
 const Config = @import("../config/root.zig");
 const Console = @import("../console/root.zig");
 const Env = @import("../env/root.zig");
+const Schema = @import("../schema/root.zig");
 const Secrets = @import("../secrets/root.zig");
 const StdService = @import("../service/root.zig");
 const fx = @import("zigeffect");
@@ -23,11 +24,42 @@ pub const OptionSpec = struct {
     config_key: ?[]const u8 = null,
 };
 
+pub const OptionMeta = struct {
+    long: []const u8,
+    short: ?u8 = null,
+    help: []const u8 = "",
+    required: bool = false,
+    default_value: ?[]const u8 = null,
+    env: ?[]const u8 = null,
+    config_key: ?[]const u8 = null,
+    secret: bool = false,
+};
+
 pub const CommandSpec = struct {
     name: []const u8,
     description: []const u8 = "",
     options: []const OptionSpec = &.{},
     subcommands: []const CommandSpec = &.{},
+};
+
+pub const TypedCommandMeta = struct {
+    name: []const u8,
+    description: []const u8 = "",
+    version: []const u8 = "",
+};
+
+pub const OptionSourceKind = enum { cli, env, config, default, missing };
+
+pub const OptionSourceFact = struct {
+    name: []const u8,
+    source: OptionSourceKind,
+    redacted_value: []const u8,
+};
+
+pub const BuiltinRequest = enum {
+    help,
+    version,
+    completions,
 };
 
 pub const CliError = error{
@@ -67,8 +99,8 @@ pub const ParsedCommand = struct {
     }
 
     pub fn optionValue(self: ParsedCommand, name: []const u8) ?[]const u8 {
-        for (self.options) |option| {
-            if (std.mem.eql(u8, option.name, name)) return option.value;
+        for (self.options) |parsed_option| {
+            if (std.mem.eql(u8, parsed_option.name, name)) return parsed_option.value;
         }
         return null;
     }
@@ -119,6 +151,176 @@ pub fn Application(comptime EffectEnv: type, comptime Failure: type) type {
             return null;
         }
     };
+}
+
+pub fn TypedOptionSpec(comptime SchemaT: type, comptime field_name: []const u8, comptime meta: OptionMeta) type {
+    return struct {
+        pub const FieldName = field_name;
+        pub const Meta = meta;
+        pub const SchemaType = SchemaT;
+
+        schema: SchemaT,
+    };
+}
+
+pub fn option(comptime field_name: []const u8, schema: anytype, comptime meta: OptionMeta) TypedOptionSpec(@TypeOf(schema), field_name, meta) {
+    return .{ .schema = schema };
+}
+
+pub fn flag(comptime field_name: []const u8, comptime meta: OptionMeta) TypedOptionSpec(Schema.BooleanSchema, field_name, meta) {
+    return .{ .schema = Schema.boolean() };
+}
+
+pub fn TypedCommand(comptime Args: type, comptime meta: TypedCommandMeta, comptime Options: type) type {
+    const legacy_options = typedLegacyOptions(Options);
+    return struct {
+        pub const ArgsType = Args;
+        pub const OptionsType = Options;
+        pub const Meta = meta;
+
+        options: Options,
+
+        pub fn toCommandSpec(self: @This()) CommandSpec {
+            _ = self;
+            return .{
+                .name = meta.name,
+                .description = meta.description,
+                .options = legacy_options[0..],
+            };
+        }
+    };
+}
+
+pub fn typedCommand(comptime Args: type, comptime meta: TypedCommandMeta, options_value: anytype) TypedCommand(Args, meta, @TypeOf(options_value)) {
+    return .{ .options = options_value };
+}
+
+pub fn TypedDecodeResult(comptime Args: type) type {
+    return struct {
+        allocator: std.mem.Allocator,
+        value: ?Args = null,
+        issues: Schema.IssueList,
+        sources: []OptionSourceFact = &.{},
+
+        pub fn ok(self: @This()) bool {
+            return self.value != null and self.issues.len() == 0;
+        }
+
+        pub fn deinit(self: *@This()) void {
+            for (self.sources) |source| {
+                self.allocator.free(source.name);
+                self.allocator.free(source.redacted_value);
+            }
+            self.allocator.free(self.sources);
+            self.issues.deinit();
+            self.* = undefined;
+        }
+    };
+}
+
+pub fn TypedHandler(comptime EffectEnv: type, comptime Args: type, comptime Failure: type) type {
+    return *const fn (*fx.Context(EffectEnv), Args) Failure!void;
+}
+
+pub fn TypedApplication(comptime EffectEnv: type, comptime Args: type, comptime Failure: type, comptime Command: type) type {
+    return struct {
+        command: Command,
+        handler: TypedHandler(EffectEnv, Args, Failure),
+    };
+}
+
+pub fn RunTypedEffect(comptime EffectEnv: type, comptime Args: type, comptime HandlerFailure: type, comptime Command: type) type {
+    return struct {
+        pub const SuccessType = RunSummary;
+        pub const FailureType = std.mem.Allocator.Error;
+        pub const EnvType = EffectEnv;
+        pub const RequiredServices = .{ Runner, Console.CapturedConsole };
+
+        app: TypedApplication(EffectEnv, Args, HandlerFailure, Command),
+        args: []const []const u8,
+
+        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
+            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
+        }
+
+        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!RunSummary {
+            _ = ctx.service(Runner);
+            const console = ctx.service(Console.CapturedConsole);
+            _ = StdService.recordOperation(ctx, Runner, "cli.typed.run", "started", Command.Meta.name);
+
+            if (detectBuiltin(self.app.command, self.args)) |builtin| {
+                const payload = switch (builtin) {
+                    .help => try formatTypedHelp(ctx.allocator, self.app.command),
+                    .version => try formatTypedVersion(ctx.allocator, self.app.command),
+                    .completions => try formatTypedCompletions(ctx.allocator, self.app.command),
+                };
+                defer ctx.allocator.free(payload);
+                try console.writeOut(payload);
+                _ = StdService.recordOperation(ctx, Runner, "cli.typed.run", "success", @tagName(builtin));
+                return buildRunSummary(ctx.allocator, Command.Meta.name, "success", .success, &.{
+                    .{ .kind = "cli_builtin_completed", .detail = @tagName(builtin) },
+                    .{ .kind = "cli_command_completed", .detail = "success" },
+                });
+            }
+
+            var parsed = parse(ctx.allocator, self.app.command.toCommandSpec(), self.args) catch |err| {
+                _ = StdService.recordOperation(ctx, Runner, "cli.typed.parse", "failure", @errorName(err));
+                try writeCliError(console, "parse", err);
+                _ = StdService.recordOperation(ctx, Runner, "cli.typed.run", "failure", @errorName(err));
+                return buildRunSummary(ctx.allocator, Command.Meta.name, "failure", exitCodeForError(err), &.{
+                    .{ .kind = "cli_parse_failed", .detail = @errorName(err) },
+                    .{ .kind = "cli_command_completed", .detail = "failure" },
+                });
+            };
+            defer parsed.deinit(ctx.allocator);
+
+            var decoded = try decodeTypedCommandAlloc(ctx.allocator, self.app.command, parsed, null, null);
+            defer decoded.deinit();
+            if (!decoded.ok()) {
+                const issue_json = try decoded.issues.jsonAlloc(ctx.allocator);
+                defer ctx.allocator.free(issue_json);
+                try console.writeErr(issue_json);
+                try console.writeErr("\n");
+                _ = StdService.recordOperation(ctx, Runner, "cli.typed.decode", "failure", Command.Meta.name);
+                _ = StdService.recordOperation(ctx, Runner, "cli.typed.run", "failure", "decode");
+                return buildRunSummary(ctx.allocator, Command.Meta.name, "failure", .usage, &.{
+                    .{ .kind = "cli_decode_failed", .detail = issue_json },
+                    .{ .kind = "cli_command_completed", .detail = "failure" },
+                });
+            }
+
+            _ = StdService.recordOperation(ctx, Runner, "cli.typed.decode", "success", Command.Meta.name);
+            self.app.handler(ctx, decoded.value.?) catch |err| {
+                _ = StdService.recordOperation(ctx, Runner, "cli.typed.handler", "failure", @errorName(err));
+                try writeCliError(console, "handler", err);
+                _ = StdService.recordOperation(ctx, Runner, "cli.typed.run", "failure", @errorName(err));
+                return buildRunSummary(ctx.allocator, Command.Meta.name, "failure", exitCodeForError(err), &.{
+                    .{ .kind = "cli_decode_completed", .detail = "success" },
+                    .{ .kind = "cli_handler_failed", .detail = @errorName(err) },
+                    .{ .kind = "cli_command_completed", .detail = "failure" },
+                });
+            };
+
+            _ = StdService.recordOperation(ctx, Runner, "cli.typed.handler", "success", Command.Meta.name);
+            _ = StdService.recordOperation(ctx, Runner, "cli.typed.run", "success", Command.Meta.name);
+            return buildRunSummary(ctx.allocator, Command.Meta.name, "success", .success, &.{
+                .{ .kind = "cli_decode_completed", .detail = "success" },
+                .{ .kind = "cli_handler_completed", .detail = "success" },
+                .{ .kind = "cli_command_completed", .detail = "success" },
+            });
+        }
+    };
+}
+
+pub fn runTypedEffect(
+    comptime EffectEnv: type,
+    comptime Args: type,
+    comptime HandlerFailure: type,
+    comptime Command: type,
+    app: TypedApplication(EffectEnv, Args, HandlerFailure, Command),
+    args: []const []const u8,
+) RunTypedEffect(EffectEnv, Args, HandlerFailure, Command) {
+    return .{ .app = app, .args = args };
 }
 
 pub fn RunEffect(comptime EffectEnv: type, comptime HandlerFailure: type) type {
@@ -236,8 +438,8 @@ pub fn parse(
             const raw = arg[2..];
             const equals = std.mem.indexOfScalar(u8, raw, '=');
             const name = if (equals) |eq| raw[0..eq] else raw;
-            const option = findOption(active, name) orelse return CliError.UnknownOption;
-            const value: ?[]const u8 = switch (option.kind) {
+            const legacy_option = findOption(active, name) orelse return CliError.UnknownOption;
+            const value: ?[]const u8 = switch (legacy_option.kind) {
                 .boolean => "true",
                 .string, .integer => blk: {
                     if (equals) |eq| break :blk raw[eq + 1 ..];
@@ -246,11 +448,11 @@ pub fn parse(
                     break :blk args[index];
                 },
             };
-            try validateOptionValue(option, value);
-            try options.append(allocator, .{ .name = option.name, .value = value });
+            try validateOptionValue(legacy_option, value);
+            try options.append(allocator, .{ .name = legacy_option.name, .value = value });
         } else if (std.mem.startsWith(u8, arg, "-") and arg.len == 2) {
-            const option = findShortOption(active, arg[1]) orelse return CliError.UnknownOption;
-            const value: ?[]const u8 = switch (option.kind) {
+            const legacy_option = findShortOption(active, arg[1]) orelse return CliError.UnknownOption;
+            const value: ?[]const u8 = switch (legacy_option.kind) {
                 .boolean => "true",
                 .string, .integer => blk: {
                     if (index + 1 >= args.len) return CliError.MissingOptionValue;
@@ -258,15 +460,15 @@ pub fn parse(
                     break :blk args[index];
                 },
             };
-            try validateOptionValue(option, value);
-            try options.append(allocator, .{ .name = option.name, .value = value });
+            try validateOptionValue(legacy_option, value);
+            try options.append(allocator, .{ .name = legacy_option.name, .value = value });
         } else {
             try positionals.append(allocator, arg);
         }
     }
 
-    for (active.options) |option| {
-        if (option.required and !hasParsedOption(options.items, option.name) and !optionHasDefaultSource(option)) {
+    for (active.options) |legacy_option| {
+        if (legacy_option.required and !hasParsedOption(options.items, legacy_option.name) and !optionHasDefaultSource(legacy_option)) {
             return CliError.MissingRequiredOption;
         }
     }
@@ -300,38 +502,105 @@ pub fn resolveOptionValue(
     config: ?*const Config.LayeredConfig,
 ) (CliError || Env.EnvError || Config.ConfigError || std.mem.Allocator.Error)!?[]const u8 {
     _ = allocator;
-    const option = findOption(active, name) orelse return CliError.UnknownOption;
+    const legacy_option = findOption(active, name) orelse return CliError.UnknownOption;
 
     if (parsed.optionValue(name)) |value| {
-        try validateOptionValue(option, value);
+        try validateOptionValue(legacy_option, value);
         return value;
     }
 
-    if (option.env) |env_name| {
+    if (legacy_option.env) |env_name| {
         if (env) |env_map| {
             if (env_map.get(env_name)) |value| {
-                try validateOptionValue(option, value);
+                try validateOptionValue(legacy_option, value);
                 return value;
             }
         }
     }
 
-    if (option.config_key) |config_key| {
+    if (legacy_option.config_key) |config_key| {
         if (config) |layered_config| {
             if (layered_config.get(config_key)) |value| {
-                try validateOptionValue(option, value);
+                try validateOptionValue(legacy_option, value);
                 return value;
             }
         }
     }
 
-    if (option.default_value) |value| {
-        try validateOptionValue(option, value);
+    if (legacy_option.default_value) |value| {
+        try validateOptionValue(legacy_option, value);
         return value;
     }
 
-    if (option.required) return CliError.MissingRequiredOption;
+    if (legacy_option.required) return CliError.MissingRequiredOption;
     return null;
+}
+
+pub fn decodeTypedCommandAlloc(
+    allocator: std.mem.Allocator,
+    command: anytype,
+    parsed: ParsedCommand,
+    env: ?*const Env.EnvMap,
+    config: ?*const Config.LayeredConfig,
+) std.mem.Allocator.Error!TypedDecodeResult(@TypeOf(command).ArgsType) {
+    const Command = @TypeOf(command);
+    const Args = Command.ArgsType;
+    var issues = Schema.IssueList.init(allocator);
+    errdefer issues.deinit();
+
+    var sources = std.ArrayList(OptionSourceFact).empty;
+    errdefer deinitSourceBuilder(allocator, &sources);
+
+    var output: Args = undefined;
+    var failed = false;
+
+    const args_info = @typeInfo(Args).@"struct";
+    inline for (args_info.fields) |field_info| {
+        const option_spec = typedOptionForField(command.options, field_info.name);
+        const resolved = try resolveTypedOptionText(parsed, option_spec, env, config);
+        const path = try std.fmt.allocPrint(allocator, "--{s}", .{option_spec.Meta.long});
+        defer allocator.free(path);
+
+        if (resolved.value) |text| {
+            try appendSourceFact(allocator, &sources, option_spec.Meta.long, resolved.source, text, option_spec.Meta.secret);
+            @field(output, field_info.name) = decodeOptionText(field_info.type, allocator, option_spec.schema, path, text, &issues) catch {
+                failed = true;
+                continue;
+            };
+        } else if (field_info.type == bool) {
+            try appendSourceFact(allocator, &sources, option_spec.Meta.long, .default, "false", option_spec.Meta.secret);
+            @field(output, field_info.name) = false;
+        } else if (isOptionalType(field_info.type)) {
+            try appendSourceFact(allocator, &sources, option_spec.Meta.long, .missing, "", option_spec.Meta.secret);
+            @field(output, field_info.name) = null;
+        } else {
+            try appendSourceFact(allocator, &sources, option_spec.Meta.long, .missing, "", option_spec.Meta.secret);
+            try issues.add(.{
+                .path = path,
+                .kind = .missing_field,
+                .expected = option_spec.Meta.long,
+                .actual = "missing",
+                .message = "required CLI option is missing",
+            });
+            failed = true;
+        }
+    }
+
+    const source_slice = try sources.toOwnedSlice(allocator);
+    if (failed or issues.len() != 0) {
+        return .{
+            .allocator = allocator,
+            .value = null,
+            .issues = issues,
+            .sources = source_slice,
+        };
+    }
+    return .{
+        .allocator = allocator,
+        .value = output,
+        .issues = issues,
+        .sources = source_slice,
+    };
 }
 
 pub fn formatHelp(allocator: std.mem.Allocator, spec: CommandSpec) ![]const u8 {
@@ -357,11 +626,11 @@ pub fn formatHelp(allocator: std.mem.Allocator, spec: CommandSpec) ![]const u8 {
     }
     if (spec.options.len != 0) {
         try output.appendSlice(allocator, "\nOptions:\n");
-        for (spec.options) |option| {
-            switch (option.kind) {
-                .string => try output.print(allocator, "  --{s} <value>  {s}\n", .{ option.name, option.help }),
-                .integer => try output.print(allocator, "  --{s} <int>    {s}\n", .{ option.name, option.help }),
-                .boolean => try output.print(allocator, "  --{s}       {s}\n", .{ option.name, option.help }),
+        for (spec.options) |legacy_option| {
+            switch (legacy_option.kind) {
+                .string => try output.print(allocator, "  --{s} <value>  {s}\n", .{ legacy_option.name, legacy_option.help }),
+                .integer => try output.print(allocator, "  --{s} <int>    {s}\n", .{ legacy_option.name, legacy_option.help }),
+                .boolean => try output.print(allocator, "  --{s}       {s}\n", .{ legacy_option.name, legacy_option.help }),
             }
         }
     }
@@ -381,11 +650,77 @@ pub fn formatCompletions(allocator: std.mem.Allocator, spec: CommandSpec, args: 
         try output.append(allocator, '\n');
     }
 
-    for (active.options) |option| {
-        try output.print(allocator, "option --{s}", .{option.name});
-        if (option.help.len != 0) {
-            try output.print(allocator, " {s}", .{option.help});
+    for (active.options) |legacy_option| {
+        try output.print(allocator, "option --{s}", .{legacy_option.name});
+        if (legacy_option.help.len != 0) {
+            try output.print(allocator, " {s}", .{legacy_option.help});
         }
+        try output.append(allocator, '\n');
+    }
+
+    return output.toOwnedSlice(allocator);
+}
+
+pub fn formatTypedHelp(allocator: std.mem.Allocator, command: anytype) std.mem.Allocator.Error![]const u8 {
+    const Command = @TypeOf(command);
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    try output.print(allocator, "Usage: {s} [options]\n", .{Command.Meta.name});
+    if (Command.Meta.description.len != 0) {
+        try output.print(allocator, "\n{s}\n", .{Command.Meta.description});
+    }
+
+    if (typedOptionCount(Command.OptionsType) != 0) {
+        try output.appendSlice(allocator, "\nOptions:\n");
+        inline for (@typeInfo(Command.OptionsType).@"struct".fields) |field_info| {
+            const Option = field_info.type;
+            try output.print(allocator, "  --{s}", .{Option.Meta.long});
+            if (Option.Meta.short) |short| try output.print(allocator, ", -{c}", .{short});
+            try output.print(allocator, " <{s}>", .{optionHintForOutput(Option.SchemaType.Output)});
+            if (Option.Meta.help.len != 0) try output.print(allocator, "  {s}", .{Option.Meta.help});
+            if (Option.Meta.required) try output.appendSlice(allocator, " [required]");
+            if (Option.Meta.env) |env_name| try output.print(allocator, " [env: {s}]", .{env_name});
+            if (Option.Meta.config_key) |config_key| try output.print(allocator, " [config: {s}]", .{config_key});
+            if (Option.Meta.default_value) |default_value| {
+                const display_default = if (Option.Meta.secret or Secrets.containsSecret(default_value)) Secrets.redacted else default_value;
+                try output.print(allocator, " [default: {s}]", .{display_default});
+            }
+            try output.append(allocator, '\n');
+        }
+    }
+
+    return output.toOwnedSlice(allocator);
+}
+
+pub fn detectBuiltin(command: anytype, args: []const []const u8) ?BuiltinRequest {
+    const Command = @TypeOf(command);
+    if (args.len == 0) return null;
+    if (args.len == 1 and std.mem.eql(u8, args[0], "--help")) return .help;
+    if (args.len == 1 and std.mem.eql(u8, args[0], "-h")) return .help;
+    if (args.len == 1 and std.mem.eql(u8, args[0], "--version")) return .version;
+    if (args.len == 1 and std.mem.eql(u8, args[0], "completions")) return .completions;
+    if (args.len >= 1 and std.mem.eql(u8, args[0], "help")) {
+        if (args.len == 1) return .help;
+        if (std.mem.eql(u8, args[1], Command.Meta.name)) return .help;
+    }
+    return null;
+}
+
+pub fn formatTypedVersion(allocator: std.mem.Allocator, command: anytype) std.mem.Allocator.Error![]const u8 {
+    const Command = @TypeOf(command);
+    return std.fmt.allocPrint(allocator, "{s} {s}\n", .{ Command.Meta.name, Command.Meta.version });
+}
+
+pub fn formatTypedCompletions(allocator: std.mem.Allocator, command: anytype) std.mem.Allocator.Error![]const u8 {
+    const Command = @TypeOf(command);
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+
+    inline for (@typeInfo(Command.OptionsType).@"struct".fields) |field_info| {
+        const Option = field_info.type;
+        try output.print(allocator, "option --{s}", .{Option.Meta.long});
+        if (Option.Meta.help.len != 0) try output.print(allocator, " {s}", .{Option.Meta.help});
         try output.append(allocator, '\n');
     }
 
@@ -496,15 +831,15 @@ fn findSubcommand(spec: CommandSpec, name: []const u8) ?CommandSpec {
 }
 
 fn findOption(spec: CommandSpec, name: []const u8) ?OptionSpec {
-    for (spec.options) |option| {
-        if (std.mem.eql(u8, option.name, name)) return option;
+    for (spec.options) |legacy_option| {
+        if (std.mem.eql(u8, legacy_option.name, name)) return legacy_option;
     }
     return null;
 }
 
 fn findShortOption(spec: CommandSpec, short: u8) ?OptionSpec {
-    for (spec.options) |option| {
-        if (option.short != null and option.short.? == short) return option;
+    for (spec.options) |legacy_option| {
+        if (legacy_option.short != null and legacy_option.short.? == short) return legacy_option;
     }
     return null;
 }
@@ -539,8 +874,8 @@ fn appendSpaces(output: *std.ArrayList(u8), allocator: std.mem.Allocator, count:
     }
 }
 
-fn validateOptionValue(option: OptionSpec, value: ?[]const u8) CliError!void {
-    if (option.kind == .integer) {
+fn validateOptionValue(legacy_option: OptionSpec, value: ?[]const u8) CliError!void {
+    if (legacy_option.kind == .integer) {
         _ = std.fmt.parseInt(i64, value orelse return CliError.MissingOptionValue, 10) catch {
             return CliError.InvalidInteger;
         };
@@ -548,14 +883,191 @@ fn validateOptionValue(option: OptionSpec, value: ?[]const u8) CliError!void {
 }
 
 fn hasParsedOption(options: []const ParsedOption, name: []const u8) bool {
-    for (options) |option| {
-        if (std.mem.eql(u8, option.name, name)) return true;
+    for (options) |parsed_option| {
+        if (std.mem.eql(u8, parsed_option.name, name)) return true;
     }
     return false;
 }
 
-fn optionHasDefaultSource(option: OptionSpec) bool {
-    return option.default_value != null or option.env != null or option.config_key != null;
+fn optionHasDefaultSource(legacy_option: OptionSpec) bool {
+    return legacy_option.default_value != null or legacy_option.env != null or legacy_option.config_key != null;
+}
+
+fn typedLegacyOptions(comptime Options: type) [typedOptionCount(Options)]OptionSpec {
+    var specs: [typedOptionCount(Options)]OptionSpec = undefined;
+    const options_info = @typeInfo(Options).@"struct";
+    inline for (options_info.fields, 0..) |field_info, index| {
+        const Option = field_info.type;
+        specs[index] = .{
+            .name = Option.Meta.long,
+            .short = Option.Meta.short,
+            .kind = optionKindForOutput(Option.SchemaType.Output),
+            .required = Option.Meta.required,
+            .help = Option.Meta.help,
+            .default_value = Option.Meta.default_value,
+            .env = Option.Meta.env,
+            .config_key = Option.Meta.config_key,
+        };
+    }
+    return specs;
+}
+
+fn typedOptionCount(comptime Options: type) usize {
+    return @typeInfo(Options).@"struct".fields.len;
+}
+
+fn optionKindForOutput(comptime Output: type) OptionKind {
+    return switch (@typeInfo(Output)) {
+        .bool => .boolean,
+        .int => .integer,
+        .optional => |optional_info| optionKindForOutput(optional_info.child),
+        else => .string,
+    };
+}
+
+fn optionHintForOutput(comptime Output: type) []const u8 {
+    return switch (@typeInfo(Output)) {
+        .bool => "bool",
+        .int => "int",
+        .optional => |optional_info| optionHintForOutput(optional_info.child),
+        else => "value",
+    };
+}
+
+fn typedOptionForField(options: anytype, comptime field_name: []const u8) typedOptionTypeForField(@TypeOf(options), field_name) {
+    inline for (@typeInfo(@TypeOf(options)).@"struct".fields) |field_info| {
+        const option_value = @field(options, field_info.name);
+        if (std.mem.eql(u8, @TypeOf(option_value).FieldName, field_name)) return option_value;
+    }
+    @compileError("typed CLI option missing for field: " ++ field_name);
+}
+
+fn typedOptionTypeForField(comptime Options: type, comptime field_name: []const u8) type {
+    inline for (@typeInfo(Options).@"struct".fields) |field_info| {
+        if (std.mem.eql(u8, field_info.type.FieldName, field_name)) return field_info.type;
+    }
+    @compileError("typed CLI option missing for field: " ++ field_name);
+}
+
+const ResolvedOptionText = struct {
+    value: ?[]const u8,
+    source: OptionSourceKind,
+};
+
+fn resolveTypedOptionText(
+    parsed: ParsedCommand,
+    option_spec: anytype,
+    env: ?*const Env.EnvMap,
+    config: ?*const Config.LayeredConfig,
+) std.mem.Allocator.Error!ResolvedOptionText {
+    const meta = @TypeOf(option_spec).Meta;
+    if (parsed.optionValue(meta.long)) |value| return .{ .value = value, .source = .cli };
+    if (meta.env) |env_name| {
+        if (env) |env_map| {
+            if (env_map.get(env_name)) |value| return .{ .value = value, .source = .env };
+        }
+    }
+    if (meta.config_key) |config_key| {
+        if (config) |layered_config| {
+            if (layered_config.get(config_key)) |value| return .{ .value = value, .source = .config };
+        }
+    }
+    if (meta.default_value) |default_value| return .{ .value = default_value, .source = .default };
+    return .{ .value = null, .source = .missing };
+}
+
+fn decodeOptionText(
+    comptime Output: type,
+    allocator: std.mem.Allocator,
+    schema: anytype,
+    path: []const u8,
+    text: []const u8,
+    issues: *Schema.IssueList,
+) (Schema.SchemaError || std.mem.Allocator.Error)!Output {
+    var ctx = Schema.ParseContext.init(allocator, issues);
+    defer ctx.deinit();
+    try ctx.path.appendSlice(allocator, path);
+
+    const value = try cliTextJsonValue(Output, text);
+    if (@hasDecl(@TypeOf(schema), "decodeDetailedJsonValue")) {
+        return schema.decodeDetailedJsonValue(&ctx, value) catch |err| {
+            return err;
+        };
+    }
+
+    return schema.decodeJsonValue(value) catch |err| {
+        try issues.add(.{
+            .path = path,
+            .kind = schemaErrorIssueKind(err),
+            .expected = path,
+            .actual = text,
+            .message = @errorName(err),
+        });
+        return err;
+    };
+}
+
+fn cliTextJsonValue(comptime Output: type, text: []const u8) Schema.SchemaError!std.json.Value {
+    return switch (@typeInfo(Output)) {
+        .bool => .{ .bool = parseBoolText(text) catch return Schema.SchemaError.InvalidValue },
+        .int => .{ .integer = std.fmt.parseInt(i64, text, 10) catch return Schema.SchemaError.InvalidValue },
+        .optional => |optional_info| try cliTextJsonValue(optional_info.child, text),
+        else => .{ .string = text },
+    };
+}
+
+fn parseBoolText(text: []const u8) Schema.SchemaError!bool {
+    if (std.mem.eql(u8, text, "true")) return true;
+    if (std.mem.eql(u8, text, "false")) return false;
+    return Schema.SchemaError.InvalidValue;
+}
+
+fn appendSourceFact(
+    allocator: std.mem.Allocator,
+    sources: *std.ArrayList(OptionSourceFact),
+    name: []const u8,
+    source: OptionSourceKind,
+    value: []const u8,
+    force_secret: bool,
+) std.mem.Allocator.Error!void {
+    const owned_name = try allocator.dupe(u8, name);
+    errdefer allocator.free(owned_name);
+    const redacted_value = if (force_secret or Secrets.containsSecret(value))
+        try allocator.dupe(u8, Secrets.redacted)
+    else
+        try allocator.dupe(u8, value);
+    errdefer allocator.free(redacted_value);
+
+    try sources.append(allocator, .{
+        .name = owned_name,
+        .source = source,
+        .redacted_value = redacted_value,
+    });
+}
+
+fn deinitSourceBuilder(allocator: std.mem.Allocator, sources: *std.ArrayList(OptionSourceFact)) void {
+    for (sources.items) |source| {
+        allocator.free(source.name);
+        allocator.free(source.redacted_value);
+    }
+    sources.deinit(allocator);
+}
+
+fn isOptionalType(comptime T: type) bool {
+    return switch (@typeInfo(T)) {
+        .optional => true,
+        else => false,
+    };
+}
+
+fn schemaErrorIssueKind(err: Schema.SchemaError) Schema.IssueKind {
+    return switch (err) {
+        Schema.SchemaError.InvalidType => .invalid_type,
+        Schema.SchemaError.MissingField => .missing_field,
+        Schema.SchemaError.InvalidValue => .invalid_value,
+        Schema.SchemaError.UnknownEnum => .unknown_enum,
+        Schema.SchemaError.TransformFailed => .transform_failed,
+    };
 }
 
 fn appendJsonStringField(
@@ -777,6 +1289,152 @@ test "Cli resolves option defaults from CLI env config and literal defaults" {
     );
 }
 
+const TypedServeArgs = struct {
+    workspace: []const u8,
+    port: i64,
+    watch: bool,
+    mode: ?[]const u8,
+};
+
+test "Cli typed command decodes CLI env config defaults with source facts" {
+    const command = typedCommand(TypedServeArgs, .{
+        .name = "serve",
+        .description = "run local server",
+    }, .{
+        option("workspace", Schema.string().nonEmpty(), .{
+            .long = "workspace",
+            .env = "ZG_WORKSPACE",
+            .config_key = "workspace",
+            .help = "workspace root",
+            .required = true,
+        }),
+        option("port", Schema.integer().min(1).max(65535), .{
+            .long = "port",
+            .default_value = "5178",
+            .help = "local port",
+        }),
+        flag("watch", .{ .long = "watch", .short = 'w', .help = "watch files" }),
+        option("mode", Schema.optional(Schema.stringEnum(&.{ "local", "ci" })), .{
+            .long = "mode",
+            .config_key = "mode",
+            .help = "mode",
+        }),
+    });
+
+    var env = Env.EnvMap.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("ZG_WORKSPACE", "/env");
+
+    var config = Config.LayeredConfig.init(std.testing.allocator);
+    defer config.deinit();
+    try config.put("workspace", "/config", false);
+    try config.put("mode", "ci", false);
+
+    var parsed = try parse(std.testing.allocator, command.toCommandSpec(), &.{ "--workspace", "/cli", "-w" });
+    defer parsed.deinit(std.testing.allocator);
+
+    var decoded = try decodeTypedCommandAlloc(std.testing.allocator, command, parsed, &env, &config);
+    defer decoded.deinit();
+
+    try std.testing.expect(decoded.ok());
+    try std.testing.expectEqualStrings("/cli", decoded.value.?.workspace);
+    try std.testing.expectEqual(@as(i64, 5178), decoded.value.?.port);
+    try std.testing.expectEqual(true, decoded.value.?.watch);
+    try std.testing.expectEqualStrings("ci", decoded.value.?.mode.?);
+    try expectSource(decoded, "workspace", .cli);
+    try expectSource(decoded, "port", .default);
+    try expectSource(decoded, "watch", .cli);
+    try expectSource(decoded, "mode", .config);
+}
+
+test "Cli typed command accumulates schema issues and redacts source facts" {
+    const command = typedCommand(TypedServeArgs, .{
+        .name = "serve",
+    }, .{
+        option("workspace", Schema.string().nonEmpty(), .{ .long = "workspace", .required = true }),
+        option("port", Schema.integer().min(1).max(10), .{ .long = "port" }),
+        flag("watch", .{ .long = "watch" }),
+        option("mode", Schema.optional(Schema.stringEnum(&.{ "local", "ci" })), .{ .long = "mode" }),
+    });
+
+    var parsed = try parse(std.testing.allocator, command.toCommandSpec(), &.{ "--port", "999", "--mode", "prod", "--workspace", "token=abc123" });
+    defer parsed.deinit(std.testing.allocator);
+
+    var decoded = try decodeTypedCommandAlloc(std.testing.allocator, command, parsed, null, null);
+    defer decoded.deinit();
+
+    try std.testing.expect(!decoded.ok());
+    try expectIssuePath(decoded.issues, "--port", .constraint_failed);
+    try expectIssuePath(decoded.issues, "--mode", .unknown_enum);
+    try std.testing.expect(std.mem.indexOf(u8, decoded.sources[0].redacted_value, "abc123") == null);
+}
+
+test "Cli typed help includes schema source metadata and required markers" {
+    const command = typedCommand(TypedServeArgs, .{
+        .name = "serve",
+        .description = "run local server",
+        .version = "0.1.0",
+    }, .{
+        option("workspace", Schema.string().nonEmpty(), .{
+            .long = "workspace",
+            .short = 'w',
+            .env = "ZG_WORKSPACE",
+            .config_key = "workspace",
+            .help = "workspace root",
+            .required = true,
+        }),
+        option("port", Schema.integer().min(1).max(65535), .{
+            .long = "port",
+            .default_value = "5178",
+            .help = "local port",
+        }),
+    });
+
+    const help = try formatTypedHelp(std.testing.allocator, command);
+    defer std.testing.allocator.free(help);
+
+    try std.testing.expect(std.mem.indexOf(u8, help, "Usage: serve [options]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, help, "--workspace") != null);
+    try std.testing.expect(std.mem.indexOf(u8, help, "-w") != null);
+    try std.testing.expect(std.mem.indexOf(u8, help, "required") != null);
+    try std.testing.expect(std.mem.indexOf(u8, help, "env: ZG_WORKSPACE") != null);
+    try std.testing.expect(std.mem.indexOf(u8, help, "config: workspace") != null);
+    try std.testing.expect(std.mem.indexOf(u8, help, "default: 5178") != null);
+}
+
+test "Cli detects typed built-in help version and completions" {
+    const command = typedCommand(TypedServeArgs, .{ .name = "serve", .version = "0.1.0" }, .{
+        option("workspace", Schema.string(), .{ .long = "workspace" }),
+        flag("watch", .{ .long = "watch" }),
+    });
+
+    try std.testing.expectEqual(BuiltinRequest.help, detectBuiltin(command, &.{"--help"}).?);
+    try std.testing.expectEqual(BuiltinRequest.help, detectBuiltin(command, &.{ "help", "serve" }).?);
+    try std.testing.expectEqual(BuiltinRequest.version, detectBuiltin(command, &.{"--version"}).?);
+    try std.testing.expectEqual(BuiltinRequest.completions, detectBuiltin(command, &.{"completions"}).?);
+
+    const completions = try formatTypedCompletions(std.testing.allocator, command);
+    defer std.testing.allocator.free(completions);
+    try std.testing.expect(std.mem.indexOf(u8, completions, "option --workspace") != null);
+    try std.testing.expect(std.mem.indexOf(u8, completions, "option --watch") != null);
+}
+
+fn expectSource(decoded: anytype, name: []const u8, source: OptionSourceKind) !void {
+    for (decoded.sources) |fact| {
+        if (std.mem.eql(u8, fact.name, name) and fact.source == source) return;
+    }
+    std.debug.print("missing source fact name={s}\n", .{name});
+    return error.TestExpectedEqual;
+}
+
+fn expectIssuePath(issues: Schema.IssueList, path: []const u8, kind: Schema.IssueKind) !void {
+    for (issues.items.items) |issue| {
+        if (std.mem.eql(u8, issue.path, path) and issue.kind == kind) return;
+    }
+    std.debug.print("missing CLI issue path={s}\n", .{path});
+    return error.TestExpectedEqual;
+}
+
 test "Cli help includes subcommands deterministically" {
     const subcommands = [_]CommandSpec{
         .{ .name = "hello", .description = "print greeting" },
@@ -922,6 +1580,49 @@ test "Cli runEffect maps handler errors to exit codes without throwing" {
     try std.testing.expectEqualStrings("failure", summary.status);
     try std.testing.expect(std.mem.indexOf(u8, console.stderrText(), "MissingVariable") != null);
     try std.testing.expect(std.mem.indexOf(u8, summary.receipt_json, "\"status\": \"failure\"") != null);
+}
+
+test "Cli runTypedEffect decodes typed args handles builtins and records causal facts" {
+    const zstd = @import("../root.zig");
+    const Provider = zstd.Service.Provider(.{ Runner, zstd.Console.CapturedConsole });
+    const HandlerFailure = error{Boom};
+    const TestHandlers = struct {
+        fn serve(ctx: *zstd.fx.Context(Provider), args: TypedServeArgs) HandlerFailure!void {
+            try ctx.service(zstd.Console.CapturedConsole).writeOut(args.workspace);
+        }
+    };
+
+    const command = typedCommand(TypedServeArgs, .{ .name = "serve", .version = "0.1.0" }, .{
+        option("workspace", zstd.Schema.string().nonEmpty(), .{ .long = "workspace", .required = true }),
+        option("port", zstd.Schema.integer().min(1).max(65535), .{ .long = "port", .default_value = "5178" }),
+        flag("watch", .{ .long = "watch" }),
+        option("mode", zstd.Schema.optional(zstd.Schema.stringEnum(&.{ "local", "ci" })), .{ .long = "mode" }),
+    });
+    const app = TypedApplication(Provider, TypedServeArgs, HandlerFailure, @TypeOf(command)){
+        .command = command,
+        .handler = TestHandlers.serve,
+    };
+
+    var runner = Runner{};
+    var console = zstd.Console.CapturedConsole.init(std.testing.allocator);
+    defer console.deinit();
+    var provider = Provider.init(.{ &runner, &console });
+    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+    var runtime = zstd.fx.Runtime(Provider).init(std.testing.allocator, &provider)
+        .provides(.{ Runner, zstd.Console.CapturedConsole })
+        .withCausalStore(&store);
+
+    var summary = try runtime.run(runTypedEffect(Provider, TypedServeArgs, HandlerFailure, @TypeOf(command), app, &.{ "--workspace", "/repo" }));
+    defer summary.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(ExitCode.success, summary.exit_code);
+    try std.testing.expectEqualStrings("/repo", console.stdoutText());
+    try std.testing.expect(std.mem.indexOf(u8, summary.receipt_json, "cli_decode_completed") != null);
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expect(zstd.Service.hasOperation(snapshot, Runner, "cli.typed.run", "success"));
 }
 
 test "Cli runEffect participates in runtime dependency validation" {

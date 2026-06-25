@@ -191,6 +191,36 @@ Deliverables:
 - end-to-end local agent run proof through `RunAgentEffect` and
   `zstd.Process` runners.
 
+### M11 - Production Schema
+
+Status: delivered on 2026-06-26.
+
+Make `zstd.Schema` the production data-boundary layer.
+
+Deliverables:
+
+- owned redacted issue lists.
+- path-aware detailed JSON/config decode results.
+- primitive constraints, defaults, enums, arrays, structs, and derivation.
+- deterministic JSON encoding.
+- named transforms with inverse encoders.
+- backward-compatible simple decode APIs.
+
+### M12 - Production CLI
+
+Status: delivered on 2026-06-26.
+
+Make `zstd.Cli` a Schema-powered application boundary for local tools.
+
+Deliverables:
+
+- typed command definitions over Zig structs.
+- Schema-backed option decode from CLI/env/config/default sources.
+- redacted source facts and accumulated issue lists.
+- deterministic source-aware help, version, and completion built-ins.
+- effect-native typed command runner with causal facts and receipts.
+- backward-compatible legacy parser and runner APIs.
+
 ## Dependency Order
 
 ```text
@@ -204,6 +234,8 @@ M1 Service Kernel
   -> M8 HTTP/WebSocket
   -> M9 SQL/Postgres
   -> M10 Agent Toolkit
+  -> M11 Production Schema
+  -> M12 Production CLI
 ```
 
 M1 must happen first because it defines the service/layer/effect/causal contract

@@ -34,8 +34,9 @@ bun run zigeffect:std:test
 - `Sink` provides deterministic memory line sinks with redacted JSONL receipts.
 - `Queue` wraps engine queues as effect-native std services.
 - `PubSub` wraps engine hubs as effect-native multi-subscriber services.
-- `Cli` parses deterministic command specs, nested subcommands, typed defaults,
-  completions, effect-native handlers, exit-code mapping, and run receipts.
+- `Cli` parses deterministic command specs, nested subcommands, Schema-powered
+  typed options, source-aware defaults, built-ins, completions, effect-native
+  handlers, exit-code mapping, and run receipts.
 - `Console` provides a captured console service for testable command output.
 - `Env` provides an owned environment map for deterministic local runs.
 - `Config` resolves layered key/value config with redacted display values.
@@ -142,6 +143,47 @@ if (!result.ok()) {
 Schemas support primitive constraints, defaults, arrays, structs, enums, named
 transforms with inverse encoders, config decoding, deterministic JSON encoding,
 and redacted issue JSON.
+
+## CLI
+
+The legacy parser API remains available. New local tools can use typed commands
+backed by `zstd.Schema`:
+
+```zig
+const Args = struct {
+    workspace: []const u8,
+    port: i64,
+    watch: bool,
+};
+
+const command = zstd.Cli.typedCommand(Args, .{
+    .name = "serve",
+    .description = "run local server",
+    .version = "0.1.0",
+}, .{
+    zstd.Cli.option("workspace", zstd.Schema.string().nonEmpty(), .{
+        .long = "workspace",
+        .env = "ZG_WORKSPACE",
+        .config_key = "workspace",
+        .required = true,
+        .help = "workspace root",
+    }),
+    zstd.Cli.option("port", zstd.Schema.integer().min(1).max(65535), .{
+        .long = "port",
+        .default_value = "5178",
+        .help = "local HTTP port",
+    }),
+    zstd.Cli.flag("watch", .{
+        .long = "watch",
+        .short = 'w',
+        .help = "rerun on file changes",
+    }),
+});
+```
+
+Typed commands decode `cli > env > config > default`, accumulate redacted
+Schema issues, generate deterministic help/completion output, and can run
+through `runTypedEffect` with causal service facts.
 
 ## Example
 
