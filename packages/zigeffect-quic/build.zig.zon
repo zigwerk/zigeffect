@@ -1,0 +1,22 @@
+.{
+    .name = .zigeffect_quic,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0x7d4916f7192a88b,
+    .dependencies = .{
+        .zigeffect_std = .{
+            .path = "../zigeffect-std",
+        },
+        .quic = .{
+            .url = "git+https://github.com/endel/quic-zig#344c0e4efd4054402640c4dae0ed5885bd264e15",
+            .hash = "quic-0.2.0-TPyrNFqYFgAHDiFjdfQGBD0XVllKuEG2ye9Sx4-XBW2Q",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "README.md",
+        "examples",
+        "src",
+    },
+}

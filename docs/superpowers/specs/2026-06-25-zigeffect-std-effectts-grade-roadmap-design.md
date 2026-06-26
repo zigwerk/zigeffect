@@ -301,6 +301,24 @@ Deliverables:
 - migration planning, transaction-wrapped apply SQL, and redacted receipts.
 - copyable `packages/zigeffect-postgres/examples/migrate.zig` CLI.
 
+### M18 - Experimental QUIC / HTTP3 / WebTransport Adapter
+
+Status: delivered on 2026-06-26.
+
+Wrap `endel/quic-zig` in zigeffect contracts without making the core engine or
+`zigeffect-std` depend on experimental transport APIs.
+
+Deliverables:
+
+- optional `packages/zigeffect-quic` adapter package.
+- pinned `quic-zig` dependency at inspected commit
+  `344c0e4efd4054402640c4dae0ed5885bd264e15`.
+- `QuicHttpClient` with the same `sendAlloc` shape as `zstd.Http` clients.
+- deterministic `FakeQuicHttpClient` for CI and local agent tests.
+- HTTP/3 receipt JSON with redacted request metadata.
+- WebTransport stream/datagram receipt JSON with redaction.
+- copyable HTTP/3 and WebTransport examples.
+
 ## Dependency Order
 
 ```text
@@ -321,6 +339,7 @@ M1 Service Kernel
   -> M15 Workbench Dev Session UX
   -> M16 HTTP Router / Local Server
   -> M17 Postgres Maturity
+  -> M18 Experimental QUIC / HTTP3 / WebTransport Adapter
 ```
 
 M1 must happen first because it defines the service/layer/effect/causal contract
