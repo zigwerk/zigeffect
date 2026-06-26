@@ -32,6 +32,8 @@ with one import:
 - `examples/workspace_doctor.zig` for workspace snapshots, fake checks, and
   redacted receipts.
 - `examples/agent_dev_session.zig` for workbench-compatible agent JSONL.
+- `examples/agent_supervisor.zig` for supervised local agent/tool runs with
+  redacted artifacts.
 - `examples/http_sql_smoke.zig` for local HTTP/SQL contract smoke tests.
 - `examples/local_toolbelt.zig` for a composed local automation command.
 
@@ -75,7 +77,8 @@ with one import:
   WebSocket frame codecs for local workbench feeds.
 - `Agent` records workbench-compatible local agent JSONL sessions, Codex and
   Claude Code process adapter commands, guardrails, artifacts, check receipts,
-  and effect-native process-backed agent runs.
+  effect-native process-backed agent runs, and supervised local multi-tool
+  sessions with redacted stdout/stderr artifacts.
 - `fx` re-exports the base zigeffect engine facade.
 
 `Env`, `Config`, `Secrets`, `Json`, `Jsonl`, `Cli`, `Queue`, `PubSub`, `Sink`,

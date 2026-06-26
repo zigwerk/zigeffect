@@ -2,6 +2,7 @@ const std = @import("std");
 const Json = @import("../json/root.zig");
 const Jsonl = @import("../jsonl/root.zig");
 const Process = @import("../process/root.zig");
+const Secrets = @import("../secrets/root.zig");
 const StdService = @import("../service/root.zig");
 const fx = @import("zigeffect");
 
@@ -84,6 +85,49 @@ pub const RunSummary = struct {
 
     pub fn deinit(self: *RunSummary, allocator: std.mem.Allocator) void {
         allocator.free(self.receipt_json);
+        self.* = undefined;
+    }
+};
+
+pub const SupervisedTool = struct {
+    adapter: AdapterSpec,
+    check_label: []const u8,
+    stdout_artifact_path: []const u8 = "",
+    stderr_artifact_path: []const u8 = "",
+};
+
+pub const SupervisorPolicy = struct {
+    fail_fast: bool = true,
+    guardrails: []const []const u8 = &.{},
+    next_action: []const u8 = "",
+};
+
+pub const SupervisorArtifact = struct {
+    key: []const u8,
+    path: []const u8,
+    content: []const u8,
+
+    pub fn deinit(self: *SupervisorArtifact, allocator: std.mem.Allocator) void {
+        allocator.free(self.key);
+        allocator.free(self.path);
+        allocator.free(self.content);
+        self.* = undefined;
+    }
+};
+
+pub const SupervisorSummary = struct {
+    status: []const u8,
+    passed: usize,
+    failed: usize,
+    feed_jsonl: []const u8,
+    receipt_json: []const u8,
+    artifacts: []SupervisorArtifact,
+
+    pub fn deinit(self: *SupervisorSummary, allocator: std.mem.Allocator) void {
+        allocator.free(self.feed_jsonl);
+        allocator.free(self.receipt_json);
+        for (self.artifacts) |*artifact| artifact.deinit(allocator);
+        allocator.free(self.artifacts);
         self.* = undefined;
     }
 };
@@ -367,6 +411,204 @@ pub fn runAgentEffect(comptime EffectEnv: type, comptime Runner: type, adapter: 
     return .{ .adapter = adapter };
 }
 
+pub fn runSupervisorAlloc(
+    allocator: std.mem.Allocator,
+    session_id: []const u8,
+    workspace: []const u8,
+    runner: anytype,
+    tools: []const SupervisedTool,
+    policy: SupervisorPolicy,
+) !SupervisorSummary {
+    var session = Session.init(allocator, session_id, workspace);
+    defer session.deinit();
+    return runSupervisorWithSessionAlloc(allocator, &session, runner, tools, policy);
+}
+
+pub fn RunSupervisorEffect(comptime EffectEnv: type, comptime Runner: type) type {
+    return struct {
+        pub const SuccessType = SupervisorSummary;
+        pub const FailureType = anyerror;
+        pub const EnvType = EffectEnv;
+        pub const RequiredServices = .{ Session, Runner };
+
+        tools: []const SupervisedTool,
+        policy: SupervisorPolicy,
+
+        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
+            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
+        }
+
+        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!SupervisorSummary {
+            const session = ctx.service(Session);
+            const runner = ctx.service(Runner);
+            const summary = runSupervisorWithSessionAlloc(ctx.allocator, session, runner, self.tools, self.policy) catch |err| {
+                _ = StdService.recordOperation(ctx, Session, "agent.supervisor", "failure", @errorName(err));
+                return err;
+            };
+            _ = StdService.recordOperation(ctx, Session, "agent.supervisor", summary.status, session.id);
+            return summary;
+        }
+    };
+}
+
+pub fn runSupervisorEffect(
+    comptime EffectEnv: type,
+    comptime Runner: type,
+    tools: []const SupervisedTool,
+    policy: SupervisorPolicy,
+) RunSupervisorEffect(EffectEnv, Runner) {
+    return .{ .tools = tools, .policy = policy };
+}
+
+fn runSupervisorWithSessionAlloc(
+    allocator: std.mem.Allocator,
+    session: *Session,
+    runner: anytype,
+    tools: []const SupervisedTool,
+    policy: SupervisorPolicy,
+) !SupervisorSummary {
+    var artifacts = std.ArrayList(SupervisorArtifact).empty;
+    errdefer deinitArtifactBuilder(allocator, &artifacts);
+
+    for (policy.guardrails) |guardrail| {
+        try session.recordGuardrail(guardrail);
+    }
+
+    var passed: usize = 0;
+    var failed: usize = 0;
+
+    for (tools) |tool| {
+        try session.recordAgentStatus(.{
+            .agent_id = tool.adapter.id,
+            .agent_kind = tool.adapter.kind,
+            .agent_label = tool.adapter.label,
+            .status = .running,
+            .task = tool.adapter.task,
+        });
+
+        var output = runner.runOutputAlloc(allocator, tool.adapter.command()) catch |err| {
+            failed += 1;
+            try session.recordWarning(@errorName(err));
+            try session.recordAgentStatus(.{
+                .agent_id = tool.adapter.id,
+                .agent_kind = tool.adapter.kind,
+                .agent_label = tool.adapter.label,
+                .status = .failed,
+                .task = @errorName(err),
+            });
+            if (policy.fail_fast) break;
+            continue;
+        };
+        defer output.deinit(allocator);
+
+        const tool_passed = output.receipt.exit_code == 0;
+        if (tool_passed) {
+            passed += 1;
+        } else {
+            failed += 1;
+        }
+
+        if (tool.stdout_artifact_path.len != 0 and output.stdout.len != 0) {
+            try captureArtifact(allocator, session, &artifacts, tool.adapter.id, "stdout", tool.stdout_artifact_path, output.stdout);
+        }
+        if (tool.stderr_artifact_path.len != 0 and output.stderr.len != 0) {
+            try captureArtifact(allocator, session, &artifacts, tool.adapter.id, "stderr", tool.stderr_artifact_path, output.stderr);
+        }
+
+        const detail = if (tool_passed or output.stderr.len == 0) output.stdout else output.stderr;
+        try session.recordCheck(.{
+            .label = tool.check_label,
+            .command = output.receipt.command,
+            .status = if (tool_passed) .pass else .fail,
+            .detail = detail,
+            .artifact_path = if (tool_passed) tool.stdout_artifact_path else tool.stderr_artifact_path,
+        });
+        try session.recordAgentStatus(.{
+            .agent_id = tool.adapter.id,
+            .agent_kind = tool.adapter.kind,
+            .agent_label = tool.adapter.label,
+            .status = if (tool_passed) .done else .failed,
+            .task = tool.adapter.task,
+            .artifact_path = if (tool_passed) tool.stdout_artifact_path else tool.stderr_artifact_path,
+        });
+
+        if (!tool_passed and policy.fail_fast) break;
+    }
+
+    if (policy.next_action.len != 0) {
+        try session.recordNextAction(policy.next_action);
+    }
+
+    const status: []const u8 = if (failed == 0) "success" else "failure";
+    const feed_jsonl = try allocator.dupe(u8, session.feedText());
+    errdefer allocator.free(feed_jsonl);
+
+    const receipt_json = try supervisorReceiptJsonAlloc(allocator, session.id, session.workspace, status, passed, failed);
+    errdefer allocator.free(receipt_json);
+
+    return .{
+        .status = status,
+        .passed = passed,
+        .failed = failed,
+        .feed_jsonl = feed_jsonl,
+        .receipt_json = receipt_json,
+        .artifacts = try artifacts.toOwnedSlice(allocator),
+    };
+}
+
+fn captureArtifact(
+    allocator: std.mem.Allocator,
+    session: *Session,
+    artifacts: *std.ArrayList(SupervisorArtifact),
+    agent_id: []const u8,
+    kind: []const u8,
+    path: []const u8,
+    content: []const u8,
+) !void {
+    const key = try std.fmt.allocPrint(allocator, "{s}_{s}", .{ agent_id, kind });
+    errdefer allocator.free(key);
+    const owned_path = try allocator.dupe(u8, path);
+    errdefer allocator.free(owned_path);
+    const redacted_content = try Secrets.redactAlloc(allocator, content);
+    errdefer allocator.free(redacted_content);
+
+    try artifacts.append(allocator, .{
+        .key = key,
+        .path = owned_path,
+        .content = redacted_content,
+    });
+    try session.linkArtifact(key, path);
+}
+
+fn supervisorReceiptJsonAlloc(
+    allocator: std.mem.Allocator,
+    session_id: []const u8,
+    workspace: []const u8,
+    status: []const u8,
+    passed: usize,
+    failed: usize,
+) ![]const u8 {
+    const passed_text = try std.fmt.allocPrint(allocator, "{d}", .{passed});
+    defer allocator.free(passed_text);
+    const failed_text = try std.fmt.allocPrint(allocator, "{d}", .{failed});
+    defer allocator.free(failed_text);
+
+    const fields = [_]Json.Field{
+        .{ .name = "schema", .value = "zigeffect.std.agent-supervisor.v1" },
+        .{ .name = "session_id", .value = session_id },
+        .{ .name = "workspace", .value = workspace },
+        .{ .name = "status", .value = status },
+        .{ .name = "passed", .value = passed_text },
+        .{ .name = "failed", .value = failed_text },
+    };
+    return Json.objectFromFieldsAlloc(allocator, fields[0..]);
+}
+
+fn deinitArtifactBuilder(allocator: std.mem.Allocator, artifacts: *std.ArrayList(SupervisorArtifact)) void {
+    for (artifacts.items) |*artifact| artifact.deinit(allocator);
+    artifacts.deinit(allocator);
+}
+
 test "Agent formats local session events as redacted JSONL" {
     const event = Event{
         .sequence = 7,
@@ -476,4 +718,117 @@ test "Agent runAgentEffect executes process runner and records session plus caus
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
     try std.testing.expect(zstd.Service.hasOperation(snapshot, Session, "agent.run", "success"));
+}
+
+const ScriptedRunner = struct {
+    results: []const Process.Result,
+    index: usize = 0,
+
+    pub fn runOutputAlloc(
+        self: *ScriptedRunner,
+        allocator: std.mem.Allocator,
+        command: Process.Command,
+    ) !Process.RunOutput {
+        const result = self.results[self.index];
+        self.index += 1;
+        return Process.FakeRunner.init(result).runOutputAlloc(allocator, command);
+    }
+};
+
+test "Agent supervisor runs tools captures artifacts and redacts workbench feed" {
+    var runner = ScriptedRunner{
+        .results = &.{
+            .{ .exit_code = 0, .stdout = "ok token=abc123", .stderr = "" },
+            .{ .exit_code = 2, .stdout = "", .stderr = "failed password=hunter2" },
+        },
+    };
+    const ok_adapter = try localProcessAdapter("codex-check", "Codex Check", "/repo", &.{ "codex", "exec", "check" });
+    const fail_adapter = try localProcessAdapter("claude-review", "Claude Review", "/repo", &.{ "claude", "-p", "review" });
+    const tools = [_]SupervisedTool{
+        .{
+            .adapter = ok_adapter,
+            .check_label = "codex check",
+            .stdout_artifact_path = ".zig-cache/agent/codex.stdout.log",
+        },
+        .{
+            .adapter = fail_adapter,
+            .check_label = "claude review",
+            .stderr_artifact_path = ".zig-cache/agent/claude.stderr.log",
+        },
+    };
+
+    var summary = try runSupervisorAlloc(std.testing.allocator, "supervisor-test", "/repo", &runner, tools[0..], .{
+        .fail_fast = false,
+        .guardrails = &.{"never leak token=abc123"},
+        .next_action = "inspect failed review",
+    });
+    defer summary.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 2), runner.index);
+    try std.testing.expectEqualStrings("failure", summary.status);
+    try std.testing.expectEqual(@as(usize, 1), summary.passed);
+    try std.testing.expectEqual(@as(usize, 1), summary.failed);
+    try std.testing.expectEqual(@as(usize, 2), summary.artifacts.len);
+    try std.testing.expect(std.mem.indexOf(u8, summary.feed_jsonl, "\"kind\":\"agent_status\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, summary.feed_jsonl, "\"kind\":\"check_result\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, summary.feed_jsonl, "\"kind\":\"artifact_link\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, summary.feed_jsonl, "\"kind\":\"guardrail\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, summary.feed_jsonl, "\"kind\":\"next_action\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, summary.receipt_json, "\"schema\":\"zigeffect.std.agent-supervisor.v1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, summary.feed_jsonl, "abc123") == null);
+    try std.testing.expect(std.mem.indexOf(u8, summary.feed_jsonl, "hunter2") == null);
+    try std.testing.expect(std.mem.indexOf(u8, summary.artifacts[0].content, "abc123") == null);
+    try std.testing.expect(std.mem.indexOf(u8, summary.artifacts[1].content, "hunter2") == null);
+}
+
+test "Agent supervisor fail-fast stops after first failing tool" {
+    var runner = ScriptedRunner{
+        .results = &.{
+            .{ .exit_code = 1, .stdout = "", .stderr = "nope" },
+            .{ .exit_code = 0, .stdout = "should not run", .stderr = "" },
+        },
+    };
+    const first = try localProcessAdapter("first", "First", "/repo", &.{ "first" });
+    const second = try localProcessAdapter("second", "Second", "/repo", &.{ "second" });
+    const tools = [_]SupervisedTool{
+        .{ .adapter = first, .check_label = "first" },
+        .{ .adapter = second, .check_label = "second" },
+    };
+
+    var summary = try runSupervisorAlloc(std.testing.allocator, "fail-fast", "/repo", &runner, tools[0..], .{});
+    defer summary.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 1), runner.index);
+    try std.testing.expectEqualStrings("failure", summary.status);
+    try std.testing.expect(std.mem.indexOf(u8, summary.feed_jsonl, "Second") == null);
+}
+
+test "Agent runSupervisorEffect records session and causal facts" {
+    const zstd = @import("../root.zig");
+
+    var session = Session.init(std.testing.allocator, "effect-supervisor", "/repo");
+    defer session.deinit();
+    var runner = Process.FakeRunner.init(.{ .exit_code = 0, .stdout = "ok token=abc123", .stderr = "" });
+    const adapter = try localProcessAdapter("local-check", "Local Check", "/repo", &.{ "zig", "build", "test" });
+    const tools = [_]SupervisedTool{
+        .{ .adapter = adapter, .check_label = "std tests" },
+    };
+
+    var provider = zstd.Service.Provider(.{ Session, Process.FakeRunner }).init(.{ &session, &runner });
+    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
+        .provides(.{ Session, Process.FakeRunner })
+        .withCausalStore(&store);
+
+    var summary = try runtime.run(runSupervisorEffect(@TypeOf(provider), Process.FakeRunner, tools[0..], .{}));
+    defer summary.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("success", summary.status);
+    try std.testing.expect(std.mem.indexOf(u8, summary.feed_jsonl, "abc123") == null);
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expect(zstd.Service.hasOperation(snapshot, Session, "agent.supervisor", "success"));
 }

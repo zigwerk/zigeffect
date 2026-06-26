@@ -79,6 +79,27 @@ What it proves:
 
 This is the bridge from local CLI execution to the SolidJS workbench.
 
+## `agent_supervisor.zig`
+
+Use this pattern for supervised local agent/tool runs.
+
+Modules exercised:
+
+- `zstd.Agent`
+- `zstd.Process`
+- `zstd.Json`
+- `zstd.Secrets`
+
+What it proves:
+
+- A supervisor can run local process adapters sequentially.
+- Guardrails and next actions are emitted into the workbench-compatible feed.
+- stdout/stderr are captured as redacted artifacts.
+- command receipts and check results stay redacted.
+
+The production path can use `zstd.Process.LocalRunner`; the example uses the
+same runner contract with a deterministic fake runner so it stays stable in CI.
+
 ## `http_sql_smoke.zig`
 
 Use this pattern for local platform contract tests without external services.
@@ -129,7 +150,8 @@ This is the copyable starting point for local project automation.
 M13 proves the std library can build real local tools. The next two milestones
 should build on these examples:
 
-- **M14 Local Agent Supervisor:** run real local processes, stream events, apply
-  guardrails, and write workbench feeds.
+- **M14 Local Agent Supervisor:** delivered. `zstd.Agent` now supervises local
+  process adapters, emits guardrails/checks/artifacts, and returns redacted
+  workbench-compatible JSONL plus receipts.
 - **M15 Workbench Dev Session UX:** render those feeds as sessions, commands,
   checks, artifacts, and causal facts.

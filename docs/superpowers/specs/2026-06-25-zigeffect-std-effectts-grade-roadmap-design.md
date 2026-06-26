@@ -237,6 +237,22 @@ Deliverables:
 - local toolbelt example composing CLI, workspace, process, and agent output.
 - `zig build examples` gate covering every cookbook example.
 
+### M14 - Local Agent Supervisor
+
+Status: delivered on 2026-06-26.
+
+Make local agent/tool execution a first-class supervised std-lib workflow.
+
+Deliverables:
+
+- supervised local tool definitions over existing `Agent.AdapterSpec` values.
+- sequential local process execution through the `zstd.Process` runner contract.
+- guardrail and next-action emission into the workbench-compatible feed.
+- redacted stdout/stderr artifact capture.
+- supervisor receipts with pass/fail counts.
+- effect-native supervisor runner with causal service facts.
+- copyable `examples/agent_supervisor.zig`.
+
 ## Dependency Order
 
 ```text
@@ -253,6 +269,7 @@ M1 Service Kernel
   -> M11 Production Schema
   -> M12 Production CLI
   -> M13 Local Tools Cookbook
+  -> M14 Local Agent Supervisor
 ```
 
 M1 must happen first because it defines the service/layer/effect/causal contract
