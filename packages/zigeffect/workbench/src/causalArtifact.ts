@@ -357,6 +357,46 @@ export type LocalDevSessionModel = {
   warnings: string[];
 };
 
+export type LocalDevHealth = "pass" | "fail" | "running" | "unknown";
+
+export type LocalDevHealthSummary = {
+  health: LocalDevHealth;
+  passedChecks: number;
+  failedChecks: number;
+  runningChecks: number;
+  skippedChecks: number;
+  failedAgents: number;
+  activeAgents: number;
+  commandCount: number;
+  artifactCount: number;
+};
+
+export type LocalDevTimelineKind =
+  | "agent"
+  | "check"
+  | "command"
+  | "artifact"
+  | "guardrail"
+  | "warning"
+  | "next-action";
+
+export type LocalDevTimelineItem = {
+  kind: LocalDevTimelineKind;
+  label: string;
+  status: string;
+  detail: string;
+  command: string | null;
+  artifactPath: string | null;
+};
+
+export type LocalDevIssueHighlight = {
+  label: string;
+  source: "check" | "command" | "warning";
+  detail: string;
+  command: string | null;
+  artifactPath: string | null;
+};
+
 export type SemanticDiffSummary = {
   resolvedFindings: number;
   introducedFindings: number;
@@ -553,6 +593,138 @@ export function deriveLocalDevSessionModel(raw: unknown, options: WorkbenchOptio
   };
 }
 
+export function deriveLocalDevHealthSummary(session: LocalDevSessionModel): LocalDevHealthSummary {
+  const passedChecks = session.checks.filter((check) => check.status === "pass").length;
+  const failedChecks = session.checks.filter((check) => check.status === "fail").length;
+  const runningChecks = session.checks.filter((check) => check.status === "running").length;
+  const skippedChecks = session.checks.filter((check) => check.status === "skipped").length;
+  const failedAgents = session.agents.filter((agent) => agent.status === "failed").length;
+  const activeAgents = session.agents.filter((agent) => agent.status === "running" || agent.status === "reviewing").length;
+  const health: LocalDevHealth = failedChecks > 0 || failedAgents > 0
+    ? "fail"
+    : runningChecks > 0 || activeAgents > 0
+      ? "running"
+      : passedChecks > 0
+        ? "pass"
+        : "unknown";
+
+  return {
+    health,
+    passedChecks,
+    failedChecks,
+    runningChecks,
+    skippedChecks,
+    failedAgents,
+    activeAgents,
+    commandCount: session.commands.length,
+    artifactCount: session.artifacts.length,
+  };
+}
+
+export function deriveLocalDevTimeline(session: LocalDevSessionModel): LocalDevTimelineItem[] {
+  const items: LocalDevTimelineItem[] = [];
+
+  for (const agent of session.agents) {
+    items.push({
+      kind: "agent",
+      label: agent.label,
+      status: agent.status,
+      detail: agent.currentTask ?? agent.artifactPath ?? agent.kind,
+      command: null,
+      artifactPath: agent.artifactPath,
+    });
+  }
+
+  for (const check of session.checks) {
+    items.push({
+      kind: "check",
+      label: check.label,
+      status: check.status,
+      detail: check.detail || check.command || check.artifactPath || "check recorded",
+      command: check.command,
+      artifactPath: check.artifactPath,
+    });
+  }
+
+  for (const command of session.commands) {
+    items.push({
+      kind: "command",
+      label: command.label,
+      status: command.status,
+      detail: command.stderrSnippet || command.stdoutSnippet || `exit ${command.exitCode ?? "unknown"}`,
+      command: command.command,
+      artifactPath: null,
+    });
+  }
+
+  for (const artifact of session.artifacts) {
+    items.push({
+      kind: "artifact",
+      label: artifact.label,
+      status: artifact.kind,
+      detail: artifact.path,
+      command: artifact.workbenchCommand,
+      artifactPath: artifact.path,
+    });
+  }
+
+  for (const guardrail of session.guardrails) {
+    items.push({ kind: "guardrail", label: "Guardrail", status: "policy", detail: guardrail, command: null, artifactPath: null });
+  }
+  for (const warning of session.warnings) {
+    items.push({ kind: "warning", label: "Warning", status: "warning", detail: warning, command: null, artifactPath: null });
+  }
+  for (const action of session.nextActions) {
+    items.push({ kind: "next-action", label: "Next action", status: "next", detail: action, command: actionLooksLikeCommand(action) ? action : null, artifactPath: null });
+  }
+
+  return items;
+}
+
+export function deriveLocalDevIssueHighlights(session: LocalDevSessionModel): LocalDevIssueHighlight[] {
+  const highlights: LocalDevIssueHighlight[] = [];
+
+  for (const check of session.checks) {
+    const detail = check.detail || check.command || "";
+    if (check.status === "fail" && looksLikeSchemaOrCliIssue(detail)) {
+      highlights.push({
+        label: check.label,
+        source: "check",
+        detail: redactLocalDevText(detail),
+        command: check.command ? redactLocalDevText(check.command) : null,
+        artifactPath: check.artifactPath,
+      });
+    }
+  }
+
+  for (const command of session.commands) {
+    const detail = command.stderrSnippet || command.stdoutSnippet || command.command;
+    if (command.status === "fail" && looksLikeSchemaOrCliIssue(detail)) {
+      highlights.push({
+        label: command.label,
+        source: "command",
+        detail: redactLocalDevText(detail),
+        command: redactLocalDevText(command.command),
+        artifactPath: null,
+      });
+    }
+  }
+
+  for (const warning of session.warnings) {
+    if (looksLikeSchemaOrCliIssue(warning)) {
+      highlights.push({
+        label: "warning",
+        source: "warning",
+        detail: redactLocalDevText(warning),
+        command: null,
+        artifactPath: null,
+      });
+    }
+  }
+
+  return highlights;
+}
+
 export function filterEvents(events: CausalEvent[], filter: EventFilter): CausalEvent[] {
   const text = filter.text?.trim().toLowerCase() ?? "";
   const kind = filter.kind?.trim();
@@ -570,6 +742,25 @@ export function filterEvents(events: CausalEvent[], filter: EventFilter): Causal
     }
     return searchableEventText(event).includes(text);
   });
+}
+
+function actionLooksLikeCommand(value: string): boolean {
+  return /^(bun|zig|zig build|codex|claude|npm|pnpm|yarn)\b/.test(value.trim());
+}
+
+function looksLikeSchemaOrCliIssue(value: string): boolean {
+  return /\b(schema|cli|missing_field|invalid_type|invalid_value|unknown_enum|constraint_failed|decode_failed|parse failed|--[a-z][a-z0-9-]*)\b/i.test(value);
+}
+
+function redactLocalDevText(value: string): string {
+  return value
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^/?#\s:@]+:[^/?#\s@]+@/gi, "$1<redacted>@")
+    .replace(/\b(authorization|proxy-authorization)\s*:\s*(bearer|basic)\s+[^;\s,]+/gi, "$1: $2 <redacted>")
+    .replace(/\bcookie\s*:\s*[^,\n\r]+/gi, "Cookie: <redacted>")
+    .replace(
+      /\b(api[_-]?key|x-api-key|token|password|secret|session(?:_id)?|sid)\b\s*[:=]\s*("[^"]*"|'[^']*'|[^;\s,}\]]+)/gi,
+      "$1=<redacted>",
+    );
 }
 
 export function queryCommandsForEvent(event: CausalEvent, artifactPath: string): QueryCommand[] {

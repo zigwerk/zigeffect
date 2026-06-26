@@ -4,7 +4,10 @@ import {
   causePathForEvent,
   deriveAppRemediationModel,
   deriveGovernanceModel,
+  deriveLocalDevHealthSummary,
+  deriveLocalDevIssueHighlights,
   deriveLocalDevSessionModel,
+  deriveLocalDevTimeline,
   deriveSemanticDiffModel,
   deriveVisualGraphModel,
   deriveWorkbenchModel,
@@ -711,6 +714,70 @@ test("deriveLocalDevSessionModel derives fallbacks for older dev-session receipt
 
 test("deriveLocalDevSessionModel ignores unrelated artifacts", () => {
   expect(deriveLocalDevSessionModel({ schema: "zigeffect.causal.v1" }, { artifactPath: "trace.json" })).toBeNull();
+});
+
+test("deriveLocalDevHealthSummary counts checks agents commands and artifacts", () => {
+  const session = deriveLocalDevSessionModel({
+    ...sampleLocalDevSession,
+    agents: [
+      ...sampleLocalDevSession.agents,
+      { id: "review", label: "Review", kind: "other", status: "failed" },
+    ],
+    checks: [
+      ...sampleLocalDevSession.checks,
+      { label: "schema cli", status: "fail", detail: "missing --workspace" },
+      { label: "agent supervisor", status: "running", detail: "streaming" },
+    ],
+  }, { artifactPath: "dev-session.json" });
+
+  const summary = deriveLocalDevHealthSummary(session!);
+
+  expect(summary.health).toBe("fail");
+  expect(summary.passedChecks).toBe(2);
+  expect(summary.failedChecks).toBe(1);
+  expect(summary.runningChecks).toBe(1);
+  expect(summary.failedAgents).toBe(1);
+  expect(summary.commandCount).toBe(1);
+  expect(summary.artifactCount).toBe(5);
+});
+
+test("deriveLocalDevTimeline creates stable operational rows", () => {
+  const session = deriveLocalDevSessionModel(sampleLocalDevSession, { artifactPath: "dev-session.json" });
+  const timeline = deriveLocalDevTimeline(session!);
+
+  expect(timeline.map((item) => `${item.kind}:${item.label}`)).toContain("agent:Codex");
+  expect(timeline.map((item) => `${item.kind}:${item.label}`)).toContain("check:causal-dev-loop after");
+  expect(timeline.map((item) => `${item.kind}:${item.label}`)).toContain("command:causal-dev-loop after");
+  expect(timeline.map((item) => `${item.kind}:${item.label}`)).toContain("artifact:After Json");
+  expect(timeline.map((item) => `${item.kind}:${item.label}`)).toContain("guardrail:Guardrail");
+  expect(timeline.map((item) => `${item.kind}:${item.label}`)).toContain("next-action:Next action");
+});
+
+test("deriveLocalDevIssueHighlights detects Schema and CLI errors with redaction", () => {
+  const session = deriveLocalDevSessionModel({
+    ...sampleLocalDevSession,
+    checks: [
+      {
+        label: "schema-cli",
+        command: "schema-cli --workspace token=abc123",
+        status: "fail",
+        detail: "[{\"path\":\"--workspace\",\"kind\":\"missing_field\",\"message\":\"token=abc123\"}]",
+      },
+      {
+        label: "regular failing test",
+        status: "fail",
+        detail: "assertion failed",
+      },
+    ],
+    warnings: ["CLI parse failed password=hunter2"],
+  }, { artifactPath: "dev-session.json" });
+
+  const issues = deriveLocalDevIssueHighlights(session!);
+
+  expect(issues.map((issue) => issue.label)).toEqual(["schema-cli", "warning"]);
+  expect(JSON.stringify(issues)).toContain("<redacted>");
+  expect(JSON.stringify(issues)).not.toContain("abc123");
+  expect(JSON.stringify(issues)).not.toContain("hunter2");
 });
 
 test("deriveGraphModel summarizes roots parent edges and runtime lanes", () => {

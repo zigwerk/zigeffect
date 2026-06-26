@@ -11,7 +11,9 @@ import {
   type GraphLaneKind,
   type GovernanceModel,
   type LocalDevArtifactModel,
+  type LocalDevIssueHighlight,
   type LocalDevSessionModel,
+  type LocalDevTimelineItem,
   type QueryCommand,
   type RemediationChainModel,
   type ChainSourceStep,
@@ -26,7 +28,10 @@ import {
   causePathForEvent,
   deriveGovernanceModel,
   deriveGraphModel,
+  deriveLocalDevHealthSummary,
+  deriveLocalDevIssueHighlights,
   deriveLocalDevSessionModel,
+  deriveLocalDevTimeline,
   deriveSemanticDiffModel,
   deriveVisualGraphModel,
   deriveWorkbenchModel,
@@ -47,7 +52,7 @@ type WorkbenchTab = { id: Tab; label: string };
 
 const tabs: WorkbenchTab[] = [
   { id: "timeline", label: "Timeline" },
-  { id: "agents", label: "Agents" },
+  { id: "agents", label: "Dev Session" },
   { id: "findings", label: "Findings" },
   { id: "graph", label: "Graph" },
   { id: "visual-graph", label: "Visual Graph" },
@@ -351,6 +356,9 @@ function AgentDevelopmentView(props: {
   copiedCommand: string | null;
   onCopy: (command: string) => void;
 }) {
+  const health = createMemo(() => props.session ? deriveLocalDevHealthSummary(props.session) : null);
+  const timeline = createMemo(() => props.session ? deriveLocalDevTimeline(props.session) : []);
+  const issues = createMemo(() => props.session ? deriveLocalDevIssueHighlights(props.session) : []);
   const commands = createMemo<QueryCommand[]>(() => {
     const session = props.session;
     if (!session) {
@@ -370,7 +378,7 @@ function AgentDevelopmentView(props: {
   return (
     <div class="view-stack">
       <div class="view-heading">
-        <h2>Agents</h2>
+        <h2>Dev Session</h2>
         <span>{props.session?.status ?? "no local session"}</span>
       </div>
 
@@ -380,10 +388,14 @@ function AgentDevelopmentView(props: {
             <div class="agent-summary">
               <Metric label="target" value={session().target} />
               <Metric label="phase" value={session().phase} />
+              <Metric label="health" value={health()?.health ?? "unknown"} tone={health()?.health === "fail" ? "warn" : "ok"} />
               <Metric label="status" value={session().status} tone={session().status === "failed" ? "warn" : "ok"} />
+              <Metric label="pass" value={String(health()?.passedChecks ?? 0)} tone="ok" />
+              <Metric label="fail" value={String(health()?.failedChecks ?? 0)} tone={(health()?.failedChecks ?? 0) ? "warn" : "ok"} />
+              <Metric label="running" value={String(health()?.runningChecks ?? 0)} />
               <Metric label="agents" value={String(session().agents.length)} />
-              <Metric label="checks" value={String(session().checks.length)} />
-              <Metric label="artifacts" value={String(session().artifacts.length)} />
+              <Metric label="commands" value={String(health()?.commandCount ?? 0)} />
+              <Metric label="artifacts" value={String(health()?.artifactCount ?? 0)} />
             </div>
 
             <section class="agent-panel">
@@ -400,6 +412,30 @@ function AgentDevelopmentView(props: {
                 <Meta label="schema" value={session().schema} />
                 <Meta label="schema version" value={session().schemaVersion} />
               </dl>
+            </section>
+
+            <Show when={issues().length > 0}>
+              <section class="agent-panel">
+                <div class="lane-section-head">
+                  <h3>Schema / CLI issues</h3>
+                  <span>{issues().length}</span>
+                </div>
+                <div class="agent-issue-list">
+                  <For each={issues()}>{(issue) => <AgentIssueRow issue={issue} />}</For>
+                </div>
+              </section>
+            </Show>
+
+            <section class="agent-panel">
+              <div class="lane-section-head">
+                <h3>Development timeline</h3>
+                <span>{timeline().length}</span>
+              </div>
+              <div class="agent-timeline-list">
+                <For each={timeline()} fallback={<EmptyState label="No timeline items" compact />}>
+                  {(item) => <AgentTimelineRow item={item} />}
+                </For>
+              </div>
             </section>
 
             <div class="agent-grid">
@@ -456,7 +492,7 @@ function AgentDevelopmentView(props: {
             <Show when={commands().length > 0}>
               <section class="agent-panel">
                 <div class="lane-section-head">
-                  <h3>Commands</h3>
+                  <h3>Command receipts</h3>
                   <span>{commands().length}</span>
                 </div>
                 <CommandList commands={commands()} copiedCommand={props.copiedCommand} onCopy={props.onCopy} />
@@ -496,6 +532,32 @@ function AgentDevelopmentView(props: {
             </Show>
           </>
         )}
+      </Show>
+    </div>
+  );
+}
+
+function AgentIssueRow(props: { issue: LocalDevIssueHighlight }) {
+  return (
+    <div class="agent-issue-row">
+      <span>{props.issue.source}</span>
+      <strong>{props.issue.label}</strong>
+      <small>{props.issue.detail}</small>
+      <Show when={props.issue.artifactPath}>
+        <code>{props.issue.artifactPath}</code>
+      </Show>
+    </div>
+  );
+}
+
+function AgentTimelineRow(props: { item: LocalDevTimelineItem }) {
+  return (
+    <div classList={{ "agent-timeline-row": true, [props.item.status]: true }}>
+      <span>{props.item.kind}</span>
+      <strong>{props.item.label}</strong>
+      <small>{props.item.detail}</small>
+      <Show when={props.item.command ?? props.item.artifactPath}>
+        <code>{props.item.command ?? props.item.artifactPath}</code>
       </Show>
     </div>
   );

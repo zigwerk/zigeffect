@@ -253,6 +253,21 @@ Deliverables:
 - effect-native supervisor runner with causal service facts.
 - copyable `examples/agent_supervisor.zig`.
 
+### M15 - Workbench Dev Session UX
+
+Status: delivered on 2026-06-26.
+
+Make local agent development visible and actionable in the SolidJS workbench.
+
+Deliverables:
+
+- Dev Session tab label over the existing `agents` tab id.
+- local dev health summary for checks, agents, commands, and artifacts.
+- derived development timeline across agents, checks, commands, artifacts,
+  guardrails, warnings, and next actions.
+- Schema/CLI issue highlights with browser-side redaction.
+- dense responsive rows for timeline and issue panels.
+
 ## Dependency Order
 
 ```text
@@ -270,6 +285,7 @@ M1 Service Kernel
   -> M12 Production CLI
   -> M13 Local Tools Cookbook
   -> M14 Local Agent Supervisor
+  -> M15 Workbench Dev Session UX
 ```
 
 M1 must happen first because it defines the service/layer/effect/causal contract

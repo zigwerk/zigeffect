@@ -400,7 +400,7 @@ h3 {
 
 .agent-summary {
   display: grid;
-  grid-template-columns: repeat(6, minmax(92px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
   gap: 8px;
 }
 
@@ -438,14 +438,18 @@ h3 {
 
 .agent-row-list,
 .agent-check-list,
-.agent-artifact-list {
+.agent-artifact-list,
+.agent-issue-list,
+.agent-timeline-list {
   display: grid;
   gap: 7px;
 }
 
 .agent-row,
 .agent-check-row,
-.agent-artifact-row {
+.agent-artifact-row,
+.agent-issue-row,
+.agent-timeline-row {
   min-width: 0;
   display: grid;
   gap: 8px;
@@ -469,9 +473,21 @@ h3 {
   grid-template-columns: 82px minmax(126px, 0.5fr) minmax(0, 1fr);
 }
 
+.agent-issue-row {
+  grid-template-columns: 82px minmax(140px, 0.6fr) minmax(0, 1fr) minmax(0, 0.8fr);
+  border-color: #d99376;
+  background: #fff1ec;
+}
+
+.agent-timeline-row {
+  grid-template-columns: 96px minmax(150px, 0.65fr) minmax(0, 1fr) minmax(0, 0.85fr);
+}
+
 .agent-row > span,
 .agent-check-row > span,
-.agent-artifact-row > span {
+.agent-artifact-row > span,
+.agent-issue-row > span,
+.agent-timeline-row > span {
   color: #66736e;
   font-size: 0.72rem;
   font-weight: 850;
@@ -480,7 +496,9 @@ h3 {
 
 .agent-row strong,
 .agent-check-row strong,
-.agent-artifact-row strong {
+.agent-artifact-row strong,
+.agent-issue-row strong,
+.agent-timeline-row strong {
   min-width: 0;
   color: #17211f;
   font-size: 0.84rem;
@@ -488,7 +506,9 @@ h3 {
 }
 
 .agent-row small,
-.agent-check-row small {
+.agent-check-row small,
+.agent-issue-row small,
+.agent-timeline-row small {
   min-width: 0;
   color: #66736e;
   font-size: 0.76rem;
@@ -496,7 +516,9 @@ h3 {
   overflow-wrap: anywhere;
 }
 
-.agent-artifact-row code {
+.agent-artifact-row code,
+.agent-issue-row code,
+.agent-timeline-row code {
   min-width: 0;
   color: #17211f;
   font-size: 0.78rem;
@@ -504,7 +526,9 @@ h3 {
 }
 
 .agent-row.failed,
-.agent-check-row.fail {
+.agent-check-row.fail,
+.agent-timeline-row.fail,
+.agent-timeline-row.failed {
   border-color: #d99376;
   background: #fff1ec;
 }
@@ -513,13 +537,21 @@ h3 {
 .agent-row.reviewing,
 .agent-check-row.running,
 .agent-check-row.skipped,
-.agent-check-row.unknown {
+.agent-check-row.unknown,
+.agent-timeline-row.running,
+.agent-timeline-row.warning,
+.agent-timeline-row.reviewing,
+.agent-timeline-row.skipped,
+.agent-timeline-row.unknown {
   border-color: #d8b05d;
   background: #fff7df;
 }
 
 .agent-row.done,
-.agent-check-row.pass {
+.agent-check-row.pass,
+.agent-timeline-row.pass,
+.agent-timeline-row.done,
+.agent-timeline-row.ok {
   border-color: #9ccbb7;
   background: #eff9f3;
 }
@@ -1565,6 +1597,8 @@ dd {
   .agent-row,
   .agent-check-row,
   .agent-artifact-row,
+  .agent-issue-row,
+  .agent-timeline-row,
   .visual-node-row {
     grid-template-columns: 1fr;
   }

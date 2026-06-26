@@ -24,3 +24,9 @@ test("workbenchTabsForArtifact does not expose deleted artifact tabs", () => {
   expect(tabIds).not.toContain("telemetry");
   expect(tabIds).not.toContain("app-preview");
 });
+
+test("workbenchTabsForArtifact labels the agents tab as Dev Session", () => {
+  const agentsTab = workbenchTabsForArtifact().find((tab) => tab.id === "agents");
+
+  expect(agentsTab?.label).toBe("Dev Session");
+});
