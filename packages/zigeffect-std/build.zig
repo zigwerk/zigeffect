@@ -27,6 +27,7 @@ pub fn build(b: *std.Build) void {
     addExample(b, examples_step, target, optimize, zigeffect_std, "workspace-doctor", "examples/workspace_doctor.zig");
     addExample(b, examples_step, target, optimize, zigeffect_std, "agent-dev-session", "examples/agent_dev_session.zig");
     addExample(b, examples_step, target, optimize, zigeffect_std, "agent-supervisor", "examples/agent_supervisor.zig");
+    addExample(b, examples_step, target, optimize, zigeffect_std, "http-router", "examples/http_router.zig");
     addExample(b, examples_step, target, optimize, zigeffect_std, "http-sql-smoke", "examples/http_sql_smoke.zig");
     addExample(b, examples_step, target, optimize, zigeffect_std, "local-toolbelt", "examples/local_toolbelt.zig");
 }

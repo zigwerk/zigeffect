@@ -34,6 +34,8 @@ with one import:
 - `examples/agent_dev_session.zig` for workbench-compatible agent JSONL.
 - `examples/agent_supervisor.zig` for supervised local agent/tool runs with
   redacted artifacts.
+- `examples/http_router.zig` for Schema-coded local HTTP routes with receipts
+  and traces.
 - `examples/http_sql_smoke.zig` for local HTTP/SQL contract smoke tests.
 - `examples/local_toolbelt.zig` for a composed local automation command.
 
@@ -73,8 +75,9 @@ with one import:
   databases, transactions, migrations, and pool lifecycle facts. The local
   Postgres adapter lives in `packages/zigeffect-postgres`.
 - `Http` defines effect-native HTTP client/server contracts with fake and live
-  local clients, deterministic memory routing, redacted diagnostics, and
-  WebSocket frame codecs for local workbench feeds.
+  local clients, deterministic memory routing, Schema-coded local JSON routes,
+  redacted route receipts/traces, and WebSocket frame codecs for local
+  workbench feeds.
 - `Agent` records workbench-compatible local agent JSONL sessions, Codex and
   Claude Code process adapter commands, guardrails, artifacts, check receipts,
   effect-native process-backed agent runs, and supervised local multi-tool

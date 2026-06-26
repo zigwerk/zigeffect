@@ -1,5 +1,6 @@
 const std = @import("std");
 const Json = @import("../json/root.zig");
+const Schema = @import("../schema/root.zig");
 const Secrets = @import("../secrets/root.zig");
 const StdService = @import("../service/root.zig");
 const fx = @import("zigeffect");
@@ -28,6 +29,19 @@ pub const Response = struct {
     }
 };
 
+pub const RouteResult = struct {
+    response: Response,
+    receipt_json: []const u8,
+    trace_json: []const u8,
+
+    pub fn deinit(self: *RouteResult, allocator: std.mem.Allocator) void {
+        self.response.deinit(allocator);
+        allocator.free(self.receipt_json);
+        allocator.free(self.trace_json);
+        self.* = undefined;
+    }
+};
+
 pub const FakeClient = struct {
     response: Response,
 
@@ -45,6 +59,110 @@ pub const FakeClient = struct {
         return cloneResponseAlloc(allocator, self.response);
     }
 };
+
+pub fn JsonEndpoint(comptime RequestSchema: type, comptime ResponseSchema: type, comptime Handler: type) type {
+    return struct {
+        const Self = @This();
+
+        method: []const u8,
+        path: []const u8,
+        request_schema: RequestSchema,
+        response_schema: ResponseSchema,
+        handler: Handler,
+
+        pub fn matches(self: Self, request: Request) bool {
+            return eqlInsensitive(self.method, request.method) and std.mem.eql(u8, self.path, requestPath(request.url));
+        }
+
+        pub fn routeName(self: Self) []const u8 {
+            _ = self;
+            return RequestSchemaRouteName(Self);
+        }
+
+        pub fn handleAlloc(self: Self, allocator: std.mem.Allocator, request: Request) !RouteResult {
+            var decoded = try Schema.decodeDetailedJsonAlloc(allocator, self.request_schema, request.body);
+            defer decoded.deinit();
+
+            if (!decoded.ok()) {
+                const issues_json = try decoded.issues.jsonAlloc(allocator);
+                defer allocator.free(issues_json);
+                const route_name = try routeNameAlloc(allocator, self.method, self.path);
+                defer allocator.free(route_name);
+                return routeErrorResultAlloc(allocator, 400, route_name, "validation_failed", issues_json, request);
+            }
+
+            const output = self.handler(allocator, decoded.value.?) catch |err| {
+                const route_name = try routeNameAlloc(allocator, self.method, self.path);
+                defer allocator.free(route_name);
+                return routeErrorResultAlloc(allocator, 500, route_name, "handler_failed", @errorName(err), request);
+            };
+
+            const body = Schema.encodeJsonAlloc(allocator, self.response_schema, output) catch |err| {
+                const route_name = try routeNameAlloc(allocator, self.method, self.path);
+                defer allocator.free(route_name);
+                return routeErrorResultAlloc(allocator, 500, route_name, "encode_failed", @errorName(err), request);
+            };
+            defer allocator.free(body);
+
+            const response = try jsonResponseAlloc(allocator, 200, body);
+            errdefer {
+                var mutable_response = response;
+                mutable_response.deinit(allocator);
+            }
+
+            const route_name = try routeNameAlloc(allocator, self.method, self.path);
+            defer allocator.free(route_name);
+            const receipt_json = try routeReceiptJsonAlloc(allocator, route_name, "success", 200);
+            errdefer allocator.free(receipt_json);
+            const trace_json = try routeTraceJsonAlloc(allocator, route_name, "success", 200, request);
+            errdefer allocator.free(trace_json);
+
+            return .{
+                .response = response,
+                .receipt_json = receipt_json,
+                .trace_json = trace_json,
+            };
+        }
+    };
+}
+
+pub fn jsonEndpoint(
+    method: []const u8,
+    path: []const u8,
+    request_schema: anytype,
+    response_schema: anytype,
+    handler: anytype,
+) JsonEndpoint(@TypeOf(request_schema), @TypeOf(response_schema), *const @TypeOf(handler)) {
+    return .{
+        .method = method,
+        .path = path,
+        .request_schema = request_schema,
+        .response_schema = response_schema,
+        .handler = handler,
+    };
+}
+
+pub fn Router(comptime Routes: type) type {
+    return struct {
+        const Self = @This();
+
+        routes: Routes,
+
+        pub fn handleAlloc(self: *Self, allocator: std.mem.Allocator, request: Request) !RouteResult {
+            inline for (@typeInfo(Routes).@"struct".fields) |field_info| {
+                const endpoint = @field(self.routes, field_info.name);
+                if (endpoint.matches(request)) {
+                    return endpoint.handleAlloc(allocator, request);
+                }
+            }
+            return routeErrorResultAlloc(allocator, 404, "unmatched", "route_not_found", requestPath(request.url), request);
+        }
+    };
+}
+
+pub fn router(routes: anytype) Router(@TypeOf(routes)) {
+    return .{ .routes = routes };
+}
 
 pub const LocalClient = struct {
     client: std.http.Client,
@@ -279,6 +397,41 @@ pub fn handleEffect(comptime EffectEnv: type, request: Request) HandleEffect(Eff
     return .{ .request = request };
 }
 
+pub fn HandleRouteEffect(comptime EffectEnv: type, comptime RouterType: type) type {
+    return struct {
+        pub const SuccessType = RouteResult;
+        pub const FailureType = anyerror;
+        pub const EnvType = EffectEnv;
+        pub const RequiredServices = .{RouterType};
+
+        request: Request,
+
+        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
+            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
+        }
+
+        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!RouteResult {
+            const local_router = ctx.service(RouterType);
+            const detail = redactRequestAlloc(ctx.allocator, self.request) catch |err| {
+                _ = StdService.recordOperation(ctx, RouterType, "http.route", "failure", @errorName(err));
+                return err;
+            };
+            defer ctx.allocator.free(detail);
+
+            const result = local_router.handleAlloc(ctx.allocator, self.request) catch |err| {
+                _ = StdService.recordOperation(ctx, RouterType, "http.route", "failure", detail);
+                return err;
+            };
+            _ = StdService.recordOperation(ctx, RouterType, "http.route", if (result.response.status < 400) "success" else "failure", detail);
+            return result;
+        }
+    };
+}
+
+pub fn handleRouteEffect(comptime EffectEnv: type, comptime RouterType: type, request: Request) HandleRouteEffect(EffectEnv, RouterType) {
+    return .{ .request = request };
+}
+
 pub fn cloneResponseAlloc(allocator: std.mem.Allocator, response: Response) std.mem.Allocator.Error!Response {
     const headers = try cloneHeadersAlloc(allocator, response.headers);
     errdefer freeHeaders(allocator, headers);
@@ -289,6 +442,86 @@ pub fn cloneResponseAlloc(allocator: std.mem.Allocator, response: Response) std.
         .headers = headers,
         .body = body,
     };
+}
+
+fn jsonResponseAlloc(allocator: std.mem.Allocator, status: u16, body: []const u8) !Response {
+    const headers = [_]Header{
+        .{ .name = "content-type", .value = "application/json" },
+    };
+    return cloneResponseAlloc(allocator, .{
+        .status = status,
+        .headers = headers[0..],
+        .body = body,
+    });
+}
+
+fn routeErrorResultAlloc(
+    allocator: std.mem.Allocator,
+    status: u16,
+    route_name: []const u8,
+    error_code: []const u8,
+    detail: []const u8,
+    request: Request,
+) !RouteResult {
+    const redacted_detail = try Secrets.redactAlloc(allocator, detail);
+    defer allocator.free(redacted_detail);
+
+    const body = try Json.objectFromFieldsAlloc(allocator, &.{
+        .{ .name = "schema", .value = "zigeffect.std.http-route-error.v1" },
+        .{ .name = "status", .value = error_code },
+        .{ .name = "detail", .value = redacted_detail },
+    });
+    defer allocator.free(body);
+
+    const response = try jsonResponseAlloc(allocator, status, body);
+    errdefer {
+        var mutable_response = response;
+        mutable_response.deinit(allocator);
+    }
+    const receipt_json = try routeReceiptJsonAlloc(allocator, route_name, error_code, status);
+    errdefer allocator.free(receipt_json);
+    const trace_json = try routeTraceJsonAlloc(allocator, route_name, error_code, status, request);
+    errdefer allocator.free(trace_json);
+
+    return .{
+        .response = response,
+        .receipt_json = receipt_json,
+        .trace_json = trace_json,
+    };
+}
+
+fn routeReceiptJsonAlloc(allocator: std.mem.Allocator, route_name: []const u8, status: []const u8, http_status: u16) ![]const u8 {
+    const status_text = try std.fmt.allocPrint(allocator, "{d}", .{http_status});
+    defer allocator.free(status_text);
+    return Json.objectFromFieldsAlloc(allocator, &.{
+        .{ .name = "schema", .value = "zigeffect.std.http-route-receipt.v1" },
+        .{ .name = "route", .value = route_name },
+        .{ .name = "status", .value = status },
+        .{ .name = "http_status", .value = status_text },
+    });
+}
+
+fn routeTraceJsonAlloc(allocator: std.mem.Allocator, route_name: []const u8, status: []const u8, http_status: u16, request: Request) ![]const u8 {
+    const status_text = try std.fmt.allocPrint(allocator, "{d}", .{http_status});
+    defer allocator.free(status_text);
+    const request_text = try redactRequestAlloc(allocator, request);
+    defer allocator.free(request_text);
+    return Json.objectFromFieldsAlloc(allocator, &.{
+        .{ .name = "schema", .value = "zigeffect.std.http-route-trace.v1" },
+        .{ .name = "route", .value = route_name },
+        .{ .name = "status", .value = status },
+        .{ .name = "http_status", .value = status_text },
+        .{ .name = "request", .value = request_text },
+    });
+}
+
+fn routeNameAlloc(allocator: std.mem.Allocator, method: []const u8, path: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(allocator, "{s} {s}", .{ method, path });
+}
+
+fn RequestSchemaRouteName(comptime Endpoint: type) []const u8 {
+    _ = Endpoint;
+    return "typed-json-endpoint";
 }
 
 fn cloneHeadersAlloc(allocator: std.mem.Allocator, headers: []const Header) std.mem.Allocator.Error![]Header {
@@ -468,4 +701,129 @@ test "Http WebSocketFrame encodes decodes and redacts payloads" {
     defer decoded.deinit(std.testing.allocator);
     try std.testing.expectEqual(WebSocketFrame.Kind.text, decoded.kind);
     try std.testing.expectEqualStrings("[REDACTED]", decoded.payload);
+}
+
+const ProjectCreate = struct {
+    name: []const u8,
+    limit: i64,
+};
+
+const ProjectCreated = struct {
+    id: []const u8,
+    name: []const u8,
+};
+
+fn createProjectHandler(allocator: std.mem.Allocator, input: ProjectCreate) !ProjectCreated {
+    _ = allocator;
+    return .{
+        .id = "project-local",
+        .name = input.name,
+    };
+}
+
+test "Http typed router validates JSON and returns response receipt and trace" {
+    const endpoint = jsonEndpoint(
+        "POST",
+        "/projects",
+        Schema.derive(ProjectCreate, .{
+            .name = Schema.string().nonEmpty(),
+            .limit = Schema.integer().min(1).max(10),
+        }),
+        Schema.derive(ProjectCreated, .{
+            .id = Schema.string().nonEmpty(),
+            .name = Schema.string().nonEmpty(),
+        }),
+        createProjectHandler,
+    );
+    var local_router = router(.{endpoint});
+
+    var result = try local_router.handleAlloc(std.testing.allocator, .{
+        .method = "POST",
+        .url = "http://localhost/projects",
+        .body = "{\"name\":\"local\",\"limit\":2}",
+    });
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(u16, 200), result.response.status);
+    try std.testing.expect(std.mem.indexOf(u8, result.response.body, "\"id\":\"project-local\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.receipt_json, "\"status\":\"success\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.trace_json, "\"route\":\"POST /projects\"") != null);
+}
+
+test "Http typed router returns redacted validation failure" {
+    const endpoint = jsonEndpoint(
+        "POST",
+        "/projects",
+        Schema.derive(ProjectCreate, .{
+            .name = Schema.string().nonEmpty(),
+            .limit = Schema.integer().min(1).max(10),
+        }),
+        Schema.derive(ProjectCreated, .{
+            .id = Schema.string().nonEmpty(),
+            .name = Schema.string().nonEmpty(),
+        }),
+        createProjectHandler,
+    );
+    var local_router = router(.{endpoint});
+
+    var result = try local_router.handleAlloc(std.testing.allocator, .{
+        .method = "POST",
+        .url = "/projects",
+        .body = "{\"name\":\"token=abc123\",\"limit\":99}",
+    });
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(u16, 400), result.response.status);
+    try std.testing.expect(std.mem.indexOf(u8, result.response.body, "$.limit") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.response.body, "abc123") == null);
+}
+
+test "Http typed router returns deterministic not found responses" {
+    var local_router = router(.{});
+    var result = try local_router.handleAlloc(std.testing.allocator, .{
+        .method = "GET",
+        .url = "/missing",
+    });
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(u16, 404), result.response.status);
+    try std.testing.expect(std.mem.indexOf(u8, result.response.body, "route_not_found") != null);
+}
+
+test "Http typed router effect records causal facts" {
+    const zstd = @import("../root.zig");
+    const endpoint = jsonEndpoint(
+        "POST",
+        "/projects",
+        Schema.derive(ProjectCreate, .{
+            .name = Schema.string().nonEmpty(),
+            .limit = Schema.integer().min(1).max(10),
+        }),
+        Schema.derive(ProjectCreated, .{
+            .id = Schema.string().nonEmpty(),
+            .name = Schema.string().nonEmpty(),
+        }),
+        createProjectHandler,
+    );
+    var local_router = router(.{endpoint});
+    const RouterType = @TypeOf(local_router);
+
+    var provider = zstd.Service.Provider(.{RouterType}).init(.{&local_router});
+    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
+        .provides(.{RouterType})
+        .withCausalStore(&store);
+
+    var result = try runtime.run(handleRouteEffect(@TypeOf(provider), RouterType, .{
+        .method = "POST",
+        .url = "/projects",
+        .body = "{\"name\":\"local\",\"limit\":1}",
+    }));
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(u16, 200), result.response.status);
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expect(zstd.Service.hasOperation(snapshot, RouterType, "http.route", "success"));
 }

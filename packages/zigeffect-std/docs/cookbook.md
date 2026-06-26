@@ -121,6 +121,26 @@ What it proves:
 This is the smallest useful shape for future local API and database smoke
 tests.
 
+## `http_router.zig`
+
+Use this pattern for local HTTP application boundaries.
+
+Modules exercised:
+
+- `zstd.Http`
+- `zstd.Schema`
+- `zstd.Json`
+
+What it proves:
+
+- A local route can decode JSON through Schema.
+- The typed handler returns a Schema-encoded response.
+- validation failures return deterministic redacted 400 payloads.
+- every handled request returns route receipt and trace JSON.
+
+This is the local development shape for API endpoints before a production
+network listener exists.
+
 ## `local_toolbelt.zig`
 
 Use this pattern when building a complete local developer command.

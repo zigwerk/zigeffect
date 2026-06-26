@@ -268,6 +268,22 @@ Deliverables:
 - Schema/CLI issue highlights with browser-side redaction.
 - dense responsive rows for timeline and issue panels.
 
+### M16 - HTTP Router / Local Server
+
+Status: delivered on 2026-06-26.
+
+Make local HTTP application boundaries Schema-coded and receipt-producing.
+
+Deliverables:
+
+- typed JSON endpoint definitions over `zstd.Schema`.
+- tuple-backed local router for heterogeneous endpoints.
+- request validation failures as deterministic redacted 400 responses.
+- route-not-found responses as deterministic 404 payloads.
+- route receipt JSON and workbench-ready trace JSON.
+- effect-native route handler with causal service facts.
+- copyable `examples/http_router.zig`.
+
 ## Dependency Order
 
 ```text
@@ -286,6 +302,7 @@ M1 Service Kernel
   -> M13 Local Tools Cookbook
   -> M14 Local Agent Supervisor
   -> M15 Workbench Dev Session UX
+  -> M16 HTTP Router / Local Server
 ```
 
 M1 must happen first because it defines the service/layer/effect/causal contract
