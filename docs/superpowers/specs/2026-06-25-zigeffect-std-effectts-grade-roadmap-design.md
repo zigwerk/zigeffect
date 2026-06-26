@@ -221,6 +221,22 @@ Deliverables:
 - effect-native typed command runner with causal facts and receipts.
 - backward-compatible legacy parser and runner APIs.
 
+### M13 - Local Tools Cookbook
+
+Status: delivered on 2026-06-26.
+
+Prove the M1-M12 standard-library surface with copyable local developer tools.
+
+Deliverables:
+
+- Schema-powered CLI example with CLI/env/config/default precedence.
+- workspace doctor example with snapshots, fake checks, observability, and
+  redacted JSON receipts.
+- agent dev-session example with workbench-compatible JSONL.
+- HTTP/SQL smoke example using Schema validation and fake SQL contracts.
+- local toolbelt example composing CLI, workspace, process, and agent output.
+- `zig build examples` gate covering every cookbook example.
+
 ## Dependency Order
 
 ```text
@@ -236,6 +252,7 @@ M1 Service Kernel
   -> M10 Agent Toolkit
   -> M11 Production Schema
   -> M12 Production CLI
+  -> M13 Local Tools Cookbook
 ```
 
 M1 must happen first because it defines the service/layer/effect/causal contract

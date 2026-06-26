@@ -557,28 +557,32 @@ pub fn decodeTypedCommandAlloc(
     const args_info = @typeInfo(Args).@"struct";
     inline for (args_info.fields) |field_info| {
         const option_spec = typedOptionForField(command.options, field_info.name);
+        const OptionSpecType = @TypeOf(option_spec);
         const resolved = try resolveTypedOptionText(parsed, option_spec, env, config);
-        const path = try std.fmt.allocPrint(allocator, "--{s}", .{option_spec.Meta.long});
+        const path = try std.fmt.allocPrint(allocator, "--{s}", .{OptionSpecType.Meta.long});
         defer allocator.free(path);
 
         if (resolved.value) |text| {
-            try appendSourceFact(allocator, &sources, option_spec.Meta.long, resolved.source, text, option_spec.Meta.secret);
-            @field(output, field_info.name) = decodeOptionText(field_info.type, allocator, option_spec.schema, path, text, &issues) catch {
-                failed = true;
-                continue;
-            };
+            try appendSourceFact(allocator, &sources, OptionSpecType.Meta.long, resolved.source, text, OptionSpecType.Meta.secret);
+            field_decode: {
+                const decoded = decodeOptionText(field_info.type, allocator, option_spec.schema, path, text, &issues) catch {
+                    failed = true;
+                    break :field_decode;
+                };
+                @field(output, field_info.name) = decoded;
+            }
         } else if (field_info.type == bool) {
-            try appendSourceFact(allocator, &sources, option_spec.Meta.long, .default, "false", option_spec.Meta.secret);
+            try appendSourceFact(allocator, &sources, OptionSpecType.Meta.long, .default, "false", OptionSpecType.Meta.secret);
             @field(output, field_info.name) = false;
-        } else if (isOptionalType(field_info.type)) {
-            try appendSourceFact(allocator, &sources, option_spec.Meta.long, .missing, "", option_spec.Meta.secret);
+        } else if (comptime isOptionalType(field_info.type)) {
+            try appendSourceFact(allocator, &sources, OptionSpecType.Meta.long, .missing, "", OptionSpecType.Meta.secret);
             @field(output, field_info.name) = null;
         } else {
-            try appendSourceFact(allocator, &sources, option_spec.Meta.long, .missing, "", option_spec.Meta.secret);
+            try appendSourceFact(allocator, &sources, OptionSpecType.Meta.long, .missing, "", OptionSpecType.Meta.secret);
             try issues.add(.{
                 .path = path,
                 .kind = .missing_field,
-                .expected = option_spec.Meta.long,
+                .expected = OptionSpecType.Meta.long,
                 .actual = "missing",
                 .message = "required CLI option is missing",
             });
@@ -937,7 +941,7 @@ fn optionHintForOutput(comptime Output: type) []const u8 {
 fn typedOptionForField(options: anytype, comptime field_name: []const u8) typedOptionTypeForField(@TypeOf(options), field_name) {
     inline for (@typeInfo(@TypeOf(options)).@"struct".fields) |field_info| {
         const option_value = @field(options, field_info.name);
-        if (std.mem.eql(u8, @TypeOf(option_value).FieldName, field_name)) return option_value;
+        if (comptime std.mem.eql(u8, @TypeOf(option_value).FieldName, field_name)) return option_value;
     }
     @compileError("typed CLI option missing for field: " ++ field_name);
 }

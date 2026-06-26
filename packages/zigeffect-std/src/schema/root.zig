@@ -776,7 +776,7 @@ pub fn StructSchema(comptime StructOutput: type, comptime Fields: type) type {
                     @field(output, Field.Name) = try field_spec.schema.decodeJsonValue(field_value);
                 } else if (hasDefault(@TypeOf(field_spec.schema))) {
                     @field(output, Field.Name) = field_spec.schema.defaultValue();
-                } else if (isOptional(FieldOutput)) {
+                } else if (comptime isOptional(FieldOutput)) {
                     @field(output, Field.Name) = null;
                 } else {
                     return SchemaError.MissingField;
@@ -812,7 +812,7 @@ pub fn StructSchema(comptime StructOutput: type, comptime Fields: type) type {
                         if (ctx.issues.len() > before) failed = true;
                     } else if (hasDefault(@TypeOf(field_spec.schema))) {
                         @field(output, Field.Name) = field_spec.schema.defaultValue();
-                    } else if (isOptional(FieldOutput)) {
+                    } else if (comptime isOptional(FieldOutput)) {
                         @field(output, Field.Name) = null;
                     } else {
                         try ctx.addIssue(.missing_field, Field.Name, "missing", "required object field is missing");
@@ -863,9 +863,9 @@ pub fn DerivedSchema(comptime StructOutput: type, comptime Overrides: type) type
                     } else {
                         @field(output, field_info.name) = try decodeInferredJsonValue(field_info.type, field_value);
                     }
-                } else if (@hasField(Overrides, field_info.name) and hasDefault(@TypeOf(@field(self.overrides, field_info.name)))) {
+                } else if (comptime overrideHasDefault(Overrides, field_info.name)) {
                     @field(output, field_info.name) = @field(self.overrides, field_info.name).defaultValue();
-                } else if (isOptional(field_info.type)) {
+                } else if (comptime isOptional(field_info.type)) {
                     @field(output, field_info.name) = null;
                 } else {
                     return SchemaError.MissingField;
@@ -893,22 +893,28 @@ pub fn DerivedSchema(comptime StructOutput: type, comptime Overrides: type) type
 
                     if (object.get(field_info.name)) |field_value| {
                         const before = ctx.issues.len();
-                        if (@hasField(Overrides, field_info.name)) {
-                            const field_schema = @field(self.overrides, field_info.name);
-                            @field(output, field_info.name) = rootDecodeDetailedJsonValue(field_schema, ctx, field_value) catch {
+                        field_decode: {
+                            if (@hasField(Overrides, field_info.name)) {
+                                const field_schema = @field(self.overrides, field_info.name);
+                                const decoded = rootDecodeDetailedJsonValue(field_schema, ctx, field_value) catch {
+                                    failed = true;
+                                    break :field_decode;
+                                };
+                                @field(output, field_info.name) = decoded;
+                            } else {
+                                const decoded = decodeInferredDetailedJsonValue(field_info.type, ctx, field_value) catch {
+                                    failed = true;
+                                    break :field_decode;
+                                };
+                                @field(output, field_info.name) = decoded;
+                            }
+                            if (ctx.issues.len() > before) {
                                 failed = true;
-                                continue;
-                            };
-                        } else {
-                            @field(output, field_info.name) = decodeInferredDetailedJsonValue(field_info.type, ctx, field_value) catch {
-                                failed = true;
-                                continue;
-                            };
+                            }
                         }
-                        if (ctx.issues.len() > before) failed = true;
-                    } else if (@hasField(Overrides, field_info.name) and hasDefault(@TypeOf(@field(self.overrides, field_info.name)))) {
+                    } else if (comptime overrideHasDefault(Overrides, field_info.name)) {
                         @field(output, field_info.name) = @field(self.overrides, field_info.name).defaultValue();
-                    } else if (isOptional(field_info.type)) {
+                    } else if (comptime isOptional(field_info.type)) {
                         @field(output, field_info.name) = null;
                     } else {
                         try ctx.addIssue(.missing_field, field_info.name, "missing", "required object field is missing");
@@ -1056,7 +1062,7 @@ pub fn decodeDetailedConfig(
 
 pub fn decodeConfig(config: anytype, comptime key: []const u8, schema: anytype) !@TypeOf(schema).Output {
     const text = config.require(key) catch {
-        if (isOptional(@TypeOf(schema).Output)) return null;
+        if (comptime isOptional(@TypeOf(schema).Output)) return null;
         return SchemaError.MissingField;
     };
     return decodeConfigText(schema, text);
@@ -1196,6 +1202,18 @@ fn isOptional(comptime T: type) bool {
 
 fn hasDefault(comptime T: type) bool {
     return @hasDecl(T, "defaultValue");
+}
+
+fn overrideHasDefault(comptime Overrides: type, comptime field_name: []const u8) bool {
+    if (!@hasField(Overrides, field_name)) return false;
+    return hasDefault(overrideTypeForField(Overrides, field_name));
+}
+
+fn overrideTypeForField(comptime Overrides: type, comptime field_name: []const u8) type {
+    inline for (@typeInfo(Overrides).@"struct".fields) |field_info| {
+        if (comptime std.mem.eql(u8, field_info.name, field_name)) return field_info.type;
+    }
+    @compileError("schema override missing for field: " ++ field_name);
 }
 
 fn valueTypeName(value: std.json.Value) []const u8 {

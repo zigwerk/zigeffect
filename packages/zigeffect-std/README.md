@@ -22,6 +22,19 @@ From the repository root:
 bun run zigeffect:std:test
 ```
 
+## Cookbook
+
+M13 adds a local-tools cookbook in `docs/cookbook.md`. These examples compile
+as part of `zig build examples` and show how to build real local developer tools
+with one import:
+
+- `examples/schema_cli.zig` for Schema-powered typed CLI input.
+- `examples/workspace_doctor.zig` for workspace snapshots, fake checks, and
+  redacted receipts.
+- `examples/agent_dev_session.zig` for workbench-compatible agent JSONL.
+- `examples/http_sql_smoke.zig` for local HTTP/SQL contract smoke tests.
+- `examples/local_toolbelt.zig` for a composed local automation command.
+
 ## Modules
 
 - `Service` provides the effect-native service kernel for providers, access
@@ -185,10 +198,11 @@ Typed commands decode `cli > env > config > default`, accumulate redacted
 Schema issues, generate deterministic help/completion output, and can run
 through `runTypedEffect` with causal service facts.
 
-## Example
+## Examples
 
 The first example is intentionally small: it proves the one-import facade can
-parse a command and write output through a testable service.
+parse a command and write output through a testable service. The cookbook
+examples exercise the production local-development path.
 
 ```sh
 cd packages/zigeffect-std
