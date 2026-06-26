@@ -5,7 +5,11 @@ pub const Sql = zstd.Sql;
 
 pub const PostgresError = error{
     InvalidJsonRows,
+    InvalidMigrationTable,
+    MissingCliCommand,
+    MissingCliValue,
     PsqlFailed,
+    UnknownCliCommand,
 };
 
 pub const ConnectionConfig = struct {
@@ -25,7 +29,7 @@ pub const PsqlClient = struct {
     }
 
     pub fn queryAlloc(self: *PsqlClient, allocator: std.mem.Allocator, statement: Sql.Statement) anyerror!Sql.QueryResult {
-        const argv = try buildPsqlArgv(allocator, self.config, statement.sql);
+        const argv = try buildPsqlJsonArgv(allocator, self.config, statement.sql);
         defer freeArgv(allocator, argv);
 
         const run_result = try std.process.run(allocator, self.io, .{
@@ -43,6 +47,62 @@ pub const PsqlClient = struct {
         }
 
         return parseJsonRowsAlloc(allocator, run_result.stdout);
+    }
+
+    pub fn executeRawAlloc(self: *PsqlClient, allocator: std.mem.Allocator, sql: []const u8) anyerror![]const u8 {
+        const argv = try buildPsqlArgv(allocator, self.config, sql);
+        defer freeArgv(allocator, argv);
+
+        const run_result = try std.process.run(allocator, self.io, .{
+            .argv = argv,
+            .stdout_limit = self.stdout_limit,
+            .stderr_limit = self.stderr_limit,
+            .reserve_amount = self.reserve_amount,
+        });
+        defer allocator.free(run_result.stderr);
+
+        switch (run_result.term) {
+            .exited => |code| if (code != 0) {
+                allocator.free(run_result.stdout);
+                return PostgresError.PsqlFailed;
+            },
+            else => {
+                allocator.free(run_result.stdout);
+                return PostgresError.PsqlFailed;
+            },
+        }
+
+        return run_result.stdout;
+    }
+};
+
+pub const MigrationPlanOptions = struct {
+    table: []const u8 = "zigeffect_migrations",
+    connection_url: ?[]const u8 = null,
+};
+
+pub const MigrationPlan = struct {
+    allocator: std.mem.Allocator,
+    table: []const u8,
+    connection_url: ?[]const u8,
+    pending: []Sql.Migration,
+    skipped_ids: []const []const u8,
+    apply_sql: []const u8,
+    receipt_json: []const u8,
+
+    pub fn deinit(self: *MigrationPlan) void {
+        self.allocator.free(self.table);
+        if (self.connection_url) |url| self.allocator.free(url);
+        for (self.pending) |migration| {
+            self.allocator.free(migration.id);
+            self.allocator.free(migration.sql);
+        }
+        self.allocator.free(self.pending);
+        for (self.skipped_ids) |id| self.allocator.free(id);
+        self.allocator.free(self.skipped_ids);
+        self.allocator.free(self.apply_sql);
+        self.allocator.free(self.receipt_json);
+        self.* = undefined;
     }
 };
 
@@ -82,6 +142,24 @@ pub fn freeArgv(allocator: std.mem.Allocator, argv: []const []const u8) void {
     allocator.free(argv);
 }
 
+pub fn jsonRowsSqlAlloc(allocator: std.mem.Allocator, sql: []const u8) std.mem.Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "select coalesce(json_agg(row_to_json(zigeffect_query_rows)), '[]'::json) from ({s}) as zigeffect_query_rows",
+        .{sql},
+    );
+}
+
+pub fn buildPsqlJsonArgv(
+    allocator: std.mem.Allocator,
+    config: ConnectionConfig,
+    sql: []const u8,
+) std.mem.Allocator.Error![]const []const u8 {
+    const wrapped_sql = try jsonRowsSqlAlloc(allocator, sql);
+    defer allocator.free(wrapped_sql);
+    return buildPsqlArgv(allocator, config, wrapped_sql);
+}
+
 pub fn queryReceiptAlloc(
     allocator: std.mem.Allocator,
     config: ConnectionConfig,
@@ -93,6 +171,210 @@ pub fn queryReceiptAlloc(
     defer allocator.free(query);
 
     return std.fmt.allocPrint(allocator, "{s} {s} -c {s}", .{ config.psql_path, connection, query });
+}
+
+pub fn planMigrationsAlloc(
+    allocator: std.mem.Allocator,
+    options: MigrationPlanOptions,
+    migrations: []const Sql.Migration,
+    applied_ids: []const []const u8,
+) (std.mem.Allocator.Error || PostgresError)!MigrationPlan {
+    try validateIdentifier(options.table);
+
+    var pending: std.ArrayList(Sql.Migration) = .empty;
+    errdefer {
+        for (pending.items) |migration| {
+            allocator.free(migration.id);
+            allocator.free(migration.sql);
+        }
+        pending.deinit(allocator);
+    }
+
+    var skipped: std.ArrayList([]const u8) = .empty;
+    errdefer {
+        for (skipped.items) |id| allocator.free(id);
+        skipped.deinit(allocator);
+    }
+
+    for (migrations) |migration| {
+        if (hasApplied(applied_ids, migration.id)) {
+            try skipped.append(allocator, try allocator.dupe(u8, migration.id));
+            continue;
+        }
+        const owned_id = try allocator.dupe(u8, migration.id);
+        errdefer allocator.free(owned_id);
+        const owned_sql = try allocator.dupe(u8, migration.sql);
+        errdefer allocator.free(owned_sql);
+        try pending.append(allocator, .{ .id = owned_id, .sql = owned_sql });
+    }
+
+    const owned_table = try allocator.dupe(u8, options.table);
+    errdefer allocator.free(owned_table);
+    const owned_url = if (options.connection_url) |url| try allocator.dupe(u8, url) else null;
+    errdefer if (owned_url) |url| allocator.free(url);
+
+    const pending_slice = try pending.toOwnedSlice(allocator);
+    errdefer {
+        for (pending_slice) |migration| {
+            allocator.free(migration.id);
+            allocator.free(migration.sql);
+        }
+        allocator.free(pending_slice);
+    }
+    const skipped_slice = try skipped.toOwnedSlice(allocator);
+    errdefer {
+        for (skipped_slice) |id| allocator.free(id);
+        allocator.free(skipped_slice);
+    }
+
+    const apply_sql = try migrationApplySqlAlloc(allocator, owned_table, pending_slice);
+    errdefer allocator.free(apply_sql);
+    const receipt_json = try migrationPlanReceiptJsonAlloc(allocator, .{
+        .table = owned_table,
+        .connection_url = owned_url,
+    }, pending_slice, skipped_slice, apply_sql);
+    errdefer allocator.free(receipt_json);
+
+    return .{
+        .allocator = allocator,
+        .table = owned_table,
+        .connection_url = owned_url,
+        .pending = pending_slice,
+        .skipped_ids = skipped_slice,
+        .apply_sql = apply_sql,
+        .receipt_json = receipt_json,
+    };
+}
+
+pub fn migrationApplySqlAlloc(
+    allocator: std.mem.Allocator,
+    table: []const u8,
+    migrations: []const Sql.Migration,
+) (std.mem.Allocator.Error || PostgresError)![]const u8 {
+    try validateIdentifier(table);
+
+    var output: std.ArrayList(u8) = .empty;
+    errdefer output.deinit(allocator);
+
+    try output.print(
+        allocator,
+        "create table if not exists {s} (id text primary key, applied_at timestamptz not null default now());\n",
+        .{table},
+    );
+    try output.appendSlice(allocator, "begin;\n");
+    if (migrations.len == 0) {
+        try output.appendSlice(allocator, "-- no pending zigeffect migrations\n");
+    }
+    for (migrations) |migration| {
+        const escaped_id = try sqlStringLiteralAlloc(allocator, migration.id);
+        defer allocator.free(escaped_id);
+
+        try output.print(allocator, "-- zigeffect migration: {s}\n", .{migration.id});
+        try output.appendSlice(allocator, migration.sql);
+        if (!std.mem.endsWith(u8, std.mem.trim(u8, migration.sql, " \n\r\t"), ";")) {
+            try output.append(allocator, ';');
+        }
+        try output.print(
+            allocator,
+            "\ninsert into {s}(id) values ('{s}') on conflict (id) do nothing;\n",
+            .{ table, escaped_id },
+        );
+    }
+    try output.appendSlice(allocator, "commit;\n");
+    return output.toOwnedSlice(allocator);
+}
+
+pub fn migrationPlanReceiptJsonAlloc(
+    allocator: std.mem.Allocator,
+    options: MigrationPlanOptions,
+    pending: []const Sql.Migration,
+    skipped_ids: []const []const u8,
+    apply_sql: []const u8,
+) std.mem.Allocator.Error![]const u8 {
+    const pending_count = try std.fmt.allocPrint(allocator, "{d}", .{pending.len});
+    defer allocator.free(pending_count);
+    const skipped_count = try std.fmt.allocPrint(allocator, "{d}", .{skipped_ids.len});
+    defer allocator.free(skipped_count);
+    const connection = if (options.connection_url) |url| try zstd.Secrets.redactAlloc(allocator, url) else try allocator.dupe(u8, "");
+    defer allocator.free(connection);
+
+    return zstd.Json.objectFromFieldsAlloc(allocator, &.{
+        .{ .name = "kind", .value = "postgres.migration_plan" },
+        .{ .name = "table", .value = options.table },
+        .{ .name = "connection", .value = connection },
+        .{ .name = "pending_count", .value = pending_count },
+        .{ .name = "skipped_count", .value = skipped_count },
+        .{ .name = "apply_sql", .value = apply_sql },
+    });
+}
+
+pub fn runMigrationCliAlloc(
+    allocator: std.mem.Allocator,
+    argv: []const []const u8,
+    migrations: []const Sql.Migration,
+    applied_ids: []const []const u8,
+) (std.mem.Allocator.Error || PostgresError)![]const u8 {
+    if (argv.len < 2) return PostgresError.MissingCliCommand;
+
+    const command = argv[1];
+    var table: []const u8 = "zigeffect_migrations";
+    var connection_url: ?[]const u8 = null;
+
+    var index: usize = 2;
+    while (index < argv.len) : (index += 1) {
+        if (std.mem.eql(u8, argv[index], "--url")) {
+            index += 1;
+            if (index >= argv.len) return PostgresError.MissingCliValue;
+            connection_url = argv[index];
+        } else if (std.mem.eql(u8, argv[index], "--table")) {
+            index += 1;
+            if (index >= argv.len) return PostgresError.MissingCliValue;
+            table = argv[index];
+        } else {
+            return PostgresError.UnknownCliCommand;
+        }
+    }
+
+    var plan = try planMigrationsAlloc(allocator, .{
+        .table = table,
+        .connection_url = connection_url,
+    }, migrations, applied_ids);
+    defer plan.deinit();
+
+    if (std.mem.eql(u8, command, "plan")) {
+        return allocator.dupe(u8, plan.receipt_json);
+    }
+    if (std.mem.eql(u8, command, "apply-sql")) {
+        return allocator.dupe(u8, plan.apply_sql);
+    }
+    return PostgresError.UnknownCliCommand;
+}
+
+fn hasApplied(applied_ids: []const []const u8, id: []const u8) bool {
+    for (applied_ids) |applied_id| {
+        if (std.mem.eql(u8, applied_id, id)) return true;
+    }
+    return false;
+}
+
+fn validateIdentifier(identifier: []const u8) PostgresError!void {
+    if (identifier.len == 0) return PostgresError.InvalidMigrationTable;
+    for (identifier) |byte| {
+        if (std.ascii.isAlphanumeric(byte) or byte == '_') continue;
+        return PostgresError.InvalidMigrationTable;
+    }
+}
+
+fn sqlStringLiteralAlloc(allocator: std.mem.Allocator, value: []const u8) std.mem.Allocator.Error![]const u8 {
+    var output: std.ArrayList(u8) = .empty;
+    errdefer output.deinit(allocator);
+
+    for (value) |byte| {
+        if (byte == '\'') try output.append(allocator, '\'');
+        try output.append(allocator, byte);
+    }
+
+    return output.toOwnedSlice(allocator);
 }
 
 pub fn parseJsonRowsAlloc(allocator: std.mem.Allocator, input: []const u8) (std.mem.Allocator.Error || PostgresError)!Sql.QueryResult {
@@ -208,4 +490,65 @@ test "Postgres adapter parses psql JSON rows into zstd SQL results" {
     try std.testing.expectEqual(Sql.Value.null_value, result.rows[0].fields[2].value);
     try std.testing.expectEqualStrings("name", result.rows[0].fields[3].name);
     try std.testing.expectEqualStrings("local", result.rows[0].fields[3].value.text);
+}
+
+test "Postgres adapter wraps local queries as deterministic JSON row SQL" {
+    const wrapped = try jsonRowsSqlAlloc(std.testing.allocator, "select id, name from projects");
+    defer std.testing.allocator.free(wrapped);
+
+    try std.testing.expect(std.mem.indexOf(u8, wrapped, "row_to_json(zigeffect_query_rows)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, wrapped, "select id, name from projects") != null);
+
+    const config = ConnectionConfig{
+        .url = "postgres://user:pass@localhost/db",
+        .psql_path = "psql",
+    };
+    const argv = try buildPsqlJsonArgv(std.testing.allocator, config, "select 1");
+    defer freeArgv(std.testing.allocator, argv);
+    try std.testing.expect(std.mem.indexOf(u8, argv[6], "json_agg") != null);
+}
+
+test "Postgres migration planner generates apply SQL and redacted receipts" {
+    const migrations = [_]Sql.Migration{
+        .{ .id = "001_init", .sql = "create table projects(id int primary key)" },
+        .{ .id = "002_add_name", .sql = "alter table projects add column name text" },
+    };
+    const applied = [_][]const u8{"001_init"};
+
+    var plan = try planMigrationsAlloc(std.testing.allocator, .{
+        .table = "zigeffect_migrations",
+        .connection_url = "postgres://user:pass@localhost/db",
+    }, migrations[0..], applied[0..]);
+    defer plan.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), plan.pending.len);
+    try std.testing.expectEqualStrings("002_add_name", plan.pending[0].id);
+    try std.testing.expectEqual(@as(usize, 1), plan.skipped_ids.len);
+    try std.testing.expect(std.mem.indexOf(u8, plan.apply_sql, "create table if not exists zigeffect_migrations") != null);
+    try std.testing.expect(std.mem.indexOf(u8, plan.apply_sql, "insert into zigeffect_migrations") != null);
+
+    try std.testing.expect(std.mem.indexOf(u8, plan.receipt_json, "pass@localhost") == null);
+    try std.testing.expect(std.mem.indexOf(u8, plan.receipt_json, "\"pending_count\":\"1\"") != null);
+}
+
+test "Postgres migration CLI emits a local plan without leaking connection secrets" {
+    const migrations = [_]Sql.Migration{
+        .{ .id = "001_init", .sql = "create table projects(id int primary key)" },
+    };
+    const applied = [_][]const u8{};
+    const argv = [_][]const u8{
+        "zigeffect-postgres-migrate",
+        "plan",
+        "--url",
+        "postgres://user:pass@localhost/db",
+        "--table",
+        "local_migrations",
+    };
+
+    const output = try runMigrationCliAlloc(std.testing.allocator, argv[0..], migrations[0..], applied[0..]);
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "\"table\":\"local_migrations\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "\"pending_count\":\"1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "pass@localhost") == null);
 }

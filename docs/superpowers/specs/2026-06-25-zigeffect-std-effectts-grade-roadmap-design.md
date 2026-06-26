@@ -284,6 +284,23 @@ Deliverables:
 - effect-native route handler with causal service facts.
 - copyable `examples/http_router.zig`.
 
+### M17 - Postgres Maturity
+
+Status: delivered on 2026-06-26.
+
+Make local database development production-shaped without requiring hosted
+infrastructure in CI.
+
+Deliverables:
+
+- Schema-backed SQL row JSON and typed row decoding through `zstd.Schema`.
+- row-indexed SQL decode issue trees with redaction.
+- pool lease and stats helpers for local agent receipts.
+- transaction helper receipts for committed and rolled-back runs.
+- Postgres JSON row query wrapping around `psql`.
+- migration planning, transaction-wrapped apply SQL, and redacted receipts.
+- copyable `packages/zigeffect-postgres/examples/migrate.zig` CLI.
+
 ## Dependency Order
 
 ```text
@@ -303,6 +320,7 @@ M1 Service Kernel
   -> M14 Local Agent Supervisor
   -> M15 Workbench Dev Session UX
   -> M16 HTTP Router / Local Server
+  -> M17 Postgres Maturity
 ```
 
 M1 must happen first because it defines the service/layer/effect/causal contract

@@ -121,6 +121,29 @@ What it proves:
 This is the smallest useful shape for future local API and database smoke
 tests.
 
+## `packages/zigeffect-postgres/examples/migrate.zig`
+
+Use this pattern for local Postgres migration commands.
+
+Modules exercised:
+
+- `pg.Sql` / `zstd.Sql`
+- `pg.planMigrationsAlloc`
+- `pg.runMigrationCliAlloc`
+- `zstd.Secrets`
+- `zstd.Json`
+
+What it proves:
+
+- Projects can supply typed migration lists without a hosted service.
+- `plan` produces a redacted JSON receipt for local agents and workbench feeds.
+- `apply-sql` produces executable transaction-wrapped SQL for `psql`.
+- URLs, passwords, and sentinel-shaped values do not appear in receipts.
+
+This is the first production-local Postgres shape: deterministic in CI, real
+enough for local development, and still replaceable by a future wire-protocol
+driver.
+
 ## `http_router.zig`
 
 Use this pattern for local HTTP application boundaries.
@@ -167,11 +190,17 @@ This is the copyable starting point for local project automation.
 
 ## Next Local Milestones
 
-M13 proves the std library can build real local tools. The next two milestones
-should build on these examples:
+M13 proves the std library can build real local tools. M14-M17 extend those
+examples into a local agent/database development loop:
 
 - **M14 Local Agent Supervisor:** delivered. `zstd.Agent` now supervises local
   process adapters, emits guardrails/checks/artifacts, and returns redacted
   workbench-compatible JSONL plus receipts.
 - **M15 Workbench Dev Session UX:** render those feeds as sessions, commands,
   checks, artifacts, and causal facts.
+- **M16 HTTP Router / Local Server:** delivered. `zstd.Http` now provides
+  Schema-coded local JSON routes with receipt and trace JSON.
+- **M17 Postgres Maturity:** delivered. `zstd.Sql` now decodes rows through
+  Schema, exposes pool leases/stats and transaction receipts, and
+  `zigeffect-postgres` provides migration planning/apply SQL plus a copyable
+  local migration CLI.
