@@ -70,6 +70,10 @@ export function localDevSessionEventsFromJsonl(text: string): LocalDevSessionEve
     .sort((left, right) => left.sequence - right.sequence);
 }
 
+export function redactLocalDevSessionText(value: string): string {
+  return redactLocalDevText(value);
+}
+
 export function applyLocalDevSessionEvents(
   base: LocalDevSessionModel,
   events: readonly LocalDevSessionEvent[],

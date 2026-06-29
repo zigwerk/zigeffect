@@ -33,7 +33,7 @@ semantic fact comparison, not exact event-id graph isomorphism.
 | 6 | Causal dev loop (compare/advice/verdict) | **done** | `tools/causal_dev_loop`, `causal_compare`, `causal_advice`, `causal_verdict` |
 | 7 | Guarded remediation + agent interventions | **closed loop, gate-off by default** | `src/services/policy_engine.zig`, `src/services/agent_intervention.zig`, `tools/causal_*remediation*` |
 | 8 | App-facing causal trace | **done** | `src/services/causal_app_runtime.zig` |
-| 9 | Visual workbench (SolidJS / zig-webui) | **live-attach + dev-session UX** (static + streaming via collector plus host-frame ingest, host apply adapter, host runner bundle, supervised host loop, NDJSON fact tap, host request router, runtime runner, local agent runtime, and local agent development health/timeline/issues view) | `workbench/`, `workbench/src/collector/` |
+| 9 | Visual workbench (SolidJS / zig-webui) | **live-attach + dev-session UX** (static + streaming via collector plus host-frame ingest, host apply adapter, host runner bundle, supervised host loop, NDJSON fact tap, host request router, runtime runner, local agent runtime/artifact capture, and local agent development health/timeline/issues view) | `workbench/`, `workbench/src/collector/` |
 | 10 | Export adapters (JSONL/DOT/OTel/OTLP/graph-history/NenDB) | **OTLP + collector live end-to-end** | `src/services/causal_*_backend.zig`, `causal_otlp_json.zig` |
 | 11 | Durable workflows + clustering | **scheduler runs on zio; workflow journal appends can live-mirror into causal stores; loopback + remote socket wrappers cross the transport boundary; discovery JSON/file/HTTP snapshots, caller-owned HTTP refresh loops, and auth-epoch-aware selection feed the local registry** | `src/workflow/*`, `src/cluster/*` |
 | 12 | Agent-operable runtime layer | **bounded interventions, counterfactuals, invariants, evals, semantic diffs, live command executor/tap, poll bridge, local daemon/HTTP engine bridge, eval diff artifacts/links/manifests, dev-loop/remediation-decision/patch-proposal eval persistence** | `src/services/agent_intervention.zig`, `counterfactual.zig`, `causal_invariant.zig`, `agent_eval.zig`, `causal_diff.zig`, `causal_live_command.zig` |
@@ -381,7 +381,7 @@ substrates into real deployed systems:
    zigeffect's own causal tools share development evidence. The first pass
    reuses `zigeffect.causal.dev-session.v1` and teaches the workbench to render
    agents, checks, commands, artifact links, guardrails, and next actions. The
-   ordered sequence is M72 through M78 below.
+   ordered sequence is M72 through M79 below.
 
 ## Local agentic development roadmap
 
@@ -389,16 +389,16 @@ This is the local-first sequence for making zigeffect useful as the development
 engine for local projects and standard-library work. It intentionally comes
 before hosting or broad distributed orchestration.
 
-Status on 2026-06-29: M72 through M78 are implemented in the workbench,
+Status on 2026-06-29: M72 through M79 are implemented in the workbench,
 `causal-dev-session`, and collector. Local session events have parser/apply
 coverage, Codex/Claude-style JSONL fixtures, a `bun run zigeffect:local-agent-gate`
 command, and a live collector WebSocket overlay (`POST /agent-feed` and
 `POST /agent-events`) so the Agents tab updates during an active stream. A
 fakeable Bun-local agent runtime now runs configured local commands, emits
 redacted start/check/done/failed/warning events, supports fail-fast execution,
-and feeds those endpoints. Remaining local-first work is long-running
-interactive Codex/Claude transcript capture, richer artifact capture, and
-turn-level causal receipts.
+captures redacted stdout/stderr/error artifacts, emits artifact links, and feeds
+those endpoints. Remaining local-first work is long-running interactive
+Codex/Claude transcript capture and turn-level causal receipts.
 
 ### M72 - Local development session protocol
 
@@ -510,6 +510,24 @@ that streams workbench-compatible local dev-session events.
 - Runtime tests prove sentinel secrets are redacted before posting.
 - Runtime tests prove failure continuation and fail-fast behavior.
 - A real `Bun.spawn` smoke test executes a local command.
+
+### M79 - Local agent artifact capture
+
+**Goal:** persist local command output as redacted workbench evidence.
+
+**Work:**
+- Add an optional runtime artifact sink for stdout, stderr, and runner errors.
+- Add a Bun-backed sink that writes caller-owned local text files.
+- Redact artifact content and secret-shaped filenames before sink writes.
+- Emit `artifact_link` events before related `check_result` events and attach
+  the first artifact path to the check.
+
+**Acceptance:**
+- Runtime tests prove stdout/stderr artifact capture and event ordering.
+- Runtime tests prove thrown-runner error artifact capture.
+- Runtime tests prove sentinel secrets never reach artifact content, event
+  payloads, or generated filenames.
+- A real Bun file-sink smoke test writes a redacted local artifact.
 
 ## Hardening milestone roadmap
 

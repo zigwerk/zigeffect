@@ -1,6 +1,7 @@
 import type { LocalDevAgentKind } from "../causalArtifact";
 import {
   parseLocalDevSessionEventMessage,
+  redactLocalDevSessionText,
   type LocalDevSessionEvent,
 } from "../localDevSessionFeed";
 
@@ -25,10 +26,26 @@ export type LocalAgentRuntimeRunner = {
   run: (tool: LocalAgentRuntimeTool) => Promise<LocalAgentRuntimeResult>;
 };
 
+export type LocalAgentRuntimeArtifactStream = "stdout" | "stderr" | "error";
+
+export type LocalAgentRuntimeArtifact = {
+  key: string;
+  toolId: string;
+  stream: LocalAgentRuntimeArtifactStream;
+  filename: string;
+  content: string;
+  mediaType: "text/plain";
+};
+
+export type LocalAgentRuntimeArtifactSink = {
+  write: (artifact: LocalAgentRuntimeArtifact) => Promise<string>;
+};
+
 export type LocalAgentRuntimeOptions = {
   agentEventsUrl: string;
   fetcher?: typeof fetch;
   runner?: LocalAgentRuntimeRunner;
+  artifactSink?: LocalAgentRuntimeArtifactSink;
   failFast?: boolean;
 };
 
@@ -37,8 +54,13 @@ export type LocalAgentRuntimeSummary = {
   attempted: number;
   passed: number;
   failed: number;
+  artifacts: number;
   postedEvents: number;
   stoppedEarly: boolean;
+};
+
+type WrittenArtifact = LocalAgentRuntimeArtifact & {
+  path: string;
 };
 
 export async function postLocalAgentEvent(
@@ -88,6 +110,18 @@ export const bunLocalAgentRunner: LocalAgentRuntimeRunner = {
   },
 };
 
+export function bunLocalAgentArtifactSink(rootDir: string): LocalAgentRuntimeArtifactSink {
+  const root = rootDir.replace(/\/+$/, "");
+  return {
+    async write(artifact) {
+      const filename = safeArtifactFilename(artifact.filename);
+      const path = `${root}/${filename}`;
+      await Bun.write(path, artifact.content);
+      return path;
+    },
+  };
+}
+
 export async function runLocalAgentRuntime(
   tools: readonly LocalAgentRuntimeTool[],
   options: LocalAgentRuntimeOptions,
@@ -97,6 +131,7 @@ export async function runLocalAgentRuntime(
   let attempted = 0;
   let passed = 0;
   let failed = 0;
+  let artifacts = 0;
   let postedEvents = 0;
   let stoppedEarly = false;
 
@@ -121,6 +156,9 @@ export async function runLocalAgentRuntime(
     try {
       const result = await runner.run(tool);
       toolFailed = result.exitCode !== 0;
+      const writtenArtifacts = await writeResultArtifacts(tool, result, options.artifactSink);
+      artifacts += writtenArtifacts.length;
+      await emitArtifactLinks(writtenArtifacts);
       const detail = resultDetail(result);
       await emit({
         kind: "check_result",
@@ -128,6 +166,7 @@ export async function runLocalAgentRuntime(
         command: commandText(tool.command),
         status: toolFailed ? "fail" : "pass",
         detail,
+        artifact_path: firstArtifactPath(writtenArtifacts),
       });
     } catch (error) {
       toolFailed = true;
@@ -136,12 +175,16 @@ export async function runLocalAgentRuntime(
         kind: "warning",
         value: `${tool.label} failed before exit: ${detail}`,
       });
+      const writtenArtifacts = await writeErrorArtifacts(tool, detail, options.artifactSink);
+      artifacts += writtenArtifacts.length;
+      await emitArtifactLinks(writtenArtifacts);
       await emit({
         kind: "check_result",
         label: tool.checkLabel ?? tool.label,
         command: commandText(tool.command),
         status: "fail",
         detail,
+        artifact_path: firstArtifactPath(writtenArtifacts),
       });
     }
 
@@ -177,9 +220,20 @@ export async function runLocalAgentRuntime(
     attempted,
     passed,
     failed,
+    artifacts,
     postedEvents,
     stoppedEarly,
   };
+
+  async function emitArtifactLinks(writtenArtifacts: readonly WrittenArtifact[]): Promise<void> {
+    for (const artifact of writtenArtifacts) {
+      await emit({
+        kind: "artifact_link",
+        key: artifact.key,
+        path: artifact.path,
+      });
+    }
+  }
 }
 
 function resultDetail(result: LocalAgentRuntimeResult): string {
@@ -205,4 +259,81 @@ function errorDetail(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
   return "unknown runtime error";
+}
+
+async function writeResultArtifacts(
+  tool: LocalAgentRuntimeTool,
+  result: LocalAgentRuntimeResult,
+  sink: LocalAgentRuntimeArtifactSink | undefined,
+): Promise<WrittenArtifact[]> {
+  if (!sink) return [];
+  const artifacts: LocalAgentRuntimeArtifact[] = [];
+  if (result.stdout.trim().length > 0) {
+    artifacts.push(runtimeArtifact(tool, "stdout", result.stdout));
+  }
+  if (result.stderr.trim().length > 0) {
+    artifacts.push(runtimeArtifact(tool, "stderr", result.stderr));
+  }
+  return writeArtifacts(artifacts, sink);
+}
+
+async function writeErrorArtifacts(
+  tool: LocalAgentRuntimeTool,
+  detail: string,
+  sink: LocalAgentRuntimeArtifactSink | undefined,
+): Promise<WrittenArtifact[]> {
+  if (!sink || detail.trim().length === 0) return [];
+  return writeArtifacts([runtimeArtifact(tool, "error", detail)], sink);
+}
+
+async function writeArtifacts(
+  artifacts: readonly LocalAgentRuntimeArtifact[],
+  sink: LocalAgentRuntimeArtifactSink,
+): Promise<WrittenArtifact[]> {
+  const written: WrittenArtifact[] = [];
+  for (const artifact of artifacts) {
+    const path = await sink.write(artifact);
+    written.push({ ...artifact, path });
+  }
+  return written;
+}
+
+function runtimeArtifact(
+  tool: LocalAgentRuntimeTool,
+  stream: LocalAgentRuntimeArtifactStream,
+  content: string,
+): LocalAgentRuntimeArtifact {
+  return {
+    key: `${safeArtifactKey(tool.id)}_${stream}`,
+    toolId: tool.id,
+    stream,
+    filename: `${safeArtifactFilename(tool.id)}-${stream}.txt`,
+    content: redactLocalDevSessionText(content.trim()),
+    mediaType: "text/plain",
+  };
+}
+
+function firstArtifactPath(writtenArtifacts: readonly WrittenArtifact[]): string | undefined {
+  return writtenArtifacts[0]?.path;
+}
+
+function safeArtifactKey(value: string): string {
+  const key = redactLocalDevSessionText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9_:-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return key.length > 0 ? key : "local_agent";
+}
+
+function safeArtifactFilename(value: string): string {
+  const filename = redactLocalDevSessionText(value)
+    .toLowerCase()
+    .replace(/\.\.+/g, ".")
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 96);
+  if (filename.length === 0 || filename === "." || filename === "..") {
+    return "artifact";
+  }
+  return filename;
 }

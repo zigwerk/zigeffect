@@ -1,8 +1,13 @@
 import { expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { LocalDevSessionEvent } from "../localDevSessionFeed";
 import {
+  bunLocalAgentArtifactSink,
   bunLocalAgentRunner,
   runLocalAgentRuntime,
+  type LocalAgentRuntimeArtifact,
   type LocalAgentRuntimeRunner,
 } from "./localAgentRuntime";
 
@@ -52,6 +57,7 @@ test("runLocalAgentRuntime posts redacted start, check, and done events in order
     attempted: 1,
     passed: 1,
     failed: 0,
+    artifacts: 0,
     postedEvents: 3,
     stoppedEarly: false,
   });
@@ -115,6 +121,7 @@ test("runLocalAgentRuntime records failures and continues by default", async () 
     attempted: 2,
     passed: 1,
     failed: 1,
+    artifacts: 0,
     postedEvents: 6,
     stoppedEarly: false,
   });
@@ -165,6 +172,7 @@ test("runLocalAgentRuntime honors failFast after a failed command", async () => 
     attempted: 1,
     passed: 0,
     failed: 1,
+    artifacts: 0,
     postedEvents: 3,
     stoppedEarly: true,
   });
@@ -195,6 +203,127 @@ test("runLocalAgentRuntime emits a warning for runner exceptions", async () => {
     value: "Codex failed before exit: boom token=<redacted>",
   });
   expect(JSON.stringify(events)).not.toContain("sentinel-secret");
+});
+
+test("runLocalAgentRuntime writes redacted stdout and stderr artifacts before the check result", async () => {
+  const events: LocalDevSessionEvent[] = [];
+  const artifacts: LocalAgentRuntimeArtifact[] = [];
+  const runner: LocalAgentRuntimeRunner = {
+    async run(tool) {
+      return {
+        toolId: tool.id,
+        exitCode: 0,
+        stdout: "stdout token=sentinel-secret",
+        stderr: "stderr password=sentinel-secret",
+      };
+    },
+  };
+
+  const summary = await runLocalAgentRuntime(
+    [{ id: "codex", kind: "codex", label: "Codex", command: ["codex", "exec"] }],
+    {
+      agentEventsUrl: "http://collector.test/agent-events",
+      artifactSink: {
+        async write(artifact) {
+          artifacts.push(artifact);
+          return `/tmp/${artifact.filename}`;
+        },
+      },
+      fetcher: eventCapture(events),
+      runner,
+    },
+  );
+
+  expect(summary.artifacts).toBe(2);
+  expect(summary.postedEvents).toBe(5);
+  expect(events.map((event) => event.kind)).toEqual([
+    "agent_status",
+    "artifact_link",
+    "artifact_link",
+    "check_result",
+    "agent_status",
+  ]);
+  expect(artifacts.map((artifact) => artifact.stream)).toEqual(["stdout", "stderr"]);
+  expect(JSON.stringify(artifacts)).not.toContain("sentinel-secret");
+  expect(artifacts[0]?.content).toBe("stdout token=<redacted>");
+  expect(artifacts[1]?.content).toBe("stderr password=<redacted>");
+  expect(events[1]).toMatchObject({
+    kind: "artifact_link",
+    key: "codex_stdout",
+    path: "/tmp/codex-stdout.txt",
+  });
+  expect(events[3]).toMatchObject({
+    kind: "check_result",
+    artifact_path: "/tmp/codex-stdout.txt",
+  });
+});
+
+test("runLocalAgentRuntime writes redacted runner exception artifacts", async () => {
+  const events: LocalDevSessionEvent[] = [];
+  const artifacts: LocalAgentRuntimeArtifact[] = [];
+  const runner: LocalAgentRuntimeRunner = {
+    async run() {
+      throw new Error("boom secret=sentinel-secret");
+    },
+  };
+
+  const summary = await runLocalAgentRuntime(
+    [{ id: "claude", kind: "claude-code", label: "Claude Code", command: ["claude", "review"] }],
+    {
+      agentEventsUrl: "http://collector.test/agent-events",
+      artifactSink: {
+        async write(artifact) {
+          artifacts.push(artifact);
+          return `/tmp/${artifact.filename}`;
+        },
+      },
+      fetcher: eventCapture(events),
+      runner,
+    },
+  );
+
+  expect(summary.artifacts).toBe(1);
+  expect(events.map((event) => event.kind)).toEqual([
+    "agent_status",
+    "warning",
+    "artifact_link",
+    "check_result",
+    "agent_status",
+  ]);
+  expect(artifacts[0]).toMatchObject({
+    key: "claude_error",
+    stream: "error",
+    filename: "claude-error.txt",
+    content: "boom secret=<redacted>",
+  });
+  expect(events[3]).toMatchObject({
+    kind: "check_result",
+    artifact_path: "/tmp/claude-error.txt",
+  });
+  expect(JSON.stringify(events)).not.toContain("sentinel-secret");
+  expect(JSON.stringify(artifacts)).not.toContain("sentinel-secret");
+});
+
+test("bunLocalAgentArtifactSink writes a redacted artifact with a safe filename", async () => {
+  const root = await mkdtemp(join(tmpdir(), "zigeffect-agent-artifacts-"));
+  try {
+    const sink = bunLocalAgentArtifactSink(root);
+    const path = await sink.write({
+      key: "unsafe",
+      toolId: "../codex",
+      stream: "stdout",
+      filename: "../codex token=sentinel-secret stdout.txt",
+      content: "hello token=<redacted>",
+      mediaType: "text/plain",
+    });
+
+    expect(path.startsWith(root)).toBe(true);
+    expect(path).not.toContain("..");
+    expect(path).not.toContain("sentinel-secret");
+    expect(await Bun.file(path).text()).toBe("hello token=<redacted>");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("bunLocalAgentRunner executes a simple local command", async () => {
