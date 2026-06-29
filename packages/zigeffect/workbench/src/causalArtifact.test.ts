@@ -753,6 +753,29 @@ test("deriveLocalDevTimeline creates stable operational rows", () => {
   expect(timeline.map((item) => `${item.kind}:${item.label}`)).toContain("next-action:Next action");
 });
 
+test("deriveLocalDevSessionModel normalizes WebTransport bridge status", () => {
+  const session = deriveLocalDevSessionModel({
+    ...sampleLocalDevSession,
+    transports: [
+      {
+        protocol: "webtransport",
+        status: "connected",
+        url: "https://localhost:4433/.well-known/webtransport?password=hunter2",
+        session_id: "42",
+        frame_count: 8,
+        fallback: "websocket",
+        detail: "local bridge ready",
+      },
+    ],
+  }, { artifactPath: "dev-session.json" });
+
+  expect(session?.transports[0]?.protocol).toBe("webtransport");
+  expect(session?.transports[0]?.frameCount).toBe(8);
+  expect(JSON.stringify(session)).not.toContain("hunter2");
+  expect(deriveLocalDevHealthSummary(session!).transportCount).toBe(1);
+  expect(deriveLocalDevTimeline(session!).map((item) => `${item.kind}:${item.label}`)).toContain("transport:WebTransport");
+});
+
 test("deriveLocalDevIssueHighlights detects Schema and CLI errors with redaction", () => {
   const session = deriveLocalDevSessionModel({
     ...sampleLocalDevSession,

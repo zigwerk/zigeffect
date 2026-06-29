@@ -14,6 +14,7 @@ import {
   type LocalDevIssueHighlight,
   type LocalDevSessionModel,
   type LocalDevTimelineItem,
+  type LocalDevTransportModel,
   type QueryCommand,
   type RemediationChainModel,
   type ChainSourceStep,
@@ -396,6 +397,7 @@ function AgentDevelopmentView(props: {
               <Metric label="agents" value={String(session().agents.length)} />
               <Metric label="commands" value={String(health()?.commandCount ?? 0)} />
               <Metric label="artifacts" value={String(health()?.artifactCount ?? 0)} />
+              <Metric label="transports" value={String(health()?.transportCount ?? 0)} />
             </div>
 
             <section class="agent-panel">
@@ -413,6 +415,20 @@ function AgentDevelopmentView(props: {
                 <Meta label="schema version" value={session().schemaVersion} />
               </dl>
             </section>
+
+            <Show when={session().transports.length > 0}>
+              <section class="agent-panel">
+                <div class="lane-section-head">
+                  <h3>Transports</h3>
+                  <span>{session().transports.length}</span>
+                </div>
+                <div class="transport-list">
+                  <For each={session().transports}>
+                    {(transport) => <TransportRow transport={transport} />}
+                  </For>
+                </div>
+              </section>
+            </Show>
 
             <Show when={issues().length > 0}>
               <section class="agent-panel">
@@ -533,6 +549,17 @@ function AgentDevelopmentView(props: {
           </>
         )}
       </Show>
+    </div>
+  );
+}
+
+function TransportRow(props: { transport: LocalDevTransportModel }) {
+  return (
+    <div classList={{ "transport-row": true, [props.transport.status]: true }}>
+      <span>{props.transport.protocol}</span>
+      <strong>{props.transport.status}</strong>
+      <small>{props.transport.detail || props.transport.fallback || `${props.transport.frameCount} frames`}</small>
+      <code>{props.transport.url ?? props.transport.sessionId ?? "local session"}</code>
     </div>
   );
 }

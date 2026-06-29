@@ -337,6 +337,16 @@ export type LocalDevArtifactModel = {
   workbenchCommand: string | null;
 };
 
+export type LocalDevTransportModel = {
+  protocol: "webtransport" | "websocket" | "http" | "other";
+  status: string;
+  url: string | null;
+  sessionId: string | null;
+  frameCount: number;
+  fallback: string | null;
+  detail: string;
+};
+
 export type LocalDevSessionModel = {
   artifactPath: string;
   schema: string;
@@ -352,6 +362,7 @@ export type LocalDevSessionModel = {
   checks: LocalDevCheckModel[];
   commands: LocalDevCommandModel[];
   artifacts: LocalDevArtifactModel[];
+  transports: LocalDevTransportModel[];
   nextActions: string[];
   guardrails: string[];
   warnings: string[];
@@ -369,6 +380,7 @@ export type LocalDevHealthSummary = {
   activeAgents: number;
   commandCount: number;
   artifactCount: number;
+  transportCount: number;
 };
 
 export type LocalDevTimelineKind =
@@ -376,6 +388,7 @@ export type LocalDevTimelineKind =
   | "check"
   | "command"
   | "artifact"
+  | "transport"
   | "guardrail"
   | "warning"
   | "next-action";
@@ -569,6 +582,7 @@ export function deriveLocalDevSessionModel(raw: unknown, options: WorkbenchOptio
   const status = textValue(artifact.status, "unknown");
   const commands = localDevCommands(artifact.commands);
   const artifacts = localDevArtifacts(artifact.artifacts);
+  const transports = localDevTransports(artifact.transports, artifact.transport);
   const explicitAgents = localDevAgents(artifact.agents);
   const explicitChecks = localDevChecks(artifact.checks);
 
@@ -587,6 +601,7 @@ export function deriveLocalDevSessionModel(raw: unknown, options: WorkbenchOptio
     checks: explicitChecks.length > 0 ? explicitChecks : commands.map(checkFromLocalDevCommand),
     commands,
     artifacts,
+    transports,
     nextActions: stringList(artifact.next_actions),
     guardrails: stringList(artifact.guardrails),
     warnings,
@@ -618,6 +633,7 @@ export function deriveLocalDevHealthSummary(session: LocalDevSessionModel): Loca
     activeAgents,
     commandCount: session.commands.length,
     artifactCount: session.artifacts.length,
+    transportCount: session.transports.length,
   };
 }
 
@@ -665,6 +681,17 @@ export function deriveLocalDevTimeline(session: LocalDevSessionModel): LocalDevT
       detail: artifact.path,
       command: artifact.workbenchCommand,
       artifactPath: artifact.path,
+    });
+  }
+
+  for (const transport of session.transports) {
+    items.push({
+      kind: "transport",
+      label: transportLabel(transport.protocol),
+      status: transport.status,
+      detail: transport.detail || transport.url || `${transport.frameCount} frames`,
+      command: null,
+      artifactPath: null,
     });
   }
 
@@ -1849,6 +1876,45 @@ function localDevArtifacts(value: unknown): LocalDevArtifactModel[] {
     .filter((artifact): artifact is LocalDevArtifactModel => artifact !== null);
 }
 
+function localDevTransports(value: unknown, legacyValue: unknown): LocalDevTransportModel[] {
+  const records = Array.isArray(value)
+    ? value.filter(isRecord)
+    : isRecord(legacyValue)
+      ? [legacyValue]
+      : [];
+
+  return records.map((transport) => ({
+    protocol: localDevTransportProtocol(transport.protocol),
+    status: textValue(transport.status, "unknown"),
+    url: nullableRedactedTextValue(transport.url),
+    sessionId: nullableTextValue(transport.session_id),
+    frameCount: numericValue(transport.frame_count) ?? 0,
+    fallback: nullableTextValue(transport.fallback),
+    detail: redactLocalDevText(textValue(transport.detail, "")),
+  }));
+}
+
+function localDevTransportProtocol(value: unknown): LocalDevTransportModel["protocol"] {
+  const protocol = textValue(value, "other");
+  if (protocol === "webtransport" || protocol === "websocket" || protocol === "http") {
+    return protocol;
+  }
+  return "other";
+}
+
+function transportLabel(protocol: LocalDevTransportModel["protocol"]): string {
+  switch (protocol) {
+    case "webtransport":
+      return "WebTransport";
+    case "websocket":
+      return "WebSocket";
+    case "http":
+      return "HTTP";
+    case "other":
+      return "Transport";
+  }
+}
+
 function fallbackLocalDevAgents(commands: LocalDevCommandModel[], sessionStatus: string): LocalDevAgentModel[] {
   const toolStatus = commands.some((command) => command.status === "fail")
     ? "failed"
@@ -2138,6 +2204,11 @@ function textValue(value: unknown, fallback: string): string {
 function nullableTextValue(value: unknown): string | null {
   const text = textValue(value, "");
   return text.length > 0 ? text : null;
+}
+
+function nullableRedactedTextValue(value: unknown): string | null {
+  const text = nullableTextValue(value);
+  return text === null ? null : redactLocalDevText(text);
 }
 
 function booleanValue(value: unknown): boolean | null {

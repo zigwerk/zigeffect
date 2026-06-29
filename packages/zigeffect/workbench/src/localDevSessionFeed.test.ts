@@ -70,3 +70,47 @@ test("sample local agent adapter fixture applies to the dev-session sample", () 
   expect(updated.checks.find((check) => check.label === "bun run zigeffect:workbench:test")?.status).toBe("pass");
   expect(updated.artifacts.find((artifact) => artifact.key === "agent_activity")?.kind).toBe("jsonl");
 });
+
+test("WebTransport local dev frames unwrap into session events and transport status", () => {
+  const framed = [
+    {
+      schema: "zigeffect.webtransport.local-dev-frame.v1",
+      transport: "webtransport",
+      payload: JSON.stringify({
+        sequence: "0",
+        kind: "transport_status",
+        protocol: "webtransport",
+        status: "connected",
+        url: "https://localhost:4433/.well-known/webtransport?token=abc123",
+        session_id: "42",
+        frame_count: "3",
+        fallback: "websocket",
+        detail: "local WebTransport bridge ready",
+      }),
+    },
+    {
+      schema: "zigeffect.webtransport.local-dev-frame.v1",
+      transport: "webtransport",
+      payload: JSON.stringify({
+        sequence: "1",
+        kind: "agent_status",
+        agent_id: "codex",
+        agent_kind: "codex",
+        agent_label: "Codex",
+        status: "running",
+        task: "bridged token=abc123",
+      }),
+    },
+  ].map((record) => JSON.stringify(record)).join("\n");
+
+  const events = localDevSessionEventsFromJsonl(framed);
+  const base = deriveLocalDevSessionModel(sampleSession, { artifactPath: "sample-dev-session.json" });
+  const updated = applyLocalDevSessionEvents(base!, events);
+
+  expect(events.map((event) => event.kind)).toEqual(["transport_status", "agent_status"]);
+  expect(updated.transports[0]?.protocol).toBe("webtransport");
+  expect(updated.transports[0]?.status).toBe("connected");
+  expect(updated.transports[0]?.frameCount).toBe(3);
+  expect(JSON.stringify(updated)).not.toContain("abc123");
+  expect(updated.agents.find((agent) => agent.id === "codex")?.status).toBe("running");
+});

@@ -440,6 +440,7 @@ h3 {
 .agent-check-list,
 .agent-artifact-list,
 .agent-issue-list,
+.transport-list,
 .agent-timeline-list {
   display: grid;
   gap: 7px;
@@ -449,6 +450,7 @@ h3 {
 .agent-check-row,
 .agent-artifact-row,
 .agent-issue-row,
+.transport-row,
 .agent-timeline-row {
   min-width: 0;
   display: grid;
@@ -479,6 +481,10 @@ h3 {
   background: #fff1ec;
 }
 
+.transport-row {
+  grid-template-columns: 116px minmax(96px, 0.4fr) minmax(0, 1fr) minmax(0, 0.95fr);
+}
+
 .agent-timeline-row {
   grid-template-columns: 96px minmax(150px, 0.65fr) minmax(0, 1fr) minmax(0, 0.85fr);
 }
@@ -487,6 +493,7 @@ h3 {
 .agent-check-row > span,
 .agent-artifact-row > span,
 .agent-issue-row > span,
+.transport-row > span,
 .agent-timeline-row > span {
   color: #66736e;
   font-size: 0.72rem;
@@ -498,6 +505,7 @@ h3 {
 .agent-check-row strong,
 .agent-artifact-row strong,
 .agent-issue-row strong,
+.transport-row strong,
 .agent-timeline-row strong {
   min-width: 0;
   color: #17211f;
@@ -508,6 +516,7 @@ h3 {
 .agent-row small,
 .agent-check-row small,
 .agent-issue-row small,
+.transport-row small,
 .agent-timeline-row small {
   min-width: 0;
   color: #66736e;
@@ -518,6 +527,7 @@ h3 {
 
 .agent-artifact-row code,
 .agent-issue-row code,
+.transport-row code,
 .agent-timeline-row code {
   min-width: 0;
   color: #17211f;
@@ -527,6 +537,9 @@ h3 {
 
 .agent-row.failed,
 .agent-check-row.fail,
+.transport-row.failed,
+.transport-row.closed,
+.transport-row.error,
 .agent-timeline-row.fail,
 .agent-timeline-row.failed {
   border-color: #d99376;
@@ -538,6 +551,9 @@ h3 {
 .agent-check-row.running,
 .agent-check-row.skipped,
 .agent-check-row.unknown,
+.transport-row.connecting,
+.transport-row.reconnecting,
+.transport-row.unknown,
 .agent-timeline-row.running,
 .agent-timeline-row.warning,
 .agent-timeline-row.reviewing,
@@ -549,8 +565,10 @@ h3 {
 
 .agent-row.done,
 .agent-check-row.pass,
+.transport-row.connected,
 .agent-timeline-row.pass,
 .agent-timeline-row.done,
+.agent-timeline-row.connected,
 .agent-timeline-row.ok {
   border-color: #9ccbb7;
   background: #eff9f3;
@@ -1598,6 +1616,7 @@ dd {
   .agent-check-row,
   .agent-artifact-row,
   .agent-issue-row,
+  .transport-row,
   .agent-timeline-row,
   .visual-node-row {
     grid-template-columns: 1fr;

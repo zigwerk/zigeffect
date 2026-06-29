@@ -6,12 +6,14 @@ import type {
   LocalDevCheckModel,
   LocalDevCheckStatus,
   LocalDevSessionModel,
+  LocalDevTransportModel,
 } from "./causalArtifact";
 
 export type LocalDevSessionEventKind =
   | "agent_status"
   | "check_result"
   | "artifact_link"
+  | "transport_status"
   | "next_action"
   | "guardrail"
   | "warning";
@@ -22,7 +24,12 @@ export type LocalDevSessionEvent = {
   agent_id?: string;
   agent_kind?: LocalDevAgentKind;
   agent_label?: string;
-  status?: LocalDevAgentStatus | LocalDevCheckStatus;
+  status?: LocalDevAgentStatus | LocalDevCheckStatus | string;
+  protocol?: LocalDevTransportModel["protocol"];
+  url?: string;
+  session_id?: string;
+  frame_count?: number;
+  fallback?: string;
   task?: string;
   label?: string;
   command?: string;
@@ -39,6 +46,7 @@ const eventKinds = new Set<LocalDevSessionEventKind>([
   "agent_status",
   "check_result",
   "artifact_link",
+  "transport_status",
   "next_action",
   "guardrail",
   "warning",
@@ -46,7 +54,7 @@ const eventKinds = new Set<LocalDevSessionEventKind>([
 
 export function parseLocalDevSessionEventMessage(data: string): LocalDevSessionEvent | null {
   try {
-    return normalizeLocalDevSessionEvent(JSON.parse(data) as unknown);
+    return normalizeLocalDevSessionEvent(unwrapLocalDevTransportFrame(JSON.parse(data) as unknown));
   } catch {
     return null;
   }
@@ -72,6 +80,7 @@ export function applyLocalDevSessionEvents(
     checks: [...base.checks],
     commands: [...base.commands],
     artifacts: [...base.artifacts],
+    transports: [...base.transports],
     nextActions: [...base.nextActions],
     guardrails: [...base.guardrails],
     warnings: [...base.warnings],
@@ -98,7 +107,21 @@ function normalizeLocalDevSessionEvent(value: unknown): LocalDevSessionEvent | n
   setText(event, "agent_id", value.agent_id);
   event.agent_kind = localDevAgentKind(value.agent_kind);
   setText(event, "agent_label", value.agent_label);
-  event.status = kind === "check_result" ? localDevCheckStatus(value.status) : localDevAgentStatus(value.status);
+  if (kind === "check_result") {
+    event.status = localDevCheckStatus(value.status);
+  } else if (kind === "transport_status") {
+    event.status = localDevTransportStatus(value.status);
+  } else {
+    event.status = localDevAgentStatus(value.status);
+  }
+  event.protocol = localDevTransportProtocol(value.protocol);
+  setText(event, "url", value.url);
+  setText(event, "session_id", value.session_id);
+  const frameCount = safeSequence(value.frame_count);
+  if (frameCount !== null) {
+    event.frame_count = frameCount;
+  }
+  setText(event, "fallback", value.fallback);
   setText(event, "task", value.task);
   setText(event, "label", value.label);
   setText(event, "command", value.command);
@@ -117,6 +140,9 @@ function normalizeLocalDevSessionEvent(value: unknown): LocalDevSessionEvent | n
   if (kind === "artifact_link" && (!event.key || !event.path)) {
     return null;
   }
+  if (kind === "transport_status" && !event.protocol) {
+    return null;
+  }
   if ((kind === "next_action" || kind === "guardrail" || kind === "warning") && !event.value) {
     return null;
   }
@@ -133,6 +159,9 @@ function applyLocalDevSessionEvent(session: LocalDevSessionModel, event: LocalDe
       break;
     case "artifact_link":
       upsertArtifact(session.artifacts, artifactFromEvent(event));
+      break;
+    case "transport_status":
+      upsertTransport(session.transports, transportFromEvent(event));
       break;
     case "next_action":
       appendUnique(session.nextActions, event.value ?? "");
@@ -180,6 +209,18 @@ function artifactFromEvent(event: LocalDevSessionEvent): LocalDevArtifactModel {
   };
 }
 
+function transportFromEvent(event: LocalDevSessionEvent): LocalDevTransportModel {
+  return {
+    protocol: event.protocol ?? "other",
+    status: localDevTransportStatus(event.status),
+    url: event.url ?? null,
+    sessionId: event.session_id ?? null,
+    frameCount: event.frame_count ?? 0,
+    fallback: event.fallback ?? null,
+    detail: event.detail ?? "",
+  };
+}
+
 function upsertAgent(agents: LocalDevAgentModel[], agent: LocalDevAgentModel): void {
   const index = agents.findIndex((candidate) => candidate.id === agent.id);
   if (index === -1) {
@@ -207,6 +248,19 @@ function upsertArtifact(artifacts: LocalDevArtifactModel[], artifact: LocalDevAr
   }
 }
 
+function upsertTransport(transports: LocalDevTransportModel[], transport: LocalDevTransportModel): void {
+  const index = transports.findIndex((candidate) =>
+    candidate.protocol === transport.protocol &&
+    candidate.sessionId === transport.sessionId &&
+    candidate.url === transport.url
+  );
+  if (index === -1) {
+    transports.push(transport);
+  } else {
+    transports[index] = { ...transports[index], ...transport };
+  }
+}
+
 function appendUnique(values: string[], value: string): void {
   if (value.length > 0 && !values.includes(value)) {
     values.push(value);
@@ -225,7 +279,14 @@ function setText<T extends keyof LocalDevSessionEvent>(
 }
 
 function safeSequence(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+  }
+  return null;
 }
 
 function localDevSessionEventKind(value: unknown): LocalDevSessionEventKind | null {
@@ -273,6 +334,22 @@ function localDevCheckStatus(value: unknown): LocalDevCheckStatus {
   return "unknown";
 }
 
+function localDevTransportProtocol(value: unknown): LocalDevTransportModel["protocol"] | undefined {
+  const protocol = textValue(value);
+  if (protocol === "webtransport" || protocol === "websocket" || protocol === "http") {
+    return protocol;
+  }
+  if (protocol.length > 0) {
+    return "other";
+  }
+  return undefined;
+}
+
+function localDevTransportStatus(value: unknown): string {
+  const status = textValue(value);
+  return status.length > 0 ? redactLocalDevText(status) : "unknown";
+}
+
 function artifactKind(path: string): LocalDevArtifactModel["kind"] {
   if (path.endsWith(".json")) return "json";
   if (path.endsWith(".jsonl") || path.endsWith(".ndjson")) return "jsonl";
@@ -297,6 +374,23 @@ function agentLabel(kind: LocalDevAgentKind): string {
     case "human": return "Human";
     case "other": return "Local agent";
   }
+}
+
+function unwrapLocalDevTransportFrame(value: unknown): unknown {
+  if (!isRecord(value)) {
+    return value;
+  }
+  if (textValue(value.schema) !== "zigeffect.webtransport.local-dev-frame.v1") {
+    return value;
+  }
+  if (typeof value.payload === "string") {
+    try {
+      return JSON.parse(value.payload) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  return isRecord(value.payload) ? value.payload : null;
 }
 
 function redactLocalDevText(value: string): string {
@@ -326,4 +420,3 @@ function textValue(value: unknown): string {
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null;
 }
-
