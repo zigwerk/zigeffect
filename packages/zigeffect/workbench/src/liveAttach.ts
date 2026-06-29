@@ -929,6 +929,7 @@ export class LiveLocalDevSessionBuffer {
       agents: [],
       checks: [],
       commands: [],
+      turns: [],
       artifacts: {},
       transports: [],
       next_actions: [],

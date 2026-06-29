@@ -38,6 +38,12 @@ test("Dev Session view exposes the transport panel", () => {
   expect(source).toContain("<h3>Transports</h3>");
 });
 
+test("Dev Session view exposes turn count metric", () => {
+  const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+
+  expect(source).toContain('Metric label="turns"');
+});
+
 test("App uses live local dev session overlay when attached", () => {
   const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 

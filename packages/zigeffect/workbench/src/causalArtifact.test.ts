@@ -753,6 +753,44 @@ test("deriveLocalDevTimeline creates stable operational rows", () => {
   expect(timeline.map((item) => `${item.kind}:${item.label}`)).toContain("next-action:Next action");
 });
 
+test("deriveLocalDevSessionModel normalizes local agent turns", () => {
+  const session = deriveLocalDevSessionModel({
+    ...sampleLocalDevSession,
+    turns: [
+      {
+        id: "turn-1",
+        agent_id: "codex",
+        agent_label: "Codex",
+        agent_kind: "codex",
+        role: "assistant",
+        status: "completed",
+        summary: "implemented schema token=abc123",
+        input: "please fix password=hunter2",
+        output: "patched output secret=abc123",
+        artifact_path: ".zig-cache/causal-artifacts/codex-turn-1.md",
+      },
+    ],
+  }, { artifactPath: "dev-session.json" });
+
+  expect(session?.turns[0]).toMatchObject({
+    id: "turn-1",
+    agentId: "codex",
+    agentLabel: "Codex",
+    role: "assistant",
+    status: "completed",
+    summary: "implemented schema token=<redacted>",
+    input: "please fix password=<redacted>",
+    output: "patched output secret=<redacted>",
+    artifactPath: ".zig-cache/causal-artifacts/codex-turn-1.md",
+  });
+  expect(deriveLocalDevHealthSummary(session!).turnCount).toBe(1);
+  expect(deriveLocalDevTimeline(session!).map((item) => `${item.kind}:${item.label}`)).toContain(
+    "turn:Codex assistant",
+  );
+  expect(JSON.stringify(session)).not.toContain("abc123");
+  expect(JSON.stringify(session)).not.toContain("hunter2");
+});
+
 test("deriveLocalDevSessionModel normalizes WebTransport bridge status", () => {
   const session = deriveLocalDevSessionModel({
     ...sampleLocalDevSession,

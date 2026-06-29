@@ -6,11 +6,15 @@ import type {
   LocalDevCheckModel,
   LocalDevCheckStatus,
   LocalDevSessionModel,
+  LocalDevTurnModel,
+  LocalDevTurnRole,
+  LocalDevTurnStatus,
   LocalDevTransportModel,
 } from "./causalArtifact";
 
 export type LocalDevSessionEventKind =
   | "agent_status"
+  | "agent_turn"
   | "check_result"
   | "artifact_link"
   | "transport_status"
@@ -31,6 +35,11 @@ export type LocalDevSessionEvent = {
   frame_count?: number;
   fallback?: string;
   task?: string;
+  turn_id?: string;
+  role?: LocalDevTurnRole;
+  summary?: string;
+  input?: string;
+  output?: string;
   label?: string;
   command?: string;
   detail?: string;
@@ -44,6 +53,7 @@ type UnknownRecord = Record<string, unknown>;
 
 const eventKinds = new Set<LocalDevSessionEventKind>([
   "agent_status",
+  "agent_turn",
   "check_result",
   "artifact_link",
   "transport_status",
@@ -83,6 +93,7 @@ export function applyLocalDevSessionEvents(
     agents: [...base.agents],
     checks: [...base.checks],
     commands: [...base.commands],
+    turns: [...base.turns],
     artifacts: [...base.artifacts],
     transports: [...base.transports],
     nextActions: [...base.nextActions],
@@ -113,6 +124,8 @@ function normalizeLocalDevSessionEvent(value: unknown): LocalDevSessionEvent | n
   setText(event, "agent_label", value.agent_label);
   if (kind === "check_result") {
     event.status = localDevCheckStatus(value.status);
+  } else if (kind === "agent_turn") {
+    event.status = localDevTurnStatus(value.status);
   } else if (kind === "transport_status") {
     event.status = localDevTransportStatus(value.status);
   } else {
@@ -127,6 +140,11 @@ function normalizeLocalDevSessionEvent(value: unknown): LocalDevSessionEvent | n
   }
   setText(event, "fallback", value.fallback);
   setText(event, "task", value.task);
+  setText(event, "turn_id", value.turn_id ?? value.turnId);
+  event.role = localDevTurnRole(value.role);
+  setText(event, "summary", value.summary);
+  setText(event, "input", value.input ?? value.prompt);
+  setText(event, "output", value.output ?? value.response);
   setText(event, "label", value.label);
   setText(event, "command", value.command);
   setText(event, "detail", value.detail);
@@ -136,6 +154,9 @@ function normalizeLocalDevSessionEvent(value: unknown): LocalDevSessionEvent | n
   setText(event, "value", value.value);
 
   if (kind === "agent_status" && !event.agent_id) {
+    return null;
+  }
+  if (kind === "agent_turn" && (!event.agent_id || !event.turn_id)) {
     return null;
   }
   if (kind === "check_result" && !event.label) {
@@ -158,6 +179,9 @@ function applyLocalDevSessionEvent(session: LocalDevSessionModel, event: LocalDe
     case "agent_status":
       upsertAgent(session.agents, agentFromEvent(event));
       break;
+    case "agent_turn":
+      upsertTurn(session.turns, turnFromEvent(event));
+      break;
     case "check_result":
       upsertCheck(session.checks, checkFromEvent(event));
       break;
@@ -177,6 +201,22 @@ function applyLocalDevSessionEvent(session: LocalDevSessionModel, event: LocalDe
       appendUnique(session.warnings, event.value ?? "");
       break;
   }
+}
+
+function turnFromEvent(event: LocalDevSessionEvent): LocalDevTurnModel {
+  const agentKind = event.agent_kind ?? "other";
+  return {
+    id: event.turn_id ?? `turn-${event.sequence}`,
+    agentId: event.agent_id ?? "local-agent",
+    agentLabel: event.agent_label ?? agentLabel(agentKind),
+    agentKind,
+    role: localDevTurnRole(event.role),
+    status: localDevTurnStatus(event.status),
+    summary: event.summary ?? event.value ?? event.detail ?? "",
+    input: event.input ?? null,
+    output: event.output ?? null,
+    artifactPath: event.artifact_path ?? null,
+  };
 }
 
 function agentFromEvent(event: LocalDevSessionEvent): LocalDevAgentModel {
@@ -231,6 +271,23 @@ function upsertAgent(agents: LocalDevAgentModel[], agent: LocalDevAgentModel): v
     agents.push(agent);
   } else {
     agents[index] = { ...agents[index], ...agent };
+  }
+}
+
+function upsertTurn(turns: LocalDevTurnModel[], turn: LocalDevTurnModel): void {
+  const index = turns.findIndex((candidate) => candidate.id === turn.id && candidate.agentId === turn.agentId);
+  if (index === -1) {
+    turns.push(turn);
+  } else {
+    const existing = turns[index]!;
+    turns[index] = {
+      ...existing,
+      ...turn,
+      summary: turn.summary.length > 0 ? turn.summary : existing.summary,
+      input: turn.input ?? existing.input,
+      output: turn.output ?? existing.output,
+      artifactPath: turn.artifactPath ?? existing.artifactPath,
+    };
   }
 }
 
@@ -317,6 +374,28 @@ function localDevAgentStatus(value: unknown): LocalDevAgentStatus {
     status === "failed"
   ) {
     return status;
+  }
+  return "unknown";
+}
+
+function localDevTurnRole(value: unknown): LocalDevTurnRole {
+  const role = textValue(value);
+  if (role === "user" || role === "assistant" || role === "tool" || role === "system") {
+    return role;
+  }
+  return "unknown";
+}
+
+function localDevTurnStatus(value: unknown): LocalDevTurnStatus {
+  const status = textValue(value);
+  if (status === "started" || status === "running") {
+    return "started";
+  }
+  if (status === "completed" || status === "complete" || status === "done" || status === "success") {
+    return "completed";
+  }
+  if (status === "failed" || status === "fail" || status === "error") {
+    return "failed";
   }
   return "unknown";
 }

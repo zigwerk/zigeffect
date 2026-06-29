@@ -34,6 +34,20 @@
       "stderr_snippet": ""
     }
   ],
+  "turns": [
+    {
+      "id": "codex-turn-1",
+      "agent_id": "codex",
+      "agent_label": "Codex",
+      "agent_kind": "codex",
+      "role": "assistant",
+      "status": "completed",
+      "summary": "Implemented the local dev-session renderer and reviewed the next evidence gap.",
+      "input": "Continue the local agentic development cockpit.",
+      "output": "Added parser, timeline, artifact, and guardrail evidence for the workbench.",
+      "artifact_path": ".zig-cache/causal-artifacts/codex-turn-1.md"
+    }
+  ],
   "checks": [
     {
       "label": "causal-dev-loop after",

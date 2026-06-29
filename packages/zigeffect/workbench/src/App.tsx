@@ -395,6 +395,7 @@ function AgentDevelopmentView(props: {
               <Metric label="fail" value={String(health()?.failedChecks ?? 0)} tone={(health()?.failedChecks ?? 0) ? "warn" : "ok"} />
               <Metric label="running" value={String(health()?.runningChecks ?? 0)} />
               <Metric label="agents" value={String(session().agents.length)} />
+              <Metric label="turns" value={String(health()?.turnCount ?? 0)} />
               <Metric label="commands" value={String(health()?.commandCount ?? 0)} />
               <Metric label="artifacts" value={String(health()?.artifactCount ?? 0)} />
               <Metric label="transports" value={String(health()?.transportCount ?? 0)} />

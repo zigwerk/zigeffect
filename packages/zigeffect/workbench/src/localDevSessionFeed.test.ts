@@ -60,6 +60,30 @@ test("applyLocalDevSessionEvents updates local session agents checks artifacts a
   expect(updated.guardrails).toContain("do not summarize unverified local checks as passing");
 });
 
+test("agent_turn events update local session turns with redaction", () => {
+  const base = deriveLocalDevSessionModel(sampleSession, { artifactPath: "sample-dev-session.json" });
+  expect(base).not.toBeNull();
+
+  const updated = applyLocalDevSessionEvents(base!, localDevSessionEventsFromJsonl(`
+{"sequence":1,"kind":"agent_turn","agent_id":"codex","agent_kind":"codex","agent_label":"Codex","turn_id":"codex-turn-1","role":"assistant","status":"completed","summary":"edited schema token=sentinel-secret","input":"user password=sentinel-secret","output":"done secret=sentinel-secret","artifact_path":".zig-cache/causal-artifacts/codex-turn-1.md"}
+{"sequence":2,"kind":"agent_turn","agent_id":"codex","agent_kind":"codex","agent_label":"Codex","turn_id":"codex-turn-1","role":"assistant","status":"completed","summary":"edited schema and cli"}
+`));
+
+  expect(updated.turns).toHaveLength(1);
+  expect(updated.turns[0]).toMatchObject({
+    id: "codex-turn-1",
+    agentId: "codex",
+    agentLabel: "Codex",
+    role: "assistant",
+    status: "completed",
+    summary: "edited schema and cli",
+    input: "user password=<redacted>",
+    output: "done secret=<redacted>",
+    artifactPath: ".zig-cache/causal-artifacts/codex-turn-1.md",
+  });
+  expect(JSON.stringify(updated)).not.toContain("sentinel-secret");
+});
+
 test("sample local agent adapter fixture applies to the dev-session sample", () => {
   const base = deriveLocalDevSessionModel(sampleSession, { artifactPath: "sample-dev-session.json" });
   const fixture = readFileSync(new URL("../public/sample-agent-activity.jsonl", import.meta.url), "utf8");

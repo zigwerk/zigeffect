@@ -302,6 +302,10 @@ export type LocalDevAgentStatus = "idle" | "running" | "reviewing" | "blocked" |
 
 export type LocalDevCheckStatus = "pass" | "fail" | "running" | "skipped" | "unknown";
 
+export type LocalDevTurnRole = "user" | "assistant" | "tool" | "system" | "unknown";
+
+export type LocalDevTurnStatus = "started" | "completed" | "failed" | "unknown";
+
 export type LocalDevAgentModel = {
   id: string;
   label: string;
@@ -327,6 +331,19 @@ export type LocalDevCommandModel = {
   exitCode: number | null;
   stdoutSnippet: string;
   stderrSnippet: string;
+};
+
+export type LocalDevTurnModel = {
+  id: string;
+  agentId: string;
+  agentLabel: string;
+  agentKind: LocalDevAgentKind;
+  role: LocalDevTurnRole;
+  status: LocalDevTurnStatus;
+  summary: string;
+  input: string | null;
+  output: string | null;
+  artifactPath: string | null;
 };
 
 export type LocalDevArtifactModel = {
@@ -361,6 +378,7 @@ export type LocalDevSessionModel = {
   agents: LocalDevAgentModel[];
   checks: LocalDevCheckModel[];
   commands: LocalDevCommandModel[];
+  turns: LocalDevTurnModel[];
   artifacts: LocalDevArtifactModel[];
   transports: LocalDevTransportModel[];
   nextActions: string[];
@@ -379,12 +397,14 @@ export type LocalDevHealthSummary = {
   failedAgents: number;
   activeAgents: number;
   commandCount: number;
+  turnCount: number;
   artifactCount: number;
   transportCount: number;
 };
 
 export type LocalDevTimelineKind =
   | "agent"
+  | "turn"
   | "check"
   | "command"
   | "artifact"
@@ -581,6 +601,7 @@ export function deriveLocalDevSessionModel(raw: unknown, options: WorkbenchOptio
   const phase = textValue(artifact.phase, "unknown");
   const status = textValue(artifact.status, "unknown");
   const commands = localDevCommands(artifact.commands);
+  const turns = localDevTurns(artifact.turns);
   const artifacts = localDevArtifacts(artifact.artifacts);
   const transports = localDevTransports(artifact.transports, artifact.transport);
   const explicitAgents = localDevAgents(artifact.agents);
@@ -600,6 +621,7 @@ export function deriveLocalDevSessionModel(raw: unknown, options: WorkbenchOptio
     agents: explicitAgents.length > 0 ? explicitAgents : fallbackLocalDevAgents(commands, status),
     checks: explicitChecks.length > 0 ? explicitChecks : commands.map(checkFromLocalDevCommand),
     commands,
+    turns,
     artifacts,
     transports,
     nextActions: stringList(artifact.next_actions),
@@ -632,6 +654,7 @@ export function deriveLocalDevHealthSummary(session: LocalDevSessionModel): Loca
     failedAgents,
     activeAgents,
     commandCount: session.commands.length,
+    turnCount: session.turns.length,
     artifactCount: session.artifacts.length,
     transportCount: session.transports.length,
   };
@@ -659,6 +682,17 @@ export function deriveLocalDevTimeline(session: LocalDevSessionModel): LocalDevT
       detail: check.detail || check.command || check.artifactPath || "check recorded",
       command: check.command,
       artifactPath: check.artifactPath,
+    });
+  }
+
+  for (const turn of session.turns) {
+    items.push({
+      kind: "turn",
+      label: `${turn.agentLabel} ${turn.role}`,
+      status: turn.status,
+      detail: turn.summary || turn.output || turn.input || turn.id,
+      command: null,
+      artifactPath: turn.artifactPath,
     });
   }
 
@@ -1838,6 +1872,32 @@ function localDevCommands(value: unknown): LocalDevCommandModel[] {
     }));
 }
 
+function localDevTurns(value: unknown): LocalDevTurnModel[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(isRecord)
+    .map((turn, index) => {
+      const agentKind = localDevAgentKind(turn.agent_kind ?? turn.agentKind ?? turn.kind);
+      const agentId = textValue(turn.agent_id ?? turn.agentId, localDevAgentId(agentKind, index));
+      const role = localDevTurnRole(turn.role);
+      return {
+        id: textValue(turn.id ?? turn.turn_id ?? turn.turnId, `turn-${index + 1}`),
+        agentId,
+        agentLabel: textValue(turn.agent_label ?? turn.agentLabel, localDevAgentKindLabel(agentKind)),
+        agentKind,
+        role,
+        status: localDevTurnStatus(turn.status),
+        summary: redactLocalDevText(textValue(turn.summary ?? turn.value, "")),
+        input: nullableRedactedTextValue(turn.input ?? turn.prompt),
+        output: nullableRedactedTextValue(turn.output ?? turn.response),
+        artifactPath: nullableRedactedTextValue(turn.artifact_path ?? turn.artifactPath),
+      };
+    });
+}
+
 function localDevCommandText(command: UnknownRecord): string {
   const explicit = textValue(command.command, "");
   if (explicit.length > 0) {
@@ -1963,6 +2023,28 @@ function localDevAgentStatus(value: unknown): LocalDevAgentStatus {
     status === "failed"
   ) {
     return status;
+  }
+  return "unknown";
+}
+
+function localDevTurnRole(value: unknown): LocalDevTurnRole {
+  const role = textValue(value, "");
+  if (role === "user" || role === "assistant" || role === "tool" || role === "system") {
+    return role;
+  }
+  return "unknown";
+}
+
+function localDevTurnStatus(value: unknown): LocalDevTurnStatus {
+  const status = textValue(value, "");
+  if (status === "started" || status === "running") {
+    return "started";
+  }
+  if (status === "completed" || status === "complete" || status === "done" || status === "success") {
+    return "completed";
+  }
+  if (status === "failed" || status === "fail" || status === "error") {
+    return "failed";
   }
   return "unknown";
 }
