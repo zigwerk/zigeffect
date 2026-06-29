@@ -33,7 +33,7 @@ semantic fact comparison, not exact event-id graph isomorphism.
 | 6 | Causal dev loop (compare/advice/verdict) | **done** | `tools/causal_dev_loop`, `causal_compare`, `causal_advice`, `causal_verdict` |
 | 7 | Guarded remediation + agent interventions | **closed loop, gate-off by default** | `src/services/policy_engine.zig`, `src/services/agent_intervention.zig`, `tools/causal_*remediation*` |
 | 8 | App-facing causal trace | **done** | `src/services/causal_app_runtime.zig` |
-| 9 | Visual workbench (SolidJS / zig-webui) | **live-attach + dev-session UX** (static + streaming via collector plus host-frame ingest, host apply adapter, host runner bundle, supervised host loop, NDJSON fact tap, host request router, runtime runner, local agent runtime/artifact capture/turn receipts, and local agent development health/timeline/issues view) | `workbench/`, `workbench/src/collector/` |
+| 9 | Visual workbench (SolidJS / zig-webui) | **live-attach + dev-session UX** (static + streaming via collector plus host-frame ingest, host apply adapter, host runner bundle, supervised host loop, NDJSON fact tap, host request router, runtime runner, local agent runtime/artifact capture/turn receipts/transcript tailing, and local agent development health/timeline/issues view) | `workbench/`, `workbench/src/collector/` |
 | 10 | Export adapters (JSONL/DOT/OTel/OTLP/graph-history/NenDB) | **OTLP + collector live end-to-end** | `src/services/causal_*_backend.zig`, `causal_otlp_json.zig` |
 | 11 | Durable workflows + clustering | **scheduler runs on zio; workflow journal appends can live-mirror into causal stores; loopback + remote socket wrappers cross the transport boundary; discovery JSON/file/HTTP snapshots, caller-owned HTTP refresh loops, and auth-epoch-aware selection feed the local registry** | `src/workflow/*`, `src/cluster/*` |
 | 12 | Agent-operable runtime layer | **bounded interventions, counterfactuals, invariants, evals, semantic diffs, live command executor/tap, poll bridge, local daemon/HTTP engine bridge, eval diff artifacts/links/manifests, dev-loop/remediation-decision/patch-proposal eval persistence** | `src/services/agent_intervention.zig`, `counterfactual.zig`, `causal_invariant.zig`, `agent_eval.zig`, `causal_diff.zig`, `causal_live_command.zig` |
@@ -381,7 +381,7 @@ substrates into real deployed systems:
    zigeffect's own causal tools share development evidence. The first pass
    reuses `zigeffect.causal.dev-session.v1` and teaches the workbench to render
    agents, checks, commands, artifact links, guardrails, and next actions. The
-   ordered sequence is M72 through M80 below.
+   ordered sequence is M72 through M81 below.
 
 ## Local agentic development roadmap
 
@@ -389,7 +389,7 @@ This is the local-first sequence for making zigeffect useful as the development
 engine for local projects and standard-library work. It intentionally comes
 before hosting or broad distributed orchestration.
 
-Status on 2026-06-29: M72 through M80 are implemented in the workbench,
+Status on 2026-06-29: M72 through M81 are implemented in the workbench,
 `causal-dev-session`, and collector. Local session events have parser/apply
 coverage, Codex/Claude-style JSONL fixtures, a `bun run zigeffect:local-agent-gate`
 command, and a live collector WebSocket overlay (`POST /agent-feed` and
@@ -398,9 +398,10 @@ fakeable Bun-local agent runtime now runs configured local commands, emits
 redacted start/check/done/failed/warning events, supports fail-fast execution,
 captures redacted stdout/stderr/error artifacts, emits artifact links, and feeds
 those endpoints. Turn-level receipts now exist as static session data and live
-`agent_turn` events. Remaining local-first work is long-running interactive
-Codex/Claude process tailing that converts real terminal sessions into turn
-receipts.
+`agent_turn` events. A transcript tail adapter can consume line-oriented JSONL
+or tagged text streams and post redacted turns. Remaining local-first work is
+runner-owned terminal lifecycle and provider-specific Codex/Claude transcript
+samples.
 
 ### M72 - Local development session protocol
 
@@ -548,6 +549,23 @@ that streams workbench-compatible local dev-session events.
   updating summaries/status.
 - UI tests prove the turn metric is present.
 - Public workbench samples include turn receipts.
+
+### M81 - Local agent transcript tail
+
+**Goal:** convert long-running local agent transcript streams into live
+`agent_turn` events.
+
+**Work:**
+- Parse provider-neutral JSONL turn records.
+- Parse simple tagged plaintext lines such as `assistant: ...`.
+- Tail `ReadableStream<Uint8Array>` sources across chunk boundaries.
+- Post every recognized turn through the existing collector event endpoint.
+
+**Acceptance:**
+- Tests prove JSONL transcript lines map to redacted turn events.
+- Tests prove tagged plaintext maps to turn events.
+- Tests prove stream tailing flushes trailing partial lines and ignores junk.
+- All emitted events pass through the existing local dev-session parser/redactor.
 
 ## Hardening milestone roadmap
 
