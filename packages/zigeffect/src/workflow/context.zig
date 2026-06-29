@@ -19,6 +19,7 @@ pub const Codec = traits_mod.Codec;
 pub const DeferredAwaitResult = deferred_mod.DeferredAwaitResult;
 pub const JournalStore = store_mod.JournalStore;
 pub const JournalEventBatch = store_mod.JournalEventBatch;
+pub const CausalJournalStore = store_mod.CausalJournalStore;
 pub const Schedule = schedule_mod.Schedule;
 pub const Suspension = control_mod.Suspension;
 pub const TimerSleepResult = durable_clock_mod.TimerSleepResult;
@@ -58,6 +59,7 @@ pub const WorkflowContext = struct {
     clock: ?*Clock,
     causal_store: ?*CausalStore,
     causal_run_id: ?u64,
+    causal_journal_store: ?*CausalJournalStore = null,
     next_sequence: JournalSequence,
     replay_events: JournalEventBatch,
 
@@ -70,7 +72,7 @@ pub const WorkflowContext = struct {
         else
             replay_events.events[replay_events.events.len - 1].sequence + 1;
 
-        return .{
+        var context = WorkflowContext{
             .allocator = allocator,
             .journal_store = journal_store,
             .workflow_id = options.workflow_id,
@@ -81,9 +83,26 @@ pub const WorkflowContext = struct {
             .next_sequence = next_sequence,
             .replay_events = replay_events,
         };
+        if (options.causal_store) |causal_store| {
+            const causal_journal_store = try allocator.create(CausalJournalStore);
+            causal_journal_store.* = CausalJournalStore.init(
+                allocator,
+                journal_store,
+                causal_store,
+                options.causal_run_id,
+            );
+            context.causal_journal_store = causal_journal_store;
+            context.journal_store = causal_journal_store.asJournalStore();
+        }
+        return context;
     }
 
     pub fn deinit(self: *WorkflowContext) void {
+        if (self.causal_journal_store) |causal_journal_store| {
+            causal_journal_store.deinit();
+            self.allocator.destroy(causal_journal_store);
+            self.causal_journal_store = null;
+        }
         self.replay_events.deinit();
     }
 

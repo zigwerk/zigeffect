@@ -2268,6 +2268,134 @@ test "workflow context replays recorded u64 step without rerunning function" {
     try std.testing.expectEqualStrings("42", events.events[2].redacted_detail);
 }
 
+test "workflow context mirrors successful journal appends into attached causal store" {
+    const Step = struct {
+        fn run() !u64 {
+            return 42;
+        }
+    };
+
+    var causal = fx.CausalStore.init(std.testing.allocator);
+    defer causal.deinit();
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+        .workflow_id = 700,
+        .execution_id = 800,
+        .causal_store = &causal,
+        .causal_run_id = 99,
+    });
+    defer context.deinit();
+
+    const value = try context.stepU64("live-step", Step.run);
+    try std.testing.expectEqual(@as(u64, 42), value);
+
+    var snapshot = try causal.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 2), snapshot.events.len);
+    try std.testing.expectEqual(fx.CausalEventKind.workflow_event_recorded, snapshot.events[0].kind);
+    try std.testing.expectEqual(@as(?u64, 99), snapshot.events[0].run_id);
+    try std.testing.expectEqual(@as(?u64, 800), snapshot.events[0].scope_id);
+    try std.testing.expectEqual(@as(?u64, 700), snapshot.events[0].trace_id);
+    try std.testing.expectEqualStrings("workflow.step_started", snapshot.events[0].type_name);
+    try std.testing.expectEqualStrings("live-step", snapshot.events[0].label);
+    try std.testing.expectEqualStrings("workflow.step_completed", snapshot.events[1].type_name);
+    try std.testing.expectEqualStrings("42", snapshot.events[1].redacted_detail);
+}
+
+test "causal journal store records only successful workflow appends" {
+    var causal = fx.CausalStore.init(std.testing.allocator);
+    defer causal.deinit();
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    var causal_journal = fx.workflow.CausalJournalStore.init(
+        std.testing.allocator,
+        journal_memory.asJournalStore(),
+        &causal,
+        11,
+    );
+    defer causal_journal.deinit();
+    const journal = causal_journal.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 700,
+        .execution_id = 800,
+        .name = "dedupe-workflow",
+        .status = "running",
+        .idempotency_key = "dedupe-start",
+    } });
+
+    try std.testing.expectError(error.DuplicateEvent, journal.append(.{ .event = .{
+        .sequence = 2,
+        .kind = .workflow_started,
+        .workflow_id = 700,
+        .execution_id = 800,
+        .name = "dedupe-workflow",
+        .status = "running",
+        .idempotency_key = "dedupe-start",
+    } }));
+
+    var snapshot = try causal.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 1), snapshot.events.len);
+    try std.testing.expectEqual(fx.CausalEventKind.workflow_event_recorded, snapshot.events[0].kind);
+    try std.testing.expectEqual(@as(?u64, 11), snapshot.events[0].run_id);
+    try std.testing.expectEqualStrings("workflow.workflow_started", snapshot.events[0].type_name);
+}
+
+test "causal journal store maps workflow parent sequences to causal event ids" {
+    var causal = fx.CausalStore.init(std.testing.allocator);
+    defer causal.deinit();
+    _ = try causal.record(.{
+        .kind = .run_started,
+        .label = "pre-existing engine event",
+    });
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    var causal_journal = fx.workflow.CausalJournalStore.init(
+        std.testing.allocator,
+        journal_memory.asJournalStore(),
+        &causal,
+        11,
+    );
+    defer causal_journal.deinit();
+    const journal = causal_journal.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 700,
+        .execution_id = 800,
+        .name = "causal-parent-map",
+        .status = "running",
+        .idempotency_key = "parent-start",
+    } });
+    _ = try journal.append(.{ .event = .{
+        .sequence = 2,
+        .parent_sequence = 1,
+        .kind = .step_completed,
+        .workflow_id = 700,
+        .execution_id = 800,
+        .name = "causal-child",
+        .status = "completed",
+        .redacted_detail = "ok",
+        .idempotency_key = "parent-child",
+    } });
+
+    var snapshot = try causal.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 3), snapshot.events.len);
+    try std.testing.expectEqualStrings("pre-existing engine event", snapshot.events[0].label);
+    try std.testing.expectEqualStrings("workflow.workflow_started", snapshot.events[1].type_name);
+    try std.testing.expectEqualStrings("workflow.step_completed", snapshot.events[2].type_name);
+    try std.testing.expectEqual(@as(?u64, snapshot.events[1].id), snapshot.events[2].parent_id);
+}
+
 test "workflow context records failed u64 steps with typed error names" {
     const Step = struct {
         var calls: u64 = 0;

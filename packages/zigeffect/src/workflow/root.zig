@@ -59,6 +59,7 @@ pub const WorkflowReplayState = replay.WorkflowReplayState;
 pub const workflowStatusIsTerminal = replay.workflowStatusIsTerminal;
 
 pub const JournalStore = store.JournalStore;
+pub const CausalJournalStore = store.CausalJournalStore;
 pub const JournalAppend = store.JournalAppend;
 pub const JournalEventBatch = store.JournalEventBatch;
 pub const JournalStoreError = store.JournalStoreError;

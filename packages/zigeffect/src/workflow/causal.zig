@@ -332,7 +332,7 @@ fn cloneText(allocator: Allocator, text: []const u8) Allocator.Error![]const u8 
     return allocator.dupe(u8, text);
 }
 
-fn deinitMappedEvent(allocator: Allocator, event: CausalEvent) void {
+pub fn deinitMappedEvent(allocator: Allocator, event: CausalEvent) void {
     if (event.label.len != 0) allocator.free(event.label);
     if (event.type_name.len != 0) allocator.free(event.type_name);
     if (event.status.len != 0) allocator.free(event.status);

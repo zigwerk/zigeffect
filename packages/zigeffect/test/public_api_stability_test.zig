@@ -40,6 +40,7 @@ test "workflow namespace keeps durable public exports" {
         "WorkflowEventMigrationRegistry",
         "WorkflowReplayState",
         "JournalStore",
+        "CausalJournalStore",
         "JournalAppend",
         "JournalEventBatch",
         "InMemoryJournalStore",
@@ -77,6 +78,7 @@ test "workflow namespace keeps durable public exports" {
     try std.testing.expect(fx.workflow.WorkflowEvent == fx.workflow.journal.WorkflowEvent);
     try std.testing.expect(fx.workflow.WorkflowReplayState == fx.workflow.replay.WorkflowReplayState);
     try std.testing.expect(fx.workflow.JournalStore == fx.workflow.store.JournalStore);
+    try std.testing.expect(fx.workflow.CausalJournalStore == fx.workflow.store.CausalJournalStore);
     try std.testing.expect(fx.workflow.WorkflowEngine == fx.workflow.engine.WorkflowEngine);
     try std.testing.expect(fx.workflow.WorkflowContext == fx.workflow.context.WorkflowContext);
     try std.testing.expect(fx.workflow.DurableClock == fx.workflow.clock.DurableClock);
