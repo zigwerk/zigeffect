@@ -924,6 +924,47 @@ test("createLiveArtifact reactively accumulates frames and tracks connection", (
   });
 });
 
+test("createLiveArtifact accumulates local dev-session events for the Dev Session tab", () => {
+  createRoot((dispose) => {
+    const live = createLiveArtifact({
+      subscribe(subscriber) {
+        subscriber.onLocalDevEvent?.({
+          sequence: 1,
+          kind: "agent_status",
+          agent_id: "codex",
+          agent_kind: "codex",
+          agent_label: "Codex",
+          status: "running",
+          task: "editing token=abc123",
+        });
+        subscriber.onLocalDevEvent?.({
+          sequence: 2,
+          kind: "check_result",
+          label: "local gate",
+          status: "pass",
+          detail: "ready",
+        });
+        subscriber.onClose?.();
+        return () => {};
+      },
+    }, {
+      localDevSessionId: "live-agent-session",
+      localDevSessionTitle: "Live Agent Session",
+      localDevSessionTarget: "zigeffect-local",
+    });
+
+    expect(live.localDevSessionEventCount()).toBe(2);
+    const session = live.localDevSession();
+    expect(session?.sessionId).toBe("live-agent-session");
+    expect(session?.title).toBe("Live Agent Session");
+    expect(session?.target).toBe("zigeffect-local");
+    expect(session?.agents.find((agent) => agent.id === "codex")?.status).toBe("running");
+    expect(session?.checks.find((check) => check.label === "local gate")?.status).toBe("pass");
+    expect(JSON.stringify(session)).not.toContain("abc123");
+    dispose();
+  });
+});
+
 test("webSocketLiveSource parses message frames and ignores non-frame payloads", () => {
   type Listener = (event: unknown) => void;
   const listeners = new Map<string, Listener>();
@@ -947,6 +988,39 @@ test("webSocketLiveSource parses message frames and ignores non-frame payloads",
 
   expect(received).toEqual([10]);
   expect(closed).toBe(true);
+});
+
+test("webSocketLiveSource parses local dev-session events from the live socket", () => {
+  type Listener = (event: unknown) => void;
+  const listeners = new Map<string, Listener>();
+  const fakeSocket: WebSocketLike = {
+    addEventListener: (type, listener) => listeners.set(type, listener),
+    close: () => listeners.set("__closed", () => {}),
+  };
+  const received: string[] = [];
+  webSocketLiveSource("ws://localhost:0/live", () => fakeSocket).subscribe({
+    onFrame: () => {
+      throw new Error("agent events should not be parsed as causal frames");
+    },
+    onLocalDevEvent: (event) => {
+      received.push(`${event.kind}:${event.agent_id}:${event.status}:${event.task}`);
+    },
+  });
+
+  listeners.get("message")?.({
+    data: JSON.stringify({
+      sequence: 1,
+      kind: "agent_status",
+      agent_id: "codex",
+      agent_kind: "codex",
+      agent_label: "Codex",
+      status: "running",
+      task: "streaming token=abc123",
+    }),
+  });
+  listeners.get("message")?.({ data: JSON.stringify({ hello: "world" }) });
+
+  expect(received).toEqual(["agent_status:codex:running:streaming token=<redacted>"]);
 });
 
 test("liveUrlFromSearch reads ?live=<url>", () => {

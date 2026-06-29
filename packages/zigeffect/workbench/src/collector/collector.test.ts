@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import type { Server } from "bun";
 import { createCollector } from "./collector";
 import { parseCommandMessage, parseFrameMessage, type LiveCommandFrame, type LiveFrame } from "../liveAttach";
+import { parseLocalDevSessionEventMessage, type LocalDevSessionEvent } from "../localDevSessionFeed";
 
 const engineLine = (extra: Record<string, unknown>): string =>
   JSON.stringify({ id: 1, kind: "run_started", run_id: 1, status: "started", label: "", ...extra });
@@ -71,6 +72,22 @@ function nextCommand(ws: WebSocket): Promise<LiveCommandFrame> {
         const frame = parseCommandMessage(typeof event.data === "string" ? event.data : "");
         if (frame) resolve(frame);
         else reject(new Error(`unparseable command: ${String(event.data)}`));
+      },
+      { once: true },
+    );
+  });
+}
+
+function nextAgentEvent(ws: WebSocket): Promise<LocalDevSessionEvent> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out waiting for an agent event")), 2000);
+    ws.addEventListener(
+      "message",
+      (event) => {
+        clearTimeout(timer);
+        const frame = parseLocalDevSessionEventMessage(typeof event.data === "string" ? event.data : "");
+        if (frame) resolve(frame);
+        else reject(new Error(`unparseable agent event: ${String(event.data)}`));
       },
       { once: true },
     );
@@ -196,6 +213,37 @@ test("POST /command redacts secret-shaped command kind before response and broad
 
     const all = await (await fetch(`http://${origin}/commands?after=0`)).json();
     expect(JSON.stringify(all)).not.toContain("sentinel-secret");
+  } finally {
+    client.close();
+  }
+});
+
+test("POST /agent-feed broadcasts redacted local dev-session events", async () => {
+  const { origin } = serve();
+  const client = await openClient(origin);
+  try {
+    const received = nextAgentEvent(client);
+    const response = await fetch(`http://${origin}/agent-feed`, {
+      method: "POST",
+      body: [
+        JSON.stringify({
+          sequence: 1,
+          kind: "agent_status",
+          agent_id: "codex",
+          agent_kind: "codex",
+          agent_label: "Codex",
+          status: "running",
+          task: "streaming token=sentinel-secret",
+        }),
+      ].join("\n"),
+    });
+
+    expect(await response.json()).toEqual({ ingested: 1 });
+    const event = await received;
+    expect(event.kind).toBe("agent_status");
+    expect(event.agent_id).toBe("codex");
+    expect(event.task).toContain("<redacted>");
+    expect(JSON.stringify(event)).not.toContain("sentinel-secret");
   } finally {
     client.close();
   }

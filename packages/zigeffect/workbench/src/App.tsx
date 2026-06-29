@@ -116,7 +116,7 @@ export function App() {
         model: deriveWorkbenchModel(raw, { artifactPath }),
         governance: deriveGovernanceModel(raw, { artifactPath }),
         semanticDiff: deriveSemanticDiffModel(raw, { artifactPath }),
-        localDevSession: deriveLocalDevSessionModel(raw, { artifactPath }),
+        localDevSession: deriveLocalDevSessionModel(raw, { artifactPath }) ?? live?.localDevSession() ?? null,
         raw,
         session: loaded.session,
         error: null,

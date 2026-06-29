@@ -13,7 +13,16 @@
 // local command polling harness to the engine-side policy bridge.
 
 import { createSignal, onCleanup } from "solid-js";
-import type { UnknownRecord } from "./causalArtifact";
+import {
+  deriveLocalDevSessionModel,
+  type LocalDevSessionModel,
+  type UnknownRecord,
+} from "./causalArtifact";
+import {
+  applyLocalDevSessionEvents,
+  parseLocalDevSessionEventMessage,
+  type LocalDevSessionEvent,
+} from "./localDevSessionFeed";
 
 // ── Live wire format — one frame per causal-event delta ───────────────────────
 export type LiveFrame = {
@@ -198,6 +207,10 @@ export type LiveStreamMeta = {
   schema?: string;
   schemaVersion?: number | string;
   taxonomyVersion?: string;
+  localDevSessionId?: string;
+  localDevSessionTitle?: string;
+  localDevSessionGoal?: string;
+  localDevSessionTarget?: string;
   /** Ring-buffer window; <= 0 / undefined keeps every frame. */
   maxFrames?: number;
 };
@@ -207,6 +220,7 @@ const DEFAULT_SCHEMA = "zigeffect.causal.live-dashboard-stream.v1";
 // ── Transport abstraction ─────────────────────────────────────────────────────
 export type LiveSubscriber = {
   onFrame: (frame: LiveFrame) => void;
+  onLocalDevEvent?: (event: LocalDevSessionEvent) => void;
   onError?: (error: unknown) => void;
   onClose?: () => void;
 };
@@ -885,6 +899,46 @@ export class LiveCausalBuffer {
   }
 }
 
+export class LiveLocalDevSessionBuffer {
+  private readonly events: LocalDevSessionEvent[] = [];
+
+  constructor(private readonly meta: LiveStreamMeta = {}) {}
+
+  ingest(event: LocalDevSessionEvent): void {
+    this.events.push(parseLocalDevSessionEventMessage(JSON.stringify(event)) ?? event);
+  }
+
+  get count(): number {
+    return this.events.length;
+  }
+
+  session(): LocalDevSessionModel | null {
+    if (this.events.length === 0) {
+      return null;
+    }
+    const base = deriveLocalDevSessionModel({
+      schema: "zigeffect.causal.dev-session.v1",
+      schema_version: 1,
+      mode: "live",
+      session_id: this.meta.localDevSessionId ?? "live-agent-session",
+      title: this.meta.localDevSessionTitle ?? "Live Agent Session",
+      goal: this.meta.localDevSessionGoal ?? "Observe local agent development as it happens.",
+      target: this.meta.localDevSessionTarget ?? "local",
+      phase: "live",
+      status: "running",
+      agents: [],
+      checks: [],
+      commands: [],
+      artifacts: {},
+      transports: [],
+      next_actions: [],
+      guardrails: [],
+      warnings: [],
+    }, { artifactPath: "live-agent-session" });
+    return base ? applyLocalDevSessionEvents(base, this.events) : null;
+  }
+}
+
 // ── Mock source (tests / offline demo) ────────────────────────────────────────
 export function mockLiveSource(
   frames: readonly LiveFrame[],
@@ -954,9 +1008,15 @@ export function webSocketLiveSource(
     subscribe(subscriber) {
       const socket = factory(url);
       socket.addEventListener("message", (event) => {
-        const frame = parseFrameMessage(socketMessageData(event));
+        const data = socketMessageData(event);
+        const frame = parseFrameMessage(data);
         if (frame) {
           subscriber.onFrame(frame);
+          return;
+        }
+        const localDevEvent = parseLocalDevSessionEventMessage(data);
+        if (localDevEvent) {
+          subscriber.onLocalDevEvent?.(localDevEvent);
         }
       });
       socket.addEventListener("error", (event) => subscriber.onError?.(event));
@@ -969,6 +1029,8 @@ export function webSocketLiveSource(
 // ── SolidJS reactive integration ──────────────────────────────────────────────
 export type LiveArtifactHandle = {
   artifactJson: () => string;
+  localDevSession: () => LocalDevSessionModel | null;
+  localDevSessionEventCount: () => number;
   frameCount: () => number;
   dropped: () => number;
   connected: () => boolean;
@@ -979,7 +1041,10 @@ export type LiveArtifactHandle = {
  * (component body or `createRoot`) so the subscription is cleaned up. */
 export function createLiveArtifact(source: LiveSource, meta: LiveStreamMeta = {}): LiveArtifactHandle {
   const buffer = new LiveCausalBuffer(meta);
+  const localDevBuffer = new LiveLocalDevSessionBuffer(meta);
   const [artifactJson, setArtifactJson] = createSignal(buffer.artifactJson());
+  const [localDevSession, setLocalDevSession] = createSignal<LocalDevSessionModel | null>(localDevBuffer.session());
+  const [localDevSessionEventCount, setLocalDevSessionEventCount] = createSignal(localDevBuffer.count);
   const [frameCount, setFrameCount] = createSignal(0);
   const [dropped, setDropped] = createSignal(0);
   const [connected, setConnected] = createSignal(true);
@@ -991,13 +1056,18 @@ export function createLiveArtifact(source: LiveSource, meta: LiveStreamMeta = {}
       setFrameCount(buffer.size);
       setDropped(buffer.dropped);
     },
+    onLocalDevEvent: (event) => {
+      localDevBuffer.ingest(event);
+      setLocalDevSession(localDevBuffer.session());
+      setLocalDevSessionEventCount(localDevBuffer.count);
+    },
     onError: () => setConnected(false),
     onClose: () => setConnected(false),
   });
 
   onCleanup(unsubscribe);
 
-  return { artifactJson, frameCount, dropped, connected };
+  return { artifactJson, localDevSession, localDevSessionEventCount, frameCount, dropped, connected };
 }
 
 /** Extract a live-attach websocket URL from a `?live=<url>` query string. */

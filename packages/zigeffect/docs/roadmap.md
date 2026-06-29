@@ -389,11 +389,13 @@ This is the local-first sequence for making zigeffect useful as the development
 engine for local projects and standard-library work. It intentionally comes
 before hosting or broad distributed orchestration.
 
-Status on 2026-06-25: M72 through M74 are implemented in the workbench and
-`causal-dev-session`; M76 and M77 have local JSONL adapter docs/fixtures and a
-`bun run zigeffect:local-agent-gate` command. M75 has the local session-event
-parser/apply layer; the remaining live step is wiring those events through the
-collector WebSocket so the Agents tab updates during an active stream.
+Status on 2026-06-29: M72 through M77 are implemented in the workbench,
+`causal-dev-session`, and collector. Local session events have parser/apply
+coverage, Codex/Claude-style JSONL fixtures, a `bun run zigeffect:local-agent-gate`
+command, and a live collector WebSocket overlay (`POST /agent-feed` and
+`POST /agent-events`) so the Agents tab updates during an active stream. The
+remaining local-first step is a real local process launcher/runtime that feeds
+those endpoints from Codex, Claude Code, and zigeffect std tools.
 
 ### M72 - Local development session protocol
 
