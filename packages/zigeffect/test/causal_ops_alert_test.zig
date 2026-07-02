@@ -69,6 +69,30 @@ test "ops runbook json summarizes deployment retention and redacts secrets" {
     try std.testing.expect(std.mem.indexOf(u8, json, fx.causal_redaction_marker) != null);
 }
 
+test "ops runbook json escapes control bytes into parseable output" {
+    const json = try fx.formatCausalOpsRunbookJson(std.testing.allocator, .{
+        .deployment = .{
+            .service = "zigeffect",
+            .environment = "prod",
+            .region = "eu\x1bwest",
+            .cluster_id = "cluster-a",
+        },
+        .retention = .{
+            .max_events = 100,
+            .alert_threshold = 3,
+        },
+        .retained_events = 10,
+        .alert_count = 0,
+    });
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+}
+
 test "ops runbook json includes operator endpoint metadata" {
     const json = try fx.formatCausalOpsRunbookJson(std.testing.allocator, .{
         .deployment = .{

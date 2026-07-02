@@ -117,6 +117,22 @@ test "map causal event to deterministic nendb node and parent edge" {
     try std.testing.expectEqual(write.parent_edge.?.label_id, second.parent_edge.?.label_id);
 }
 
+test "nendb node properties escape control bytes into parseable json" {
+    var write = try fx.mapCausalEventToNendbWrite(std.testing.allocator, .{
+        .id = 7,
+        .kind = .effect_started,
+        .label = "ansi \x1b[31mred\x1b[0m label",
+    });
+    defer fx.deinitCausalNendbWrite(std.testing.allocator, &write);
+
+    try std.testing.expect(std.mem.indexOf(u8, write.node.properties, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, write.node.properties, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, write.node.properties, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("ansi \x1b[31mred\x1b[0m label", parsed.value.object.get("label").?.string);
+}
+
 test "nendb storage backend writes conformance events and keeps queryable history" {
     var fake = FakeNendbWriter.init(std.testing.allocator);
     defer fake.deinit();

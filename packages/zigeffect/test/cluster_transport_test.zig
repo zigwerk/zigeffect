@@ -65,6 +65,28 @@ test "transport request json round-trips" {
     try std.testing.expectEqual(@as(usize, 2), parsed.policy.max_retries);
 }
 
+test "transport request json escapes control bytes" {
+    const request = fx.ClusterTransportRequest{
+        .kind = .request,
+        .address = fx.entityAddress("counter", "transport-escape"),
+        .payload_type_name = "text",
+        .payload = "ansi \x1b[31mred\x1b[0m payload",
+        .redacted_detail = "escape check",
+        .idempotency_key = "transport-escape-key",
+        .policy = .{ .timeout_ms = 250, .max_retries = 2 },
+    };
+
+    const json = try fx.formatClusterTransportRequestJson(std.testing.allocator, request);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("ansi \x1b[31mred\x1b[0m payload", parsed.value.object.get("payload").?.string);
+}
+
 test "transport request json redacts auth credential while preserving trace and chunk metadata" {
     const request = fx.ClusterTransportRequest{
         .kind = .request,

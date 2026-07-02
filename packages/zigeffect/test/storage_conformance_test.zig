@@ -173,6 +173,51 @@ test "sql storage migration plan formats text and json" {
     try expectContains(json, "create_cluster_runner_leases");
 }
 
+test "storage schema catalog json escapes control bytes" {
+    const items = [_]fx.StorageSchemaDescriptor{.{
+        .adapter = .journal,
+        .record = .workflow_event,
+        .schema = "zigeffect.test.escape.v1",
+        .version = 1,
+        .description = "ansi \x1b[31mred\x1b[0m description",
+    }};
+
+    const json = try fx.formatStorageSchemaCatalogJson(std.testing.allocator, .{ .items = &items });
+    defer std.testing.allocator.free(json);
+
+    try expectContains(json, "\\u001b");
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+    const description = parsed.value.object.get("items").?.array.items[0].object.get("description").?.string;
+    try std.testing.expectEqualStrings("ansi \x1b[31mred\x1b[0m description", description);
+}
+
+test "sql storage migration plan json escapes control bytes" {
+    const statements = [_]fx.SqlStorageStatement{.{
+        .name = "create_escape_probe",
+        .adapter = .journal,
+        .kind = .create_table,
+        .sql = "CREATE TABLE escape_probe (c TEXT) -- \x1b[31m",
+    }};
+
+    const json = try fx.formatSqlStorageMigrationPlanJson(std.testing.allocator, .{
+        .dialect = .postgresql,
+        .schemas = &.{},
+        .statements = &statements,
+    });
+    defer std.testing.allocator.free(json);
+
+    try expectContains(json, "\\u001b");
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+    const sql = parsed.value.object.get("statements").?.array.items[0].object.get("sql").?.string;
+    try std.testing.expectEqualStrings("CREATE TABLE escape_probe (c TEXT) -- \x1b[31m", sql);
+}
+
 fn expectSqlStatement(plan: fx.SqlStorageMigrationPlan, name: []const u8) !void {
     for (plan.statements) |statement| {
         if (std.mem.eql(u8, statement.name, name)) return;

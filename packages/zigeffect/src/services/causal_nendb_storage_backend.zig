@@ -460,6 +460,8 @@ fn cloneEvent(allocator: Allocator, event: causal.CausalEvent) Allocator.Error!c
     errdefer if (owned.label.len > 0) allocator.free(owned.label);
     owned.type_name = try cloneSlice(allocator, event.type_name);
     errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
+    owned.layer_name = try cloneSlice(allocator, event.layer_name);
+    errdefer if (owned.layer_name.len > 0) allocator.free(owned.layer_name);
     owned.service_key = try cloneSlice(allocator, event.service_key);
     errdefer if (owned.service_key.len > 0) allocator.free(owned.service_key);
     owned.artifact_id = try cloneSlice(allocator, event.artifact_id);
@@ -480,6 +482,7 @@ fn cloneEvent(allocator: Allocator, event: causal.CausalEvent) Allocator.Error!c
 fn deinitEventStrings(allocator: Allocator, event: causal.CausalEvent) void {
     if (event.label.len > 0) allocator.free(event.label);
     if (event.type_name.len > 0) allocator.free(event.type_name);
+    if (event.layer_name.len > 0) allocator.free(event.layer_name);
     if (event.service_key.len > 0) allocator.free(event.service_key);
     if (event.artifact_id.len > 0) allocator.free(event.artifact_id);
     if (event.domain_entity_ref.len > 0) allocator.free(event.domain_entity_ref);
@@ -530,6 +533,7 @@ fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []c
             '\n' => try output.appendSlice(allocator, "\\n"),
             '\r' => try output.appendSlice(allocator, "\\r"),
             '\t' => try output.appendSlice(allocator, "\\t"),
+            0x00...0x08, 0x0b, 0x0c, 0x0e...0x1f => try output.print(allocator, "\\u{x:0>4}", .{byte}),
             else => try output.append(allocator, byte),
         }
     }
@@ -559,6 +563,8 @@ fn appendNodeCommonProperties(output: *std.ArrayList(u8), allocator: Allocator, 
     try appendOptionalJsonU64(output, allocator, event.scope_id);
     try output.appendSlice(allocator, ",\"layer_id\":");
     try appendOptionalJsonU64(output, allocator, event.layer_id);
+    try output.appendSlice(allocator, ",\"layer_name\":");
+    try appendJsonString(output, allocator, event.layer_name);
     try output.appendSlice(allocator, ",\"service_key\":");
     try appendJsonString(output, allocator, event.service_key);
     try output.appendSlice(allocator, ",\"resource_id\":");

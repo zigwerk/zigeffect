@@ -166,6 +166,42 @@ test "agent eval formats diff artifact link for remediation chains" {
     try std.testing.expect(std.mem.indexOf(u8, link, requested) != null);
 }
 
+test "agent eval diff artifact link json escapes control bytes" {
+    const policy = (fx.AgentInterventionPolicy{})
+        .withApplyEnabled(true)
+        .withKindPolicy(.interrupt_fiber, .auto_approve);
+    const invariants = fx.CausalInvariantBuilder.init().requireSuspendedFibersResolve();
+
+    var artifact = try fx.runAgentEvalWithDiffArtifact(std.testing.allocator, .{
+        .name = "interrupt hung fiber",
+        .baseline = &baseline,
+        .policy = policy,
+        .request = .{
+            .kind = .interrupt_fiber,
+            .run_id = 1,
+            .fiber_id = 9,
+            .reason = "eval interrupt",
+        },
+        .invariants = invariants,
+        .expect_improvement = true,
+    }, "baseline", "after-interrupt");
+    defer artifact.deinit();
+
+    const link = try fx.formatAgentEvalDiffArtifactLinkJson(std.testing.allocator, .{
+        .eval_name = "interrupt \x1b[31mhung\x1b[0m fiber",
+        .artifact_path = ".zig-cache/causal-artifacts/eval\x1bdiff.json",
+        .result = artifact.result,
+    });
+    defer std.testing.allocator.free(link);
+
+    try std.testing.expect(std.mem.indexOf(u8, link, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, link, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, link, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("interrupt \x1b[31mhung\x1b[0m fiber", parsed.value.object.get("eval_name").?.string);
+}
+
 const LinkedEvalArtifactCapture = struct {
     artifact_writes: usize = 0,
     link_writes: usize = 0,

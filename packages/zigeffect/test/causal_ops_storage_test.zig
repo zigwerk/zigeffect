@@ -150,6 +150,37 @@ test "ops artifact endpoint response gates and redacts event evidence" {
     try std.testing.expect(std.mem.indexOf(u8, allowed, "sentinel-secret") == null);
 }
 
+test "ops artifact endpoint response escapes control bytes in event evidence" {
+    var storage = fx.CausalNendbStorageBackendState.init(std.testing.allocator, noOpWriter(), .{});
+    defer storage.deinit();
+
+    var store = fx.CausalStore.init(std.testing.allocator);
+    store.attachBackend(storage.backend());
+    defer store.deinit();
+
+    _ = try store.record(.{
+        .kind = .resource_acquired,
+        .scope_id = 10,
+        .label = "ansi \x1b[31mred\x1b[0m resource",
+        .type_name = "Db",
+        .status = "success",
+    });
+
+    const json = try fx.formatCausalOpsArtifactResponseJson(std.testing.allocator, &storage, opsPolicy(), .{
+        .actor_id = "agent-1",
+        .scope_id = 10,
+    });
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+    const label = parsed.value.object.get("events").?.array.items[0].object.get("label").?.string;
+    try std.testing.expectEqualStrings("ansi \x1b[31mred\x1b[0m resource", label);
+}
+
 test "ops artifact http response wraps policy result with status code" {
     var storage = fx.CausalNendbStorageBackendState.init(std.testing.allocator, noOpWriter(), .{});
     defer storage.deinit();

@@ -67,6 +67,33 @@ test "cluster workflow command json round-trips" {
     try std.testing.expectEqual(@as(?fx.workflow.JournalSequence, 2), parsed.expected_next_sequence);
 }
 
+test "cluster workflow command json escapes control bytes" {
+    const command = fx.ClusterWorkflowCommand{
+        .kind = .append_event,
+        .event_kind = .timer_scheduled,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .workflow_name = "approval",
+        .name = "review \x1b[31mtimeout\x1b[0m",
+        .status = "scheduled",
+        .redacted_detail = "fire_at_ms=1200",
+        .idempotency_key = "timer:escape",
+        .now_ms = 1_000,
+        .timer_id = 55,
+        .expected_next_sequence = 2,
+    };
+
+    const json = try fx.formatClusterWorkflowCommandJson(std.testing.allocator, command);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("review \x1b[31mtimeout\x1b[0m", parsed.value.object.get("name").?.string);
+}
+
 test "cluster workflow result json round-trips" {
     const result = fx.ClusterWorkflowCommandResult{
         .kind = .fire_due_timers,

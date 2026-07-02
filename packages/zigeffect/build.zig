@@ -385,6 +385,34 @@ pub fn build(b: *std.Build) void {
     live_stream_example_step.dependOn(&live_stream_example.step);
     live_stream_example_step.dependOn(&run_live_stream_example_tests.step);
 
+    const multi_service_stream_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/multi_service_stream_example.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    multi_service_stream_example_module.addImport("zigeffect", zigeffect);
+
+    const multi_service_stream_example = b.addExecutable(.{
+        .name = "zigeffect-multi-service-stream-example",
+        .root_module = multi_service_stream_example_module,
+    });
+    // Installed so it can be piped directly:
+    //   ./zig-out/bin/zigeffect-multi-service-stream-example | bun .../hub/hub.ts
+    b.installArtifact(multi_service_stream_example);
+    const run_multi_service_stream_example = b.addRunArtifact(multi_service_stream_example);
+    const multi_service_stream_step = b.step("multi-service-stream", "Stream two services' interleaved causal NDJSON to stdout (hub feed)");
+    multi_service_stream_step.dependOn(&run_multi_service_stream_example.step);
+
+    const multi_service_stream_example_tests = b.addTest(.{
+        .name = "zigeffect-multi-service-stream-example-tests",
+        .root_module = multi_service_stream_example_module,
+    });
+    const run_multi_service_stream_example_tests = b.addRunArtifact(multi_service_stream_example_tests);
+
+    const multi_service_stream_example_step = b.step("multi-service-stream-example", "Compile and test the multi-service hub emitter example");
+    multi_service_stream_example_step.dependOn(&multi_service_stream_example.step);
+    multi_service_stream_example_step.dependOn(&run_multi_service_stream_example_tests.step);
+
     const self_improving_loop_example_module = b.createModule(.{
         .root_source_file = b.path("examples/self_improving_loop.zig"),
         .target = target,
@@ -1688,6 +1716,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_effect_state_example_tests.step);
     examples_step.dependOn(&live_stream_example.step);
     examples_step.dependOn(&run_live_stream_example_tests.step);
+    examples_step.dependOn(&multi_service_stream_example.step);
+    examples_step.dependOn(&run_multi_service_stream_example_tests.step);
     examples_step.dependOn(&self_improving_loop_example.step);
     examples_step.dependOn(&run_self_improving_loop_example_tests.step);
     examples_step.dependOn(&causal_readiness_example.step);

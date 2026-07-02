@@ -115,6 +115,8 @@ pub fn cloneCausalAsyncStreamEvent(allocator: Allocator, event: causal.CausalEve
     errdefer if (owned.label.len > 0) allocator.free(owned.label);
     owned.type_name = try cloneSlice(allocator, event.type_name);
     errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
+    owned.layer_name = try cloneSlice(allocator, event.layer_name);
+    errdefer if (owned.layer_name.len > 0) allocator.free(owned.layer_name);
     owned.service_key = try cloneSlice(allocator, event.service_key);
     errdefer if (owned.service_key.len > 0) allocator.free(owned.service_key);
     owned.artifact_id = try cloneSlice(allocator, event.artifact_id);
@@ -139,6 +141,7 @@ pub fn deinitCausalAsyncStreamEvent(allocator: Allocator, event: causal.CausalEv
 fn deinitEventStrings(allocator: Allocator, event: causal.CausalEvent) void {
     if (event.label.len > 0) allocator.free(event.label);
     if (event.type_name.len > 0) allocator.free(event.type_name);
+    if (event.layer_name.len > 0) allocator.free(event.layer_name);
     if (event.service_key.len > 0) allocator.free(event.service_key);
     if (event.artifact_id.len > 0) allocator.free(event.artifact_id);
     if (event.domain_entity_ref.len > 0) allocator.free(event.domain_entity_ref);

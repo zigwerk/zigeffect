@@ -57,3 +57,24 @@ test "semantic causal graph diff formats workbench artifact json" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"type_name\":\"db\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"added_lineage_edges\"") != null);
 }
+
+test "semantic causal graph diff json escapes control bytes" {
+    const before = [_]fx.CausalEvent{
+        .{ .kind = .run_started, .run_id = 1, .status = "started" },
+    };
+    const after = [_]fx.CausalEvent{
+        .{ .kind = .run_started, .run_id = 1, .status = "started" },
+    };
+
+    var diff = try fx.diffCausalGraphs(std.testing.allocator, &before, &after);
+    defer diff.deinit();
+
+    const json = try fx.formatCausalGraphDiffJson(std.testing.allocator, diff, "before\x1b.json", "after\x1b.json");
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+}

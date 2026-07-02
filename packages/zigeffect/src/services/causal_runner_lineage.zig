@@ -147,9 +147,13 @@ pub fn stitchCausalRunnerLineage(
             const cause_event_id = event.cause_event_id orelse continue;
             const source = findRunnerForEvent(traces, cause_event_id) orelse continue;
             if (source.trace_index == trace_index) continue;
+            const from_runner_id = try cloneSlice(allocator, source.runner_id);
+            errdefer if (from_runner_id.len > 0) allocator.free(from_runner_id);
+            const to_runner_id = try cloneSlice(allocator, trace.runner_id);
+            errdefer if (to_runner_id.len > 0) allocator.free(to_runner_id);
             try edges.append(allocator, .{
-                .from_runner_id = try cloneSlice(allocator, source.runner_id),
-                .to_runner_id = try cloneSlice(allocator, trace.runner_id),
+                .from_runner_id = from_runner_id,
+                .to_runner_id = to_runner_id,
                 .from_event_id = cause_event_id,
                 .to_event_id = event.id,
                 .edge_kind = "cause_event_id",
@@ -253,6 +257,7 @@ fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []c
             '\n' => try output.appendSlice(allocator, "\\n"),
             '\r' => try output.appendSlice(allocator, "\\r"),
             '\t' => try output.appendSlice(allocator, "\\t"),
+            0x00...0x08, 0x0b, 0x0c, 0x0e...0x1f => try output.print(allocator, "\\u{x:0>4}", .{byte}),
             else => try output.append(allocator, byte),
         }
     }
@@ -265,6 +270,8 @@ fn cloneEvent(allocator: Allocator, event: CausalEvent) Allocator.Error!CausalEv
     errdefer if (owned.label.len > 0) allocator.free(owned.label);
     owned.type_name = try cloneSlice(allocator, event.type_name);
     errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
+    owned.layer_name = try cloneSlice(allocator, event.layer_name);
+    errdefer if (owned.layer_name.len > 0) allocator.free(owned.layer_name);
     owned.service_key = try cloneSlice(allocator, event.service_key);
     errdefer if (owned.service_key.len > 0) allocator.free(owned.service_key);
     owned.artifact_id = try cloneSlice(allocator, event.artifact_id);
@@ -285,6 +292,7 @@ fn cloneEvent(allocator: Allocator, event: CausalEvent) Allocator.Error!CausalEv
 fn deinitEventStrings(allocator: Allocator, event: CausalEvent) void {
     if (event.label.len > 0) allocator.free(event.label);
     if (event.type_name.len > 0) allocator.free(event.type_name);
+    if (event.layer_name.len > 0) allocator.free(event.layer_name);
     if (event.service_key.len > 0) allocator.free(event.service_key);
     if (event.artifact_id.len > 0) allocator.free(event.artifact_id);
     if (event.domain_entity_ref.len > 0) allocator.free(event.domain_entity_ref);

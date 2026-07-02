@@ -13,6 +13,7 @@ const JsonLineRow = struct {
     fiber_id: ?u64,
     scope_id: ?u64,
     layer_id: ?u64,
+    layer_name: []const u8,
     service_key: []const u8,
     resource_id: ?u64,
     cause_event_id: ?u64,
@@ -49,6 +50,7 @@ test "formatCausalJsonLine emits schema-tagged escaped row" {
         .fiber_id = 99,
         .scope_id = 11,
         .layer_id = 12,
+        .layer_name = "persistence",
         .service_key = "Logger",
         .resource_id = 13,
         .cause_event_id = 41,
@@ -80,6 +82,7 @@ test "formatCausalJsonLine emits schema-tagged escaped row" {
     try std.testing.expectEqual(@as(?u64, 99), parsed.value.fiber_id);
     try std.testing.expectEqual(@as(?u64, 11), parsed.value.scope_id);
     try std.testing.expectEqual(@as(?u64, 12), parsed.value.layer_id);
+    try std.testing.expectEqualStrings("persistence", parsed.value.layer_name);
     try std.testing.expectEqualStrings("Logger", parsed.value.service_key);
     try std.testing.expectEqual(@as(?u64, 13), parsed.value.resource_id);
     try std.testing.expectEqual(@as(?u64, 41), parsed.value.cause_event_id);
@@ -137,6 +140,37 @@ test "json lines backend writes stored sanitized conformance events" {
     try std.testing.expectEqualStrings("log_recorded", second.value.kind);
     try std.testing.expectEqual(ids.completed, third.value.id);
     try std.testing.expectEqualStrings("run_completed", third.value.kind);
+}
+
+test "json lines backend escapes control bytes into parseable rows" {
+    var output = std.ArrayList(u8).empty;
+    defer output.deinit(std.testing.allocator);
+
+    var backend_state = fx.CausalJsonLinesBackendState.init(std.testing.allocator, &output, .{});
+
+    var store = fx.CausalStore.init(std.testing.allocator);
+    store.attachBackend(backend_state.backend());
+    defer store.deinit();
+
+    _ = try store.record(.{
+        .kind = .run_started,
+        .layer_name = "layer\x08name",
+        .label = "ansi \x1b[31mred\x1b[0m label",
+    });
+
+    try std.testing.expectEqual(@as(u64, 1), backend_state.writtenEventCount());
+    try std.testing.expectEqual(@as(u64, 0), backend_state.failedEventCount());
+
+    const row_json = try expectSingleJsonLine(output.items);
+    try std.testing.expect(std.mem.indexOf(u8, row_json, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOf(u8, row_json, "\\u0008") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, row_json, 0x1b) == null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, row_json, 0x08) == null);
+
+    var parsed = try parseJsonLine(row_json);
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("ansi \x1b[31mred\x1b[0m label", parsed.value.label);
+    try std.testing.expectEqualStrings("layer\x08name", parsed.value.layer_name);
 }
 
 test "json lines backend max_bytes fails closed without partial rows" {

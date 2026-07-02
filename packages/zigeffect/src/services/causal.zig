@@ -32,6 +32,10 @@ pub const CausalStoreOptions = struct {
     max_events: ?usize = null,
     sampling: CausalSamplingPolicy = .{},
     max_event_string_bytes: ?usize = null,
+    // Default service identity stamped onto every recorded event whose own
+    // `service_key` is empty. The slice is NOT cloned by the store; it must
+    // outlive the store (a string literal is the normal case).
+    service_key: []const u8 = "",
 };
 
 pub const CausalEventKind = enum {
@@ -222,6 +226,7 @@ pub const CausalEvent = struct {
     fiber_id: ?u64 = null,
     scope_id: ?u64 = null,
     layer_id: ?u64 = null,
+    layer_name: []const u8 = "",
     service_key: []const u8 = "",
     resource_id: ?u64 = null,
     cause_event_id: ?u64 = null,
@@ -590,6 +595,8 @@ fn cloneEventForStore(
     errdefer if (owned.label.len > 0) allocator.free(owned.label);
     owned.type_name = try redactAndBoundCausalText(allocator, event.type_name, max_event_string_bytes, truncated_field_count);
     errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
+    owned.layer_name = try redactAndBoundCausalText(allocator, event.layer_name, max_event_string_bytes, truncated_field_count);
+    errdefer if (owned.layer_name.len > 0) allocator.free(owned.layer_name);
     owned.service_key = try redactAndBoundCausalText(allocator, event.service_key, max_event_string_bytes, truncated_field_count);
     errdefer if (owned.service_key.len > 0) allocator.free(owned.service_key);
     owned.artifact_id = try redactAndBoundCausalText(allocator, event.artifact_id, max_event_string_bytes, truncated_field_count);
@@ -613,6 +620,8 @@ fn cloneEvent(allocator: Allocator, event: CausalEvent) Allocator.Error!CausalEv
     errdefer if (owned.label.len > 0) allocator.free(owned.label);
     owned.type_name = try redactCausalText(allocator, event.type_name);
     errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
+    owned.layer_name = try redactCausalText(allocator, event.layer_name);
+    errdefer if (owned.layer_name.len > 0) allocator.free(owned.layer_name);
     owned.service_key = try redactCausalText(allocator, event.service_key);
     errdefer if (owned.service_key.len > 0) allocator.free(owned.service_key);
     owned.artifact_id = try redactCausalText(allocator, event.artifact_id);
@@ -633,6 +642,7 @@ fn cloneEvent(allocator: Allocator, event: CausalEvent) Allocator.Error!CausalEv
 fn deinitEventStrings(allocator: Allocator, event: CausalEvent) void {
     if (event.label.len > 0) allocator.free(event.label);
     if (event.type_name.len > 0) allocator.free(event.type_name);
+    if (event.layer_name.len > 0) allocator.free(event.layer_name);
     if (event.service_key.len > 0) allocator.free(event.service_key);
     if (event.artifact_id.len > 0) allocator.free(event.artifact_id);
     if (event.domain_entity_ref.len > 0) allocator.free(event.domain_entity_ref);
@@ -784,6 +794,7 @@ pub const CausalStore = struct {
     log_seen_count: u64 = 0,
     metric_seen_count: u64 = 0,
     span_seen_count: u64 = 0,
+    default_service_key: []const u8 = "",
 
     pub fn init(allocator: Allocator) CausalStore {
         return initWithOptions(allocator, .{});
@@ -795,11 +806,18 @@ pub const CausalStore = struct {
             .max_events = options.max_events,
             .sampling = options.sampling,
             .max_event_string_bytes = options.max_event_string_bytes,
+            .default_service_key = options.service_key,
         };
     }
 
     pub fn initBounded(allocator: Allocator, max_events: usize) CausalStore {
         return initWithOptions(allocator, .{ .max_events = max_events });
+    }
+
+    // Set the service identity once instead of tagging every `record` call.
+    // See CausalStoreOptions.service_key for the slice-lifetime contract.
+    pub fn initForService(allocator: Allocator, service_key: []const u8) CausalStore {
+        return initWithOptions(allocator, .{ .service_key = service_key });
     }
 
     pub fn deinit(self: *CausalStore) void {
@@ -896,9 +914,12 @@ pub const CausalStore = struct {
             return event_id;
         }
 
+        var stamped = event;
+        if (stamped.service_key.len == 0) stamped.service_key = self.default_service_key;
+
         var owned = try cloneEventForStore(
             self.allocator,
-            event,
+            stamped,
             self.max_event_string_bytes,
             &self.truncated_field_count,
         );
@@ -1454,6 +1475,7 @@ fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []c
             '\n' => try output.appendSlice(allocator, "\\n"),
             '\r' => try output.appendSlice(allocator, "\\r"),
             '\t' => try output.appendSlice(allocator, "\\t"),
+            0x00...0x08, 0x0b, 0x0c, 0x0e...0x1f => try output.print(allocator, "\\u{x:0>4}", .{byte}),
             else => try output.append(allocator, byte),
         }
     }
@@ -1525,6 +1547,8 @@ pub fn formatCausalJson(allocator: Allocator, store: *const CausalStore) Allocat
         try appendOptionalJsonU64(&output, allocator, event.scope_id);
         try output.appendSlice(allocator, ",\n      \"layer_id\": ");
         try appendOptionalJsonU64(&output, allocator, event.layer_id);
+        try output.appendSlice(allocator, ",\n      \"layer_name\": ");
+        try appendJsonString(&output, allocator, event.layer_name);
         try output.appendSlice(allocator, ",\n      \"service_key\": ");
         try appendJsonString(&output, allocator, event.service_key);
         try output.appendSlice(allocator, ",\n      \"resource_id\": ");
@@ -1631,6 +1655,9 @@ fn appendDotEventTooltip(output: *std.ArrayList(u8), allocator: Allocator, event
     try appendDotOptionalU64Tooltip(output, allocator, "scope", event.scope_id, &wrote);
     try appendDotOptionalU64Tooltip(output, allocator, "fiber", event.fiber_id, &wrote);
     try appendDotOptionalU64Tooltip(output, allocator, "layer", event.layer_id, &wrote);
+    if (event.layer_name.len > 0) {
+        try appendDotStringTooltip(output, allocator, "layer_name", event.layer_name, &wrote);
+    }
     try appendDotOptionalU64Tooltip(output, allocator, "resource", event.resource_id, &wrote);
     try appendDotOptionalU64Tooltip(output, allocator, "cause", event.cause_event_id, &wrote);
     try appendDotOptionalU64Tooltip(output, allocator, "schedule", event.schedule_id, &wrote);

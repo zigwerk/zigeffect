@@ -316,6 +316,28 @@ test "workflow event json includes schema metadata and optional ids" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"idempotency_key\":\"event-1\"") != null);
 }
 
+test "workflow event json escapes control bytes" {
+    const event = fx.workflow.WorkflowEvent{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "ansi \x1b[31mred\x1b[0m workflow",
+        .status = "running",
+        .idempotency_key = "escape-start",
+    };
+
+    const json = try fx.workflow.formatWorkflowEventJson(std.testing.allocator, event);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("ansi \x1b[31mred\x1b[0m workflow", parsed.value.object.get("name").?.string);
+}
+
 test "workflow event text is readable for agents and CLIs" {
     const event = fx.workflow.WorkflowEvent{
         .sequence = 2,
@@ -998,6 +1020,49 @@ test "workflow inspector formats event inspection reports" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"events\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"step_failed\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"redacted_detail\":\"exit.cause.failure:Boom\"") != null);
+}
+
+test "workflow inspector json escapes control bytes" {
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .name = "ansi \x1b[31mred\x1b[0m workflow",
+            .status = "running",
+            .idempotency_key = "escape-inspect",
+        },
+    };
+    var report = try fx.workflow.inspectExecution(std.testing.allocator, &events, null);
+    defer report.deinit();
+
+    const json = try fx.workflow.formatInspectReportJson(std.testing.allocator, &report, &events);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+}
+
+test "workflow checkpoint json escapes control bytes" {
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8, .idempotency_key = "start" },
+        .{ .sequence = 2, .kind = .activity_scheduled, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .attempt = 1, .name = "charge \x1b[31mcard\x1b[0m" },
+    };
+    var state = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &events);
+    defer state.deinit();
+
+    const json = try fx.workflow.formatWorkflowCheckpointJson(std.testing.allocator, &state);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
 }
 
 test "workflow causal mapping links journal events to causal ids" {

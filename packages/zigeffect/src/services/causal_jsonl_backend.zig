@@ -81,6 +81,7 @@ fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []c
             '\n' => try output.appendSlice(allocator, "\\n"),
             '\r' => try output.appendSlice(allocator, "\\r"),
             '\t' => try output.appendSlice(allocator, "\\t"),
+            0x00...0x08, 0x0b, 0x0c, 0x0e...0x1f => try output.print(allocator, "\\u{x:0>4}", .{byte}),
             else => try output.append(allocator, byte),
         }
     }
@@ -117,6 +118,8 @@ pub fn formatCausalJsonLine(allocator: Allocator, event: causal.CausalEvent) All
     try appendOptionalJsonU64(&output, allocator, event.scope_id);
     try output.appendSlice(allocator, ",\"layer_id\":");
     try appendOptionalJsonU64(&output, allocator, event.layer_id);
+    try output.appendSlice(allocator, ",\"layer_name\":");
+    try appendJsonString(&output, allocator, event.layer_name);
     try output.appendSlice(allocator, ",\"service_key\":");
     try appendJsonString(&output, allocator, event.service_key);
     try output.appendSlice(allocator, ",\"resource_id\":");
