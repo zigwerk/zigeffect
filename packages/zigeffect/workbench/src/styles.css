@@ -747,6 +747,47 @@ button.layer-chip:hover {
   color: var(--text-2);
 }
 
+/* ---- cross-service boundary jump links (inspector, hub mode) ---- */
+.boundary-links {
+  display: grid;
+  gap: 4px;
+}
+.boundary-link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-1);
+  font-size: var(--fs-micro);
+  text-align: left;
+  cursor: pointer;
+}
+.boundary-link:hover {
+  border-color: var(--accent);
+  color: var(--text-0);
+}
+.bl-service {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bl-id,
+.bl-kind {
+  font-family: var(--font-mono);
+  color: var(--text-2);
+}
+.bl-jump {
+  color: var(--accent);
+}
+
 .stage {
   min-width: 0;
   min-height: 0;

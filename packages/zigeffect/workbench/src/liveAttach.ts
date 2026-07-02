@@ -48,6 +48,9 @@ export type LiveFrame = {
   scope_id?: number | null;
   resource_id?: number | null;
   type_name?: string;
+  // Cross-service correlation: one id stamped on both sides of a service
+  // boundary (origin's outbound event + callee's inbound run/scope).
+  boundary_id?: number | null;
 };
 
 export type LiveCommandRequest = {
@@ -267,6 +270,7 @@ export function frameToEventRecord(frame: LiveFrame): UnknownRecord {
     scope_id: frame.scope_id ?? null,
     resource_id: frame.resource_id ?? null,
     type_name: frame.type_name ?? "",
+    boundary_id: frame.boundary_id ?? null,
   };
 }
 

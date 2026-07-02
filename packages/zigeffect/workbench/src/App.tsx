@@ -18,7 +18,8 @@ import {
 } from "./causalArtifact";
 import { loadPayload, type WorkbenchSession } from "./workbenchBridge";
 import { createLiveArtifact, liveUrlFromSearch, webSocketLiveSource } from "./liveAttach";
-import { createHubServices, hubUrlFromSearch, hubWebSocketSource } from "./liveServices";
+import { correlateEndpoint, createHubServices, hubUrlFromSearch, hubWebSocketSource } from "./liveServices";
+import { parseCorrelation } from "./hub/protocol";
 import { ServicesRail } from "./services/ServicesRail";
 import { PinnedPanes } from "./services/PinnedPanes";
 import { applyThemeToDocument, lens, setLens, theme, toggleLens, toggleTheme, type Lens } from "./theme";
@@ -87,7 +88,9 @@ export function App() {
   // Hub mode: `?hub=<ws-url>` fans in MANY services. The ServicesRail lists the live
   // roster; focusing a service feeds ITS accumulated artifact into the same pipeline.
   const hubUrl = hubUrlFromSearch(locationSearch);
-  const hubServices = hubUrl ? createHubServices(hubWebSocketSource(hubUrl), { maxFrames: 1000 }) : null;
+  // maxFrames matches the hub's per-service retention (5000): a smaller client
+  // cap would evict backfilled frames that boundary jump links still target.
+  const hubServices = hubUrl ? createHubServices(hubWebSocketSource(hubUrl), { maxFrames: 5000 }) : null;
   const emptyArtifact = JSON.stringify({ schema: "zigeffect.causal.v1", schema_version: 1, event_taxonomy_version: 1, events: [] });
 
   // Every focus change goes through here: event ids restart per service, so a
@@ -252,6 +255,38 @@ export function App() {
     const current = model();
     const event = selectedEvent();
     return current && event ? queryCommandsForEvent(event, current.artifactPath) : [];
+  });
+
+  // Cross-service correlation (hub mode): when the selected event carries a
+  // boundary_id, ask the hub where else that id was observed — the hub indexes
+  // ALL services, including ones this client never subscribed to. The source is
+  // a fresh object per recompute so the fetch re-runs when the selection moves
+  // (even to the same boundary id in another service) and when a new
+  // boundary-tagged frame arrives (late other-side occurrences appear).
+  const boundaryQuery = createMemo(() => {
+    if (!hubUrl || !hubServices) {
+      return null;
+    }
+    hubServices.boundaryActivity();
+    hubServices.focused();
+    const event = selectedEvent();
+    const boundaryId = event?.boundaryId;
+    return boundaryId ? { boundaryId } : null;
+  });
+  const [boundaryOccurrences] = createResource(boundaryQuery, async (query) => {
+    const endpoint = hubUrl ? correlateEndpoint(hubUrl, query.boundaryId) : null;
+    if (!endpoint) {
+      return [];
+    }
+    try {
+      const response = await fetch(endpoint);
+      if (!response.ok) {
+        return [];
+      }
+      return parseCorrelation(await response.json());
+    } catch {
+      return [];
+    }
   });
 
   const dimmedIds = createMemo<Set<string> | null>(() => {
@@ -469,6 +504,20 @@ export function App() {
                   commands={selectedCommands()}
                   copiedCommand={copiedCommand()}
                   runMeta={runMeta()}
+                  boundary={
+                    hubServices
+                      ? {
+                          // While a refetch is in flight the resource still
+                          // returns the PREVIOUS boundary's occurrences — hide
+                          // them rather than flash wrong jump links.
+                          occurrences: boundaryOccurrences.loading ? [] : boundaryOccurrences() ?? [],
+                          onJump: (serviceKey, eventId) => {
+                            focusService(serviceKey);
+                            setSelectedId(eventId);
+                          },
+                        }
+                      : null
+                  }
                   onCopy={copyCommand}
                   onSelect={setSelectedId}
                 />

@@ -11,6 +11,38 @@ export type ServiceStatus = "running" | "idle" | "stopped";
 
 export type ServiceLayer = { layer_id: number; layer_name: string };
 
+/** One side of a service boundary: where a shared boundary_id was observed.
+ * Served by the hub's GET /correlate?boundary= endpoint. */
+export type BoundaryOccurrence = {
+  service_key: string;
+  event_id: number;
+  event_kind: string;
+  label: string;
+};
+
+/** Parse a /correlate response body; malformed entries are dropped, never cast. */
+export function parseCorrelation(data: unknown): BoundaryOccurrence[] {
+  if (typeof data !== "object" || data === null) {
+    return [];
+  }
+  const record = data as Record<string, unknown>;
+  if (!Array.isArray(record.occurrences)) {
+    return [];
+  }
+  return record.occurrences.filter((occurrence): occurrence is BoundaryOccurrence => {
+    if (typeof occurrence !== "object" || occurrence === null) {
+      return false;
+    }
+    const entry = occurrence as Record<string, unknown>;
+    return (
+      typeof entry.service_key === "string" &&
+      typeof entry.event_id === "number" &&
+      typeof entry.event_kind === "string" &&
+      typeof entry.label === "string"
+    );
+  });
+}
+
 export type ServiceSummary = {
   service_key: string;
   status: ServiceStatus;

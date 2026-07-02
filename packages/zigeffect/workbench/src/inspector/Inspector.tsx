@@ -1,5 +1,6 @@
 import { For, Show } from "solid-js";
 import type { CausalEvent, QueryCommand } from "../causalArtifact";
+import type { BoundaryOccurrence } from "../hub/protocol";
 import type { TraceFindingMark } from "../trace/traceModel";
 import { Badge, CommandList, EmptyState, Meta } from "../primitives";
 
@@ -16,6 +17,12 @@ export function Inspector(props: {
   commands: QueryCommand[];
   copiedCommand: string | null;
   runMeta: Array<{ label: string; value: string }>;
+  /** Cross-service correlation (hub mode): where else the selected event's
+   * boundary_id was observed; jumping promotes that service to focus. */
+  boundary?: {
+    occurrences: BoundaryOccurrence[];
+    onJump: (serviceKey: string, eventId: string) => void;
+  } | null;
   onCopy: (command: string) => void;
   onSelect: (id: string) => void;
 }) {
@@ -68,6 +75,7 @@ export function Inspector(props: {
                 <Show when={event().layerName || event().layerId}>
                   <Meta label="layer" value={event().layerName || `layer ${event().layerId}`} />
                 </Show>
+                <Show when={event().boundaryId}>{(value) => <Meta label="boundary" value={value()} />}</Show>
                 <Show when={event().runId}>{(value) => <Meta label="run" value={value()} />}</Show>
                 <Show when={event().scopeId}>{(value) => <Meta label="scope" value={value()} />}</Show>
                 <Show when={event().fiberId}>{(value) => <Meta label="fiber" value={value()} />}</Show>
@@ -76,6 +84,35 @@ export function Inspector(props: {
                 <Show when={event().spanId}>{(value) => <Meta label="span" value={value()} />}</Show>
               </dl>
             </section>
+
+            <Show
+              when={
+                props.boundary &&
+                event().boundaryId &&
+                crossServiceOccurrences(props.boundary.occurrences, event()).length > 0
+              }
+            >
+              <section class="insp-section">
+                <h4>Boundary · crosses services</h4>
+                <div class="boundary-links">
+                  <For each={crossServiceOccurrences(props.boundary?.occurrences ?? [], event())}>
+                    {(occurrence) => (
+                      <button
+                        type="button"
+                        class="boundary-link"
+                        title={`jump to ${occurrence.service_key} #${occurrence.event_id}`}
+                        onClick={() => props.boundary?.onJump(occurrence.service_key, String(occurrence.event_id))}
+                      >
+                        <span class="bl-service">{occurrence.service_key}</span>
+                        <span class="bl-id">#{occurrence.event_id}</span>
+                        <span class="bl-kind">{occurrence.event_kind}</span>
+                        <span class="bl-jump">→</span>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </section>
+            </Show>
 
             <Show when={hasRefs(event())}>
               <section class="insp-section">
@@ -148,4 +185,11 @@ function RefPill(props: { label: string; value: string }) {
 
 function hasRefs(event: CausalEvent): boolean {
   return Boolean(event.artifactId || event.domainEntityRef || event.dataSubjectRef || event.schemaRef);
+}
+
+/** The OTHER sides of the boundary — the selected event itself is not a jump target. */
+function crossServiceOccurrences(occurrences: BoundaryOccurrence[], event: CausalEvent): BoundaryOccurrence[] {
+  return occurrences.filter(
+    (occurrence) => !(occurrence.service_key === event.serviceKey && String(occurrence.event_id) === event.idText),
+  );
 }

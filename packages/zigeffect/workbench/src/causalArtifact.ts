@@ -13,6 +13,7 @@ export type CausalEvent = {
   fiberId: string | null;
   scopeId: string | null;
   layerId: string | null;
+  boundaryId: string | null;
   traceId: string | null;
   spanId: string | null;
   layerName: string;
@@ -2225,6 +2226,7 @@ function normalizeEvent(raw: UnknownRecord, index: number): CausalEvent {
     fiberId: nullableIdValue(raw.fiber_id),
     scopeId: nullableIdValue(raw.scope_id),
     layerId: nullableIdValue(raw.layer_id),
+    boundaryId: nullableIdValue(raw.boundary_id),
     traceId: nullableIdValue(raw.trace_id),
     spanId: nullableIdValue(raw.span_id),
     layerName: textValue(raw.layer_name, ""),

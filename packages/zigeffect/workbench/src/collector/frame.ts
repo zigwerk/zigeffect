@@ -103,5 +103,6 @@ export function causalLineToFrame(line: string, sequence: number): LiveFrame | n
     scope_id: safeIdOrNull(event.scope_id),
     resource_id: safeIdOrNull(event.resource_id),
     type_name: typeof event.type_name === "string" ? redactFrameText(event.type_name) : "",
+    boundary_id: safeIdOrNull(event.boundary_id),
   };
 }

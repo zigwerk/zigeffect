@@ -1257,6 +1257,7 @@ function minimalEvent(idText: string): CausalEvent {
     fiberId: null,
     scopeId: null,
     layerId: null,
+    boundaryId: null,
     traceId: null,
     spanId: null,
     layerName: "",

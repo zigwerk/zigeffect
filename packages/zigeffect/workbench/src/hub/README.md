@@ -46,7 +46,25 @@ curl -XPOST --data-binary @events.ndjson 'http://127.0.0.1:4600/ingest?service=p
   `service_key`, falling back to the `?service=` tag when a line has none.
 - `POST /register {service_key}` / `POST /deregister {service_key}` — liveness.
 - `GET /services` — `{services: ServiceSummary[]}` roster.
-- `GET /health` — `{ok, services, clients}`.
+- `GET /correlate?boundary=<id>` — everywhere that boundary id was observed,
+  across ALL services: `{boundary_id, occurrences: [{service_key, event_id,
+  event_kind, label}]}`. The inspector's cross-service jump links use this.
+- `GET /health` — `{ok, services, clients, rejected_lines, boundaries}`. Always
+  open, even when a token is configured.
+
+### Environment
+- `PORT` (4600) · `HUB_SERVICE` — default service_key for untagged stdin lines.
+- `HUB_HOST` (127.0.0.1) — set `0.0.0.0` to accept emitters from other machines
+  on a trusted dev network. This is local tooling: no TLS, no users.
+- `HUB_TOKEN` — when set, every endpoint but `/health` requires it:
+  `authorization: Bearer <token>` for HTTP, `?token=<token>` for the WebSocket
+  and browser GETs (append it to the `?hub=` URL and the workbench carries it
+  through to `/correlate`). Comparison is timing-safe.
+- `HUB_PERSIST=<path>.json` — snapshot the hub's state (frames, sequences,
+  layers, boundary index) atomically after activity and on SIGINT/SIGTERM;
+  restored on boot with services `stopped` and **sequences continuing** (a
+  regression would read as a service restart to clients). An incompatible or
+  corrupt snapshot is ignored, never fatal.
 
 ## Point the workbench at it
 

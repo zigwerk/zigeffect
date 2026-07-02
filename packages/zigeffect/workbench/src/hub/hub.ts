@@ -12,13 +12,18 @@
 // regardless of whether that service used a bounded CausalStore.
 
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { causalLineToFrame, type LiveFrame } from "../collector/frame";
 import {
   parseHubClientMessage,
+  type BoundaryOccurrence,
   type HubMessage,
   type ServiceStatus,
   type ServiceSummary,
 } from "./protocol";
+
+export type { BoundaryOccurrence };
 
 /** Frames with an empty engine service_key are grouped under this bucket. */
 export const UNNAMED_SERVICE = "(unnamed)";
@@ -28,6 +33,8 @@ export type HubOptions = {
   maxFramesPerService?: number;
   /** Max distinct services; lines for new keys past this are rejected. */
   maxServices?: number;
+  /** Max distinct boundary ids indexed for cross-service correlation. */
+  maxBoundaries?: number;
   /** Max bytes accepted by one POST /ingest body (413 past this). */
   maxIngestBytes?: number;
   /** Max bytes for a single NDJSON line; longer lines are rejected. */
@@ -38,6 +45,9 @@ export type HubOptions = {
   stoppedAfterMs?: number;
   /** Stopped for this long → the service is garbage-collected entirely. */
   gcAfterMs?: number;
+  /** When set, every endpoint except /health requires this token —
+   * HTTP via `authorization: Bearer <token>`, WS/browser via `?token=`. */
+  token?: string;
   /** Clock, injectable for deterministic tests. */
   now?: () => number;
 };
@@ -46,6 +56,10 @@ export type HubOptions = {
 const MAX_LAYERS_PER_SERVICE = 256;
 /** Distinct service keys one client may hold subscription state for. */
 const MAX_SUBSCRIPTIONS_PER_CLIENT = 1024;
+/** Occurrences retained per boundary id (a buggy emitter reusing one id can't grow it without bound). */
+const MAX_OCCURRENCES_PER_BOUNDARY = 32;
+/** The workbench runs on a different port; local tooling, so a blanket allow is fine. */
+const CORS_HEADERS = { "access-control-allow-origin": "*" } as const;
 
 type ServiceState = {
   serviceKey: string;
@@ -82,18 +96,101 @@ export type Hub = {
   clientCount: () => number;
   /** Lines dropped so far (unparseable, oversized, or past the service cap). */
   rejectedLineCount: () => number;
+  /** Everywhere a boundary id was observed, across all services. */
+  correlate: (boundaryId: number) => BoundaryOccurrence[];
+  /** Monotonic counter bumped on every state mutation — lets the persistence
+   * loop skip writes when nothing changed. */
+  stateVersion: () => number;
+  /** Serializable state for HUB_PERSIST (frames, sequences, layers, boundaries). */
+  snapshotState: () => HubSnapshot;
+  /** Restore a snapshot taken by snapshotState. Services come back "stopped"
+   * with a fresh liveness clock; sequences CONTINUE from their saved values
+   * (a regression would make clients treat the resume as a service restart).
+   * Returns false (and restores nothing) on a version mismatch. */
+  restoreState: (snapshot: unknown) => boolean;
+};
+
+export type HubSnapshot = {
+  version: 1;
+  services: Array<{
+    service_key: string;
+    frames: LiveFrame[];
+    sequence: number;
+    total_frames: number;
+    layers: Array<[number, string]>;
+  }>;
+  boundaries: Array<[number, Array<BoundaryOccurrence & { sequence?: number }>]>;
 };
 
 export function createHub(options: HubOptions = {}): Hub {
   const maxFrames = Math.max(1, options.maxFramesPerService ?? 5000);
   const maxServices = Math.max(1, options.maxServices ?? 512);
+  const maxBoundaries = Math.max(1, options.maxBoundaries ?? 4096);
   const maxIngestBytes = Math.max(1, options.maxIngestBytes ?? 32 * 1024 * 1024);
   const maxLineBytes = Math.max(1, options.maxLineBytes ?? 1024 * 1024);
   const idleAfterMs = options.idleAfterMs ?? 15_000;
   const stoppedAfterMs = options.stoppedAfterMs ?? 60_000;
   const gcAfterMs = options.gcAfterMs ?? stoppedAfterMs * 2;
+  const token = options.token;
+  // An empty token is a misconfiguration trap, not a secret: requests without
+  // credentials still 401 (auth LOOKS enabled) while `?token=` with an empty
+  // value passes. Refuse loudly instead.
+  if (token !== undefined && token.length === 0) {
+    throw new Error("hub token is set but empty — unset it for open access or provide a real secret");
+  }
   const now = options.now ?? (() => Date.now());
   let rejectedLines = 0;
+  let stateVersion = 0;
+
+  // Cross-service correlation: boundary_id → everywhere it was observed. Each
+  // stored occurrence remembers its frame's hub sequence so correlate() can
+  // drop entries whose frame has left the service's ring buffer — a jump link
+  // must never point at an event the hub can no longer deliver.
+  type StoredBoundaryOccurrence = BoundaryOccurrence & { sequence: number };
+  const boundaries = new Map<number, StoredBoundaryOccurrence[]>();
+
+  function indexBoundary(serviceKey: string, frame: LiveFrame): void {
+    const boundaryId = frame.boundary_id;
+    if (typeof boundaryId !== "number") {
+      return;
+    }
+    let occurrences = boundaries.get(boundaryId);
+    if (!occurrences) {
+      if (boundaries.size >= maxBoundaries) {
+        return; // bounded like everything else in the hub
+      }
+      occurrences = [];
+      boundaries.set(boundaryId, occurrences);
+    }
+    // A restarted service re-records the same event ids — replace, don't stack.
+    const existing = occurrences.findIndex(
+      (occurrence) => occurrence.service_key === serviceKey && occurrence.event_id === frame.event_id,
+    );
+    const occurrence: StoredBoundaryOccurrence = {
+      service_key: serviceKey,
+      event_id: frame.event_id,
+      event_kind: frame.event_kind,
+      label: frame.label ?? "",
+      sequence: frame.sequence,
+    };
+    if (existing >= 0) {
+      occurrences[existing] = occurrence;
+    } else if (occurrences.length < MAX_OCCURRENCES_PER_BOUNDARY) {
+      occurrences.push(occurrence);
+    }
+  }
+
+  // Token gate (H8). Hashing both sides normalizes lengths for timingSafeEqual;
+  // /health stays open so probes work without credentials.
+  const digest = (value: string) => createHash("sha256").update(value).digest();
+  function authorized(request: Request, url: URL): boolean {
+    if (token === undefined) {
+      return true;
+    }
+    const header = request.headers.get("authorization");
+    const candidate = header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : url.searchParams.get("token");
+    return candidate !== null && candidate !== undefined && timingSafeEqual(digest(candidate), digest(token));
+  }
 
   const services = new Map<string, ServiceState>();
   // Per client: serviceKey → { subscribed, watermark }. The watermark (last
@@ -233,6 +330,8 @@ export function createHub(options: HubOptions = {}): Hub {
       }
     }
     service.lastFrameAt = now();
+    indexBoundary(serviceKey, frame);
+    stateVersion += 1;
 
     const wasRunning = service.status === "running";
     service.status = "running";
@@ -276,6 +375,7 @@ export function createHub(options: HubOptions = {}): Hub {
     // does), else a re-registered quiet service keeps its stale lastFrameAt and
     // the next tick flips it straight back to stopped / garbage-collects it.
     service.lastFrameAt = now();
+    stateVersion += 1;
     const wasRunning = service.status === "running";
     service.status = "running";
     if (created) {
@@ -293,6 +393,7 @@ export function createHub(options: HubOptions = {}): Hub {
     }
     if (service.status !== "stopped") {
       service.status = "stopped";
+      stateVersion += 1;
       broadcastStatus(serviceKey, "stopped");
       broadcastRoster();
     }
@@ -333,7 +434,19 @@ export function createHub(options: HubOptions = {}): Hub {
           subscriptions.delete(serviceKey);
         }
       }
+      // A GC'd service's boundary occurrences go with it (its frames are gone).
+      for (const [boundaryId, occurrences] of boundaries) {
+        const kept = occurrences.filter((occurrence) => occurrence.service_key !== serviceKey);
+        if (kept.length === 0) {
+          boundaries.delete(boundaryId);
+        } else if (kept.length !== occurrences.length) {
+          boundaries.set(boundaryId, kept);
+        }
+      }
       changed = true;
+    }
+    if (expired.length > 0) {
+      stateVersion += 1;
     }
     if (changed) {
       broadcastRoster();
@@ -405,29 +518,53 @@ export function createHub(options: HubOptions = {}): Hub {
     },
   };
 
+  function json(data: unknown, status = 200): Response {
+    return new Response(JSON.stringify(data), {
+      status,
+      headers: { "content-type": "application/json", ...CORS_HEADERS },
+    });
+  }
+
+  function plain(message: string, status: number): Response {
+    return new Response(message, { status, headers: CORS_HEADERS });
+  }
+
   function fetch(request: Request, server: Server<undefined>): Response | Promise<Response> | undefined {
     const url = new URL(request.url);
+
+    // /health stays open (probes carry no credentials); everything else is
+    // token-gated when a token is configured.
+    if (url.pathname === "/health") {
+      return json({
+        ok: true,
+        services: services.size,
+        clients: clients.size,
+        rejected_lines: rejectedLines,
+        boundaries: boundaries.size,
+      });
+    }
+    if (!authorized(request, url)) {
+      return plain("unauthorized", 401);
+    }
 
     if (url.pathname === "/live") {
       if (server.upgrade(request)) {
         return undefined;
       }
-      return new Response("expected a websocket upgrade", { status: 426 });
+      return plain("expected a websocket upgrade", 426);
     }
 
     if (url.pathname === "/ingest" && request.method === "POST") {
       const declaredBytes = Number(request.headers.get("content-length") ?? 0);
       if (declaredBytes > maxIngestBytes) {
-        return new Response("ingest body too large", { status: 413 });
+        return plain("ingest body too large", 413);
       }
       const defaultServiceKey = url.searchParams.get("service") ?? undefined;
       return request.text().then((body) => {
         if (body.length > maxIngestBytes) {
-          return new Response("ingest body too large", { status: 413 });
+          return plain("ingest body too large", 413);
         }
-        return new Response(JSON.stringify({ ingested: ingestBody(body, defaultServiceKey) }), {
-          headers: { "content-type": "application/json" },
-        });
+        return json({ ingested: ingestBody(body, defaultServiceKey) });
       });
     }
 
@@ -436,15 +573,15 @@ export function createHub(options: HubOptions = {}): Hub {
         (body) => {
           const serviceKey = typeof body === "object" && body !== null ? (body as Record<string, unknown>).service_key : undefined;
           if (typeof serviceKey !== "string" || serviceKey.length === 0) {
-            return new Response("service_key required", { status: 400 });
+            return plain("service_key required", 400);
           }
           const summary = register(serviceKey);
           if (!summary) {
-            return new Response("service cap reached", { status: 503 });
+            return plain("service cap reached", 503);
           }
-          return new Response(JSON.stringify(summary), { headers: { "content-type": "application/json" } });
+          return json(summary);
         },
-        () => new Response("invalid body", { status: 400 }),
+        () => plain("invalid body", 400),
       );
     }
 
@@ -453,26 +590,126 @@ export function createHub(options: HubOptions = {}): Hub {
         (body) => {
           const serviceKey = typeof body === "object" && body !== null ? (body as Record<string, unknown>).service_key : undefined;
           if (typeof serviceKey !== "string" || serviceKey.length === 0) {
-            return new Response("service_key required", { status: 400 });
+            return plain("service_key required", 400);
           }
-          return new Response(JSON.stringify({ stopped: deregister(serviceKey) }), { headers: { "content-type": "application/json" } });
+          return json({ stopped: deregister(serviceKey) });
         },
-        () => new Response("invalid body", { status: 400 }),
+        () => plain("invalid body", 400),
       );
     }
 
     if (url.pathname === "/services" && request.method === "GET") {
-      return new Response(JSON.stringify({ services: roster() }), { headers: { "content-type": "application/json" } });
+      return json({ services: roster() });
     }
 
-    if (url.pathname === "/health") {
-      return new Response(
-        JSON.stringify({ ok: true, services: services.size, clients: clients.size, rejected_lines: rejectedLines }),
-        { headers: { "content-type": "application/json" } },
-      );
+    if (url.pathname === "/correlate" && request.method === "GET") {
+      // Number(null) and Number("") both coerce to 0 — a missing/empty param
+      // must be a 400, not a successful query for boundary 0.
+      const rawBoundary = url.searchParams.get("boundary");
+      const boundaryId = rawBoundary === null || rawBoundary.trim() === "" ? Number.NaN : Number(rawBoundary);
+      if (!Number.isSafeInteger(boundaryId) || boundaryId < 0) {
+        return plain("boundary query param required", 400);
+      }
+      return json({ boundary_id: boundaryId, occurrences: correlate(boundaryId) });
     }
 
-    return new Response("not found", { status: 404 });
+    return plain("not found", 404);
+  }
+
+  function correlate(boundaryId: number): BoundaryOccurrence[] {
+    const occurrences = boundaries.get(boundaryId);
+    if (!occurrences) {
+      return [];
+    }
+    // Lazily prune occurrences whose frame was ring-evicted (or whose service
+    // is gone) — GC pruning in tick() only covers whole-service death.
+    const live = occurrences.filter((occurrence) => {
+      const service = services.get(occurrence.service_key);
+      if (!service) {
+        return false;
+      }
+      const floor = service.frames[0]?.sequence ?? service.sequence + 1;
+      return occurrence.sequence >= floor;
+    });
+    if (live.length === 0) {
+      boundaries.delete(boundaryId);
+    } else if (live.length !== occurrences.length) {
+      boundaries.set(boundaryId, live);
+    }
+    return live.map(({ sequence: _sequence, ...occurrence }) => occurrence);
+  }
+
+  function snapshotState(): HubSnapshot {
+    return {
+      version: 1,
+      services: [...services.values()].map((service) => ({
+        service_key: service.serviceKey,
+        frames: service.frames,
+        sequence: service.sequence,
+        total_frames: service.totalFrames,
+        layers: [...service.layers.entries()],
+      })),
+      boundaries: [...boundaries.entries()],
+    };
+  }
+
+  function restoreState(snapshot: unknown): boolean {
+    if (typeof snapshot !== "object" || snapshot === null) {
+      return false;
+    }
+    const record = snapshot as Record<string, unknown>;
+    if (record.version !== 1 || !Array.isArray(record.services) || !Array.isArray(record.boundaries)) {
+      return false;
+    }
+    // Build into locals first — a malformed snapshot (the file is ours, but
+    // truncated writes happen) must not leave the hub half-restored.
+    const restoredServices = new Map<string, ServiceState>();
+    const restoredBoundaries = new Map<number, StoredBoundaryOccurrence[]>();
+    try {
+      for (const entry of record.services as HubSnapshot["services"]) {
+        if (typeof entry?.service_key !== "string" || entry.service_key.length === 0 || !Array.isArray(entry.frames)) {
+          return false;
+        }
+        restoredServices.set(entry.service_key, {
+          serviceKey: entry.service_key,
+          // An emitter's next frame flips this back to running.
+          status: "stopped",
+          frames: entry.frames,
+          // Sequences must CONTINUE — a regression reads as a service restart
+          // to clients, which would wrongly reset their buffers.
+          sequence: typeof entry.sequence === "number" ? entry.sequence : entry.frames.length,
+          totalFrames: typeof entry.total_frames === "number" ? entry.total_frames : entry.frames.length,
+          // Fresh liveness clock: a restored service gets a full stopped→GC
+          // window from restart instead of being collected on the first sweep.
+          lastFrameAt: now(),
+          layers: new Map(entry.layers ?? []),
+        });
+      }
+      for (const [boundaryId, occurrences] of record.boundaries as HubSnapshot["boundaries"]) {
+        if (typeof boundaryId !== "number" || !Array.isArray(occurrences)) {
+          return false;
+        }
+        // A missing sequence (older snapshot) must not be prunable-by-default:
+        // treat it as newest so correlate() keeps it until its service goes.
+        restoredBoundaries.set(
+          boundaryId,
+          occurrences.map((occurrence) => ({
+            ...occurrence,
+            sequence: typeof occurrence.sequence === "number" ? occurrence.sequence : Number.MAX_SAFE_INTEGER,
+          })),
+        );
+      }
+    } catch {
+      return false;
+    }
+    for (const [key, state] of restoredServices) {
+      services.set(key, state);
+    }
+    for (const [boundaryId, occurrences] of restoredBoundaries) {
+      boundaries.set(boundaryId, occurrences);
+    }
+    stateVersion += 1;
+    return true;
   }
 
   return {
@@ -488,19 +725,69 @@ export function createHub(options: HubOptions = {}): Hub {
     tick,
     clientCount: () => clients.size,
     rejectedLineCount: () => rejectedLines,
+    correlate,
+    stateVersion: () => stateVersion,
+    snapshotState,
+    restoreState,
   };
 }
 
 // `service-a | service-b | … | bun hub.ts` — serve + route stdin NDJSON by service_key.
+// Env: PORT (4600), HUB_HOST (127.0.0.1; 0.0.0.0 accepts remote emitters),
+// HUB_TOKEN (token-gate every endpoint but /health), HUB_PERSIST (snapshot path),
+// HUB_SERVICE (default service_key for untagged stdin lines).
 if (import.meta.main) {
   const port = Number(process.env.PORT ?? 4600);
-  const hub = createHub();
-  const server = Bun.serve({ port, fetch: hub.fetch, websocket: hub.websocket });
-  const sweep = setInterval(() => hub.tick(Date.now()), 5000);
+  const host = process.env.HUB_HOST ?? "127.0.0.1";
+  const persistPath = process.env.HUB_PERSIST;
+  if (process.env.HUB_TOKEN !== undefined && process.env.HUB_TOKEN.length === 0) {
+    // eslint-disable-next-line no-console
+    console.error("HUB_TOKEN is set but empty (e.g. an unset shell variable) — refusing to start with a bypassable gate");
+    process.exit(1);
+  }
+  const hub = createHub({ token: process.env.HUB_TOKEN });
+
+  if (persistPath) {
+    try {
+      const raw = readFileSync(persistPath, "utf8");
+      const restored = hub.restoreState(JSON.parse(raw));
+      // eslint-disable-next-line no-console
+      console.log(restored ? `restored hub state from ${persistPath}` : `ignored incompatible snapshot at ${persistPath}`);
+    } catch {
+      // First run (no snapshot yet) or unreadable file — start empty, never crash.
+    }
+  }
+  let savedVersion = hub.stateVersion();
+  const saveSnapshot = (): void => {
+    if (!persistPath || hub.stateVersion() === savedVersion) {
+      return;
+    }
+    const tmp = `${persistPath}.tmp`;
+    try {
+      writeFileSync(tmp, JSON.stringify(hub.snapshotState()));
+      renameSync(tmp, persistPath); // atomic on the same filesystem
+      savedVersion = hub.stateVersion();
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error(`hub snapshot write failed: ${String(error)}`);
+    }
+  };
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      saveSnapshot();
+      process.exit(0);
+    });
+  }
+
+  const server = Bun.serve({ port, hostname: host, fetch: hub.fetch, websocket: hub.websocket });
+  const sweep = setInterval(() => {
+    hub.tick(Date.now());
+    saveSnapshot();
+  }, 5000);
   sweep.unref?.();
   // eslint-disable-next-line no-console
   console.log(
-    `zigeffect causal hub on http://127.0.0.1:${server.port}  (ws: /live, ingest: POST /ingest?service=, roster: GET /services)`,
+    `zigeffect causal hub on http://${host}:${server.port}  (ws: /live, ingest: POST /ingest?service=, roster: GET /services)`,
   );
 
   const defaultServiceKey = process.env.HUB_SERVICE ?? undefined;

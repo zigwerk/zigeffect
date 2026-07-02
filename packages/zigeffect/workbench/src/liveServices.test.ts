@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createRoot } from "solid-js";
-import { createHubServices, hubUrlFromSearch, type HubSource, type HubSubscriber } from "./liveServices";
-import type { HubClientMessage, ServiceSummary } from "./hub/protocol";
+import { correlateEndpoint, createHubServices, hubUrlFromSearch, type HubSource, type HubSubscriber } from "./liveServices";
+import { parseCorrelation, type HubClientMessage, type ServiceSummary } from "./hub/protocol";
 import type { LiveFrame } from "./liveAttach";
 
 function frame(id: number, serviceKey: string): LiveFrame {
@@ -102,6 +102,31 @@ test("hubUrlFromSearch extracts the ?hub= url", () => {
   expect(hubUrlFromSearch("?hub=ws://127.0.0.1:4600/live")).toBe("ws://127.0.0.1:4600/live");
   expect(hubUrlFromSearch("?live=ws://x/live")).toBeNull();
   expect(hubUrlFromSearch("")).toBeNull();
+});
+
+test("correlateEndpoint derives the hub's HTTP endpoint from the ?hub= WS url, keeping the token", () => {
+  expect(correlateEndpoint("ws://127.0.0.1:4600/live", "7")).toBe("http://127.0.0.1:4600/correlate?boundary=7");
+  expect(correlateEndpoint("wss://hub.local:4600/live", "7")).toBe("https://hub.local:4600/correlate?boundary=7");
+  expect(correlateEndpoint("ws://127.0.0.1:4600/live?token=s3cret", "7")).toBe(
+    "http://127.0.0.1:4600/correlate?boundary=7&token=s3cret",
+  );
+  expect(correlateEndpoint("not a url", "7")).toBeNull();
+});
+
+test("parseCorrelation keeps well-formed occurrences and drops junk", () => {
+  const body = {
+    boundary_id: 7,
+    occurrences: [
+      { service_key: "ledger", event_id: 2, event_kind: "scope_opened", label: "post entry" },
+      { service_key: "bad" }, // missing fields
+      "junk",
+    ],
+  };
+  expect(parseCorrelation(body)).toEqual([
+    { service_key: "ledger", event_id: 2, event_kind: "scope_opened", label: "post entry" },
+  ]);
+  expect(parseCorrelation(null)).toEqual([]);
+  expect(parseCorrelation({ occurrences: "nope" })).toEqual([]);
 });
 
 test("a sequence regression (service restart) resets the buffer instead of blending two runs", () => {

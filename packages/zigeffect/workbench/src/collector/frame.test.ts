@@ -137,3 +137,10 @@ test("structural ids + type_name survive the mapping, so live analysis matches a
   expect(frame!.type_name).toBe("DbPool");
   expect(isLiveFrame(frame)).toBe(true);
 });
+
+test("boundary_id survives the mapping (cross-service correlation)", () => {
+  const frame = causalLineToFrame(JSON.stringify({ id: 5, kind: "effect_started", boundary_id: 7 }), 1);
+  expect(frame!.boundary_id).toBe(7);
+  const none = causalLineToFrame(JSON.stringify({ id: 6, kind: "run_started" }), 2);
+  expect(none!.boundary_id).toBeNull();
+});

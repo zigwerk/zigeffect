@@ -98,6 +98,26 @@ export function hubUrlFromSearch(search: string): string | null {
   return url && url.length > 0 ? url : null;
 }
 
+/** Derive the hub's HTTP /correlate endpoint from its `?hub=` WebSocket URL —
+ * ws→http (wss→https), any `?token=` carried over (H8 auth uses the query
+ * carrier for browser requests). Returns null for an unparseable hub URL. */
+export function correlateEndpoint(hubUrl: string, boundaryId: string): string | null {
+  try {
+    const url = new URL(hubUrl);
+    url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+    url.pathname = "/correlate";
+    const token = url.searchParams.get("token");
+    url.search = "";
+    url.searchParams.set("boundary", boundaryId);
+    if (token) {
+      url.searchParams.set("token", token);
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 // ── Reactive multi-service registry ──────────────────────────────────────────
 export type HubServicesHandle = {
   /** Reactive roster (auto-discovered services with status + layers). */
@@ -116,6 +136,9 @@ export type HubServicesHandle = {
   /** Frames the hub evicted before this client could receive them (reactive);
    * > 0 means the visible trace starts mid-run. */
   droppedFrames: (serviceKey: string) => number;
+  /** Bumped whenever a subscribed frame carries a boundary_id — a cheap signal
+   * for "the correlation index may have new occurrences, refetch". */
+  boundaryActivity: () => number;
 };
 
 type ServiceBuffer = {
@@ -133,6 +156,7 @@ export function createHubServices(source: HubSource, meta: LiveStreamMeta = {}):
   const [connected, setConnected] = createSignal(true);
   const [focused, setFocused] = createSignal<string | null>(null);
   const [pinned, setPinned] = createSignal<string[]>([]);
+  const [boundaryActivity, setBoundaryActivity] = createSignal(0);
 
   const buffers = new Map<string, ServiceBuffer>();
   const subscribed = new Set<string>();
@@ -171,6 +195,9 @@ export function createHubServices(source: HubSource, meta: LiveStreamMeta = {}):
       entry.lastSequence = frame.sequence;
       entry.buffer.ingest(frame);
       entry.bump();
+      if (typeof frame.boundary_id === "number") {
+        setBoundaryActivity((value) => value + 1);
+      }
     },
     onServiceStatus: (serviceKey, status) => {
       setServices((prev) => prev.map((service) => (service.service_key === serviceKey ? { ...service, status } : service)));
@@ -245,5 +272,6 @@ export function createHubServices(source: HubSource, meta: LiveStreamMeta = {}):
       return entry.buffer.size;
     },
     droppedFrames: (serviceKey) => ensureBuffer(serviceKey).dropped(),
+    boundaryActivity,
   };
 }

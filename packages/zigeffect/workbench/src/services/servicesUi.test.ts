@@ -45,3 +45,18 @@ test("the pinned-pane surfaces are styled with the token system", () => {
   expect(source).toContain(".pin-btn.pinned {");
   expect(source).toContain("button.layer-chip:hover {");
 });
+
+test("cross-service boundary links: inspector renders jump targets, App fetches /correlate", () => {
+  const inspector = readFileSync(new URL("../inspector/Inspector.tsx", import.meta.url), "utf8");
+  expect(inspector).toContain('label="boundary"');
+  expect(inspector).toContain("crossServiceOccurrences"); // the selected event itself is never a jump target
+  expect(inspector).toContain('class="boundary-link"');
+
+  const app = appSource();
+  expect(app).toContain("correlateEndpoint");
+  expect(app).toContain("parseCorrelation");
+  // Jumping promotes the other service through the same selection-clearing path.
+  expect(app).toContain("onJump: (serviceKey, eventId) => {");
+
+  expect(stylesSource()).toContain(".boundary-link {");
+});
