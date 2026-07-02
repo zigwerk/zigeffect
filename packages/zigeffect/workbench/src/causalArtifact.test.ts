@@ -588,6 +588,24 @@ test("filterEvents supports text kind and status filters", () => {
   expect(filterEvents(model.events, { status: "failure" }).map((event) => event.idText)).toEqual(["8", "9"]);
 });
 
+test("filterEvents text search matches layer_name and service_key (rail chip drill-down)", () => {
+  const artifact = JSON.stringify({
+    schema: "zigeffect.causal.v1",
+    schema_version: 1,
+    event_taxonomy_version: 1,
+    events: [
+      { id: 1, kind: "run_started", status: "started", service_key: "payments-api" },
+      { id: 2, kind: "resource_acquired", status: "success", layer_id: 1, layer_name: "persistence", service_key: "payments-api" },
+      { id: 3, kind: "service_required", status: "missing", layer_id: 2, layer_name: "integration", service_key: "payments-api" },
+    ],
+  });
+  const model = deriveWorkbenchModel(parseArtifactJson(artifact), { artifactPath: "hub" });
+
+  expect(filterEvents(model.events, { text: "persistence" }).map((event) => event.idText)).toEqual(["2"]);
+  expect(filterEvents(model.events, { text: "integration" }).map((event) => event.idText)).toEqual(["3"]);
+  expect(filterEvents(model.events, { text: "payments-api" }).length).toBe(3);
+});
+
 test("queryCommandsForEvent generates copyable causal-query commands", () => {
   const model = deriveWorkbenchModel(parseArtifactJson(sampleArtifact), {
     artifactPath: ".zig-cache/causal-artifacts/zigeffect-causal-dogfood.json",
@@ -1238,8 +1256,11 @@ function minimalEvent(idText: string): CausalEvent {
     parentId: null,
     fiberId: null,
     scopeId: null,
+    layerId: null,
     traceId: null,
     spanId: null,
+    layerName: "",
+    serviceKey: "",
     artifactId: "",
     domainEntityRef: "",
     dataSubjectRef: "",

@@ -91,5 +91,17 @@ export function causalLineToFrame(line: string, sequence: number): LiveFrame | n
     parent_id: safeIdOrNull(event.parent_id),
     finding_kind: null,
     dashboard_priority: derivePriority(event),
+    // Service + layer identity — carried through so the workbench can group
+    // live frames by service (multi-service discovery) and by layer.
+    service_key: typeof event.service_key === "string" ? redactFrameText(event.service_key) : "",
+    layer_id: safeIdOrNull(event.layer_id),
+    layer_name: typeof event.layer_name === "string" ? redactFrameText(event.layer_name) : "",
+    // Raw structural ids + type name, so live-mode analysis (resource-leak /
+    // pending-fiber findings, lane grouping) matches the same events on disk.
+    run_id: safeIdOrNull(event.run_id),
+    fiber_id: safeIdOrNull(event.fiber_id),
+    scope_id: safeIdOrNull(event.scope_id),
+    resource_id: safeIdOrNull(event.resource_id),
+    type_name: typeof event.type_name === "string" ? redactFrameText(event.type_name) : "",
   };
 }

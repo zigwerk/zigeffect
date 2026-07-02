@@ -61,6 +61,27 @@ test("frameToEventRecord maps wire fields onto canonical artifact keys", () => {
   expect(record.lane).toBe("fiber");
 });
 
+test("frameToEventRecord carries structural ids + type_name so live findings match artifact findings", () => {
+  const record = frameToEventRecord(
+    frame({
+      sequence: 5,
+      event_id: 100,
+      event_kind: "resource_acquired",
+      status: "success",
+      run_id: 1,
+      fiber_id: 7,
+      scope_id: 3,
+      resource_id: 9,
+      type_name: "DbPool",
+    }),
+  );
+  expect(record.run_id).toBe(1);
+  expect(record.fiber_id).toBe(7);
+  expect(record.scope_id).toBe(3);
+  expect(record.resource_id).toBe(9);
+  expect(record.type_name).toBe("DbPool");
+});
+
 test("isLiveFrame / parseFrameMessage accept valid frames and reject junk", () => {
   expect(isLiveFrame(sampleFrames[0])).toBe(true);
   expect(isLiveFrame({ sequence: 1 })).toBe(false);

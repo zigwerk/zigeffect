@@ -35,6 +35,19 @@ export type LiveFrame = {
   parent_id?: number | null;
   finding_kind?: string | null;
   dashboard_priority?: string | null;
+  // service + layer identity carried from the engine (already emitted by
+  // formatCausalJsonLine); enables multi-service discovery + layer grouping.
+  service_key?: string;
+  layer_id?: number | null;
+  layer_name?: string;
+  // Raw structural ids + type name. Without these, live-mode analysis diverges
+  // from artifact mode: resource-leak findings match on scope/type identity and
+  // all-null values make ANY finalize suppress EVERY leak finding.
+  run_id?: number | null;
+  fiber_id?: number | null;
+  scope_id?: number | null;
+  resource_id?: number | null;
+  type_name?: string;
 };
 
 export type LiveCommandRequest = {
@@ -246,6 +259,14 @@ export function frameToEventRecord(frame: LiveFrame): UnknownRecord {
     lane: frame.lane ?? null,
     finding_kind: frame.finding_kind ?? null,
     dashboard_priority: frame.dashboard_priority ?? null,
+    layer_id: frame.layer_id ?? null,
+    layer_name: frame.layer_name ?? "",
+    service_key: frame.service_key ?? "",
+    run_id: frame.run_id ?? null,
+    fiber_id: frame.fiber_id ?? null,
+    scope_id: frame.scope_id ?? null,
+    resource_id: frame.resource_id ?? null,
+    type_name: frame.type_name ?? "",
   };
 }
 

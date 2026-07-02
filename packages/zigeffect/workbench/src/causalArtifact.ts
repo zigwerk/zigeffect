@@ -12,8 +12,11 @@ export type CausalEvent = {
   parentId: string | null;
   fiberId: string | null;
   scopeId: string | null;
+  layerId: string | null;
   traceId: string | null;
   spanId: string | null;
+  layerName: string;
+  serviceKey: string;
   artifactId: string;
   domainEntityRef: string;
   dataSubjectRef: string;
@@ -2221,8 +2224,11 @@ function normalizeEvent(raw: UnknownRecord, index: number): CausalEvent {
     parentId: nullableIdValue(raw.parent_id),
     fiberId: nullableIdValue(raw.fiber_id),
     scopeId: nullableIdValue(raw.scope_id),
+    layerId: nullableIdValue(raw.layer_id),
     traceId: nullableIdValue(raw.trace_id),
     spanId: nullableIdValue(raw.span_id),
+    layerName: textValue(raw.layer_name, ""),
+    serviceKey: textValue(raw.service_key, ""),
     artifactId: textValue(raw.artifact_id, ""),
     domainEntityRef: textValue(raw.domain_entity_ref, ""),
     dataSubjectRef: textValue(raw.data_subject_ref, ""),
@@ -2251,6 +2257,10 @@ function searchableEventText(event: CausalEvent): string {
     event.status,
     event.label,
     event.typeName,
+    // Layer + service identity: lets the rail's layer chips drive the text
+    // filter (drill down service → layer).
+    event.layerName,
+    event.serviceKey,
     event.redactedDetail,
     event.runId,
     event.parentId,
