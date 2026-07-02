@@ -231,6 +231,11 @@ pub const CausalEvent = struct {
     resource_id: ?u64 = null,
     cause_event_id: ?u64 = null,
     schedule_id: ?u64 = null,
+    // Cross-service correlation: one id stamped on both sides of a service
+    // boundary — the origin allocates it (nextBoundaryId) and records it on its
+    // outbound event; the callee receives it over the transport and records it
+    // on its inbound run/scope events.
+    boundary_id: ?u64 = null,
     artifact_id: []const u8 = "",
     domain_entity_ref: []const u8 = "",
     data_subject_ref: []const u8 = "",
@@ -782,6 +787,7 @@ pub const CausalStore = struct {
     next_layer_id_value: u64 = 1,
     next_resource_id_value: u64 = 1,
     next_schedule_id_value: u64 = 1,
+    next_boundary_id_value: u64 = 1,
     events: std.ArrayList(CausalEvent) = .empty,
     backend: ?CausalBackend = null,
     backend_failure_count: u64 = 0,
@@ -894,6 +900,16 @@ pub const CausalStore = struct {
         defer self.mutex.unlock();
         const id = self.next_schedule_id_value;
         self.next_schedule_id_value += 1;
+        return id;
+    }
+
+    // Allocate a boundary id on the ORIGIN side of a cross-service call; the
+    // callee must receive it over the transport and record the same value.
+    pub fn nextBoundaryId(self: *CausalStore) u64 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        const id = self.next_boundary_id_value;
+        self.next_boundary_id_value += 1;
         return id;
     }
 
@@ -1557,6 +1573,8 @@ pub fn formatCausalJson(allocator: Allocator, store: *const CausalStore) Allocat
         try appendOptionalJsonU64(&output, allocator, event.cause_event_id);
         try output.appendSlice(allocator, ",\n      \"schedule_id\": ");
         try appendOptionalJsonU64(&output, allocator, event.schedule_id);
+        try output.appendSlice(allocator, ",\n      \"boundary_id\": ");
+        try appendOptionalJsonU64(&output, allocator, event.boundary_id);
         try output.appendSlice(allocator, ",\n      \"artifact_id\": ");
         try appendJsonString(&output, allocator, event.artifact_id);
         try output.appendSlice(allocator, ",\n      \"domain_entity_ref\": ");
@@ -1661,6 +1679,7 @@ fn appendDotEventTooltip(output: *std.ArrayList(u8), allocator: Allocator, event
     try appendDotOptionalU64Tooltip(output, allocator, "resource", event.resource_id, &wrote);
     try appendDotOptionalU64Tooltip(output, allocator, "cause", event.cause_event_id, &wrote);
     try appendDotOptionalU64Tooltip(output, allocator, "schedule", event.schedule_id, &wrote);
+    try appendDotOptionalU64Tooltip(output, allocator, "boundary", event.boundary_id, &wrote);
     try appendDotOptionalU64Tooltip(output, allocator, "trace", event.trace_id, &wrote);
     try appendDotOptionalU64Tooltip(output, allocator, "span", event.span_id, &wrote);
     if (event.service_key.len > 0) {

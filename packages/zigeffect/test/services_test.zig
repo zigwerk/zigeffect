@@ -381,6 +381,31 @@ test "causal store stamps its default service key onto events without one" {
     try std.testing.expectEqualStrings("auditor", snapshot.events[1].service_key);
 }
 
+test "causal store allocates boundary ids and snapshots them on events" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    try std.testing.expectEqual(@as(u64, 1), store.nextBoundaryId());
+    try std.testing.expectEqual(@as(u64, 2), store.nextBoundaryId());
+
+    _ = try store.record(.{ .kind = .effect_started, .status = "started", .boundary_id = 42 });
+    _ = try store.record(.{ .kind = .run_started, .status = "started" });
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+
+    // The boundary id survives the store's clone; unset stays null.
+    try std.testing.expectEqual(@as(u64, 42), snapshot.events[0].boundary_id.?);
+    try std.testing.expectEqual(@as(?u64, null), snapshot.events[1].boundary_id);
+
+    // And the saved artifact emits it — the workbench's cross-service jump
+    // links depend on this field being on disk, not just in memory.
+    const json = try fx.formatCausalJson(std.testing.allocator, &store);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"boundary_id\": 42") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"boundary_id\": null") != null);
+}
+
 test "bounded causal store keeps newest events and reports dropped count" {
     var store = fx.CausalStore.initBounded(std.testing.allocator, 2);
     defer store.deinit();

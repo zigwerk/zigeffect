@@ -15,6 +15,11 @@
 const std = @import("std");
 const fx = @import("zigeffect");
 
+// One id on both sides of the payments-api → ledger call. In a real deployment
+// the origin allocates it (store.nextBoundaryId()) and the callee receives it
+// over the transport; here both scenario builders share the constant.
+const shared_boundary_id: u64 = 7;
+
 fn drainTap(allocator: std.mem.Allocator, tap: *fx.causal_hub_backend.CausalNdjsonTapState) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
@@ -40,6 +45,9 @@ fn buildPaymentsNdjson(allocator: std.mem.Allocator) ![]u8 {
     const run = try store.record(.{ .kind = .run_started, .run_id = run_id, .status = "started", .label = "payments run" });
     const scope = try store.record(.{ .kind = .scope_opened, .run_id = run_id, .scope_id = scope_id, .parent_id = run, .status = "opened", .label = "request scope" });
     _ = try store.record(.{ .kind = .service_required, .run_id = run_id, .scope_id = scope_id, .parent_id = scope, .layer_id = integration_layer, .layer_name = "integration", .status = "missing", .label = "PaymentGateway" });
+    // The cross-service call: this boundary id reappears on ledger's inbound
+    // scope, so the workbench inspector can jump payments-api → ledger.
+    _ = try store.record(.{ .kind = .effect_started, .run_id = run_id, .scope_id = scope_id, .parent_id = scope, .boundary_id = shared_boundary_id, .status = "started", .label = "post ledger entry" });
     _ = try store.record(.{ .kind = .resource_acquired, .run_id = run_id, .scope_id = scope_id, .parent_id = scope, .layer_id = persistence_layer, .layer_name = "persistence", .status = "success", .label = "primary db" });
     _ = try store.record(.{ .kind = .scope_closed, .run_id = run_id, .scope_id = scope_id, .status = "closed", .label = "request scope" });
     _ = try store.record(.{ .kind = .run_completed, .run_id = run_id, .status = "success", .label = "payments run" });
@@ -63,7 +71,9 @@ fn buildLedgerNdjson(allocator: std.mem.Allocator) ![]u8 {
     const scope_id = store.nextScopeId();
 
     const run = try store.record(.{ .kind = .run_started, .run_id = run_id, .status = "started", .label = "ledger run" });
-    const scope = try store.record(.{ .kind = .scope_opened, .run_id = run_id, .scope_id = scope_id, .parent_id = run, .status = "opened", .label = "post entry" });
+    // Inbound side of payments-api's "post ledger entry" call (same boundary id,
+    // received over the transport in a real deployment).
+    const scope = try store.record(.{ .kind = .scope_opened, .run_id = run_id, .scope_id = scope_id, .parent_id = run, .boundary_id = shared_boundary_id, .status = "opened", .label = "post entry" });
     _ = try store.record(.{ .kind = .resource_acquired, .run_id = run_id, .scope_id = scope_id, .parent_id = scope, .layer_id = persistence_layer, .layer_name = "persistence", .status = "success", .label = "ledger db" });
     _ = try store.record(.{ .kind = .schedule_decision, .run_id = run_id, .parent_id = run, .layer_id = resilience_layer, .layer_name = "resilience", .status = "exhausted", .label = "retry policy" });
     _ = try store.record(.{ .kind = .scope_closed, .run_id = run_id, .scope_id = scope_id, .status = "closed", .label = "post entry" });
@@ -122,22 +132,32 @@ test "buildMultiServiceNdjson interleaves two service_key-tagged streams for the
 
     var payments_lines: usize = 0;
     var ledger_lines: usize = 0;
+    var payments_boundary_lines: usize = 0;
+    var ledger_boundary_lines: usize = 0;
     var it = std.mem.tokenizeScalar(u8, ndjson, '\n');
     while (it.next()) |line| {
         try std.testing.expect(line[0] == '{' and line[line.len - 1] == '}');
+        const has_boundary = std.mem.indexOf(u8, line, "\"boundary_id\":7") != null;
         // Every line carries a service identity — stamped by initForService,
         // not by per-event fields.
         if (std.mem.indexOf(u8, line, "\"service_key\":\"payments-api\"") != null) {
             payments_lines += 1;
+            if (has_boundary) payments_boundary_lines += 1;
         } else if (std.mem.indexOf(u8, line, "\"service_key\":\"ledger\"") != null) {
             ledger_lines += 1;
+            if (has_boundary) ledger_boundary_lines += 1;
         } else {
             return error.LineWithoutServiceKey;
         }
     }
-    // run + scope + 2 mid events + close + complete, per service.
-    try std.testing.expectEqual(@as(usize, 6), payments_lines);
+    // payments: run + scope + missing service + boundary call + resource + close + complete.
+    try std.testing.expectEqual(@as(usize, 7), payments_lines);
+    // ledger: run + scope + resource + schedule decision + close + complete.
     try std.testing.expectEqual(@as(usize, 6), ledger_lines);
+    // The boundary id appears on exactly one line of EACH service — the two
+    // sides of the cross-service call the hub correlates.
+    try std.testing.expectEqual(@as(usize, 1), payments_boundary_lines);
+    try std.testing.expectEqual(@as(usize, 1), ledger_boundary_lines);
 
     // The streams are interleaved (not one service then the other): the first
     // two lines belong to different services.

@@ -573,6 +573,8 @@ fn appendNodeCommonProperties(output: *std.ArrayList(u8), allocator: Allocator, 
     try appendOptionalJsonU64(output, allocator, event.cause_event_id);
     try output.appendSlice(allocator, ",\"schedule_id\":");
     try appendOptionalJsonU64(output, allocator, event.schedule_id);
+    try output.appendSlice(allocator, ",\"boundary_id\":");
+    try appendOptionalJsonU64(output, allocator, event.boundary_id);
     try output.appendSlice(allocator, ",\"artifact_id\":");
     try appendJsonString(output, allocator, event.artifact_id);
     try output.appendSlice(allocator, ",\"domain_entity_ref\":");
