@@ -389,7 +389,7 @@ This is the local-first sequence for making zigeffect useful as the development
 engine for local projects and standard-library work. It intentionally comes
 before hosting or broad distributed orchestration.
 
-Status on 2026-07-10: M72 through M85 are implemented in the workbench,
+Status on 2026-07-10: M72 through M86 are implemented in the workbench,
 `causal-dev-session`, and collector. Local session events have parser/apply
 coverage, native Codex/Claude JSONL fixtures, a `bun run zigeffect:local-agent-gate`
 command, and a live collector WebSocket overlay (`POST /agent-feed` and
@@ -411,8 +411,12 @@ versioned snapshots, marks stale restored ownership interrupted, and integrates
 write-through persistence into every supervisor terminal path. An authenticated
 local control API now exposes allowlisted tool discovery, session start/stop,
 durable session inspection, and bounded redacted policy receipts without ever
-accepting arbitrary argv. The next local sequence is M86 operator UX and M87 PTY
-input; neither requires a hosting dependency.
+accepting arbitrary argv. The M86 Solid operator now uses a
+validated loopback-only client, single-flight polling, ephemeral bearer tokens,
+schema-described prompt tools, durable history/detail, start/stop ownership,
+recovery state, counters, and policy receipts. A supported Bun host composes the
+collector and control API with fixed Codex/Claude allowlists. M87 PTY input is
+the next local milestone.
 
 ### M72 - Local development session protocol
 
@@ -679,6 +683,21 @@ and stop active ownership from the SolidJS collaboration view.
 - Add session history/detail surfaces and explicit start/stop commands.
 - Show recovery interruptions, transcript counters, and persistence state.
 - Keep all mutation controls behind the local control API policy response.
+
+**Acceptance:**
+- Browser control URLs are loopback-only, tokens are ephemeral, and every
+  response is size-bounded and runtime-validated.
+- Polling is single-flight; stale reconnects and cancelled requests cannot
+  overwrite newer operator state.
+- The Solid collaboration view covers connect, approved launch, durable
+  history/detail, stop, recovery interruption, counters, and policy receipts.
+- A supported loopback Bun host composes collector/control routes, restores and
+  immediately persists recovery state, and exposes prompt-only Codex/Claude
+  tools.
+- Desktop and mobile browser checks cover a real inert process launch/stop with
+  no overflow, clipped controls, or browser console errors.
+
+**Status:** delivered.
 
 ### M87 - Bidirectional PTY sessions
 

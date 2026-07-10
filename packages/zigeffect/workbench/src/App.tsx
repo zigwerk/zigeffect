@@ -35,6 +35,10 @@ import { Inspector } from "./inspector/Inspector";
 import { CommandPalette, type AuxView } from "./ui/CommandPalette";
 import { AuxOverlay } from "./ui/AuxOverlay";
 import { ChainView, DiffView, MetadataView, QueriesView } from "./aux/auxViews";
+import {
+  localAgentControlBootstrapFromLocation,
+  scrubLocalAgentControlTokenFragment,
+} from "./localAgentControlClient";
 
 const auxTitles: Record<AuxView, string> = {
   diff: "Semantic diff",
@@ -76,6 +80,15 @@ export function App() {
   // every view renders. Absent `?live`, this is a no-op and the static snapshot path
   // is used.
   const locationSearch = typeof window === "undefined" ? "" : window.location.search;
+  const locationHash = typeof window === "undefined" ? "" : window.location.hash;
+  const controlBootstrap = localAgentControlBootstrapFromLocation(locationSearch, locationHash);
+  if (typeof window !== "undefined" && controlBootstrap.token) {
+    window.history.replaceState(
+      window.history.state,
+      "",
+      scrubLocalAgentControlTokenFragment(window.location),
+    );
+  }
   const liveUrl = liveUrlFromSearch(locationSearch);
   const live = liveUrl ? createLiveArtifact(webSocketLiveSource(liveUrl), { maxFrames: 1000 }) : null;
   const liveSession: WorkbenchSession = {
@@ -408,6 +421,7 @@ export function App() {
                       <div class="stage-body">
                         <CollabBoard
                           session={localDevSession()}
+                          operatorBootstrap={controlBootstrap}
                           validEventIds={validEventIds()}
                           copiedCommand={copiedCommand()}
                           onCopy={copyCommand}

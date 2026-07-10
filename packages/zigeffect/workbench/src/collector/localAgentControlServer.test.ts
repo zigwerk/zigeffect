@@ -44,6 +44,13 @@ function codexTool(overrides: Partial<LocalAgentControlTool> = {}): LocalAgentCo
     label: "Codex review",
     description: "Review the local workspace",
     kind: "codex",
+    input: {
+      kind: "prompt",
+      label: "Task prompt",
+      placeholder: "Review token=sentinel-secret",
+      required: true,
+      maxLength: 200,
+    },
     build(input) {
       const prompt = typeof input === "object" && input !== null && "prompt" in input
         ? String((input as { prompt: unknown }).prompt)
@@ -71,7 +78,7 @@ test("control server keeps health open and bearer-gates safe tool metadata", asy
 
   const health = await server.fetch(request("/agent-control/health"));
   expect(health.status).toBe(200);
-  expect(await health.json()).toEqual({ ok: true, active_sessions: 0 });
+  expect(await health.json()).toEqual({ ok: true, active_sessions: 0, persistence: "memory" });
   expect(health.headers.get("access-control-allow-origin")).toBe("*");
 
   const unauthorized = await server.fetch(request("/agent-control/tools"));
@@ -86,8 +93,16 @@ test("control server keeps health open and bearer-gates safe tool metadata", asy
     label: "Codex review",
     description: "Review the local workspace",
     kind: "codex",
+    input: {
+      kind: "prompt",
+      label: "Task prompt",
+      placeholder: "Review token=<redacted>",
+      required: true,
+      max_length: 200,
+    },
   }]);
   expect(JSON.stringify(payload)).not.toContain("command");
+  expect(JSON.stringify(payload)).not.toContain("sentinel-secret");
 
   const preflight = await server.fetch(request("/agent-control/sessions", { method: "OPTIONS" }));
   expect(preflight.status).toBe(204);
@@ -181,6 +196,24 @@ test("control server rejects unknown tools, invalid builders, and oversized bodi
   }));
   expect(invalid.status).toBe(400);
 
+  const missingPrompt = await server.fetch(request("/agent-control/sessions", {
+    method: "POST",
+    token: "control-secret",
+    body: JSON.stringify({ tool_id: "codex-review", session_id: "missing-prompt", input: {} }),
+  }));
+  expect(missingPrompt.status).toBe(400);
+
+  const injectedArgv = await server.fetch(request("/agent-control/sessions", {
+    method: "POST",
+    token: "control-secret",
+    body: JSON.stringify({
+      tool_id: "codex-review",
+      session_id: "injected-argv",
+      input: { prompt: "review", argv: ["sh", "-c", "unsafe"] },
+    }),
+  }));
+  expect(injectedArgv.status).toBe(400);
+
   const oversized = await server.fetch(request("/agent-control/sessions", {
     method: "POST",
     token: "control-secret",
@@ -224,7 +257,11 @@ test("control server rejects duplicate ownership and stop aborts exactly one chi
     agentEventsUrl: "http://collector.test/agent-events",
     now: () => 10,
   });
-  const startBody = JSON.stringify({ tool_id: "codex-review", session_id: "active-session" });
+  const startBody = JSON.stringify({
+    tool_id: "codex-review",
+    session_id: "active-session",
+    input: { prompt: "review locally" },
+  });
   expect((await server.fetch(request("/agent-control/sessions", {
     method: "POST", token: "control-secret", body: startBody,
   }))).status).toBe(202);
@@ -265,6 +302,32 @@ test("control server validates configuration and bounds receipt history", async 
     registry,
     agentEventsUrl: "http://collector.test/agent-events",
   })).toThrow("duplicate control tool id");
+  expect(() => createLocalAgentControlServer({
+    token: "secret",
+    tools: [codexTool({ input: {
+      kind: "prompt",
+      label: "Prompt",
+      maxLength: 0,
+    } })],
+    registry,
+    agentEventsUrl: "http://collector.test/agent-events",
+  })).toThrow("tool input maxLength must be a positive safe integer");
+
+  const durable = createLocalAgentControlServer({
+    token: "secret",
+    tools: [],
+    registry,
+    sessionStore: {
+      async read() { return null; },
+      async write() {},
+    },
+    agentEventsUrl: "http://collector.test/agent-events",
+  });
+  expect(await (await durable.fetch(request("/agent-control/health"))).json()).toEqual({
+    ok: true,
+    active_sessions: 0,
+    persistence: "durable",
+  });
 
   const mirrored: unknown[] = [];
   const server = createLocalAgentControlServer({
@@ -310,7 +373,11 @@ test("control server reports registry capacity conflicts before accepting owners
   const response = await server.fetch(request("/agent-control/sessions", {
     method: "POST",
     token: "secret",
-    body: JSON.stringify({ tool_id: "codex-review", session_id: "new-session" }),
+    body: JSON.stringify({
+      tool_id: "codex-review",
+      session_id: "new-session",
+      input: { prompt: "review locally" },
+    }),
   }));
 
   expect(response.status).toBe(409);

@@ -18,7 +18,16 @@ export type LocalAgentControlTool = {
   label: string;
   description?: string;
   kind: LocalDevAgentKind;
+  input?: LocalAgentControlPromptInput;
   build: (input: unknown) => LocalAgentProcessTool | Promise<LocalAgentProcessTool>;
+};
+
+export type LocalAgentControlPromptInput = {
+  kind: "prompt";
+  label: string;
+  placeholder?: string;
+  required?: boolean;
+  maxLength?: number;
 };
 
 export type LocalAgentControlReceipt = {
@@ -67,6 +76,8 @@ type StartRequest = {
 const DEFAULT_MAX_BODY_BYTES = 64 * 1024;
 const DEFAULT_MAX_RECEIPTS = 512;
 const MAX_RECEIPT_DETAIL = 1024;
+const DEFAULT_MAX_PROMPT_LENGTH = 16 * 1024;
+const MAX_PROMPT_LENGTH = 64 * 1024;
 const TRUNCATION_MARKER = "... [truncated]";
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const CORS_HEADERS = {
@@ -88,6 +99,7 @@ export function createLocalAgentControlServer(
   for (const tool of options.tools) {
     requireIdentifier(tool.id, "control tool id");
     if (tools.has(tool.id)) throw new Error(`duplicate control tool id: ${tool.id}`);
+    validateToolInput(tool.input);
     tools.set(tool.id, tool);
   }
 
@@ -101,7 +113,11 @@ export function createLocalAgentControlServer(
     const path = normalizedPath(url.pathname);
     if (request.method === "OPTIONS") return response(null, 204);
     if (path === "/agent-control/health" && request.method === "GET") {
-      return json({ ok: true, active_sessions: active.size });
+      return json({
+        ok: true,
+        active_sessions: active.size,
+        persistence: options.sessionStore ? "durable" : "memory",
+      });
     }
     if (!authorized(request)) return response("unauthorized", 401);
 
@@ -112,6 +128,7 @@ export function createLocalAgentControlServer(
           label: boundedRedacted(tool.label),
           description: boundedRedacted(tool.description ?? ""),
           kind: tool.kind,
+          input: safeToolInput(tool.input),
         })),
       });
     }
@@ -158,6 +175,11 @@ export function createLocalAgentControlServer(
     if (active.has(parsed.sessionId) || options.registry.get(parsed.sessionId)) {
       await recordReceipt("start", "rejected", parsed.sessionId, parsed.toolId, "session id already exists");
       return response("session id already exists", 409);
+    }
+    const inputFailure = validateToolRequestInput(tool.input, parsed.input);
+    if (inputFailure) {
+      await recordReceipt("start", "rejected", parsed.sessionId, parsed.toolId, inputFailure);
+      return response("tool input rejected", 400);
     }
 
     let processTool: LocalAgentProcessTool;
@@ -315,6 +337,43 @@ function validateProcessTool(processTool: LocalAgentProcessTool, catalogTool: Lo
   if (processTool.id.length === 0 || processTool.label.length === 0) {
     throw new Error("built tool identity must not be empty");
   }
+}
+
+function validateToolInput(input: LocalAgentControlPromptInput | undefined): void {
+  if (!input) return;
+  if (input.kind !== "prompt") throw new Error("unsupported tool input kind");
+  if (input.label.trim().length === 0) throw new Error("tool input label must not be empty");
+  const maxLength = input.maxLength ?? DEFAULT_MAX_PROMPT_LENGTH;
+  positiveSafeInteger(maxLength, "tool input maxLength");
+  if (maxLength > MAX_PROMPT_LENGTH) {
+    throw new RangeError(`tool input maxLength must not exceed ${MAX_PROMPT_LENGTH}`);
+  }
+}
+
+function safeToolInput(input: LocalAgentControlPromptInput | undefined): unknown {
+  if (!input) return null;
+  return {
+    kind: "prompt",
+    label: boundedRedacted(input.label),
+    placeholder: boundedRedacted(input.placeholder ?? ""),
+    required: input.required === true,
+    max_length: input.maxLength ?? DEFAULT_MAX_PROMPT_LENGTH,
+  };
+}
+
+function validateToolRequestInput(
+  descriptor: LocalAgentControlPromptInput | undefined,
+  value: unknown,
+): string | null {
+  if (!descriptor) return null;
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== "prompt")) {
+    return "prompt input must contain only prompt";
+  }
+  const prompt = value.prompt;
+  if (typeof prompt !== "string") return "prompt input must be a string";
+  if (descriptor.required === true && prompt.trim().length === 0) return "prompt input is required";
+  if (prompt.length > (descriptor.maxLength ?? DEFAULT_MAX_PROMPT_LENGTH)) return "prompt input is too long";
+  return null;
 }
 
 async function boundedJsonBody(

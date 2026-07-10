@@ -78,15 +78,19 @@ The ordered local-first roadmap is:
 12. M83 - Native Codex and Claude transcript adapters.
 13. M84 - Durable local agent session registry.
 14. M85 - Local agent control API.
+15. M86 - Workbench local operator controls and supported loopback host.
 
-M72 through M85 are implemented. The registry records redacted session
+M72 through M86 are implemented. The registry records redacted session
 lifecycle and counters, writes starting/running/terminal snapshots through a
 caller-owned store, restores snapshots all-or-nothing, and marks stale active
 ownership interrupted. The authenticated control API exposes only caller-owned
 tool IDs, bounded input, durable session reads, explicit stop ownership, and
 redacted audit receipts; HTTP callers cannot provide argv. The next local
-maturity sequence is M86 workbench operator controls and M87 interactive PTY
-support; neither requires a hosted control plane.
+maturity milestone is M87 interactive PTY support. M86 provides a
+runtime-validated loopback browser client, ephemeral token bootstrap,
+single-flight polling, responsive Solid controls, and the supported Bun host
+that combines the collector with prompt-only Codex/Claude allowlists. No hosted
+control plane is required.
 
 ## Boundaries
 

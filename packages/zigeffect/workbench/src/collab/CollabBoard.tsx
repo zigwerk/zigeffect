@@ -1,4 +1,4 @@
-import { For, Show, createMemo } from "solid-js";
+import { For, Show, createMemo, lazy } from "solid-js";
 import {
   deriveLocalDevHealthSummary,
   deriveLocalDevIssueHighlights,
@@ -11,6 +11,12 @@ import {
 } from "../causalArtifact";
 import { resolveEvidenceEventId } from "../trace/traceModel";
 import { Badge, CommandList, EmptyState, Meta, Metric, agentHue } from "../primitives";
+import type { LocalAgentControlBootstrap } from "../localAgentControlClient";
+
+const LocalAgentOperatorPanel = lazy(async () => {
+  const module = await import("./LocalAgentOperatorPanel");
+  return { default: module.LocalAgentOperatorPanel };
+});
 
 // The Human <-> AI collaboration lens. The hero when the lens is "collaboration", a slim
 // ribbon's worth of summary when the lens is "execution". Every card that can name a
@@ -18,6 +24,7 @@ import { Badge, CommandList, EmptyState, Meta, Metric, agentHue } from "../primi
 // event can be resolved it says so honestly rather than faking a link.
 export function CollabBoard(props: {
   session: LocalDevSessionModel | null;
+  operatorBootstrap: LocalAgentControlBootstrap;
   validEventIds: Set<string>;
   copiedCommand: string | null;
   onCopy: (command: string) => void;
@@ -37,13 +44,15 @@ export function CollabBoard(props: {
   });
 
   return (
-    <section class="stage-pane">
+    <section class="stage-pane collab-pane">
       <div class="pane-head">
         <div class="pane-title">
           <h2>Human &amp; AI session</h2>
           <span class="pane-sub">{props.session?.status ?? "no local session"}</span>
         </div>
       </div>
+
+      <LocalAgentOperatorPanel bootstrap={props.operatorBootstrap} />
 
       <Show
         when={props.session}
