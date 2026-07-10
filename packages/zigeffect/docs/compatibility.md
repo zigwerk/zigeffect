@@ -6,11 +6,12 @@ not require a hosted service.
 | Surface | Supported contract |
 |---|---|
 | Zig | `>= 0.16.0`, `< 0.17.0` |
-| zigeffect CLI | `0.2.0` |
+| zigeffect CLI | `0.3.0` |
 | project manifest | `zigeffect.project.v1` |
-| scaffold template | `zigeffect.scaffold-template.v1`, version `1` |
+| scaffold template | `zigeffect.scaffold-template.v1`, version `2` |
 | core API | `0.1.x` |
 | zigeffect-std API | `0.1.x` |
+| local causal graph | `zigeffect.causal.local-graph-record.v1` under the manifest-owned graph path |
 | local adapters | zio `0.14.0`; checked-in Postgres and QUIC package locks |
 | workbench protocol | checked-in TypeScript schemas and collector tests |
 
@@ -46,6 +47,20 @@ The five generated project kinds are pinned by
 `packages/zigeffect-cli/src/snapshots/scaffold-contracts.v1.json`. Template
 changes must intentionally update the versioned SHA-256 snapshot and continue
 to pass real Debug and ReleaseSafe generated-project builds.
+
+Template version `2` adds `causal_graph` to executable component capabilities
+and `.zigeffect/graph` to manifest artifact paths. Applications and services
+open `zstd.CausalGraph.LocalDatabase` before their first generated fact and
+write a bounded restart-safe WAL. Existing version-1 manifests remain parseable
+because the new artifact field has a default. System graph inspection requires
+a manifest component id:
+
+```sh
+zigeffect graph status --root ./system --component api-service --json
+```
+
+This local adapter uses the core's NenDB-compatible writer contract. It is not
+a compatibility claim for the upstream NenDB package.
 
 ## Install
 

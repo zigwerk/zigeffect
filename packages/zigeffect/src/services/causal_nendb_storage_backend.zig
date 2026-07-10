@@ -126,6 +126,7 @@ pub const CausalNendbStorageBackendState = struct {
     written_event_count: u64 = 0,
     failed_event_count: u64 = 0,
     flushed_count: u64 = 0,
+    last_failure: ?anyerror = null,
 
     pub fn init(
         allocator: Allocator,
@@ -164,6 +165,10 @@ pub const CausalNendbStorageBackendState = struct {
 
     pub fn failedEventCount(self: *const CausalNendbStorageBackendState) u64 {
         return self.failed_event_count;
+    }
+
+    pub fn lastFailure(self: *const CausalNendbStorageBackendState) ?anyerror {
+        return self.last_failure;
     }
 
     pub fn flushedCount(self: *const CausalNendbStorageBackendState) u64 {
@@ -220,7 +225,10 @@ pub const CausalNendbStorageBackendState = struct {
 
     pub fn flush(self: *CausalNendbStorageBackendState) anyerror!void {
         if (self.writer.flush) |flush_writer| {
-            try flush_writer(self.writer.state);
+            flush_writer(self.writer.state) catch |err| {
+                self.last_failure = err;
+                return err;
+            };
             self.flushed_count += 1;
         }
     }
@@ -638,29 +646,34 @@ fn recordNendbStorageBackend(raw: ?*anyopaque, event: causal.CausalEvent) anyerr
     if (state.max_events) |max_events| {
         if (state.events.items.len >= max_events) {
             state.failed_event_count += 1;
-            return error.CausalNendbStorageBackendFull;
+            state.last_failure = error.CausalNendbStorageBackendFull;
+            return state.last_failure.?;
         }
     }
 
     state.events.ensureUnusedCapacity(state.allocator, 1) catch |err| {
         state.failed_event_count += 1;
+        state.last_failure = err;
         return err;
     };
 
     const owned_event = cloneEvent(state.allocator, event) catch |err| {
         state.failed_event_count += 1;
+        state.last_failure = err;
         return err;
     };
     errdefer deinitEventStrings(state.allocator, owned_event);
 
     var write = mapCausalEventToNendbWrite(state.allocator, event) catch |err| {
         state.failed_event_count += 1;
+        state.last_failure = err;
         return err;
     };
     defer deinitCausalNendbWrite(state.allocator, &write);
 
     state.writer.write(state.writer.state, write) catch |err| {
         state.failed_event_count += 1;
+        state.last_failure = err;
         return err;
     };
 

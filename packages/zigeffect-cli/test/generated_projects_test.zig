@@ -80,11 +80,38 @@ test "every scaffold builds in Debug and ReleaseSafe and system children build i
 
         try runBuild(target_path, "Debug");
         try runBuild(target_path, "ReleaseSafe");
+        if (case.kind == .application or case.kind == .service) {
+            try runProject(target_path);
+            var graph = try cli.runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{
+                "graph", "status", "--root", target_path, "--json",
+            });
+            defer graph.deinit();
+            try std.testing.expectEqual(@as(u8, 0), graph.exit_code);
+            try std.testing.expect(std.mem.indexOf(u8, graph.output, "\"records\":") != null);
+            try target_dir.access(std.testing.io, ".zigeffect/graph/causal-graph.jsonl", .{});
+        }
         if (case.kind == .system) {
             for ([_][]const u8{ "services/api", "services/worker", "packages/shared" }) |child| {
                 const child_path = try std.fs.path.join(std.testing.allocator, &.{ target_path, child });
                 defer std.testing.allocator.free(child_path);
                 try runBuild(child_path, "Debug");
+            }
+            for ([_]struct { path: []const u8, id: []const u8 }{
+                .{ .path = "services/api", .id = "api-service" },
+                .{ .path = "services/worker", .id = "worker-service" },
+            }) |service| {
+                const service_path = try std.fs.path.join(std.testing.allocator, &.{ target_path, service.path });
+                defer std.testing.allocator.free(service_path);
+                try runProject(service_path);
+                var graph = try cli.runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{
+                    "graph", "status", "--root", target_path, "--component", service.id, "--json",
+                });
+                defer graph.deinit();
+                try std.testing.expectEqual(@as(u8, 0), graph.exit_code);
+                try std.testing.expect(std.mem.indexOf(u8, graph.output, "\"records\":") != null);
+                const wal_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/.zigeffect/graph/causal-graph.jsonl", .{service.path});
+                defer std.testing.allocator.free(wal_path);
+                try target_dir.access(std.testing.io, wal_path, .{});
             }
             const added_path = try std.fs.path.join(std.testing.allocator, &.{ target_path, "libraries/analytics" });
             defer std.testing.allocator.free(added_path);
@@ -132,5 +159,24 @@ fn runBuild(cwd: []const u8, optimize: []const u8) !void {
     if (!passed) {
         std.debug.print("generated project failed in {s} ({s})\nstdout:\n{s}\nstderr:\n{s}\n", .{ cwd, optimize, result.stdout, result.stderr });
         return error.GeneratedProjectBuildFailed;
+    }
+}
+
+fn runProject(cwd: []const u8) !void {
+    const result = try std.process.run(std.testing.allocator, std.testing.io, .{
+        .argv = &.{ "zig", "build", "run", "--summary", "all" },
+        .cwd = .{ .path = cwd },
+        .stdout_limit = .limited(4 * 1024 * 1024),
+        .stderr_limit = .limited(4 * 1024 * 1024),
+    });
+    defer std.testing.allocator.free(result.stdout);
+    defer std.testing.allocator.free(result.stderr);
+    const passed = switch (result.term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+    if (!passed) {
+        std.debug.print("generated project run failed in {s}\nstdout:\n{s}\nstderr:\n{s}\n", .{ cwd, result.stdout, result.stderr });
+        return error.GeneratedProjectRunFailed;
     }
 }

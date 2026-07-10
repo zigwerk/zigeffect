@@ -255,6 +255,7 @@ test "nendb storage writer failure fails closed without local history" {
     try std.testing.expectEqual(@as(usize, 0), backend_state.eventCount());
     try std.testing.expectEqual(@as(u64, 0), backend_state.writtenEventCount());
     try std.testing.expectEqual(@as(u64, 1), backend_state.failedEventCount());
+    try std.testing.expectEqual(error.FakeNendbWriterRejected, backend_state.lastFailure().?);
     try std.testing.expectEqual(@as(u64, 1), store.backendFailureCount());
 
     var snapshot = try store.snapshot(std.testing.allocator);
@@ -282,6 +283,7 @@ test "nendb storage max_events fails before writer call" {
     try std.testing.expectEqual(@as(usize, 0), backend_state.eventCount());
     try std.testing.expectEqual(@as(u64, 0), backend_state.writtenEventCount());
     try std.testing.expectEqual(@as(u64, 1), backend_state.failedEventCount());
+    try std.testing.expectEqual(error.CausalNendbStorageBackendFull, backend_state.lastFailure().?);
     try std.testing.expectEqual(@as(u64, 1), store.backendFailureCount());
 }
 

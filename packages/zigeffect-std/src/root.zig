@@ -26,6 +26,7 @@ pub const Sql = @import("sql/root.zig");
 pub const Http = @import("http/root.zig");
 pub const Agent = @import("agent/root.zig");
 pub const Application = @import("application/root.zig");
+pub const CausalGraph = @import("causal_graph/root.zig");
 pub const Project = @import("project/root.zig");
 pub const Safety = @import("safety/root.zig");
 
@@ -51,8 +52,15 @@ test "root exports provider conformance scoring" {
     try std.testing.expect(@hasDecl(zstd.Safety.Conformance, "scoreSuiteAlloc"));
 }
 
+test "root exports durable causal graph database" {
+    const zstd = @import("root.zig");
+    try std.testing.expect(@hasDecl(zstd.CausalGraph, "LocalDatabase"));
+    try std.testing.expect(@hasDecl(zstd.CausalGraph, "Snapshot"));
+}
+
 test {
     std.testing.refAllDecls(Application);
+    std.testing.refAllDecls(CausalGraph);
     std.testing.refAllDecls(Project);
     std.testing.refAllDecls(Safety);
 }

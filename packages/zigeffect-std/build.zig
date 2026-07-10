@@ -30,6 +30,7 @@ pub fn build(b: *std.Build) void {
     addExample(b, examples_step, target, optimize, zigeffect_std, "http-router", "examples/http_router.zig");
     addExample(b, examples_step, target, optimize, zigeffect_std, "http-sql-smoke", "examples/http_sql_smoke.zig");
     addExample(b, examples_step, target, optimize, zigeffect_std, "local-toolbelt", "examples/local_toolbelt.zig");
+    addExample(b, examples_step, target, optimize, zigeffect_std, "causal-graph", "examples/causal_graph.zig");
 }
 
 fn addExample(

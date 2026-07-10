@@ -49,8 +49,9 @@ place.
 
 Generated applications and services include typed Config/Schema and CLI
 boundaries, local HTTP and SQL fakes, an effect-native service and layer, causal
-evidence, workbench attachment metadata, deterministic tests, the project
-manifest, and matching Codex/Claude skills. Libraries and packages expose a
+evidence, a durable Zig-native causal graph, workbench attachment metadata,
+deterministic tests, the project manifest, and matching Codex/Claude skills.
+Libraries and packages expose a
 tested effect-native public facade. Systems contain two independently buildable
 services and a shared package.
 
@@ -97,6 +98,22 @@ manifest; there is no arbitrary command or passthrough argv option. Check, test,
 and dev output is bounded and redacted, with receipts persisted under
 `.zigeffect/receipts`. Dev also writes `.zigeffect/workbench.json` for local
 attachment.
+
+Applications and services attach `zstd.CausalGraph.LocalDatabase` before their
+first generated application fact and flush a bounded graph WAL under the
+manifest's `.zigeffect/graph` artifact path. Query it without accepting an
+arbitrary database path:
+
+```sh
+zigeffect graph status --root ./my-app --json
+zigeffect graph event <durable-event-id> --root ./my-app --json
+zigeffect graph children <durable-event-id> --root ./my-app --json
+zigeffect graph status --root ./my-system --component api-service --json
+```
+
+System services use independent graph roots and require `--component` for root
+CLI queries. The embedded WAL implements the existing NenDB-compatible writer
+contract, but the CLI does not install the upstream NenDB package.
 
 The agent check joins AST-based governed-construct policy with bounded raw Zig
 compiler artifacts and writes a source-revision/toolchain-linked safety receipt.

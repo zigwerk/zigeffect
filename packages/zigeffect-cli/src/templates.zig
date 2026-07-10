@@ -59,7 +59,7 @@ pub const main_source =
     \\const app = @import("app");
     \\
     \\pub fn main(init: std.process.Init) !void {
-    \\    try app.run(init.gpa);
+    \\    try app.run(init.gpa, init.io, std.Io.Dir.cwd());
     \\}
 ;
 
@@ -71,16 +71,22 @@ pub const app_source =
     \\const http = @import("http.zig");
     \\const sql = @import("sql.zig");
     \\const causal = @import("causal.zig");
+    \\const causal_graph = @import("causal_graph.zig");
     \\const greeting = @import("services/greeting.zig");
     \\__SHARED_SOURCE_IMPORT__
     \\pub const component_name = "__PROJECT_NAME__";
     \\
-    \\pub fn run(allocator: std.mem.Allocator) !void {
+    \\pub fn run(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir) !void {
     \\    var greeting_service = greeting.Greeting{ .prefix = "hello" };
     \\    var provider = zstd.Service.Provider(.{greeting.Greeting}).init(.{&greeting_service});
     \\    _ = provider.layer();
+    \\    var graph = try causal_graph.open(allocator, io, root);
+    \\    defer graph.deinit();
+    \\    var graph_backend = graph.storageBackend(allocator, causal_graph.max_events);
+    \\    defer graph_backend.deinit();
     \\    var store = zstd.fx.CausalStore.init(allocator);
     \\    defer store.deinit();
+    \\    store.attachBackend(graph_backend.backend());
     \\    var scope = zstd.fx.Scope.init(allocator);
     \\    defer scope.deinit();
     \\    var context = zstd.fx.Context(@TypeOf(provider)).init(allocator, &provider, &scope).withCausalStore(&store);
@@ -110,6 +116,14 @@ pub const app_source =
     \\    defer allocator.free(message);
     \\    if (zstd.Application.record(&context, zstd.Application.acceptanceEvaluation("check-bootstrap", "passed", "application boundaries passed")) == null) return error.OutOfMemory;
     \\    if (zstd.Application.record(&context, zstd.Application.artifactProduction("workbench-attachment", "created", "bounded causal attachment")) == null) return error.OutOfMemory;
+    \\    if (zstd.Application.record(&context, zstd.Application.artifactProduction("causal-graph", "prepared", causal_graph.wal_path)) == null) return error.OutOfMemory;
+    \\    try graph_backend.flush();
+    \\    if (graph_backend.lastFailure()) |err| return err;
+    \\    if (store.backendFailureCount() != 0) return error.GraphWriteFailed;
+    \\    if (zstd.Application.record(&context, zstd.Application.artifactProduction("causal-graph", "flushed", causal_graph.wal_path)) == null) return error.OutOfMemory;
+    \\    try graph_backend.flush();
+    \\    if (graph_backend.lastFailure()) |err| return err;
+    \\    if (store.backendFailureCount() != 0) return error.GraphWriteFailed;
     \\
     \\    var snapshot = try store.snapshot(allocator);
     \\    defer snapshot.deinit();
@@ -120,8 +134,25 @@ pub const app_source =
     \\    try recorder.increment("app.runs", 1);
     \\    const workbench = try recorder.workbenchJsonAlloc(allocator, component_name);
     \\    defer allocator.free(workbench);
-    \\    const attachment = try causal.attachmentJsonAlloc(allocator, component_name, snapshot.events.len);
+    \\    const attachment = try causal.attachmentJsonAlloc(allocator, component_name, snapshot.events.len, graph.summary());
     \\    defer allocator.free(attachment);
+    \\}
+;
+
+pub const causal_graph_source =
+    \\const std = @import("std");
+    \\const zstd = @import("zigeffect_std");
+    \\
+    \\pub const path = zstd.CausalGraph.default_path;
+    \\pub const wal_path = path ++ "/" ++ zstd.CausalGraph.default_wal_name;
+    \\pub const max_events: usize = 100_000;
+    \\
+    \\pub fn open(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir) !zstd.CausalGraph.LocalDatabase {
+    \\    return zstd.CausalGraph.LocalDatabase.init(allocator, io, root, .{
+    \\        .path = path,
+    \\        .max_records = max_events,
+    \\        .max_wal_bytes = 16 * 1024 * 1024,
+    \\    });
     \\}
 ;
 
@@ -220,14 +251,26 @@ pub const causal_source =
     \\
     \\pub const workbench_query = "?live=ws://127.0.0.1:4318";
     \\
-    \\pub fn attachmentJsonAlloc(allocator: std.mem.Allocator, component: []const u8, facts: usize) ![]const u8 {
-    \\    const fact_text = try std.fmt.allocPrint(allocator, "{d}", .{facts});
-    \\    defer allocator.free(fact_text);
-    \\    return zstd.Json.objectFromFieldsAlloc(allocator, &.{
-    \\        .{ .name = "schema", .value = "zigeffect.application-attachment.v1" },
-    \\        .{ .name = "component", .value = component },
-    \\        .{ .name = "facts", .value = fact_text },
-    \\    });
+    \\pub fn attachmentJsonAlloc(
+    \\    allocator: std.mem.Allocator,
+    \\    component: []const u8,
+    \\    facts: usize,
+    \\    graph: zstd.CausalGraph.Summary,
+    \\) ![]u8 {
+    \\    return std.json.Stringify.valueAlloc(allocator, .{
+    \\        .schema = "zigeffect.application-attachment.v2",
+    \\        .schema_version = 2,
+    \\        .component = component,
+    \\        .facts = facts,
+    \\        .causal_graph = .{
+    \\            .schema = graph.schema,
+    \\            .path = graph.path,
+    \\            .wal_name = graph.wal_name,
+    \\            .records = graph.records,
+    \\            .edges = graph.edges,
+    \\            .session = graph.sessions,
+    \\        },
+    \\    }, .{});
     \\}
 ;
 
@@ -274,10 +317,25 @@ pub const executable_test =
     \\const app = @import("app");
     \\const zstd = @import("zigeffect_std");
     \\
-    \\fn runWithAllocator(allocator: std.mem.Allocator) !void { try app.run(allocator); }
+    \\fn runWithAllocator(allocator: std.mem.Allocator) !void {
+    \\    var tmp = std.testing.tmpDir(.{});
+    \\    defer tmp.cleanup();
+    \\    try app.run(allocator, std.testing.io, tmp.dir);
+    \\}
     \\
     \\test "application boundaries produce causal evidence" {
-    \\    try app.run(std.testing.allocator);
+    \\    var tmp = std.testing.tmpDir(.{});
+    \\    defer tmp.cleanup();
+    \\    try app.run(std.testing.allocator, std.testing.io, tmp.dir);
+    \\    var graph = try zstd.CausalGraph.Snapshot.open(std.testing.allocator, std.testing.io, tmp.dir, .{});
+    \\    defer graph.deinit();
+    \\    const summary = graph.summary();
+    \\    try std.testing.expect(summary.records >= 10);
+    \\    try std.testing.expect(summary.edges > 0);
+    \\    try std.testing.expectEqual(@as(usize, 0), summary.trailing_partial_bytes);
+    \\    const event = try graph.recordJsonAlloc(std.testing.allocator, summary.newest_durable_event_id.?);
+    \\    defer std.testing.allocator.free(event);
+    \\    try std.testing.expect(std.mem.indexOf(u8, event, "causal-graph") != null);
     \\}
     \\
     \\test "application survives every deterministic allocation failure" {
@@ -492,10 +550,16 @@ pub const system_source =
     \\pub const worker = @import("worker");
     \\pub const shared = @import("shared");
     \\
-    \\pub fn run(allocator: std.mem.Allocator) !void {
+    \\pub fn run(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir) !void {
     \\    if (shared.contract_version != 1) return error.IncompatibleSharedContract;
-    \\    try api.run(allocator);
-    \\    try worker.run(allocator);
+    \\    try root.createDirPath(io, "services/api");
+    \\    try root.createDirPath(io, "services/worker");
+    \\    var api_root = try root.openDir(io, "services/api", .{});
+    \\    defer api_root.close(io);
+    \\    var worker_root = try root.openDir(io, "services/worker", .{});
+    \\    defer worker_root.close(io);
+    \\    try api.run(allocator, io, api_root);
+    \\    try worker.run(allocator, io, worker_root);
     \\}
 ;
 
@@ -504,7 +568,15 @@ pub const system_test =
     \\const system = @import("system");
     \\
     \\test "all components run against the shared contract" {
-    \\    try system.run(std.testing.allocator);
+    \\    var tmp = std.testing.tmpDir(.{});
+    \\    defer tmp.cleanup();
+    \\    try system.run(std.testing.allocator, std.testing.io, tmp.dir);
+    \\    var api_graph = try tmp.dir.openDir(std.testing.io, "services/api/.zigeffect/graph", .{});
+    \\    defer api_graph.close(std.testing.io);
+    \\    var worker_graph = try tmp.dir.openDir(std.testing.io, "services/worker/.zigeffect/graph", .{});
+    \\    defer worker_graph.close(std.testing.io);
+    \\    try api_graph.access(std.testing.io, "causal-graph.jsonl", .{});
+    \\    try worker_graph.access(std.testing.io, "causal-graph.jsonl", .{});
     \\}
 ;
 
@@ -536,12 +608,19 @@ pub const readme =
     \\zigeffect project check --agent --json
     \\zigeffect project test --json
     \\zigeffect project dev
+    \\zigeffect graph status --json
+    \\zigeffect graph event <event-id> --json
+    \\zigeffect graph children <event-id> --json
     \\```
     \\
     \\The source of truth is `zigeffect.project.json`. Compatibility metadata and
     \\CLI-owned scaffold hashes live under `.zigeffect/`; upgrades preserve
     \\user-owned source and refuse edited managed files. Keep requirement status,
     \\acceptance checks, causal evidence, and handoff receipts aligned with code.
+    \\Applications and services persist a bounded, redacted causal graph at
+    \\`.zigeffect/graph/causal-graph.jsonl`; the graph commands validate the
+    \\manifest before opening that artifact. For a system root, add
+    \\`--component <manifest-component-id>` to graph queries.
 ;
 
 pub const changelog =
@@ -557,6 +636,7 @@ pub const gitignore =
     \\zig-out/
     \\.zigeffect/sessions/
     \\.zigeffect/causal/
+    \\.zigeffect/graph/
     \\.zigeffect/receipts/
 ;
 
@@ -580,7 +660,9 @@ pub const skill =
     \\   truncated, or unsupported required evidence as an unpassed handoff.
     \\7. Use `zigeffect safety explain <finding-id>` for source-linked repair
     \\   guidance. Never add unmanaged roots or unaudited escape hatches.
-    \\8. Query causal evidence before reconstructing failures from text output.
+    \\8. Run `zigeffect graph status --json`, adding `--component <id>` for a
+    \\   system root, then query graph events and children before reconstructing
+    \\   failures from text output.
     \\9. Attach the bounded redacted safety receipt to the handoff and never
     \\   claim an unpassed check.
 ;

@@ -875,7 +875,8 @@ Deliver install/version/completion flows, compatibility metadata, upgrade
 dry-runs, scaffold migrations, generated-project snapshots, public API gates,
 and one complete local release command.
 
-**Status:** delivered on 2026-07-10. The installable CLI is version `0.2.0`,
+**Status:** delivered on 2026-07-10. The installable CLI was version `0.2.0` at
+delivery and is now `0.3.0` after M111,
 declares Zig `>=0.16.0,<0.17.0`, and emits deterministic Bash, Zsh, and Fish
 completions. Every scaffold includes a validated compatibility contract and a
 SHA-256 state file limited to CLI-owned metadata and agent skills. `upgrade` is
@@ -889,6 +890,54 @@ stdlib, CLI, generated projects, the 14-case provider matrix, core raw and
 ReleaseSafe tests, the core release gate, Postgres, QUIC, zio, Workbench
 typecheck/tests/build, redaction, docs honesty, and tool hygiene. Compatibility
 and ownership details live in `docs/compatibility.md`.
+
+### M108 - Durable local causal graph runtime
+
+**Status:** delivered on 2026-07-10.
+
+`zstd.CausalGraph.LocalDatabase` is a bounded Zig-native append-only graph WAL
+over the core NenDB-compatible writer contract. It validates complete committed
+rows, repairs only a partial tail, rebuilds bounded indexes, assigns restart-safe
+session/event ids, writes a node and optional parent edge atomically, rejects
+secret-shaped records, and exposes read-only summary/event/children snapshots.
+The stdlib includes allocation-failure, restart, traversal, corruption,
+capacity, redaction, and partial-recovery tests plus a compile-tested example.
+This does not install the upstream NenDB package.
+
+### M109 - Manifest-scoped graph query CLI
+
+**Status:** delivered on 2026-07-10.
+
+`zigeffect graph status|event|children` opens only the graph artifact declared
+by a validated `zigeffect.project.json`. System queries require
+`--component <id>` and resolve the selected component beneath its validated
+path. JSON schemas are stable and bounded; no arbitrary database path or
+command execution surface exists. Real filesystem tests persist, close, reopen,
+and query parent/child evidence.
+
+### M110 - Graph-first executable scaffolds
+
+**Status:** delivered on 2026-07-10.
+
+Application and service templates now generate `src/causal_graph.zig`, declare
+the `causal_graph` capability and `.zigeffect/graph` artifact, attach storage
+before the first fact, record and flush graph artifact evidence, and propagate
+the backend's retained typed failure. Generated tests run against isolated
+roots and reopen the graph; system API and worker services use independent
+roots. README, Git ignore, Workbench attachment, and Codex/Claude skill output
+all include the graph workflow.
+
+### M111 - Graph scaffold compatibility and release
+
+**Status:** delivered on 2026-07-10.
+
+CLI `0.3.0` and scaffold template version `2` pin all five generated project
+contracts with new SHA-256 snapshots. Shell completions, compatibility docs,
+the future-agent briefing, operations guidance, and the local release gate are
+aligned. The generated-project matrix runs every project in Debug and
+ReleaseSafe, builds system children independently, executes real application,
+service, API, and worker binaries, and queries each resulting graph through the
+CLI before the full local release proof.
 
 ## Hardening milestone roadmap
 

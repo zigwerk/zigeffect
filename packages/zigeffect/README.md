@@ -183,6 +183,12 @@ nonzero, fall back to the in-memory trace): JSON Lines, DOT, OpenTelemetry-shape
 records, scan-based graph history, a NenDB node/edge write-contract, and a bounded
 async stream. Each has a focused gate (`zig build causal-*-backend`).
 
+For generated local applications, `zigeffect-std` implements that writer
+contract as `zstd.CausalGraph.LocalDatabase`, a bounded restart-safe Zig graph
+WAL at `.zigeffect/graph/causal-graph.jsonl`. The `zigeffect` CLI scaffolds the
+attachment and exposes manifest-scoped status, event, and child queries. It does
+not install or claim the upstream NenDB package.
+
 ## Schema governance and budgets
 
 ```bash
@@ -233,6 +239,7 @@ record-only clone tools; see [docs/roadmap.md](docs/roadmap.md).
 - [Data](docs/data.md) · [Pattern Matching](docs/pattern-matching.md) ·
   [Module Pattern](docs/module-pattern.md) · [EffectTS Parity](docs/effectts-parity.md)
 - [Agent-Observable Causal Runtime](docs/agent-observable-runtime.md) ·
+  [How Codex Builds Applications](docs/agent-first-application-development.md) ·
   [Agent Guide](docs/agent-guide.md) · [Causal Scenarios](docs/causal-scenarios.md) ·
   [Causal Dev Harness](docs/causal-dev-harness.md) ·
   [Local Agentic Development](docs/local-agentic-development.md) ·

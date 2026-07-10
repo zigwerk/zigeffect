@@ -120,6 +120,9 @@ expire.
 
 - Causal graph inspection remains read-only; local command execution is owned by
   explicit runner code and policy-gated command intents.
+- Generated applications and services persist redacted causal facts in their
+  local `.zigeffect/graph` WAL. `zigeffect graph` resolves only validated project
+  and component paths; it never accepts an arbitrary database path.
 - zigeffect causal tools write evidence, not source patches.
 - Human approval is required before any source mutation path is treated as
   applied.

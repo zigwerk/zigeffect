@@ -18,6 +18,7 @@ pub const CliError = error{
     InvalidTarget,
     UnknownShell,
     InvalidOptionCombination,
+    InvalidEventId,
 };
 
 pub const ScaffoldOptions = struct {
@@ -37,6 +38,7 @@ pub const Action = union(enum) {
     completions: distribution.Shell,
     compatibility: CompatibilityOptions,
     upgrade: UpgradeOptions,
+    graph: GraphOptions,
     new: ScaffoldOptions,
     project: ProjectOptions,
     safety: SafetyOptions,
@@ -55,6 +57,15 @@ pub const UpgradeOptions = struct {
     root: []const u8 = ".",
     dry_run: bool = true,
     apply: bool = false,
+    json: bool = false,
+};
+
+pub const GraphOperation = enum { status, event, children };
+pub const GraphOptions = struct {
+    operation: GraphOperation,
+    event_id: u64 = 0,
+    root: []const u8 = ".",
+    component: ?[]const u8 = null,
     json: bool = false,
 };
 
@@ -115,6 +126,7 @@ pub fn parseArgs(args: []const []const u8) (CliError || zstd.Project.ProjectErro
     if (eql(args[0], "completions")) return .{ .completions = try parseCompletionsArgs(args[1..]) };
     if (eql(args[0], "compatibility")) return .{ .compatibility = try parseCompatibilityArgs(args[1..]) };
     if (eql(args[0], "upgrade")) return .{ .upgrade = try parseUpgradeArgs(args[1..]) };
+    if (eql(args[0], "graph")) return .{ .graph = try parseGraphArgs(args[1..]) };
     if (eql(args[0], "project")) return .{ .project = try parseProjectArgs(args[1..]) };
     if (eql(args[0], "safety")) return .{ .safety = try parseSafetyArgs(args[1..]) };
     if (eql(args[0], "agent")) return .{ .agent = try parseAgentArgs(args[1..]) };
@@ -232,6 +244,7 @@ pub fn runAlloc(
         .completions => |shell| return .{ .allocator = allocator, .exit_code = 0, .output = try allocator.dupe(u8, distribution.completionScript(shell)) },
         .compatibility => |options| return runCompatibilityAlloc(allocator, io, base_dir, options),
         .upgrade => |options| return runUpgradeAlloc(allocator, io, base_dir, options),
+        .graph => |options| return runGraphAlloc(allocator, io, base_dir, options),
         .project => |options| return runProjectAlloc(allocator, io, base_dir, options),
         .safety => |options| return runSafetyAlloc(allocator, io, base_dir, options),
         .agent => |options| return runAgentAlloc(allocator, io, base_dir, options),
@@ -402,6 +415,65 @@ fn runCompatibilityAlloc(
             distribution.cli_version,
         });
     return .{ .allocator = allocator, .exit_code = if (compatible) 0 else 1, .output = output };
+}
+
+fn runGraphAlloc(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    base_dir: std.Io.Dir,
+    options: GraphOptions,
+) !RunResult {
+    var project_dir = try openTargetDir(io, base_dir, options.root);
+    defer project_dir.close(io);
+    const manifest_text = try project_dir.readFileAlloc(io, "zigeffect.project.json", allocator, .limited(4 * 1024 * 1024));
+    defer allocator.free(manifest_text);
+    var manifest = try zstd.Project.parseManifest(allocator, manifest_text);
+    defer manifest.deinit();
+    if (manifest.value.kind == .system and options.component == null) return error.ComponentRequired;
+    var component_dir: ?std.Io.Dir = null;
+    defer if (component_dir) |*dir| dir.close(io);
+    const graph_root = if (options.component) |component_id| graph_root: {
+        const component = manifest.value.component(component_id) orelse return error.ComponentNotFound;
+        if (std.mem.eql(u8, component.path, ".")) break :graph_root project_dir;
+        component_dir = try project_dir.openDir(io, component.path, .{ .follow_symlinks = false });
+        break :graph_root component_dir.?;
+    } else project_dir;
+    var snapshot = try zstd.CausalGraph.Snapshot.open(allocator, io, graph_root, .{
+        .path = manifest.value.artifacts.graph,
+        .max_wal_bytes = manifest.value.safety.limits.max_artifact_bytes,
+        .max_records = manifest.value.safety.limits.max_runtime_events,
+    });
+    defer snapshot.deinit();
+
+    const output = switch (options.operation) {
+        .status => if (options.json)
+            try snapshot.summaryJsonAlloc(allocator)
+        else status: {
+            const summary = snapshot.summary();
+            break :status try std.fmt.allocPrint(allocator, "{s}{s}{s}: records={d} edges={d} sessions={d} bytes={d} partial={d}\n", .{
+                manifest.value.name,
+                if (options.component != null) "/" else "",
+                options.component orelse "",
+                summary.records,
+                summary.edges,
+                summary.sessions,
+                summary.wal_bytes,
+                summary.trailing_partial_bytes,
+            });
+        },
+        .event => try snapshot.recordJsonAlloc(allocator, options.event_id),
+        .children => children: {
+            const ids = try snapshot.childrenAlloc(allocator, options.event_id);
+            defer allocator.free(ids);
+            if (options.json) break :children try zstd.CausalGraph.childrenJsonAlloc(allocator, options.event_id, ids);
+            var text_output = std.ArrayList(u8).empty;
+            errdefer text_output.deinit(allocator);
+            try text_output.print(allocator, "event {d} children={d}\n", .{ options.event_id, ids.len });
+            for (ids) |id| try text_output.print(allocator, "- {d}\n", .{id});
+            break :children try text_output.toOwnedSlice(allocator);
+        },
+    };
+    return .{ .allocator = allocator, .exit_code = 0, .output = output };
 }
 
 fn runUpgradeAlloc(
@@ -997,7 +1069,7 @@ fn runAddAlloc(
         if (std.mem.eql(u8, component.path, component_path)) return error.DuplicateComponentPath;
     }
     const capabilities = if (options.kind == .service)
-        &[_]zstd.Project.Capability{ .cli, .http, .sql, .config, .observability, .agent, .workbench }
+        &[_]zstd.Project.Capability{ .cli, .http, .sql, .config, .observability, .agent, .workbench, .causal_graph }
     else
         &[_]zstd.Project.Capability{ .config, .observability, .agent, .workbench };
     const components = try allocator.alloc(zstd.Project.Component, parsed.value.components.len + 1);
@@ -1231,6 +1303,8 @@ pub fn helpText() []const u8 {
     \\  zigeffect completions <bash|zsh|fish>
     \\  zigeffect compatibility [--root <path>] [--json]
     \\  zigeffect upgrade [--root <path>] [--dry-run|--apply] [--json]
+    \\  zigeffect graph status [--root <path>] [--component <id>] [--json]
+    \\  zigeffect graph <event|children> <event-id> [--root <path>] [--component <id>] [--json]
     \\  zigeffect new <application|service|library|package|system> <name> [options]
     \\  zigeffect add <service|library|package> <name> [options]
     \\  zigeffect generate <service|layer|schema|cli|http|sql|test> <name> --component <id> [options]
@@ -1300,6 +1374,7 @@ fn addExecutableProject(
     try addRenderedAt(plan, prefix, "src/http.zig", templates.http_source, &.{});
     try addRenderedAt(plan, prefix, "src/sql.zig", templates.sql_source, &.{});
     try addRenderedAt(plan, prefix, "src/causal.zig", templates.causal_source, &.{});
+    try addRenderedAt(plan, prefix, "src/causal_graph.zig", templates.causal_graph_source, &.{});
     try addRenderedAt(plan, prefix, "src/services/greeting.zig", templates.greeting_source, &.{});
     try addRenderedAt(plan, prefix, "test/root_test.zig", templates.executable_test, &.{});
     if (prefix.len != 0) {
@@ -1436,7 +1511,7 @@ fn addManifest(plan: *zstd.Project.FilePlan, options: ScaffoldOptions) !void {
         .command = "test",
         .expectation = "all generated tests pass",
     }};
-    const executable_capabilities = [_]zstd.Project.Capability{ .cli, .http, .sql, .config, .observability, .agent, .workbench };
+    const executable_capabilities = [_]zstd.Project.Capability{ .cli, .http, .sql, .config, .observability, .agent, .workbench, .causal_graph };
     const library_capabilities = [_]zstd.Project.Capability{ .config, .observability, .agent, .workbench };
     const single_component = [_]zstd.Project.Component{.{
         .id = options.name,
@@ -1639,6 +1714,45 @@ fn parseUpgradeArgs(args: []const []const u8) CliError!UpgradeOptions {
         } else return error.UnknownOption;
     }
     if (dry_run_set and apply_set) return error.InvalidOptionCombination;
+    try validateTarget(options.root);
+    return options;
+}
+
+fn parseGraphArgs(args: []const []const u8) (CliError || zstd.Project.ProjectError)!GraphOptions {
+    if (args.len == 0) return error.MissingCommand;
+    const operation = std.meta.stringToEnum(GraphOperation, args[0]) orelse return error.UnknownCommand;
+    var options = GraphOptions{ .operation = operation };
+    var root_set = false;
+    var component_set = false;
+    var event_id_set = false;
+    var index: usize = 1;
+
+    if (operation == .event or operation == .children) {
+        if (index >= args.len or std.mem.startsWith(u8, args[index], "--")) return error.InvalidEventId;
+        options.event_id = std.fmt.parseInt(u64, args[index], 10) catch return error.InvalidEventId;
+        if (options.event_id == 0) return error.InvalidEventId;
+        event_id_set = true;
+        index += 1;
+    }
+
+    while (index < args.len) {
+        if (eql(args[index], "--root")) {
+            if (root_set) return error.DuplicateOption;
+            options.root = try optionValue(args, &index);
+            root_set = true;
+        } else if (eql(args[index], "--component")) {
+            if (component_set) return error.DuplicateOption;
+            const component = try optionValue(args, &index);
+            try zstd.Project.validateIdentifier(component);
+            options.component = component;
+            component_set = true;
+        } else if (eql(args[index], "--json")) {
+            if (options.json) return error.DuplicateOption;
+            options.json = true;
+            index += 1;
+        } else return error.UnknownOption;
+    }
+    if ((operation == .event or operation == .children) and !event_id_set) return error.InvalidEventId;
     try validateTarget(options.root);
     return options;
 }
@@ -1942,6 +2056,21 @@ test "CLI parses bounded project add and generate operations" {
     try std.testing.expectEqualStrings("api-service", generate.generate.component);
     try std.testing.expect(generate.generate.force);
     try std.testing.expectError(error.MissingOptionValue, parseArgs(&.{ "generate", "schema", "invoice" }));
+
+    const graph_status = try parseArgs(&.{ "graph", "status", "--root", "demo", "--component", "api-service", "--json" });
+    try std.testing.expectEqual(GraphOperation.status, graph_status.graph.operation);
+    try std.testing.expectEqualStrings("demo", graph_status.graph.root);
+    try std.testing.expectEqualStrings("api-service", graph_status.graph.component.?);
+    try std.testing.expect(graph_status.graph.json);
+    const graph_event = try parseArgs(&.{ "graph", "event", "42", "--root", "demo" });
+    try std.testing.expectEqual(GraphOperation.event, graph_event.graph.operation);
+    try std.testing.expectEqual(@as(u64, 42), graph_event.graph.event_id);
+    const graph_children = try parseArgs(&.{ "graph", "children", "42", "--json" });
+    try std.testing.expectEqual(GraphOperation.children, graph_children.graph.operation);
+    try std.testing.expectError(error.InvalidEventId, parseArgs(&.{ "graph", "event", "0" }));
+    try std.testing.expectError(error.InvalidEventId, parseArgs(&.{ "graph", "event" }));
+    try std.testing.expectError(error.InvalidEventId, parseArgs(&.{ "graph", "children", "not-a-number" }));
+    try std.testing.expectError(error.UnknownOption, parseArgs(&.{ "graph", "status", "42" }));
 }
 
 test "CLI parses provider-neutral agent queries and handoff" {
@@ -2035,6 +2164,7 @@ test "application and service plans wire every production boundary" {
             "src/sql.zig",
             "src/services/greeting.zig",
             "src/causal.zig",
+            "src/causal_graph.zig",
         }) |path| try std.testing.expect(plan.find(path) != null);
 
         const app = plan.find("src/app.zig").?.content;
@@ -2049,6 +2179,13 @@ test "application and service plans wire every production boundary" {
             "zstd.Application.componentDependency",
             "zstd.Application.acceptanceEvaluation",
         }) |semantic_helper| try std.testing.expect(std.mem.indexOf(u8, app, semantic_helper) != null);
+        try std.testing.expect(std.mem.indexOf(u8, app, "store.attachBackend(graph_backend.backend())") != null);
+        try std.testing.expect(std.mem.indexOf(u8, app, "graph_backend.flush()") != null);
+
+        var manifest = try zstd.Project.parseManifest(std.testing.allocator, plan.find("zigeffect.project.json").?.content);
+        defer manifest.deinit();
+        try std.testing.expect(std.mem.eql(u8, manifest.value.artifacts.graph, zstd.CausalGraph.default_path));
+        try std.testing.expect(std.mem.indexOfScalar(zstd.Project.Capability, manifest.value.components[0].capabilities, .causal_graph) != null);
     }
 }
 
@@ -2064,8 +2201,10 @@ test "system plan contains independently buildable services and shared package" 
     for ([_][]const u8{
         "services/api/build.zig",
         "services/api/src/main.zig",
+        "services/api/src/causal_graph.zig",
         "services/worker/build.zig",
         "services/worker/src/main.zig",
+        "services/worker/src/causal_graph.zig",
         "packages/shared/build.zig",
         "packages/shared/src/root.zig",
     }) |path| try std.testing.expect(plan.find(path) != null);
@@ -2103,6 +2242,49 @@ test "every scaffold matches the committed compatibility snapshot" {
         try std.testing.expectEqual(expected_case.files, plan.files.items.len);
         try std.testing.expectEqualStrings(expected_case.sha256, digest);
     }
+}
+
+test "graph commands query manifest-owned durable causal evidence" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var plan = try generatePlan(std.testing.allocator, .{
+        .kind = .application,
+        .name = "graph-project",
+        .target = "graph-project",
+    });
+    defer plan.deinit();
+    _ = try writePlan(std.testing.io, tmp.dir, "graph-project", plan, .{});
+
+    {
+        var root = try tmp.dir.openDir(std.testing.io, "graph-project", .{});
+        defer root.close(std.testing.io);
+        var database = try zstd.CausalGraph.LocalDatabase.init(std.testing.allocator, std.testing.io, root, .{});
+        defer database.deinit();
+        var backend = database.storageBackend(std.testing.allocator, 16);
+        defer backend.deinit();
+        var store = zstd.fx.CausalStore.init(std.testing.allocator);
+        defer store.deinit();
+        store.attachBackend(backend.backend());
+        const parent = try store.record(.{ .kind = .effect_started, .label = "cli-graph-proof" });
+        _ = try store.record(.{ .kind = .effect_completed, .label = "cli-graph-proof", .parent_id = parent, .status = "success" });
+        try backend.flush();
+        try std.testing.expectEqual(@as(u64, 0), store.backendFailureCount());
+    }
+
+    var status = try runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{ "graph", "status", "--root", "graph-project", "--json" });
+    defer status.deinit();
+    try std.testing.expectEqual(@as(u8, 0), status.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, status.output, "\"records\":2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status.output, "\"edges\":1") != null);
+
+    var event = try runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{ "graph", "event", "2", "--root", "graph-project", "--json" });
+    defer event.deinit();
+    try std.testing.expect(std.mem.indexOf(u8, event.output, "cli-graph-proof") != null);
+    try std.testing.expect(std.mem.indexOf(u8, event.output, "\"from\":1") != null);
+
+    var children = try runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{ "graph", "children", "1", "--root", "graph-project", "--json" });
+    defer children.deinit();
+    try std.testing.expect(std.mem.indexOf(u8, children.output, "\"children\":[2]") != null);
 }
 
 test "writer dry run creates nothing and default mode refuses a non-empty target" {

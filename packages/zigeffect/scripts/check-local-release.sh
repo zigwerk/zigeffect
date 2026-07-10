@@ -28,12 +28,12 @@ printf '== zigeffect CLI, install, scaffolds, and provider fixtures ==\n'
 )
 ZIGEFFECT_BIN="$INSTALL_PREFIX/bin/zigeffect"
 test -x "$ZIGEFFECT_BIN"
-test "$($ZIGEFFECT_BIN --version)" = "zigeffect 0.2.0"
+test "$($ZIGEFFECT_BIN --version)" = "zigeffect 0.3.0"
 for shell in bash zsh fish; do
   "$ZIGEFFECT_BIN" completions "$shell" > "$INSTALL_PREFIX/$shell.completion"
   test -s "$INSTALL_PREFIX/$shell.completion"
 done
-"$ZIGEFFECT_BIN" compatibility --json | jq -e '.compatible == true and .cli_version == "0.2.0"' > /dev/null
+"$ZIGEFFECT_BIN" compatibility --json | jq -e '.compatible == true and .cli_version == "0.3.0"' > /dev/null
 "$ZIGEFFECT_BIN" benchmark conformance \
   packages/zigeffect/benchmarks/fixtures/provider-conformance.v1.json \
   --root . --json | jq -e '.complete_provider_matrix == true and .passed == 14 and .failed == 0' > /dev/null
@@ -78,4 +78,4 @@ if sed -n '/### M88/,/## Hardening milestone roadmap/p' packages/zigeffect/docs/
 fi
 git diff --check
 
-printf 'zigeffect local release gate passed (Zig %s, CLI 0.2.0)\n' "$ZIG_VERSION"
+printf 'zigeffect local release gate passed (Zig %s, CLI 0.3.0)\n' "$ZIG_VERSION"

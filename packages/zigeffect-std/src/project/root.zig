@@ -59,6 +59,7 @@ pub const Capability = enum {
     observability,
     agent,
     workbench,
+    causal_graph,
 };
 
 pub const Component = struct {
@@ -271,6 +272,7 @@ pub const ArtifactPaths = struct {
     sessions: []const u8 = ".zigeffect/sessions",
     causal: []const u8 = ".zigeffect/causal",
     receipts: []const u8 = ".zigeffect/receipts",
+    graph: []const u8 = ".zigeffect/graph",
 };
 
 pub const DependencyPaths = struct {
@@ -374,6 +376,7 @@ pub const Manifest = struct {
         try validateRelativePath(self.artifacts.sessions, false);
         try validateRelativePath(self.artifacts.causal, false);
         try validateRelativePath(self.artifacts.receipts, false);
+        try validateRelativePath(self.artifacts.graph, false);
         try validateDependencyPath(self.dependencies.zigeffect);
         try validateDependencyPath(self.dependencies.zigeffect_std);
         try self.safety.validate(self);
@@ -671,6 +674,11 @@ test "Project rejects unknown schemas unsafe paths and invalid component graphs"
         .components = &.{.{ .id = "demo-app", .kind = .application, .path = "." }},
     };
     try std.testing.expectError(error.UnsupportedSchema, unknown_schema.validate());
+
+    var invalid_graph_path = unknown_schema;
+    invalid_graph_path.schema = schema_version;
+    invalid_graph_path.artifacts.graph = "../outside";
+    try std.testing.expectError(error.InvalidPath, invalid_graph_path.validate());
 
     const traversal = Manifest{
         .name = "demo-app",
