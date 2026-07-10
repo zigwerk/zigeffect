@@ -1,3 +1,5 @@
+import { redactLocalDevText } from "./localDevRedaction";
+
 export type UnknownRecord = Record<string, unknown>;
 
 export type CausalEvent = {
@@ -815,17 +817,6 @@ function actionLooksLikeCommand(value: string): boolean {
 
 function looksLikeSchemaOrCliIssue(value: string): boolean {
   return /\b(schema|cli|missing_field|invalid_type|invalid_value|unknown_enum|constraint_failed|decode_failed|parse failed|--[a-z][a-z0-9-]*)\b/i.test(value);
-}
-
-function redactLocalDevText(value: string): string {
-  return value
-    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^/?#\s:@]+:[^/?#\s@]+@/gi, "$1<redacted>@")
-    .replace(/\b(authorization|proxy-authorization)\s*:\s*(bearer|basic)\s+[^;\s,]+/gi, "$1: $2 <redacted>")
-    .replace(/\bcookie\s*:\s*[^,\n\r]+/gi, "Cookie: <redacted>")
-    .replace(
-      /\b(api[_-]?key|x-api-key|token|password|secret|session(?:_id)?|sid)\b\s*[:=]\s*("[^"]*"|'[^']*'|[^;\s,}\]]+)/gi,
-      "$1=<redacted>",
-    );
 }
 
 export function queryCommandsForEvent(event: CausalEvent, artifactPath: string): QueryCommand[] {

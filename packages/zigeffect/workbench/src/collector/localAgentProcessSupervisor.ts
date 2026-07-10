@@ -3,6 +3,7 @@ import type { LocalDevSessionEvent } from "../localDevSessionFeed";
 import { postLocalAgentEvent } from "./localAgentRuntime";
 import {
   runLocalAgentTranscriptTail,
+  type LocalAgentTranscriptAdapter,
   type LocalAgentTranscriptTailSummary,
 } from "./localAgentTranscriptTail";
 
@@ -14,6 +15,7 @@ export type LocalAgentProcessTool = {
   cwd?: string;
   task?: string;
   checkLabel?: string;
+  transcriptAdapter?: LocalAgentTranscriptAdapter;
 };
 
 export type LocalAgentProcessHandle = {
@@ -137,6 +139,7 @@ export async function runLocalAgentProcessSupervisor(
     agentId: tool.id,
     agentKind: tool.kind,
     agentLabel: tool.label,
+    adapter: tool.transcriptAdapter,
     fetcher: options.fetcher,
     sequenceStart: sequence,
   });

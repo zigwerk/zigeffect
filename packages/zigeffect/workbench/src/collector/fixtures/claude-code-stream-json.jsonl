@@ -1,0 +1,7 @@
+{"type":"system","subtype":"init","uuid":"claude-init-1","session_id":"claude-session-1","model":"claude-sonnet","tools":["Bash","Edit"]}
+{"type":"assistant","uuid":"claude-assistant-tool-1","session_id":"claude-session-1","message":{"id":"claude-message-1","role":"assistant","content":[{"type":"tool_use","id":"claude-tool-1","name":"Bash","input":{"command":"bun test","token":"sentinel-secret"}}]}}
+{"type":"user","uuid":"claude-tool-result-1","session_id":"claude-session-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"claude-tool-1","content":"tests passed password=sentinel-secret","is_error":false}]}}
+{"type":"assistant","uuid":"claude-assistant-text-1","session_id":"claude-session-1","message":{"id":"claude-message-2","role":"assistant","content":[{"type":"text","text":"Review complete secret=sentinel-secret"}]}}
+{"type":"result","subtype":"success","uuid":"claude-result-1","session_id":"claude-session-1","is_error":false,"duration_ms":420,"result":"Finished local review token=sentinel-secret"}
+{"type":"stream_event","uuid":"claude-partial-1","session_id":"claude-session-1","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"duplicated partial"}}}
+{"type":"future_claude_event","uuid":"claude-future-1"}

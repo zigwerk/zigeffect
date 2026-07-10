@@ -36,10 +36,35 @@ emitter's output, replayed verbatim by the end-to-end collector test.)
 
 ### Endpoints
 - `GET /live` — WebSocket; browser clients subscribe here. Each message is one
-  JSON `LiveFrame`.
+  JSON causal, command, or local agent frame.
 - `POST /ingest` — body is NDJSON engine `CausalEvent` lines; returns
   `{"ingested": <count>}` and broadcasts each mapped frame.
+- `POST /frames` — validates and broadcasts trusted, already-mapped live frames.
+- `POST /command` — validates, redacts, stores, and broadcasts one intervention
+  command intent.
+- `GET /commands?after=<sequence>` — returns command intents newer than the
+  caller's cursor for an engine-side command tap.
+- `POST /agent-events` — validates, redacts, and broadcasts one local Dev Session
+  event or an array of events.
+- `POST /agent-feed` — validates and broadcasts a local Dev Session JSONL body.
 - `GET /health` — `{"ok": true, "clients": <n>}`.
+
+## Local agent processes
+
+`localAgentProcessSupervisor.ts` owns one Bun child process, tails stdout,
+drains bounded stderr, and emits running/check/terminal receipts through
+`POST /agent-events`. `localAgentTranscriptAdapters.ts` supplies native public
+stream adapters and command builders for:
+
+```text
+codex exec --json "<prompt>"
+claude -p "<prompt>" --output-format stream-json --verbose
+```
+
+Provider envelopes are reduced to the provider-neutral `agent_turn` contract
+before browser delivery. Secret-shaped JSON fields are structurally redacted,
+payload snippets are bounded, unsupported events are ignored, and tests use the
+offline fixtures under `fixtures/`.
 
 ## Point the workbench at it
 

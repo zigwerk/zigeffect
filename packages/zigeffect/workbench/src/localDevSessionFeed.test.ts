@@ -5,6 +5,7 @@ import {
   applyLocalDevSessionEvents,
   localDevSessionEventsFromJsonl,
   parseLocalDevSessionEventMessage,
+  redactLocalDevSessionText,
 } from "./localDevSessionFeed";
 
 const sampleSession = JSON.parse(
@@ -37,6 +38,24 @@ test("parseLocalDevSessionEventMessage accepts one event and rejects junk", () =
   expect(event?.agent_id).toBe("claude-code");
   expect(parseLocalDevSessionEventMessage("nope")).toBeNull();
   expect(parseLocalDevSessionEventMessage(JSON.stringify({ kind: "unknown" }))).toBeNull();
+});
+
+test("redactLocalDevSessionText structurally redacts JSON tool inputs", () => {
+  const redacted = redactLocalDevSessionText(JSON.stringify({
+    command: "bun test",
+    token: "sentinel-secret",
+    nested: {
+      password: "hunter2",
+      message: "secret=embedded-secret",
+    },
+  }));
+
+  expect(redacted).toBe(
+    '{"command":"bun test","token":"<redacted>","nested":{"password":"<redacted>","message":"secret=<redacted>"}}',
+  );
+  expect(redacted).not.toContain("sentinel-secret");
+  expect(redacted).not.toContain("hunter2");
+  expect(redacted).not.toContain("embedded-secret");
 });
 
 test("applyLocalDevSessionEvents updates local session agents checks artifacts and guardrails", () => {

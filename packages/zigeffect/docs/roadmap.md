@@ -389,9 +389,9 @@ This is the local-first sequence for making zigeffect useful as the development
 engine for local projects and standard-library work. It intentionally comes
 before hosting or broad distributed orchestration.
 
-Status on 2026-07-10: M72 through M82 are implemented in the workbench,
+Status on 2026-07-10: M72 through M83 are implemented in the workbench,
 `causal-dev-session`, and collector. Local session events have parser/apply
-coverage, Codex/Claude-style JSONL fixtures, a `bun run zigeffect:local-agent-gate`
+coverage, native Codex/Claude JSONL fixtures, a `bun run zigeffect:local-agent-gate`
 command, and a live collector WebSocket overlay (`POST /agent-feed` and
 `POST /agent-events`) so the Agents tab updates during an active stream. A
 fakeable Bun-local agent runtime now runs configured local commands, emits
@@ -399,11 +399,15 @@ redacted start/check/done/failed/warning events, supports fail-fast execution,
 captures redacted stdout/stderr/error artifacts, emits artifact links, and feeds
 those endpoints. Turn-level receipts now exist as static session data and live
 `agent_turn` events. A transcript tail adapter can consume line-oriented JSONL
-or tagged text streams and post redacted turns. Remaining local-first work is
-provider-specific Codex/Claude transcript adapters and samples. A fakeable
-process supervisor now owns a real Bun child lifecycle, streams stdout turns,
-drains bounded stderr, supports abort-driven termination, and posts honest
-terminal receipts.
+or tagged text streams and post redacted turns. A fakeable process supervisor
+owns a real Bun child lifecycle, streams stdout turns, drains bounded stderr,
+supports abort-driven termination, and posts honest terminal receipts. Native
+adapters now normalize public `codex exec --json` and Claude Code
+`--output-format stream-json` envelopes, including item/tool lifecycle upserts,
+parallel Claude tool uses, bounded snippets, and offline fixtures. The declared
+local-first M72-M83 foundation is complete; subsequent work can deepen
+interactive PTY control, resumable session recovery, and operator UX without a
+hosting dependency.
 
 ### M72 - Local development session protocol
 
@@ -610,6 +614,10 @@ and Claude Code CLIs into the provider-neutral `agent_turn` protocol.
 - Unsupported event kinds are ignored without stopping the owned process.
 - Provider adapters remain isolated from the workbench session model.
 - The local agent gate runs the provider adapter tests without network access.
+
+**Status:** delivered with public-envelope fixtures, provider command builders,
+multi-event transcript sequencing, structured JSON redaction, and process
+supervisor integration.
 
 ## Hardening milestone roadmap
 

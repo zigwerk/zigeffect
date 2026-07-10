@@ -11,8 +11,15 @@ export type LocalAgentTranscriptAgent = {
   agentLabel: string;
 };
 
+export type LocalAgentTranscriptAdapter = (
+  line: string,
+  agent: LocalAgentTranscriptAgent,
+  sequence: number,
+) => LocalDevSessionEvent | readonly LocalDevSessionEvent[] | null;
+
 export type LocalAgentTranscriptTailOptions = LocalAgentTranscriptAgent & {
   agentEventsUrl: string;
+  adapter?: LocalAgentTranscriptAdapter;
   fetcher?: typeof fetch;
   sequenceStart?: number;
 };
@@ -31,17 +38,41 @@ export function parseLocalAgentTranscriptLine(
   line: string,
   agent: LocalAgentTranscriptAgent,
   sequence: number,
+  adapter?: LocalAgentTranscriptAdapter,
 ): LocalDevSessionEvent | null {
+  return parseLocalAgentTranscriptEvents(line, agent, sequence, adapter)[0] ?? null;
+}
+
+export function parseLocalAgentTranscriptEvents(
+  line: string,
+  agent: LocalAgentTranscriptAgent,
+  sequence: number,
+  adapter?: LocalAgentTranscriptAdapter,
+): LocalDevSessionEvent[] {
   const trimmed = line.trim();
   if (trimmed.length === 0) {
-    return null;
+    return [];
   }
 
+  const adapted = adapter?.(trimmed, agent, sequence);
+  if (adapted) {
+    const candidates = Array.isArray(adapted) ? adapted : [adapted];
+    const normalized = candidates
+      .map((event, index) => parseLocalDevSessionEventMessage(JSON.stringify({
+        ...event,
+        sequence: sequence + index,
+      })))
+      .filter((event): event is LocalDevSessionEvent => event !== null);
+    if (normalized.length > 0) {
+      return normalized;
+    }
+  }
   const event = eventFromJsonLine(trimmed, agent, sequence) ?? eventFromTaggedLine(trimmed, agent, sequence);
   if (!event) {
-    return null;
+    return [];
   }
-  return parseLocalDevSessionEventMessage(JSON.stringify(event));
+  const normalized = parseLocalDevSessionEventMessage(JSON.stringify(event));
+  return normalized ? [normalized] : [];
 }
 
 export async function runLocalAgentTranscriptTail(
@@ -56,21 +87,25 @@ export async function runLocalAgentTranscriptTail(
   let turns = 0;
   let ignored = 0;
   let posted = 0;
+  let lastSequence = sequenceStart;
 
   async function processLine(line: string): Promise<void> {
     if (line.trim().length === 0) {
       return;
     }
     lines += 1;
-    const sequence = sequenceStart + lines;
-    const event = parseLocalAgentTranscriptLine(line, options, sequence);
-    if (!event) {
+    const sequence = lastSequence + 1;
+    const events = parseLocalAgentTranscriptEvents(line, options, sequence, options.adapter);
+    lastSequence += Math.max(1, events.length);
+    if (events.length === 0) {
       ignored += 1;
       return;
     }
-    turns += 1;
-    await postLocalAgentEvent(options.agentEventsUrl, event, options.fetcher);
-    posted += 1;
+    turns += events.length;
+    for (const event of events) {
+      await postLocalAgentEvent(options.agentEventsUrl, event, options.fetcher);
+      posted += 1;
+    }
   }
 
   while (true) {
@@ -94,7 +129,7 @@ export async function runLocalAgentTranscriptTail(
     turns,
     ignored,
     posted,
-    lastSequence: sequenceStart + lines,
+    lastSequence,
   };
 }
 
