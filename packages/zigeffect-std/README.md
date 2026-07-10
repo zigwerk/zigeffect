@@ -75,10 +75,13 @@ with one import:
   row decoding, fake databases, transaction receipts, migrations, pool
   leases/stats, and lifecycle facts. The local Postgres adapter lives in
   `packages/zigeffect-postgres`.
-- `Http` defines effect-native HTTP client/server contracts with fake and live
-  local clients, deterministic memory routing, Schema-coded local JSON routes,
-  redacted route receipts/traces, and WebSocket frame codecs for local
-  workbench feeds.
+- `Http` defines one effect-native client contract shared by live, fake, and
+  scripted transports. Responses own their headers and bodies, header lookup is
+  case-insensitive, and provider clients receive typed timeout, cancellation,
+  body-limit, and transport failures plus parsed `Retry-After` metadata. It also
+  provides deterministic memory routing, Schema-coded local JSON routes,
+  credential-safe request redaction, route receipts/traces, and WebSocket frame
+  codecs for local workbench feeds.
 - `Agent` records workbench-compatible local agent JSONL sessions, Codex and
   Claude Code process adapter commands, guardrails, artifacts, check receipts,
   effect-native process-backed agent runs, and supervised local multi-tool
