@@ -8,6 +8,7 @@ import {
   type LocalAgentControlTool,
 } from "./localAgentControlServer";
 import type { LocalAgentProcessRunner } from "./localAgentProcessSupervisor";
+import type { LocalAgentPtyRunner } from "./localAgentPtySupervisor";
 import {
   bunLocalAgentSessionStore,
   createLocalAgentSessionRegistry,
@@ -28,6 +29,7 @@ export type LocalAgentControlHostOptions = {
   statePath?: string;
   tools?: readonly LocalAgentControlTool[];
   runner?: LocalAgentProcessRunner;
+  ptyRunner?: LocalAgentPtyRunner;
   fetcher?: typeof fetch;
   now?: () => number;
 };
@@ -82,6 +84,8 @@ export async function createLocalAgentControlHost(
     registry,
     sessionStore,
     runner: options.runner,
+    ptyRunner: options.ptyRunner,
+    ptySecretLiterals: [options.token, ...secretEnvironmentValues(process.env)],
     fetcher: options.fetcher,
     agentEventsUrl: `${origin}/agent-events`,
     now: options.now,
@@ -185,7 +189,57 @@ function builtInTools(workspace: string): LocalAgentControlTool[] {
         });
       },
     },
+    {
+      id: "codex-interactive",
+      label: "Codex interactive",
+      description: "Run an interactive Codex TUI in the local workspace",
+      kind: "codex",
+      mode: "pty",
+      input,
+      build(value) {
+        const prompt = promptFromInput(value);
+        return {
+          id: "codex-interactive",
+          kind: "codex",
+          label: "Codex interactive",
+          command: ["codex", "--no-alt-screen", prompt],
+          cwd: workspace,
+          task: prompt,
+          checkLabel: "Codex interactive task",
+        };
+      },
+    },
+    {
+      id: "claude-code-interactive",
+      label: "Claude Code interactive",
+      description: "Run an interactive Claude Code TUI in the local workspace",
+      kind: "claude-code",
+      mode: "pty",
+      input,
+      build(value) {
+        const prompt = promptFromInput(value);
+        return {
+          id: "claude-code-interactive",
+          kind: "claude-code",
+          label: "Claude Code interactive",
+          command: ["claude", prompt],
+          cwd: workspace,
+          task: prompt,
+          checkLabel: "Claude Code interactive task",
+        };
+      },
+    },
   ];
+}
+
+function secretEnvironmentValues(env: Record<string, string | undefined>): string[] {
+  const values = new Set<string>();
+  for (const [key, value] of Object.entries(env)) {
+    if (value && value.length >= 4 && /(token|secret|password|api[_-]?key|authorization|cookie)/i.test(key)) {
+      values.add(value);
+    }
+  }
+  return [...values];
 }
 
 function promptFromInput(value: unknown): string {

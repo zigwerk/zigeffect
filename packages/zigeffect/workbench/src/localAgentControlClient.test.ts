@@ -15,6 +15,8 @@ const session = {
   command: "codex exec --json <redacted>",
   cwd: "/workspace",
   task: "Review schema",
+  mode: "pty",
+  terminalAvailable: true,
   status: "running",
   startedAt: 10,
   updatedAt: 20,
@@ -28,6 +30,11 @@ const session = {
   lastSequence: 3,
   detail: null,
 } as const;
+
+function wireSession() {
+  const { terminalAvailable, ...record } = session;
+  return { ...record, terminal_available: terminalAvailable };
+}
 
 test("control client accepts only credential-free loopback HTTP URLs", () => {
   expect(normalizeLocalAgentControlUrl("http://127.0.0.1:4500/")).toBe("http://127.0.0.1:4500");
@@ -79,8 +86,22 @@ test("control client authenticates protected routes and parses the complete cont
       label: "Codex review",
       description: "Review locally",
       kind: "codex",
+      mode: "pty",
       input: { kind: "prompt", label: "Task", placeholder: "Review", required: true, max_length: 200 },
     }] });
+    if (url.includes("/terminal?after=")) return Response.json({
+      frames: [{ sequence: 1, timestamp: 30, data: "ready$ " }],
+      next_after: 1,
+      gap: false,
+      dropped_frames: 0,
+      dropped_bytes: 0,
+      status: "running",
+      cols: 100,
+      rows: 30,
+      total_bytes: 7,
+    });
+    if (url.endsWith("/sessions/session-1/input")) return Response.json({ accepted: true, session_id: "session-1" }, { status: 202 });
+    if (url.endsWith("/sessions/session-1/resize")) return Response.json({ accepted: true, session_id: "session-1", cols: 120, rows: 40 }, { status: 202 });
     if (url.endsWith("/receipts")) return Response.json({ receipts: [{
       sequence: 1,
       timestamp: 20,
@@ -91,11 +112,11 @@ test("control client authenticates protected routes and parses the complete cont
       detail: "started allowlisted tool codex-review",
     }] });
     if (url.endsWith("/sessions/session-1/stop")) return Response.json({ accepted: true, session_id: "session-1" }, { status: 202 });
-    if (url.endsWith("/sessions/session-1")) return Response.json({ session });
+    if (url.endsWith("/sessions/session-1")) return Response.json({ session: wireSession() });
     if (url.endsWith("/sessions") && init?.method === "POST") {
       return Response.json({ accepted: true, session_id: "session-1" }, { status: 202 });
     }
-    if (url.endsWith("/sessions")) return Response.json({ sessions: [session] });
+    if (url.endsWith("/sessions")) return Response.json({ sessions: [wireSession()] });
     return new Response("not found", { status: 404 });
   });
   const client = createLocalAgentControlClient({
@@ -105,13 +126,22 @@ test("control client authenticates protected routes and parses the complete cont
   });
 
   expect(await client.health()).toEqual({ ok: true, activeSessions: 1, persistence: "durable" });
-  expect((await client.tools())[0]).toMatchObject({ id: "codex-review", input: { maxLength: 200 } });
+  expect((await client.tools())[0]).toMatchObject({ id: "codex-review", mode: "pty", input: { maxLength: 200 } });
   expect((await client.sessions())[0]).toEqual(session);
   expect(await client.session("session-1")).toEqual(session);
   expect((await client.receipts())[0]).toMatchObject({ action: "start", outcome: "accepted" });
   expect(await client.start({ toolId: "codex-review", sessionId: "session-1", input: { prompt: "Review schema" } }))
     .toEqual({ accepted: true, sessionId: "session-1" });
   expect(await client.stop("session-1")).toEqual({ accepted: true, sessionId: "session-1" });
+  expect(await client.terminal("session-1", 0)).toMatchObject({
+    frames: [{ sequence: 1, data: "ready$ " }],
+    nextAfter: 1,
+    status: "running",
+    cols: 100,
+    rows: 30,
+  });
+  expect(await client.writeTerminal("session-1", "echo private\r")).toEqual({ accepted: true, sessionId: "session-1" });
+  expect(await client.resizeTerminal("session-1", 120, 40)).toEqual({ accepted: true, sessionId: "session-1", cols: 120, rows: 40 });
 
   expect(seen[0]).toMatchObject({ method: "GET", auth: null });
   expect(seen.slice(1).every((request) => request.auth === "Bearer control-secret")).toBe(true);
@@ -120,6 +150,8 @@ test("control client authenticates protected routes and parses the complete cont
     session_id: "session-1",
     input: { prompt: "Review schema" },
   });
+  expect(seen.find((request) => request.url.endsWith("/sessions/session-1/input"))?.body).toEqual({ data: "echo private\r" });
+  expect(seen.find((request) => request.url.endsWith("/sessions/session-1/resize"))?.body).toEqual({ cols: 120, rows: 40 });
 });
 
 test("control client maps authorization and policy failures without leaking credentials", async () => {
@@ -198,4 +230,32 @@ test("control client normalizes cancellation while reading a response body", asy
     code: "cancelled",
     message: "local control request cancelled",
   });
+});
+
+test("control client rejects malformed terminal frames and invalid commands", async () => {
+  const requests: string[] = [];
+  const client = createLocalAgentControlClient({
+    baseUrl: "http://localhost:4500",
+    token: "secret",
+    fetcher: async (input) => {
+      requests.push(String(input));
+      return Response.json({
+        frames: [{ sequence: 0, timestamp: -1, data: 42 }],
+        next_after: 0,
+        gap: false,
+        dropped_frames: 0,
+        dropped_bytes: 0,
+        status: "running",
+        cols: 100,
+        rows: 30,
+        total_bytes: 0,
+      });
+    },
+  });
+
+  await expect(client.terminal("session-1", 0)).rejects.toMatchObject({ code: "invalid_response" });
+  await expect(client.terminal("session-1", -1)).rejects.toMatchObject({ code: "policy" });
+  await expect(client.writeTerminal("session-1", "x".repeat(20_000))).rejects.toMatchObject({ code: "policy" });
+  await expect(client.resizeTerminal("session-1", 2, 999)).rejects.toMatchObject({ code: "policy" });
+  expect(requests).toHaveLength(1);
 });

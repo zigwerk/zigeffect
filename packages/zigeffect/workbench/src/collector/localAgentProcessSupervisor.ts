@@ -1,6 +1,6 @@
 import type { LocalDevAgentKind } from "../causalArtifact";
 import type { LocalDevSessionEvent } from "../localDevSessionFeed";
-import { postLocalAgentEvent } from "./localAgentRuntime";
+import { localAgentChildEnvironment, postLocalAgentEvent } from "./localAgentRuntime";
 import type {
   LocalAgentSessionRegistry,
   LocalAgentSessionStore,
@@ -70,6 +70,7 @@ export const bunLocalAgentProcessRunner: LocalAgentProcessRunner = {
 
     const process = Bun.spawn([command, ...args], {
       cwd: tool.cwd,
+      env: localAgentChildEnvironment(),
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",

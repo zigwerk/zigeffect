@@ -92,6 +92,7 @@ export const bunLocalAgentRunner: LocalAgentRuntimeRunner = {
 
     const process = Bun.spawn([command, ...args], {
       cwd: tool.cwd,
+      env: localAgentChildEnvironment(),
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -109,6 +110,16 @@ export const bunLocalAgentRunner: LocalAgentRuntimeRunner = {
     };
   },
 };
+
+export function localAgentChildEnvironment(
+  env: Record<string, string | undefined> = process.env,
+): Record<string, string> {
+  const child: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined && !key.startsWith("ZIGEFFECT_CONTROL_")) child[key] = value;
+  }
+  return child;
+}
 
 export function bunLocalAgentArtifactSink(rootDir: string): LocalAgentRuntimeArtifactSink {
   const root = rootDir.replace(/\/+$/, "");

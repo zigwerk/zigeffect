@@ -15,6 +15,7 @@ const tool: LocalAgentControlToolSummary = {
   label: "Codex review",
   description: "Review locally",
   kind: "codex",
+  mode: "batch",
   input: { kind: "prompt", label: "Task", placeholder: "Review schema", required: true, maxLength: 200 },
 };
 
@@ -27,6 +28,8 @@ function session(overrides: Partial<LocalAgentControlSession> = {}): LocalAgentC
     command: "codex exec --json <redacted>",
     cwd: "/workspace",
     task: "Review schema",
+    mode: "batch",
+    terminalAvailable: false,
     status: "running",
     startedAt: 10,
     updatedAt: 20,
@@ -53,6 +56,14 @@ function fakeClient(overrides: Partial<LocalAgentControlClient> = {}): LocalAgen
     async receipts() { return []; },
     async start() { return { accepted: true, sessionId: "session-1" }; },
     async stop(id) { return { accepted: true, sessionId: id }; },
+    async terminal() {
+      return {
+        frames: [], nextAfter: 0, gap: false, droppedFrames: 0, droppedBytes: 0,
+        status: "running", cols: 100, rows: 30, totalBytes: 0,
+      };
+    },
+    async writeTerminal(id) { return { accepted: true, sessionId: id }; },
+    async resizeTerminal(id, cols, rows) { return { accepted: true, sessionId: id, cols, rows }; },
     ...overrides,
   };
 }

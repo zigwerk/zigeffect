@@ -12,12 +12,18 @@ import {
   type LocalAgentSessionRegistry,
   type LocalAgentSessionStore,
 } from "./localAgentSessionRegistry";
+import {
+  startLocalAgentPtySupervisor,
+  type LocalAgentPtyRunner,
+  type LocalAgentPtySupervisor,
+} from "./localAgentPtySupervisor";
 
 export type LocalAgentControlTool = {
   id: string;
   label: string;
   description?: string;
   kind: LocalDevAgentKind;
+  mode?: "batch" | "pty";
   input?: LocalAgentControlPromptInput;
   build: (input: unknown) => LocalAgentProcessTool | Promise<LocalAgentProcessTool>;
 };
@@ -52,6 +58,9 @@ export type LocalAgentControlServerOptions = {
   maxReceipts?: number;
   now?: () => number;
   receiptSink?: (receipt: LocalAgentControlReceipt) => void | Promise<void>;
+  ptyRunner?: LocalAgentPtyRunner;
+  ptySecretLiterals?: readonly string[];
+  maxPtySessions?: number;
 };
 
 export type LocalAgentControlServer = {
@@ -65,6 +74,7 @@ type ActiveSession = {
   controller: AbortController;
   completion: Promise<void>;
   toolId: string;
+  pty: LocalAgentPtySupervisor | null;
 };
 
 type StartRequest = {
@@ -78,6 +88,12 @@ const DEFAULT_MAX_RECEIPTS = 512;
 const MAX_RECEIPT_DETAIL = 1024;
 const DEFAULT_MAX_PROMPT_LENGTH = 16 * 1024;
 const MAX_PROMPT_LENGTH = 64 * 1024;
+const DEFAULT_MAX_PTY_SESSIONS = 32;
+const MAX_TERMINAL_INPUT_BYTES = 16 * 1024;
+const MIN_TERMINAL_COLS = 20;
+const MAX_TERMINAL_COLS = 500;
+const MIN_TERMINAL_ROWS = 5;
+const MAX_TERMINAL_ROWS = 200;
 const TRUNCATION_MARKER = "... [truncated]";
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const CORS_HEADERS = {
@@ -94,17 +110,22 @@ export function createLocalAgentControlServer(
   }
   const maxBodyBytes = positiveSafeInteger(options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES, "maxBodyBytes");
   const maxReceipts = positiveSafeInteger(options.maxReceipts ?? DEFAULT_MAX_RECEIPTS, "maxReceipts");
+  const maxPtySessions = positiveSafeInteger(options.maxPtySessions ?? DEFAULT_MAX_PTY_SESSIONS, "maxPtySessions");
   const now = options.now ?? Date.now;
   const tools = new Map<string, LocalAgentControlTool>();
   for (const tool of options.tools) {
     requireIdentifier(tool.id, "control tool id");
     if (tools.has(tool.id)) throw new Error(`duplicate control tool id: ${tool.id}`);
     validateToolInput(tool.input);
+    if (tool.mode !== undefined && tool.mode !== "batch" && tool.mode !== "pty") {
+      throw new Error(`unsupported control tool mode: ${String(tool.mode)}`);
+    }
     tools.set(tool.id, tool);
   }
 
   const expectedToken = digest(options.token);
   const active = new Map<string, ActiveSession>();
+  const terminalSessions = new Map<string, LocalAgentPtySupervisor>();
   const audit: LocalAgentControlReceipt[] = [];
   let receiptSequence = 0;
 
@@ -128,18 +149,32 @@ export function createLocalAgentControlServer(
           label: boundedRedacted(tool.label),
           description: boundedRedacted(tool.description ?? ""),
           kind: tool.kind,
+          mode: tool.mode ?? "batch",
           input: safeToolInput(tool.input),
         })),
       });
     }
     if (path === "/agent-control/sessions" && request.method === "GET") {
-      return json({ sessions: options.registry.list() });
+      return json({ sessions: options.registry.list().map(sessionView) });
     }
     if (path === "/agent-control/sessions" && request.method === "POST") {
       return startSession(request);
     }
     if (path === "/agent-control/receipts" && request.method === "GET") {
       return json({ receipts: receipts() });
+    }
+
+    const terminalMatch = /^\/agent-control\/sessions\/([^/]+)\/terminal$/.exec(path);
+    if (terminalMatch && request.method === "GET") {
+      return readTerminal(safeDecode(terminalMatch[1]!), url.searchParams.get("after"));
+    }
+    const inputMatch = /^\/agent-control\/sessions\/([^/]+)\/input$/.exec(path);
+    if (inputMatch && request.method === "POST") {
+      return writeTerminal(safeDecode(inputMatch[1]!), request);
+    }
+    const resizeMatch = /^\/agent-control\/sessions\/([^/]+)\/resize$/.exec(path);
+    if (resizeMatch && request.method === "POST") {
+      return resizeTerminal(safeDecode(resizeMatch[1]!), request);
     }
 
     const stopMatch = /^\/agent-control\/sessions\/([^/]+)\/stop$/.exec(path);
@@ -151,7 +186,7 @@ export function createLocalAgentControlServer(
       const sessionId = safeDecode(detailMatch[1]!);
       if (!sessionId) return response("invalid session id", 400);
       const session = options.registry.get(sessionId);
-      return session ? json({ session }) : response("session not found", 404);
+      return session ? json({ session: sessionView(session) }) : response("session not found", 404);
     }
     return response("not found", 404);
   }
@@ -197,6 +232,10 @@ export function createLocalAgentControlServer(
       return response("tool input rejected", 400);
     }
 
+    if (tool.mode === "pty") {
+      return startPtySession(parsed, tool, processTool);
+    }
+
     const controller = new AbortController();
     const run = runLocalAgentProcessSupervisor(processTool, {
       agentEventsUrl: options.agentEventsUrl,
@@ -215,7 +254,7 @@ export function createLocalAgentControlServer(
       .finally(() => {
         active.delete(parsed.sessionId);
       });
-    active.set(parsed.sessionId, { controller, completion, toolId: parsed.toolId });
+    active.set(parsed.sessionId, { controller, completion, toolId: parsed.toolId, pty: null });
     await Promise.resolve();
     if (!options.registry.get(parsed.sessionId)) {
       controller.abort();
@@ -225,6 +264,121 @@ export function createLocalAgentControlServer(
     }
     await recordReceipt("start", "accepted", parsed.sessionId, parsed.toolId, `started allowlisted tool ${parsed.toolId}`);
     return json({ accepted: true, session_id: parsed.sessionId }, 202);
+  }
+
+  async function startPtySession(
+    parsed: StartRequest,
+    tool: LocalAgentControlTool,
+    processTool: LocalAgentProcessTool,
+  ): Promise<Response> {
+    evictTerminalPtySessions(maxPtySessions - 1);
+    if (terminalSessions.size >= maxPtySessions) {
+      await recordReceipt("start", "rejected", parsed.sessionId, parsed.toolId, "PTY retention is full with active sessions");
+      return response("PTY retention is full with active sessions", 409);
+    }
+    const controller = new AbortController();
+    let pty: LocalAgentPtySupervisor;
+    try {
+      pty = await startLocalAgentPtySupervisor(processTool, {
+        sessionId: parsed.sessionId,
+        registry: options.registry,
+        sessionStore: options.sessionStore,
+        agentEventsUrl: options.agentEventsUrl,
+        fetcher: options.fetcher,
+        runner: options.ptyRunner,
+        signal: controller.signal,
+        secretLiterals: options.ptySecretLiterals,
+        now,
+      });
+    } catch (error) {
+      await recordReceipt("start", "rejected", parsed.sessionId, parsed.toolId, `PTY failed to start: ${errorDetail(error)}`);
+      return response("PTY failed to start", 500);
+    }
+    terminalSessions.set(parsed.sessionId, pty);
+    const completion = pty.completion
+      .then(() => undefined)
+      .catch(async (error) => {
+        await markBackgroundFailure(parsed.sessionId, error);
+      })
+      .finally(() => {
+        active.delete(parsed.sessionId);
+        evictTerminalPtySessions(maxPtySessions);
+      });
+    active.set(parsed.sessionId, { controller, completion, toolId: tool.id, pty });
+    await recordReceipt("start", "accepted", parsed.sessionId, parsed.toolId, `started allowlisted PTY tool ${parsed.toolId}`);
+    return json({ accepted: true, session_id: parsed.sessionId }, 202);
+  }
+
+  function readTerminal(sessionId: string | null, rawAfter: string | null): Response {
+    if (!sessionId || !identifierPattern.test(sessionId)) return response("invalid session id", 400);
+    const after = Number(rawAfter ?? "0");
+    if (!Number.isSafeInteger(after) || after < 0) return response("invalid terminal cursor", 400);
+    const pty = terminalSessions.get(sessionId);
+    if (!pty) return terminalUnavailable(sessionId);
+    const output = pty.read(after);
+    return json({
+      frames: output.frames,
+      next_after: output.nextAfter,
+      gap: output.gap,
+      dropped_frames: output.droppedFrames,
+      dropped_bytes: output.droppedBytes,
+      status: output.status,
+      cols: output.cols,
+      rows: output.rows,
+      total_bytes: output.totalBytes,
+    });
+  }
+
+  async function writeTerminal(sessionId: string | null, request: Request): Promise<Response> {
+    const body = await boundedJsonBody(request, maxBodyBytes);
+    if (body.status !== 200 || !isRecord(body.value) || typeof body.value.data !== "string" || Object.keys(body.value).some((key) => key !== "data")) {
+      return response(body.status === 413 ? body.detail : "invalid terminal input", body.status === 413 ? 413 : 400);
+    }
+    if (Buffer.byteLength(body.value.data, "utf8") > MAX_TERMINAL_INPUT_BYTES) return response("terminal input too large", 413);
+    if (!sessionId || !identifierPattern.test(sessionId)) return response("invalid session id", 400);
+    const pty = terminalSessions.get(sessionId);
+    if (!pty) return terminalUnavailable(sessionId);
+    if (pty.status() !== "running") return response("terminal is not active", 409);
+    return pty.write(body.value.data)
+      ? json({ accepted: true, session_id: sessionId }, 202)
+      : response("terminal input rejected", 409);
+  }
+
+  async function resizeTerminal(sessionId: string | null, request: Request): Promise<Response> {
+    const body = await boundedJsonBody(request, maxBodyBytes);
+    if (
+      body.status !== 200 || !isRecord(body.value) ||
+      !validDimension(body.value.cols, MIN_TERMINAL_COLS, MAX_TERMINAL_COLS) ||
+      !validDimension(body.value.rows, MIN_TERMINAL_ROWS, MAX_TERMINAL_ROWS) ||
+      Object.keys(body.value).some((key) => key !== "cols" && key !== "rows")
+    ) {
+      return response(body.status === 413 ? body.detail : "invalid terminal dimensions", body.status === 413 ? 413 : 400);
+    }
+    if (!sessionId || !identifierPattern.test(sessionId)) return response("invalid session id", 400);
+    const pty = terminalSessions.get(sessionId);
+    if (!pty) return terminalUnavailable(sessionId);
+    if (pty.status() !== "running") return response("terminal is not active", 409);
+    return pty.resize(body.value.cols, body.value.rows)
+      ? json({ accepted: true, session_id: sessionId, cols: body.value.cols, rows: body.value.rows }, 202)
+      : response("terminal resize rejected", 409);
+  }
+
+  function terminalUnavailable(sessionId: string): Response {
+    return options.registry.get(sessionId)
+      ? response("session has no retained terminal", 409)
+      : response("session not found", 404);
+  }
+
+  function evictTerminalPtySessions(maxRetained: number): void {
+    if (terminalSessions.size <= maxRetained) return;
+    for (const [sessionId, pty] of terminalSessions) {
+      if (terminalSessions.size <= maxRetained) break;
+      if (pty.status() !== "running") terminalSessions.delete(sessionId);
+    }
+  }
+
+  function sessionView<T extends { id: string }>(session: T): T & { terminal_available: boolean } {
+    return { ...session, terminal_available: terminalSessions.has(session.id) };
   }
 
   async function stopSession(sessionId: string | null): Promise<Response> {
@@ -453,4 +607,8 @@ function nonNegativeSafeInteger(value: number, label: string): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validDimension(value: unknown, minimum: number, maximum: number): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= minimum && (value as number) <= maximum;
 }

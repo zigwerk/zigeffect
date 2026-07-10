@@ -14,6 +14,8 @@ export type LocalAgentSessionStatus =
   | "failed"
   | "interrupted";
 
+export type LocalAgentSessionMode = "batch" | "pty";
+
 export type LocalAgentSessionDescriptor = {
   agentId: string;
   agentKind: LocalDevAgentKind;
@@ -21,6 +23,7 @@ export type LocalAgentSessionDescriptor = {
   command: readonly string[];
   cwd?: string;
   task?: string;
+  mode?: LocalAgentSessionMode;
 };
 
 export type LocalAgentSessionTerminal = {
@@ -43,6 +46,7 @@ export type LocalAgentSessionRecord = {
   command: string;
   cwd: string | null;
   task: string | null;
+  mode: LocalAgentSessionMode;
   status: LocalAgentSessionStatus;
   startedAt: number;
   updatedAt: number;
@@ -125,6 +129,7 @@ export function createLocalAgentSessionRegistry(
       command: redactedText(descriptor.command.join(" ")),
       cwd: optionalRedactedText(descriptor.cwd),
       task: optionalRedactedText(descriptor.task),
+      mode: descriptor.mode ?? "batch",
       status: "starting",
       startedAt: now,
       updatedAt: now,
@@ -314,9 +319,11 @@ function parseRecord(value: unknown): LocalAgentSessionRecord | null {
   if (!isRecord(value)) return null;
   const status = sessionStatus(value.status);
   const kind = agentKind(value.agentKind);
+  const mode = sessionMode(value.mode);
   if (
     !status ||
     !kind ||
+    !mode ||
     typeof value.id !== "string" ||
     !sessionIdPattern.test(value.id) ||
     typeof value.agentId !== "string" ||
@@ -352,6 +359,7 @@ function parseRecord(value: unknown): LocalAgentSessionRecord | null {
     command: redactedText(value.command),
     cwd: typeof value.cwd === "string" ? redactedText(value.cwd) : null,
     task: typeof value.task === "string" ? redactedText(value.task) : null,
+    mode,
     status,
     startedAt,
     updatedAt,
@@ -434,6 +442,11 @@ function sessionStatus(value: unknown): LocalAgentSessionStatus | null {
   return value === "starting" || value === "running" || value === "done" || value === "failed" || value === "interrupted"
     ? value
     : null;
+}
+
+function sessionMode(value: unknown): LocalAgentSessionMode | null {
+  if (value === undefined) return "batch";
+  return value === "batch" || value === "pty" ? value : null;
 }
 
 function agentKind(value: unknown): LocalDevAgentKind | null {

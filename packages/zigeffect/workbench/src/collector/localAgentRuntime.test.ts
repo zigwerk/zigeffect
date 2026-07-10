@@ -6,10 +6,21 @@ import type { LocalDevSessionEvent } from "../localDevSessionFeed";
 import {
   bunLocalAgentArtifactSink,
   bunLocalAgentRunner,
+  localAgentChildEnvironment,
   runLocalAgentRuntime,
   type LocalAgentRuntimeArtifact,
   type LocalAgentRuntimeRunner,
 } from "./localAgentRuntime";
+
+test("local agent child environments strip control-plane authority", () => {
+  expect(localAgentChildEnvironment({
+    PATH: "/usr/bin",
+    HOME: "/workspace",
+    ZIGEFFECT_CONTROL_TOKEN: "sentinel-secret",
+    ZIGEFFECT_CONTROL_PORT: "4500",
+    OPTIONAL: undefined,
+  })).toEqual({ PATH: "/usr/bin", HOME: "/workspace" });
+});
 
 function eventCapture(events: LocalDevSessionEvent[]): typeof fetch {
   return (async (_input: RequestInfo | URL, init?: RequestInit) => {

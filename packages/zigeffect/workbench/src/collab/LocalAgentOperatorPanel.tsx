@@ -14,25 +14,49 @@ import {
   type LocalAgentControlSession,
 } from "../localAgentControlClient";
 import { Badge, EmptyState, Metric } from "../primitives";
+import { LocalAgentTerminalPanel } from "./LocalAgentTerminalPanel";
 import { createLocalAgentOperator } from "./localAgentOperator";
 
+type OperatorMobilePanel = "launch" | "sessions" | "detail" | "terminal";
+
 export function LocalAgentOperatorPanel(props: { bootstrap: LocalAgentControlBootstrap }) {
+  let operatorRoot!: HTMLElement;
+  let terminalSection: HTMLElement | undefined;
   const operator = createLocalAgentOperator();
   const [endpoint, setEndpoint] = createSignal(props.bootstrap.controlUrl ?? "");
   const [token, setToken] = createSignal(props.bootstrap.token ?? "");
   const [selectedToolId, setSelectedToolId] = createSignal("");
   const [prompt, setPrompt] = createSignal("");
-  const [mobilePanel, setMobilePanel] = createSignal<"launch" | "sessions" | "detail">("launch");
+  const [mobilePanel, setMobilePanel] = createSignal<OperatorMobilePanel>("launch");
+  const [controlClient, setControlClient] = createSignal<ReturnType<typeof createLocalAgentControlClient> | null>(null);
   const [configError, setConfigError] = createSignal<string | null>(null);
   const selectedTool = createMemo(() => operator.tools().find((tool) => tool.id === selectedToolId()) ?? null);
   const latestReceipt = operator.latestReceipt;
   const connected = createMemo(() => operator.connection() === "connected");
+  const terminalSessionId = createMemo(() => {
+    const client = controlClient();
+    const item = operator.selectedSession();
+    return client && item && item.mode === "pty" && item.terminalAvailable ? item.id : null;
+  });
+  const mobileTabs = createMemo<readonly (readonly [OperatorMobilePanel, string])[]>(() => {
+    const tabs: Array<readonly [OperatorMobilePanel, string]> = [
+      ["launch", "Run"],
+      ["sessions", `Sessions ${operator.sessions().length}`],
+      ["detail", "Detail"],
+    ];
+    if (terminalSessionId()) tabs.push(["terminal", "Terminal"]);
+    return tabs;
+  });
 
   createEffect(() => {
     const available = operator.tools();
     if (!available.some((tool) => tool.id === selectedToolId())) {
       setSelectedToolId(available[0]?.id ?? "");
     }
+  });
+
+  createEffect(() => {
+    if (mobilePanel() === "terminal" && !terminalSessionId()) setMobilePanel("detail");
   });
 
   onMount(() => {
@@ -48,8 +72,10 @@ export function LocalAgentOperatorPanel(props: { bootstrap: LocalAgentControlBoo
       const client = createLocalAgentControlClient({ baseUrl: controlUrl, token: bearer });
       setEndpoint(client.baseUrl);
       setToken("");
+      setControlClient(client);
       await operator.connect(client);
       if (operator.connection() === "connected") operator.startPolling();
+      else setControlClient(null);
     } catch (caught) {
       setToken("");
       setConfigError(caught instanceof LocalAgentControlClientError ? caught.message : "local control connection failed");
@@ -60,18 +86,30 @@ export function LocalAgentOperatorPanel(props: { bootstrap: LocalAgentControlBoo
     const decision = await operator.start(selectedToolId(), prompt());
     if (decision) {
       setPrompt("");
-      setMobilePanel("detail");
+      showMobilePanel(selectedTool()?.mode === "pty" ? "terminal" : "detail");
     }
   }
 
   function disconnect(): void {
     operator.disconnect();
+    setControlClient(null);
     setPrompt("");
     setConfigError(null);
   }
 
+  function showMobilePanel(panel: OperatorMobilePanel): void {
+    setMobilePanel(panel);
+    if (panel !== "terminal" || !window.matchMedia("(max-width: 720px)").matches) return;
+    requestAnimationFrame(() => {
+      if (!terminalSection) return;
+      const rootTop = operatorRoot.getBoundingClientRect().top;
+      const terminalTop = terminalSection.getBoundingClientRect().top;
+      operatorRoot.scrollTop += terminalTop - rootTop - 8;
+    });
+  }
+
   return (
-    <section class="local-operator" aria-label="Local agent control">
+    <section ref={operatorRoot} class="local-operator" aria-label="Local agent control">
       <header class="operator-head">
         <div class="operator-title">
           <span classList={{ "operator-status-dot": true, connected: connected() }} />
@@ -167,18 +205,14 @@ export function LocalAgentOperatorPanel(props: { bootstrap: LocalAgentControlBoo
         </Show>
 
         <div class="operator-mobile-tabs" role="tablist" aria-label="Local operator view">
-          <For each={[
-            ["launch", "Run"],
-            ["sessions", `Sessions ${operator.sessions().length}`],
-            ["detail", "Detail"],
-          ] as const}>
+          <For each={mobileTabs()}>
             {([id, label]) => (
               <button
                 type="button"
                 role="tab"
                 aria-selected={mobilePanel() === id}
                 classList={{ active: mobilePanel() === id }}
-                onClick={() => setMobilePanel(id)}
+                onClick={() => showMobilePanel(id)}
               >
                 {label}
               </button>
@@ -247,7 +281,7 @@ export function LocalAgentOperatorPanel(props: { bootstrap: LocalAgentControlBoo
                     classList={{ "operator-session-row": true, selected: operator.selectedSessionId() === item.id }}
                     aria-pressed={operator.selectedSessionId() === item.id}
                     onClick={() => {
-                      setMobilePanel("detail");
+                      showMobilePanel("detail");
                       void operator.selectSession(item.id);
                     }}
                   >
@@ -314,6 +348,14 @@ export function LocalAgentOperatorPanel(props: { bootstrap: LocalAgentControlBoo
               )}
             </Show>
           </section>
+
+          <Show keyed when={terminalSessionId()}>
+            {(sessionId) => (
+              <section ref={terminalSection} classList={{ "operator-terminal": true, "mobile-active": mobilePanel() === "terminal" }} aria-label="Selected interactive terminal">
+                <LocalAgentTerminalPanel client={controlClient()!} sessionId={sessionId} />
+              </section>
+            )}
+          </Show>
         </div>
 
         <Show when={latestReceipt()}>

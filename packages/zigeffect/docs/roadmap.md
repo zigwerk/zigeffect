@@ -33,7 +33,7 @@ semantic fact comparison, not exact event-id graph isomorphism.
 | 6 | Causal dev loop (compare/advice/verdict) | **done** | `tools/causal_dev_loop`, `causal_compare`, `causal_advice`, `causal_verdict` |
 | 7 | Guarded remediation + agent interventions | **closed loop, gate-off by default** | `src/services/policy_engine.zig`, `src/services/agent_intervention.zig`, `tools/causal_*remediation*` |
 | 8 | App-facing causal trace | **done** | `src/services/causal_app_runtime.zig` |
-| 9 | Visual workbench (SolidJS / zig-webui) | **live-attach + dev-session UX** (static + streaming via collector plus host-frame ingest, host apply adapter, host runner bundle, supervised host loop, NDJSON fact tap, host request router, runtime runner, local agent runtime/artifact capture/turn receipts/transcript tailing/process supervision/session registry, and local agent development health/timeline/issues view) | `workbench/`, `workbench/src/collector/` |
+| 9 | Visual workbench (SolidJS / zig-webui) | **live-attach + local operator UX** (static + streaming collector, host runner/apply paths, local runtime/artifacts/turns/transcript adapters/process supervision/durable registry, authenticated allowlisted control API, native PTY ownership, and lazy responsive xterm.js terminal) | `workbench/`, `workbench/src/collector/` |
 | 10 | Export adapters (JSONL/DOT/OTel/OTLP/graph-history/NenDB) | **OTLP + collector live end-to-end** | `src/services/causal_*_backend.zig`, `causal_otlp_json.zig` |
 | 11 | Durable workflows + clustering | **scheduler runs on zio; workflow journal appends can live-mirror into causal stores; loopback + remote socket wrappers cross the transport boundary; discovery JSON/file/HTTP snapshots, caller-owned HTTP refresh loops, and auth-epoch-aware selection feed the local registry** | `src/workflow/*`, `src/cluster/*` |
 | 12 | Agent-operable runtime layer | **bounded interventions, counterfactuals, invariants, evals, semantic diffs, live command executor/tap, poll bridge, local daemon/HTTP engine bridge, eval diff artifacts/links/manifests, dev-loop/remediation-decision/patch-proposal eval persistence** | `src/services/agent_intervention.zig`, `counterfactual.zig`, `causal_invariant.zig`, `agent_eval.zig`, `causal_diff.zig`, `causal_live_command.zig` |
@@ -381,7 +381,8 @@ substrates into real deployed systems:
    zigeffect's own causal tools share development evidence. The first pass
    reuses `zigeffect.causal.dev-session.v1` and teaches the workbench to render
    agents, checks, commands, artifact links, guardrails, and next actions. The
-   foundation is M72 through M84; the next operator sequence is M85 through M87.
+   foundation is M72 through M84; the operator sequence M85 through M87 is now
+   delivered.
 
 ## Local agentic development roadmap
 
@@ -389,7 +390,7 @@ This is the local-first sequence for making zigeffect useful as the development
 engine for local projects and standard-library work. It intentionally comes
 before hosting or broad distributed orchestration.
 
-Status on 2026-07-10: M72 through M86 are implemented in the workbench,
+Status on 2026-07-10: M72 through M87 are implemented in the workbench,
 `causal-dev-session`, and collector. Local session events have parser/apply
 coverage, native Codex/Claude JSONL fixtures, a `bun run zigeffect:local-agent-gate`
 command, and a live collector WebSocket overlay (`POST /agent-feed` and
@@ -415,8 +416,12 @@ accepting arbitrary argv. The M86 Solid operator now uses a
 validated loopback-only client, single-flight polling, ephemeral bearer tokens,
 schema-described prompt tools, durable history/detail, start/stop ownership,
 recovery state, counters, and policy receipts. A supported Bun host composes the
-collector and control API with fixed Codex/Claude allowlists. M87 PTY input is
-the next local milestone.
+collector and control API with fixed Codex/Claude batch and interactive
+allowlists. M87 adds native Bun PTY ownership, authenticated cursor/input/resize
+routes, bounded stream-aware redaction and output retention, durable lifecycle
+state, and a lazy xterm.js terminal in the desktop/mobile operator. The declared
+local-first operator sequence is complete; later milestones must preserve this
+loopback-only, allowlisted, no-arbitrary-argv boundary.
 
 ### M72 - Local development session protocol
 
@@ -706,8 +711,24 @@ ownership and policy controls exist.
 
 **Work:**
 - Add a bounded PTY adapter with explicit stdin ownership and resize events.
-- Stream terminal output through provider adapters without duplicating receipts.
+- Stream redacted terminal output through a bounded cursor ring without
+  pretending VT output is a provider turn transcript.
 - Enforce idle/runtime/output limits, abort cleanup, and no-orphan recovery.
+
+**Acceptance:**
+- A real Bun PTY smoke test proves TTY detection, input, output, resize, and
+  clean exit.
+- Authenticated terminal routes validate cursor, input, and dimensions; reject
+  batch or unavailable sessions; and never copy input into receipts.
+- Secret literals split across delayed output callbacks are redacted before any
+  retained frame or browser payload is visible.
+- Polling is single-flight, input is serialized, resize is coalesced, and all
+  browser/terminal resources are cancelled on disposal.
+- The lazy xterm.js operator proves launch, input, output, resize, exit, retained
+  history, and responsive layout against a real loopback host.
+
+**Status:** delivered. PTY output is deliberately bounded and memory-only;
+durability claims apply to session lifecycle state, not full terminal history.
 
 ## Hardening milestone roadmap
 

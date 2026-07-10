@@ -98,11 +98,23 @@ required/max-length contract before invoking the caller-owned builder, so the
 workbench form is not the policy boundary. Health also reports `durable` or
 `memory` persistence capability.
 
+Tools may opt into `mode: "pty"`. PTY ownership uses native `Bun.Terminal` and
+adds authenticated cursor reads plus bounded input and resize routes:
+
+- `GET /agent-control/sessions/:id/terminal?after=<sequence>`;
+- `POST /agent-control/sessions/:id/input` with `{ "data": "..." }`; and
+- `POST /agent-control/sessions/:id/resize` with `{ "cols": n, "rows": n }`.
+
+Terminal output is a bounded, redacted in-memory ring with explicit gap/drop
+counters. Durable registry records retain lifecycle state, not scrollback.
+Input bytes are not recorded as receipts. Every native child runner removes
+`ZIGEFFECT_CONTROL_*` variables before spawn.
+
 ## Run the local agent host
 
 The supported host combines collector/WebSocket and agent-control routes on one
-loopback port, restores durable session history, and allowlists only the native
-Codex and Claude Code prompt adapters:
+loopback port, restores durable session history, and allowlists native Codex and
+Claude Code batch plus interactive prompt adapters:
 
 ```bash
 export ZIGEFFECT_CONTROL_TOKEN="$(openssl rand -hex 32)"
@@ -138,6 +150,11 @@ one-use token in `#control-token=...`; the app consumes and removes that fragmen
 before connecting. It never persists or renders the token. `webSocketLiveSource`
 feeds the existing timeline/graph/findings path while the validated control
 client independently owns local process operations.
+
+Interactive sessions render through lazy-loaded xterm.js. The browser polls
+ordered output cursors, serializes keystroke writes, coalesces resize events,
+stops polling at terminal settlement, and keeps completed retained output
+inspectable on desktop and mobile.
 
 ## Runtime boundary
 

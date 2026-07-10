@@ -122,6 +122,19 @@ test("session registry restore is all-or-nothing and interrupts stale active rec
   expect(target.snapshot()).toEqual(before);
 });
 
+test("session registry persists PTY mode and defaults legacy snapshots to batch", () => {
+  const pty = createLocalAgentSessionRegistry({ now: () => 10 });
+  pty.begin({ ...descriptor(), mode: "pty" }, "pty-session");
+  expect(pty.get("pty-session")?.mode).toBe("pty");
+  expect(pty.snapshot()).toMatchObject({ sessions: [{ id: "pty-session", mode: "pty" }] });
+
+  const legacy = JSON.parse(JSON.stringify(pty.snapshot())) as { sessions: Array<Record<string, unknown>> };
+  delete legacy.sessions[0]?.mode;
+  const restored = createLocalAgentSessionRegistry({ now: () => 20 });
+  expect(restored.restore(legacy)).toBe(true);
+  expect(restored.get("pty-session")?.mode).toBe("batch");
+});
+
 test("session registry evicts only the oldest terminal record at capacity", () => {
   let now = 1;
   const registry = createLocalAgentSessionRegistry({ maxSessions: 2, now: () => now });

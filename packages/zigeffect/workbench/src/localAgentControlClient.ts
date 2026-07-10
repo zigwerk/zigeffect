@@ -29,6 +29,7 @@ export type LocalAgentControlToolSummary = {
   label: string;
   description: string;
   kind: "codex" | "claude-code" | "zigeffect" | "human" | "other";
+  mode: "batch" | "pty";
   input: LocalAgentControlPrompt | null;
 };
 
@@ -40,6 +41,8 @@ export type LocalAgentControlSession = {
   command: string;
   cwd: string | null;
   task: string | null;
+  mode: "batch" | "pty";
+  terminalAvailable: boolean;
   status: "starting" | "running" | "done" | "failed" | "interrupted";
   startedAt: number;
   updatedAt: number;
@@ -69,6 +72,29 @@ export type LocalAgentControlDecision = {
   sessionId: string;
 };
 
+export type LocalAgentTerminalFrame = {
+  sequence: number;
+  timestamp: number;
+  data: string;
+};
+
+export type LocalAgentTerminalRead = {
+  frames: LocalAgentTerminalFrame[];
+  nextAfter: number;
+  gap: boolean;
+  droppedFrames: number;
+  droppedBytes: number;
+  status: LocalAgentControlSession["status"];
+  cols: number;
+  rows: number;
+  totalBytes: number;
+};
+
+export type LocalAgentTerminalResizeDecision = LocalAgentControlDecision & {
+  cols: number;
+  rows: number;
+};
+
 export type LocalAgentControlStart = {
   toolId: string;
   sessionId?: string;
@@ -84,6 +110,9 @@ export type LocalAgentControlClient = {
   receipts: (signal?: AbortSignal) => Promise<LocalAgentControlReceipt[]>;
   start: (start: LocalAgentControlStart, signal?: AbortSignal) => Promise<LocalAgentControlDecision>;
   stop: (sessionId: string, signal?: AbortSignal) => Promise<LocalAgentControlDecision>;
+  terminal: (sessionId: string, after: number, signal?: AbortSignal) => Promise<LocalAgentTerminalRead>;
+  writeTerminal: (sessionId: string, data: string, signal?: AbortSignal) => Promise<LocalAgentControlDecision>;
+  resizeTerminal: (sessionId: string, cols: number, rows: number, signal?: AbortSignal) => Promise<LocalAgentTerminalResizeDecision>;
 };
 
 export type LocalAgentControlBootstrap = {
@@ -108,6 +137,11 @@ type UnknownRecord = Record<string, unknown>;
 const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
 const MAX_ERROR_DETAIL = 512;
 const MAX_TOKEN_LENGTH = 4096;
+const MAX_TERMINAL_INPUT_BYTES = 16 * 1024;
+const MIN_TERMINAL_COLS = 20;
+const MAX_TERMINAL_COLS = 500;
+const MIN_TERMINAL_ROWS = 5;
+const MAX_TERMINAL_ROWS = 200;
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const agentKinds = new Set(["codex", "claude-code", "zigeffect", "human", "other"]);
 const sessionStatuses = new Set(["starting", "running", "done", "failed", "interrupted"]);
@@ -245,6 +279,39 @@ export function createLocalAgentControlClient(
         signal,
       }, true));
     },
+    async terminal(sessionId, after, signal) {
+      requireIdentifier(sessionId, "session id");
+      if (!Number.isSafeInteger(after) || after < 0) {
+        throw new LocalAgentControlClientError("policy", "terminal cursor is invalid");
+      }
+      return parseTerminal(await request(
+        `/agent-control/sessions/${encodeURIComponent(sessionId)}/terminal?after=${after}`,
+        { method: "GET", signal },
+        true,
+      ));
+    },
+    async writeTerminal(sessionId, data, signal) {
+      requireIdentifier(sessionId, "session id");
+      if (new TextEncoder().encode(data).byteLength > MAX_TERMINAL_INPUT_BYTES) {
+        throw new LocalAgentControlClientError("policy", "terminal input is too large");
+      }
+      return parseDecision(await request(`/agent-control/sessions/${encodeURIComponent(sessionId)}/input`, {
+        method: "POST",
+        body: JSON.stringify({ data }),
+        signal,
+      }, true));
+    },
+    async resizeTerminal(sessionId, cols, rows, signal) {
+      requireIdentifier(sessionId, "session id");
+      if (!dimension(cols, MIN_TERMINAL_COLS, MAX_TERMINAL_COLS) || !dimension(rows, MIN_TERMINAL_ROWS, MAX_TERMINAL_ROWS)) {
+        throw new LocalAgentControlClientError("policy", "terminal dimensions are invalid");
+      }
+      return parseResizeDecision(await request(`/agent-control/sessions/${encodeURIComponent(sessionId)}/resize`, {
+        method: "POST",
+        body: JSON.stringify({ cols, rows }),
+        signal,
+      }, true));
+    },
   };
 }
 
@@ -290,6 +357,7 @@ function parseTool(value: unknown): LocalAgentControlToolSummary {
     label: item.label,
     description: item.description,
     kind: item.kind as LocalAgentControlToolSummary["kind"],
+    mode: item.mode === "pty" ? "pty" : "batch",
     input: parsePrompt(item.input),
   };
 }
@@ -321,7 +389,9 @@ function parseSession(value: unknown): LocalAgentControlSession {
     !item || !identifier(item.id) || !string(item.agentId) || !agentKinds.has(String(item.agentKind)) ||
     !string(item.agentLabel) || !string(item.command) || !nullableString(item.cwd) || !nullableString(item.task) ||
     !sessionStatuses.has(String(item.status)) || !nullableInteger(item.finishedAt) || !nullableInteger(item.exitCode) ||
-    typeof item.interrupted !== "boolean" || !nullableString(item.detail)
+    typeof item.interrupted !== "boolean" || !nullableString(item.detail) ||
+    (item.mode !== undefined && item.mode !== "batch" && item.mode !== "pty") ||
+    (item.terminal_available !== undefined && typeof item.terminal_available !== "boolean")
   ) invalidResponse();
   return {
     id: item.id,
@@ -331,6 +401,8 @@ function parseSession(value: unknown): LocalAgentControlSession {
     command: item.command,
     cwd: item.cwd,
     task: item.task,
+    mode: item.mode === "pty" ? "pty" : "batch",
+    terminalAvailable: item.terminal_available === true,
     status: item.status as LocalAgentControlSession["status"],
     startedAt: nonNegativeInteger(item.startedAt),
     updatedAt: nonNegativeInteger(item.updatedAt),
@@ -374,6 +446,50 @@ function parseDecision(value: unknown): LocalAgentControlDecision {
   return { accepted: true, sessionId: item.session_id };
 }
 
+function parseResizeDecision(value: unknown): LocalAgentTerminalResizeDecision {
+  const decision = parseDecision(value);
+  const item = record(value);
+  if (!item || !dimension(item.cols, MIN_TERMINAL_COLS, MAX_TERMINAL_COLS) || !dimension(item.rows, MIN_TERMINAL_ROWS, MAX_TERMINAL_ROWS)) {
+    invalidResponse();
+  }
+  return { ...decision, cols: item.cols, rows: item.rows };
+}
+
+function parseTerminal(value: unknown): LocalAgentTerminalRead {
+  const item = record(value);
+  if (
+    !item || !Array.isArray(item.frames) || typeof item.gap !== "boolean" ||
+    !sessionStatuses.has(String(item.status)) ||
+    !dimension(item.cols, MIN_TERMINAL_COLS, MAX_TERMINAL_COLS) ||
+    !dimension(item.rows, MIN_TERMINAL_ROWS, MAX_TERMINAL_ROWS)
+  ) invalidResponse();
+  const frames = item.frames.map((value) => {
+    const frame = record(value);
+    if (!frame || !string(frame.data)) invalidResponse();
+    return {
+      sequence: positiveInteger(frame.sequence),
+      timestamp: nonNegativeInteger(frame.timestamp),
+      data: frame.data,
+    };
+  });
+  for (let index = 1; index < frames.length; index += 1) {
+    if (frames[index]!.sequence <= frames[index - 1]!.sequence) invalidResponse();
+  }
+  const nextAfter = nonNegativeInteger(item.next_after);
+  if ((frames.at(-1)?.sequence ?? 0) > nextAfter) invalidResponse();
+  return {
+    frames,
+    nextAfter,
+    gap: item.gap,
+    droppedFrames: nonNegativeInteger(item.dropped_frames),
+    droppedBytes: nonNegativeInteger(item.dropped_bytes),
+    status: item.status as LocalAgentTerminalRead["status"],
+    cols: item.cols,
+    rows: item.rows,
+    totalBytes: nonNegativeInteger(item.total_bytes),
+  };
+}
+
 function record(value: unknown): UnknownRecord | null {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as UnknownRecord : null;
 }
@@ -396,6 +512,10 @@ function nullableString(value: unknown): value is string | null {
 
 function nullableInteger(value: unknown): value is number | null {
   return value === null || Number.isSafeInteger(value);
+}
+
+function dimension(value: unknown, minimum: number, maximum: number): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= minimum && (value as number) <= maximum;
 }
 
 function nonNegativeInteger(value: unknown): number {

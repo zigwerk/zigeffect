@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { Server } from "bun";
 import type { LocalDevSessionEvent } from "../localDevSessionFeed";
 import type { LocalAgentProcessRunner } from "./localAgentProcessSupervisor";
+import type { LocalAgentPtyRunner } from "./localAgentPtySupervisor";
 import { createLocalAgentSessionRegistry } from "./localAgentSessionRegistry";
 import {
   createLocalAgentControlHost,
@@ -52,7 +53,12 @@ test("local control host composes collector routes with durable Codex and Claude
     const tools = await (await hostFetch(host, request("/agent-control/tools", { token: "control-secret" }))!).json() as {
       tools: Array<Record<string, unknown>>;
     };
-    expect(tools.tools.map((tool) => tool.id)).toEqual(["codex", "claude-code"]);
+    expect(tools.tools.map((tool) => tool.id)).toEqual([
+      "codex",
+      "claude-code",
+      "codex-interactive",
+      "claude-code-interactive",
+    ]);
     expect(tools.tools.every((tool) => (tool.input as { kind?: string }).kind === "prompt")).toBe(true);
     expect(JSON.stringify(tools)).not.toContain("command");
     await host.close();
@@ -169,4 +175,53 @@ test("local control host configuration requires a token and loopback port", asyn
     origin: "http://192.168.1.2:4510",
     workspace: "/workspace",
   })).rejects.toThrow("loopback HTTP");
+});
+
+test("local control host interactive tools use PTY-safe Codex and Claude argv without bypasses", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "zigeffect-control-interactive-"));
+  const commands: string[][] = [];
+  const ptyRunner: LocalAgentPtyRunner = {
+    async start(tool) {
+      commands.push([...tool.command]);
+      return {
+        exited: Promise.resolve(0),
+        write() { return 0; },
+        resize() {},
+        kill() {},
+        close() {},
+      };
+    },
+  };
+  try {
+    const host = await createLocalAgentControlHost({
+      token: "control-secret",
+      origin: "http://127.0.0.1:4510",
+      workspace: directory,
+      ptyRunner,
+      fetcher: (async () => Response.json({ ingested: 1 })) as unknown as typeof fetch,
+    });
+    for (const toolId of ["codex-interactive", "claude-code-interactive"]) {
+      const response = await hostFetch(host, request("/agent-control/sessions", {
+        method: "POST",
+        token: "control-secret",
+        body: JSON.stringify({
+          tool_id: toolId,
+          session_id: `${toolId}-session`,
+          input: { prompt: "Review schema" },
+        }),
+      }));
+      expect(response?.status).toBe(202);
+      await host.control.waitForIdle();
+    }
+
+    expect(commands).toEqual([
+      ["codex", "--no-alt-screen", "Review schema"],
+      ["claude", "Review schema"],
+    ]);
+    expect(commands.flat().join(" ")).not.toContain("dangerously");
+    expect(commands.flat().join(" ")).not.toContain("bypass");
+    await host.close();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

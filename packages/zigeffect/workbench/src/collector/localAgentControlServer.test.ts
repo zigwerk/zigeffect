@@ -5,6 +5,7 @@ import {
   type LocalAgentControlTool,
 } from "./localAgentControlServer";
 import type { LocalAgentProcessRunner } from "./localAgentProcessSupervisor";
+import type { LocalAgentPtyHandle, LocalAgentPtyRunner, LocalAgentPtyRunnerOptions } from "./localAgentPtySupervisor";
 import { createLocalAgentSessionRegistry } from "./localAgentSessionRegistry";
 
 const baseUrl = "http://127.0.0.1:4500";
@@ -68,6 +69,47 @@ function codexTool(overrides: Partial<LocalAgentControlTool> = {}): LocalAgentCo
   };
 }
 
+function ptyTool(overrides: Partial<LocalAgentControlTool> = {}): LocalAgentControlTool {
+  return codexTool({
+    id: "codex-interactive",
+    label: "Codex interactive",
+    mode: "pty",
+    build(input) {
+      const prompt = typeof input === "object" && input !== null && "prompt" in input
+        ? String((input as { prompt: unknown }).prompt)
+        : "work interactively";
+      return {
+        id: "codex-interactive",
+        kind: "codex",
+        label: "Codex interactive",
+        command: ["codex", "--no-alt-screen", prompt],
+        task: prompt,
+      };
+    },
+    ...overrides,
+  });
+}
+
+function fakePtyRunner() {
+  let options: LocalAgentPtyRunnerOptions | null = null;
+  let resolveExit!: (code: number) => void;
+  const exited = new Promise<number>((resolve) => { resolveExit = resolve; });
+  const writes: string[] = [];
+  const resizes: Array<[number, number]> = [];
+  let kills = 0;
+  const handle: LocalAgentPtyHandle = {
+    exited,
+    write(data) { writes.push(data); return data.length; },
+    resize(cols, rows) { resizes.push([cols, rows]); },
+    kill() { kills += 1; resolveExit(143); },
+    close() {},
+  };
+  const runner: LocalAgentPtyRunner = {
+    async start(_tool, value) { options = value; return handle; },
+  };
+  return { runner, options: () => options!, writes, resizes, resolveExit, kills: () => kills };
+}
+
 test("control server keeps health open and bearer-gates safe tool metadata", async () => {
   const server = createLocalAgentControlServer({
     token: "control-secret",
@@ -93,6 +135,7 @@ test("control server keeps health open and bearer-gates safe tool metadata", asy
     label: "Codex review",
     description: "Review the local workspace",
     kind: "codex",
+    mode: "batch",
     input: {
       kind: "prompt",
       label: "Task prompt",
@@ -405,4 +448,133 @@ test("control receipt mirrors cannot block policy responses", async () => {
 
   expect(result).not.toBe("timeout");
   expect((result as Response).status).toBe(403);
+});
+
+test("control server owns interactive PTY input, resize, output, and retained completion", async () => {
+  const pty = fakePtyRunner();
+  const events: LocalDevSessionEvent[] = [];
+  const server = createLocalAgentControlServer({
+    token: "control-secret",
+    tools: [ptyTool()],
+    registry: createLocalAgentSessionRegistry({ now: () => 10 }),
+    ptyRunner: pty.runner,
+    fetcher: eventCapture(events),
+    agentEventsUrl: "http://collector.test/agent-events",
+    now: () => 10,
+  });
+
+  const tools = await server.fetch(request("/agent-control/tools", { token: "control-secret" }));
+  expect(await tools.json()).toMatchObject({ tools: [{ id: "codex-interactive", mode: "pty" }] });
+  const start = await server.fetch(request("/agent-control/sessions", {
+    method: "POST",
+    token: "control-secret",
+    body: JSON.stringify({
+      tool_id: "codex-interactive",
+      session_id: "interactive-session",
+      input: { prompt: "Review schema" },
+    }),
+  }));
+  expect(start.status).toBe(202);
+  expect(await (await server.fetch(request("/agent-control/sessions", { token: "control-secret" }))).json()).toMatchObject({
+    sessions: [{ id: "interactive-session", mode: "pty", terminal_available: true }],
+  });
+
+  pty.options().onData(new TextEncoder().encode("ready token=sentinel-secret\r\n"));
+  await Promise.resolve();
+  const output = await server.fetch(request("/agent-control/sessions/interactive-session/terminal?after=0", {
+    token: "control-secret",
+  }));
+  expect(output.status).toBe(200);
+  expect(await output.json()).toMatchObject({
+    frames: [{ sequence: 1, data: "ready token=<redacted>\r\n" }],
+    next_after: 1,
+    gap: false,
+    status: "running",
+  });
+
+  const input = await server.fetch(request("/agent-control/sessions/interactive-session/input", {
+    method: "POST",
+    token: "control-secret",
+    body: JSON.stringify({ data: "private-input\r" }),
+  }));
+  const resize = await server.fetch(request("/agent-control/sessions/interactive-session/resize", {
+    method: "POST",
+    token: "control-secret",
+    body: JSON.stringify({ cols: 132, rows: 44 }),
+  }));
+  expect(input.status).toBe(202);
+  expect(resize.status).toBe(202);
+  expect(pty.writes).toEqual(["private-input\r"]);
+  expect(pty.resizes).toEqual([[132, 44]]);
+  expect(JSON.stringify(server.receipts())).not.toContain("private-input");
+
+  pty.resolveExit(0);
+  await server.waitForIdle();
+  const retained = await server.fetch(request("/agent-control/sessions/interactive-session/terminal?after=1", {
+    token: "control-secret",
+  }));
+  expect(retained.status).toBe(200);
+  expect(await retained.json()).toMatchObject({ frames: [], next_after: 1, status: "done", cols: 132, rows: 44 });
+});
+
+test("terminal routes reject batch sessions, invalid cursors, input, and dimensions", async () => {
+  const events: LocalDevSessionEvent[] = [];
+  const server = createLocalAgentControlServer({
+    token: "secret",
+    tools: [codexTool()],
+    registry: createLocalAgentSessionRegistry(),
+    runner: {
+      async start() {
+        return { stdout: streamFromText(""), stderr: streamFromText(""), exited: Promise.resolve(0), kill() {} };
+      },
+    },
+    fetcher: eventCapture(events),
+    agentEventsUrl: "http://collector.test/agent-events",
+  });
+  await server.fetch(request("/agent-control/sessions", {
+    method: "POST",
+    token: "secret",
+    body: JSON.stringify({ tool_id: "codex-review", session_id: "batch-session", input: { prompt: "review" } }),
+  }));
+  await server.waitForIdle();
+
+  expect((await server.fetch(request("/agent-control/sessions/batch-session/terminal?after=0", { token: "secret" }))).status).toBe(409);
+  expect((await server.fetch(request("/agent-control/sessions/missing/terminal?after=0", { token: "secret" }))).status).toBe(404);
+  expect((await server.fetch(request("/agent-control/sessions/batch-session/terminal?after=-1", { token: "secret" }))).status).toBe(400);
+  expect((await server.fetch(request("/agent-control/sessions/batch-session/input", {
+    method: "POST", token: "secret", body: JSON.stringify({ data: 42 }),
+  }))).status).toBe(400);
+  expect((await server.fetch(request("/agent-control/sessions/batch-session/resize", {
+    method: "POST", token: "secret", body: JSON.stringify({ cols: 2, rows: 999 }),
+  }))).status).toBe(400);
+});
+
+test("completed PTY history remains available at the configured retention boundary", async () => {
+  const pty = fakePtyRunner();
+  const server = createLocalAgentControlServer({
+    token: "secret",
+    tools: [ptyTool()],
+    registry: createLocalAgentSessionRegistry(),
+    ptyRunner: pty.runner,
+    maxPtySessions: 1,
+    fetcher: eventCapture([]),
+    agentEventsUrl: "http://collector.test/agent-events",
+  });
+  expect((await server.fetch(request("/agent-control/sessions", {
+    method: "POST",
+    token: "secret",
+    body: JSON.stringify({
+      tool_id: "codex-interactive",
+      session_id: "retained-session",
+      input: { prompt: "review" },
+    }),
+  }))).status).toBe(202);
+
+  pty.resolveExit(0);
+  await server.waitForIdle();
+  const terminal = await server.fetch(request("/agent-control/sessions/retained-session/terminal?after=0", {
+    token: "secret",
+  }));
+  expect(terminal.status).toBe(200);
+  expect(await terminal.json()).toMatchObject({ status: "done" });
 });
