@@ -128,6 +128,8 @@ pub fn formatCausalJsonLine(allocator: Allocator, event: causal.CausalEvent) All
     try appendOptionalJsonU64(&output, allocator, event.cause_event_id);
     try output.appendSlice(allocator, ",\"schedule_id\":");
     try appendOptionalJsonU64(&output, allocator, event.schedule_id);
+    try output.appendSlice(allocator, ",\"source_ref_id\":");
+    try appendOptionalJsonU64(&output, allocator, event.source_ref_id);
     try output.appendSlice(allocator, ",\"boundary_id\":");
     try appendOptionalJsonU64(&output, allocator, event.boundary_id);
     try output.appendSlice(allocator, ",\"artifact_id\":");

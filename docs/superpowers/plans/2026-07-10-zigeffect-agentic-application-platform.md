@@ -24,19 +24,19 @@ agent-first Zig development system.
 
 ### M89 - Scaffold CLI
 
-- [ ] Scaffold `packages/zigeffect-cli` with `zigeffect` executable, library,
+- [x] Scaffold `packages/zigeffect-cli` with `zigeffect` executable, library,
   tests, build/install steps, and root Bun commands.
-- [ ] Add failing parser tests for help/version and
+- [x] Add failing parser tests for help/version and
   `new application|service|library|package|system`.
-- [ ] Add failing generator snapshots for every scaffold kind.
-- [ ] Implement deterministic templates with effects, layers, Schema, CLI,
+- [x] Add failing generator snapshots for every scaffold kind.
+- [x] Implement deterministic templates with effects, layers, Schema, CLI,
   HTTP, SQL, config, tests, causal instrumentation, skills, and manifest.
-- [ ] Implement safe local writer, dry-run, JSON, conflict, force, and local
+- [x] Implement safe local writer, dry-run, JSON, conflict, force, and local
   dependency path behavior.
-- [ ] Add real temp-directory integration tests that run `zig build test` for
+- [x] Add real temp-directory integration tests that run `zig build test` for
   every generated kind.
-- [ ] Add CLI tests to the local-agent gate and document copyable commands.
-- [ ] Commit M89.
+- [x] Add CLI tests to the local-agent gate and document copyable commands.
+- [x] Commit M89.
 
 ### M90 - Project Manager
 
@@ -119,3 +119,13 @@ is delivered or explicitly proven impossible by an external constraint.
 - Local-agent gate: 256 workbench tests, production workbench build, stdlib
   tests/examples, 193 core tests across 67 build steps, raw core tests, tool
   hygiene, and `git diff --check` passed on 2026-07-10.
+
+### M89 Evidence
+
+- CLI: 9 parser/planner/writer/execution tests passed; the executable and Bun
+  entry point reported version `0.1.0`.
+- Generated-project integration: all five kinds passed Debug and ReleaseSafe;
+  the system's API, worker, and shared package also passed independently.
+- Expanded local-agent gate: 256 workbench tests and production build, stdlib
+  tests/examples, 193 configured core tests across 67 steps, 850 raw core
+  tests, tool hygiene, and `git diff --check` passed on 2026-07-10.

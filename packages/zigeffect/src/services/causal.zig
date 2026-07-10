@@ -231,6 +231,7 @@ pub const CausalEvent = struct {
     resource_id: ?u64 = null,
     cause_event_id: ?u64 = null,
     schedule_id: ?u64 = null,
+    source_ref_id: ?u64 = null,
     // Cross-service correlation: one id stamped on both sides of a service
     // boundary — the origin allocates it (nextBoundaryId) and records it on its
     // outbound event; the callee receives it over the transport and records it
@@ -1573,6 +1574,8 @@ pub fn formatCausalJson(allocator: Allocator, store: *const CausalStore) Allocat
         try appendOptionalJsonU64(&output, allocator, event.cause_event_id);
         try output.appendSlice(allocator, ",\n      \"schedule_id\": ");
         try appendOptionalJsonU64(&output, allocator, event.schedule_id);
+        try output.appendSlice(allocator, ",\n      \"source_ref_id\": ");
+        try appendOptionalJsonU64(&output, allocator, event.source_ref_id);
         try output.appendSlice(allocator, ",\n      \"boundary_id\": ");
         try appendOptionalJsonU64(&output, allocator, event.boundary_id);
         try output.appendSlice(allocator, ",\n      \"artifact_id\": ");

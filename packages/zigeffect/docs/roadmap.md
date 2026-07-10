@@ -765,7 +765,18 @@ Add an installable `zigeffect` CLI with real, compile-tested
 includes effects, layers, Schema, CLI, HTTP, SQL, config, tests, causal
 instrumentation, workbench attachment, project manifest, and agent skills.
 
-**Status:** active.
+**Status:** delivered on 2026-07-10. The dedicated `packages/zigeffect-cli`
+installs a real `zigeffect` executable and generates all five project kinds
+through the deterministic `zstd.Project.FilePlan`. Dry-runs list every path,
+JSON receipts are stable and redacted, non-empty targets are refused, explicit
+relative/absolute targets are supported, and `--force` replaces only declared
+files through per-file temporary renames. Generated manifests default to
+`agent_safe_v1` with source-policy, Debug, and ReleaseSafe gates. Acceptance
+evidence: 9 CLI unit/writer tests and one isolated integration matrix generated
+all five roots, passed Debug and ReleaseSafe for each, and independently passed
+the system API, worker, and shared-package tests. The expanded local-agent gate
+also passed 256 workbench tests/build, stdlib tests/examples, 193 configured
+core tests, 850 raw core tests, tool hygiene, and diff checks.
 
 ### M90 - Instrumented project manager
 
@@ -773,7 +784,7 @@ Add components and boundary modules to existing projects, validate dependency
 graphs, and run manifest-owned doctor/check/test/dev workflows with causal
 receipts and no arbitrary argv boundary.
 
-**Status:** planned.
+**Status:** active.
 
 ### M91 - Agent development protocol
 

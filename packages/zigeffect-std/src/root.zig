@@ -26,6 +26,7 @@ pub const Sql = @import("sql/root.zig");
 pub const Http = @import("http/root.zig");
 pub const Agent = @import("agent/root.zig");
 pub const Project = @import("project/root.zig");
+pub const Safety = @import("safety/root.zig");
 
 test "zigeffect-std re-exports the engine facade" {
     try std.testing.expect(@hasDecl(fx, "effect"));
@@ -39,4 +40,5 @@ test "root exports Observability namespace" {
 
 test {
     std.testing.refAllDecls(Project);
+    std.testing.refAllDecls(Safety);
 }

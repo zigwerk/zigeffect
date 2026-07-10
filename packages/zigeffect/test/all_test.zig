@@ -13,6 +13,9 @@ comptime {
     _ = @import("thread_safety_test.zig");
     _ = @import("h7a_cause_edge_test.zig");
     _ = @import("scope_test.zig");
+    _ = @import("safe_resource_test.zig");
+    _ = @import("tracked_allocator_test.zig");
+    _ = @import("schedule_explorer_test.zig");
     _ = @import("runtime_test.zig");
     _ = @import("runtime_executor_test.zig");
     _ = @import("fiber_test.zig");
@@ -42,6 +45,7 @@ comptime {
     _ = @import("suspension_test.zig");
     _ = @import("suspension_coordination_test.zig");
     _ = @import("causal_structural_test.zig");
+    _ = @import("source_ref_test.zig");
     _ = @import("policy_engine_test.zig");
     _ = @import("closed_loop_test.zig");
     _ = @import("causal_backend_conformance_test.zig");

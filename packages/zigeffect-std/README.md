@@ -87,6 +87,10 @@ with one import:
   dependency graph, requirements, acceptance checks, fixed command IDs,
   deterministic owned file plans, and redacted scaffold receipts used by the
   application-development CLI.
+- `Safety` defines the `agent_safe_v1` project policy, parser-backed governed
+  construct analysis, exact fingerprinted allowances, compiler diagnostics,
+  bounded evidence completeness, and versioned safety receipts. Unknown,
+  stale, unsupported, truncated, and unrun evidence never becomes a pass.
 - `fx` re-exports the base zigeffect engine facade.
 
 `Env`, `Config`, `Secrets`, `Json`, `Jsonl`, `Cli`, `Queue`, `PubSub`, `Sink`,
@@ -124,6 +128,7 @@ zstd.Sql
 zstd.Http
 zstd.Agent
 zstd.Project
+zstd.Safety
 ```
 
 ## Project Contract

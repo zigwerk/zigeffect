@@ -8,6 +8,7 @@ bun run zigeffect:workbench:typecheck
 bun run zigeffect:workbench:test
 bun run zigeffect:workbench:build
 bun run zigeffect:std:test
+bun run zigeffect:cli:test
 
 (
   cd packages/zigeffect

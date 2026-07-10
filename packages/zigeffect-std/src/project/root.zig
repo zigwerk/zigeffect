@@ -23,6 +23,15 @@ pub const ProjectError = error{
     DuplicateAcceptanceCheck,
     SecretDetected,
     DuplicatePath,
+    MissingSafeRoot,
+    MissingSafetyGate,
+    InvalidSafetyRoot,
+    OverlappingSafetyRoot,
+    InvalidSafetyLimit,
+    InvalidSafetyAllowance,
+    DuplicateSafetyAllowance,
+    UnauditedSafetyAllowance,
+    DuplicateSafetyGate,
 };
 
 pub const ProjectKind = enum {
@@ -99,6 +108,162 @@ pub const Policy = struct {
     persist_raw_terminal: bool = false,
 };
 
+pub const SafetyProfile = enum {
+    unmanaged,
+    agent_safe_v1,
+    audited_systems,
+};
+
+pub const GovernedConstruct = enum {
+    pointer_cast,
+    pointer_integer_conversion,
+    opaque_pointer,
+    many_pointer,
+    runtime_safety_disabled,
+    inline_assembly,
+    foreign_interface,
+    volatile_access,
+    thread_local_state,
+    unmanaged_thread,
+    unchecked_unreachable,
+    undefined_escape,
+    manual_allocator_escape,
+};
+
+pub const SafetyGateKind = enum {
+    source_policy,
+    compile_debug,
+    compile_release_safe,
+    allocation_failures,
+    leak_detection,
+    causal_invariants,
+    schedule_exploration,
+    thread_sanitizer,
+    c_undefined_behavior,
+    fuzz,
+    executor_equivalence,
+};
+
+pub const SafetyGatePolicy = struct {
+    kind: SafetyGateKind,
+    required: bool = true,
+    command: ?[]const u8 = null,
+};
+
+pub const SafetyLimits = struct {
+    max_source_bytes: usize = 8 * 1024 * 1024,
+    max_findings: usize = 1024,
+    max_diagnostics: usize = 1024,
+    max_schedules: usize = 10_000,
+    max_fuzz_cases: usize = 100_000,
+    max_artifact_bytes: usize = 16 * 1024 * 1024,
+    max_runtime_events: usize = 100_000,
+
+    fn validate(self: SafetyLimits) ProjectError!void {
+        if (self.max_source_bytes == 0 or
+            self.max_findings == 0 or
+            self.max_diagnostics == 0 or
+            self.max_schedules == 0 or
+            self.max_fuzz_cases == 0 or
+            self.max_artifact_bytes == 0 or
+            self.max_runtime_events == 0)
+        {
+            return error.InvalidSafetyLimit;
+        }
+    }
+};
+
+pub const SafetyProductionPosture = struct {
+    retain_generation_checks: bool = true,
+    retain_critical_invariants: bool = true,
+    retain_causal_findings: bool = true,
+};
+
+pub const UnsafeAllowance = struct {
+    id: []const u8,
+    path: []const u8,
+    construct: GovernedConstruct,
+    fingerprint: []const u8,
+    justification: []const u8,
+    required_check: []const u8,
+};
+
+pub const SafetyPolicy = struct {
+    profile: SafetyProfile = .unmanaged,
+    safe_roots: []const []const u8 = &.{},
+    audited_roots: []const []const u8 = &.{},
+    allowances: []const UnsafeAllowance = &.{},
+    gates: []const SafetyGatePolicy = &.{},
+    limits: SafetyLimits = .{},
+    production_posture: SafetyProductionPosture = .{},
+
+    pub fn validate(self: SafetyPolicy, manifest: Manifest) ProjectError!void {
+        try self.limits.validate();
+
+        if (self.profile == .unmanaged) {
+            if (self.safe_roots.len != 0 or self.audited_roots.len != 0 or self.allowances.len != 0 or self.gates.len != 0) {
+                return error.InvalidSafetyRoot;
+            }
+            return;
+        }
+        if (self.profile == .agent_safe_v1 and self.safe_roots.len == 0) return error.MissingSafeRoot;
+        if (self.profile == .audited_systems and self.audited_roots.len == 0) return error.InvalidSafetyRoot;
+
+        try validateSafetyRoots(self.safe_roots);
+        try validateSafetyRoots(self.audited_roots);
+        for (self.safe_roots) |safe_root| {
+            for (self.audited_roots) |audited_root| {
+                if (std.mem.eql(u8, safe_root, audited_root) or pathIsWithin(safe_root, audited_root)) {
+                    return error.OverlappingSafetyRoot;
+                }
+            }
+        }
+
+        var has_source_policy = false;
+        for (self.gates, 0..) |gate, index| {
+            if (gate.kind == .source_policy) has_source_policy = true;
+            if (gate.command) |command_id| {
+                try ensureSafe(command_id);
+                if (manifest.command(command_id) == null) return error.MissingSafetyGate;
+            } else if (gate.kind != .source_policy) {
+                return error.MissingSafetyGate;
+            }
+            for (self.gates[0..index]) |previous| {
+                if (previous.kind == gate.kind) return error.DuplicateSafetyGate;
+            }
+        }
+        if (self.profile == .agent_safe_v1 and !has_source_policy) return error.MissingSafetyGate;
+
+        for (self.allowances, 0..) |allowance, index| {
+            try validateIdentifier(allowance.id);
+            try validateRelativePath(allowance.path, false);
+            try ensureSafe(allowance.path);
+            try ensureSafe(allowance.fingerprint);
+            try ensureSafe(allowance.justification);
+            try ensureSafe(allowance.required_check);
+            if (!validSafetyFingerprint(allowance.fingerprint) or allowance.justification.len < 16) {
+                return error.InvalidSafetyAllowance;
+            }
+            if (manifest.command(allowance.required_check) == null) return error.InvalidSafetyAllowance;
+            var audited = false;
+            for (self.audited_roots) |root| {
+                if (pathIsWithin(allowance.path, root)) {
+                    audited = true;
+                    break;
+                }
+            }
+            if (!audited) return error.UnauditedSafetyAllowance;
+            for (self.allowances[0..index]) |previous| {
+                if (std.mem.eql(u8, previous.id, allowance.id) or
+                    (std.mem.eql(u8, previous.path, allowance.path) and previous.construct == allowance.construct))
+                {
+                    return error.DuplicateSafetyAllowance;
+                }
+            }
+        }
+    }
+};
+
 pub const ArtifactPaths = struct {
     sessions: []const u8 = ".zigeffect/sessions",
     causal: []const u8 = ".zigeffect/causal",
@@ -120,6 +285,7 @@ pub const Manifest = struct {
     requirements: []const Requirement = &.{},
     acceptance_checks: []const AcceptanceCheck = &.{},
     policy: Policy = .{},
+    safety: SafetyPolicy = .{},
     artifacts: ArtifactPaths = .{},
     dependencies: DependencyPaths = .{},
 
@@ -207,6 +373,7 @@ pub const Manifest = struct {
         try validateRelativePath(self.artifacts.receipts, false);
         try validateDependencyPath(self.dependencies.zigeffect);
         try validateDependencyPath(self.dependencies.zigeffect_std);
+        try self.safety.validate(self);
     }
 
     pub fn component(self: Manifest, id: []const u8) ?Component {
@@ -245,6 +412,33 @@ pub const Manifest = struct {
         return false;
     }
 };
+
+fn validateSafetyRoots(roots: []const []const u8) ProjectError!void {
+    for (roots, 0..) |root, index| {
+        try validateRelativePath(root, true);
+        try ensureSafe(root);
+        for (roots[0..index]) |previous| {
+            if (std.mem.eql(u8, root, previous) or pathIsWithin(root, previous) or pathIsWithin(previous, root)) {
+                return error.OverlappingSafetyRoot;
+            }
+        }
+    }
+}
+
+fn pathIsWithin(path: []const u8, root: []const u8) bool {
+    if (std.mem.eql(u8, root, ".")) return true;
+    if (std.mem.eql(u8, path, root)) return true;
+    return path.len > root.len and std.mem.startsWith(u8, path, root) and path[root.len] == '/';
+}
+
+fn validSafetyFingerprint(value: []const u8) bool {
+    const prefix = "sha256:";
+    if (!std.mem.startsWith(u8, value, prefix) or value.len < prefix.len + 16) return false;
+    for (value[prefix.len..]) |byte| {
+        if (!std.ascii.isHex(byte)) return false;
+    }
+    return true;
+}
 
 pub const ParsedManifest = std.json.Parsed(Manifest);
 
@@ -612,4 +806,164 @@ test "Project rejects secrets and redacts receipt detail" {
     defer std.testing.allocator.free(json);
     try std.testing.expect(std.mem.indexOf(u8, json, "sentinel-secret") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, "[REDACTED]") != null);
+}
+
+test "Project validates agent safe policy and round trips safety JSON" {
+    const manifest = Manifest{
+        .name = "safe-app",
+        .kind = .application,
+        .components = &.{.{ .id = "safe-app", .kind = .application, .path = "." }},
+        .commands = &.{
+            .{ .id = "check-debug", .argv = &.{ "zig", "build", "test", "-Doptimize=Debug" } },
+            .{ .id = "check-safe", .argv = &.{ "zig", "build", "test", "-Doptimize=ReleaseSafe" } },
+        },
+        .safety = .{
+            .profile = .agent_safe_v1,
+            .safe_roots = &.{"src"},
+            .audited_roots = &.{"src/platform"},
+            .allowances = &.{.{
+                .id = "ffi-entry",
+                .path = "src/platform/native.zig",
+                .construct = .foreign_interface,
+                .fingerprint = "sha256:0123456789abcdef",
+                .justification = "platform adapter owns the foreign ABI boundary",
+                .required_check = "check-safe",
+            }},
+            .gates = &.{
+                .{ .kind = .source_policy },
+                .{ .kind = .compile_debug, .command = "check-debug" },
+                .{ .kind = .compile_release_safe, .command = "check-safe" },
+            },
+        },
+    };
+
+    try manifest.validate();
+    const json = try manifest.jsonAlloc(std.testing.allocator);
+    defer std.testing.allocator.free(json);
+    var parsed = try parseManifest(std.testing.allocator, json);
+    defer parsed.deinit();
+
+    try std.testing.expectEqual(SafetyProfile.agent_safe_v1, parsed.value.safety.profile);
+    try std.testing.expectEqual(@as(usize, 1), parsed.value.safety.allowances.len);
+    try std.testing.expectEqual(GovernedConstruct.foreign_interface, parsed.value.safety.allowances[0].construct);
+    try std.testing.expectEqual(@as(usize, 3), parsed.value.safety.gates.len);
+}
+
+test "Project safety policy fails closed for missing roots gates and invalid limits" {
+    const base = Manifest{
+        .name = "safe-app",
+        .kind = .application,
+        .components = &.{.{ .id = "safe-app", .kind = .application, .path = "." }},
+    };
+
+    var missing_roots = base;
+    missing_roots.safety = .{
+        .profile = .agent_safe_v1,
+        .gates = &.{.{ .kind = .source_policy }},
+    };
+    try std.testing.expectError(error.MissingSafeRoot, missing_roots.validate());
+
+    var missing_gate = base;
+    missing_gate.safety = .{
+        .profile = .agent_safe_v1,
+        .safe_roots = &.{"src"},
+    };
+    try std.testing.expectError(error.MissingSafetyGate, missing_gate.validate());
+
+    var zero_limit = base;
+    zero_limit.safety = .{
+        .profile = .agent_safe_v1,
+        .safe_roots = &.{"src"},
+        .gates = &.{.{ .kind = .source_policy }},
+        .limits = .{ .max_findings = 0 },
+    };
+    try std.testing.expectError(error.InvalidSafetyLimit, zero_limit.validate());
+}
+
+test "Project safety policy rejects overlapping roots and unaudited allowances" {
+    const overlapping = Manifest{
+        .name = "safe-app",
+        .kind = .application,
+        .components = &.{.{ .id = "safe-app", .kind = .application, .path = "." }},
+        .safety = .{
+            .profile = .agent_safe_v1,
+            .safe_roots = &.{ "src", "src/domain" },
+            .audited_roots = &.{"adapters"},
+            .gates = &.{.{ .kind = .source_policy }},
+        },
+    };
+    try std.testing.expectError(error.OverlappingSafetyRoot, overlapping.validate());
+
+    const unaudited = Manifest{
+        .name = "safe-app",
+        .kind = .application,
+        .components = &.{.{ .id = "safe-app", .kind = .application, .path = "." }},
+        .commands = &.{.{ .id = "check-safe", .argv = &.{ "zig", "build", "test" } }},
+        .safety = .{
+            .profile = .agent_safe_v1,
+            .safe_roots = &.{"src"},
+            .audited_roots = &.{"adapters"},
+            .allowances = &.{.{
+                .id = "bad-location",
+                .path = "src/raw.zig",
+                .construct = .pointer_cast,
+                .fingerprint = "sha256:0123456789abcdef",
+                .justification = "this is deliberately outside the audited root",
+                .required_check = "check-safe",
+            }},
+            .gates = &.{.{ .kind = .source_policy }},
+        },
+    };
+    try std.testing.expectError(error.UnauditedSafetyAllowance, unaudited.validate());
+}
+
+test "Project safety policy rejects duplicates stale shapes and secrets" {
+    const manifest = Manifest{
+        .name = "safe-app",
+        .kind = .application,
+        .components = &.{.{ .id = "safe-app", .kind = .application, .path = "." }},
+        .commands = &.{.{ .id = "check-safe", .argv = &.{ "zig", "build", "test" } }},
+    };
+
+    var duplicate_gate = manifest;
+    duplicate_gate.safety = .{
+        .profile = .agent_safe_v1,
+        .safe_roots = &.{"src"},
+        .gates = &.{ .{ .kind = .source_policy }, .{ .kind = .source_policy } },
+    };
+    try std.testing.expectError(error.DuplicateSafetyGate, duplicate_gate.validate());
+
+    var malformed_fingerprint = manifest;
+    malformed_fingerprint.safety = .{
+        .profile = .agent_safe_v1,
+        .safe_roots = &.{"src"},
+        .audited_roots = &.{"adapters"},
+        .allowances = &.{.{
+            .id = "native-entry",
+            .path = "adapters/native.zig",
+            .construct = .pointer_cast,
+            .fingerprint = "old",
+            .justification = "adapter has a reviewed pointer conversion boundary",
+            .required_check = "check-safe",
+        }},
+        .gates = &.{.{ .kind = .source_policy }},
+    };
+    try std.testing.expectError(error.InvalidSafetyAllowance, malformed_fingerprint.validate());
+
+    var secret = manifest;
+    secret.safety = .{
+        .profile = .agent_safe_v1,
+        .safe_roots = &.{"src"},
+        .audited_roots = &.{"adapters"},
+        .allowances = &.{.{
+            .id = "native-entry",
+            .path = "adapters/native.zig",
+            .construct = .pointer_cast,
+            .fingerprint = "sha256:0123456789abcdef",
+            .justification = "authorization: Bearer sentinel-secret-for-tests",
+            .required_check = "check-safe",
+        }},
+        .gates = &.{.{ .kind = .source_policy }},
+    };
+    try std.testing.expectError(error.SecretDetected, secret.validate());
 }

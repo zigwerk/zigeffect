@@ -345,7 +345,7 @@ pub const IntegerSchema = struct {
     pub fn decodeJsonValue(self: IntegerSchema, value: std.json.Value) SchemaError!i64 {
         const integer_value = switch (value) {
             .integer => |integer_value| integer_value,
-            else => SchemaError.InvalidType,
+            else => return SchemaError.InvalidType,
         };
         try self.validateSimple(integer_value);
         return integer_value;
@@ -1596,4 +1596,14 @@ test "Schema decodes JSON text and config entries" {
     try config.put("HTTP_PORT", "5178", false);
 
     try std.testing.expectEqual(@as(i64, 5178), try decodeConfig(config, "HTTP_PORT", integer()));
+}
+
+test "Schema derived integer rejects a non-integer value" {
+    const Input = struct { port: i64 };
+    const schema = derive(Input, .{ .port = integer().min(1).max(65535) });
+
+    try std.testing.expectError(
+        SchemaError.InvalidType,
+        decodeJsonAlloc(std.testing.allocator, schema, "{\"port\":\"5178\"}"),
+    );
 }
