@@ -40,15 +40,15 @@ agent-first Zig development system.
 
 ### M90 - Project Manager
 
-- [ ] Add manifest-owned component mutation and graph validation tests.
-- [ ] Implement `add service|library|package` with atomic manifest updates.
-- [ ] Implement `generate service|layer|schema|cli|http|sql|test` within a
+- [x] Add manifest-owned component mutation and graph validation tests.
+- [x] Implement `add service|library|package` with atomic manifest updates.
+- [x] Implement `generate service|layer|schema|cli|http|sql|test` within a
   selected component.
-- [ ] Implement `project show|validate|doctor|check|test|dev` with fixed command
+- [x] Implement `project show|validate|doctor|check|test|dev` with fixed command
   IDs, redacted receipts, cancellation, and no arbitrary argv.
-- [ ] Generate local agent/workbench launch metadata and dev-session receipts.
-- [ ] Prove add/generate/check against a real generated system workspace.
-- [ ] Commit M90.
+- [x] Generate local agent/workbench launch metadata and dev-session receipts.
+- [x] Prove add/generate/check against a real generated system workspace.
+- [x] Commit M90.
 
 ### M91 - Agent Development Protocol
 
@@ -129,3 +129,11 @@ is delivered or explicitly proven impossible by an external constraint.
 - Expanded local-agent gate: 256 workbench tests and production build, stdlib
   tests/examples, 193 configured core tests across 67 steps, 850 raw core
   tests, tool hygiene, and `git diff --check` passed on 2026-07-10.
+
+### M90 Evidence
+
+- CLI: 10 parser/planner/writer/manager tests passed.
+- Real system: added and independently built `analytics`, generated an API
+  schema, validated the updated graph, passed aggregate Debug/ReleaseSafe,
+  passed every original child plus the new child, ran manifest-owned `check`,
+  and verified `.zigeffect/receipts/check.json`.

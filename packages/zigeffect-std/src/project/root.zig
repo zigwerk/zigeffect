@@ -443,7 +443,10 @@ fn validSafetyFingerprint(value: []const u8) bool {
 pub const ParsedManifest = std.json.Parsed(Manifest);
 
 pub fn parseManifest(allocator: std.mem.Allocator, input: []const u8) !ParsedManifest {
-    var parsed = try std.json.parseFromSlice(Manifest, allocator, input, .{});
+    // Parsed manifests routinely outlive the read buffer used by CLI and agent
+    // tooling. Own every string so callers cannot accidentally retain slices
+    // into an already-released file buffer.
+    var parsed = try std.json.parseFromSlice(Manifest, allocator, input, .{ .allocate = .alloc_always });
     errdefer parsed.deinit();
     try parsed.value.validate();
     return parsed;

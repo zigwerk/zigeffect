@@ -46,6 +46,28 @@ test "every scaffold builds in Debug and ReleaseSafe and system children build i
         defer plan.deinit();
         _ = try cli.writePlan(std.testing.io, tmp.dir, case.name, plan, .{});
 
+        if (case.kind == .system) {
+            var added = try cli.runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{
+                "add", "library", "analytics", "--root", target_path, "--json",
+            });
+            defer added.deinit();
+            try std.testing.expectEqual(@as(u8, 0), added.exit_code);
+            try std.testing.expect(std.mem.indexOf(u8, added.output, "libraries/analytics/build.zig") != null);
+
+            var generated = try cli.runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{
+                "generate", "schema", "invoice", "--component", "api-service", "--root", target_path, "--json",
+            });
+            defer generated.deinit();
+            try std.testing.expectEqual(@as(u8, 0), generated.exit_code);
+            try target_dir.access(std.testing.io, "services/api/src/schema/invoice.zig", .{});
+
+            var validated = try cli.runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{
+                "project", "validate", "--root", target_path, "--json",
+            });
+            defer validated.deinit();
+            try std.testing.expectEqual(@as(u8, 0), validated.exit_code);
+        }
+
         try runBuild(target_path, "Debug");
         try runBuild(target_path, "ReleaseSafe");
         if (case.kind == .system) {
@@ -54,6 +76,16 @@ test "every scaffold builds in Debug and ReleaseSafe and system children build i
                 defer std.testing.allocator.free(child_path);
                 try runBuild(child_path, "Debug");
             }
+            const added_path = try std.fs.path.join(std.testing.allocator, &.{ target_path, "libraries/analytics" });
+            defer std.testing.allocator.free(added_path);
+            try runBuild(added_path, "Debug");
+
+            var checked = try cli.runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{
+                "project", "check", "--root", target_path, "--json",
+            });
+            defer checked.deinit();
+            try std.testing.expectEqual(@as(u8, 0), checked.exit_code);
+            try target_dir.access(std.testing.io, ".zigeffect/receipts/check.json", .{});
         }
     }
 }

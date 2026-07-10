@@ -44,3 +44,22 @@ Every generated manifest defaults to `agent_safe_v1` and declares source-policy,
 Debug, and ReleaseSafe gates. Dependency paths are explicit relative paths so
 the generated project stays portable and does not persist machine-specific
 absolute locations.
+
+## Manage A Project
+
+```sh
+zigeffect add service payments --root ./my-system
+zigeffect add package shared-events --root ./my-system
+zigeffect generate schema invoice --component api-service --root ./my-system
+zigeffect project validate --root ./my-system --json
+zigeffect project doctor --root ./my-system --json
+zigeffect project check --root ./my-system --json
+```
+
+`add` atomically updates a validated system manifest and writes an independently
+buildable child. `generate` accepts only the seven declared module kinds and a
+manifest component id. Project execution selects fixed command ids from the
+manifest; there is no arbitrary command or passthrough argv option. Check, test,
+and dev output is bounded and redacted, with receipts persisted under
+`.zigeffect/receipts`. Dev also writes `.zigeffect/workbench.json` for local
+attachment.

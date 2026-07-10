@@ -784,7 +784,17 @@ Add components and boundary modules to existing projects, validate dependency
 graphs, and run manifest-owned doctor/check/test/dev workflows with causal
 receipts and no arbitrary argv boundary.
 
-**Status:** active.
+**Status:** delivered on 2026-07-10. `add service|library|package` validates and
+atomically updates system manifests, adjusts child dependency paths, refuses
+collisions unless explicitly forced, and leaves each child independently
+buildable. `generate service|layer|schema|cli|http|sql|test` writes only inside
+a selected manifest component. `project show|validate|doctor|check|test|dev`
+revalidates the manifest and selects fixed command ids with bounded redacted
+output; no arbitrary command input exists. Check/test/dev persist JSON receipts,
+and dev writes local workbench attachment metadata. Acceptance evidence: 10 CLI
+tests plus the generated-system integration added a real library, generated an
+API schema, rebuilt the aggregate and child, executed project check, and proved
+the persisted receipt.
 
 ### M91 - Agent development protocol
 
@@ -792,7 +802,7 @@ Make requirements, tasks, checks, evidence, next actions, and handoffs stable
 provider-neutral JSON/JSONL contracts that Codex, Claude, the CLI, and the
 workbench share.
 
-**Status:** planned.
+**Status:** active.
 
 ### M92 - Causal application SDK
 
