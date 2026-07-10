@@ -1,6 +1,6 @@
 # zigeffect Roadmap
 
-Date: 2026-06-24
+Date: 2026-06-24 (updated 2026-07-10)
 
 `zigeffect` is a Zig-native Effect-inspired engine whose primary debugging
 interface is a deterministic, queryable **causal event graph** that LLM agents
@@ -729,6 +729,92 @@ ownership and policy controls exist.
 
 **Status:** delivered. PTY output is deliberately bounded and memory-only;
 durability claims apply to session lifecycle state, not full terminal history.
+
+## Agentic application platform roadmap
+
+M72-M87 delivered the local agent control plane. M88-M95 now turn that
+foundation into the application-development product: agents receive
+requirements, create conventional zigeffect systems, run instrumented local
+workflows, query causal evidence, and leave verifiable handoffs. This sequence
+is local-first and does not require hosting.
+
+The governing design and executable checklist are:
+
+- `docs/superpowers/specs/2026-07-10-zigeffect-agentic-application-platform-design.md`
+- `docs/superpowers/plans/2026-07-10-zigeffect-agentic-application-platform.md`
+
+### M88 - Agentic project contract and skills
+
+Add `zstd.Project` manifests, component graphs, requirements, acceptance
+checks, deterministic generated-file plans, redacted receipts, and matching
+Codex/Claude project skills.
+
+**Status:** delivered on 2026-07-10. `zstd.Project` now fails closed on
+unsupported schemas, malformed names/versions/paths, invalid component graphs,
+broken requirement/check references, and secret-bearing values. Its owned file
+plans are deterministic and collision-safe. Matching Codex and Claude skills
+use the manifest, public stdlib surface, tests, causal evidence, and redacted
+handoffs as the development loop. Acceptance evidence: 26 stdlib tests, stdlib
+examples, 256 workbench tests, 193 core tests across 67 build steps, production
+workbench build, raw core tests, and tool hygiene all passed.
+
+### M89 - Production application scaffold CLI
+
+Add an installable `zigeffect` CLI with real, compile-tested
+`new application|service|library|package|system` generators. Every scaffold
+includes effects, layers, Schema, CLI, HTTP, SQL, config, tests, causal
+instrumentation, workbench attachment, project manifest, and agent skills.
+
+**Status:** active.
+
+### M90 - Instrumented project manager
+
+Add components and boundary modules to existing projects, validate dependency
+graphs, and run manifest-owned doctor/check/test/dev workflows with causal
+receipts and no arbitrary argv boundary.
+
+**Status:** planned.
+
+### M91 - Agent development protocol
+
+Make requirements, tasks, checks, evidence, next actions, and handoffs stable
+provider-neutral JSON/JSONL contracts that Codex, Claude, the CLI, and the
+workbench share.
+
+**Status:** planned.
+
+### M92 - Causal application SDK
+
+Record semantic application facts for config, schema, CLI, HTTP, SQL, external
+calls, artifacts, component dependencies, and acceptance checks so agents can
+debug application intent rather than only low-level runtime mechanics.
+
+**Status:** planned.
+
+### M93 - Workbench application-development UX
+
+Unify requirements, components, tasks, source-change receipts, commands,
+checks, artifacts, agents, application facts, causal graph focus, comparisons,
+recovery, and approvals in one live development session.
+
+**Status:** planned.
+
+### M94 - Provider conformance and benchmarks
+
+Run provider-neutral offline Codex/Claude fixtures and opt-in real local runs
+against identical requirements. Score compile/test success, acceptance
+coverage, repair iterations, causal-query use, secret posture, and handoff
+completeness without claiming model-quality results from synthetic fixtures.
+
+**Status:** planned.
+
+### M95 - Local distribution and compatibility
+
+Deliver install/version/completion flows, compatibility metadata, upgrade
+dry-runs, scaffold migrations, generated-project snapshots, public API gates,
+and one complete local release command.
+
+**Status:** planned.
 
 ## Hardening milestone roadmap
 

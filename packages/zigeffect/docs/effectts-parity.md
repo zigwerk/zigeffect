@@ -283,9 +283,10 @@ diagnostic surface for the same family of questions:
 - backend adapter kinds for memory, JSON Lines, DOT, OpenTelemetry, embedded
   graph queries, durable history, and future async streams
 
-This is not EffectTS's full runtime inspector or a durable workflow engine. It
-is the deterministic Zig core plus a local async wait backend that production
-adapters and agent tools can build on.
+This is not EffectTS's full runtime inspector. It is the deterministic Zig core,
+real coroutine/thread-pool executors, durable workflow and local cluster
+substrates, plus production-shaped adapters and agent tools. Hosted multi-node
+deployment remains outside the local-first boundary.
 
 ## Next Parity Priorities
 
@@ -298,7 +299,11 @@ Remaining:
 
 1. Deterministic replay/forking for selected effect inputs.
 2. Compile-time assertions for common effect composition mistakes.
-3. The full cluster transport on a real socket (the workflow scheduler already
-   runs on zio; the transport vtable still routes in-process).
+3. Real deployment wiring around the delivered loopback/remote socket
+   transports: TLS handshakes, health-checked pools, and separate-process
+   lineage. This is deferred behind local application-development work.
 4. Recursive schedule programs and richer test fixtures/golden output, as real
    stdlib code demands them.
+5. The M88-M95 agentic application platform: project contracts, compile-tested
+   scaffolds, instrumented project workflows, semantic application facts,
+   workbench development UX, provider conformance, and local distribution.

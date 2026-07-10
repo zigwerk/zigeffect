@@ -83,6 +83,10 @@ with one import:
   Claude Code process adapter commands, guardrails, artifacts, check receipts,
   effect-native process-backed agent runs, and supervised local multi-tool
   sessions with redacted stdout/stderr artifacts.
+- `Project` defines the validated `zigeffect.project.v1` manifest, component
+  dependency graph, requirements, acceptance checks, fixed command IDs,
+  deterministic owned file plans, and redacted scaffold receipts used by the
+  application-development CLI.
 - `fx` re-exports the base zigeffect engine facade.
 
 `Env`, `Config`, `Secrets`, `Json`, `Jsonl`, `Cli`, `Queue`, `PubSub`, `Sink`,
@@ -119,7 +123,16 @@ zstd.Schedule
 zstd.Sql
 zstd.Http
 zstd.Agent
+zstd.Project
 ```
+
+## Project Contract
+
+`zstd.Project.Manifest` fails closed on unknown schema versions, malformed
+identifiers, unsafe paths, duplicate components or capabilities, missing or
+cyclic dependencies, invalid commands, broken requirement/check references, and
+secret-bearing values. `zstd.Project.FilePlan` owns and sorts generated files so
+dry-runs and filesystem writes consume the same deterministic plan.
 
 ## Schema
 
