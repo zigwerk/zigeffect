@@ -228,7 +228,8 @@ record-only clone tools; see [docs/roadmap.md](docs/roadmap.md).
 - [Agent-Observable Causal Runtime](docs/agent-observable-runtime.md) ·
   [Agent Guide](docs/agent-guide.md) · [Causal Scenarios](docs/causal-scenarios.md) ·
   [Causal Dev Harness](docs/causal-dev-harness.md) ·
-  [Local Agentic Development](docs/local-agentic-development.md)
+  [Local Agentic Development](docs/local-agentic-development.md) ·
+  [Agent Safety Plane](docs/agent-safety-plane.md)
 - [Operations](docs/operations.md) · [Schema Governance](docs/schema-governance.md) ·
   [Performance Budget](docs/performance-budget.md) ·
   [Self-Improving AI Engine](docs/self-improving-ai-engine.md)

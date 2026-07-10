@@ -802,7 +802,15 @@ Make requirements, tasks, checks, evidence, next actions, and handoffs stable
 provider-neutral JSON/JSONL contracts that Codex, Claude, the CLI, and the
 workbench share.
 
-**Status:** active.
+**Status:** delivered on 2026-07-10. `zstd.Project.Protocol` defines bounded,
+versioned tasks, evidence, next actions, project status, and provider-neutral
+handoffs with owned parsing and fail-closed secret/version/duplicate/limit
+validation. `agent status|requirements|checks|evidence|next|handoff` emits JSON
+or JSONL from a validated manifest and bounded receipt links; handoffs persist
+under `.zigeffect/handoffs`. Matching Codex and Claude skills now orient from
+status/next queries and finish with the same handoff schema. Acceptance
+evidence: protocol-focused stdlib coverage and 14 CLI tests passed, including
+malformed input, redaction, provider metadata, and JSONL parsing.
 
 ### M92 - Causal application SDK
 
@@ -810,7 +818,15 @@ Record semantic application facts for config, schema, CLI, HTTP, SQL, external
 calls, artifacts, component dependencies, and acceptance checks so agents can
 debug application intent rather than only low-level runtime mechanics.
 
-**Status:** planned.
+**Status:** delivered on 2026-07-10. `zstd.Application` provides nine typed fact
+constructors over the existing semantic `span_recorded` taxonomy, bounded
+validation, redacted JSON receipts, event classification, and an
+application-aware structural comparator that normalizes ids and ordering while
+checking status, references, parent ownership, and causal ownership. Generated
+applications and services emit the facts by default. Acceptance evidence: 49
+stdlib tests and 14 CLI tests passed, including allocation-failure, redaction,
+deterministic trace, and changed-lineage regressions; every generated scaffold
+also passed the integration matrix.
 
 ### M93 - Workbench application-development UX
 
@@ -818,7 +834,7 @@ Unify requirements, components, tasks, source-change receipts, commands,
 checks, artifacts, agents, application facts, causal graph focus, comparisons,
 recovery, and approvals in one live development session.
 
-**Status:** planned.
+**Status:** active.
 
 ### M94 - Provider conformance and benchmarks
 

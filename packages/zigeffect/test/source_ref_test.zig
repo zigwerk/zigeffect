@@ -103,3 +103,24 @@ test "causal events preserve source reference ids in snapshots and JSON" {
     defer std.testing.allocator.free(compact_expected);
     try std.testing.expect(std.mem.indexOf(u8, line, compact_expected) != null);
 }
+
+test "source map releases every partial entry and JSON allocation" {
+    const Harness = struct {
+        fn run(allocator: std.mem.Allocator) !void {
+            var map = fx.SourceMap.init(allocator, .{});
+            defer map.deinit();
+            _ = try map.register(.{
+                .component = "api",
+                .file = "src/main.zig",
+                .declaration = "run",
+                .line = 1,
+                .column = 1,
+                .fingerprint = "sha256:0123456789abcdef",
+                .source_digest = "sha256:abcdef0123456789",
+            });
+            const json = try fx.formatSourceMapJson(allocator, &map);
+            defer allocator.free(json);
+        }
+    };
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, Harness.run, .{});
+}

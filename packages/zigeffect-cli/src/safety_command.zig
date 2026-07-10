@@ -63,6 +63,7 @@ pub fn runProjectCheckAlloc(
     defer allocator.free(source_revision);
     const zig_version = try zigVersionAlloc(allocator, io, base_dir);
     defer allocator.free(zig_version);
+    const capabilities = detectCompilerCapabilities(allocator, io, base_dir);
     const target = try std.fmt.allocPrint(allocator, "{s}-{s}", .{ @tagName(builtin.cpu.arch), @tagName(builtin.os.tag) });
     defer allocator.free(target);
 
@@ -94,8 +95,8 @@ pub fn runProjectCheckAlloc(
             try gates.append(.{
                 .kind = gate_policy.kind,
                 .required = gate_policy.required,
-                .status = .not_run,
-                .detail = "gate has no manifest-owned command",
+                .status = .unsupported,
+                .detail = capabilityDetail(gate_policy.kind, capabilities),
             });
             continue;
         };
@@ -109,6 +110,18 @@ pub fn runProjectCheckAlloc(
             });
             continue;
         };
+        if (gateForCommand(gates.values.items, command_id)) |existing| {
+            try gates.append(.{
+                .kind = gate_policy.kind,
+                .required = gate_policy.required,
+                .status = existing.status,
+                .command_id = existing.command_id,
+                .detail = existing.detail,
+                .artifact_id = existing.artifact_id,
+                .replay_command = existing.replay_command,
+            });
+            continue;
+        }
 
         const run = std.process.run(allocator, io, .{
             .argv = command.argv,
@@ -116,7 +129,12 @@ pub fn runProjectCheckAlloc(
             .stdout_limit = .limited(manifest.safety.limits.max_artifact_bytes),
             .stderr_limit = .limited(manifest.safety.limits.max_artifact_bytes),
         }) catch |err| {
-            const status: zstd.Safety.GateStatus = if (err == error.StreamTooLong) .truncated else .failed;
+            const status: zstd.Safety.GateStatus = if (err == error.StreamTooLong)
+                .truncated
+            else if (err == error.FileNotFound)
+                .unsupported
+            else
+                .failed;
             if (status == .truncated) completeness.truncated_artifacts += 1;
             try gates.append(.{
                 .kind = gate_policy.kind,
@@ -136,6 +154,25 @@ pub fn runProjectCheckAlloc(
             .exited => |code| code,
             else => 255,
         };
+        const artifact_path = try std.fmt.allocPrint(allocator, ".zigeffect/receipts/compiler-{s}.json", .{command_id});
+        defer allocator.free(artifact_path);
+        if (options.write_receipt) {
+            const safe_stdout = try zstd.Secrets.redactAlloc(allocator, run.stdout);
+            defer allocator.free(safe_stdout);
+            const safe_stderr = try zstd.Secrets.redactAlloc(allocator, run.stderr);
+            defer allocator.free(safe_stderr);
+            const raw_artifact = try std.json.Stringify.valueAlloc(allocator, .{
+                .schema = "zigeffect.compiler-artifact.v1",
+                .command_id = command_id,
+                .argv = command.argv,
+                .exit_code = exit_code,
+                .stdout = safe_stdout,
+                .stderr = safe_stderr,
+                .truncated = false,
+            }, .{});
+            defer allocator.free(raw_artifact);
+            try writeAtomic(allocator, io, base_dir, artifact_path, raw_artifact);
+        }
         const detail_source = if (run.stderr.len > 0) run.stderr else run.stdout;
         const detail = detail_source[0..@min(detail_source.len, 512)];
         try gates.append(.{
@@ -144,7 +181,7 @@ pub fn runProjectCheckAlloc(
             .status = if (exit_code == 0) .passed else .failed,
             .command_id = command_id,
             .detail = if (detail.len > 0) detail else if (exit_code == 0) "command passed" else "command failed",
-            .artifact_id = command_id,
+            .artifact_id = artifact_path,
             .replay_command = command_id,
         });
 
@@ -164,6 +201,7 @@ pub fn runProjectCheckAlloc(
     const finding_ids = try allocator.alloc([]const u8, static_report.findings.items.len);
     defer allocator.free(finding_ids);
     for (static_report.findings.items, 0..) |finding, index| finding_ids[index] = finding.id;
+    const baseline_diff = try readBaselineDiff(allocator, io, base_dir, finding_ids);
 
     const receipt = zstd.Safety.SafetyReceipt{
         .project = manifest.name,
@@ -178,6 +216,8 @@ pub fn runProjectCheckAlloc(
             .forbidden = static_report.forbiddenCount(),
             .allowed = static_report.allowedCount(),
             .stale = static_report.staleCount(),
+            .introduced = baseline_diff.introduced,
+            .resolved = baseline_diff.resolved,
         },
         .completeness = completeness,
         .diagnostics = diagnostics.items.items,
@@ -189,8 +229,8 @@ pub fn runProjectCheckAlloc(
     if (options.write_receipt) {
         const static_json = try static_report.jsonAlloc(allocator);
         defer allocator.free(static_json);
-        try writeAtomic(io, base_dir, ".zigeffect/receipts/latest-static-safety.json", static_json);
-        try writeAtomic(io, base_dir, ".zigeffect/receipts/latest-safety.json", receipt_json);
+        try writeAtomic(allocator, io, base_dir, ".zigeffect/receipts/latest-static-safety.json", static_json);
+        try writeAtomic(allocator, io, base_dir, ".zigeffect/receipts/latest-safety.json", receipt_json);
     }
 
     const exit_code: u8 = switch (receipt.verdict()) {
@@ -265,7 +305,7 @@ pub fn runSafetyBaselineAlloc(
     const content = try base_dir.readFileAlloc(io, receipt_path, allocator, .limited(16 * 1024 * 1024));
     defer allocator.free(content);
     if (zstd.Secrets.containsSecret(content)) return error.SecretDetected;
-    try writeAtomic(io, base_dir, ".zigeffect/receipts/safety-baseline.json", content);
+    try writeAtomic(allocator, io, base_dir, ".zigeffect/receipts/safety-baseline.json", content);
     const output = try std.json.Stringify.valueAlloc(allocator, .{
         .schema = "zigeffect.safety-baseline.v1",
         .source = receipt_path,
@@ -273,6 +313,79 @@ pub fn runSafetyBaselineAlloc(
         .written = true,
     }, .{});
     return .{ .allocator = allocator, .exit_code = 0, .output = output };
+}
+
+pub fn runBenchmarkScoreAlloc(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    base_dir: std.Io.Dir,
+    fixture_path: []const u8,
+) !CommandOutput {
+    try zstd.Project.validateRelativePath(fixture_path, false);
+    const content = try base_dir.readFileAlloc(io, fixture_path, allocator, .limited(16 * 1024 * 1024));
+    defer allocator.free(content);
+    var parsed = try zstd.Safety.Benchmark.parseFixture(allocator, content);
+    defer parsed.deinit();
+    const scores = try zstd.Safety.Benchmark.scoreFixtureAlloc(allocator, parsed.value);
+    defer allocator.free(scores);
+    const report = zstd.Safety.Benchmark.ScoreReport{ .task_id = parsed.value.task.id, .scores = scores };
+    return .{ .allocator = allocator, .exit_code = 0, .output = try report.jsonAlloc(allocator) };
+}
+
+pub fn runProviderBenchmarkAlloc(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    base_dir: std.Io.Dir,
+    provider: []const u8,
+    command_id: []const u8,
+) !CommandOutput {
+    try zstd.Project.validateIdentifier(provider);
+    try zstd.Project.validateIdentifier(command_id);
+    base_dir.access(io, ".zigeffect/provider-benchmarks.enabled", .{}) catch |err| switch (err) {
+        error.FileNotFound => {
+            const unavailable = try std.json.Stringify.valueAlloc(allocator, .{
+                .schema = "zigeffect.provider-benchmark-run.v1",
+                .available = false,
+                .executed = false,
+                .provider = provider,
+                .command_id = command_id,
+                .reason = "create .zigeffect/provider-benchmarks.enabled to opt in; CI never creates this marker",
+            }, .{});
+            return .{ .allocator = allocator, .exit_code = 3, .output = unavailable };
+        },
+        else => return err,
+    };
+
+    var parsed = try readManifest(allocator, io, base_dir, "zigeffect.project.json");
+    defer parsed.deinit();
+    const command = parsed.value.command(command_id) orelse return error.MissingProjectCommand;
+    const run = try std.process.run(allocator, io, .{
+        .argv = command.argv,
+        .cwd = .{ .dir = base_dir },
+        .stdout_limit = .limited(parsed.value.safety.limits.max_artifact_bytes),
+        .stderr_limit = .limited(parsed.value.safety.limits.max_artifact_bytes),
+    });
+    defer allocator.free(run.stdout);
+    defer allocator.free(run.stderr);
+    const exit_code: u8 = switch (run.term) {
+        .exited => |code| code,
+        else => 255,
+    };
+    const safe_stdout = try zstd.Secrets.redactAlloc(allocator, run.stdout);
+    defer allocator.free(safe_stdout);
+    const safe_stderr = try zstd.Secrets.redactAlloc(allocator, run.stderr);
+    defer allocator.free(safe_stderr);
+    const output = try std.json.Stringify.valueAlloc(allocator, .{
+        .schema = "zigeffect.provider-benchmark-run.v1",
+        .available = true,
+        .executed = true,
+        .provider = provider,
+        .command_id = command_id,
+        .exit_code = exit_code,
+        .stdout = safe_stdout,
+        .stderr = safe_stderr,
+    }, .{});
+    return .{ .allocator = allocator, .exit_code = if (exit_code == 0) 0 else 1, .output = output };
 }
 
 const OwnedSource = struct {
@@ -392,6 +505,66 @@ const GateCollection = struct {
     }
 };
 
+fn gateForCommand(gates: []const zstd.Safety.GateEvidence, command_id: []const u8) ?zstd.Safety.GateEvidence {
+    for (gates) |gate| if (std.mem.eql(u8, gate.command_id, command_id)) return gate;
+    return null;
+}
+
+const BaselineDiff = struct { introduced: usize = 0, resolved: usize = 0 };
+
+fn readBaselineDiff(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    base_dir: std.Io.Dir,
+    current: []const []const u8,
+) !BaselineDiff {
+    const content = base_dir.readFileAlloc(io, ".zigeffect/receipts/safety-baseline.json", allocator, .limited(16 * 1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => return .{},
+        else => return err,
+    };
+    defer allocator.free(content);
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, content, .{});
+    defer parsed.deinit();
+    const object = switch (parsed.value) {
+        .object => |value| value,
+        else => return error.InvalidBaseline,
+    };
+    const raw_ids = object.get("finding_ids") orelse return error.InvalidBaseline;
+    const baseline = switch (raw_ids) {
+        .array => |value| value,
+        else => return error.InvalidBaseline,
+    };
+
+    var diff = BaselineDiff{};
+    for (current) |id| {
+        var found = false;
+        for (baseline.items) |baseline_value| {
+            const baseline_id = switch (baseline_value) {
+                .string => |value| value,
+                else => return error.InvalidBaseline,
+            };
+            if (std.mem.eql(u8, id, baseline_id)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) diff.introduced += 1;
+    }
+    for (baseline.items) |baseline_value| {
+        const baseline_id = switch (baseline_value) {
+            .string => |value| value,
+            else => return error.InvalidBaseline,
+        };
+        var found = false;
+        for (current) |id| if (std.mem.eql(u8, id, baseline_id)) {
+            found = true;
+            break;
+        };
+        if (!found) diff.resolved += 1;
+    }
+    return diff;
+}
+
 fn readManifest(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -420,6 +593,41 @@ fn zigVersionAlloc(allocator: std.mem.Allocator, io: std.Io, base_dir: std.Io.Di
     return allocator.dupe(u8, result.stdout);
 }
 
+const CompilerCapabilities = struct {
+    thread_sanitizer: bool = false,
+    c_undefined_behavior: bool = false,
+    stack_protection: bool = false,
+    fuzz: bool = false,
+};
+
+fn detectCompilerCapabilities(allocator: std.mem.Allocator, io: std.Io, base_dir: std.Io.Dir) CompilerCapabilities {
+    const result = std.process.run(allocator, io, .{
+        .argv = &.{ "zig", "build-exe", "--help" },
+        .cwd = .{ .dir = base_dir },
+        .stdout_limit = .limited(1024 * 1024),
+        .stderr_limit = .limited(1024 * 1024),
+    }) catch return .{};
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    const text = if (result.stdout.len > 0) result.stdout else result.stderr;
+    return .{
+        .thread_sanitizer = std.mem.indexOf(u8, text, "-fsanitize-thread") != null,
+        .c_undefined_behavior = std.mem.indexOf(u8, text, "-fsanitize-c") != null,
+        .stack_protection = std.mem.indexOf(u8, text, "-fstack-protector") != null,
+        .fuzz = std.mem.indexOf(u8, text, "-ffuzz") != null,
+    };
+}
+
+fn capabilityDetail(kind: zstd.Project.SafetyGateKind, capabilities: CompilerCapabilities) []const u8 {
+    return switch (kind) {
+        .thread_sanitizer => if (capabilities.thread_sanitizer) "toolchain advertises -fsanitize-thread; no manifest-owned target command is configured" else "toolchain does not advertise -fsanitize-thread",
+        .c_undefined_behavior => if (capabilities.c_undefined_behavior) "toolchain advertises -fsanitize-c; no manifest-owned C target command is configured" else "toolchain does not advertise -fsanitize-c",
+        .stack_protection => if (capabilities.stack_protection) "toolchain advertises -fstack-protector; no manifest-owned target command is configured" else "toolchain does not advertise -fstack-protector",
+        .fuzz => if (capabilities.fuzz) "toolchain advertises -ffuzz; no manifest-owned fuzz target command is configured" else "toolchain does not advertise -ffuzz",
+        else => "no supported manifest-owned command is configured for this platform",
+    };
+}
+
 fn appendDiagnosticClone(
     allocator: std.mem.Allocator,
     output: *zstd.Safety.CompilerDiagnosticSet,
@@ -438,11 +646,11 @@ fn appendDiagnosticClone(
     });
 }
 
-fn writeAtomic(io: std.Io, base_dir: std.Io.Dir, path: []const u8, content: []const u8) !void {
+fn writeAtomic(allocator: std.mem.Allocator, io: std.Io, base_dir: std.Io.Dir, path: []const u8, content: []const u8) !void {
     const slash = std.mem.lastIndexOfScalar(u8, path, '/') orelse return error.InvalidPath;
     try base_dir.createDirPath(io, path[0..slash]);
-    const temporary = try std.fmt.allocPrint(std.heap.page_allocator, "{s}.tmp", .{path});
-    defer std.heap.page_allocator.free(temporary);
+    const temporary = try std.fmt.allocPrint(allocator, "{s}.tmp", .{path});
+    defer allocator.free(temporary);
     base_dir.writeFile(io, .{ .sub_path = temporary, .data = content }) catch |err| {
         base_dir.deleteFile(io, temporary) catch {};
         return err;
@@ -533,6 +741,9 @@ test "project safety check joins static policy compiler gates diagnostics and re
     const persisted = try tmp.dir.readFileAlloc(std.testing.io, ".zigeffect/receipts/latest-safety.json", std.testing.allocator, .limited(1024 * 1024));
     defer std.testing.allocator.free(persisted);
     try std.testing.expectEqualStrings(result.output, persisted);
+    const compiler_artifact = try tmp.dir.readFileAlloc(std.testing.io, ".zigeffect/receipts/compiler-check-debug.json", std.testing.allocator, .limited(1024 * 1024));
+    defer std.testing.allocator.free(compiler_artifact);
+    try std.testing.expect(std.mem.indexOf(u8, compiler_artifact, "zigeffect.compiler-artifact.v1") != null);
 }
 
 test "project safety check fails unsafe source and compiler diagnostics are source linked" {
@@ -568,4 +779,51 @@ test "project safety check fails unsafe source and compiler diagnostics are sour
     try std.testing.expect(std.mem.indexOf(u8, result.output, "\"verdict\":\"failed\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.output, "ZFX-pointer_cast") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.output, "\"line\":1") != null);
+}
+
+test "safety baseline diff reports introduced and resolved finding ids" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(std.testing.io, ".zigeffect/receipts");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".zigeffect/receipts/safety-baseline.json", .data = "{\"finding_ids\":[\"one\",\"resolved\"]}" });
+    const diff = try readBaselineDiff(std.testing.allocator, std.testing.io, tmp.dir, &.{ "one", "introduced" });
+    try std.testing.expectEqual(@as(usize, 1), diff.introduced);
+    try std.testing.expectEqual(@as(usize, 1), diff.resolved);
+}
+
+test "provider benchmark runner is unavailable until explicitly enabled" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var unavailable = try runProviderBenchmarkAlloc(std.testing.allocator, std.testing.io, tmp.dir, "codex", "benchmark-codex");
+    defer unavailable.deinit();
+    try std.testing.expectEqual(@as(u8, 3), unavailable.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, unavailable.output, "\"available\":false") != null);
+}
+
+test "provider benchmark runner executes only an opted-in manifest command" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(std.testing.io, ".zigeffect");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".zigeffect/provider-benchmarks.enabled", .data = "local opt in\n" });
+    const manifest = zstd.Project.Manifest{
+        .name = "benchmark-app",
+        .kind = .application,
+        .components = &.{.{ .id = "benchmark-app", .kind = .application, .path = "." }},
+        .commands = &.{.{ .id = "benchmark-codex", .argv = &.{ "zig", "version" } }},
+    };
+    const json = try manifest.jsonAlloc(std.testing.allocator);
+    defer std.testing.allocator.free(json);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "zigeffect.project.json", .data = json });
+    var result = try runProviderBenchmarkAlloc(std.testing.allocator, std.testing.io, tmp.dir, "codex", "benchmark-codex");
+    defer result.deinit();
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, result.output, "\"executed\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.output, "0.16.0") != null);
+}
+
+test "compiler capability evidence distinguishes advertised flags from configured commands" {
+    const capabilities = CompilerCapabilities{ .thread_sanitizer = true, .stack_protection = true };
+    try std.testing.expect(std.mem.indexOf(u8, capabilityDetail(.thread_sanitizer, capabilities), "advertises -fsanitize-thread") != null);
+    try std.testing.expect(std.mem.indexOf(u8, capabilityDetail(.c_undefined_behavior, capabilities), "does not advertise") != null);
+    try std.testing.expect(std.mem.indexOf(u8, capabilityDetail(.stack_protection, capabilities), "no manifest-owned") != null);
 }

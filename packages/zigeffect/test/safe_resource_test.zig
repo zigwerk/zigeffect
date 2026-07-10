@@ -88,3 +88,16 @@ test "agent sendable accepts value messages and generational handles" {
     try std.testing.expect(!fx.isAgentSendable([]const u8));
     try std.testing.expect(!fx.isAgentSendable(struct { allocator: std.mem.Allocator }));
 }
+
+test "ResourceTable releases every partial slot allocation" {
+    const Harness = struct {
+        fn run(allocator: std.mem.Allocator) !void {
+            var releases: usize = 0;
+            var table = fx.ResourceTable(Resource).init(allocator, releaseResource);
+            defer table.deinit();
+            const handle = try table.open(.{ .value = 1, .releases = &releases }, null);
+            try table.close(handle, null);
+        }
+    };
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, Harness.run, .{});
+}

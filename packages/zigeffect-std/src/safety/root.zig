@@ -2,6 +2,7 @@ const std = @import("std");
 const Project = @import("../project/root.zig");
 
 pub const receipt = @import("receipt.zig");
+pub const Benchmark = @import("benchmark.zig");
 pub const SafetyReceipt = receipt.SafetyReceipt;
 pub const SafetyVerdict = receipt.SafetyVerdict;
 pub const GateStatus = receipt.GateStatus;
@@ -562,4 +563,21 @@ test "Safety report JSON is deterministic bounded and contains no source body" {
     try std.testing.expect(std.mem.indexOf(u8, first, schema_version) != null);
     try std.testing.expect(std.mem.indexOf(u8, first, "anyopaque") != null);
     try std.testing.expect(std.mem.indexOf(u8, first, "_ = raw") == null);
+}
+
+test "Safety analyzer and report release partial ownership on every allocation failure" {
+    const Harness = struct {
+        fn run(allocator: std.mem.Allocator) !void {
+            const source: [:0]const u8 = "fn run(raw: *anyopaque) void { _ = @ptrCast(raw); }";
+            var report = try analyze(allocator, .{
+                .profile = .agent_safe_v1,
+                .safe_roots = &.{"src"},
+                .gates = &.{.{ .kind = .source_policy }},
+            }, &.{.{ .component = "app", .path = "src/main.zig", .source = source }});
+            defer report.deinit();
+            const json = try report.jsonAlloc(allocator);
+            defer allocator.free(json);
+        }
+    };
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, Harness.run, .{});
 }

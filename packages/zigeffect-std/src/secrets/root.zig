@@ -22,8 +22,18 @@ pub fn containsSecret(input: []const u8) bool {
         containsInsensitive(input, "token=") or
         containsInsensitive(input, "authorization:") or
         containsInsensitive(input, "bearer ") or
-        containsInsensitive(input, "sk-") or
+        containsSecretKeyPrefix(input) or
         containsUrlUserInfo(input);
+}
+
+fn containsSecretKeyPrefix(input: []const u8) bool {
+    const needle = "sk-";
+    var offset: usize = 0;
+    while (offset + needle.len <= input.len) : (offset += 1) {
+        if (!eqlInsensitive(input[offset .. offset + needle.len], needle)) continue;
+        if (offset == 0 or !std.ascii.isAlphanumeric(input[offset - 1])) return true;
+    }
+    return false;
 }
 
 pub fn redactAlloc(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
@@ -124,6 +134,12 @@ test "SecretString never exposes raw display text" {
 
     try std.testing.expectEqualStrings("sentinel-secret-for-tests", secret.expose());
     try std.testing.expectEqualStrings(redacted, secret.display());
+}
+
+test "Secrets does not mistake an embedded sk prefix for a key" {
+    try std.testing.expect(!containsSecret("task-invoice"));
+    try std.testing.expect(!containsSecret("risk-model"));
+    try std.testing.expect(containsSecret("key sk-project-key"));
 }
 
 test "Secrets redactEffect uses Redactor service and records causal fact" {

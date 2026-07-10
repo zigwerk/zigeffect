@@ -83,6 +83,11 @@ with one import:
   Claude Code process adapter commands, guardrails, artifacts, check receipts,
   effect-native process-backed agent runs, and supervised local multi-tool
   sessions with redacted stdout/stderr artifacts.
+- `Application` records stable semantic facts for config loads, Schema decodes,
+  CLI commands, requests, SQL transactions, external calls, artifacts,
+  component dependencies, and acceptance checks. It reuses the core causal
+  taxonomy, emits redacted `span_recorded` facts, writes bounded fact receipts,
+  and compares executor traces by semantic shape rather than event ids.
 - `Project` defines the validated `zigeffect.project.v1` manifest, component
   dependency graph, requirements, acceptance checks, fixed command IDs,
   deterministic owned file plans, and redacted scaffold receipts used by the
@@ -127,6 +132,7 @@ zstd.Schedule
 zstd.Sql
 zstd.Http
 zstd.Agent
+zstd.Application
 zstd.Project
 zstd.Safety
 ```
@@ -138,6 +144,22 @@ identifiers, unsafe paths, duplicate components or capabilities, missing or
 cyclic dependencies, invalid commands, broken requirement/check references, and
 secret-bearing values. `zstd.Project.FilePlan` owns and sorts generated files so
 dry-runs and filesystem writes consume the same deterministic plan.
+
+## Application Facts
+
+Record application intent from an effect context with the typed constructors:
+
+```zig
+_ = zstd.Application.record(
+    ctx,
+    zstd.Application.schemaDecode("Invoice.v1", "success", "validated input"),
+);
+```
+
+`zstd.Application.tracesEquivalent` first applies the engine's structural
+comparison and then checks application fact status, references, parent shape,
+and cause shape. Runtime snapshots and `receiptJsonAlloc` redact
+secret-shaped values before they become agent or workbench artifacts.
 
 ## Schema
 

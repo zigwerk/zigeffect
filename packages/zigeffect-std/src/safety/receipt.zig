@@ -251,10 +251,7 @@ fn parseDiagnosticLine(line: []const u8) ?ParsedDiagnostic {
     const column = std.fmt.parseInt(u32, line[second + 1 .. third], 10) catch return null;
     const severity_text = std.mem.trim(u8, line[third + 1 .. fourth], " \t");
     const severity: CompilerDiagnosticSeverity =
-        if (std.mem.eql(u8, severity_text, "error")) .@"error"
-        else if (std.mem.eql(u8, severity_text, "warning")) .warning
-        else if (std.mem.eql(u8, severity_text, "note")) .note
-        else .info;
+        if (std.mem.eql(u8, severity_text, "error")) .@"error" else if (std.mem.eql(u8, severity_text, "warning")) .warning else if (std.mem.eql(u8, severity_text, "note")) .note else .info;
     return .{
         .severity = severity,
         .file = line[0..first],
@@ -402,4 +399,23 @@ test "Zig compiler diagnostic parser captures spans notes truncation and redacts
     var redacted = try parseZigDiagnostics(std.testing.allocator, raw, 4);
     defer redacted.deinit();
     try std.testing.expectEqualStrings("[REDACTED]", redacted.items.items[2].message);
+}
+
+test "Safety receipt builder releases every partial JSON allocation" {
+    const Harness = struct {
+        fn run(allocator: std.mem.Allocator) !void {
+            const gates = [_]GateEvidence{.{ .kind = .source_policy, .required = true, .status = .passed }};
+            const value = SafetyReceipt{
+                .project = "safe-app",
+                .source_revision = "sha256:revision",
+                .profile = .agent_safe_v1,
+                .zig_version = "0.16.0",
+                .target = "native",
+                .gates = &gates,
+            };
+            const json = try value.jsonAlloc(allocator);
+            defer allocator.free(json);
+        }
+    };
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, Harness.run, .{});
 }

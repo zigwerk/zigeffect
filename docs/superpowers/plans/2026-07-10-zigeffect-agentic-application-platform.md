@@ -52,24 +52,24 @@ agent-first Zig development system.
 
 ### M91 - Agent Development Protocol
 
-- [ ] Define requirement, task, acceptance, evidence, and handoff schemas.
-- [ ] Add CLI JSON/JSONL queries for project status, unresolved requirements,
+- [x] Define requirement, task, acceptance, evidence, and handoff schemas.
+- [x] Add CLI JSON/JSONL queries for project status, unresolved requirements,
   failed checks, causal evidence, and next actions.
-- [ ] Integrate provider-neutral session receipts and bounded artifact links.
-- [ ] Add compatibility, malformed-input, redaction, and replay tests.
-- [ ] Update both skills to make the protocol the default agent workflow.
-- [ ] Commit M91.
+- [x] Integrate provider-neutral session receipts and bounded artifact links.
+- [x] Add compatibility, malformed-input, redaction, and replay tests.
+- [x] Update both skills to make the protocol the default agent workflow.
+- [x] Commit M91.
 
 ### M92 - Causal Application SDK
 
-- [ ] Design semantic application fact kinds without expanding core taxonomy
+- [x] Design semantic application fact kinds without expanding core taxonomy
   unnecessarily.
-- [ ] Implement stdlib helpers for config, schema, CLI, HTTP, SQL, external
+- [x] Implement stdlib helpers for config, schema, CLI, HTTP, SQL, external
   calls, artifacts, component dependencies, and acceptance checks.
-- [ ] Use helpers in generated application/service templates.
-- [ ] Add deterministic causal traces and structural-equivalence tests across
+- [x] Use helpers in generated application/service templates.
+- [x] Add deterministic causal traces and structural-equivalence tests across
   supported executors where applicable.
-- [ ] Commit M92.
+- [x] Commit M92.
 
 ### M93 - Workbench Application UX
 
@@ -137,3 +137,20 @@ is delivered or explicitly proven impossible by an external constraint.
   schema, validated the updated graph, passed aggregate Debug/ReleaseSafe,
   passed every original child plus the new child, ran manifest-owned `check`,
   and verified `.zigeffect/receipts/check.json`.
+
+### M91 Evidence
+
+- Protocol: provider-neutral status/handoff round trips, unknown-version,
+  malformed-input, duplicate-id, bound, and sentinel-secret tests passed.
+- CLI: 14 tests passed; generated-system integration persisted and parsed a
+  Codex handoff after a real manifest-owned project check.
+
+### M92 Evidence
+
+- Application SDK: 49 stdlib tests passed, including all nine semantic fact
+  kinds, stable core-taxonomy mapping, causal and JSON redaction, bounded
+  validation, every receipt allocation failure, and changed-reference/lineage
+  structural regressions.
+- Scaffolds: 14 CLI tests proved application and service plans contain all nine
+  helpers; the real generated-project integration passed every kind in Debug
+  and ReleaseSafe with deterministic allocation-failure and schedule tests.

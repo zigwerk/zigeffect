@@ -86,6 +86,14 @@ test "every scaffold builds in Debug and ReleaseSafe and system children build i
             defer checked.deinit();
             try std.testing.expectEqual(@as(u8, 0), checked.exit_code);
             try target_dir.access(std.testing.io, ".zigeffect/receipts/check.json", .{});
+
+            var handoff = try cli.runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{
+                "agent", "handoff", "--provider", "codex", "--session", "integration-session", "--root", target_path,
+            });
+            defer handoff.deinit();
+            try std.testing.expectEqual(@as(u8, 0), handoff.exit_code);
+            try std.testing.expect(std.mem.indexOf(u8, handoff.output, "zigeffect.agent-handoff.v1") != null);
+            try target_dir.access(std.testing.io, ".zigeffect/handoffs/latest.json", .{});
         }
     }
 }

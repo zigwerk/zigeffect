@@ -33,6 +33,7 @@ pub const executable_build =
     \\        .optimize = optimize,
     \\    });
     \\    test_module.addImport("app", app);
+    \\    test_module.addImport("zigeffect_std", zigeffect_std);
     \\    const tests = b.addTest(.{ .name = "__PROJECT_NAME__-tests", .root_module = test_module });
     \\    const test_step = b.step("test", "Run __PROJECT_NAME__ tests");
     \\    test_step.dependOn(&b.addRunArtifact(tests).step);
@@ -75,25 +76,40 @@ pub const app_source =
     \\pub const component_name = "__PROJECT_NAME__";
     \\
     \\pub fn run(allocator: std.mem.Allocator) !void {
-    \\    const app_config = try config.decodeJsonAlloc(allocator, "{\"port\":5178,\"development\":true}");
-    \\    if (app_config.port != 5178) return error.InvalidConfig;
-    \\    if (try command.decodePortAlloc(allocator, &.{ "--port", "5178" }) != 5178) return error.InvalidCommand;
-    \\
-    \\    var route = try http.runHealthRoute(allocator);
-    \\    defer route.deinit(allocator);
-    \\    if (route.response.status != 200) return error.UnhealthyRoute;
-    \\    if (try sql.runSmokeQuery(allocator) != 1) return error.UnexpectedRowCount;
-    \\__SHARED_SOURCE_USE__
     \\    var greeting_service = greeting.Greeting{ .prefix = "hello" };
     \\    var provider = zstd.Service.Provider(.{greeting.Greeting}).init(.{&greeting_service});
     \\    _ = provider.layer();
     \\    var store = zstd.fx.CausalStore.init(allocator);
     \\    defer store.deinit();
+    \\    var scope = zstd.fx.Scope.init(allocator);
+    \\    defer scope.deinit();
+    \\    var context = zstd.fx.Context(@TypeOf(provider)).init(allocator, &provider, &scope).withCausalStore(&store);
+    \\
+    \\    const app_config = try config.decodeJsonAlloc(allocator, "{\"port\":5178,\"development\":true}");
+    \\    if (app_config.port != 5178) return error.InvalidConfig;
+    \\    if (zstd.Application.record(&context, zstd.Application.configLoad("application", "success", "source=local")) == null) return error.OutOfMemory;
+    \\    if (zstd.Application.record(&context, zstd.Application.schemaDecode("AppConfig", "success", "validated config")) == null) return error.OutOfMemory;
+    \\    const port = try command.decodePortAlloc(allocator, &.{ "--port", "5178" });
+    \\    if (port != 5178) return error.InvalidCommand;
+    \\    if (zstd.Application.record(&context, zstd.Application.commandExecution("run", "success", "typed CLI decoded")) == null) return error.OutOfMemory;
+    \\
+    \\    var route = try http.runHealthRoute(allocator);
+    \\    defer route.deinit(allocator);
+    \\    if (route.response.status != 200) return error.UnhealthyRoute;
+    \\    if (zstd.Application.record(&context, zstd.Application.requestHandling("POST /health", "success", "status=200")) == null) return error.OutOfMemory;
+    \\    if (zstd.Application.record(&context, zstd.Application.externalCall("local-http-router", "health", "success")) == null) return error.OutOfMemory;
+    \\    const row_count = try sql.runSmokeQuery(allocator);
+    \\    if (row_count != 1) return error.UnexpectedRowCount;
+    \\    if (zstd.Application.record(&context, zstd.Application.sqlTransaction("local-sql", "health-query", "committed")) == null) return error.OutOfMemory;
+    \\__SHARED_SOURCE_USE__
+    \\    if (zstd.Application.record(&context, zstd.Application.componentDependency(component_name, "zigeffect-std", "resolved")) == null) return error.OutOfMemory;
     \\    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(allocator, &provider)
     \\        .provides(.{greeting.Greeting})
     \\        .withCausalStore(&store);
     \\    const message = try runtime.run(greeting.greetEffect(@TypeOf(provider), component_name));
     \\    defer allocator.free(message);
+    \\    if (zstd.Application.record(&context, zstd.Application.acceptanceEvaluation("check-bootstrap", "passed", "application boundaries passed")) == null) return error.OutOfMemory;
+    \\    if (zstd.Application.record(&context, zstd.Application.artifactProduction("workbench-attachment", "created", "bounded causal attachment")) == null) return error.OutOfMemory;
     \\
     \\    var snapshot = try store.snapshot(allocator);
     \\    defer snapshot.deinit();
@@ -241,7 +257,8 @@ pub const greeting_source =
     \\
     \\        pub fn run(self: @This(), ctx: *zstd.fx.Context(EffectEnv)) FailureType![]u8 {
     \\            const result = try ctx.service(Greeting).formatAlloc(ctx.allocator, self.name);
-    \\            _ = zstd.Service.recordOperation(ctx, Greeting, "greet", "success", self.name);
+    \\            errdefer ctx.allocator.free(result);
+    \\            if (zstd.Service.recordOperation(ctx, Greeting, "greet", "success", self.name) == null) return error.OutOfMemory;
     \\            return result;
     \\        }
     \\    };
@@ -255,9 +272,33 @@ pub const greeting_source =
 pub const executable_test =
     \\const std = @import("std");
     \\const app = @import("app");
+    \\const zstd = @import("zigeffect_std");
+    \\
+    \\fn runWithAllocator(allocator: std.mem.Allocator) !void { try app.run(allocator); }
     \\
     \\test "application boundaries produce causal evidence" {
     \\    try app.run(std.testing.allocator);
+    \\}
+    \\
+    \\test "application survives every deterministic allocation failure" {
+    \\    try std.testing.checkAllAllocationFailures(std.testing.allocator, runWithAllocator, .{});
+    \\}
+    \\
+    \\test "application concurrency model explores every bounded schedule" {
+    \\    const Model = struct {
+    \\        value: u8 = 0,
+    \\        done: [2]bool = .{ false, false },
+    \\        pub fn actionCount(_: @This()) usize { return 2; }
+    \\        pub fn runnable(self: @This(), action: usize) bool { return action < 2 and !self.done[action]; }
+    \\        pub fn step(self: *@This(), action: usize) !void { if (!self.runnable(action)) return error.NotRunnable; self.value += 1; self.done[action] = true; }
+    \\        pub fn isComplete(self: @This()) bool { return self.done[0] and self.done[1]; }
+    \\        pub fn invariant(self: @This()) bool { return self.value <= 2; }
+    \\        pub fn stateHash(self: @This()) u64 { return @as(u64, self.value) | (@as(u64, @intFromBool(self.done[0])) << 8) | (@as(u64, @intFromBool(self.done[1])) << 9); }
+    \\        pub fn sourceRef(_: @This(), action: usize) ?u64 { return 100 + action; }
+    \\    };
+    \\    var report = try zstd.fx.exploreSchedules(std.testing.allocator, Model{}, .{});
+    \\    defer report.deinit();
+    \\    try std.testing.expectEqual(zstd.fx.ScheduleExplorationVerdict.passed, report.verdict());
     \\}
 ;
 
@@ -280,6 +321,7 @@ pub const library_build =
     \\        .optimize = optimize,
     \\    });
     \\    test_module.addImport("library", library);
+    \\    test_module.addImport("zigeffect_std", zigeffect_std);
     \\    const tests = b.addTest(.{ .name = "__PROJECT_NAME__-tests", .root_module = test_module });
     \\    const test_step = b.step("test", "Run __PROJECT_NAME__ tests");
     \\    test_step.dependOn(&b.addRunArtifact(tests).step);
@@ -300,16 +342,16 @@ pub const library_source =
     \\pub fn DoubleEffect(comptime EffectEnv: type) type {
     \\    return struct {
     \\        pub const SuccessType = i64;
-    \\        pub const FailureType = error{};
+    \\        pub const FailureType = std.mem.Allocator.Error;
     \\        pub const EnvType = EffectEnv;
     \\        pub const RequiredServices = .{Calculator};
     \\        value: i64,
     \\        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!zstd.fx.ServiceSet {
     \\            return zstd.fx.ServiceSet.fromTypes(allocator, RequiredServices);
     \\        }
-    \\        pub fn run(self: @This(), ctx: *zstd.fx.Context(EffectEnv)) error{}!i64 {
+    \\        pub fn run(self: @This(), ctx: *zstd.fx.Context(EffectEnv)) std.mem.Allocator.Error!i64 {
     \\            const output = ctx.service(Calculator).double(self.value);
-    \\            _ = zstd.Service.recordOperation(ctx, Calculator, "double", "success", component_name);
+    \\            if (zstd.Service.recordOperation(ctx, Calculator, "double", "success", component_name) == null) return error.OutOfMemory;
     \\            return output;
     \\        }
     \\    };
@@ -334,9 +376,37 @@ pub const library_source =
 pub const library_test =
     \\const std = @import("std");
     \\const library = @import("library");
+    \\const zstd = @import("zigeffect_std");
+    \\
+    \\fn runWithAllocator(allocator: std.mem.Allocator) !void {
+    \\    _ = try zstd.Schema.decodeJsonAlloc(allocator, zstd.Schema.derive(library.Input, .{
+    \\        .value = zstd.Schema.integer(),
+    \\    }), "{\"value\":21}");
+    \\}
     \\
     \\test "public effect validates input and runs through its layer" {
     \\    try std.testing.expectEqual(@as(i64, 42), try library.run(std.testing.allocator, "{\"value\":21}"));
+    \\}
+    \\
+    \\test "library survives every deterministic allocation failure" {
+    \\    try std.testing.checkAllAllocationFailures(std.testing.allocator, runWithAllocator, .{});
+    \\}
+    \\
+    \\test "library schedule model is bounded and complete" {
+    \\    const Model = struct {
+    \\        value: u8 = 0,
+    \\        done: [2]bool = .{ false, false },
+    \\        pub fn actionCount(_: @This()) usize { return 2; }
+    \\        pub fn runnable(self: @This(), action: usize) bool { return action < 2 and !self.done[action]; }
+    \\        pub fn step(self: *@This(), action: usize) !void { if (!self.runnable(action)) return error.NotRunnable; self.value += 1; self.done[action] = true; }
+    \\        pub fn isComplete(self: @This()) bool { return self.done[0] and self.done[1]; }
+    \\        pub fn invariant(self: @This()) bool { return self.value <= 2; }
+    \\        pub fn stateHash(self: @This()) u64 { return @as(u64, self.value) | (@as(u64, @intFromBool(self.done[0])) << 8) | (@as(u64, @intFromBool(self.done[1])) << 9); }
+    \\        pub fn sourceRef(_: @This(), action: usize) ?u64 { return 200 + action; }
+    \\    };
+    \\    var report = try zstd.fx.exploreSchedules(std.testing.allocator, Model{}, .{});
+    \\    defer report.deinit();
+    \\    try std.testing.expectEqual(zstd.fx.ScheduleExplorationVerdict.passed, report.verdict());
     \\}
 ;
 
@@ -429,7 +499,7 @@ pub const readme =
     \\
     \\```sh
     \\zigeffect project validate --json
-    \\zigeffect project check --json
+    \\zigeffect project check --agent --json
     \\zigeffect project test --json
     \\zigeffect project dev
     \\```
@@ -468,7 +538,11 @@ pub const skill =
     \\   another component's internals.
     \\4. Add a failing deterministic test before changing behavior.
     \\5. Use `zigeffect add` and `zigeffect generate` for framework structure.
-    \\6. Run manifest-owned `validate`, `check`, and `test` commands.
-    \\7. Query causal evidence before reconstructing failures from text output.
-    \\8. Leave a bounded, redacted handoff and never claim an unpassed check.
+    \\6. Run `zigeffect project check --agent --json`; treat failed, incomplete,
+    \\   truncated, or unsupported required evidence as an unpassed handoff.
+    \\7. Use `zigeffect safety explain <finding-id>` for source-linked repair
+    \\   guidance. Never add unmanaged roots or unaudited escape hatches.
+    \\8. Query causal evidence before reconstructing failures from text output.
+    \\9. Attach the bounded redacted safety receipt to the handoff and never
+    \\   claim an unpassed check.
 ;

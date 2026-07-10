@@ -537,9 +537,14 @@ fn cloneHeadersAlloc(allocator: std.mem.Allocator, headers: []const Header) std.
     }
 
     for (headers, 0..) |header, index| {
+        const name = try allocator.dupe(u8, header.name);
+        const value = allocator.dupe(u8, header.value) catch |err| {
+            allocator.free(name);
+            return err;
+        };
         cloned[index] = .{
-            .name = try allocator.dupe(u8, header.name),
-            .value = try allocator.dupe(u8, header.value),
+            .name = name,
+            .value = value,
         };
         initialized += 1;
     }
@@ -748,6 +753,23 @@ test "Http typed router validates JSON and returns response receipt and trace" {
     try std.testing.expect(std.mem.indexOf(u8, result.response.body, "\"id\":\"project-local\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.receipt_json, "\"status\":\"success\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.trace_json, "\"route\":\"POST /projects\"") != null);
+}
+
+test "Http response cloning releases partial headers on every allocation failure" {
+    const Harness = struct {
+        fn run(allocator: std.mem.Allocator) !void {
+            var response = try cloneResponseAlloc(allocator, .{
+                .status = 200,
+                .headers = &.{
+                    .{ .name = "content-type", .value = "application/json" },
+                    .{ .name = "x-request-id", .value = "local" },
+                },
+                .body = "{}",
+            });
+            defer response.deinit(allocator);
+        }
+    };
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, Harness.run, .{});
 }
 
 test "Http typed router returns redacted validation failure" {

@@ -1,6 +1,8 @@
 const std = @import("std");
 const Secrets = @import("../secrets/root.zig");
 
+pub const Protocol = @import("protocol.zig");
+
 pub const schema_version = "zigeffect.project.v1";
 
 pub const ProjectError = error{
@@ -140,6 +142,7 @@ pub const SafetyGateKind = enum {
     schedule_exploration,
     thread_sanitizer,
     c_undefined_behavior,
+    stack_protection,
     fuzz,
     executor_equivalence,
 };
@@ -225,7 +228,7 @@ pub const SafetyPolicy = struct {
             if (gate.command) |command_id| {
                 try ensureSafe(command_id);
                 if (manifest.command(command_id) == null) return error.MissingSafetyGate;
-            } else if (gate.kind != .source_policy) {
+            } else if (gate.kind != .source_policy and gate.required) {
                 return error.MissingSafetyGate;
             }
             for (self.gates[0..index]) |previous| {
@@ -872,6 +875,18 @@ test "Project safety policy fails closed for missing roots gates and invalid lim
         .safe_roots = &.{"src"},
     };
     try std.testing.expectError(error.MissingSafetyGate, missing_gate.validate());
+
+    var optional_capability = base;
+    optional_capability.safety = .{
+        .profile = .agent_safe_v1,
+        .safe_roots = &.{"src"},
+        .gates = &.{ .{ .kind = .source_policy }, .{ .kind = .thread_sanitizer, .required = false } },
+    };
+    try optional_capability.validate();
+
+    var required_capability = optional_capability;
+    required_capability.safety.gates = &.{ .{ .kind = .source_policy }, .{ .kind = .thread_sanitizer } };
+    try std.testing.expectError(error.MissingSafetyGate, required_capability.validate());
 
     var zero_limit = base;
     zero_limit.safety = .{
