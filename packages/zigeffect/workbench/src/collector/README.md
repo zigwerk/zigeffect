@@ -80,6 +80,19 @@ terminal transitions. Commands, paths, tasks, labels, and diagnostics are
 redacted and capped before persistence. Retention evicts only old terminal
 records and never hides active ownership.
 
+## Local control API
+
+`localAgentControlServer.ts` exposes a standard `fetch(Request)` handler for a
+local operator process to bind with `Bun.serve`. All mutation and session routes
+require a bearer token; only health is public. Callers provide a fixed catalog
+of tool builders, and HTTP requests may select a `tool_id` with bounded input but
+can never provide command argv.
+
+The API lists safe tool metadata and durable sessions, starts and stops owned
+supervisors, and retains bounded redacted policy receipts. Registry capacity is
+confirmed before a start returns `202`, while optional receipt mirroring is
+isolated so a slow event sink cannot delay a control decision.
+
 ## Point the workbench at it
 
 Open the workbench with `?live=<ws-url>`:

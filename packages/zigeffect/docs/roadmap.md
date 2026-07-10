@@ -389,7 +389,7 @@ This is the local-first sequence for making zigeffect useful as the development
 engine for local projects and standard-library work. It intentionally comes
 before hosting or broad distributed orchestration.
 
-Status on 2026-07-10: M72 through M84 are implemented in the workbench,
+Status on 2026-07-10: M72 through M85 are implemented in the workbench,
 `causal-dev-session`, and collector. Local session events have parser/apply
 coverage, native Codex/Claude JSONL fixtures, a `bun run zigeffect:local-agent-gate`
 command, and a live collector WebSocket overlay (`POST /agent-feed` and
@@ -408,9 +408,11 @@ parallel Claude tool uses, bounded snippets, and offline fixtures. The declared
 local-first protocol/runtime foundation is complete. A bounded local session
 registry now records redacted lifecycle/counter state, atomically persists
 versioned snapshots, marks stale restored ownership interrupted, and integrates
-write-through persistence into every supervisor terminal path. The next local
-sequence is M85 control API, M86 operator UX, and M87 PTY input; none requires a
-hosting dependency.
+write-through persistence into every supervisor terminal path. An authenticated
+local control API now exposes allowlisted tool discovery, session start/stop,
+durable session inspection, and bounded redacted policy receipts without ever
+accepting arbitrary argv. The next local sequence is M86 operator UX and M87 PTY
+input; neither requires a hosting dependency.
 
 ### M72 - Local development session protocol
 
@@ -658,6 +660,15 @@ to the workbench without introducing a hosted control plane.
 - Own active process abort controllers and reject duplicate session IDs.
 - Serve registry snapshots and individual session records.
 - Emit causal command/guardrail receipts for accepted and rejected operations.
+
+**Acceptance:**
+- Requests can select only caller-owned tool IDs and never submit argv.
+- Bearer authentication, bounded bodies, safe IDs, CORS, and registry capacity
+  are enforced before a start is accepted.
+- Start, stop, list, detail, health, and receipt routes have deterministic tests.
+- Receipt mirroring cannot delay or alter a control decision.
+
+**Status:** delivered.
 
 ### M86 - Workbench local operator controls
 

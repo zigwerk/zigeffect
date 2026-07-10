@@ -77,13 +77,16 @@ The ordered local-first roadmap is:
 11. M82 - Local agent process supervisor.
 12. M83 - Native Codex and Claude transcript adapters.
 13. M84 - Durable local agent session registry.
+14. M85 - Local agent control API.
 
-M72 through M84 are implemented. The registry records redacted session
+M72 through M85 are implemented. The registry records redacted session
 lifecycle and counters, writes starting/running/terminal snapshots through a
 caller-owned store, restores snapshots all-or-nothing, and marks stale active
-ownership interrupted. The next local maturity sequence is M85 control API,
-M86 workbench operator controls, and M87 interactive PTY support; none requires
-a hosted control plane.
+ownership interrupted. The authenticated control API exposes only caller-owned
+tool IDs, bounded input, durable session reads, explicit stop ownership, and
+redacted audit receipts; HTTP callers cannot provide argv. The next local
+maturity sequence is M86 workbench operator controls and M87 interactive PTY
+support; neither requires a hosted control plane.
 
 ## Boundaries
 
