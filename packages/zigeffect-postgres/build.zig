@@ -5,6 +5,12 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const zigeffect_std = b.dependency("zigeffect_std", .{}).module("zigeffect_std");
+    const pg = b.dependency("pg", .{
+        .target = target,
+        .optimize = optimize,
+        .openssl = true,
+        .openssl_lib_name = @as([]const u8, "ssl"),
+    }).module("pg");
 
     const zigeffect_postgres = b.addModule("zigeffect_postgres", .{
         .root_source_file = b.path("src/root.zig"),
@@ -12,6 +18,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     zigeffect_postgres.addImport("zigeffect_std", zigeffect_std);
+    zigeffect_postgres.addImport("pg", pg);
 
     const tests = b.addTest(.{
         .name = "zigeffect-postgres-tests",
@@ -23,6 +30,11 @@ pub fn build(b: *std.Build) void {
 
     const examples_step = b.step("examples", "Build zigeffect-postgres examples");
     addExample(b, examples_step, target, optimize, zigeffect_postgres, "migrate", "examples/migrate.zig");
+
+    const cockroach_live = b.addSystemCommand(&.{"bash"});
+    cockroach_live.addFileArg(b.path("scripts/cockroach-tls-test.sh"));
+    const cockroach_live_step = b.step("cockroach-live-test", "Run native verified-TLS tests against disposable CockroachDB");
+    cockroach_live_step.dependOn(&cockroach_live.step);
 }
 
 fn addExample(

@@ -2,6 +2,7 @@ const std = @import("std");
 const zstd = @import("zigeffect_std");
 
 pub const Sql = zstd.Sql;
+pub const Native = @import("native.zig");
 
 pub const PostgresError = error{
     InvalidJsonRows,
@@ -17,6 +18,40 @@ pub const ConnectionConfig = struct {
     psql_path: []const u8 = "psql",
 };
 
+pub const Outcome = enum {
+    definite,
+    ambiguous,
+    connection,
+};
+
+pub const Diagnostic = struct {
+    sqlstate: ?[5]u8 = null,
+    outcome: Outcome = .connection,
+
+    pub fn reset(self: *Diagnostic) void {
+        self.* = .{};
+    }
+
+    pub fn sqlstateSlice(self: *const Diagnostic) ?[]const u8 {
+        return if (self.sqlstate) |*sqlstate| sqlstate else null;
+    }
+
+    pub fn captureStderr(self: *Diagnostic, stderr: []const u8) void {
+        self.reset();
+        var index: usize = 0;
+        while (index + 5 < stderr.len) : (index += 1) {
+            const candidate = stderr[index .. index + 5];
+            if (index == 0 or !std.ascii.isWhitespace(stderr[index - 1]) or
+                stderr[index + 5] != ':' or !isSqlstate(candidate)) continue;
+            var sqlstate: [5]u8 = undefined;
+            @memcpy(&sqlstate, candidate);
+            self.sqlstate = sqlstate;
+            self.outcome = if (std.mem.eql(u8, candidate, "40003")) .ambiguous else .definite;
+            return;
+        }
+    }
+};
+
 pub const PsqlClient = struct {
     config: ConnectionConfig,
     io: std.Io,
@@ -29,37 +64,68 @@ pub const PsqlClient = struct {
     }
 
     pub fn queryAlloc(self: *PsqlClient, allocator: std.mem.Allocator, statement: Sql.Statement) anyerror!Sql.QueryResult {
+        var diagnostic = Diagnostic{};
+        return self.queryDetailedAlloc(allocator, statement, &diagnostic);
+    }
+
+    pub fn queryDetailedAlloc(
+        self: *PsqlClient,
+        allocator: std.mem.Allocator,
+        statement: Sql.Statement,
+        diagnostic: *Diagnostic,
+    ) anyerror!Sql.QueryResult {
+        diagnostic.reset();
         const argv = try buildPsqlJsonArgv(allocator, self.config, statement.sql);
         defer freeArgv(allocator, argv);
+        var environ = try connectionEnviron(allocator, self.config.url);
+        defer deinitSecretEnviron(&environ);
 
         const run_result = try std.process.run(allocator, self.io, .{
             .argv = argv,
+            .environ_map = &environ,
             .stdout_limit = self.stdout_limit,
             .stderr_limit = self.stderr_limit,
             .reserve_amount = self.reserve_amount,
         });
         defer allocator.free(run_result.stdout);
         defer allocator.free(run_result.stderr);
+        diagnostic.captureStderr(run_result.stderr);
 
         switch (run_result.term) {
             .exited => |code| if (code != 0) return PostgresError.PsqlFailed,
             else => return PostgresError.PsqlFailed,
         }
+        diagnostic.outcome = .definite;
 
         return parseJsonRowsAlloc(allocator, run_result.stdout);
     }
 
     pub fn executeRawAlloc(self: *PsqlClient, allocator: std.mem.Allocator, sql: []const u8) anyerror![]const u8 {
+        var diagnostic = Diagnostic{};
+        return self.executeRawDetailedAlloc(allocator, sql, &diagnostic);
+    }
+
+    pub fn executeRawDetailedAlloc(
+        self: *PsqlClient,
+        allocator: std.mem.Allocator,
+        sql: []const u8,
+        diagnostic: *Diagnostic,
+    ) anyerror![]const u8 {
+        diagnostic.reset();
         const argv = try buildPsqlArgv(allocator, self.config, sql);
         defer freeArgv(allocator, argv);
+        var environ = try connectionEnviron(allocator, self.config.url);
+        defer deinitSecretEnviron(&environ);
 
         const run_result = try std.process.run(allocator, self.io, .{
             .argv = argv,
+            .environ_map = &environ,
             .stdout_limit = self.stdout_limit,
             .stderr_limit = self.stderr_limit,
             .reserve_amount = self.reserve_amount,
         });
         defer allocator.free(run_result.stderr);
+        diagnostic.captureStderr(run_result.stderr);
 
         switch (run_result.term) {
             .exited => |code| if (code != 0) {
@@ -71,6 +137,7 @@ pub const PsqlClient = struct {
                 return PostgresError.PsqlFailed;
             },
         }
+        diagnostic.outcome = .definite;
 
         return run_result.stdout;
     }
@@ -111,7 +178,7 @@ pub fn buildPsqlArgv(
     config: ConnectionConfig,
     sql: []const u8,
 ) std.mem.Allocator.Error![]const []const u8 {
-    const argv = try allocator.alloc([]const u8, 7);
+    const argv = try allocator.alloc([]const u8, 8);
     errdefer allocator.free(argv);
 
     var initialized: usize = 0;
@@ -121,20 +188,45 @@ pub fn buildPsqlArgv(
 
     argv[0] = try allocator.dupe(u8, config.psql_path);
     initialized += 1;
-    argv[1] = try allocator.dupe(u8, config.url);
+    argv[1] = try allocator.dupe(u8, "-X");
     initialized += 1;
-    argv[2] = try allocator.dupe(u8, "-X");
+    argv[2] = try allocator.dupe(u8, "-A");
     initialized += 1;
-    argv[3] = try allocator.dupe(u8, "-A");
+    argv[3] = try allocator.dupe(u8, "-t");
     initialized += 1;
-    argv[4] = try allocator.dupe(u8, "-t");
+    argv[4] = try allocator.dupe(u8, "--set=ON_ERROR_STOP=1");
     initialized += 1;
-    argv[5] = try allocator.dupe(u8, "-c");
+    argv[5] = try allocator.dupe(u8, "--set=VERBOSITY=verbose");
     initialized += 1;
-    argv[6] = try allocator.dupe(u8, sql);
+    argv[6] = try allocator.dupe(u8, "-c");
+    initialized += 1;
+    argv[7] = try allocator.dupe(u8, sql);
     initialized += 1;
 
     return argv;
+}
+
+fn connectionEnviron(allocator: std.mem.Allocator, url: []const u8) std.mem.Allocator.Error!std.process.Environ.Map {
+    var environ = std.process.Environ.Map.init(allocator);
+    errdefer environ.deinit();
+    try environ.put("PGDATABASE", url);
+    return environ;
+}
+
+fn deinitSecretEnviron(environ: *std.process.Environ.Map) void {
+    for (environ.values()) |entry| std.crypto.secureZero(u8, @constCast(entry));
+    environ.deinit();
+}
+
+fn isSqlstate(candidate: []const u8) bool {
+    if (candidate.len != 5) return false;
+    var has_digit = false;
+    for (candidate) |byte| {
+        if (std.ascii.isDigit(byte)) {
+            has_digit = true;
+        } else if (!std.ascii.isUpper(byte)) return false;
+    }
+    return has_digit;
 }
 
 pub fn freeArgv(allocator: std.mem.Allocator, argv: []const []const u8) void {
@@ -460,17 +552,34 @@ test "Postgres adapter redacts connections and builds psql argv" {
     defer freeArgv(std.testing.allocator, argv);
 
     try std.testing.expectEqualStrings("psql", argv[0]);
-    try std.testing.expectEqualStrings("postgres://user:pass@localhost/db", argv[1]);
-    try std.testing.expectEqualStrings("-X", argv[2]);
-    try std.testing.expectEqualStrings("-A", argv[3]);
-    try std.testing.expectEqualStrings("-t", argv[4]);
-    try std.testing.expectEqualStrings("-c", argv[5]);
-    try std.testing.expectEqualStrings("select 1", argv[6]);
+    try std.testing.expectEqualStrings("-X", argv[1]);
+    try std.testing.expectEqualStrings("-A", argv[2]);
+    try std.testing.expectEqualStrings("-t", argv[3]);
+    try std.testing.expectEqualStrings("--set=ON_ERROR_STOP=1", argv[4]);
+    try std.testing.expectEqualStrings("--set=VERBOSITY=verbose", argv[5]);
+    try std.testing.expectEqualStrings("-c", argv[6]);
+    try std.testing.expectEqualStrings("select 1", argv[7]);
+    for (argv) |argument| try std.testing.expect(std.mem.indexOf(u8, argument, "pass@localhost") == null);
 
     const receipt = try queryReceiptAlloc(std.testing.allocator, config, "select token=abc123");
     defer std.testing.allocator.free(receipt);
     try std.testing.expect(std.mem.indexOf(u8, receipt, "pass@localhost") == null);
     try std.testing.expect(std.mem.indexOf(u8, receipt, "abc123") == null);
+}
+
+test "Postgres adapter parses SQLSTATE without retaining server diagnostics" {
+    var diagnostic = Diagnostic{};
+    diagnostic.captureStderr("ERROR:  40001: restart transaction: TransactionRetryWithProtoRefreshError\nLOCATION:  file.go:42");
+    try std.testing.expectEqualStrings("40001", diagnostic.sqlstateSlice().?);
+    try std.testing.expectEqual(Outcome.definite, diagnostic.outcome);
+
+    diagnostic.captureStderr("ERROR:  40003: result is ambiguous\n");
+    try std.testing.expectEqualStrings("40003", diagnostic.sqlstateSlice().?);
+    try std.testing.expectEqual(Outcome.ambiguous, diagnostic.outcome);
+
+    diagnostic.captureStderr("psql: error: connection to server was lost\n");
+    try std.testing.expect(diagnostic.sqlstateSlice() == null);
+    try std.testing.expectEqual(Outcome.connection, diagnostic.outcome);
 }
 
 test "Postgres adapter parses psql JSON rows into zstd SQL results" {
@@ -505,7 +614,7 @@ test "Postgres adapter wraps local queries as deterministic JSON row SQL" {
     };
     const argv = try buildPsqlJsonArgv(std.testing.allocator, config, "select 1");
     defer freeArgv(std.testing.allocator, argv);
-    try std.testing.expect(std.mem.indexOf(u8, argv[6], "json_agg") != null);
+    try std.testing.expect(std.mem.indexOf(u8, argv[7], "json_agg") != null);
 }
 
 test "Postgres migration planner generates apply SQL and redacted receipts" {
@@ -529,6 +638,10 @@ test "Postgres migration planner generates apply SQL and redacted receipts" {
 
     try std.testing.expect(std.mem.indexOf(u8, plan.receipt_json, "pass@localhost") == null);
     try std.testing.expect(std.mem.indexOf(u8, plan.receipt_json, "\"pending_count\":\"1\"") != null);
+}
+
+test "native adapter declarations and tests are part of the package gate" {
+    std.testing.refAllDecls(Native);
 }
 
 test "Postgres migration CLI emits a local plan without leaking connection secrets" {

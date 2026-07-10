@@ -7,6 +7,10 @@
         .zigeffect_std = .{
             .path = "../zigeffect-std",
         },
+        .pg = .{
+            .url = "git+https://github.com/karlseguin/pg.zig#c9213c2a0f9942e76ad856efbd2e5847f153b55e",
+            .hash = "pg-0.0.0-Wp_7gdaoBgCY54xf40F0CA3J3C28EbeYadws6t0ej6EE",
+        },
     },
     .paths = .{
         "build.zig",
