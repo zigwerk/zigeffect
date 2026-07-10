@@ -12,6 +12,11 @@ import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import { causalLineToFrame, type LiveFrame } from "./frame";
 import type { LiveCommandFrame } from "../liveAttach";
 import { parseLocalDevSessionEventMessage, type LocalDevSessionEvent } from "../localDevSessionFeed";
+import { redactLocalDevText } from "../localDevRedaction";
+import {
+  parseProjectDevelopmentFrameMessage,
+  type ProjectDevelopmentFrame,
+} from "../development/projectDevelopment";
 
 export type Collector = {
   /** Bun.serve `fetch` handler: upgrades `/live` to WS, ingests `POST /ingest`. */
@@ -30,6 +35,7 @@ export type Collector = {
   ingestAgentEvent: (body: unknown) => LocalDevSessionEvent | null;
   /** Validate and broadcast local dev-session JSONL. */
   ingestAgentFeed: (body: string) => number;
+  ingestProjectUpdate: (body: unknown) => ProjectDevelopmentFrame | null;
   /** Return command frames newer than the provided command sequence. */
   commandsSince: (afterSequence: number) => LiveCommandFrame[];
   /** Number of currently-connected WebSocket clients. */
@@ -43,7 +49,7 @@ export function createCollector(): Collector {
   let commandSequence = 0;
 
   const WS_OPEN = 1; // WebSocket.OPEN
-  function broadcast(frame: LiveFrame | LiveCommandFrame | LocalDevSessionEvent): void {
+  function broadcast(frame: LiveFrame | LiveCommandFrame | LocalDevSessionEvent | ProjectDevelopmentFrame): void {
     const message = JSON.stringify(frame);
     for (const client of clients) {
       // Skip a socket that is closing/closed (it is removed on its `close`
@@ -172,6 +178,19 @@ export function createCollector(): Collector {
     return count;
   }
 
+  function ingestProjectUpdate(body: unknown): ProjectDevelopmentFrame | null {
+    let safe: string;
+    try {
+      safe = redactLocalDevText(JSON.stringify(body));
+    } catch {
+      return null;
+    }
+    const frame = parseProjectDevelopmentFrameMessage(safe);
+    if (!frame) return null;
+    broadcast(frame);
+    return frame;
+  }
+
   function commandsSince(afterSequence: number): LiveCommandFrame[] {
     return commandHistory.filter((command) => command.sequence > afterSequence);
   }
@@ -253,6 +272,19 @@ export function createCollector(): Collector {
       );
     }
 
+    if (url.pathname === "/project" && request.method === "POST") {
+      return request.json().then(
+        (body) => {
+          const frame = ingestProjectUpdate(body);
+          if (!frame) return new Response("invalid project update", { status: 400 });
+          return new Response(JSON.stringify({ ingested: 1 }), {
+            headers: { "content-type": "application/json" },
+          });
+        },
+        () => new Response("invalid project update", { status: 400 }),
+      );
+    }
+
     if (url.pathname === "/commands" && request.method === "GET") {
       const rawAfter = url.searchParams.get("after") ?? "0";
       const after = Number(rawAfter);
@@ -284,6 +316,7 @@ export function createCollector(): Collector {
     ingestCommand,
     ingestAgentEvent,
     ingestAgentFeed,
+    ingestProjectUpdate,
     commandsSince,
     clientCount: () => clients.size,
   };

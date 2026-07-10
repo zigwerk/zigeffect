@@ -73,14 +73,14 @@ agent-first Zig development system.
 
 ### M93 - Workbench Application UX
 
-- [ ] Extend the workbench model with project/component/requirement/task/check/
+- [x] Extend the workbench model with project/component/requirement/task/check/
   artifact/application-fact contracts.
-- [ ] Add component dependency view, requirement and acceptance panels, command
+- [x] Add component dependency view, requirement and acceptance panels, command
   and artifact inspection, session comparison, graph focus, and recovery state.
-- [ ] Stream protocol updates through the existing collector boundary.
-- [ ] Add focused model/controller/UI tests and responsive styles.
-- [ ] Run a real generated-project browser proof on desktop and mobile.
-- [ ] Commit M93.
+- [x] Stream protocol updates through the existing collector boundary.
+- [x] Add focused model/controller/UI tests and responsive styles.
+- [x] Run a real generated-project browser proof on desktop and mobile.
+- [x] Commit M93.
 
 ### M94 - Provider Conformance
 
@@ -154,3 +154,14 @@ is delivered or explicitly proven impossible by an external constraint.
 - Scaffolds: 14 CLI tests proved application and service plans contain all nine
   helpers; the real generated-project integration passed every kind in Debug
   and ReleaseSafe with deterministic allocation-failure and schedule tests.
+
+### M93 Evidence
+
+- Workbench: typecheck, 269 focused and regression tests, and the production
+  Vite build passed. The collector test uses a real WebSocket client and rejects
+  malformed project versions before broadcast.
+- Browser: the project-development sample rendered the generated system graph,
+  requirements, checks, sessions, approvals, artifacts, and all nine semantic
+  fact kinds at 1440x1000 and 390x844. Selecting `api-service` narrowed three
+  requirements to one and nine facts to seven; selecting Schema event 3 opened
+  its cause path and `InvoiceResponse.v1` reference in the shared Inspector.

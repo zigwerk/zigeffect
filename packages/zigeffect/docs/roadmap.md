@@ -834,7 +834,19 @@ Unify requirements, components, tasks, source-change receipts, commands,
 checks, artifacts, agents, application facts, causal graph focus, comparisons,
 recovery, and approvals in one live development session.
 
-**Status:** active.
+**Status:** delivered on 2026-07-10. The strict
+`zigeffect.project-development.v1` browser model joins validated project
+components, dependencies, requirements, checks, tasks, evidence, commands,
+artifacts, sessions, approvals, recovery, and the nine application fact kinds.
+The collaboration lens provides component/session focus, requirement-to-check-
+to-evidence chains, session comparison, artifact inspection, command copying,
+and application-fact jumps into the shared causal Inspector. The collector's
+redacted `POST /project` path streams the same model over the existing
+WebSocket; live frames now preserve every semantic reference and cause edge.
+Acceptance evidence: typecheck, production build, and 269 Workbench tests
+passed. Browser proof at 1440x1000 and 390x844 exercised the generated-system
+sample, component filtering, session comparison, and Schema-fact graph jump;
+document and panel widths stayed within both viewports.
 
 ### M94 - Provider conformance and benchmarks
 
@@ -843,7 +855,7 @@ against identical requirements. Score compile/test success, acceptance
 coverage, repair iterations, causal-query use, secret posture, and handoff
 completeness without claiming model-quality results from synthetic fixtures.
 
-**Status:** planned.
+**Status:** active.
 
 ### M95 - Local distribution and compatibility
 

@@ -1338,7 +1338,169 @@ button.layer-chip:hover {
    Collaboration board
    ============================================================================ */
 
-.stage-pane.collab-pane { grid-template-rows: auto auto minmax(0, 1fr); }
+.stage-pane.collab-pane { grid-template-rows: auto auto auto minmax(0, 1fr); }
+.project-development {
+  max-height: min(720px, 72vh);
+  min-width: 0;
+  display: grid;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  overflow: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+}
+.project-development-head,
+.project-state,
+.project-filters,
+.requirement-title,
+.acceptance-row,
+.evidence-row,
+.comparison-controls {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.project-development-head { justify-content: space-between; gap: var(--sp-3); }
+.project-development-head > div:first-child { min-width: 0; display: grid; gap: 2px; }
+.project-development-head h3 { color: var(--text-0); font-size: var(--fs-lg); }
+.project-development-head small,
+.project-kicker { color: var(--text-2); font: 650 var(--fs-micro) var(--font-mono); }
+.project-kicker { text-transform: uppercase; }
+.project-state { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.project-metrics,
+.comparison-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(90px, 1fr));
+  gap: var(--sp-2);
+}
+.project-filters { gap: var(--sp-2); }
+.project-filters label { min-width: min(100%, 180px); display: grid; gap: 4px; }
+.project-filters label > span { color: var(--text-2); font-size: var(--fs-micro); font-weight: 650; }
+.project-filters select,
+.comparison-controls select {
+  width: 100%;
+  height: 34px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  color: var(--text-0);
+  font-size: var(--fs-sm);
+}
+.project-development-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+.project-development-column { min-width: 0; display: grid; align-content: start; gap: var(--sp-2); }
+.project-development-column .collab-section-head h3 { display: inline-flex; align-items: center; gap: 6px; }
+.component-map,
+.project-session-list,
+.project-list,
+.application-fact-list { min-width: 0; display: grid; gap: 6px; }
+.component-node,
+.project-session,
+.application-fact-list > button {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-1);
+  text-align: left;
+  cursor: pointer;
+}
+.component-node { min-height: 62px; display: grid; gap: 2px; padding: var(--sp-2); }
+.component-node strong { color: var(--text-0); font-size: var(--fs-sm); }
+.component-node span,
+.component-node small { overflow-wrap: anywhere; }
+.component-node span { font: var(--fs-micro) var(--font-mono); }
+.component-node small { color: var(--text-2); font-size: var(--fs-micro); }
+.component-node:hover,
+.component-node.selected,
+.project-session:hover,
+.project-session.selected { border-color: var(--accent); background: var(--accent-soft); }
+.requirement-row {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding: var(--sp-2);
+  border-left: 3px solid var(--ok);
+  background: var(--surface);
+}
+.requirement-row.warning { border-left-color: var(--warn); }
+.requirement-title { flex-wrap: wrap; gap: 6px; }
+.requirement-title strong { min-width: min(100%, 180px); flex: 1; color: var(--text-0); font-size: var(--fs-sm); }
+.requirement-title small { color: var(--text-2); font: var(--fs-micro) var(--font-mono); }
+.acceptance-row,
+.evidence-row {
+  min-height: 30px;
+  gap: var(--sp-2);
+  padding: 4px var(--sp-2);
+  border: 1px solid var(--border);
+  background: var(--surface-sunken);
+  font-size: var(--fs-micro);
+}
+.acceptance-row.fail { border-color: color-mix(in srgb, var(--fail) 45%, var(--border)); }
+.acceptance-row span,
+.evidence-row strong { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.acceptance-row code,
+.evidence-row > span { color: var(--text-2); }
+.evidence-row button,
+.project-list button {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-1);
+  cursor: pointer;
+}
+.project-list > div {
+  min-width: 0;
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 5px var(--sp-2);
+  border-bottom: 1px solid var(--border);
+}
+.project-list strong,
+.project-list code { min-width: 0; color: var(--text-0); overflow-wrap: anywhere; }
+.project-list small { color: var(--text-2); font: var(--fs-micro) var(--font-mono); }
+.project-list button span { position: absolute; width: 1px; height: 1px; overflow: hidden; }
+.project-session {
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: minmax(70px, 0.7fr) minmax(90px, 1fr) auto auto;
+  align-items: center;
+  gap: 3px var(--sp-2);
+  padding: 6px var(--sp-2);
+}
+.project-session strong { color: var(--text-0); font-size: var(--fs-sm); }
+.project-session span,
+.project-session small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-session span { font: var(--fs-micro) var(--font-mono); }
+.project-session small { grid-column: 1 / 3; color: var(--text-2); font-size: var(--fs-micro); }
+.comparison-controls { gap: var(--sp-2); }
+.comparison-summary { grid-template-columns: repeat(3, minmax(72px, 1fr)); }
+.application-fact-list > button {
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: auto minmax(100px, 0.7fr) minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 6px var(--sp-2);
+}
+.application-fact-list > button:disabled { cursor: default; opacity: 0.62; }
+.application-fact-list > button:not(:disabled):hover { border-color: var(--accent); }
+.application-fact-list strong { color: var(--text-0); font-size: var(--fs-sm); }
+.application-fact-list span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.application-fact-list code { color: var(--text-2); font-size: var(--fs-micro); }
 .local-operator {
   max-height: min(680px, 76vh);
   display: grid;
@@ -2309,6 +2471,7 @@ button.layer-chip:hover {
   .pinned-strip { overflow-x: auto; border-top: 1px solid var(--border); }
   .pinned-pane { max-height: 200px; }
   .collab-hero { grid-template-columns: minmax(0, 1fr); }
+  .project-development-grid { grid-template-columns: minmax(0, 1fr); }
   .operator-workspace { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .operator-detail { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--border); }
   .chain-grid, .app-remediation-grid, .diff-grid, .citation-grid { grid-template-columns: minmax(0, 1fr); }
@@ -2321,6 +2484,21 @@ button.layer-chip:hover {
   .stage.lens-execution .stage-body { grid-template-rows: minmax(0, 1fr); }
   .stage.lens-collaboration .stage-body { grid-template-rows: minmax(0, 2.4fr) minmax(100px, 1fr); }
   .local-operator { max-height: 62vh; }
+  .project-development { max-height: 68vh; }
+  .project-development-head { align-items: flex-start; }
+  .project-state { justify-content: flex-start; }
+  .project-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .project-filters { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .project-list > div { display: flex; flex-wrap: wrap; }
+  .project-list > div > strong,
+  .project-list > div > code { min-width: 0; flex: 1 1 180px; }
+  .project-list > div > small { min-width: 0; flex: 1 1 100%; overflow-wrap: anywhere; }
+  .project-list > div > button { margin-left: auto; }
+  .project-session { grid-template-columns: minmax(70px, 0.7fr) minmax(80px, 1fr); }
+  .project-session .badge { justify-self: start; }
+  .application-fact-list > button { grid-template-columns: auto minmax(0, 1fr); }
+  .application-fact-list > button span,
+  .application-fact-list > button code { grid-column: 1 / -1; }
   .operator-connect { grid-template-columns: minmax(0, 1fr); }
   .operator-health { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .operator-health .metric { padding: 6px; }

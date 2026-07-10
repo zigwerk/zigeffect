@@ -39,13 +39,34 @@ import {
   localAgentControlBootstrapFromLocation,
   scrubLocalAgentControlTokenFragment,
 } from "./localAgentControlClient";
+import { SafetyPanel } from "./safety/SafetyPanel";
+import { loadSafetyReceipt } from "./safety/safetyReceipt";
+import {
+  deriveProjectDevelopmentModel,
+  type ProjectDevelopmentModel,
+} from "./development/projectDevelopment";
 
 const auxTitles: Record<AuxView, string> = {
   diff: "Semantic diff",
   chain: "Governance chain",
   metadata: "Metadata",
   queries: "Query catalogue",
+  safety: "Agent safety evidence",
 };
+
+function projectDevelopmentFromRaw(raw: unknown): ProjectDevelopmentModel | null {
+  try {
+    return deriveProjectDevelopmentModel(raw);
+  } catch {
+    return null;
+  }
+}
+
+function localDevSessionFromRaw(raw: unknown, artifactPath: string) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const embedded = (raw as Record<string, unknown>).local_dev_session;
+  return deriveLocalDevSessionModel(embedded ?? raw, { artifactPath });
+}
 
 /** Stable description of the two lenses — the headline navigation axis. */
 export function workbenchLensesForArtifact(): Array<{ id: Lens; label: string }> {
@@ -57,11 +78,12 @@ export function workbenchLensesForArtifact(): Array<{ id: Lens; label: string }>
 
 /** The auxiliary views the old tab bar dissolved into (reachable via ⌘K / More). */
 export function workbenchAuxViews(): AuxView[] {
-  return ["diff", "chain", "metadata", "queries"];
+  return ["diff", "chain", "metadata", "queries", "safety"];
 }
 
 export function App() {
   const [payload] = createResource(loadPayload);
+  const [safetyReceipt] = createResource(loadSafetyReceipt);
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   const [search, setSearch] = createSignal("");
   const [kind, setKind] = createSignal("all");
@@ -188,7 +210,8 @@ export function App() {
         model: deriveWorkbenchModel(raw, { artifactPath }),
         governance: deriveGovernanceModel(raw, { artifactPath }),
         semanticDiff: deriveSemanticDiffModel(raw, { artifactPath }),
-        localDevSession: deriveLocalDevSessionModel(raw, { artifactPath }) ?? live?.localDevSession() ?? null,
+        localDevSession: localDevSessionFromRaw(raw, artifactPath) ?? live?.localDevSession() ?? null,
+        projectDevelopment: projectDevelopmentFromRaw(raw),
         raw,
         session: loaded.session,
         error: null as string | null,
@@ -199,6 +222,7 @@ export function App() {
         governance: null,
         semanticDiff: null,
         localDevSession: null,
+        projectDevelopment: null,
         raw: null,
         session: loaded.session,
         error: error instanceof Error ? error.message : "failed to parse artifact",
@@ -210,6 +234,7 @@ export function App() {
   const governance = createMemo(() => parsed()?.governance ?? null);
   const semanticDiff = createMemo(() => parsed()?.semanticDiff ?? null);
   const localDevSession = createMemo(() => parsed()?.localDevSession ?? null);
+  const projectDevelopment = createMemo(() => live?.projectDevelopment() ?? parsed()?.projectDevelopment ?? null);
   const health = createMemo(() => {
     const session = localDevSession();
     return session ? deriveLocalDevHealthSummary(session) : null;
@@ -421,6 +446,7 @@ export function App() {
                       <div class="stage-body">
                         <CollabBoard
                           session={localDevSession()}
+                          project={projectDevelopment()}
                           operatorBootstrap={controlBootstrap}
                           validEventIds={validEventIds()}
                           copiedCommand={copiedCommand()}
@@ -580,6 +606,14 @@ export function App() {
                         artifactPath={current().artifactPath}
                         selected={selectedEvent()}
                         commands={selectedCommands()}
+                        copiedCommand={copiedCommand()}
+                        onCopy={copyCommand}
+                      />
+                    </Show>
+                    <Show when={view === "safety"}>
+                      <SafetyPanel
+                        receipt={safetyReceipt() ?? null}
+                        error={safetyReceipt.error instanceof Error ? safetyReceipt.error.message : undefined}
                         copiedCommand={copiedCommand()}
                         onCopy={copyCommand}
                       />

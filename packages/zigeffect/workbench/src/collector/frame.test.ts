@@ -144,3 +144,24 @@ test("boundary_id survives the mapping (cross-service correlation)", () => {
   const none = causalLineToFrame(JSON.stringify({ id: 6, kind: "run_started" }), 2);
   expect(none!.boundary_id).toBeNull();
 });
+
+test("application semantic references survive redacted live mapping", () => {
+  const frame = causalLineToFrame(engineLine({
+    id: 12,
+    kind: "span_recorded",
+    cause_event_id: 11,
+    artifact_id: "receipt-12",
+    domain_entity_ref: "invoice-42",
+    data_subject_ref: "request-body",
+    schema_ref: "Invoice.v1",
+    redacted_detail: "token=sentinel-secret-for-tests",
+  }), 3);
+  expect(frame).toMatchObject({
+    cause_event_id: 11,
+    artifact_id: "receipt-12",
+    domain_entity_ref: "invoice-42",
+    data_subject_ref: "request-body",
+    schema_ref: "Invoice.v1",
+  });
+  expect(frame!.redacted_detail).not.toContain("sentinel-secret");
+});

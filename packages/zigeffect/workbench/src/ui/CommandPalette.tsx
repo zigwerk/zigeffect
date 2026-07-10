@@ -4,7 +4,7 @@ import type { Lens } from "../theme";
 import type { TraceFindingMark } from "../trace/traceModel";
 import { Overlay } from "./Overlay";
 
-export type AuxView = "diff" | "chain" | "metadata" | "queries";
+export type AuxView = "diff" | "chain" | "metadata" | "queries" | "safety";
 
 type PaletteItem = { id: string; label: string; hint?: string; run: () => void };
 
@@ -30,6 +30,7 @@ export function CommandPalette(props: {
       { id: "lens-exec", label: "Switch to Execution lens", hint: "⌘1", run: () => props.onSetLens("execution") },
       { id: "lens-collab", label: "Switch to Collaboration lens", hint: "⌘2", run: () => props.onSetLens("collaboration") },
       { id: "theme", label: "Toggle dark / light theme", run: () => props.onToggleTheme() },
+      { id: "safety", label: "Open agent safety evidence", run: () => props.onOpenAux("safety") },
       { id: "metadata", label: "Open metadata", run: () => props.onOpenAux("metadata") },
       { id: "queries", label: "Open query catalogue", run: () => props.onOpenAux("queries") },
     ];

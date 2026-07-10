@@ -49,6 +49,24 @@ const sampleFrames: LiveFrame[] = [
   frame({ sequence: 3, event_id: 12, event_kind: "metric_recorded", status: "ready", lane: "resource", parent_id: 11 }),
 ];
 
+const projectUpdate = {
+  schema: "zigeffect.project-development.v1" as const,
+  sequence: 1,
+  connection: "live",
+  manifest: {
+    schema: "zigeffect.project.v1",
+    name: "demo",
+    version: "0.1.0",
+    kind: "application",
+    components: [{ id: "demo", kind: "application", path: ".", depends_on: [], capabilities: [] }],
+    commands: [{ id: "check", argv: ["zig", "build", "test"] }],
+    requirements: [],
+    acceptance_checks: [],
+  },
+  sessions: [],
+  events: [],
+};
+
 test("frameToEventRecord maps wire fields onto canonical artifact keys", () => {
   const record = frameToEventRecord(
     frame({ sequence: 4, event_id: 99, event_kind: "fiber_resumed", status: "ready", parent_id: 11, lane: "fiber" }),
@@ -80,6 +98,25 @@ test("frameToEventRecord carries structural ids + type_name so live findings mat
   expect(record.scope_id).toBe(3);
   expect(record.resource_id).toBe(9);
   expect(record.type_name).toBe("DbPool");
+});
+
+test("frameToEventRecord preserves application fact cause and semantic references", () => {
+  const record = frameToEventRecord(frame({
+    sequence: 6,
+    event_id: 101,
+    cause_event_id: 100,
+    artifact_id: "receipt",
+    domain_entity_ref: "invoice",
+    data_subject_ref: "request",
+    schema_ref: "Invoice.v1",
+    redacted_detail: "validated",
+  }));
+  expect(record.cause_event_id).toBe(100);
+  expect(record.artifact_id).toBe("receipt");
+  expect(record.domain_entity_ref).toBe("invoice");
+  expect(record.data_subject_ref).toBe("request");
+  expect(record.schema_ref).toBe("Invoice.v1");
+  expect(record.redacted_detail).toBe("validated");
 });
 
 test("isLiveFrame / parseFrameMessage accept valid frames and reject junk", () => {
@@ -986,6 +1023,21 @@ test("createLiveArtifact accumulates local dev-session events for the Dev Sessio
   });
 });
 
+test("createLiveArtifact keeps the newest project development update", () => {
+  createRoot((dispose) => {
+    const live = createLiveArtifact({
+      subscribe(subscriber) {
+        subscriber.onProjectUpdate?.(projectUpdate);
+        subscriber.onClose?.();
+        return () => {};
+      },
+    });
+    expect(live.projectDevelopment()?.project).toBe("demo");
+    expect(live.projectDevelopment()?.connection).toBe("live");
+    dispose();
+  });
+});
+
 test("webSocketLiveSource parses message frames and ignores non-frame payloads", () => {
   type Listener = (event: unknown) => void;
   const listeners = new Map<string, Listener>();
@@ -1042,6 +1094,22 @@ test("webSocketLiveSource parses local dev-session events from the live socket",
   listeners.get("message")?.({ data: JSON.stringify({ hello: "world" }) });
 
   expect(received).toEqual(["agent_status:codex:running:streaming token=<redacted>"]);
+});
+
+test("webSocketLiveSource parses project development updates from the live socket", () => {
+  type Listener = (event: unknown) => void;
+  const listeners = new Map<string, Listener>();
+  const fakeSocket: WebSocketLike = {
+    addEventListener: (type, listener) => listeners.set(type, listener),
+    close: () => {},
+  };
+  const received: string[] = [];
+  webSocketLiveSource("ws://localhost:0/live", () => fakeSocket).subscribe({
+    onFrame: () => {},
+    onProjectUpdate: (frame) => received.push(`${frame.sequence}:${String(frame.manifest && (frame.manifest as { name?: string }).name)}`),
+  });
+  listeners.get("message")?.({ data: JSON.stringify(projectUpdate) });
+  expect(received).toEqual(["1:demo"]);
 });
 
 test("liveUrlFromSearch reads ?live=<url>", () => {

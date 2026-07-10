@@ -23,6 +23,12 @@ import {
   parseLocalDevSessionEventMessage,
   type LocalDevSessionEvent,
 } from "./localDevSessionFeed";
+import {
+  deriveProjectDevelopmentModel,
+  parseProjectDevelopmentFrameMessage,
+  type ProjectDevelopmentFrame,
+  type ProjectDevelopmentModel,
+} from "./development/projectDevelopment";
 
 // ── Live wire format — one frame per causal-event delta ───────────────────────
 export type LiveFrame = {
@@ -47,7 +53,13 @@ export type LiveFrame = {
   fiber_id?: number | null;
   scope_id?: number | null;
   resource_id?: number | null;
+  cause_event_id?: number | null;
   type_name?: string;
+  artifact_id?: string;
+  domain_entity_ref?: string;
+  data_subject_ref?: string;
+  schema_ref?: string;
+  redacted_detail?: string;
   // Cross-service correlation: one id stamped on both sides of a service
   // boundary (origin's outbound event + callee's inbound run/scope).
   boundary_id?: number | null;
@@ -237,6 +249,7 @@ const DEFAULT_SCHEMA = "zigeffect.causal.live-dashboard-stream.v1";
 export type LiveSubscriber = {
   onFrame: (frame: LiveFrame) => void;
   onLocalDevEvent?: (event: LocalDevSessionEvent) => void;
+  onProjectUpdate?: (frame: ProjectDevelopmentFrame) => void;
   onError?: (error: unknown) => void;
   onClose?: () => void;
 };
@@ -269,7 +282,13 @@ export function frameToEventRecord(frame: LiveFrame): UnknownRecord {
     fiber_id: frame.fiber_id ?? null,
     scope_id: frame.scope_id ?? null,
     resource_id: frame.resource_id ?? null,
+    cause_event_id: frame.cause_event_id ?? null,
     type_name: frame.type_name ?? "",
+    artifact_id: frame.artifact_id ?? "",
+    domain_entity_ref: frame.domain_entity_ref ?? "",
+    data_subject_ref: frame.data_subject_ref ?? "",
+    schema_ref: frame.schema_ref ?? "",
+    redacted_detail: frame.redacted_detail ?? "",
     boundary_id: frame.boundary_id ?? null,
   };
 }
@@ -965,6 +984,19 @@ export class LiveLocalDevSessionBuffer {
   }
 }
 
+export class LiveProjectDevelopmentBuffer {
+  private latest: ProjectDevelopmentModel | null = null;
+
+  ingest(frame: ProjectDevelopmentFrame): void {
+    const model = deriveProjectDevelopmentModel(frame);
+    if (!this.latest || model.sequence >= this.latest.sequence) this.latest = model;
+  }
+
+  model(): ProjectDevelopmentModel | null {
+    return this.latest;
+  }
+}
+
 // ── Mock source (tests / offline demo) ────────────────────────────────────────
 export function mockLiveSource(
   frames: readonly LiveFrame[],
@@ -1043,7 +1075,10 @@ export function webSocketLiveSource(
         const localDevEvent = parseLocalDevSessionEventMessage(data);
         if (localDevEvent) {
           subscriber.onLocalDevEvent?.(localDevEvent);
+          return;
         }
+        const projectUpdate = parseProjectDevelopmentFrameMessage(data);
+        if (projectUpdate) subscriber.onProjectUpdate?.(projectUpdate);
       });
       socket.addEventListener("error", (event) => subscriber.onError?.(event));
       socket.addEventListener("close", () => subscriber.onClose?.());
@@ -1057,6 +1092,7 @@ export type LiveArtifactHandle = {
   artifactJson: () => string;
   localDevSession: () => LocalDevSessionModel | null;
   localDevSessionEventCount: () => number;
+  projectDevelopment: () => ProjectDevelopmentModel | null;
   frameCount: () => number;
   dropped: () => number;
   connected: () => boolean;
@@ -1068,9 +1104,11 @@ export type LiveArtifactHandle = {
 export function createLiveArtifact(source: LiveSource, meta: LiveStreamMeta = {}): LiveArtifactHandle {
   const buffer = new LiveCausalBuffer(meta);
   const localDevBuffer = new LiveLocalDevSessionBuffer(meta);
+  const projectBuffer = new LiveProjectDevelopmentBuffer();
   const [artifactJson, setArtifactJson] = createSignal(buffer.artifactJson());
   const [localDevSession, setLocalDevSession] = createSignal<LocalDevSessionModel | null>(localDevBuffer.session());
   const [localDevSessionEventCount, setLocalDevSessionEventCount] = createSignal(localDevBuffer.count);
+  const [projectDevelopment, setProjectDevelopment] = createSignal<ProjectDevelopmentModel | null>(projectBuffer.model());
   const [frameCount, setFrameCount] = createSignal(0);
   const [dropped, setDropped] = createSignal(0);
   const [connected, setConnected] = createSignal(true);
@@ -1087,13 +1125,17 @@ export function createLiveArtifact(source: LiveSource, meta: LiveStreamMeta = {}
       setLocalDevSession(localDevBuffer.session());
       setLocalDevSessionEventCount(localDevBuffer.count);
     },
+    onProjectUpdate: (frame) => {
+      projectBuffer.ingest(frame);
+      setProjectDevelopment(projectBuffer.model());
+    },
     onError: () => setConnected(false),
     onClose: () => setConnected(false),
   });
 
   onCleanup(unsubscribe);
 
-  return { artifactJson, localDevSession, localDevSessionEventCount, frameCount, dropped, connected };
+  return { artifactJson, localDevSession, localDevSessionEventCount, projectDevelopment, frameCount, dropped, connected };
 }
 
 /** Extract a live-attach websocket URL from a `?live=<url>` query string. */

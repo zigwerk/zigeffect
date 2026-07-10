@@ -102,7 +102,13 @@ export function causalLineToFrame(line: string, sequence: number): LiveFrame | n
     fiber_id: safeIdOrNull(event.fiber_id),
     scope_id: safeIdOrNull(event.scope_id),
     resource_id: safeIdOrNull(event.resource_id),
+    cause_event_id: safeIdOrNull(event.cause_event_id),
     type_name: typeof event.type_name === "string" ? redactFrameText(event.type_name) : "",
+    artifact_id: typeof event.artifact_id === "string" ? redactFrameText(event.artifact_id) : "",
+    domain_entity_ref: typeof event.domain_entity_ref === "string" ? redactFrameText(event.domain_entity_ref) : "",
+    data_subject_ref: typeof event.data_subject_ref === "string" ? redactFrameText(event.data_subject_ref) : "",
+    schema_ref: typeof event.schema_ref === "string" ? redactFrameText(event.schema_ref) : "",
+    redacted_detail: typeof event.redacted_detail === "string" ? redactFrameText(event.redacted_detail) : "",
     boundary_id: safeIdOrNull(event.boundary_id),
   };
 }

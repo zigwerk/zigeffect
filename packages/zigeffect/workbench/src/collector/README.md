@@ -36,7 +36,7 @@ emitter's output, replayed verbatim by the end-to-end collector test.)
 
 ### Endpoints
 - `GET /live` — WebSocket; browser clients subscribe here. Each message is one
-  JSON causal, command, or local agent frame.
+  JSON causal, command, local agent, or project-development frame.
 - `POST /ingest` — body is NDJSON engine `CausalEvent` lines; returns
   `{"ingested": <count>}` and broadcasts each mapped frame.
 - `POST /frames` — validates and broadcasts trusted, already-mapped live frames.
@@ -47,6 +47,9 @@ emitter's output, replayed verbatim by the end-to-end collector test.)
 - `POST /agent-events` — validates, redacts, and broadcasts one local Dev Session
   event or an array of events.
 - `POST /agent-feed` — validates and broadcasts a local Dev Session JSONL body.
+- `POST /project` — validates, recursively redacts, and broadcasts one
+  `zigeffect.project-development.v1` snapshot joining the project manifest,
+  agent protocol, sessions, and application facts.
 - `GET /health` — `{"ok": true, "clients": <n>}`.
 
 ## Local agent processes

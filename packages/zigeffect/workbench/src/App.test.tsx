@@ -17,7 +17,7 @@ test("workbench labels the lenses for humans", () => {
 test("the dissolved tabs survive as auxiliary views", () => {
   const auxIds = workbenchAuxViews();
 
-  expect(auxIds).toEqual(["diff", "chain", "metadata", "queries"]);
+  expect(auxIds).toEqual(["diff", "chain", "metadata", "queries", "safety"]);
   // the old flat tab bar is gone; these are reachable via the command palette / More.
   expect(auxIds).not.toContain("timeline");
   expect(auxIds).not.toContain("visual-graph");
@@ -27,6 +27,7 @@ test("App wires the live local dev session overlay when attached", () => {
   const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 
   expect(source).toContain("live?.localDevSession()");
+  expect(source).toContain("live?.projectDevelopment()");
 });
 
 test("App drives a single selection id across every surface", () => {
@@ -45,4 +46,5 @@ test("the collaboration board keeps the transports panel and turn count", () => 
 
   expect(source).toContain("<h3>Transports</h3>");
   expect(source).toContain('Metric label="turns"');
+  expect(source).toContain("<ProjectDevelopmentPanel");
 });

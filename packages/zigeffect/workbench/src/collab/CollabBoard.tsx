@@ -12,10 +12,15 @@ import {
 import { resolveEvidenceEventId } from "../trace/traceModel";
 import { Badge, CommandList, EmptyState, Meta, Metric, agentHue } from "../primitives";
 import type { LocalAgentControlBootstrap } from "../localAgentControlClient";
+import type { ProjectDevelopmentModel } from "../development/projectDevelopment";
 
 const LocalAgentOperatorPanel = lazy(async () => {
   const module = await import("./LocalAgentOperatorPanel");
   return { default: module.LocalAgentOperatorPanel };
+});
+const ProjectDevelopmentPanel = lazy(async () => {
+  const module = await import("../development/ProjectDevelopmentPanel");
+  return { default: module.ProjectDevelopmentPanel };
 });
 
 // The Human <-> AI collaboration lens. The hero when the lens is "collaboration", a slim
@@ -24,6 +29,7 @@ const LocalAgentOperatorPanel = lazy(async () => {
 // event can be resolved it says so honestly rather than faking a link.
 export function CollabBoard(props: {
   session: LocalDevSessionModel | null;
+  project: ProjectDevelopmentModel | null;
   operatorBootstrap: LocalAgentControlBootstrap;
   validEventIds: Set<string>;
   copiedCommand: string | null;
@@ -53,6 +59,18 @@ export function CollabBoard(props: {
       </div>
 
       <LocalAgentOperatorPanel bootstrap={props.operatorBootstrap} />
+
+      <Show when={props.project}>
+        {(project) => (
+          <ProjectDevelopmentPanel
+            model={project()}
+            validEventIds={props.validEventIds}
+            copiedCommand={props.copiedCommand}
+            onCopy={props.onCopy}
+            onSelectEvent={props.onSelectEvent}
+          />
+        )}
+      </Show>
 
       <Show
         when={props.session}
