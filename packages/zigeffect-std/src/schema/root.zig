@@ -1136,8 +1136,13 @@ fn decodeInferredJsonValue(comptime T: type, value: std.json.Value) (SchemaError
 
 fn decodeInferredDetailedJsonValue(comptime T: type, ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!T {
     return decodeInferredJsonValue(T, value) catch |err| {
-        try ctx.addIssue(schemaErrorIssueKind(err), inferredExpectedName(T), valueTypeName(value), @errorName(err));
-        return err;
+        switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => |schema_error| {
+                try ctx.addIssue(schemaErrorIssueKind(schema_error), inferredExpectedName(T), valueTypeName(value), @errorName(schema_error));
+                return schema_error;
+            },
+        }
     };
 }
 
