@@ -141,7 +141,7 @@ pub const ParseContext = struct {
 
     pub fn pushIndex(self: *ParseContext, index: usize) std.mem.Allocator.Error!usize {
         const previous = try self.mark();
-        try self.path.writer(self.allocator).print("[{d}]", .{index});
+        try self.path.print(self.allocator, "[{d}]", .{index});
         return previous;
     }
 

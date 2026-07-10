@@ -854,7 +854,9 @@ fn containsCredentialBody(body: []const u8) bool {
     return containsInsensitive(body, "\"client_secret\"") or
         containsInsensitive(body, "\"private_key\"") or
         containsInsensitive(body, "\"refresh_token\"") or
-        containsInsensitive(body, "\"access_token\"");
+        containsInsensitive(body, "\"access_token\"") or
+        containsInsensitive(body, "\"password\"") or
+        containsInsensitive(body, "\"api_key\"");
 }
 
 fn containsInsensitive(haystack: []const u8, needle: []const u8) bool {
@@ -1072,6 +1074,24 @@ test "Http redacts OAuth credential request bodies" {
 
     try std.testing.expect(std.mem.indexOf(u8, display, "raw-key") == null);
     try std.testing.expect(std.mem.indexOf(u8, display, "[REDACTED]") != null);
+}
+
+test "Http redacts database password and API key request bodies" {
+    const password_display = try redactRequestAlloc(std.testing.allocator, .{
+        .method = "POST",
+        .url = "https://cockroachlabs.cloud/api/v1/sql-users",
+        .body = "{\"name\":\"app\",\"password\":\"dummy-database-password\"}",
+    });
+    defer std.testing.allocator.free(password_display);
+    const key_display = try redactRequestAlloc(std.testing.allocator, .{
+        .method = "POST",
+        .url = "https://example.test/credentials",
+        .body = "{\"api_key\":\"dummy-api-key\"}",
+    });
+    defer std.testing.allocator.free(key_display);
+
+    try std.testing.expect(std.mem.indexOf(u8, password_display, "dummy-database-password") == null);
+    try std.testing.expect(std.mem.indexOf(u8, key_display, "dummy-api-key") == null);
 }
 
 test "Http sendEffect uses client services and records redacted causal facts" {
