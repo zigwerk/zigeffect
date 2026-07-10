@@ -66,6 +66,18 @@ pub const MemoryEvidence = struct {
     out_of_memory: usize = 0,
 };
 
+pub fn memoryEvidenceFromSnapshot(snapshot: anytype) MemoryEvidence {
+    return .{
+        .allocations = snapshot.allocations,
+        .frees = snapshot.frees,
+        .live_allocations = snapshot.live_allocations,
+        .live_bytes = snapshot.live_bytes,
+        .peak_bytes = snapshot.peak_bytes,
+        .invalid_frees = snapshot.invalid_frees,
+        .out_of_memory = snapshot.out_of_memory,
+    };
+}
+
 pub const CompilerDiagnosticSeverity = enum {
     @"error",
     warning,
@@ -418,4 +430,18 @@ test "Safety receipt builder releases every partial JSON allocation" {
         }
     };
     try std.testing.checkAllAllocationFailures(std.testing.allocator, Harness.run, .{});
+}
+
+test "runtime memory snapshots join receipt evidence without a package dependency" {
+    const evidence = memoryEvidenceFromSnapshot(.{
+        .allocations = @as(usize, 4),
+        .frees = @as(usize, 3),
+        .live_allocations = @as(usize, 1),
+        .live_bytes = @as(usize, 64),
+        .peak_bytes = @as(usize, 128),
+        .invalid_frees = @as(usize, 0),
+        .out_of_memory = @as(usize, 2),
+    });
+    try std.testing.expectEqual(@as(usize, 64), evidence.live_bytes);
+    try std.testing.expectEqual(@as(usize, 2), evidence.out_of_memory);
 }

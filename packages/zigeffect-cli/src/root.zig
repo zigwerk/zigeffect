@@ -62,7 +62,7 @@ pub const AgentOptions = struct {
     session: []const u8 = "local-session",
     jsonl: bool = false,
 };
-pub const BenchmarkOperation = enum { score, run };
+pub const BenchmarkOperation = enum { score, conformance, run };
 pub const BenchmarkOptions = struct {
     operation: BenchmarkOperation,
     fixture: []const u8 = "",
@@ -539,17 +539,37 @@ fn deriveAgentProtocol(
         };
         break :check true;
     };
-    const evidence_count: usize = if (has_check_receipt and manifest.requirements.len > 0) 1 else 0;
+    const has_safety_receipt = safety_receipt: {
+        project_dir.access(io, ".zigeffect/receipts/latest-safety.json", .{}) catch |err| switch (err) {
+            error.FileNotFound => break :safety_receipt false,
+            else => return err,
+        };
+        break :safety_receipt true;
+    };
+    const evidence_count: usize = if (manifest.requirements.len == 0) 0 else @as(usize, @intFromBool(has_check_receipt)) + @as(usize, @intFromBool(has_safety_receipt));
     result.evidence = try allocator.alloc(zstd.Project.Protocol.Evidence, evidence_count);
     result.evidence_owned = true;
-    if (evidence_count == 1) {
-        result.evidence[0] = .{
+    var evidence_index: usize = 0;
+    if (has_check_receipt and manifest.requirements.len > 0) {
+        result.evidence[evidence_index] = .{
             .id = "evidence-project-check",
             .requirement = manifest.requirements[0].id,
             .component = manifest.requirements[0].component,
             .kind = .test_result,
             .artifact = ".zigeffect/receipts/check.json",
             .summary = "manifest-owned project check receipt",
+        };
+        evidence_index += 1;
+    }
+    if (has_safety_receipt and manifest.requirements.len > 0) {
+        result.evidence[evidence_index] = .{
+            .id = "evidence-agent-safety",
+            .requirement = manifest.requirements[0].id,
+            .acceptance_check = if (manifest.acceptance_checks.len > 0) manifest.acceptance_checks[0].id else null,
+            .component = manifest.requirements[0].component,
+            .kind = .artifact,
+            .artifact = ".zigeffect/receipts/latest-safety.json",
+            .summary = "source-linked agent safety receipt",
         };
     }
     var pending: usize = 0;
@@ -627,6 +647,7 @@ fn runBenchmarkAlloc(
     defer project_dir.close(io);
     return safetyResult(switch (options.operation) {
         .score => try safety.runBenchmarkScoreAlloc(allocator, io, project_dir, options.fixture),
+        .conformance => try safety.runConformanceScoreAlloc(allocator, io, project_dir, options.fixture),
         .run => try safety.runProviderBenchmarkAlloc(allocator, io, project_dir, options.provider, options.command),
     });
 }
@@ -923,6 +944,7 @@ pub fn helpText() []const u8 {
     \\  zigeffect safety replay <finding-id> [--receipt <path>]
     \\  zigeffect safety baseline [--root <path>] [--receipt <path>]
     \\  zigeffect benchmark score <fixture> --json [--root <path>]
+    \\  zigeffect benchmark conformance <suite> --json [--root <path>]
     \\  zigeffect benchmark run --provider <id> --command <manifest-id> [--root <path>]
     \\
     \\Options:
@@ -1356,7 +1378,7 @@ fn parseBenchmarkArgs(args: []const []const u8) CliError!BenchmarkOptions {
     const operation = std.meta.stringToEnum(BenchmarkOperation, args[0]) orelse return error.UnknownCommand;
     var options = BenchmarkOptions{ .operation = operation };
     var index: usize = 1;
-    if (operation == .score) {
+    if (operation != .run) {
         if (index >= args.len or std.mem.startsWith(u8, args[index], "--")) return error.MissingOptionValue;
         options.fixture = args[index];
         index += 1;
@@ -1535,6 +1557,9 @@ test "CLI parses bounded project add and generate operations" {
     try std.testing.expectEqual(BenchmarkOperation.score, benchmark.benchmark.operation);
     try std.testing.expectEqualStrings("fixtures/codex-zig.json", benchmark.benchmark.fixture);
     try std.testing.expectEqualStrings("demo", benchmark.benchmark.root);
+    const conformance = try parseArgs(&.{ "benchmark", "conformance", "fixtures/provider-suite.json", "--json" });
+    try std.testing.expectEqual(BenchmarkOperation.conformance, conformance.benchmark.operation);
+    try std.testing.expectEqualStrings("fixtures/provider-suite.json", conformance.benchmark.fixture);
     const provider_run = try parseArgs(&.{ "benchmark", "run", "--provider", "codex", "--command", "benchmark-codex" });
     try std.testing.expectEqual(BenchmarkOperation.run, provider_run.benchmark.operation);
     try std.testing.expectEqualStrings("codex", provider_run.benchmark.provider);

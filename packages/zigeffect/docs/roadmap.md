@@ -855,7 +855,18 @@ against identical requirements. Score compile/test success, acceptance
 coverage, repair iterations, causal-query use, secret posture, and handoff
 completeness without claiming model-quality results from synthetic fixtures.
 
-**Status:** active.
+**Status:** delivered on 2026-07-10. `zstd.Safety.Conformance` validates and
+scores the versioned provider-neutral event protocol, rejects malformed order,
+duplicates, oversized values, unsupported schemas, and secret-bearing fields,
+and requires a complete provider/scenario matrix for its gate. The checked-in
+14-case suite runs identical success, repair, failure, cancellation, approval,
+large-output, and recovery contracts for Codex and Claude Code. The CLI emits a
+stable comparable report and exits non-zero for incomplete or failed suites.
+Real local runs remain explicitly opt-in, select a manifest-owned
+`benchmark-<provider>` command, accept no passthrough argv, bound and redact
+output, distinguish unavailable executables from provider failures, and persist
+provider receipts. CI remains credential-free and network-free; the docs state
+that synthetic fixtures are protocol evidence, never model-quality evidence.
 
 ### M95 - Local distribution and compatibility
 
@@ -863,7 +874,7 @@ Deliver install/version/completion flows, compatibility metadata, upgrade
 dry-runs, scaffold migrations, generated-project snapshots, public API gates,
 and one complete local release command.
 
-**Status:** planned.
+**Status:** active.
 
 ## Hardening milestone roadmap
 

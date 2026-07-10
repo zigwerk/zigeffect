@@ -3,6 +3,7 @@ const Project = @import("../project/root.zig");
 
 pub const receipt = @import("receipt.zig");
 pub const Benchmark = @import("benchmark.zig");
+pub const Conformance = @import("conformance.zig");
 pub const SafetyReceipt = receipt.SafetyReceipt;
 pub const SafetyVerdict = receipt.SafetyVerdict;
 pub const GateStatus = receipt.GateStatus;
@@ -10,6 +11,7 @@ pub const GateEvidence = receipt.GateEvidence;
 pub const EvidenceCompleteness = receipt.EvidenceCompleteness;
 pub const StaticEvidenceSummary = receipt.StaticEvidenceSummary;
 pub const MemoryEvidence = receipt.MemoryEvidence;
+pub const memoryEvidenceFromSnapshot = receipt.memoryEvidenceFromSnapshot;
 pub const CompilerDiagnosticSeverity = receipt.CompilerDiagnosticSeverity;
 pub const CompilerDiagnostic = receipt.CompilerDiagnostic;
 pub const CompilerDiagnosticSet = receipt.CompilerDiagnosticSet;

@@ -191,6 +191,28 @@ test "top level compatibility aliases point at namespace exports" {
     try std.testing.expect(fx.PerformanceBenchmarkReport == fx.performance.PerformanceBenchmarkReport);
 }
 
+test "agent safety kernel keeps stable public exports" {
+    const exports = [_][]const u8{
+        "SourceMap",
+        "SourceRef",
+        "SourceRefInput",
+        "resolveEventSource",
+        "ResourceHandle",
+        "ResourceTable",
+        "isAgentSendable",
+        "assertAgentSendable",
+        "TrackedAllocator",
+        "MemorySafetySnapshot",
+        "ScheduleExplorerOptions",
+        "ScheduleExplorationReport",
+        "exploreSchedules",
+        "replaySchedule",
+    };
+    inline for (exports) |name| try std.testing.expect(@hasDecl(fx, name));
+    try std.testing.expectEqualStrings("zigeffect.source-map.v1", fx.source_map_schema);
+    try std.testing.expectEqualStrings("zigeffect.schedule-exploration.v1", fx.schedule_exploration_schema);
+}
+
 test "public durable schema constants stay at version one" {
     try std.testing.expectEqualStrings("zigeffect.workflow.journal-event.v1", fx.workflow.workflow_journal_event_schema);
     try std.testing.expectEqual(@as(u32, 1), fx.workflow.workflow_journal_event_schema_version);

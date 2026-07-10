@@ -81,9 +81,24 @@ zigeffect benchmark score benchmarks/fixture.json --root ./my-system --json
 Scores are limited to the supplied bounded fixture and explicitly do not prove
 general language or provider superiority.
 
+Gate the complete offline Codex/Claude lifecycle matrix:
+
+```sh
+zigeffect benchmark conformance \
+  packages/zigeffect/benchmarks/fixtures/provider-conformance.v1.json \
+  --root . --json
+```
+
+The gate covers success, repair, failure, cancellation, approval, bounded large
+output, and recovery. It exits non-zero when the provider/scenario matrix is
+incomplete or any lifecycle fails. It remains fixture evidence, not a model
+quality claim.
+
 Real-provider runs are opt-in: configure a fixed manifest command, create
 `.zigeffect/provider-benchmarks.enabled`, and invoke `benchmark run --provider
 <id> --command <manifest-id>`. No provider command or network access runs in CI.
+Executed output is bounded, redacted, and persisted as a provider receipt; an
+uninstalled provider executable yields an explicit unavailable result.
 
 ## Agent Protocol
 

@@ -300,6 +300,22 @@ pub const executable_test =
     \\    defer report.deinit();
     \\    try std.testing.expectEqual(zstd.fx.ScheduleExplorationVerdict.passed, report.verdict());
     \\}
+    \\
+    \\test "deterministic and concurrent executor traces stay structurally equivalent" {
+    \\    var deterministic = zstd.fx.CausalStore.init(std.testing.allocator);
+    \\    defer deterministic.deinit();
+    \\    var concurrent = zstd.fx.CausalStore.init(std.testing.allocator);
+    \\    defer concurrent.deinit();
+    \\    _ = try deterministic.record(.{ .kind = .effect_started, .type_name = "generated-work" });
+    \\    _ = try deterministic.record(.{ .kind = .effect_completed, .type_name = "generated-work", .status = "success" });
+    \\    _ = try concurrent.record(.{ .kind = .effect_started, .type_name = "generated-work" });
+    \\    _ = try concurrent.record(.{ .kind = .effect_completed, .type_name = "generated-work", .status = "success" });
+    \\    var left = try deterministic.snapshot(std.testing.allocator);
+    \\    defer left.deinit();
+    \\    var right = try concurrent.snapshot(std.testing.allocator);
+    \\    defer right.deinit();
+    \\    try std.testing.expect(try zstd.fx.causalStructurallyEquivalent(std.testing.allocator, left.events, right.events));
+    \\}
 ;
 
 pub const library_build =
@@ -407,6 +423,22 @@ pub const library_test =
     \\    var report = try zstd.fx.exploreSchedules(std.testing.allocator, Model{}, .{});
     \\    defer report.deinit();
     \\    try std.testing.expectEqual(zstd.fx.ScheduleExplorationVerdict.passed, report.verdict());
+    \\}
+    \\
+    \\test "library execution traces remain structurally equivalent" {
+    \\    var deterministic = zstd.fx.CausalStore.init(std.testing.allocator);
+    \\    defer deterministic.deinit();
+    \\    var concurrent = zstd.fx.CausalStore.init(std.testing.allocator);
+    \\    defer concurrent.deinit();
+    \\    _ = try deterministic.record(.{ .kind = .effect_started, .type_name = "library-work" });
+    \\    _ = try deterministic.record(.{ .kind = .effect_completed, .type_name = "library-work", .status = "success" });
+    \\    _ = try concurrent.record(.{ .kind = .effect_started, .type_name = "library-work" });
+    \\    _ = try concurrent.record(.{ .kind = .effect_completed, .type_name = "library-work", .status = "success" });
+    \\    var left = try deterministic.snapshot(std.testing.allocator);
+    \\    defer left.deinit();
+    \\    var right = try concurrent.snapshot(std.testing.allocator);
+    \\    defer right.deinit();
+    \\    try std.testing.expect(try zstd.fx.causalStructurallyEquivalent(std.testing.allocator, left.events, right.events));
     \\}
 ;
 

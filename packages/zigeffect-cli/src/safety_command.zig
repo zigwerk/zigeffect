@@ -332,6 +332,25 @@ pub fn runBenchmarkScoreAlloc(
     return .{ .allocator = allocator, .exit_code = 0, .output = try report.jsonAlloc(allocator) };
 }
 
+pub fn runConformanceScoreAlloc(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    base_dir: std.Io.Dir,
+    fixture_path: []const u8,
+) !CommandOutput {
+    try zstd.Project.validateRelativePath(fixture_path, false);
+    const content = try base_dir.readFileAlloc(io, fixture_path, allocator, .limited(16 * 1024 * 1024));
+    defer allocator.free(content);
+    var parsed = try zstd.Safety.Conformance.parseSuite(allocator, content);
+    defer parsed.deinit();
+    const passes = try zstd.Safety.Conformance.passesGate(parsed.value);
+    return .{
+        .allocator = allocator,
+        .exit_code = if (passes) 0 else 1,
+        .output = try zstd.Safety.Conformance.reportAlloc(allocator, parsed.value),
+    };
+}
+
 pub fn runProviderBenchmarkAlloc(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -339,8 +358,11 @@ pub fn runProviderBenchmarkAlloc(
     provider: []const u8,
     command_id: []const u8,
 ) !CommandOutput {
-    try zstd.Project.validateIdentifier(provider);
+    _ = std.meta.stringToEnum(zstd.Safety.Conformance.Provider, provider) orelse return error.UnknownProvider;
     try zstd.Project.validateIdentifier(command_id);
+    const expected_prefix = try std.fmt.allocPrint(allocator, "benchmark-{s}", .{provider});
+    defer allocator.free(expected_prefix);
+    if (!std.mem.startsWith(u8, command_id, expected_prefix)) return error.InvalidProviderCommand;
     base_dir.access(io, ".zigeffect/provider-benchmarks.enabled", .{}) catch |err| switch (err) {
         error.FileNotFound => {
             const unavailable = try std.json.Stringify.valueAlloc(allocator, .{
@@ -359,12 +381,25 @@ pub fn runProviderBenchmarkAlloc(
     var parsed = try readManifest(allocator, io, base_dir, "zigeffect.project.json");
     defer parsed.deinit();
     const command = parsed.value.command(command_id) orelse return error.MissingProjectCommand;
-    const run = try std.process.run(allocator, io, .{
+    const run = std.process.run(allocator, io, .{
         .argv = command.argv,
         .cwd = .{ .dir = base_dir },
         .stdout_limit = .limited(parsed.value.safety.limits.max_artifact_bytes),
         .stderr_limit = .limited(parsed.value.safety.limits.max_artifact_bytes),
-    });
+    }) catch |err| switch (err) {
+        error.FileNotFound => {
+            const unavailable = try std.json.Stringify.valueAlloc(allocator, .{
+                .schema = "zigeffect.provider-benchmark-run.v1",
+                .available = false,
+                .executed = false,
+                .provider = provider,
+                .command_id = command_id,
+                .reason = "manifest-owned provider executable is unavailable",
+            }, .{});
+            return .{ .allocator = allocator, .exit_code = 3, .output = unavailable };
+        },
+        else => return err,
+    };
     defer allocator.free(run.stdout);
     defer allocator.free(run.stderr);
     const exit_code: u8 = switch (run.term) {
@@ -385,6 +420,9 @@ pub fn runProviderBenchmarkAlloc(
         .stdout = safe_stdout,
         .stderr = safe_stderr,
     }, .{});
+    const receipt_path = try std.fmt.allocPrint(allocator, ".zigeffect/receipts/provider-benchmark-{s}.json", .{provider});
+    defer allocator.free(receipt_path);
+    try writeAtomic(allocator, io, base_dir, receipt_path, output);
     return .{ .allocator = allocator, .exit_code = if (exit_code == 0) 0 else 1, .output = output };
 }
 
@@ -800,6 +838,21 @@ test "provider benchmark runner is unavailable until explicitly enabled" {
     try std.testing.expect(std.mem.indexOf(u8, unavailable.output, "\"available\":false") != null);
 }
 
+test "offline provider conformance suite reports an incomplete matrix as a failed gate" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const suite =
+        \\{"schema":"zigeffect.provider-conformance-suite.v1","schema_version":1,"cases":[{"id":"codex-cancel","provider":"codex","scenario":"cancellation","expected_terminal":"cancelled","required_acceptance":0,"events":[{"sequence":1,"kind":"cancellation_requested","status":"requested"},{"sequence":2,"kind":"session_cancelled","status":"cancelled"}]}]}
+    ;
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "suite.json", .data = suite });
+    var result = try runConformanceScoreAlloc(std.testing.allocator, std.testing.io, tmp.dir, "suite.json");
+    defer result.deinit();
+    try std.testing.expectEqual(@as(u8, 1), result.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, result.output, "zigeffect.provider-conformance-report.v1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.output, "\"passed\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.output, "\"complete_provider_matrix\":false") != null);
+}
+
 test "provider benchmark runner executes only an opted-in manifest command" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -819,6 +872,9 @@ test "provider benchmark runner executes only an opted-in manifest command" {
     try std.testing.expectEqual(@as(u8, 0), result.exit_code);
     try std.testing.expect(std.mem.indexOf(u8, result.output, "\"executed\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.output, "0.16.0") != null);
+    try tmp.dir.access(std.testing.io, ".zigeffect/receipts/provider-benchmark-codex.json", .{});
+    try std.testing.expectError(error.UnknownProvider, runProviderBenchmarkAlloc(std.testing.allocator, std.testing.io, tmp.dir, "other", "benchmark-other"));
+    try std.testing.expectError(error.InvalidProviderCommand, runProviderBenchmarkAlloc(std.testing.allocator, std.testing.io, tmp.dir, "codex", "check"));
 }
 
 test "compiler capability evidence distinguishes advertised flags from configured commands" {

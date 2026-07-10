@@ -90,6 +90,7 @@ test "causal events preserve source reference ids in snapshots and JSON" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
     try std.testing.expectEqual(@as(?u64, source_ref_id), snapshot.events[0].source_ref_id);
+    try std.testing.expectEqualStrings("api", fx.resolveEventSource(&map, snapshot.events[0]).?.component);
 
     const json = try fx.formatCausalJson(std.testing.allocator, &store);
     defer std.testing.allocator.free(json);

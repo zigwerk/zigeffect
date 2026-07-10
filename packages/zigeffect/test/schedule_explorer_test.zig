@@ -152,3 +152,47 @@ test "ScheduleExplorer reports deadlock and truthful truncation" {
     try std.testing.expect(truncated.truncated);
     try std.testing.expectEqual(fx.ScheduleExplorationVerdict.incomplete, truncated.verdict());
 }
+
+test "ScheduleExplorer source-links timeout cancellation and spawn failures" {
+    const Fault = enum { timeout, canceled, spawn_failed };
+    const FaultModel = struct {
+        fault: Fault,
+        done: bool = false,
+
+        pub fn actionCount(_: @This()) usize { return 1; }
+        pub fn runnable(self: @This(), action: usize) bool { return action == 0 and !self.done; }
+        pub fn step(self: *@This(), _: usize) !void {
+            return switch (self.fault) {
+                .timeout => error.Timeout,
+                .canceled => error.Canceled,
+                .spawn_failed => error.SpawnFailed,
+            };
+        }
+        pub fn isComplete(self: @This()) bool { return self.done; }
+        pub fn invariant(_: @This()) bool { return true; }
+        pub fn stateHash(self: @This()) u64 { return @intFromEnum(self.fault); }
+        pub fn sourceRef(_: @This(), _: usize) ?u64 { return 9001; }
+    };
+    const cases = [_]struct { fault: Fault, name: []const u8 }{
+        .{ .fault = .timeout, .name = "Timeout" },
+        .{ .fault = .canceled, .name = "Canceled" },
+        .{ .fault = .spawn_failed, .name = "SpawnFailed" },
+    };
+    for (cases) |case| {
+        var report = try fx.exploreSchedules(std.testing.allocator, FaultModel{ .fault = case.fault }, .{});
+        defer report.deinit();
+        try std.testing.expectEqual(fx.ScheduleFailureKind.step_error, report.failure.?.kind);
+        try std.testing.expectEqualStrings(case.name, report.failure.?.error_name);
+        try std.testing.expectEqual(@as(?u64, 9001), report.failure.?.source_ref_id);
+    }
+}
+
+test "ScheduleExplorer releases partial exploration state on every allocation failure" {
+    const Harness = struct {
+        fn run(allocator: std.mem.Allocator) !void {
+            var report = try fx.exploreSchedules(allocator, SafeIncrementModel{}, .{});
+            defer report.deinit();
+        }
+    };
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, Harness.run, .{});
+}

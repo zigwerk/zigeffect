@@ -45,6 +45,12 @@ test "root exports causal Application namespace" {
     try std.testing.expect(@hasDecl(zstd.Application, "record"));
 }
 
+test "root exports provider conformance scoring" {
+    const zstd = @import("root.zig");
+    try std.testing.expect(@hasDecl(zstd.Safety, "Conformance"));
+    try std.testing.expect(@hasDecl(zstd.Safety.Conformance, "scoreSuiteAlloc"));
+}
+
 test {
     std.testing.refAllDecls(Application);
     std.testing.refAllDecls(Project);

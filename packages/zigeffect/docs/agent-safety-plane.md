@@ -11,6 +11,13 @@ roots cannot use the configured escape-hatch constructs; unavoidable systems
 code belongs under audited roots with an exact source fingerprint,
 justification, and required check.
 
+The existing engine implementation is a trusted systems-code base and still
+contains pointer-erased executor/FFI internals and ordinary Zig `undefined`
+initialization. Those internals are not relabelled as agent-safe by this work.
+The safer claim applies to projects and components that actually opt into and
+pass the profile; audited runtime internals continue to require human review,
+focused tests, ReleaseSafe, and platform tooling.
+
 ## Agent loop
 
 ```sh
@@ -88,6 +95,7 @@ models, prompts, hardware, raw evidence, and repeated measurements.
 - compiler artifact: `zigeffect.compiler-artifact.v1`
 - source map: `zigeffect.source-map.v1`
 - schedule exploration: `zigeffect.schedule-exploration.v1`
+- optional fuzz sidecar: `zigeffect.fuzz-artifact.v1`
 - benchmark fixture/score: `zigeffect.agent-benchmark-fixture.v1` /
   `zigeffect.agent-benchmark-score.v1`
 

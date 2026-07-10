@@ -167,6 +167,11 @@ pub fn stableSourceRefId(input: SourceRefInput) u64 {
     return if (hash == 0) 1 else hash;
 }
 
+pub fn resolveEventSource(map: *const SourceMap, event: anytype) ?SourceRef {
+    const id = event.source_ref_id orelse return null;
+    return map.resolve(id);
+}
+
 pub fn formatSourceMapJson(allocator: std.mem.Allocator, map: *const SourceMap) std.mem.Allocator.Error![]u8 {
     const value = .{
         .schema = source_map_schema,

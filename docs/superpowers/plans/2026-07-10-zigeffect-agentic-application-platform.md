@@ -84,14 +84,14 @@ agent-first Zig development system.
 
 ### M94 - Provider Conformance
 
-- [ ] Define provider-neutral benchmark scenarios and score schema.
-- [ ] Add deterministic Codex and Claude fixtures for success, repair, failure,
+- [x] Define provider-neutral benchmark scenarios and score schema.
+- [x] Add deterministic Codex and Claude fixtures for success, repair, failure,
   cancellation, approval, large output, and recovery.
-- [ ] Implement offline scorer and comparable receipts.
-- [ ] Add opt-in real local provider runner with explicit availability checks;
+- [x] Implement offline scorer and comparable receipts.
+- [x] Add opt-in real local provider runner with explicit availability checks;
   keep CI network-free.
-- [ ] Publish benchmark interpretation and non-claims.
-- [ ] Commit M94.
+- [x] Publish benchmark interpretation and non-claims.
+- [x] Commit M94.
 
 ### M95 - Distribution And Release
 
@@ -165,3 +165,16 @@ is delivered or explicitly proven impossible by an external constraint.
   fact kinds at 1440x1000 and 390x844. Selecting `api-service` narrowed three
   requirements to one and nine facts to seven; selecting Schema event 3 opened
   its cause path and `InvoiceResponse.v1` reference in the shared Inspector.
+
+### M94 Evidence
+
+- Conformance: the checked-in provider-neutral matrix parsed and scored 14/14
+  passing cases, covering the same seven lifecycle scenarios for Codex and
+  Claude Code with `complete_provider_matrix: true`.
+- Safety/CLI: 56 stdlib tests and 19 CLI tests passed, including allocation
+  failure, secret rejection, sequence/version/duplicate rejection, incomplete
+  matrix gate failure, opt-in enforcement, provider/command matching, bounded
+  output, unavailable executable behavior, and persisted real-run receipts.
+- Claims: benchmark docs distinguish deterministic offline protocol evidence
+  from controlled repeated real-provider studies; CI performs no provider or
+  network invocation.
