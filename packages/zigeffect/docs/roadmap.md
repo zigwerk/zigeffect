@@ -33,7 +33,7 @@ semantic fact comparison, not exact event-id graph isomorphism.
 | 6 | Causal dev loop (compare/advice/verdict) | **done** | `tools/causal_dev_loop`, `causal_compare`, `causal_advice`, `causal_verdict` |
 | 7 | Guarded remediation + agent interventions | **closed loop, gate-off by default** | `src/services/policy_engine.zig`, `src/services/agent_intervention.zig`, `tools/causal_*remediation*` |
 | 8 | App-facing causal trace | **done** | `src/services/causal_app_runtime.zig` |
-| 9 | Visual workbench (SolidJS / zig-webui) | **live-attach + dev-session UX** (static + streaming via collector plus host-frame ingest, host apply adapter, host runner bundle, supervised host loop, NDJSON fact tap, host request router, runtime runner, local agent runtime/artifact capture/turn receipts/transcript tailing, and local agent development health/timeline/issues view) | `workbench/`, `workbench/src/collector/` |
+| 9 | Visual workbench (SolidJS / zig-webui) | **live-attach + dev-session UX** (static + streaming via collector plus host-frame ingest, host apply adapter, host runner bundle, supervised host loop, NDJSON fact tap, host request router, runtime runner, local agent runtime/artifact capture/turn receipts/transcript tailing/process supervision, and local agent development health/timeline/issues view) | `workbench/`, `workbench/src/collector/` |
 | 10 | Export adapters (JSONL/DOT/OTel/OTLP/graph-history/NenDB) | **OTLP + collector live end-to-end** | `src/services/causal_*_backend.zig`, `causal_otlp_json.zig` |
 | 11 | Durable workflows + clustering | **scheduler runs on zio; workflow journal appends can live-mirror into causal stores; loopback + remote socket wrappers cross the transport boundary; discovery JSON/file/HTTP snapshots, caller-owned HTTP refresh loops, and auth-epoch-aware selection feed the local registry** | `src/workflow/*`, `src/cluster/*` |
 | 12 | Agent-operable runtime layer | **bounded interventions, counterfactuals, invariants, evals, semantic diffs, live command executor/tap, poll bridge, local daemon/HTTP engine bridge, eval diff artifacts/links/manifests, dev-loop/remediation-decision/patch-proposal eval persistence** | `src/services/agent_intervention.zig`, `counterfactual.zig`, `causal_invariant.zig`, `agent_eval.zig`, `causal_diff.zig`, `causal_live_command.zig` |
@@ -381,7 +381,7 @@ substrates into real deployed systems:
    zigeffect's own causal tools share development evidence. The first pass
    reuses `zigeffect.causal.dev-session.v1` and teaches the workbench to render
    agents, checks, commands, artifact links, guardrails, and next actions. The
-   ordered sequence is M72 through M81 below.
+   ordered sequence is M72 through M83 below.
 
 ## Local agentic development roadmap
 
@@ -389,7 +389,7 @@ This is the local-first sequence for making zigeffect useful as the development
 engine for local projects and standard-library work. It intentionally comes
 before hosting or broad distributed orchestration.
 
-Status on 2026-06-29: M72 through M81 are implemented in the workbench,
+Status on 2026-07-10: M72 through M82 are implemented in the workbench,
 `causal-dev-session`, and collector. Local session events have parser/apply
 coverage, Codex/Claude-style JSONL fixtures, a `bun run zigeffect:local-agent-gate`
 command, and a live collector WebSocket overlay (`POST /agent-feed` and
@@ -400,8 +400,10 @@ captures redacted stdout/stderr/error artifacts, emits artifact links, and feeds
 those endpoints. Turn-level receipts now exist as static session data and live
 `agent_turn` events. A transcript tail adapter can consume line-oriented JSONL
 or tagged text streams and post redacted turns. Remaining local-first work is
-runner-owned terminal lifecycle and provider-specific Codex/Claude transcript
-samples.
+provider-specific Codex/Claude transcript adapters and samples. A fakeable
+process supervisor now owns a real Bun child lifecycle, streams stdout turns,
+drains bounded stderr, supports abort-driven termination, and posts honest
+terminal receipts.
 
 ### M72 - Local development session protocol
 
@@ -566,6 +568,48 @@ that streams workbench-compatible local dev-session events.
 - Tests prove tagged plaintext maps to turn events.
 - Tests prove stream tailing flushes trailing partial lines and ignores junk.
 - All emitted events pass through the existing local dev-session parser/redactor.
+
+### M82 - Local agent process supervisor
+
+**Goal:** own a long-running local agent process from start through terminal
+workbench receipts.
+
+**Work:**
+- Add a fakeable process handle and runner contract with stdout, stderr, exit,
+  and kill ownership.
+- Add a Bun-backed process runner for real local commands.
+- Stream stdout through the transcript tail while draining bounded stderr.
+- Keep lifecycle and transcript sequences monotonic across ignored input lines.
+- Terminate the child on abort and clean it up when stream or collector delivery
+  fails.
+
+**Acceptance:**
+- Tests prove running, turn, check, and terminal event order for successful and
+  failed exits.
+- Tests prove spawn exceptions never claim the agent reached running state.
+- Tests prove abort requests kill the child and emit interrupted failure state.
+- Tests prove bounded stderr and parser normalization prevent sentinel-secret
+  leakage.
+- A real Bun subprocess streams a tagged turn through the supervisor.
+
+### M83 - Native Codex and Claude transcript adapters
+
+**Goal:** normalize the supported public stream envelopes from current Codex
+and Claude Code CLIs into the provider-neutral `agent_turn` protocol.
+
+**Work:**
+- Add explicit Codex JSON event-envelope parsing with representative fixtures.
+- Add explicit Claude Code stream-JSON parsing with representative fixtures.
+- Preserve stable provider turn/item identifiers and distinguish assistant,
+  tool, system, and result records.
+- Document supported CLI invocation shapes and fixture provenance without
+  depending on private transcript storage.
+
+**Acceptance:**
+- Fixtures from both provider envelope families produce redacted turn receipts.
+- Unsupported event kinds are ignored without stopping the owned process.
+- Provider adapters remain isolated from the workbench session model.
+- The local agent gate runs the provider adapter tests without network access.
 
 ## Hardening milestone roadmap
 
