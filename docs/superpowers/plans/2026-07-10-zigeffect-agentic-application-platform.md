@@ -95,14 +95,14 @@ agent-first Zig development system.
 
 ### M95 - Distribution And Release
 
-- [ ] Add install/version/completions and compatibility metadata.
-- [ ] Add scaffold schema migrations and upgrade dry-runs with conflict-safe
+- [x] Add install/version/completions and compatibility metadata.
+- [x] Add scaffold schema migrations and upgrade dry-runs with conflict-safe
   behavior.
-- [ ] Add generated snapshot compatibility and public API stability gates.
-- [ ] Build one local release command covering core/std/CLI/Postgres/workbench,
+- [x] Add generated snapshot compatibility and public API stability gates.
+- [x] Build one local release command covering core/std/CLI/Postgres/workbench,
   generated projects, docs honesty, redaction, and hygiene.
-- [ ] Reconcile every roadmap/parity/cookbook status claim.
-- [ ] Run the complete release gate and commit M95.
+- [x] Reconcile every roadmap/parity/cookbook status claim.
+- [x] Run the complete release gate and commit M95.
 
 ## Completion Evidence
 
@@ -178,3 +178,22 @@ is delivered or explicitly proven impossible by an external constraint.
 - Claims: benchmark docs distinguish deterministic offline protocol evidence
   from controlled repeated real-provider studies; CI performs no provider or
   network invocation.
+
+### M95 Evidence
+
+- Distribution: a stage-installed `zigeffect 0.2.0` binary emitted non-empty
+  Bash, Zsh, and Fish completions and a machine-readable Zig/project/template/
+  core/stdlib compatibility report.
+- Upgrades: tests prove pristine-state adoption, v0-to-v1 manifest migration,
+  preservation of user-owned application source, SHA-256 managed-file checks,
+  and exit-code-3 whole-apply refusal for an edited agent skill.
+- Compatibility: 24 CLI tests pin all five scaffold kinds to the committed
+  versioned snapshot; the generated-project integration compiled every kind in
+  Debug and ReleaseSafe, compiled system children independently, and passed
+  compatibility plus no-op upgrade checks.
+- Final release: `bun run zigeffect:local-release` passed with the stage-installed
+  CLI, 56/56 stdlib tests and all examples, 24/24 CLI tests, the full generated
+  project matrix, 14/14 provider cases, 855/855 core tests in both Debug and
+  ReleaseSafe, 7/7 public API tests, the 241-step core release gate with 461/461
+  tests, Postgres/QUIC/zio gates, 269/269 Workbench tests plus typecheck/build,
+  docs honesty, redaction coverage, and tool hygiene on Zig 0.16.0.

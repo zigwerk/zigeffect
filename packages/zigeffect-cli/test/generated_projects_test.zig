@@ -46,6 +46,16 @@ test "every scaffold builds in Debug and ReleaseSafe and system children build i
         defer plan.deinit();
         _ = try cli.writePlan(std.testing.io, tmp.dir, case.name, plan, .{});
 
+        var compatible = try cli.runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{ "compatibility", "--root", target_path, "--json" });
+        defer compatible.deinit();
+        try std.testing.expectEqual(@as(u8, 0), compatible.exit_code);
+        try std.testing.expect(std.mem.indexOf(u8, compatible.output, "\"compatible\":true") != null);
+
+        var upgrade = try cli.runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{ "upgrade", "--root", target_path, "--dry-run", "--json" });
+        defer upgrade.deinit();
+        try std.testing.expectEqual(@as(u8, 0), upgrade.exit_code);
+        try std.testing.expect(std.mem.indexOf(u8, upgrade.output, "\"status\":\"current\"") != null);
+
         if (case.kind == .system) {
             var added = try cli.runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{
                 "add", "library", "analytics", "--root", target_path, "--json",

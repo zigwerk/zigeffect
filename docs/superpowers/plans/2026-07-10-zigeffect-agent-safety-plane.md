@@ -8,6 +8,17 @@ under `src`; expose one CLI workflow instead of adding `causal_*` report tools.
 Every milestone ends with focused verification and no completion claim without
 passing evidence.
 
+**Delivery result (2026-07-10):** Implemented end to end. The final
+`bun run zigeffect:local-release` gate passes stdlib/examples, the installed
+CLI and every generated project kind, provider conformance, core Debug and
+ReleaseSafe, the 241-step causal release gate, public API review, Postgres,
+QUIC, zio, 269 workbench tests/typecheck/build, redaction/honesty checks, and
+tool hygiene. A real generated `project check --agent` receipt and browser proof
+also pass. ThreadSanitizer, C sanitizer, stack protection, and fuzz are detected
+but remain explicit optional `unsupported` gates until a project supplies a
+platform-specific manifest-owned target. This is not a claim that arbitrary Zig
+or the existing trusted runtime internals are Rust-equivalent memory-safe code.
+
 ## M96 - Safety Project Contract
 
 - [ ] Add red tests for profiles, safe/audited roots, gate policies, limits,

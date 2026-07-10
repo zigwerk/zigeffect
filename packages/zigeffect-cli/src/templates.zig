@@ -530,13 +530,17 @@ pub const readme =
     \\## Develop
     \\
     \\```sh
+    \\zigeffect compatibility --json
+    \\zigeffect upgrade --dry-run --json
     \\zigeffect project validate --json
     \\zigeffect project check --agent --json
     \\zigeffect project test --json
     \\zigeffect project dev
     \\```
     \\
-    \\The source of truth is `zigeffect.project.json`. Keep requirement status,
+    \\The source of truth is `zigeffect.project.json`. Compatibility metadata and
+    \\CLI-owned scaffold hashes live under `.zigeffect/`; upgrades preserve
+    \\user-owned source and refuse edited managed files. Keep requirement status,
     \\acceptance checks, causal evidence, and handoff receipts aligned with code.
 ;
 
@@ -564,7 +568,9 @@ pub const skill =
     \\
     \\# zigeffect Development
     \\
-    \\1. Read `zigeffect.project.json` before editing.
+    \\1. Run `zigeffect compatibility --json`, then read
+    \\   `zigeffect.project.json` before editing. Use `zigeffect upgrade --dry-run`
+    \\   to inspect migrations; never rewrite around a reported conflict.
     \\2. Map the request to a requirement, acceptance check, and component.
     \\3. Use public `zigeffect_std` APIs and component facades; do not import
     \\   another component's internals.

@@ -204,6 +204,13 @@ zig build release-gate    # the full release pipeline
 
 Or from the repo root: `bun run zigeffect:test`.
 
+For the complete local application-development distribution, install the
+`packages/zigeffect-cli` executable and run
+`bun run zigeffect:local-release`. The CLI generates five compile-tested project
+kinds, embeds compatibility and scaffold-ownership metadata, emits Bash/Zsh/Fish
+completions, and performs dry-run-first conflict-safe upgrades. See
+[docs/compatibility.md](docs/compatibility.md).
+
 ## Tools
 
 The `tools/` directory holds the 46 approved CLI tools (causal harness, query

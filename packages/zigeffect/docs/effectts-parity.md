@@ -304,6 +304,8 @@ Remaining:
    lineage. This is deferred behind local application-development work.
 4. Recursive schedule programs and richer test fixtures/golden output, as real
    stdlib code demands them.
-5. The M88-M95 agentic application platform: project contracts, compile-tested
-   scaffolds, instrumented project workflows, semantic application facts,
-   workbench development UX, provider conformance, and local distribution.
+5. Broader real-project adoption of the delivered M88-M95 agentic application
+   platform. Project contracts, compile-tested scaffolds, instrumented project
+   workflows, semantic application facts, workbench development UX, provider
+   conformance, conflict-safe local upgrades, and distribution gates now ship;
+   the next evidence should come from using them on additional Zig codebases.

@@ -2,8 +2,9 @@ const std = @import("std");
 pub const zstd = @import("zigeffect_std");
 const templates = @import("templates.zig");
 pub const safety = @import("safety_command.zig");
+pub const distribution = @import("distribution.zig");
 
-pub const version = "0.1.0";
+pub const version = distribution.cli_version;
 
 pub const CliError = error{
     MissingCommand,
@@ -15,6 +16,8 @@ pub const CliError = error{
     DuplicateOption,
     MissingOptionValue,
     InvalidTarget,
+    UnknownShell,
+    InvalidOptionCombination,
 };
 
 pub const ScaffoldOptions = struct {
@@ -31,6 +34,9 @@ pub const ScaffoldOptions = struct {
 pub const Action = union(enum) {
     help,
     version,
+    completions: distribution.Shell,
+    compatibility: CompatibilityOptions,
+    upgrade: UpgradeOptions,
     new: ScaffoldOptions,
     project: ProjectOptions,
     safety: SafetyOptions,
@@ -38,6 +44,18 @@ pub const Action = union(enum) {
     benchmark: BenchmarkOptions,
     add: AddOptions,
     generate: GenerateOptions,
+};
+
+pub const CompatibilityOptions = struct {
+    root: []const u8 = ".",
+    json: bool = false,
+};
+
+pub const UpgradeOptions = struct {
+    root: []const u8 = ".",
+    dry_run: bool = true,
+    apply: bool = false,
+    json: bool = false,
 };
 
 pub const ProjectOperation = enum { show, validate, doctor, check, @"test", dev };
@@ -94,6 +112,9 @@ pub fn parseArgs(args: []const []const u8) (CliError || zstd.Project.ProjectErro
     if (args.len == 0) return error.MissingCommand;
     if (args.len == 1 and (eql(args[0], "--help") or eql(args[0], "help"))) return .help;
     if (args.len == 1 and (eql(args[0], "--version") or eql(args[0], "version"))) return .version;
+    if (eql(args[0], "completions")) return .{ .completions = try parseCompletionsArgs(args[1..]) };
+    if (eql(args[0], "compatibility")) return .{ .compatibility = try parseCompatibilityArgs(args[1..]) };
+    if (eql(args[0], "upgrade")) return .{ .upgrade = try parseUpgradeArgs(args[1..]) };
     if (eql(args[0], "project")) return .{ .project = try parseProjectArgs(args[1..]) };
     if (eql(args[0], "safety")) return .{ .safety = try parseSafetyArgs(args[1..]) };
     if (eql(args[0], "agent")) return .{ .agent = try parseAgentArgs(args[1..]) };
@@ -171,6 +192,8 @@ pub fn generatePlan(allocator: std.mem.Allocator, options: ScaffoldOptions) !zst
     try addRootCommon(&plan, options);
     try addManifest(&plan, options);
     try plan.sort();
+    try distribution.addScaffoldMetadata(&plan, options.name, options.kind);
+    try plan.sort();
     return plan;
 }
 
@@ -206,6 +229,9 @@ pub fn runAlloc(
     switch (action) {
         .help => return .{ .allocator = allocator, .exit_code = 0, .output = try allocator.dupe(u8, helpText()) },
         .version => return .{ .allocator = allocator, .exit_code = 0, .output = try std.fmt.allocPrint(allocator, "zigeffect {s}\n", .{version}) },
+        .completions => |shell| return .{ .allocator = allocator, .exit_code = 0, .output = try allocator.dupe(u8, distribution.completionScript(shell)) },
+        .compatibility => |options| return runCompatibilityAlloc(allocator, io, base_dir, options),
+        .upgrade => |options| return runUpgradeAlloc(allocator, io, base_dir, options),
         .project => |options| return runProjectAlloc(allocator, io, base_dir, options),
         .safety => |options| return runSafetyAlloc(allocator, io, base_dir, options),
         .agent => |options| return runAgentAlloc(allocator, io, base_dir, options),
@@ -289,6 +315,275 @@ pub fn writePlan(
         };
     }
     return .{ .planned = plan.files.items.len, .written = plan.files.items.len, .replaced = replaced };
+}
+
+const UpgradeAction = enum { create, update, unchanged, conflict, migrate };
+const UpgradePath = struct { path: []const u8, action: UpgradeAction };
+
+const UpgradeReport = struct {
+    schema: []const u8 = distribution.upgrade_receipt_schema,
+    schema_version: u32 = 1,
+    project: []const u8,
+    kind: zstd.Project.ProjectKind,
+    from_project_schema: []const u8,
+    to_project_schema: []const u8 = zstd.Project.schema_version,
+    from_template_version: ?u32,
+    to_template_version: u32 = distribution.template_version,
+    status: []const u8,
+    dry_run: bool,
+    state_adoption: bool,
+    created: usize,
+    updated: usize,
+    unchanged: usize,
+    conflicts: usize,
+    user_owned_preserved: usize,
+    paths: []const UpgradePath,
+};
+
+fn runCompatibilityAlloc(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    base_dir: std.Io.Dir,
+    options: CompatibilityOptions,
+) !RunResult {
+    var project_dir = try openTargetDir(io, base_dir, options.root);
+    defer project_dir.close(io);
+    const manifest_text = try readOptionalFileAlloc(allocator, io, project_dir, "zigeffect.project.json", 4 * 1024 * 1024);
+    defer if (manifest_text) |text| allocator.free(text);
+    if (manifest_text == null) {
+        const report = distribution.CompatibilityReport{
+            .project_present = false,
+            .compatible = true,
+            .upgrade_required = false,
+        };
+        const output = if (options.json)
+            try std.json.Stringify.valueAlloc(allocator, report, .{})
+        else
+            try std.fmt.allocPrint(allocator, "zigeffect {s}: Zig >= {s} and < {s}; project schema {s}\n", .{
+                distribution.cli_version,
+                distribution.minimum_zig_version,
+                distribution.maximum_zig_version_exclusive,
+                zstd.Project.schema_version,
+            });
+        return .{ .allocator = allocator, .exit_code = 0, .output = output };
+    }
+
+    var manifest = try distribution.parseMigratableManifest(allocator, manifest_text.?);
+    defer manifest.deinit();
+    const metadata_text = try readOptionalFileAlloc(allocator, io, project_dir, distribution.compatibility_path, 1024 * 1024);
+    defer if (metadata_text) |text| allocator.free(text);
+    var metadata_valid = false;
+    if (metadata_text) |text| {
+        if (distribution.parseCompatibility(allocator, text)) |parsed_value| {
+            var parsed = parsed_value;
+            defer parsed.deinit();
+            metadata_valid = std.mem.eql(u8, parsed.value.project, manifest.parsed.value.name) and
+                parsed.value.kind == manifest.parsed.value.kind;
+        } else |_| {}
+    }
+    const compatible = !manifest.migrated and metadata_valid;
+    const report = distribution.CompatibilityReport{
+        .project_present = true,
+        .project = manifest.parsed.value.name,
+        .kind = manifest.parsed.value.kind,
+        .detected_project_schema = manifest.original_schema,
+        .metadata_present = metadata_text != null,
+        .compatible = compatible,
+        .upgrade_required = !compatible,
+    };
+    const output = if (options.json)
+        try std.json.Stringify.valueAlloc(allocator, report, .{})
+    else
+        try std.fmt.allocPrint(allocator, "{s}: {s}; schema={s}; metadata={s}; cli={s}\n", .{
+            manifest.parsed.value.name,
+            if (compatible) "compatible" else "upgrade required",
+            manifest.original_schema,
+            if (metadata_valid) "compatible" else "missing or incompatible",
+            distribution.cli_version,
+        });
+    return .{ .allocator = allocator, .exit_code = if (compatible) 0 else 1, .output = output };
+}
+
+fn runUpgradeAlloc(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    base_dir: std.Io.Dir,
+    options: UpgradeOptions,
+) !RunResult {
+    var project_dir = try openTargetDir(io, base_dir, options.root);
+    defer project_dir.close(io);
+    const manifest_text = try project_dir.readFileAlloc(io, "zigeffect.project.json", allocator, .limited(4 * 1024 * 1024));
+    defer allocator.free(manifest_text);
+    var manifest = try distribution.parseMigratableManifest(allocator, manifest_text);
+    defer manifest.deinit();
+
+    var expected = try generatePlan(allocator, .{
+        .kind = manifest.parsed.value.kind,
+        .name = manifest.parsed.value.name,
+        .target = ".",
+        .zigeffect_path = manifest.parsed.value.dependencies.zigeffect,
+        .zigeffect_std_path = manifest.parsed.value.dependencies.zigeffect_std,
+    });
+    defer expected.deinit();
+    const expected_state_file = findGeneratedFile(expected, distribution.scaffold_state_path) orelse return error.MissingScaffoldState;
+
+    const old_state_text = try readOptionalFileAlloc(allocator, io, project_dir, distribution.scaffold_state_path, 4 * 1024 * 1024);
+    defer if (old_state_text) |text| allocator.free(text);
+    var old_state: ?distribution.ParsedState = null;
+    defer if (old_state) |*state| state.deinit();
+    if (old_state_text) |text| {
+        old_state = try distribution.parseState(allocator, text);
+        if (!std.mem.eql(u8, old_state.?.value.project, manifest.parsed.value.name) or old_state.?.value.kind != manifest.parsed.value.kind) {
+            return error.ScaffoldStateProjectMismatch;
+        }
+    }
+
+    var paths = std.ArrayList(UpgradePath).empty;
+    defer paths.deinit(allocator);
+    var created: usize = 0;
+    var updated: usize = 0;
+    var unchanged: usize = 0;
+    var conflicts: usize = 0;
+    var user_owned_preserved: usize = 0;
+
+    for (expected.files.items) |file| {
+        if (std.mem.eql(u8, file.path, distribution.scaffold_state_path) or std.mem.eql(u8, file.path, "zigeffect.project.json")) continue;
+        if (!distribution.isToolOwnedPath(file.path)) {
+            user_owned_preserved += 1;
+            continue;
+        }
+        const current = try readOptionalFileAlloc(allocator, io, project_dir, file.path, 4 * 1024 * 1024);
+        defer if (current) |text| allocator.free(text);
+        const action: UpgradeAction = action: {
+            if (current == null) {
+                created += 1;
+                break :action .create;
+            }
+            if (std.mem.eql(u8, current.?, file.content)) {
+                unchanged += 1;
+                break :action .unchanged;
+            }
+            if (old_state) |state| {
+                if (state.value.managedFile(file.path)) |managed| {
+                    if (distribution.digestMatches(current.?, managed.sha256)) {
+                        updated += 1;
+                        break :action .update;
+                    }
+                }
+            }
+            conflicts += 1;
+            break :action .conflict;
+        };
+        try paths.append(allocator, .{ .path = file.path, .action = action });
+    }
+
+    if (manifest.migrated) {
+        updated += 1;
+        try paths.append(allocator, .{ .path = "zigeffect.project.json", .action = .migrate });
+    }
+    const state_action: UpgradeAction = if (old_state_text == null)
+        .create
+    else if (std.mem.eql(u8, old_state_text.?, expected_state_file.content))
+        .unchanged
+    else
+        .update;
+    switch (state_action) {
+        .create => created += 1,
+        .update => updated += 1,
+        .unchanged => unchanged += 1,
+        else => unreachable,
+    }
+    try paths.append(allocator, .{ .path = distribution.scaffold_state_path, .action = state_action });
+    std.mem.sort(UpgradePath, paths.items, {}, lessThanUpgradePath);
+
+    const state_adoption = old_state == null;
+    const has_changes = created != 0 or updated != 0;
+    const status: []const u8 = if (conflicts != 0)
+        "conflict"
+    else if (!has_changes)
+        "current"
+    else if (options.apply)
+        "applied"
+    else
+        "planned";
+
+    if (options.apply and conflicts == 0 and has_changes) {
+        var writes = zstd.Project.FilePlan.init(allocator);
+        defer writes.deinit();
+        for (paths.items) |item| {
+            if (item.action != .create and item.action != .update and item.action != .migrate) continue;
+            if (std.mem.eql(u8, item.path, "zigeffect.project.json")) {
+                const canonical = try manifest.parsed.value.jsonAlloc(allocator);
+                defer allocator.free(canonical);
+                try writes.add(item.path, canonical);
+            } else {
+                const generated = findGeneratedFile(expected, item.path) orelse return error.MissingUpgradeContent;
+                try writes.add(item.path, generated.content);
+            }
+        }
+        try writes.sort();
+        _ = try writePlan(io, base_dir, options.root, writes, .{ .force = true });
+    }
+
+    const report = UpgradeReport{
+        .project = manifest.parsed.value.name,
+        .kind = manifest.parsed.value.kind,
+        .from_project_schema = manifest.original_schema,
+        .from_template_version = if (old_state) |state| state.value.template_version else null,
+        .status = status,
+        .dry_run = !options.apply,
+        .state_adoption = state_adoption,
+        .created = created,
+        .updated = updated,
+        .unchanged = unchanged,
+        .conflicts = conflicts,
+        .user_owned_preserved = user_owned_preserved,
+        .paths = paths.items,
+    };
+    const output = if (options.json)
+        try std.json.Stringify.valueAlloc(allocator, report, .{})
+    else
+        try formatUpgradeReportAlloc(allocator, report);
+    return .{ .allocator = allocator, .exit_code = if (conflicts == 0) 0 else 3, .output = output };
+}
+
+fn formatUpgradeReportAlloc(allocator: std.mem.Allocator, report: UpgradeReport) ![]u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+    try output.print(allocator, "{s}: {s} (created={d} updated={d} conflicts={d} preserved={d})\n", .{
+        report.project,
+        report.status,
+        report.created,
+        report.updated,
+        report.conflicts,
+        report.user_owned_preserved,
+    });
+    for (report.paths) |item| try output.print(allocator, "- {s}: {s}\n", .{ @tagName(item.action), item.path });
+    return output.toOwnedSlice(allocator);
+}
+
+fn readOptionalFileAlloc(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
+    path: []const u8,
+    limit: usize,
+) !?[]u8 {
+    return dir.readFileAlloc(io, path, allocator, .limited(limit)) catch |err| switch (err) {
+        error.FileNotFound => null,
+        else => return err,
+    };
+}
+
+fn findGeneratedFile(plan: zstd.Project.FilePlan, path: []const u8) ?zstd.Project.GeneratedFile {
+    for (plan.files.items) |file| {
+        if (std.mem.eql(u8, file.path, path)) return file;
+    }
+    return null;
+}
+
+fn lessThanUpgradePath(_: void, left: UpgradePath, right: UpgradePath) bool {
+    return std.mem.order(u8, left.path, right.path) == .lt;
 }
 
 fn runProjectAlloc(
@@ -933,6 +1228,9 @@ pub fn helpText() []const u8 {
     \\Usage:
     \\  zigeffect --help
     \\  zigeffect --version
+    \\  zigeffect completions <bash|zsh|fish>
+    \\  zigeffect compatibility [--root <path>] [--json]
+    \\  zigeffect upgrade [--root <path>] [--dry-run|--apply] [--json]
     \\  zigeffect new <application|service|library|package|system> <name> [options]
     \\  zigeffect add <service|library|package> <name> [options]
     \\  zigeffect generate <service|layer|schema|cli|http|sql|test> <name> --component <id> [options]
@@ -954,6 +1252,7 @@ pub fn helpText() []const u8 {
     \\  --dry-run                     print the complete plan without writing
     \\  --json                        emit a stable JSON receipt
     \\  --force                       replace only files declared by the plan
+    \\  --apply                       apply a conflict-free upgrade plan
     \\
     ;
 }
@@ -1287,6 +1586,63 @@ fn parseKind(token: []const u8) ?zstd.Project.ProjectKind {
     return null;
 }
 
+fn parseCompletionsArgs(args: []const []const u8) CliError!distribution.Shell {
+    if (args.len == 0) return error.MissingOptionValue;
+    if (args.len != 1) return error.UnknownOption;
+    return std.meta.stringToEnum(distribution.Shell, args[0]) orelse error.UnknownShell;
+}
+
+fn parseCompatibilityArgs(args: []const []const u8) CliError!CompatibilityOptions {
+    var options = CompatibilityOptions{};
+    var root_set = false;
+    var index: usize = 0;
+    while (index < args.len) {
+        if (eql(args[index], "--root")) {
+            if (root_set) return error.DuplicateOption;
+            options.root = try optionValue(args, &index);
+            root_set = true;
+        } else if (eql(args[index], "--json")) {
+            if (options.json) return error.DuplicateOption;
+            options.json = true;
+            index += 1;
+        } else return error.UnknownOption;
+    }
+    try validateTarget(options.root);
+    return options;
+}
+
+fn parseUpgradeArgs(args: []const []const u8) CliError!UpgradeOptions {
+    var options = UpgradeOptions{};
+    var root_set = false;
+    var dry_run_set = false;
+    var apply_set = false;
+    var index: usize = 0;
+    while (index < args.len) {
+        if (eql(args[index], "--root")) {
+            if (root_set) return error.DuplicateOption;
+            options.root = try optionValue(args, &index);
+            root_set = true;
+        } else if (eql(args[index], "--dry-run")) {
+            if (dry_run_set) return error.DuplicateOption;
+            dry_run_set = true;
+            index += 1;
+        } else if (eql(args[index], "--apply")) {
+            if (apply_set) return error.DuplicateOption;
+            apply_set = true;
+            options.apply = true;
+            options.dry_run = false;
+            index += 1;
+        } else if (eql(args[index], "--json")) {
+            if (options.json) return error.DuplicateOption;
+            options.json = true;
+            index += 1;
+        } else return error.UnknownOption;
+    }
+    if (dry_run_set and apply_set) return error.InvalidOptionCombination;
+    try validateTarget(options.root);
+    return options;
+}
+
 fn parseProjectArgs(args: []const []const u8) (CliError || zstd.Project.ProjectError)!ProjectOptions {
     if (args.len == 0) return error.MissingCommand;
     const operation = std.meta.stringToEnum(ProjectOperation, args[0]) orelse return error.UnknownCommand;
@@ -1503,6 +1859,14 @@ fn eql(left: []const u8, right: []const u8) bool {
 test "CLI parses help version and every new scaffold kind" {
     try std.testing.expectEqual(Action.help, try parseArgs(&.{"--help"}));
     try std.testing.expectEqual(Action.version, try parseArgs(&.{"--version"}));
+    try std.testing.expectEqual(distribution.Shell.zsh, (try parseArgs(&.{ "completions", "zsh" })).completions);
+    const compatibility = try parseArgs(&.{ "compatibility", "--root", "demo", "--json" });
+    try std.testing.expectEqualStrings("demo", compatibility.compatibility.root);
+    try std.testing.expect(compatibility.compatibility.json);
+    const upgrade = try parseArgs(&.{ "upgrade", "--root", "demo", "--dry-run", "--json" });
+    try std.testing.expectEqualStrings("demo", upgrade.upgrade.root);
+    try std.testing.expect(upgrade.upgrade.dry_run);
+    try std.testing.expect(!upgrade.upgrade.apply);
 
     const cases = [_]struct {
         token: []const u8,
@@ -1534,6 +1898,9 @@ test "CLI rejects incomplete unknown and duplicate arguments" {
     try std.testing.expectError(error.UnknownOption, parseArgs(&.{ "new", "application", "demo", "--wat" }));
     try std.testing.expectError(error.DuplicateOption, parseArgs(&.{ "new", "application", "demo", "--json", "--json" }));
     try std.testing.expectError(error.MissingOptionValue, parseArgs(&.{ "new", "application", "demo", "--target" }));
+    try std.testing.expectError(error.MissingOptionValue, parseArgs(&.{"completions"}));
+    try std.testing.expectError(error.UnknownShell, parseArgs(&.{ "completions", "powershell" }));
+    try std.testing.expectError(error.InvalidOptionCombination, parseArgs(&.{ "upgrade", "--dry-run", "--apply" }));
 }
 
 test "CLI parses bounded project add and generate operations" {
@@ -1623,6 +1990,8 @@ test "generator emits deterministic valid manifests skills and safe common files
         try std.testing.expect(plan.find("zigeffect.project.json") != null);
         try std.testing.expect(plan.find(".agents/skills/zigeffect-development/SKILL.md") != null);
         try std.testing.expect(plan.find(".claude/skills/zigeffect-development/SKILL.md") != null);
+        try std.testing.expect(plan.find(distribution.compatibility_path) != null);
+        try std.testing.expect(plan.find(distribution.scaffold_state_path) != null);
         try std.testing.expect(plan.find("README.md") != null);
         try std.testing.expect(plan.find("test/root_test.zig") != null);
 
@@ -1631,6 +2000,14 @@ test "generator emits deterministic valid manifests skills and safe common files
         try std.testing.expectEqual(kind, parsed.value.kind);
         try std.testing.expectEqual(zstd.Project.SafetyProfile.agent_safe_v1, parsed.value.safety.profile);
         try std.testing.expectEqual(@as(usize, 12), parsed.value.safety.gates.len);
+
+        var compatibility = try distribution.parseCompatibility(std.testing.allocator, plan.find(distribution.compatibility_path).?.content);
+        defer compatibility.deinit();
+        try std.testing.expectEqual(kind, compatibility.value.kind);
+        var state = try distribution.parseState(std.testing.allocator, plan.find(distribution.scaffold_state_path).?.content);
+        defer state.deinit();
+        try std.testing.expectEqual(kind, state.value.kind);
+        try std.testing.expect(state.value.managedFile(distribution.compatibility_path) != null);
 
         for (plan.files.items[1..], 1..) |file, index| {
             try std.testing.expect(std.mem.order(u8, plan.files.items[index - 1].path, file.path) == .lt);
@@ -1692,6 +2069,40 @@ test "system plan contains independently buildable services and shared package" 
         "packages/shared/build.zig",
         "packages/shared/src/root.zig",
     }) |path| try std.testing.expect(plan.find(path) != null);
+}
+
+test "every scaffold matches the committed compatibility snapshot" {
+    const SnapshotCase = struct { kind: zstd.Project.ProjectKind, files: usize, sha256: []const u8 };
+    const Snapshot = struct {
+        schema: []const u8,
+        schema_version: u32,
+        template_schema: []const u8,
+        template_version: u32,
+        project: []const u8,
+        cases: []const SnapshotCase,
+    };
+    var snapshot = try std.json.parseFromSlice(Snapshot, std.testing.allocator, @embedFile("snapshots/scaffold-contracts.v1.json"), .{ .allocate = .alloc_always });
+    defer snapshot.deinit();
+    try std.testing.expectEqualStrings("zigeffect.scaffold-contract-snapshot.v1", snapshot.value.schema);
+    try std.testing.expectEqual(@as(u32, 1), snapshot.value.schema_version);
+    try std.testing.expectEqualStrings(distribution.template_schema, snapshot.value.template_schema);
+    try std.testing.expectEqual(distribution.template_version, snapshot.value.template_version);
+    try std.testing.expectEqual(@as(usize, 5), snapshot.value.cases.len);
+
+    for (snapshot.value.cases) |expected_case| {
+        var plan = try generatePlan(std.testing.allocator, .{
+            .kind = expected_case.kind,
+            .name = snapshot.value.project,
+            .target = snapshot.value.project,
+            .zigeffect_path = "../zigeffect",
+            .zigeffect_std_path = "../zigeffect-std",
+        });
+        defer plan.deinit();
+        const digest = try distribution.contractDigestAlloc(std.testing.allocator, plan);
+        defer std.testing.allocator.free(digest);
+        try std.testing.expectEqual(expected_case.files, plan.files.items.len);
+        try std.testing.expectEqualStrings(expected_case.sha256, digest);
+    }
 }
 
 test "writer dry run creates nothing and default mode refuses a non-empty target" {
@@ -1758,6 +2169,67 @@ test "writer accepts an explicit absolute target" {
     const content = try tmp.dir.readFileAlloc(std.testing.io, "absolute-project/src/main.zig", std.testing.allocator, .limited(64));
     defer std.testing.allocator.free(content);
     try std.testing.expectEqualStrings("const ready = true;\n", content);
+}
+
+test "upgrade adopts pristine scaffolds preserves user source rejects managed conflicts and migrates manifests" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var plan = try generatePlan(std.testing.allocator, .{
+        .kind = .application,
+        .name = "upgrade-app",
+        .target = "upgrade-app",
+        .zigeffect_path = "../../zigeffect",
+        .zigeffect_std_path = "../../zigeffect-std",
+    });
+    defer plan.deinit();
+    _ = try writePlan(std.testing.io, tmp.dir, "upgrade-app", plan, .{});
+
+    var compatible = try runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{ "compatibility", "--root", "upgrade-app", "--json" });
+    defer compatible.deinit();
+    try std.testing.expectEqual(@as(u8, 0), compatible.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, compatible.output, "\"compatible\":true") != null);
+
+    try tmp.dir.deleteFile(std.testing.io, "upgrade-app/.zigeffect/scaffold-state.json");
+    try tmp.dir.deleteFile(std.testing.io, "upgrade-app/.zigeffect/compatibility.json");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "upgrade-app/src/app.zig", .data = "// user-owned application source\n" });
+    var adopt = try runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{ "upgrade", "--root", "upgrade-app", "--apply", "--json" });
+    defer adopt.deinit();
+    try std.testing.expectEqual(@as(u8, 0), adopt.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, adopt.output, "\"status\":\"applied\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, adopt.output, "\"state_adoption\":true") != null);
+    const preserved = try tmp.dir.readFileAlloc(std.testing.io, "upgrade-app/src/app.zig", std.testing.allocator, .limited(1024));
+    defer std.testing.allocator.free(preserved);
+    try std.testing.expectEqualStrings("// user-owned application source\n", preserved);
+
+    const managed_path = "upgrade-app/.agents/skills/zigeffect-development/SKILL.md";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = managed_path, .data = "user-edited managed skill\n" });
+    var conflict = try runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{ "upgrade", "--root", "upgrade-app", "--apply", "--json" });
+    defer conflict.deinit();
+    try std.testing.expectEqual(@as(u8, 3), conflict.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, conflict.output, "\"status\":\"conflict\"") != null);
+    const retained = try tmp.dir.readFileAlloc(std.testing.io, managed_path, std.testing.allocator, .limited(1024));
+    defer std.testing.allocator.free(retained);
+    try std.testing.expectEqualStrings("user-edited managed skill\n", retained);
+
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = managed_path, .data = plan.find(".agents/skills/zigeffect-development/SKILL.md").?.content });
+    const manifest_text = try tmp.dir.readFileAlloc(std.testing.io, "upgrade-app/zigeffect.project.json", std.testing.allocator, .limited(1024 * 1024));
+    defer std.testing.allocator.free(manifest_text);
+    var parsed = try std.json.parseFromSlice(zstd.Project.Manifest, std.testing.allocator, manifest_text, .{ .allocate = .alloc_always });
+    defer parsed.deinit();
+    parsed.value.schema = distribution.legacy_project_schema;
+    const legacy = try std.json.Stringify.valueAlloc(std.testing.allocator, parsed.value, .{});
+    defer std.testing.allocator.free(legacy);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "upgrade-app/zigeffect.project.json", .data = legacy });
+
+    var migrate = try runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{ "upgrade", "--root", "upgrade-app", "--apply", "--json" });
+    defer migrate.deinit();
+    try std.testing.expectEqual(@as(u8, 0), migrate.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, migrate.output, "\"action\":\"migrate\"") != null);
+    const migrated_text = try tmp.dir.readFileAlloc(std.testing.io, "upgrade-app/zigeffect.project.json", std.testing.allocator, .limited(1024 * 1024));
+    defer std.testing.allocator.free(migrated_text);
+    var migrated = try zstd.Project.parseManifest(std.testing.allocator, migrated_text);
+    defer migrated.deinit();
+    try std.testing.expectEqualStrings(zstd.Project.schema_version, migrated.value.schema);
 }
 
 test "run emits a complete JSON dry-run and an honest refused receipt" {

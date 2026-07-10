@@ -4,6 +4,20 @@ Local-first project generation and development orchestration for zigeffect.
 The CLI writes deterministic plans produced by `zstd.Project`; it does not add
 another tool under the core engine's `tools/` directory.
 
+## Install And Completions
+
+The supported local toolchain is Zig `>= 0.16.0` and `< 0.17.0`:
+
+```sh
+zig build test
+zig build install --prefix "$HOME/.local"
+"$HOME/.local/bin/zigeffect" --version
+zigeffect completions zsh > "$HOME/.zfunc/_zigeffect"
+```
+
+`completions` also supports `bash` and `fish`. The generated scripts are
+deterministic and include every top-level command.
+
 ## Build And Test
 
 ```sh
@@ -45,6 +59,22 @@ Debug, ReleaseSafe, allocation/leak, causal, schedule, and executor-equivalence
 gates plus explicit optional sanitizer/stack-protection/fuzz capabilities. Dependency paths are explicit relative paths so
 the generated project stays portable and does not persist machine-specific
 absolute locations.
+
+Every scaffold also commits `.zigeffect/compatibility.json` and a SHA-256
+`.zigeffect/scaffold-state.json`. Inspect or upgrade the local contract with:
+
+```sh
+zigeffect compatibility --root ./my-app --json
+zigeffect upgrade --root ./my-app --dry-run --json
+zigeffect upgrade --root ./my-app --apply --json
+```
+
+Upgrade is dry-run by default. It preserves source, tests, READMEs, build files,
+requirements, and unrelated files. Only CLI-owned compatibility and agent-skill
+files are eligible for replacement, and an edited managed file refuses the
+entire apply with exit code `3`. Legacy `zigeffect.project.v0` manifests migrate
+to v1 through the same preflight. State written by a newer CLI or template is
+rejected rather than silently downgraded.
 
 ## Manage A Project
 
@@ -121,3 +151,6 @@ Schema, CLI, HTTP, SQL, external calls, artifacts, component dependencies, and
 acceptance evaluation. These facts use stable labels and references so agents
 and the workbench can compare application intent across executor-specific event
 ids and ordering.
+
+The version matrix, ownership rules, snapshot contract, and complete release
+gate are documented in `packages/zigeffect/docs/compatibility.md`.

@@ -40,6 +40,7 @@ semantic fact comparison, not exact event-id graph isomorphism.
 | 13 | Production-operable guardrails | **live commands, concurrency facts, transport policy/discovery registry, ops storage/alert policy, gated ops artifact responses, alert delivery/webhook/provider envelopes, provider secret injection and retry reporting, endpoint-aware runbooks** | `workbench/src/collector`, `src/services/causal_concurrency.zig`, `src/services/causal_ops.zig`, `causal_ops_storage.zig`, `causal_ops_alert.zig`, `src/cluster/transport.zig` |
 | 14 | Multi-runner causal evidence | **local lineage stitcher plus deployment artifact metadata** | `src/services/causal_runner_lineage.zig` |
 | 15 | Effect-grade standard library | **M1-M19 delivered**: service kernel, production Schema, production Schema-powered CLI, effect-native config/JSON/secrets, streams/queues/pubsub/sinks, local process/workspace/FS adapters, observability recorder/artifacts, HTTP/WebSocket contracts/adapters, Schema-coded local HTTP router, SQL contracts plus local Postgres adapter, typed SQL row decoding, Postgres migration planning/apply SQL, experimental QUIC/HTTP3/WebTransport adapter, local WebTransport workbench bridge, local agent toolkit, real local-tool cookbook examples, local agent supervisor, and workbench dev-session UX | `packages/zigeffect-std`, `packages/zigeffect-postgres`, `packages/zigeffect-quic`, `packages/zigeffect-std/docs/cookbook.md`, `docs/superpowers/specs/2026-06-25-zigeffect-std-effectts-grade-roadmap-design.md` |
+| 16 | Agentic application platform | **M88-M95 delivered**: project contracts, Codex/Claude skills, five production scaffolds, instrumented project workflows, provider-neutral development protocol, semantic application facts, Workbench project UX, offline provider conformance, install/completions, compatibility metadata, conflict-safe upgrades, generated snapshots, and one local release gate | `packages/zigeffect-cli`, `packages/zigeffect-std/src/project`, `packages/zigeffect-std/src/application`, `workbench/`, `docs/compatibility.md` |
 
 ## What is real today
 
@@ -874,7 +875,20 @@ Deliver install/version/completion flows, compatibility metadata, upgrade
 dry-runs, scaffold migrations, generated-project snapshots, public API gates,
 and one complete local release command.
 
-**Status:** active.
+**Status:** delivered on 2026-07-10. The installable CLI is version `0.2.0`,
+declares Zig `>=0.16.0,<0.17.0`, and emits deterministic Bash, Zsh, and Fish
+completions. Every scaffold includes a validated compatibility contract and a
+SHA-256 state file limited to CLI-owned metadata and agent skills. `upgrade` is
+dry-run by default, adopts pristine older scaffolds, migrates
+`zigeffect.project.v0` to v1, preserves user-owned source/tests/build files and
+unrelated files, and refuses the entire apply when a managed file has diverged.
+All five scaffold contracts are pinned by a versioned SHA-256 snapshot and are
+then compiled in Debug and ReleaseSafe; the core public API review remains in
+the gate. `bun run zigeffect:local-release` stage-installs the binary and covers
+stdlib, CLI, generated projects, the 14-case provider matrix, core raw and
+ReleaseSafe tests, the core release gate, Postgres, QUIC, zio, Workbench
+typecheck/tests/build, redaction, docs honesty, and tool hygiene. Compatibility
+and ownership details live in `docs/compatibility.md`.
 
 ## Hardening milestone roadmap
 
