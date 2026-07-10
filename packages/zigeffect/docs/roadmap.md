@@ -33,7 +33,7 @@ semantic fact comparison, not exact event-id graph isomorphism.
 | 6 | Causal dev loop (compare/advice/verdict) | **done** | `tools/causal_dev_loop`, `causal_compare`, `causal_advice`, `causal_verdict` |
 | 7 | Guarded remediation + agent interventions | **closed loop, gate-off by default** | `src/services/policy_engine.zig`, `src/services/agent_intervention.zig`, `tools/causal_*remediation*` |
 | 8 | App-facing causal trace | **done** | `src/services/causal_app_runtime.zig` |
-| 9 | Visual workbench (SolidJS / zig-webui) | **live-attach + dev-session UX** (static + streaming via collector plus host-frame ingest, host apply adapter, host runner bundle, supervised host loop, NDJSON fact tap, host request router, runtime runner, local agent runtime/artifact capture/turn receipts/transcript tailing/process supervision, and local agent development health/timeline/issues view) | `workbench/`, `workbench/src/collector/` |
+| 9 | Visual workbench (SolidJS / zig-webui) | **live-attach + dev-session UX** (static + streaming via collector plus host-frame ingest, host apply adapter, host runner bundle, supervised host loop, NDJSON fact tap, host request router, runtime runner, local agent runtime/artifact capture/turn receipts/transcript tailing/process supervision/session registry, and local agent development health/timeline/issues view) | `workbench/`, `workbench/src/collector/` |
 | 10 | Export adapters (JSONL/DOT/OTel/OTLP/graph-history/NenDB) | **OTLP + collector live end-to-end** | `src/services/causal_*_backend.zig`, `causal_otlp_json.zig` |
 | 11 | Durable workflows + clustering | **scheduler runs on zio; workflow journal appends can live-mirror into causal stores; loopback + remote socket wrappers cross the transport boundary; discovery JSON/file/HTTP snapshots, caller-owned HTTP refresh loops, and auth-epoch-aware selection feed the local registry** | `src/workflow/*`, `src/cluster/*` |
 | 12 | Agent-operable runtime layer | **bounded interventions, counterfactuals, invariants, evals, semantic diffs, live command executor/tap, poll bridge, local daemon/HTTP engine bridge, eval diff artifacts/links/manifests, dev-loop/remediation-decision/patch-proposal eval persistence** | `src/services/agent_intervention.zig`, `counterfactual.zig`, `causal_invariant.zig`, `agent_eval.zig`, `causal_diff.zig`, `causal_live_command.zig` |
@@ -381,7 +381,7 @@ substrates into real deployed systems:
    zigeffect's own causal tools share development evidence. The first pass
    reuses `zigeffect.causal.dev-session.v1` and teaches the workbench to render
    agents, checks, commands, artifact links, guardrails, and next actions. The
-   ordered sequence is M72 through M83 below.
+   foundation is M72 through M84; the next operator sequence is M85 through M87.
 
 ## Local agentic development roadmap
 
@@ -389,7 +389,7 @@ This is the local-first sequence for making zigeffect useful as the development
 engine for local projects and standard-library work. It intentionally comes
 before hosting or broad distributed orchestration.
 
-Status on 2026-07-10: M72 through M83 are implemented in the workbench,
+Status on 2026-07-10: M72 through M84 are implemented in the workbench,
 `causal-dev-session`, and collector. Local session events have parser/apply
 coverage, native Codex/Claude JSONL fixtures, a `bun run zigeffect:local-agent-gate`
 command, and a live collector WebSocket overlay (`POST /agent-feed` and
@@ -405,8 +405,11 @@ supports abort-driven termination, and posts honest terminal receipts. Native
 adapters now normalize public `codex exec --json` and Claude Code
 `--output-format stream-json` envelopes, including item/tool lifecycle upserts,
 parallel Claude tool uses, bounded snippets, and offline fixtures. The declared
-local-first M72-M83 foundation is complete; subsequent work can deepen
-interactive PTY control, resumable session recovery, and operator UX without a
+local-first protocol/runtime foundation is complete. A bounded local session
+registry now records redacted lifecycle/counter state, atomically persists
+versioned snapshots, marks stale restored ownership interrupted, and integrates
+write-through persistence into every supervisor terminal path. The next local
+sequence is M85 control API, M86 operator UX, and M87 PTY input; none requires a
 hosting dependency.
 
 ### M72 - Local development session protocol
@@ -618,6 +621,63 @@ and Claude Code CLIs into the provider-neutral `agent_turn` protocol.
 **Status:** delivered with public-envelope fixtures, provider command builders,
 multi-event transcript sequencing, structured JSON redaction, and process
 supervisor integration.
+
+### M84 - Durable local agent session registry
+
+**Goal:** retain honest, bounded local process ownership across collector or
+workbench restarts.
+
+**Work:**
+- Add a versioned in-memory session registry with copied read models and strict
+  lifecycle transitions.
+- Redact and bound command, cwd, task, label, and diagnostic fields.
+- Restore snapshots all-or-nothing and mark stale starting/running entries
+  interrupted.
+- Evict only the oldest terminal record at capacity.
+- Add fakeable text storage and an atomic Bun file store.
+- Write through starting, running, and terminal state from the process
+  supervisor.
+- Kill and settle a child if initial collector delivery fails.
+
+**Acceptance:**
+- Tests cover lifecycle counters, redaction, text bounds, recovery, corruption,
+  capacity, fake storage, and real Bun file persistence.
+- Supervisor tests cover success, spawn failure, abort, stream failure, and
+  initial collector rejection.
+- Persisted snapshots never claim restored processes are still running.
+
+**Status:** delivered.
+
+### M85 - Local agent control API
+
+**Goal:** expose policy-bounded local list/start/stop/session-detail operations
+to the workbench without introducing a hosted control plane.
+
+**Work:**
+- Add authenticated local HTTP routes over a caller-owned tool allowlist.
+- Own active process abort controllers and reject duplicate session IDs.
+- Serve registry snapshots and individual session records.
+- Emit causal command/guardrail receipts for accepted and rejected operations.
+
+### M86 - Workbench local operator controls
+
+**Goal:** let a local developer launch approved tools, inspect durable sessions,
+and stop active ownership from the SolidJS collaboration view.
+
+**Work:**
+- Add session history/detail surfaces and explicit start/stop commands.
+- Show recovery interruptions, transcript counters, and persistence state.
+- Keep all mutation controls behind the local control API policy response.
+
+### M87 - Bidirectional PTY sessions
+
+**Goal:** support interactive local coding-agent processes after durable
+ownership and policy controls exist.
+
+**Work:**
+- Add a bounded PTY adapter with explicit stdin ownership and resize events.
+- Stream terminal output through provider adapters without duplicating receipts.
+- Enforce idle/runtime/output limits, abort cleanup, and no-orphan recovery.
 
 ## Hardening milestone roadmap
 

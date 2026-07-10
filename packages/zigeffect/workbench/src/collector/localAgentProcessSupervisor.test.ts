@@ -75,6 +75,7 @@ test("runLocalAgentProcessSupervisor streams turns between running and terminal 
   );
 
   expect(summary).toEqual({
+    sessionId: null,
     status: "done",
     exitCode: 0,
     interrupted: false,
@@ -171,6 +172,7 @@ test("runLocalAgentProcessSupervisor records spawn exceptions without claiming t
   );
 
   expect(summary).toEqual({
+    sessionId: null,
     status: "failed",
     exitCode: null,
     interrupted: false,

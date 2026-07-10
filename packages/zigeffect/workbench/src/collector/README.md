@@ -66,6 +66,20 @@ before browser delivery. Secret-shaped JSON fields are structurally redacted,
 payload snippets are bounded, unsupported events are ignored, and tests use the
 offline fixtures under `fixtures/`.
 
+## Durable local sessions
+
+`localAgentSessionRegistry.ts` keeps bounded, copied session records and a
+versioned `zigeffect.local-agent-sessions.v1` snapshot. Restoring a snapshot
+marks any persisted `starting` or `running` entry `interrupted`, because an OS
+process handle cannot survive registry-owner restart.
+
+`bunLocalAgentSessionStore(path)` writes snapshots through a unique sibling
+temporary file and atomic rename. Pass both `registry` and `sessionStore` to
+`runLocalAgentProcessSupervisor`; it writes through `starting`, `running`, and
+terminal transitions. Commands, paths, tasks, labels, and diagnostics are
+redacted and capped before persistence. Retention evicts only old terminal
+records and never hides active ownership.
+
 ## Point the workbench at it
 
 Open the workbench with `?live=<ws-url>`:

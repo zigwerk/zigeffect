@@ -76,10 +76,14 @@ The ordered local-first roadmap is:
 10. M81 - Local agent transcript tail.
 11. M82 - Local agent process supervisor.
 12. M83 - Native Codex and Claude transcript adapters.
+13. M84 - Durable local agent session registry.
 
-M72 through M83 are implemented. The remaining local maturity frontier is
-interactive PTY control, resumable process/session recovery, and deeper
-workbench operator controls; none requires a hosted control plane.
+M72 through M84 are implemented. The registry records redacted session
+lifecycle and counters, writes starting/running/terminal snapshots through a
+caller-owned store, restores snapshots all-or-nothing, and marks stale active
+ownership interrupted. The next local maturity sequence is M85 control API,
+M86 workbench operator controls, and M87 interactive PTY support; none requires
+a hosted control plane.
 
 ## Boundaries
 

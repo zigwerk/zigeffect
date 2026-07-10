@@ -1,6 +1,12 @@
 import type { LocalDevAgentKind } from "../causalArtifact";
 import type { LocalDevSessionEvent } from "../localDevSessionFeed";
 import { postLocalAgentEvent } from "./localAgentRuntime";
+import type {
+  LocalAgentSessionRegistry,
+  LocalAgentSessionStore,
+  LocalAgentSessionTerminal,
+} from "./localAgentSessionRegistry";
+import { saveLocalAgentSessionRegistry } from "./localAgentSessionRegistry";
 import {
   runLocalAgentTranscriptTail,
   type LocalAgentTranscriptAdapter,
@@ -36,9 +42,13 @@ export type LocalAgentProcessSupervisorOptions = {
   sequenceStart?: number;
   signal?: AbortSignal;
   stderrLimitBytes?: number;
+  registry?: LocalAgentSessionRegistry;
+  sessionId?: string;
+  sessionStore?: LocalAgentSessionStore;
 };
 
 export type LocalAgentProcessSupervisorSummary = {
+  sessionId: string | null;
   status: "done" | "failed";
   exitCode: number | null;
   interrupted: boolean;
@@ -82,6 +92,33 @@ export async function runLocalAgentProcessSupervisor(
 ): Promise<LocalAgentProcessSupervisorSummary> {
   let sequence = options.sequenceStart ?? 0;
   let postedEvents = 0;
+  if (options.sessionStore && !options.registry) {
+    throw new Error("sessionStore requires a session registry");
+  }
+  const registrySession = options.registry?.begin({
+    agentId: tool.id,
+    agentKind: tool.kind,
+    agentLabel: tool.label,
+    command: tool.command,
+    cwd: tool.cwd,
+    task: tool.task,
+  }, options.sessionId);
+  const sessionId = registrySession?.id ?? null;
+
+  async function persistSession(): Promise<void> {
+    if (options.registry && options.sessionStore) {
+      await saveLocalAgentSessionRegistry(options.registry, options.sessionStore);
+    }
+  }
+
+  async function finishSession(terminal: LocalAgentSessionTerminal): Promise<void> {
+    if (sessionId) {
+      options.registry?.finish(sessionId, terminal);
+      await persistSession();
+    }
+  }
+
+  await persistSession();
 
   async function emit(event: Omit<LocalDevSessionEvent, "sequence">): Promise<void> {
     sequence += 1;
@@ -99,22 +136,37 @@ export async function runLocalAgentProcessSupervisor(
     process = await runner.start(tool);
   } catch (error) {
     const detail = errorDetail(error);
-    await emit({
-      kind: "warning",
-      value: `${tool.label} failed to start: ${detail}`,
-    });
-    await emit({
-      kind: "check_result",
-      label: tool.checkLabel ?? tool.label,
-      command: commandText(tool.command),
-      status: "fail",
-      detail,
-    });
-    await emit(agentStatus(tool, "failed"));
-    return emptySummary(sequence, postedEvents);
+    try {
+      await emit({
+        kind: "warning",
+        value: `${tool.label} failed to start: ${detail}`,
+      });
+      await emit({
+        kind: "check_result",
+        label: tool.checkLabel ?? tool.label,
+        command: commandText(tool.command),
+        status: "fail",
+        detail,
+      });
+      await emit(agentStatus(tool, "failed"));
+    } finally {
+      await finishSession(terminalRecord("failed", null, false, postedEvents, sequence, detail));
+    }
+    return emptySummary(sessionId, sequence, postedEvents);
   }
 
-  await emit(agentStatus(tool, "running"));
+  try {
+    if (sessionId) {
+      options.registry?.markRunning(sessionId);
+      await persistSession();
+    }
+    await emit(agentStatus(tool, "running"));
+  } catch (error) {
+    await terminateProcess(process);
+    const detail = `collector delivery failed: ${errorDetail(error)}`;
+    await finishSession(terminalRecord("interrupted", null, true, postedEvents, sequence, detail));
+    throw error;
+  }
 
   let interrupted = false;
   let killRequested = false;
@@ -166,6 +218,14 @@ export async function runLocalAgentProcessSupervisor(
       }
     }
     await Promise.allSettled([process.exited, transcriptPromise, stderrPromise]);
+    await finishSession(terminalRecord(
+      "interrupted",
+      null,
+      true,
+      postedEvents,
+      sequence,
+      `process supervision failed: ${errorDetail(error)}`,
+    ));
     throw error;
   } finally {
     abortSignal?.removeEventListener("abort", requestKill);
@@ -174,16 +234,32 @@ export async function runLocalAgentProcessSupervisor(
   sequence = transcript.lastSequence;
   postedEvents += transcript.posted;
   const succeeded = exitCode === 0 && !interrupted;
-  await emit({
-    kind: "check_result",
-    label: tool.checkLabel ?? tool.label,
-    command: commandText(tool.command),
-    status: succeeded ? "pass" : "fail",
-    detail: terminalDetail(exitCode, interrupted, transcript, stderr),
-  });
-  await emit(agentStatus(tool, succeeded ? "done" : "failed"));
+  const detail = terminalDetail(exitCode, interrupted, transcript, stderr);
+  try {
+    await emit({
+      kind: "check_result",
+      label: tool.checkLabel ?? tool.label,
+      command: commandText(tool.command),
+      status: succeeded ? "pass" : "fail",
+      detail,
+    });
+    await emit(agentStatus(tool, succeeded ? "done" : "failed"));
+  } finally {
+    await finishSession({
+      status: succeeded ? "done" : interrupted ? "interrupted" : "failed",
+      exitCode,
+      interrupted,
+      lines: transcript.lines,
+      turns: transcript.turns,
+      ignored: transcript.ignored,
+      postedEvents,
+      lastSequence: sequence,
+      detail: succeeded ? undefined : detail,
+    });
+  }
 
   return {
+    sessionId,
     status: succeeded ? "done" : "failed",
     exitCode,
     interrupted,
@@ -210,10 +286,12 @@ function agentStatus(
 }
 
 function emptySummary(
+  sessionId: string | null,
   lastSequence: number,
   postedEvents: number,
 ): LocalAgentProcessSupervisorSummary {
   return {
+    sessionId,
     status: "failed",
     exitCode: null,
     interrupted: false,
@@ -223,6 +301,36 @@ function emptySummary(
     postedEvents,
     lastSequence,
   };
+}
+
+function terminalRecord(
+  status: LocalAgentSessionTerminal["status"],
+  exitCode: number | null,
+  interrupted: boolean,
+  postedEvents: number,
+  lastSequence: number,
+  detail?: string,
+): LocalAgentSessionTerminal {
+  return {
+    status,
+    exitCode,
+    interrupted,
+    lines: 0,
+    turns: 0,
+    ignored: 0,
+    postedEvents,
+    lastSequence,
+    detail,
+  };
+}
+
+async function terminateProcess(process: LocalAgentProcessHandle): Promise<void> {
+  try {
+    process.kill();
+  } catch {
+    // A concurrently exiting process may already be gone.
+  }
+  await Promise.allSettled([process.exited]);
 }
 
 function terminalDetail(
