@@ -403,7 +403,7 @@ pub const LocalClient = struct {
         defer allocator.free(response_buffer);
         var response_writer = std.Io.Writer.fixed(response_buffer);
         const response_reader = live_response.reader(&.{});
-        response_reader.streamRemaining(&response_writer) catch |err| {
+        _ = response_reader.streamRemaining(&response_writer) catch |err| {
             if (response_writer.buffered().len >= options.response_body_limit) {
                 return error.ResponseBodyTooLarge;
             }
