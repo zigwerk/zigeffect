@@ -9,6 +9,7 @@ fn addV2Test(b: *std.Build, runner: std.Build.LazyPath, options: std.Build.TestO
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const testing_runner = b.path("../zigeffect/src/testing/runner.zig");
 
     const zigeffect = b.createModule(.{
         .root_source_file = b.path("../zigeffect/src/zigeffect.zig"),
