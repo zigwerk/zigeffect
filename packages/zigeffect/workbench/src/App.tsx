@@ -39,15 +39,21 @@ import {
   parseArtifactJson,
   queryCommandsForEvent,
 } from "./causalArtifact";
-import { loadPayload, type WorkbenchSession } from "./workbenchBridge";
+import { loadPayload, requestEstateScan, type WorkbenchSession } from "./workbenchBridge";
 import { createLiveArtifact, liveUrlFromSearch, webSocketLiveSource } from "./liveAttach";
+import { deriveZiacVisualModel, parseZiacVisualArtifact } from "./ziacVisualArtifact";
 
 const VisualGraphCanvas = lazy(async () => {
   const module = await import("./visualGraphAdapter");
   return { default: module.VisualGraphCanvas };
 });
 
-type Tab = "timeline" | "agents" | "findings" | "graph" | "visual-graph" | "diff" | "chain" | "queries" | "metadata";
+const ZiacWorkbenchView = lazy(async () => {
+  const module = await import("./ZiacWorkbench");
+  return { default: module.ZiacWorkbench };
+});
+
+type Tab = "timeline" | "agents" | "findings" | "graph" | "visual-graph" | "diff" | "chain" | "queries" | "metadata" | "ziac-topology" | "ziac-map";
 type WorkbenchTab = { id: Tab; label: string };
 
 const tabs: WorkbenchTab[] = [
@@ -62,8 +68,13 @@ const tabs: WorkbenchTab[] = [
   { id: "metadata", label: "Metadata" },
 ];
 
-export function workbenchTabsForArtifact(): WorkbenchTab[] {
-  return tabs;
+const ziacTabs: WorkbenchTab[] = [
+  { id: "ziac-topology", label: "Topology" },
+  { id: "ziac-map", label: "Global Map" },
+];
+
+export function workbenchTabsForArtifact(schema?: string): WorkbenchTab[] {
+  return schema === "ziac.visual.v1" ? ziacTabs : tabs;
 }
 
 const laneKinds: GraphLaneKind[] = ["run", "scope", "fiber", "resource", "retry"];
@@ -77,7 +88,7 @@ const laneLabels: Record<GraphLaneKind, string> = {
 };
 
 export function App() {
-  const [payload] = createResource(loadPayload);
+  const [payload, { refetch }] = createResource(loadPayload);
   const [activeTab, setActiveTab] = createSignal<Tab>("timeline");
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   const [search, setSearch] = createSignal("");
@@ -111,11 +122,24 @@ export function App() {
     try {
       const artifactPath = loaded.session?.artifact_path ?? "sample-artifact.json";
       const raw = parseArtifactJson(loaded.artifactJson);
+      if (typeof raw === "object" && raw !== null && "schema" in raw && raw.schema === "ziac.visual.v1") {
+        return {
+          model: null,
+          governance: null,
+          semanticDiff: null,
+          localDevSession: null,
+          ziac: deriveZiacVisualModel(parseZiacVisualArtifact(raw)),
+          raw,
+          session: loaded.session,
+          error: null,
+        };
+      }
       return {
         model: deriveWorkbenchModel(raw, { artifactPath }),
         governance: deriveGovernanceModel(raw, { artifactPath }),
         semanticDiff: deriveSemanticDiffModel(raw, { artifactPath }),
         localDevSession: deriveLocalDevSessionModel(raw, { artifactPath }),
+        ziac: null,
         raw,
         session: loaded.session,
         error: null,
@@ -126,6 +150,7 @@ export function App() {
         governance: null,
         semanticDiff: null,
         localDevSession: null,
+        ziac: null,
         raw: null,
         session: loaded.session,
         error: error instanceof Error ? error.message : "failed to parse artifact",
@@ -137,6 +162,7 @@ export function App() {
   const governance = createMemo(() => parsed()?.governance ?? null);
   const semanticDiff = createMemo(() => parsed()?.semanticDiff ?? null);
   const localDevSession = createMemo(() => parsed()?.localDevSession ?? null);
+  const ziacModel = createMemo(() => parsed()?.ziac ?? null);
   const availableTabs = createMemo(() => workbenchTabsForArtifact());
   const graphModel = createMemo(() => {
     const current = model();
@@ -184,6 +210,17 @@ export function App() {
       await navigator.clipboard.writeText(command);
       setCopiedCommand(command);
       window.setTimeout(() => setCopiedCommand(null), 1200);
+    }
+  }
+
+  async function refreshEstate() {
+    try {
+      const result = await requestEstateScan();
+      if (!result.ok) return false;
+      await refetch();
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -345,6 +382,13 @@ export function App() {
               </aside>
             </section>
           </>
+        )}
+      </Show>
+      <Show when={ziacModel()}>
+        {(current) => (
+          <Suspense fallback={<div class="loading-state">Loading Ziac infrastructure</div>}>
+            <ZiacWorkbenchView model={current()} session={parsed()?.session ?? null} onEstateRefresh={refreshEstate} />
+          </Suspense>
         )}
       </Show>
     </main>

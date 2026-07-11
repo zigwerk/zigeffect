@@ -16,6 +16,9 @@ pub const LaunchMode = enum {
 pub const LaunchOptions = struct {
     mode: LaunchMode,
     artifact_path: [:0]const u8,
+    log_path: ?[:0]const u8 = null,
+    estate_scan_executable: ?[:0]const u8 = null,
+    estate_connection_id: ?[:0]const u8 = null,
 };
 
 pub const SessionOptions = struct {
@@ -25,29 +28,50 @@ pub const SessionOptions = struct {
 
 pub fn usage() []const u8 {
     return
-        \\usage:
-        \\  zig build causal-workbench -- <artifact.json>
-        \\  zig build causal-workbench -- --server-only <artifact.json>
-        \\
+    \\usage:
+    \\  zig build causal-workbench -- <artifact.json>
+    \\  zig build causal-workbench -- --server-only <artifact.json>
+    \\  zig build causal-workbench -- --server-only --logs <events.jsonl> <artifact.json>
+    \\  zig build causal-workbench -- --server-only --estate-scan <ziac-executable> <connection-id> <artifact.json>
+    \\
     ;
 }
 
 pub fn parseLaunchArgs(args: []const [:0]const u8) ?LaunchOptions {
-    if (args.len == 2) {
-        return .{
-            .mode = .window,
-            .artifact_path = args[1],
-        };
+    if (args.len < 2) return null;
+    var index: usize = 1;
+    var mode: LaunchMode = .window;
+    if (index < args.len and std.mem.eql(u8, args[index], "--server-only")) {
+        mode = .server_only;
+        index += 1;
     }
-
-    if (args.len == 3 and std.mem.eql(u8, args[1], "--server-only")) {
-        return .{
-            .mode = .server_only,
-            .artifact_path = args[2],
-        };
+    var log_path: ?[:0]const u8 = null;
+    var estate_scan_executable: ?[:0]const u8 = null;
+    var estate_connection_id: ?[:0]const u8 = null;
+    while (index < args.len and std.mem.startsWith(u8, args[index], "--")) {
+        if (std.mem.eql(u8, args[index], "--logs")) {
+            if (log_path != null or index + 1 >= args.len) return null;
+            log_path = args[index + 1];
+            index += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, args[index], "--estate-scan")) {
+            if (estate_scan_executable != null or index + 2 >= args.len) return null;
+            estate_scan_executable = args[index + 1];
+            estate_connection_id = args[index + 2];
+            index += 3;
+            continue;
+        }
+        return null;
     }
-
-    return null;
+    if (index + 1 != args.len) return null;
+    return .{
+        .mode = mode,
+        .artifact_path = args[index],
+        .log_path = log_path,
+        .estate_scan_executable = estate_scan_executable,
+        .estate_connection_id = estate_connection_id,
+    };
 }
 
 pub fn formatSessionJson(allocator: std.mem.Allocator, options: SessionOptions) ![]u8 {
@@ -125,6 +149,36 @@ test "launch args accept explicit server-only mode" {
 
     try std.testing.expectEqual(LaunchMode.server_only, options.mode);
     try std.testing.expectEqualStrings("artifact.json", options.artifact_path);
+}
+
+test "launch args accept an optional live log snapshot" {
+    const args = [_][:0]const u8{
+        "zigeffect-causal-workbench",
+        "--server-only",
+        "--logs",
+        ".ziac/logs/global-api/dev/events.jsonl",
+        "artifact.json",
+    };
+    const options = parseLaunchArgs(&args).?;
+
+    try std.testing.expectEqualStrings("artifact.json", options.artifact_path);
+    try std.testing.expectEqualStrings(".ziac/logs/global-api/dev/events.jsonl", options.log_path.?);
+}
+
+test "launch args accept a fixed Ziac estate scanner command" {
+    const args = [_][:0]const u8{
+        "zigeffect-causal-workbench",
+        "--server-only",
+        "--estate-scan",
+        "./zig-out/bin/ziac",
+        "gcp-connection-17",
+        "estate.json",
+    };
+    const options = parseLaunchArgs(&args).?;
+
+    try std.testing.expectEqualStrings("./zig-out/bin/ziac", options.estate_scan_executable.?);
+    try std.testing.expectEqualStrings("gcp-connection-17", options.estate_connection_id.?);
+    try std.testing.expectEqualStrings("estate.json", options.artifact_path);
 }
 
 test "launch args reject unknown shapes" {

@@ -1,5 +1,11 @@
 const std = @import("std");
 
+fn addV2Test(b: *std.Build, runner: std.Build.LazyPath, options: std.Build.TestOptions) *std.Build.Step.Compile {
+    var configured = options;
+    configured.test_runner = .{ .path = runner, .mode = .server };
+    return b.addTest(configured);
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -16,6 +22,12 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const testing_runner = b.path("src/testing/runner.zig");
+    _ = b.addModule("zigeffect_test_runner", .{
+        .root_source_file = testing_runner,
+        .target = target,
+        .optimize = optimize,
+    });
 
     const tests = b.createModule(.{
         .root_source_file = b.path("test/all_test.zig"),
@@ -24,7 +36,7 @@ pub fn build(b: *std.Build) void {
     });
     tests.addImport("zigeffect", zigeffect);
 
-    const unit_tests = b.addTest(.{
+    const unit_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-tests",
         .root_module = tests,
     });
@@ -40,7 +52,7 @@ pub fn build(b: *std.Build) void {
     });
     public_api_stability_test_module.addImport("zigeffect", zigeffect);
 
-    const public_api_stability_tests = b.addTest(.{
+    const public_api_stability_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-public-api-stability-tests",
         .root_module = public_api_stability_test_module,
     });
@@ -55,7 +67,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_backend_conformance_test_module.addImport("zigeffect", zigeffect);
 
-    const causal_backend_conformance_tests = b.addTest(.{
+    const causal_backend_conformance_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-backend-conformance-tests",
         .root_module = causal_backend_conformance_test_module,
     });
@@ -70,7 +82,7 @@ pub fn build(b: *std.Build) void {
     });
     storage_conformance_test_module.addImport("zigeffect", zigeffect);
 
-    const storage_conformance_tests = b.addTest(.{
+    const storage_conformance_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-storage-conformance-tests",
         .root_module = storage_conformance_test_module,
     });
@@ -85,7 +97,7 @@ pub fn build(b: *std.Build) void {
     });
     property_history_test_module.addImport("zigeffect", zigeffect);
 
-    const property_history_tests = b.addTest(.{
+    const property_history_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-property-history-tests",
         .root_module = property_history_test_module,
     });
@@ -98,7 +110,7 @@ pub fn build(b: *std.Build) void {
     });
     crash_recovery_property_test_module.addImport("zigeffect", zigeffect);
 
-    const crash_recovery_property_tests = b.addTest(.{
+    const crash_recovery_property_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-crash-recovery-property-tests",
         .root_module = crash_recovery_property_test_module,
     });
@@ -111,7 +123,7 @@ pub fn build(b: *std.Build) void {
     });
     message_history_property_test_module.addImport("zigeffect", zigeffect);
 
-    const message_history_property_tests = b.addTest(.{
+    const message_history_property_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-message-history-property-tests",
         .root_module = message_history_property_test_module,
     });
@@ -124,7 +136,7 @@ pub fn build(b: *std.Build) void {
     });
     scheduler_fairness_property_test_module.addImport("zigeffect", zigeffect);
 
-    const scheduler_fairness_property_tests = b.addTest(.{
+    const scheduler_fairness_property_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-scheduler-fairness-property-tests",
         .root_module = scheduler_fairness_property_test_module,
     });
@@ -143,7 +155,7 @@ pub fn build(b: *std.Build) void {
     });
     performance_benchmark_test_module.addImport("zigeffect", zigeffect);
 
-    const performance_benchmark_tests = b.addTest(.{
+    const performance_benchmark_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-performance-benchmark-tests",
         .root_module = performance_benchmark_test_module,
     });
@@ -156,7 +168,7 @@ pub fn build(b: *std.Build) void {
     });
     resource_bounds_test_module.addImport("zigeffect", zigeffect);
 
-    const resource_bounds_tests = b.addTest(.{
+    const resource_bounds_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-resource-bounds-tests",
         .root_module = resource_bounds_test_module,
     });
@@ -169,7 +181,7 @@ pub fn build(b: *std.Build) void {
     });
     workflow_snapshot_frequency_test_module.addImport("zigeffect", zigeffect);
 
-    const workflow_snapshot_frequency_tests = b.addTest(.{
+    const workflow_snapshot_frequency_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-workflow-snapshot-frequency-tests",
         .root_module = workflow_snapshot_frequency_test_module,
     });
@@ -182,7 +194,7 @@ pub fn build(b: *std.Build) void {
     });
     cluster_observability_test_module.addImport("zigeffect", zigeffect);
 
-    const cluster_observability_tests = b.addTest(.{
+    const cluster_observability_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-cluster-observability-tests",
         .root_module = cluster_observability_test_module,
     });
@@ -201,7 +213,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_jsonl_backend_test_module.addImport("zigeffect", zigeffect);
 
-    const causal_jsonl_backend_tests = b.addTest(.{
+    const causal_jsonl_backend_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-jsonl-backend-tests",
         .root_module = causal_jsonl_backend_test_module,
     });
@@ -216,7 +228,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_dot_backend_test_module.addImport("zigeffect", zigeffect);
 
-    const causal_dot_backend_tests = b.addTest(.{
+    const causal_dot_backend_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-dot-backend-tests",
         .root_module = causal_dot_backend_test_module,
     });
@@ -231,7 +243,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_otel_backend_test_module.addImport("zigeffect", zigeffect);
 
-    const causal_otel_backend_tests = b.addTest(.{
+    const causal_otel_backend_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-otel-backend-tests",
         .root_module = causal_otel_backend_test_module,
     });
@@ -246,7 +258,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_graph_history_backend_test_module.addImport("zigeffect", zigeffect);
 
-    const causal_graph_history_backend_tests = b.addTest(.{
+    const causal_graph_history_backend_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-graph-history-backend-tests",
         .root_module = causal_graph_history_backend_test_module,
     });
@@ -261,7 +273,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_nendb_storage_backend_test_module.addImport("zigeffect", zigeffect);
 
-    const causal_nendb_storage_backend_tests = b.addTest(.{
+    const causal_nendb_storage_backend_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-nendb-storage-backend-tests",
         .root_module = causal_nendb_storage_backend_test_module,
     });
@@ -276,7 +288,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_async_stream_backend_test_module.addImport("zigeffect", zigeffect);
 
-    const causal_async_stream_backend_tests = b.addTest(.{
+    const causal_async_stream_backend_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-async-stream-backend-tests",
         .root_module = causal_async_stream_backend_test_module,
     });
@@ -291,7 +303,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_app_runtime_test_module.addImport("zigeffect", zigeffect);
 
-    const causal_app_runtime_tests = b.addTest(.{
+    const causal_app_runtime_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-app-runtime-tests",
         .root_module = causal_app_runtime_test_module,
     });
@@ -311,7 +323,7 @@ pub fn build(b: *std.Build) void {
         .root_module = readiness_example_module,
     });
 
-    const readiness_example_tests = b.addTest(.{
+    const readiness_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-readiness-example-tests",
         .root_module = readiness_example_module,
     });
@@ -329,7 +341,7 @@ pub fn build(b: *std.Build) void {
         .root_module = data_and_matching_example_module,
     });
 
-    const data_and_matching_example_tests = b.addTest(.{
+    const data_and_matching_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-data-and-matching-example-tests",
         .root_module = data_and_matching_example_module,
     });
@@ -347,7 +359,7 @@ pub fn build(b: *std.Build) void {
         .root_module = effect_state_example_module,
     });
 
-    const effect_state_example_tests = b.addTest(.{
+    const effect_state_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-effect-state-example-tests",
         .root_module = effect_state_example_module,
     });
@@ -375,7 +387,7 @@ pub fn build(b: *std.Build) void {
     const live_stream_step = b.step("live-stream", "Stream a sample causal scenario as NDJSON to stdout (collector feed)");
     live_stream_step.dependOn(&run_live_stream_example.step);
 
-    const live_stream_example_tests = b.addTest(.{
+    const live_stream_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-live-stream-example-tests",
         .root_module = live_stream_example_module,
     });
@@ -397,7 +409,7 @@ pub fn build(b: *std.Build) void {
         .root_module = self_improving_loop_example_module,
     });
 
-    const self_improving_loop_example_tests = b.addTest(.{
+    const self_improving_loop_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-self-improving-loop-example-tests",
         .root_module = self_improving_loop_example_module,
     });
@@ -419,7 +431,7 @@ pub fn build(b: *std.Build) void {
         .root_module = causal_readiness_example_module,
     });
 
-    const causal_readiness_example_tests = b.addTest(.{
+    const causal_readiness_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-readiness-example-tests",
         .root_module = causal_readiness_example_module,
     });
@@ -437,7 +449,7 @@ pub fn build(b: *std.Build) void {
         .root_module = causal_app_request_example_module,
     });
 
-    const causal_app_request_example_tests = b.addTest(.{
+    const causal_app_request_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-app-request-tests",
         .root_module = causal_app_request_example_module,
     });
@@ -458,7 +470,7 @@ pub fn build(b: *std.Build) void {
         .root_module = causal_missing_config_example_module,
     });
 
-    const causal_missing_config_example_tests = b.addTest(.{
+    const causal_missing_config_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-missing-config-tests",
         .root_module = causal_missing_config_example_module,
     });
@@ -476,7 +488,7 @@ pub fn build(b: *std.Build) void {
         .root_module = causal_cleanup_failure_example_module,
     });
 
-    const causal_cleanup_failure_example_tests = b.addTest(.{
+    const causal_cleanup_failure_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-cleanup-failure-tests",
         .root_module = causal_cleanup_failure_example_module,
     });
@@ -494,7 +506,7 @@ pub fn build(b: *std.Build) void {
         .root_module = causal_scoped_fiber_example_module,
     });
 
-    const causal_scoped_fiber_example_tests = b.addTest(.{
+    const causal_scoped_fiber_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-scoped-fiber-tests",
         .root_module = causal_scoped_fiber_example_module,
     });
@@ -512,7 +524,7 @@ pub fn build(b: *std.Build) void {
         .root_module = causal_retry_exhaustion_example_module,
     });
 
-    const causal_retry_exhaustion_example_tests = b.addTest(.{
+    const causal_retry_exhaustion_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-retry-exhaustion-tests",
         .root_module = causal_retry_exhaustion_example_module,
     });
@@ -530,7 +542,7 @@ pub fn build(b: *std.Build) void {
         .root_module = workflow_approval_example_module,
     });
 
-    const workflow_approval_example_tests = b.addTest(.{
+    const workflow_approval_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-workflow-approval-example-tests",
         .root_module = workflow_approval_example_module,
     });
@@ -548,7 +560,7 @@ pub fn build(b: *std.Build) void {
         .root_module = workflow_queue_worker_example_module,
     });
 
-    const workflow_queue_worker_example_tests = b.addTest(.{
+    const workflow_queue_worker_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-workflow-queue-worker-example-tests",
         .root_module = workflow_queue_worker_example_module,
     });
@@ -566,7 +578,7 @@ pub fn build(b: *std.Build) void {
         .root_module = workflow_timer_signal_example_module,
     });
 
-    const workflow_timer_signal_example_tests = b.addTest(.{
+    const workflow_timer_signal_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-workflow-timer-signal-example-tests",
         .root_module = workflow_timer_signal_example_module,
     });
@@ -584,7 +596,7 @@ pub fn build(b: *std.Build) void {
         .root_module = workflow_crash_recovery_example_module,
     });
 
-    const workflow_crash_recovery_example_tests = b.addTest(.{
+    const workflow_crash_recovery_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-workflow-crash-recovery-example-tests",
         .root_module = workflow_crash_recovery_example_module,
     });
@@ -602,7 +614,7 @@ pub fn build(b: *std.Build) void {
         .root_module = local_actor_example_module,
     });
 
-    const local_actor_example_tests = b.addTest(.{
+    const local_actor_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-local-actor-example-tests",
         .root_module = local_actor_example_module,
     });
@@ -620,7 +632,7 @@ pub fn build(b: *std.Build) void {
         .root_module = multi_runner_cluster_example_module,
     });
 
-    const multi_runner_cluster_example_tests = b.addTest(.{
+    const multi_runner_cluster_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-multi-runner-cluster-example-tests",
         .root_module = multi_runner_cluster_example_module,
     });
@@ -638,7 +650,7 @@ pub fn build(b: *std.Build) void {
         .root_module = cluster_workflow_migration_example_module,
     });
 
-    const cluster_workflow_migration_example_tests = b.addTest(.{
+    const cluster_workflow_migration_example_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-cluster-workflow-migration-example-tests",
         .root_module = cluster_workflow_migration_example_module,
     });
@@ -655,7 +667,7 @@ pub fn build(b: *std.Build) void {
         .root_module = scaffold_module,
     });
 
-    const scaffold_tool_tests = b.addTest(.{
+    const scaffold_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-scaffold-module-tests",
         .root_module = scaffold_module,
     });
@@ -676,7 +688,7 @@ pub fn build(b: *std.Build) void {
     const causal_report_step = b.step("causal-report", "Print a sample causal CI report");
     causal_report_step.dependOn(&run_causal_report_tool.step);
 
-    const causal_report_tool_tests = b.addTest(.{
+    const causal_report_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-report-tests",
         .root_module = causal_report_tool_module,
     });
@@ -703,7 +715,7 @@ pub fn build(b: *std.Build) void {
     const causal_check_step = b.step("causal-check", "Run dogfood causal check and fail when findings exist");
     causal_check_step.dependOn(&run_causal_check_tool.step);
 
-    const causal_test_tool_tests = b.addTest(.{
+    const causal_test_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-test-tests",
         .root_module = causal_test_tool_module,
     });
@@ -725,7 +737,7 @@ pub fn build(b: *std.Build) void {
     const cluster_runner_step = b.step("cluster-runner", "Run a local zigeffect cluster runner");
     cluster_runner_step.dependOn(&run_cluster_runner_tool.step);
 
-    const cluster_runner_tool_tests = b.addTest(.{
+    const cluster_runner_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-cluster-runner-tests",
         .root_module = cluster_runner_tool_module,
     });
@@ -747,7 +759,7 @@ pub fn build(b: *std.Build) void {
     const cluster_inspect_step = b.step("cluster-inspect", "Inspect durable zigeffect cluster storage");
     cluster_inspect_step.dependOn(&run_cluster_inspect_tool.step);
 
-    const cluster_inspect_tool_tests = b.addTest(.{
+    const cluster_inspect_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-cluster-inspect-tests",
         .root_module = cluster_inspect_tool_module,
     });
@@ -769,7 +781,7 @@ pub fn build(b: *std.Build) void {
     const storage_migrate_step = b.step("storage-migrate", "Print zigeffect storage schema and SQL migration plans");
     storage_migrate_step.dependOn(&run_storage_migrate_tool.step);
 
-    const storage_migrate_tool_tests = b.addTest(.{
+    const storage_migrate_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-storage-migrate-tests",
         .root_module = storage_migrate_tool_module,
     });
@@ -791,7 +803,7 @@ pub fn build(b: *std.Build) void {
     const performance_bench_step = b.step("performance-bench", "Print deterministic zigeffect performance benchmark report");
     performance_bench_step.dependOn(&run_performance_bench_tool.step);
 
-    const performance_bench_tool_tests = b.addTest(.{
+    const performance_bench_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-performance-bench-tests",
         .root_module = performance_bench_tool_module,
     });
@@ -811,7 +823,7 @@ pub fn build(b: *std.Build) void {
     const release_gate_report_step = b.step("release-gate-report", "Write zigeffect release gate report artifacts");
     release_gate_report_step.dependOn(&run_release_gate_report_tool.step);
 
-    const release_gate_report_tool_tests = b.addTest(.{
+    const release_gate_report_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-release-gate-report-tests",
         .root_module = release_gate_report_tool_module,
     });
@@ -823,7 +835,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     causal_artifact_tool_module.addImport("zigeffect", zigeffect);
-    const causal_artifact_tool_tests = b.addTest(.{
+    const causal_artifact_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-artifact-tests",
         .root_module = causal_artifact_tool_module,
     });
@@ -836,7 +848,7 @@ pub fn build(b: *std.Build) void {
     });
     workflow_tool_support_module.addImport("zigeffect", zigeffect);
 
-    const workflow_tool_support_tests = b.addTest(.{
+    const workflow_tool_support_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-workflow-tool-support-tests",
         .root_module = workflow_tool_support_module,
     });
@@ -859,7 +871,7 @@ pub fn build(b: *std.Build) void {
     const workflow_list_step = b.step("workflow-list", "List durable workflow executions from a workflow journal");
     workflow_list_step.dependOn(&run_workflow_list_tool.step);
 
-    const workflow_list_tool_tests = b.addTest(.{
+    const workflow_list_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-workflow-list-tests",
         .root_module = workflow_list_tool_module,
     });
@@ -882,7 +894,7 @@ pub fn build(b: *std.Build) void {
     const workflow_replay_step = b.step("workflow-replay", "Replay durable workflow state from a workflow journal");
     workflow_replay_step.dependOn(&run_workflow_replay_tool.step);
 
-    const workflow_replay_tool_tests = b.addTest(.{
+    const workflow_replay_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-workflow-replay-tests",
         .root_module = workflow_replay_tool_module,
     });
@@ -905,7 +917,7 @@ pub fn build(b: *std.Build) void {
     const workflow_journal_inspect_step = b.step("workflow-journal-inspect", "Inspect durable workflow journal events");
     workflow_journal_inspect_step.dependOn(&run_workflow_journal_inspect_tool.step);
 
-    const workflow_journal_inspect_tool_tests = b.addTest(.{
+    const workflow_journal_inspect_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-workflow-journal-inspect-tests",
         .root_module = workflow_journal_inspect_tool_module,
     });
@@ -927,7 +939,7 @@ pub fn build(b: *std.Build) void {
     const causal_query_step = b.step("causal-query", "Query a saved causal JSON artifact");
     causal_query_step.dependOn(&run_causal_query_tool.step);
 
-    const causal_query_tool_tests = b.addTest(.{
+    const causal_query_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-query-tests",
         .root_module = causal_query_tool_module,
     });
@@ -949,7 +961,7 @@ pub fn build(b: *std.Build) void {
     const causal_advice_step = b.step("causal-advice", "Suggest deterministic next actions from a saved causal JSON artifact");
     causal_advice_step.dependOn(&run_causal_advice_tool.step);
 
-    const causal_advice_tool_tests = b.addTest(.{
+    const causal_advice_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-advice-tests",
         .root_module = causal_advice_tool_module,
     });
@@ -963,7 +975,7 @@ pub fn build(b: *std.Build) void {
     causal_app_remediation_audit_tool_module.addImport("causal_advice", causal_advice_tool_module);
     causal_app_remediation_audit_tool_module.addImport("causal_artifact", causal_artifact_tool_module);
 
-    const causal_app_remediation_audit_tool_tests = b.addTest(.{
+    const causal_app_remediation_audit_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-app-remediation-audit-tests",
         .root_module = causal_app_remediation_audit_tool_module,
     });
@@ -975,7 +987,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const causal_app_policy_decision_tool_tests = b.addTest(.{
+    const causal_app_policy_decision_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-app-policy-decision-tests",
         .root_module = causal_app_policy_decision_tool_module,
     });
@@ -987,7 +999,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const causal_app_human_review_tool_tests = b.addTest(.{
+    const causal_app_human_review_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-app-human-review-tests",
         .root_module = causal_app_human_review_tool_module,
     });
@@ -999,7 +1011,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const causal_app_patch_proposal_tool_tests = b.addTest(.{
+    const causal_app_patch_proposal_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-app-patch-proposal-tests",
         .root_module = causal_app_patch_proposal_tool_module,
     });
@@ -1011,7 +1023,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const causal_app_application_readiness_tool_tests = b.addTest(.{
+    const causal_app_application_readiness_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-app-application-readiness-tests",
         .root_module = causal_app_application_readiness_tool_module,
     });
@@ -1023,7 +1035,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const causal_app_apply_tool_tests = b.addTest(.{
+    const causal_app_apply_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-app-apply-tests",
         .root_module = causal_app_apply_tool_module,
     });
@@ -1045,7 +1057,7 @@ pub fn build(b: *std.Build) void {
     const causal_compare_step = b.step("causal-compare", "Compare two saved causal JSON artifacts");
     causal_compare_step.dependOn(&run_causal_compare_tool.step);
 
-    const causal_compare_tool_tests = b.addTest(.{
+    const causal_compare_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-compare-tests",
         .root_module = causal_compare_tool_module,
     });
@@ -1115,7 +1127,7 @@ pub fn build(b: *std.Build) void {
     const causal_dev_test_step = b.step("causal-dev-test", "Run zigeffect tests with causal failure capture");
     causal_dev_test_step.dependOn(&run_causal_package_test_tool.step);
 
-    const causal_run_tool_tests = b.addTest(.{
+    const causal_run_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-run-tests",
         .root_module = causal_run_tool_module,
     });
@@ -1139,7 +1151,7 @@ pub fn build(b: *std.Build) void {
     const causal_snapshot_step = b.step("causal-snapshot", "Format or capture named causal snapshot manifests");
     causal_snapshot_step.dependOn(&run_causal_snapshot_tool.step);
 
-    const causal_snapshot_tool_tests = b.addTest(.{
+    const causal_snapshot_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-snapshot-tests",
         .root_module = causal_snapshot_tool_module,
     });
@@ -1160,7 +1172,7 @@ pub fn build(b: *std.Build) void {
     const causal_test_matrix_step = b.step("causal-test-matrix", "Print the zigeffect causal scenario coverage matrix");
     causal_test_matrix_step.dependOn(&run_causal_test_matrix_tool.step);
 
-    const causal_test_matrix_tool_tests = b.addTest(.{
+    const causal_test_matrix_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-test-matrix-tests",
         .root_module = causal_test_matrix_tool_module,
     });
@@ -1182,7 +1194,7 @@ pub fn build(b: *std.Build) void {
     const causal_artifacts_step = b.step("causal-artifacts", "Print causal artifact retention manifest for agents and CI");
     causal_artifacts_step.dependOn(&run_causal_artifacts_tool.step);
 
-    const causal_artifacts_tool_tests = b.addTest(.{
+    const causal_artifacts_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-artifacts-tests",
         .root_module = causal_artifacts_tool_module,
     });
@@ -1204,7 +1216,7 @@ pub fn build(b: *std.Build) void {
     const causal_schema_governance_step = b.step("causal-schema-governance", "Print causal artifact schema/version governance report");
     causal_schema_governance_step.dependOn(&run_causal_schema_governance_tool.step);
 
-    const causal_schema_governance_tool_tests = b.addTest(.{
+    const causal_schema_governance_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-schema-governance-tests",
         .root_module = causal_schema_governance_tool_module,
     });
@@ -1217,7 +1229,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const causal_workbench_session_tool_tests = b.addTest(.{
+    const causal_workbench_session_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-workbench-session-tests",
         .root_module = causal_workbench_session_tool_module,
     });
@@ -1241,7 +1253,7 @@ pub fn build(b: *std.Build) void {
     const causal_performance_budget_step = b.step("causal-performance-budget", "Print causal instrumentation performance budget report");
     causal_performance_budget_step.dependOn(&run_causal_performance_budget_tool.step);
 
-    const causal_performance_budget_tool_tests = b.addTest(.{
+    const causal_performance_budget_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-performance-budget-tests",
         .root_module = causal_performance_budget_tool_module,
     });
@@ -1277,7 +1289,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const causal_verdict_tool_tests = b.addTest(.{
+    const causal_verdict_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-verdict-tests",
         .root_module = causal_verdict_tool_module,
     });
@@ -1290,7 +1302,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_dev_agent_tool_module.addImport("causal_run", causal_run_tool_module);
 
-    const causal_dev_agent_tool_tests = b.addTest(.{
+    const causal_dev_agent_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-dev-agent-tests",
         .root_module = causal_dev_agent_tool_module,
     });
@@ -1303,7 +1315,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_dev_session_tool_module.addImport("causal_run", causal_run_tool_module);
 
-    const causal_dev_session_tool_tests = b.addTest(.{
+    const causal_dev_session_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-dev-session-tests",
         .root_module = causal_dev_session_tool_module,
     });
@@ -1335,7 +1347,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_diagnosis_tool_module.addImport("causal_run", causal_run_tool_module);
 
-    const causal_diagnosis_tool_tests = b.addTest(.{
+    const causal_diagnosis_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-diagnosis-tests",
         .root_module = causal_diagnosis_tool_module,
     });
@@ -1348,7 +1360,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_remediation_plan_tool_module.addImport("causal_run", causal_run_tool_module);
 
-    const causal_remediation_plan_tool_tests = b.addTest(.{
+    const causal_remediation_plan_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-remediation-plan-tests",
         .root_module = causal_remediation_plan_tool_module,
     });
@@ -1361,7 +1373,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_remediation_audit_tool_module.addImport("causal_run", causal_run_tool_module);
 
-    const causal_remediation_audit_tool_tests = b.addTest(.{
+    const causal_remediation_audit_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-remediation-audit-tests",
         .root_module = causal_remediation_audit_tool_module,
     });
@@ -1375,7 +1387,7 @@ pub fn build(b: *std.Build) void {
     causal_remediation_decision_tool_module.addImport("causal_run", causal_run_tool_module);
     causal_remediation_decision_tool_module.addImport("zigeffect", zigeffect);
 
-    const causal_remediation_decision_tool_tests = b.addTest(.{
+    const causal_remediation_decision_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-remediation-decision-tests",
         .root_module = causal_remediation_decision_tool_module,
     });
@@ -1389,7 +1401,7 @@ pub fn build(b: *std.Build) void {
     causal_patch_proposal_tool_module.addImport("causal_run", causal_run_tool_module);
     causal_patch_proposal_tool_module.addImport("zigeffect", zigeffect);
 
-    const causal_patch_proposal_tool_tests = b.addTest(.{
+    const causal_patch_proposal_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-patch-proposal-tests",
         .root_module = causal_patch_proposal_tool_module,
     });
@@ -1402,7 +1414,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_audit_chain_tool_module.addImport("causal_run", causal_run_tool_module);
 
-    const causal_audit_chain_tool_tests = b.addTest(.{
+    const causal_audit_chain_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-audit-chain-tests",
         .root_module = causal_audit_chain_tool_module,
     });
@@ -1415,7 +1427,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_scenario_proposal_tool_module.addImport("causal_run", causal_run_tool_module);
 
-    const causal_scenario_proposal_tool_tests = b.addTest(.{
+    const causal_scenario_proposal_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-scenario-proposal-tests",
         .root_module = causal_scenario_proposal_tool_module,
     });
@@ -1428,7 +1440,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_scenario_registry_patch_tool_module.addImport("causal_run", causal_run_tool_module);
 
-    const causal_scenario_registry_patch_tool_tests = b.addTest(.{
+    const causal_scenario_registry_patch_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-scenario-registry-patch-tests",
         .root_module = causal_scenario_registry_patch_tool_module,
     });
@@ -1441,7 +1453,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_registry_application_readiness_tool_module.addImport("causal_run", causal_run_tool_module);
 
-    const causal_registry_application_readiness_tool_tests = b.addTest(.{
+    const causal_registry_application_readiness_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-registry-application-readiness-tests",
         .root_module = causal_registry_application_readiness_tool_module,
     });
@@ -1454,7 +1466,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_registry_apply_tool_module.addImport("causal_run", causal_run_tool_module);
 
-    const causal_registry_apply_tool_tests = b.addTest(.{
+    const causal_registry_apply_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-registry-apply-tests",
         .root_module = causal_registry_apply_tool_module,
     });
@@ -1466,7 +1478,7 @@ pub fn build(b: *std.Build) void {
     });
     causal_policy_decision_tool_module.addImport("causal_run", causal_run_tool_module);
 
-    const causal_policy_decision_tool_tests = b.addTest(.{
+    const causal_policy_decision_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-policy-decision-tests",
         .root_module = causal_policy_decision_tool_module,
     });
@@ -1644,7 +1656,7 @@ pub fn build(b: *std.Build) void {
     const causal_handoff_step = b.step("causal-ci-handoff", "Write causal CI handoff report for agents");
     causal_handoff_step.dependOn(&run_causal_handoff_tool.step);
 
-    const causal_handoff_tool_tests = b.addTest(.{
+    const causal_handoff_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-handoff-tests",
         .root_module = causal_handoff_tool_module,
     });
@@ -1673,7 +1685,7 @@ pub fn build(b: *std.Build) void {
     const causal_loop_step = b.step("causal-dev-loop", "Run the zigeffect causal development loop");
     causal_loop_step.dependOn(&run_causal_loop_tool.step);
 
-    const causal_loop_tool_tests = b.addTest(.{
+    const causal_loop_tool_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-causal-loop-tests",
         .root_module = causal_loop_tool_module,
     });
