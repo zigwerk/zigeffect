@@ -1,0 +1,12 @@
+{
+  "schema": "zigeffect.reference.dashboard-contract.v1",
+  "panels": [
+    {"id":"request-rate","signals":["http_requests_total","http_orders_total"],"group_by":["service","status"]},
+    {"id":"latency","signals":["http_request_duration_ms","worker_completion_duration_ms"],"quantiles":[0.5,0.95,0.99]},
+    {"id":"durability","signals":["reference_outbox_pending","workflow_journal_append_total","worker_lease_epoch"]},
+    {"id":"dependencies","signals":["postgres_pool_checked_out","redis_command_failures","s3_request_failures","transport_reconnects"]},
+    {"id":"telemetry","signals":["otel_queue_utilization","otel_export_failures","otel_retries"]},
+    {"id":"lifecycle","signals":["lifecycle_ready","lifecycle_draining","active_connections"]}
+  ],
+  "required_dimensions": ["service.name","zigeffect.run.id","adapter.id","operation","failure.class"]
+}

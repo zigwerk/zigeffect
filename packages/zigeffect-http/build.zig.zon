@@ -1,0 +1,10 @@
+.{
+    .name = .zigeffect_http,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0x50d5ce8f82b2a5f9,
+    .dependencies = .{
+        .zigeffect_std = .{ .path = "../zigeffect-std" },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "README.md", "conformance", "src" },
+}

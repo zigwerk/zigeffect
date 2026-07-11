@@ -1,5 +1,6 @@
 comptime {
     _ = @import("architecture_test.zig");
+    _ = @import("suite_receipt_test.zig");
     _ = @import("public_api_stability_test.zig");
     _ = @import("dependency_test.zig");
     _ = @import("effect_test.zig");
@@ -11,8 +12,12 @@ comptime {
     _ = @import("fiber_ref_test.zig");
     _ = @import("hub_test.zig");
     _ = @import("thread_safety_test.zig");
+    _ = @import("thread_sanitizer_gate_test.zig");
     _ = @import("h7a_cause_edge_test.zig");
     _ = @import("scope_test.zig");
+    _ = @import("safe_resource_test.zig");
+    _ = @import("tracked_allocator_test.zig");
+    _ = @import("schedule_explorer_test.zig");
     _ = @import("runtime_test.zig");
     _ = @import("runtime_executor_test.zig");
     _ = @import("fiber_test.zig");
@@ -42,6 +47,7 @@ comptime {
     _ = @import("suspension_test.zig");
     _ = @import("suspension_coordination_test.zig");
     _ = @import("causal_structural_test.zig");
+    _ = @import("source_ref_test.zig");
     _ = @import("policy_engine_test.zig");
     _ = @import("closed_loop_test.zig");
     _ = @import("causal_backend_conformance_test.zig");
@@ -70,6 +76,7 @@ comptime {
     _ = @import("layer_test.zig");
     _ = @import("schedule_test.zig");
     _ = @import("stream_test.zig");
+    _ = @import("effect_stream_test.zig");
     _ = @import("stm_test.zig");
     _ = @import("services_test.zig");
     _ = @import("support/causal_assertions.zig");
@@ -77,6 +84,25 @@ comptime {
     _ = @import("data_test.zig");
     _ = @import("match_test.zig");
     _ = @import("pattern_test.zig");
+    _ = @import("statechart_definition_test.zig");
+    _ = @import("statechart_machine_test.zig");
+    _ = @import("statechart_configuration_test.zig");
+    _ = @import("statechart_scxml_conformance_test.zig");
+    _ = @import("statechart_macrostep_test.zig");
+    _ = @import("statechart_analysis_test.zig");
+    _ = @import("statechart_coverage_test.zig");
+    _ = @import("statechart_artifact_test.zig");
+    _ = @import("statechart_actor_test.zig");
+    _ = @import("statechart_actor_system_test.zig");
+    _ = @import("statechart_causal_test.zig");
+    _ = @import("statechart_determinism_test.zig");
+    _ = @import("statechart_version_test.zig");
+    _ = @import("statechart_simulation_test.zig");
+    _ = @import("statechart_control_test.zig");
+    _ = @import("statechart_migration_test.zig");
+    _ = @import("statechart_mutation_test.zig");
+    _ = @import("statechart_performance_test.zig");
+    _ = @import("workflow_statechart_test.zig");
     _ = @import("workflow_test.zig");
     _ = @import("resource_bounds_test.zig");
     _ = @import("workflow_snapshot_frequency_test.zig");

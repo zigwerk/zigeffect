@@ -1,0 +1,181 @@
+{
+  "schema": "zigeffect.causal.v1",
+  "schema_version": 1,
+  "event_taxonomy_version": 1,
+  "events": [
+    {
+      "id": 1,
+      "kind": "run_started",
+      "run_id": 77,
+      "parent_id": null,
+      "label": "agent research review",
+      "type_name": "StatechartActor",
+      "status": "active",
+      "redacted_detail": "statechart instance 7001"
+    },
+    {
+      "id": 2,
+      "kind": "statechart_event_recorded",
+      "run_id": 77,
+      "parent_id": 1,
+      "label": "research-complete + approval-granted",
+      "type_name": "StatechartDecision",
+      "status": "accepted",
+      "artifact_id": "agent.research-review",
+      "domain_entity_ref": "statechart-instance:7001",
+      "schema_ref": "zigeffect.statechart.execution.v1",
+      "redacted_detail": "parallel regions reached ready"
+    }
+  ],
+  "statecharts": [
+    {
+      "schema": "zigeffect.statechart.definition.v1",
+      "schema_version": 1,
+      "id": "agent.research-review",
+      "version": 1,
+      "fingerprint": 88442211,
+      "initial": "root",
+      "description": "Agent-authored research and human approval workflow",
+      "state_type": "ResearchReviewState",
+      "event_type": "ResearchReviewEvent",
+      "context_type": "ResearchReviewContext",
+      "command_type": "ResearchReviewCommand",
+      "states": [
+        { "id": "root", "kind": "compound", "parent": null, "initial": "working", "description": "Workflow root", "entry": [], "exit": [], "source": { "file": "src/research_review.zig", "declaration": "machine", "line": 18, "column": 1 } },
+        { "id": "working", "kind": "parallel", "parent": "root", "initial": null, "description": "Research and approval progress independently", "entry": ["record-start"], "exit": [], "source": { "file": "src/research_review.zig", "declaration": "machine", "line": 22, "column": 1 } },
+        { "id": "research", "kind": "compound", "parent": "working", "initial": "researching", "description": "Agent research region", "entry": [], "exit": [], "source": { "file": "src/research_review.zig", "declaration": "machine", "line": 27, "column": 1 } },
+        { "id": "researching", "kind": "atomic", "parent": "research", "initial": null, "description": "Gathering bounded cited evidence", "entry": ["start-research"], "exit": [], "source": { "file": "src/research_review.zig", "declaration": "machine", "line": 30, "column": 1 } },
+        { "id": "research_ready", "kind": "final", "parent": "research", "initial": null, "description": "Evidence threshold reached", "entry": [], "exit": [], "source": { "file": "src/research_review.zig", "declaration": "machine", "line": 34, "column": 1 } },
+        { "id": "approval", "kind": "compound", "parent": "working", "initial": "awaiting_human", "description": "Human approval region", "entry": [], "exit": [], "source": { "file": "src/research_review.zig", "declaration": "machine", "line": 38, "column": 1 } },
+        { "id": "awaiting_human", "kind": "atomic", "parent": "approval", "initial": null, "description": "Waiting for explicit human authority", "entry": ["request-approval"], "exit": [], "source": { "file": "src/research_review.zig", "declaration": "machine", "line": 41, "column": 1 } },
+        { "id": "approved", "kind": "final", "parent": "approval", "initial": null, "description": "Human approved", "entry": [], "exit": [], "source": { "file": "src/research_review.zig", "declaration": "machine", "line": 45, "column": 1 } },
+        { "id": "history", "kind": "history_deep", "parent": "root", "initial": null, "description": "Resume interrupted work", "entry": [], "exit": [], "source": { "file": "src/research_review.zig", "declaration": "machine", "line": 49, "column": 1 } },
+        { "id": "published", "kind": "final", "parent": "root", "initial": null, "description": "Reviewed result published", "entry": ["record-complete"], "exit": [], "source": { "file": "src/research_review.zig", "declaration": "machine", "line": 52, "column": 1 } }
+      ],
+      "transitions": [
+        { "id": "research-complete", "source": "researching", "event": "research_complete", "target": "research_ready", "kind": "external", "reenter": false, "guard": "has-citations", "actions": ["store-evidence"], "description": "Accept cited research", "source_ref": { "file": "src/research_review.zig", "declaration": "machine", "line": 60, "column": 1 } },
+        { "id": "approval-granted", "source": "awaiting_human", "event": "approve", "target": "approved", "kind": "external", "reenter": false, "guard": "approval-matches-version", "actions": ["record-approval"], "description": "Record human authority", "source_ref": { "file": "src/research_review.zig", "declaration": "machine", "line": 68, "column": 1 } },
+        { "id": "publish", "source": "working", "event": "publish", "target": "published", "kind": "external", "reenter": false, "guard": "all-regions-complete", "actions": ["publish-result"], "description": "Publish only after both regions complete", "source_ref": { "file": "src/research_review.zig", "declaration": "machine", "line": 76, "column": 1 } },
+        { "id": "history-default", "source": "history", "event": null, "target": "working", "kind": "external", "reenter": false, "guard": null, "actions": [], "description": "Start fresh when no history exists", "source_ref": { "file": "src/research_review.zig", "declaration": "machine", "line": 84, "column": 1 } }
+      ]
+    }
+  ],
+  "statechart_snapshots": [
+    {
+      "schema": "zigeffect.statechart.snapshot.v1",
+      "schema_version": 1,
+      "definition_fingerprint": 88442211,
+      "instance_id": 7001,
+      "configuration": ["root", "working", "research", "research_ready", "approval", "approved"],
+      "active_atomic_states": ["research_ready", "approved"],
+      "status": "active",
+      "revision": 2,
+      "last_event_sequence": 2,
+      "context_redacted": true,
+      "context": "<redacted>"
+    }
+  ],
+  "statechart_executions": [
+    {
+      "schema": "zigeffect.statechart.execution.v1",
+      "schema_version": 1,
+      "instance_id": 7001,
+      "decision_fingerprint": 9911001,
+      "outcome": "transitioned",
+      "event": "research_complete",
+      "transition_ids": ["research-complete"],
+      "from_configuration": ["researching", "awaiting_human"],
+      "to_configuration": ["research_ready", "awaiting_human"],
+      "revision": 1,
+      "actions": [{ "phase": "transition", "id": "store-evidence" }],
+      "commands": ["persist-evidence"],
+      "internal_events": []
+    },
+    {
+      "schema": "zigeffect.statechart.execution.v1",
+      "schema_version": 1,
+      "instance_id": 7001,
+      "decision_fingerprint": 9911002,
+      "outcome": "transitioned",
+      "event": "approve",
+      "transition_ids": ["approval-granted"],
+      "from_configuration": ["research_ready", "awaiting_human"],
+      "to_configuration": ["research_ready", "approved"],
+      "revision": 2,
+      "actions": [{ "phase": "transition", "id": "record-approval" }],
+      "commands": ["persist-approval"],
+      "internal_events": []
+    }
+  ],
+  "statechart_coverage": [
+    {
+      "schema": "zigeffect.statechart.coverage.v1",
+      "schema_version": 1,
+      "definition_id": "agent.research-review",
+      "definition_fingerprint": 88442211,
+      "summary": { "total_states": 10, "visited_states": 8, "total_transitions": 4, "visited_transitions": 2, "total_events": 3, "observed_events": 2 },
+      "states": [
+        { "id": "root", "count": 3 }, { "id": "working", "count": 3 },
+        { "id": "research", "count": 3 }, { "id": "researching", "count": 1 },
+        { "id": "research_ready", "count": 2 }, { "id": "approval", "count": 3 },
+        { "id": "awaiting_human", "count": 2 }, { "id": "approved", "count": 1 }
+      ],
+      "transitions": [
+        { "id": "research-complete", "count": 1 }, { "id": "approval-granted", "count": 1 },
+        { "id": "publish", "count": 0 }, { "id": "history-default", "count": 0 }
+      ],
+      "events": [{ "id": "research_complete", "count": 1 }, { "id": "approve", "count": 1 }, { "id": "publish", "count": 0 }]
+    }
+  ],
+  "statechart_fleet": {
+    "schema": "zigeffect.statechart.fleet-snapshot.v1", "schema_version": 1,
+    "summary": { "instances": 1, "running": 1, "suspended": 0, "degraded": 0, "stuck": 0, "failed": 0, "terminal": 0 },
+    "instances": [{
+      "machine_id": "agent.research-review", "instance_id": "7001", "definition_fingerprint": "88442211", "version": 1,
+      "status": "running", "health": "healthy", "owner": "runner:research-1", "fence_epoch": "7", "parent_instance_id": null,
+      "pending_commands": 0, "pending_timers": 1, "pending_signals": 0, "pending_children": 2, "mailbox_depth": 0
+    }]
+  },
+  "statechart_studio": {
+    "proposals": [{
+      "schema": "zigeffect.statechart.proposal.v1", "schema_version": 1,
+      "proposal_id": "research-review-v2", "machine_id": "agent.research-review", "author": "agent:workflow-author",
+      "title": "Require publication proof", "summary": "Bind publication to complete evidence and explicit human review.",
+      "created_ms": 1783700000000, "base_version": 1, "next_version": 2,
+      "base_fingerprint": "88442211", "next_fingerprint": "88442212",
+      "definition_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "diff_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "digest": "sha256:664b6e27e53e3d17dd490bf0de944ef6162027e2e413852275428573ff4c0428"
+    }],
+    "proofs": [{
+      "schema": "zigeffect.statechart.proof.v1", "schema_version": 1, "proof_id": "proof-research-review-v2",
+      "proposal_digest": "sha256:664b6e27e53e3d17dd490bf0de944ef6162027e2e413852275428573ff4c0428",
+      "definition_fingerprint": "88442212", "validation": "passed", "analysis": "passed", "paths": "passed", "coverage": "passed", "determinism": "passed",
+      "xstate": "passed", "temporal": "passed", "faults": "passed", "performance": "passed",
+      "mutation_total": 20, "mutation_killed": 19, "truncated": false,
+      "digest": "sha256:4040caa9ae562537203612172c088ad2596c0b00893b7bcd500f7771ede59843"
+    }],
+    "reviews": [{
+      "schema": "zigeffect.statechart.review.v1", "schema_version": 1, "review_id": "human-review-v2",
+      "proposal_digest": "sha256:664b6e27e53e3d17dd490bf0de944ef6162027e2e413852275428573ff4c0428",
+      "proof_digest": "sha256:4040caa9ae562537203612172c088ad2596c0b00893b7bcd500f7771ede59843",
+      "reviewer": "human:operator", "decision": "accepted", "summary": "The logic and evidence meet the production release contract.",
+      "issued_ms": 1783700100000, "digest": "sha256:b3813af71cf0f13398f4993abd68604c81365bc1c2e91fb17c30661f850f9104"
+    }],
+    "approvals": [{
+      "schema": "zigeffect.statechart.approval.v1", "schema_version": 1, "approval_id": "approval-research-review-v2",
+      "proposal_digest": "sha256:664b6e27e53e3d17dd490bf0de944ef6162027e2e413852275428573ff4c0428",
+      "proof_digest": "sha256:4040caa9ae562537203612172c088ad2596c0b00893b7bcd500f7771ede59843",
+      "review_digest": "sha256:b3813af71cf0f13398f4993abd68604c81365bc1c2e91fb17c30661f850f9104",
+      "reviewer": "human:operator", "decision": "approved", "issued_ms": 1783700200000, "expires_ms": 1783786600000,
+      "digest": "sha256:4b252dd7e3b49fd8d68a7891c25d837baff420b848573e6f5d0489f394b02c74"
+    }],
+    "applications": [{
+      "schema": "zigeffect.statechart.application.v1", "schema_version": 1, "application_id": "application-research-review-v2",
+      "approval_digest": "sha256:4b252dd7e3b49fd8d68a7891c25d837baff420b848573e6f5d0489f394b02c74",
+      "machine_id": "agent.research-review", "from_fingerprint": "88442211", "to_fingerprint": "88442212",
+      "applied_by": "service:statechart-control", "applied_ms": 1783700300000, "causal_event_id": "9001",
+      "digest": "sha256:536d6adad13d6e721ba78aaaab2eb6d319ca0141b92f1e3579428e76b0f69236"
+    }]
+  }
+}

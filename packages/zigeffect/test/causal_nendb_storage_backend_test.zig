@@ -117,6 +117,22 @@ test "map causal event to deterministic nendb node and parent edge" {
     try std.testing.expectEqual(write.parent_edge.?.label_id, second.parent_edge.?.label_id);
 }
 
+test "nendb node properties escape control bytes into parseable json" {
+    var write = try fx.mapCausalEventToNendbWrite(std.testing.allocator, .{
+        .id = 7,
+        .kind = .effect_started,
+        .label = "ansi \x1b[31mred\x1b[0m label",
+    });
+    defer fx.deinitCausalNendbWrite(std.testing.allocator, &write);
+
+    try std.testing.expect(std.mem.indexOf(u8, write.node.properties, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, write.node.properties, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, write.node.properties, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("ansi \x1b[31mred\x1b[0m label", parsed.value.object.get("label").?.string);
+}
+
 test "nendb storage backend writes conformance events and keeps queryable history" {
     var fake = FakeNendbWriter.init(std.testing.allocator);
     defer fake.deinit();
@@ -239,6 +255,7 @@ test "nendb storage writer failure fails closed without local history" {
     try std.testing.expectEqual(@as(usize, 0), backend_state.eventCount());
     try std.testing.expectEqual(@as(u64, 0), backend_state.writtenEventCount());
     try std.testing.expectEqual(@as(u64, 1), backend_state.failedEventCount());
+    try std.testing.expectEqual(error.FakeNendbWriterRejected, backend_state.lastFailure().?);
     try std.testing.expectEqual(@as(u64, 1), store.backendFailureCount());
 
     var snapshot = try store.snapshot(std.testing.allocator);
@@ -266,6 +283,7 @@ test "nendb storage max_events fails before writer call" {
     try std.testing.expectEqual(@as(usize, 0), backend_state.eventCount());
     try std.testing.expectEqual(@as(u64, 0), backend_state.writtenEventCount());
     try std.testing.expectEqual(@as(u64, 1), backend_state.failedEventCount());
+    try std.testing.expectEqual(error.CausalNendbStorageBackendFull, backend_state.lastFailure().?);
     try std.testing.expectEqual(@as(u64, 1), store.backendFailureCount());
 }
 

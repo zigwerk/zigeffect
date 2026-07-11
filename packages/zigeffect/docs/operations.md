@@ -335,9 +335,27 @@ Current adapters:
   `zigeffect.causal.nendb_edge.v1`.
 - `async_stream`: non-durable incremental event stream.
 
-NenDB support is currently a writer contract and adapter-test boundary. This
-branch does not add a direct production database integration and adds no
-non-NenDB durable adapter.
+The deterministic core's NenDB support remains a writer contract and
+adapter-test boundary. `zigeffect-std` now supplies the concrete local durable
+adapter `zstd.CausalGraph.LocalDatabase`: a bounded Zig-native append-only graph
+WAL over that contract. Generated applications and services write
+`.zigeffect/graph/causal-graph.jsonl`, verify backend failures, and flush before
+returning. This is not a direct dependency on the upstream NenDB package.
+
+Inspect a generated project's durable graph through its validated manifest:
+
+```sh
+zigeffect graph status --root <project> --json
+zigeffect graph event <durable-event-id> --root <project> --json
+zigeffect graph children <durable-event-id> --root <project> --json
+zigeffect graph status --root <system> --component <component-id> --json
+```
+
+System projects require `--component`; the CLI opens only the selected
+manifest component and the manifest-declared graph artifact path. Committed
+record corruption fails closed. A partial final row may be truncated during a
+writable reopen, and read snapshots report any trailing partial bytes without
+repairing the file.
 
 ## Scenario And Invariant Governance
 

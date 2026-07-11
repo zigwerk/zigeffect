@@ -28,9 +28,6 @@ export default defineConfig({
   root,
   base: "./",
   plugins: [webuiDevShim(), solid()],
-  optimizeDeps: {
-    include: ["@antv/g6"],
-  },
   build: {
     outDir: "dist",
     emptyOutDir: true,

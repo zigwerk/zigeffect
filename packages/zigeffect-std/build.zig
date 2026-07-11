@@ -34,6 +34,20 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run zigeffect-std tests");
     test_step.dependOn(&run_tests.step);
 
+    const statechart_test_module = b.createModule(.{
+        .root_source_file = b.path("src/statechart_test_root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    statechart_test_module.addImport("zigeffect", zigeffect);
+    const statechart_tests = addV2Test(b, testing_runner, .{
+        .name = "zigeffect-std-statechart-tests",
+        .root_module = statechart_test_module,
+    });
+    const run_statechart_tests = b.addRunArtifact(statechart_tests);
+    const statechart_test_step = b.step("statechart-test", "Run ZigEffect statechart standard-library tests");
+    statechart_test_step.dependOn(&run_statechart_tests.step);
+
     const examples_step = b.step("examples", "Build zigeffect-std examples");
     addExample(b, examples_step, target, optimize, testing_runner, zigeffect_std, "hello", "examples/hello.zig");
     addExample(b, examples_step, target, optimize, testing_runner, zigeffect_std, "schema-cli", "examples/schema_cli.zig");
@@ -43,6 +57,8 @@ pub fn build(b: *std.Build) void {
     addExample(b, examples_step, target, optimize, testing_runner, zigeffect_std, "http-router", "examples/http_router.zig");
     addExample(b, examples_step, target, optimize, testing_runner, zigeffect_std, "http-sql-smoke", "examples/http_sql_smoke.zig");
     addExample(b, examples_step, target, optimize, testing_runner, zigeffect_std, "local-toolbelt", "examples/local_toolbelt.zig");
+    addExample(b, examples_step, target, optimize, testing_runner, zigeffect_std, "causal-graph", "examples/causal_graph.zig");
+    addExample(b, examples_step, target, optimize, testing_runner, zigeffect_std, "agent-workflow-studio", "examples/agent_workflow_studio.zig");
 }
 
 fn addExample(

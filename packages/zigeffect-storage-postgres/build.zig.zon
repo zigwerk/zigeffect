@@ -1,0 +1,10 @@
+.{
+    .name = .zigeffect_storage_postgres,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0x846c29497346a1ab,
+    .dependencies = .{
+        .zigeffect_postgres_libpq = .{ .path = "../zigeffect-postgres-libpq" },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "README.md", "conformance", "src", "tests" },
+}

@@ -6,12 +6,19 @@ import type {
   LocalDevCheckModel,
   LocalDevCheckStatus,
   LocalDevSessionModel,
+  LocalDevTurnModel,
+  LocalDevTurnRole,
+  LocalDevTurnStatus,
+  LocalDevTransportModel,
 } from "./causalArtifact";
+import { redactLocalDevText } from "./localDevRedaction";
 
 export type LocalDevSessionEventKind =
   | "agent_status"
+  | "agent_turn"
   | "check_result"
   | "artifact_link"
+  | "transport_status"
   | "next_action"
   | "guardrail"
   | "warning";
@@ -22,8 +29,18 @@ export type LocalDevSessionEvent = {
   agent_id?: string;
   agent_kind?: LocalDevAgentKind;
   agent_label?: string;
-  status?: LocalDevAgentStatus | LocalDevCheckStatus;
+  status?: LocalDevAgentStatus | LocalDevCheckStatus | string;
+  protocol?: LocalDevTransportModel["protocol"];
+  url?: string;
+  session_id?: string;
+  frame_count?: number;
+  fallback?: string;
   task?: string;
+  turn_id?: string;
+  role?: LocalDevTurnRole;
+  summary?: string;
+  input?: string;
+  output?: string;
   label?: string;
   command?: string;
   detail?: string;
@@ -37,8 +54,10 @@ type UnknownRecord = Record<string, unknown>;
 
 const eventKinds = new Set<LocalDevSessionEventKind>([
   "agent_status",
+  "agent_turn",
   "check_result",
   "artifact_link",
+  "transport_status",
   "next_action",
   "guardrail",
   "warning",
@@ -46,7 +65,7 @@ const eventKinds = new Set<LocalDevSessionEventKind>([
 
 export function parseLocalDevSessionEventMessage(data: string): LocalDevSessionEvent | null {
   try {
-    return normalizeLocalDevSessionEvent(JSON.parse(data) as unknown);
+    return normalizeLocalDevSessionEvent(unwrapLocalDevTransportFrame(JSON.parse(data) as unknown));
   } catch {
     return null;
   }
@@ -62,6 +81,10 @@ export function localDevSessionEventsFromJsonl(text: string): LocalDevSessionEve
     .sort((left, right) => left.sequence - right.sequence);
 }
 
+export function redactLocalDevSessionText(value: string): string {
+  return redactLocalDevText(value);
+}
+
 export function applyLocalDevSessionEvents(
   base: LocalDevSessionModel,
   events: readonly LocalDevSessionEvent[],
@@ -71,7 +94,9 @@ export function applyLocalDevSessionEvents(
     agents: [...base.agents],
     checks: [...base.checks],
     commands: [...base.commands],
+    turns: [...base.turns],
     artifacts: [...base.artifacts],
+    transports: [...base.transports],
     nextActions: [...base.nextActions],
     guardrails: [...base.guardrails],
     warnings: [...base.warnings],
@@ -98,8 +123,29 @@ function normalizeLocalDevSessionEvent(value: unknown): LocalDevSessionEvent | n
   setText(event, "agent_id", value.agent_id);
   event.agent_kind = localDevAgentKind(value.agent_kind);
   setText(event, "agent_label", value.agent_label);
-  event.status = kind === "check_result" ? localDevCheckStatus(value.status) : localDevAgentStatus(value.status);
+  if (kind === "check_result") {
+    event.status = localDevCheckStatus(value.status);
+  } else if (kind === "agent_turn") {
+    event.status = localDevTurnStatus(value.status);
+  } else if (kind === "transport_status") {
+    event.status = localDevTransportStatus(value.status);
+  } else {
+    event.status = localDevAgentStatus(value.status);
+  }
+  event.protocol = localDevTransportProtocol(value.protocol);
+  setText(event, "url", value.url);
+  setText(event, "session_id", value.session_id);
+  const frameCount = safeSequence(value.frame_count);
+  if (frameCount !== null) {
+    event.frame_count = frameCount;
+  }
+  setText(event, "fallback", value.fallback);
   setText(event, "task", value.task);
+  setText(event, "turn_id", value.turn_id ?? value.turnId);
+  event.role = localDevTurnRole(value.role);
+  setText(event, "summary", value.summary);
+  setText(event, "input", value.input ?? value.prompt);
+  setText(event, "output", value.output ?? value.response);
   setText(event, "label", value.label);
   setText(event, "command", value.command);
   setText(event, "detail", value.detail);
@@ -111,10 +157,16 @@ function normalizeLocalDevSessionEvent(value: unknown): LocalDevSessionEvent | n
   if (kind === "agent_status" && !event.agent_id) {
     return null;
   }
+  if (kind === "agent_turn" && (!event.agent_id || !event.turn_id)) {
+    return null;
+  }
   if (kind === "check_result" && !event.label) {
     return null;
   }
   if (kind === "artifact_link" && (!event.key || !event.path)) {
+    return null;
+  }
+  if (kind === "transport_status" && !event.protocol) {
     return null;
   }
   if ((kind === "next_action" || kind === "guardrail" || kind === "warning") && !event.value) {
@@ -128,11 +180,17 @@ function applyLocalDevSessionEvent(session: LocalDevSessionModel, event: LocalDe
     case "agent_status":
       upsertAgent(session.agents, agentFromEvent(event));
       break;
+    case "agent_turn":
+      upsertTurn(session.turns, turnFromEvent(event));
+      break;
     case "check_result":
       upsertCheck(session.checks, checkFromEvent(event));
       break;
     case "artifact_link":
       upsertArtifact(session.artifacts, artifactFromEvent(event));
+      break;
+    case "transport_status":
+      upsertTransport(session.transports, transportFromEvent(event));
       break;
     case "next_action":
       appendUnique(session.nextActions, event.value ?? "");
@@ -144,6 +202,22 @@ function applyLocalDevSessionEvent(session: LocalDevSessionModel, event: LocalDe
       appendUnique(session.warnings, event.value ?? "");
       break;
   }
+}
+
+function turnFromEvent(event: LocalDevSessionEvent): LocalDevTurnModel {
+  const agentKind = event.agent_kind ?? "other";
+  return {
+    id: event.turn_id ?? `turn-${event.sequence}`,
+    agentId: event.agent_id ?? "local-agent",
+    agentLabel: event.agent_label ?? agentLabel(agentKind),
+    agentKind,
+    role: localDevTurnRole(event.role),
+    status: localDevTurnStatus(event.status),
+    summary: event.summary ?? event.value ?? event.detail ?? "",
+    input: event.input ?? null,
+    output: event.output ?? null,
+    artifactPath: event.artifact_path ?? null,
+  };
 }
 
 function agentFromEvent(event: LocalDevSessionEvent): LocalDevAgentModel {
@@ -180,12 +254,41 @@ function artifactFromEvent(event: LocalDevSessionEvent): LocalDevArtifactModel {
   };
 }
 
+function transportFromEvent(event: LocalDevSessionEvent): LocalDevTransportModel {
+  return {
+    protocol: event.protocol ?? "other",
+    status: localDevTransportStatus(event.status),
+    url: event.url ?? null,
+    sessionId: event.session_id ?? null,
+    frameCount: event.frame_count ?? 0,
+    fallback: event.fallback ?? null,
+    detail: event.detail ?? "",
+  };
+}
+
 function upsertAgent(agents: LocalDevAgentModel[], agent: LocalDevAgentModel): void {
   const index = agents.findIndex((candidate) => candidate.id === agent.id);
   if (index === -1) {
     agents.push(agent);
   } else {
     agents[index] = { ...agents[index], ...agent };
+  }
+}
+
+function upsertTurn(turns: LocalDevTurnModel[], turn: LocalDevTurnModel): void {
+  const index = turns.findIndex((candidate) => candidate.id === turn.id && candidate.agentId === turn.agentId);
+  if (index === -1) {
+    turns.push(turn);
+  } else {
+    const existing = turns[index]!;
+    turns[index] = {
+      ...existing,
+      ...turn,
+      summary: turn.summary.length > 0 ? turn.summary : existing.summary,
+      input: turn.input ?? existing.input,
+      output: turn.output ?? existing.output,
+      artifactPath: turn.artifactPath ?? existing.artifactPath,
+    };
   }
 }
 
@@ -207,6 +310,19 @@ function upsertArtifact(artifacts: LocalDevArtifactModel[], artifact: LocalDevAr
   }
 }
 
+function upsertTransport(transports: LocalDevTransportModel[], transport: LocalDevTransportModel): void {
+  const index = transports.findIndex((candidate) =>
+    candidate.protocol === transport.protocol &&
+    candidate.sessionId === transport.sessionId &&
+    candidate.url === transport.url
+  );
+  if (index === -1) {
+    transports.push(transport);
+  } else {
+    transports[index] = { ...transports[index], ...transport };
+  }
+}
+
 function appendUnique(values: string[], value: string): void {
   if (value.length > 0 && !values.includes(value)) {
     values.push(value);
@@ -225,7 +341,14 @@ function setText<T extends keyof LocalDevSessionEvent>(
 }
 
 function safeSequence(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+  }
+  return null;
 }
 
 function localDevSessionEventKind(value: unknown): LocalDevSessionEventKind | null {
@@ -256,6 +379,28 @@ function localDevAgentStatus(value: unknown): LocalDevAgentStatus {
   return "unknown";
 }
 
+function localDevTurnRole(value: unknown): LocalDevTurnRole {
+  const role = textValue(value);
+  if (role === "user" || role === "assistant" || role === "tool" || role === "system") {
+    return role;
+  }
+  return "unknown";
+}
+
+function localDevTurnStatus(value: unknown): LocalDevTurnStatus {
+  const status = textValue(value);
+  if (status === "started" || status === "running") {
+    return "started";
+  }
+  if (status === "completed" || status === "complete" || status === "done" || status === "success") {
+    return "completed";
+  }
+  if (status === "failed" || status === "fail" || status === "error") {
+    return "failed";
+  }
+  return "unknown";
+}
+
 function localDevCheckStatus(value: unknown): LocalDevCheckStatus {
   const status = textValue(value);
   if (status === "ok" || status === "pass" || status === "passed" || status === "success") {
@@ -271,6 +416,22 @@ function localDevCheckStatus(value: unknown): LocalDevCheckStatus {
     return "skipped";
   }
   return "unknown";
+}
+
+function localDevTransportProtocol(value: unknown): LocalDevTransportModel["protocol"] | undefined {
+  const protocol = textValue(value);
+  if (protocol === "webtransport" || protocol === "websocket" || protocol === "http") {
+    return protocol;
+  }
+  if (protocol.length > 0) {
+    return "other";
+  }
+  return undefined;
+}
+
+function localDevTransportStatus(value: unknown): string {
+  const status = textValue(value);
+  return status.length > 0 ? redactLocalDevText(status) : "unknown";
 }
 
 function artifactKind(path: string): LocalDevArtifactModel["kind"] {
@@ -299,15 +460,21 @@ function agentLabel(kind: LocalDevAgentKind): string {
   }
 }
 
-function redactLocalDevText(value: string): string {
-  return value
-    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^/?#\s:@]+:[^/?#\s@]+@/gi, "$1<redacted>@")
-    .replace(/\b(authorization|proxy-authorization)\s*:\s*(bearer|basic)\s+[^;\s,]+/gi, "$1: $2 <redacted>")
-    .replace(/\bcookie\s*:\s*[^,\n\r]+/gi, "Cookie: <redacted>")
-    .replace(
-      /\b(api[_-]?key|x-api-key|token|password|secret|session(?:_id)?|sid)\b\s*[:=]\s*("[^"]*"|'[^']*'|[^;\s,]+)/gi,
-      "$1=<redacted>",
-    );
+function unwrapLocalDevTransportFrame(value: unknown): unknown {
+  if (!isRecord(value)) {
+    return value;
+  }
+  if (textValue(value.schema) !== "zigeffect.webtransport.local-dev-frame.v1") {
+    return value;
+  }
+  if (typeof value.payload === "string") {
+    try {
+      return JSON.parse(value.payload) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  return isRecord(value.payload) ? value.payload : null;
 }
 
 function textValue(value: unknown): string {
@@ -326,4 +493,3 @@ function textValue(value: unknown): string {
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null;
 }
-

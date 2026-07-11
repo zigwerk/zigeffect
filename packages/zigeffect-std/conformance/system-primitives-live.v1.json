@@ -1,0 +1,24 @@
+{
+  "schema": "zigeffect.live-conformance-receipt.v1",
+  "adapter": "zigeffect-std.system-primitives",
+  "version": "0.1.0",
+  "status": "passed",
+  "observed_at_ms": 1783777336000,
+  "environment": {"zig":"0.16.0","os":"macos"},
+  "command": "zig build test -Doptimize=ReleaseSafe",
+  "checks": [
+    "wall clock advances and monotonic time never regresses",
+    "sleep respects its lower bound",
+    "OS CSPRNG fills distinct buffers",
+    "UUIDv7 format and time bits",
+    "ULID monotonic ordering",
+    "layered environment and JSON file configuration provenance",
+    "Schema-decoded bounded production field widths",
+    "environment and file secret references",
+    "secret access audit zeroization rotation epoch and boundary redaction"
+  ],
+  "limitations": [
+    "managed secret stores require a caller-owned provider",
+    "configuration reload is explicit rather than file-watch based"
+  ]
+}

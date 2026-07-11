@@ -47,8 +47,18 @@ through `zstd.Http.sendEffect`.
 ## WebTransport
 
 M18 adds receipt helpers and deterministic message capture for WebTransport
-streams/datagrams. The next milestone can connect these receipts to the
-workbench live agent session stream.
+streams/datagrams.
+
+M19 adds the local dev-session bridge:
+
+- `bridgeLocalDevSessionJsonlAlloc` wraps `zstd.Agent.Session` JSONL as
+  redacted `zigeffect.webtransport.local-dev-frame.v1` JSONL.
+- The bridge records every frame into `FakeWebTransportClient` so CI can prove
+  the transport boundary without opening sockets.
+- Bridge receipts redact URLs, tokens, passwords, and payload details before
+  they can reach causal artifacts or workbench payloads.
+- The Solid workbench can unwrap these frames and show transport status in the
+  Dev Session view.
 
 Copyable examples:
 

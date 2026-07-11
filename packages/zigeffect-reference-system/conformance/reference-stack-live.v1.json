@@ -1,0 +1,42 @@
+{
+  "schema": "zigeffect.live-conformance-receipt.v1",
+  "adapter": "zigeffect-reference-orders",
+  "version": "0.1.0",
+  "status": "passed",
+  "observed_at_ms": 1783777336000,
+  "environment": {
+    "zig": "0.16.0",
+    "postgres_image": "postgres@sha256:979c4379dd698aba0b890599a6104e082035f98ef31d9b9291ec22f2b13059ca",
+    "cockroach_image": "cockroachdb/cockroach@sha256:626a830ee9c8c90655812492b17ea1ad85bae9de8268f46db686f0cb833da898",
+    "redis": "8.6.3",
+    "minio_image": "quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
+    "openssl": "3"
+  },
+  "commands": [
+    "test/run_live_stack.sh",
+    "test/run_process_stack.sh",
+    "test/run_load_conformance.sh",
+    "zig build fault-matrix"
+  ],
+  "checks": [
+    "real HTTP create and read endpoints",
+    "parameter-bound Postgres transactions",
+    "Postgres-backed workflow journal and fenced worker lease",
+    "idempotent SQL outbox dispatch",
+    "password-authenticated Redis Streams broker redelivery",
+    "S3 SigV4 checksum object writes",
+    "certificate-verified TLS service transport",
+    "independent API worker and OTLP collector processes",
+    "lifecycle readiness drain and shutdown",
+    "ephemeral secret references with log scanning",
+    "model-to-live differential trace",
+    "provider fault schedule and mutation matrices",
+    "bounded multi-order load run",
+    "Testing v2 complete receipts"
+  ],
+  "limitations": [
+    "the reference topology is single-region and delegates database failover to the operator",
+    "HTTP/2 Redis Cluster S3 endpoint TLS and OTLP gRPC are outside the demonstrated profile",
+    "load budgets are release regression bounds rather than universal service-level objectives"
+  ]
+}

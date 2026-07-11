@@ -2,6 +2,11 @@ import { afterEach, expect, test } from "bun:test";
 import type { Server } from "bun";
 import { createCollector } from "./collector";
 import { parseCommandMessage, parseFrameMessage, type LiveCommandFrame, type LiveFrame } from "../liveAttach";
+import { parseLocalDevSessionEventMessage, type LocalDevSessionEvent } from "../localDevSessionFeed";
+import {
+  parseProjectDevelopmentFrameMessage,
+  type ProjectDevelopmentFrame,
+} from "../development/projectDevelopment";
 
 const engineLine = (extra: Record<string, unknown>): string =>
   JSON.stringify({ id: 1, kind: "run_started", run_id: 1, status: "started", label: "", ...extra });
@@ -75,6 +80,54 @@ function nextCommand(ws: WebSocket): Promise<LiveCommandFrame> {
       { once: true },
     );
   });
+}
+
+function nextAgentEvent(ws: WebSocket): Promise<LocalDevSessionEvent> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out waiting for an agent event")), 2000);
+    ws.addEventListener(
+      "message",
+      (event) => {
+        clearTimeout(timer);
+        const frame = parseLocalDevSessionEventMessage(typeof event.data === "string" ? event.data : "");
+        if (frame) resolve(frame);
+        else reject(new Error(`unparseable agent event: ${String(event.data)}`));
+      },
+      { once: true },
+    );
+  });
+}
+
+function nextProjectUpdate(ws: WebSocket): Promise<ProjectDevelopmentFrame> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out waiting for a project update")), 2000);
+    ws.addEventListener("message", (event) => {
+      clearTimeout(timer);
+      const frame = parseProjectDevelopmentFrameMessage(typeof event.data === "string" ? event.data : "");
+      if (frame) resolve(frame);
+      else reject(new Error(`unparseable project update: ${String(event.data)}`));
+    }, { once: true });
+  });
+}
+
+function projectUpdate(): ProjectDevelopmentFrame {
+  return {
+    schema: "zigeffect.project-development.v1",
+    sequence: 1,
+    connection: "live",
+    manifest: {
+      schema: "zigeffect.project.v1",
+      name: "demo",
+      version: "0.1.0",
+      kind: "application",
+      components: [{ id: "demo", kind: "application", path: ".", depends_on: [], capabilities: [] }],
+      commands: [{ id: "check", argv: ["zig", "build", "test"] }],
+      requirements: [],
+      acceptance_checks: [],
+    },
+    sessions: [],
+    events: [],
+  };
 }
 
 test("a connected client receives an ingested line as ONE mapped LiveFrame message", async () => {
@@ -196,6 +249,61 @@ test("POST /command redacts secret-shaped command kind before response and broad
 
     const all = await (await fetch(`http://${origin}/commands?after=0`)).json();
     expect(JSON.stringify(all)).not.toContain("sentinel-secret");
+  } finally {
+    client.close();
+  }
+});
+
+test("POST /agent-feed broadcasts redacted local dev-session events", async () => {
+  const { origin } = serve();
+  const client = await openClient(origin);
+  try {
+    const received = nextAgentEvent(client);
+    const response = await fetch(`http://${origin}/agent-feed`, {
+      method: "POST",
+      body: [
+        JSON.stringify({
+          sequence: 1,
+          kind: "agent_status",
+          agent_id: "codex",
+          agent_kind: "codex",
+          agent_label: "Codex",
+          status: "running",
+          task: "streaming token=sentinel-secret",
+        }),
+      ].join("\n"),
+    });
+
+    expect(await response.json()).toEqual({ ingested: 1 });
+    const event = await received;
+    expect(event.kind).toBe("agent_status");
+    expect(event.agent_id).toBe("codex");
+    expect(event.task).toContain("<redacted>");
+    expect(JSON.stringify(event)).not.toContain("sentinel-secret");
+  } finally {
+    client.close();
+  }
+});
+
+test("POST /project validates and broadcasts project development updates", async () => {
+  const { origin } = serve();
+  const client = await openClient(origin);
+  try {
+    const received = nextProjectUpdate(client);
+    const response = await fetch(`http://${origin}/project`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(projectUpdate()),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ingested: 1 });
+    expect((await received).sequence).toBe(1);
+
+    const invalid = await fetch(`http://${origin}/project`, {
+      method: "POST",
+      body: JSON.stringify({ ...projectUpdate(), schema: "zigeffect.project-development.v9" }),
+    });
+    expect(invalid.status).toBe(400);
   } finally {
     client.close();
   }

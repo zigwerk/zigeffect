@@ -14,6 +14,7 @@ test "root facade keeps stable public namespaces" {
         "data",
         "match",
         "pattern",
+        "statechart",
         "workflow",
         "cluster",
         "storage",
@@ -25,8 +26,67 @@ test "root facade keeps stable public namespaces" {
     }
 
     try std.testing.expectEqualStrings("workflow", fx.workflow.domain);
+    try std.testing.expectEqualStrings("statechart", fx.statechart.domain);
     try std.testing.expectEqualStrings("cluster", fx.cluster.domain);
     try std.testing.expectEqualStrings("performance", fx.performance.domain);
+}
+
+test "statechart namespace keeps typed definition exports" {
+    const exports = [_][]const u8{
+        "Definition",
+        "Machine",
+        "ConfigurationMachine",
+        "Macrostep",
+        "ConfigurationMacrostep",
+        "Analyzer",
+        "Artifacts",
+        "Actor",
+        "ConfigurationActor",
+        "ActorSystem",
+        "ConfigurationActorSystem",
+        "mapDecisionToCausal",
+        "recordDecisionCausal",
+        "StateKind",
+        "TransitionKind",
+        "SnapshotStatus",
+        "DecisionOutcome",
+        "ActionPhase",
+        "StepError",
+        "MacrostepError",
+        "AnalysisFindingKind",
+        "statechart_definition_schema",
+        "statechart_snapshot_schema",
+        "statechart_execution_schema",
+        "statechart_coverage_schema",
+        "actor_tree_checkpoint_schema",
+        "actor_tree_checkpoint_schema_version",
+        "ActorStatus",
+        "MailboxOverflowPolicy",
+        "ValidationFindingKind",
+        "DefinitionBounds",
+        "SourceRef",
+        "VersionCompatibility",
+        "DeploymentStrategy",
+        "VersionRisk",
+        "VersionSubject",
+        "VersionChangeKind",
+        "VersionDiff",
+        "Simulation",
+        "ConfigurationSimulation",
+        "ControlOperation",
+        "ControlDecision",
+        "ControlStatus",
+        "InstanceStatus",
+        "InstanceHealth",
+        "ControlPlane",
+        "FleetRegistry",
+        "MigrationRegistry",
+        "MutationCatalog",
+    };
+
+    inline for (exports) |name| {
+        try std.testing.expect(@hasDecl(fx.statechart, name));
+    }
 }
 
 test "workflow namespace keeps durable public exports" {
@@ -40,6 +100,7 @@ test "workflow namespace keeps durable public exports" {
         "WorkflowEventMigrationRegistry",
         "WorkflowReplayState",
         "JournalStore",
+        "CausalJournalStore",
         "JournalAppend",
         "JournalEventBatch",
         "InMemoryJournalStore",
@@ -63,6 +124,10 @@ test "workflow namespace keeps durable public exports" {
         "WorkflowSchedulerTickResult",
         "WorkflowLifecycle",
         "WorkflowInspectionReport",
+        "DurableStatechart",
+        "DurableConfigurationStatechart",
+        "statechart_record_schema",
+        "statechart_record_schema_version",
         "mapWorkflowEventsToCausal",
         "cloneWorkflowEvent",
         "deinitWorkflowEventStrings",
@@ -77,6 +142,7 @@ test "workflow namespace keeps durable public exports" {
     try std.testing.expect(fx.workflow.WorkflowEvent == fx.workflow.journal.WorkflowEvent);
     try std.testing.expect(fx.workflow.WorkflowReplayState == fx.workflow.replay.WorkflowReplayState);
     try std.testing.expect(fx.workflow.JournalStore == fx.workflow.store.JournalStore);
+    try std.testing.expect(fx.workflow.CausalJournalStore == fx.workflow.store.CausalJournalStore);
     try std.testing.expect(fx.workflow.WorkflowEngine == fx.workflow.engine.WorkflowEngine);
     try std.testing.expect(fx.workflow.WorkflowContext == fx.workflow.context.WorkflowContext);
     try std.testing.expect(fx.workflow.DurableClock == fx.workflow.clock.DurableClock);
@@ -125,6 +191,8 @@ test "cluster namespace keeps actor runner storage and transport exports" {
         "ClusterTransportFailureReport",
         "InProcessClusterTransport",
         "LoopbackHttpClusterTransport",
+        "EncodedInProcessHttpClusterTransport",
+        "EncodedInProcessSocketClusterTransport",
         "ProductionHttpClusterTransport",
         "ProductionSocketClusterTransport",
         "chunkedClusterTransportRequest",
@@ -161,6 +229,8 @@ test "cluster namespace keeps actor runner storage and transport exports" {
     try std.testing.expect(fx.cluster.LocalShardLeaseManager == fx.cluster.shard_lease.LocalShardLeaseManager);
     try std.testing.expect(fx.cluster.ClusterRuntime == fx.cluster.runtime.ClusterRuntime);
     try std.testing.expect(fx.cluster.ClusterTransport == fx.cluster.transport.ClusterTransport);
+    try std.testing.expect(fx.cluster.EncodedInProcessHttpClusterTransport == fx.cluster.transport.EncodedInProcessHttpClusterTransport);
+    try std.testing.expect(fx.cluster.EncodedInProcessSocketClusterTransport == fx.cluster.transport.EncodedInProcessSocketClusterTransport);
     try std.testing.expect(fx.cluster.ProductionHttpClusterTransport == fx.cluster.transport.ProductionHttpClusterTransport);
     try std.testing.expect(fx.cluster.ProductionSocketClusterTransport == fx.cluster.transport.ProductionSocketClusterTransport);
     try std.testing.expect(fx.cluster.RealClusterController == fx.cluster.real_cluster.RealClusterController);
@@ -182,11 +252,35 @@ test "top level compatibility aliases point at namespace exports" {
     try std.testing.expect(fx.MessageStorage == fx.cluster.MessageStorage);
     try std.testing.expect(fx.RunnerStorage == fx.cluster.RunnerStorage);
     try std.testing.expect(fx.ClusterTransport == fx.cluster.ClusterTransport);
+    try std.testing.expect(fx.EncodedInProcessHttpClusterTransport == fx.cluster.EncodedInProcessHttpClusterTransport);
+    try std.testing.expect(fx.EncodedInProcessSocketClusterTransport == fx.cluster.EncodedInProcessSocketClusterTransport);
     try std.testing.expect(fx.ProductionHttpClusterTransport == fx.cluster.ProductionHttpClusterTransport);
     try std.testing.expect(fx.ProductionSocketClusterTransport == fx.cluster.ProductionSocketClusterTransport);
     try std.testing.expect(fx.RealClusterController == fx.cluster.RealClusterController);
     try std.testing.expect(fx.ClusterWorkflowEngine == fx.cluster.ClusterWorkflowEngine);
     try std.testing.expect(fx.PerformanceBenchmarkReport == fx.performance.PerformanceBenchmarkReport);
+}
+
+test "agent safety kernel keeps stable public exports" {
+    const exports = [_][]const u8{
+        "SourceMap",
+        "SourceRef",
+        "SourceRefInput",
+        "resolveEventSource",
+        "ResourceHandle",
+        "ResourceTable",
+        "isAgentSendable",
+        "assertAgentSendable",
+        "TrackedAllocator",
+        "MemorySafetySnapshot",
+        "ScheduleExplorerOptions",
+        "ScheduleExplorationReport",
+        "exploreSchedules",
+        "replaySchedule",
+    };
+    inline for (exports) |name| try std.testing.expect(@hasDecl(fx, name));
+    try std.testing.expectEqualStrings("zigeffect.source-map.v1", fx.source_map_schema);
+    try std.testing.expectEqualStrings("zigeffect.schedule-exploration.v1", fx.schedule_exploration_schema);
 }
 
 test "public durable schema constants stay at version one" {

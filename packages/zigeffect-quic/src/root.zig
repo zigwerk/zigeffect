@@ -19,6 +19,16 @@ pub const ClientConfig = struct {
 };
 
 pub const FakeQuicHttpClient = struct {
+    pub const capability = zstd.Capability.Descriptor{
+        .id = "zigeffect-quic.fake-http-client",
+        .kind = .http_client,
+        .maturity = .fake,
+        .package = "zigeffect-quic",
+        .version = "0.1.0",
+        .features = &.{ "http3", "quic" },
+        .limitations = &.{"returns a configured response without QUIC network IO"},
+    };
+
     response: zstd.Http.Response,
     allocator: ?std.mem.Allocator = null,
 
@@ -46,6 +56,17 @@ pub const FakeQuicHttpClient = struct {
 };
 
 pub const QuicHttpClient = struct {
+    pub const capability = zstd.Capability.Descriptor{
+        .id = "zigeffect-quic.http3-client",
+        .kind = .http_client,
+        .maturity = .local_development,
+        .package = "zigeffect-quic",
+        .version = "0.1.0",
+        .features = &.{ "http3", "quic", "tls" },
+        .side_effects = .real,
+        .limitations = &.{"has no live release conformance recovery or bounded-load receipt"},
+    };
+
     config: ClientConfig = .{},
 
     pub fn init(config: ClientConfig) QuicHttpClient {
@@ -204,6 +225,15 @@ pub const WebTransportMessage = struct {
 };
 
 pub const FakeWebTransportClient = struct {
+    pub const capability = zstd.Capability.Descriptor{
+        .id = "zigeffect-quic.fake-web-transport-client",
+        .kind = .web_transport,
+        .maturity = .fake,
+        .package = "zigeffect-quic",
+        .version = "0.1.0",
+        .limitations = &.{"records messages in memory without a WebTransport session"},
+    };
+
     allocator: std.mem.Allocator,
     messages: std.ArrayList(WebTransportMessage) = .empty,
 
@@ -233,6 +263,160 @@ pub const FakeWebTransportClient = struct {
         });
     }
 };
+
+pub const LocalDevSessionBridgeOptions = struct {
+    session_id: u64,
+    url: []const u8,
+    status: []const u8 = "connected",
+    fallback: []const u8 = "websocket",
+};
+
+pub const LocalDevSessionBridgeSummary = struct {
+    allocator: std.mem.Allocator,
+    event_count: usize,
+    frame_count: usize,
+    frame_jsonl: []const u8,
+    receipt_json: []const u8,
+
+    pub fn deinit(self: *LocalDevSessionBridgeSummary) void {
+        self.allocator.free(self.frame_jsonl);
+        self.allocator.free(self.receipt_json);
+        self.* = undefined;
+    }
+};
+
+pub fn bridgeLocalDevSessionJsonlAlloc(
+    allocator: std.mem.Allocator,
+    options: LocalDevSessionBridgeOptions,
+    feed_jsonl: []const u8,
+    client: *FakeWebTransportClient,
+) std.mem.Allocator.Error!LocalDevSessionBridgeSummary {
+    var frames: std.ArrayList(u8) = .empty;
+    errdefer frames.deinit(allocator);
+
+    var frame_count: usize = 0;
+    var event_count: usize = 0;
+
+    const status_payload = try transportStatusPayloadJsonAlloc(allocator, options);
+    defer allocator.free(status_payload);
+    try appendDevFrameAlloc(allocator, &frames, client, options, frame_count, status_payload);
+    frame_count += 1;
+
+    var iterator = std.mem.splitScalar(u8, feed_jsonl, '\n');
+    while (iterator.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r\n");
+        if (line.len == 0) continue;
+        try appendDevFrameAlloc(allocator, &frames, client, options, frame_count, line);
+        frame_count += 1;
+        event_count += 1;
+    }
+
+    const frame_jsonl = try frames.toOwnedSlice(allocator);
+    errdefer allocator.free(frame_jsonl);
+    const receipt_json = try bridgeReceiptJsonAlloc(allocator, options, event_count, frame_count);
+    errdefer allocator.free(receipt_json);
+
+    return .{
+        .allocator = allocator,
+        .event_count = event_count,
+        .frame_count = frame_count,
+        .frame_jsonl = frame_jsonl,
+        .receipt_json = receipt_json,
+    };
+}
+
+fn appendDevFrameAlloc(
+    allocator: std.mem.Allocator,
+    frames: *std.ArrayList(u8),
+    client: *FakeWebTransportClient,
+    options: LocalDevSessionBridgeOptions,
+    frame_sequence: usize,
+    payload: []const u8,
+) std.mem.Allocator.Error!void {
+    const frame_json = try webTransportDevFrameJsonAlloc(allocator, options, frame_sequence, payload);
+    defer allocator.free(frame_json);
+
+    try client.recordAlloc(.{
+        .kind = .datagram,
+        .session_id = options.session_id,
+        .payload = frame_json,
+        .direction = "outbound",
+    });
+    try frames.appendSlice(allocator, frame_json);
+    try frames.append(allocator, '\n');
+}
+
+fn webTransportDevFrameJsonAlloc(
+    allocator: std.mem.Allocator,
+    options: LocalDevSessionBridgeOptions,
+    frame_sequence: usize,
+    payload: []const u8,
+) std.mem.Allocator.Error![]const u8 {
+    const frame_sequence_text = try std.fmt.allocPrint(allocator, "{d}", .{frame_sequence});
+    defer allocator.free(frame_sequence_text);
+    const session_id = try std.fmt.allocPrint(allocator, "{d}", .{options.session_id});
+    defer allocator.free(session_id);
+    const url = try zstd.Secrets.redactAlloc(allocator, options.url);
+    defer allocator.free(url);
+    const safe_payload = try zstd.Secrets.redactAlloc(allocator, payload);
+    defer allocator.free(safe_payload);
+
+    return zstd.Json.objectFromFieldsAlloc(allocator, &.{
+        .{ .name = "schema", .value = "zigeffect.webtransport.local-dev-frame.v1" },
+        .{ .name = "transport", .value = "webtransport" },
+        .{ .name = "frame_sequence", .value = frame_sequence_text },
+        .{ .name = "session_id", .value = session_id },
+        .{ .name = "url", .value = url },
+        .{ .name = "payload", .value = safe_payload },
+    });
+}
+
+fn transportStatusPayloadJsonAlloc(
+    allocator: std.mem.Allocator,
+    options: LocalDevSessionBridgeOptions,
+) std.mem.Allocator.Error![]const u8 {
+    const session_id = try std.fmt.allocPrint(allocator, "{d}", .{options.session_id});
+    defer allocator.free(session_id);
+    const url = try zstd.Secrets.redactAlloc(allocator, options.url);
+    defer allocator.free(url);
+
+    return zstd.Json.objectFromFieldsAlloc(allocator, &.{
+        .{ .name = "sequence", .value = "0" },
+        .{ .name = "kind", .value = "transport_status" },
+        .{ .name = "protocol", .value = "webtransport" },
+        .{ .name = "status", .value = options.status },
+        .{ .name = "url", .value = url },
+        .{ .name = "session_id", .value = session_id },
+        .{ .name = "fallback", .value = options.fallback },
+        .{ .name = "detail", .value = "local WebTransport bridge ready" },
+    });
+}
+
+fn bridgeReceiptJsonAlloc(
+    allocator: std.mem.Allocator,
+    options: LocalDevSessionBridgeOptions,
+    event_count: usize,
+    frame_count: usize,
+) std.mem.Allocator.Error![]const u8 {
+    const event_count_text = try std.fmt.allocPrint(allocator, "{d}", .{event_count});
+    defer allocator.free(event_count_text);
+    const frame_count_text = try std.fmt.allocPrint(allocator, "{d}", .{frame_count});
+    defer allocator.free(frame_count_text);
+    const session_id = try std.fmt.allocPrint(allocator, "{d}", .{options.session_id});
+    defer allocator.free(session_id);
+    const url = try zstd.Secrets.redactAlloc(allocator, options.url);
+    defer allocator.free(url);
+
+    return zstd.Json.objectFromFieldsAlloc(allocator, &.{
+        .{ .name = "kind", .value = "zigeffect.quic.webtransport.local-dev-bridge" },
+        .{ .name = "protocol", .value = "webtransport" },
+        .{ .name = "status", .value = options.status },
+        .{ .name = "url", .value = url },
+        .{ .name = "session_id", .value = session_id },
+        .{ .name = "event_count", .value = event_count_text },
+        .{ .name = "frame_count", .value = frame_count_text },
+    });
+}
 
 pub fn http3ReceiptJsonAlloc(
     allocator: std.mem.Allocator,
@@ -314,6 +498,23 @@ test "zigeffect-quic imports quic-zig" {
     try std.testing.expect(@hasDecl(quic, "event_loop"));
 }
 
+test "QUIC adapters publish truthful pre-production capabilities" {
+    try FakeQuicHttpClient.capability.validate();
+    try QuicHttpClient.capability.validate();
+    try FakeWebTransportClient.capability.validate();
+    try std.testing.expectEqual(zstd.Capability.Maturity.fake, FakeQuicHttpClient.capability.maturity);
+    try std.testing.expectEqual(zstd.Capability.Maturity.local_development, QuicHttpClient.capability.maturity);
+    try std.testing.expectEqual(zstd.Capability.Maturity.fake, FakeWebTransportClient.capability.maturity);
+    try std.testing.expectEqual(
+        zstd.Capability.Match.insufficient_maturity,
+        zstd.Capability.match(QuicHttpClient.capability, .{
+            .kind = .http_client,
+            .minimum_maturity = .production_candidate,
+            .requires_live_conformance = true,
+        }),
+    );
+}
+
 test "QUIC fake HTTP client works through zstd Http sendEffect with redacted causal facts" {
     var response = try zstd.Http.cloneResponseAlloc(std.testing.allocator, .{
         .status = 200,
@@ -393,4 +594,40 @@ test "WebTransport receipt redacts stream and datagram payloads" {
 
     try std.testing.expect(std.mem.indexOf(u8, datagram_receipt, "abc123") == null);
     try std.testing.expect(std.mem.indexOf(u8, datagram_receipt, "\"kind\":\"datagram\"") != null);
+}
+
+test "WebTransport bridge frames zstd Agent session JSONL for the workbench" {
+    var session = zstd.Agent.Session.init(std.testing.allocator, "m19-session", "/tmp/yachdee");
+    defer session.deinit();
+    try session.recordAgentStatus(.{
+        .agent_id = "codex",
+        .agent_kind = .codex,
+        .agent_label = "Codex",
+        .status = .running,
+        .task = "streaming token=abc123 through WebTransport",
+    });
+    try session.recordCheck(.{
+        .label = "bun run zigeffect:quic:test",
+        .command = "bun run zigeffect:quic:test",
+        .status = .pass,
+        .detail = "bridge test passed",
+    });
+
+    var client = FakeWebTransportClient.init(std.testing.allocator);
+    defer client.deinit();
+
+    var summary = try bridgeLocalDevSessionJsonlAlloc(std.testing.allocator, .{
+        .session_id = 42,
+        .url = "https://localhost:4433/.well-known/webtransport?token=abc123",
+        .status = "connected",
+    }, session.feedText(), &client);
+    defer summary.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), summary.event_count);
+    try std.testing.expectEqual(@as(usize, 3), summary.frame_count);
+    try std.testing.expectEqual(@as(usize, 3), client.messages.items.len);
+    try std.testing.expect(std.mem.indexOf(u8, summary.frame_jsonl, "zigeffect.webtransport.local-dev-frame.v1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, summary.frame_jsonl, "transport_status") != null);
+    try std.testing.expect(std.mem.indexOf(u8, summary.frame_jsonl, "abc123") == null);
+    try std.testing.expect(std.mem.indexOf(u8, summary.receipt_json, "abc123") == null);
 }

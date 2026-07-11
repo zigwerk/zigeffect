@@ -196,8 +196,9 @@ examples into a local agent/database development loop:
 - **M14 Local Agent Supervisor:** delivered. `zstd.Agent` now supervises local
   process adapters, emits guardrails/checks/artifacts, and returns redacted
   workbench-compatible JSONL plus receipts.
-- **M15 Workbench Dev Session UX:** render those feeds as sessions, commands,
-  checks, artifacts, and causal facts.
+- **M15 Workbench Dev Session UX:** delivered. The Solid workbench renders
+  sessions, commands, checks, artifacts, causal facts, durable local ownership,
+  and interactive PTY terminals.
 - **M16 HTTP Router / Local Server:** delivered. `zstd.Http` now provides
   Schema-coded local JSON routes with receipt and trace JSON.
 - **M17 Postgres Maturity:** delivered. `zstd.Sql` now decodes rows through

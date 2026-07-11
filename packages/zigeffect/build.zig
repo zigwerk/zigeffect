@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 fn addV2Test(b: *std.Build, runner: std.Build.LazyPath, options: std.Build.TestOptions) *std.Build.Step.Compile {
     var configured = options;
@@ -44,6 +45,35 @@ pub fn build(b: *std.Build) void {
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const raw_test_step = b.step("test-raw", "Run zigeffect tests without causal wrapping");
     raw_test_step.dependOn(&run_unit_tests.step);
+
+    const thread_sanitized_core = b.createModule(.{
+        .root_source_file = b.path("src/zigeffect.zig"),
+        .target = target,
+        .optimize = .Debug,
+        .sanitize_thread = true,
+    });
+    const thread_sanitized_tests = b.createModule(.{
+        .root_source_file = b.path("test/thread_sanitizer_gate_test.zig"),
+        .target = target,
+        .optimize = .Debug,
+        .sanitize_thread = true,
+    });
+    thread_sanitized_tests.addImport("zigeffect", thread_sanitized_core);
+    const thread_sanitizer_tests = addV2Test(b, testing_runner, .{
+        .name = "zigeffect-thread-sanitizer-tests",
+        .root_module = thread_sanitized_tests,
+    });
+    const run_thread_sanitizer_tests = b.addRunArtifact(thread_sanitizer_tests);
+    if (b.args) |args| run_thread_sanitizer_tests.addArgs(args);
+    const thread_sanitizer_step = b.step("thread-sanitizer", "Run the core concurrency gate under ThreadSanitizer");
+    if (builtin.os.tag == .linux) {
+        thread_sanitizer_step.dependOn(&run_thread_sanitizer_tests.step);
+    } else {
+        // Zig/LLVM 0.16 currently crashes in the TSan runtime before main on
+        // macOS arm64. Non-Linux hosts still prove the instrumented gate
+        // compiles; the scheduled Ubuntu job owns runtime evidence.
+        thread_sanitizer_step.dependOn(&thread_sanitizer_tests.step);
+    }
 
     const public_api_stability_test_module = b.createModule(.{
         .root_source_file = b.path("test/public_api_stability_test.zig"),
@@ -396,6 +426,34 @@ pub fn build(b: *std.Build) void {
     const live_stream_example_step = b.step("live-stream-example", "Compile and test the live-attach engine emitter example");
     live_stream_example_step.dependOn(&live_stream_example.step);
     live_stream_example_step.dependOn(&run_live_stream_example_tests.step);
+
+    const multi_service_stream_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/multi_service_stream_example.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    multi_service_stream_example_module.addImport("zigeffect", zigeffect);
+
+    const multi_service_stream_example = b.addExecutable(.{
+        .name = "zigeffect-multi-service-stream-example",
+        .root_module = multi_service_stream_example_module,
+    });
+    // Installed so it can be piped directly:
+    //   ./zig-out/bin/zigeffect-multi-service-stream-example | bun .../hub/hub.ts
+    b.installArtifact(multi_service_stream_example);
+    const run_multi_service_stream_example = b.addRunArtifact(multi_service_stream_example);
+    const multi_service_stream_step = b.step("multi-service-stream", "Stream two services' interleaved causal NDJSON to stdout (hub feed)");
+    multi_service_stream_step.dependOn(&run_multi_service_stream_example.step);
+
+    const multi_service_stream_example_tests = addV2Test(b, testing_runner, .{
+        .name = "zigeffect-multi-service-stream-example-tests",
+        .root_module = multi_service_stream_example_module,
+    });
+    const run_multi_service_stream_example_tests = b.addRunArtifact(multi_service_stream_example_tests);
+
+    const multi_service_stream_example_step = b.step("multi-service-stream-example", "Compile and test the multi-service hub emitter example");
+    multi_service_stream_example_step.dependOn(&multi_service_stream_example.step);
+    multi_service_stream_example_step.dependOn(&run_multi_service_stream_example_tests.step);
 
     const self_improving_loop_example_module = b.createModule(.{
         .root_source_file = b.path("examples/self_improving_loop.zig"),
@@ -1700,6 +1758,8 @@ pub fn build(b: *std.Build) void {
     examples_step.dependOn(&run_effect_state_example_tests.step);
     examples_step.dependOn(&live_stream_example.step);
     examples_step.dependOn(&run_live_stream_example_tests.step);
+    examples_step.dependOn(&multi_service_stream_example.step);
+    examples_step.dependOn(&run_multi_service_stream_example_tests.step);
     examples_step.dependOn(&self_improving_loop_example.step);
     examples_step.dependOn(&run_self_improving_loop_example_tests.step);
     examples_step.dependOn(&causal_readiness_example.step);

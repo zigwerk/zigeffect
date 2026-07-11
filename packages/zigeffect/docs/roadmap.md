@@ -1,6 +1,6 @@
 # zigeffect Roadmap
 
-Date: 2026-06-24
+Date: 2026-06-24 (updated 2026-07-10)
 
 `zigeffect` is a Zig-native Effect-inspired engine whose primary debugging
 interface is a deterministic, queryable **causal event graph** that LLM agents
@@ -33,13 +33,38 @@ semantic fact comparison, not exact event-id graph isomorphism.
 | 6 | Causal dev loop (compare/advice/verdict) | **done** | `tools/causal_dev_loop`, `causal_compare`, `causal_advice`, `causal_verdict` |
 | 7 | Guarded remediation + agent interventions | **closed loop, gate-off by default** | `src/services/policy_engine.zig`, `src/services/agent_intervention.zig`, `tools/causal_*remediation*` |
 | 8 | App-facing causal trace | **done** | `src/services/causal_app_runtime.zig` |
-| 9 | Visual workbench (SolidJS / zig-webui) | **live-attach + dev-session UX** (static + streaming via collector plus host-frame ingest, host apply adapter, host runner bundle, supervised host loop, NDJSON fact tap, host request router, runtime runner, and local agent development health/timeline/issues view) | `workbench/`, `workbench/src/collector/` |
+| 9 | Visual workbench (SolidJS / zig-webui) | **live-attach + local operator UX** (static + streaming collector, host runner/apply paths, local runtime/artifacts/turns/transcript adapters/process supervision/durable registry, authenticated allowlisted control API, native PTY ownership, and lazy responsive xterm.js terminal) | `workbench/`, `workbench/src/collector/` |
 | 10 | Export adapters (JSONL/DOT/OTel/OTLP/graph-history/NenDB) | **OTLP + collector live end-to-end** | `src/services/causal_*_backend.zig`, `causal_otlp_json.zig` |
-| 11 | Durable workflows + clustering | **scheduler runs on zio; loopback + remote socket wrappers cross the transport boundary; discovery JSON/file/HTTP snapshots, caller-owned HTTP refresh loops, and auth-epoch-aware selection feed the local registry** | `src/workflow/*`, `src/cluster/*` |
+| 11 | Durable workflows + clustering | **scheduler runs on zio; workflow journal appends can live-mirror into causal stores; loopback + remote socket wrappers cross the transport boundary; discovery JSON/file/HTTP snapshots, caller-owned HTTP refresh loops, and auth-epoch-aware selection feed the local registry** | `src/workflow/*`, `src/cluster/*` |
 | 12 | Agent-operable runtime layer | **bounded interventions, counterfactuals, invariants, evals, semantic diffs, live command executor/tap, poll bridge, local daemon/HTTP engine bridge, eval diff artifacts/links/manifests, dev-loop/remediation-decision/patch-proposal eval persistence** | `src/services/agent_intervention.zig`, `counterfactual.zig`, `causal_invariant.zig`, `agent_eval.zig`, `causal_diff.zig`, `causal_live_command.zig` |
 | 13 | Production-operable guardrails | **live commands, concurrency facts, transport policy/discovery registry, ops storage/alert policy, gated ops artifact responses, alert delivery/webhook/provider envelopes, provider secret injection and retry reporting, endpoint-aware runbooks** | `workbench/src/collector`, `src/services/causal_concurrency.zig`, `src/services/causal_ops.zig`, `causal_ops_storage.zig`, `causal_ops_alert.zig`, `src/cluster/transport.zig` |
 | 14 | Multi-runner causal evidence | **local lineage stitcher plus deployment artifact metadata** | `src/services/causal_runner_lineage.zig` |
-| 15 | Effect-grade standard library | **M1-M18 delivered**: service kernel, production Schema, production Schema-powered CLI, effect-native config/JSON/secrets, streams/queues/pubsub/sinks, local process/workspace/FS adapters, observability recorder/artifacts, HTTP/WebSocket contracts/adapters, Schema-coded local HTTP router, SQL contracts plus local Postgres adapter, typed SQL row decoding, Postgres migration planning/apply SQL, experimental QUIC/HTTP3/WebTransport adapter, local agent toolkit, real local-tool cookbook examples, local agent supervisor, and workbench dev-session UX | `packages/zigeffect-std`, `packages/zigeffect-postgres`, `packages/zigeffect-quic`, `packages/zigeffect-std/docs/cookbook.md`, `docs/superpowers/specs/2026-06-25-zigeffect-std-effectts-grade-roadmap-design.md` |
+| 15 | Effect-grade standard library | **M1-M19 delivered**: service kernel, production Schema, production Schema-powered CLI, effect-native config/JSON/secrets, streams/queues/pubsub/sinks, local process/workspace/FS adapters, observability recorder/artifacts, HTTP/WebSocket contracts/adapters, Schema-coded local HTTP router, SQL contracts plus local Postgres adapter, typed SQL row decoding, Postgres migration planning/apply SQL, experimental QUIC/HTTP3/WebTransport adapter, local WebTransport workbench bridge, local agent toolkit, real local-tool cookbook examples, local agent supervisor, and workbench dev-session UX | `packages/zigeffect-std`, `packages/zigeffect-postgres`, `packages/zigeffect-quic`, `packages/zigeffect-std/docs/cookbook.md`, `docs/superpowers/specs/2026-06-25-zigeffect-std-effectts-grade-roadmap-design.md` |
+| 16 | Agentic application platform | **M88-M95 delivered**: project contracts, Codex/Claude skills, five production scaffolds, instrumented project workflows, provider-neutral development protocol, semantic application facts, Workbench project UX, offline provider conformance, install/completions, compatibility metadata, conflict-safe upgrades, generated snapshots, and one local release gate | `packages/zigeffect-cli`, `packages/zigeffect-std/src/project`, `packages/zigeffect-std/src/application`, `workbench/`, `docs/compatibility.md` |
+| 17 | Agent-first testing platform | **M112-M137 delivered locally**: native control/process-receipt protocol, execution identity, semantic coverage/gaps, typed statechart and schedule exploration, structural/custom shrinking, differential execution, deterministic distributed virtual world, mutation analysis, performance budgets, side-effect firewall, stress/history CLI, Testing v2 Workbench, universal suite receipts, repository-wide package migration, migration guard, and template-v5 generated projects | `packages/zigeffect/src/testing`, `packages/zigeffect-std/src/testing`, `packages/zigeffect-cli`, `workbench/src/testing`, `docs/agent-first-testing.md` |
+| 18 | Agentic statecharts and workflows | **production implementation complete**: deterministic SCXML-derived semantics, actors and durable trees, workflow command adapters, cluster fencing, immutable proposal/proof/review/application governance, native semantic version diff, bounded simulation and invariants, policy-gated actor/workflow controls, exact-fingerprint snapshot migration, portable plan compiler, twelve reusable agentic patterns, CLI lifecycle, XState v5 oracle, and SolidJS Statechart Studio | `src/statechart`, `src/workflow/statechart.zig`, `packages/zigeffect-std/src/statechart`, `packages/zigeffect-cli`, `docs/statecharts-production.md`, `workbench/src/statechart` |
+
+## Testing v2 delivery map (M121–M130)
+
+All ten milestones are implemented locally as one additive receipt-v1 release:
+
+| Milestone | Delivered capability |
+|---|---|
+| M121 | Fixed control/process-receipt protocol, atomic publication, native receipt validation, source/command/target identity |
+| M122 | Semantic targets, hits, required/advisory gaps, CLI `coverage` and `gaps` |
+| M123 | Typed statechart model exploration and core schedule exploration with shortest retained failures |
+| M124 | Boundary generation, structural/custom shrinking, shrink paths, normalized differential executors |
+| M125 | Deterministic virtual time/network/queue/store/crash faults and default-deny real side-effect firewall |
+| M126 | Stable requirement-linked mutation points and deterministic absolute/relative performance budgets |
+| M127 | Bounded multi-seed stress, atomic validated history, introduced/resolved failure matching |
+| M128 | Workbench protocol, gap, evidence, replay, shrink, and history surfaces |
+| M129 | Template-v4 scaffolds, generated/project Codex and Claude skills, guides, and compatibility state |
+| M130 | Direct public API discovery, schema validation, package/release gates, and generated-application proof |
+
+The governing design and acceptance plan are
+[`docs/superpowers/specs/2026-07-10-zigeffect-testing-v2-design.md`](../../../docs/superpowers/specs/2026-07-10-zigeffect-testing-v2-design.md)
+and
+[`docs/superpowers/plans/2026-07-10-zigeffect-testing-v2.md`](../../../docs/superpowers/plans/2026-07-10-zigeffect-testing-v2.md).
 
 ## What is real today
 
@@ -381,7 +406,8 @@ substrates into real deployed systems:
    zigeffect's own causal tools share development evidence. The first pass
    reuses `zigeffect.causal.dev-session.v1` and teaches the workbench to render
    agents, checks, commands, artifact links, guardrails, and next actions. The
-   ordered sequence is M72 through M77 below.
+   foundation is M72 through M84; the operator sequence M85 through M87 is now
+   delivered.
 
 ## Local agentic development roadmap
 
@@ -389,11 +415,38 @@ This is the local-first sequence for making zigeffect useful as the development
 engine for local projects and standard-library work. It intentionally comes
 before hosting or broad distributed orchestration.
 
-Status on 2026-06-25: M72 through M74 are implemented in the workbench and
-`causal-dev-session`; M76 and M77 have local JSONL adapter docs/fixtures and a
-`bun run zigeffect:local-agent-gate` command. M75 has the local session-event
-parser/apply layer; the remaining live step is wiring those events through the
-collector WebSocket so the Agents tab updates during an active stream.
+Status on 2026-07-10: M72 through M87 are implemented in the workbench,
+`causal-dev-session`, and collector. Local session events have parser/apply
+coverage, native Codex/Claude JSONL fixtures, a `bun run zigeffect:local-agent-gate`
+command, and a live collector WebSocket overlay (`POST /agent-feed` and
+`POST /agent-events`) so the Agents tab updates during an active stream. A
+fakeable Bun-local agent runtime now runs configured local commands, emits
+redacted start/check/done/failed/warning events, supports fail-fast execution,
+captures redacted stdout/stderr/error artifacts, emits artifact links, and feeds
+those endpoints. Turn-level receipts now exist as static session data and live
+`agent_turn` events. A transcript tail adapter can consume line-oriented JSONL
+or tagged text streams and post redacted turns. A fakeable process supervisor
+owns a real Bun child lifecycle, streams stdout turns, drains bounded stderr,
+supports abort-driven termination, and posts honest terminal receipts. Native
+adapters now normalize public `codex exec --json` and Claude Code
+`--output-format stream-json` envelopes, including item/tool lifecycle upserts,
+parallel Claude tool uses, bounded snippets, and offline fixtures. The declared
+local-first protocol/runtime foundation is complete. A bounded local session
+registry now records redacted lifecycle/counter state, atomically persists
+versioned snapshots, marks stale restored ownership interrupted, and integrates
+write-through persistence into every supervisor terminal path. An authenticated
+local control API now exposes allowlisted tool discovery, session start/stop,
+durable session inspection, and bounded redacted policy receipts without ever
+accepting arbitrary argv. The M86 Solid operator now uses a
+validated loopback-only client, single-flight polling, ephemeral bearer tokens,
+schema-described prompt tools, durable history/detail, start/stop ownership,
+recovery state, counters, and policy receipts. A supported Bun host composes the
+collector and control API with fixed Codex/Claude batch and interactive
+allowlists. M87 adds native Bun PTY ownership, authenticated cursor/input/resize
+routes, bounded stream-aware redaction and output retention, durable lifecycle
+state, and a lazy xterm.js terminal in the desktop/mobile operator. The declared
+local-first operator sequence is complete; later milestones must preserve this
+loopback-only, allowlisted, no-arbitrary-argv boundary.
 
 ### M72 - Local development session protocol
 
@@ -486,6 +539,429 @@ NDJSON is streaming.
 - The gate fails on stale session status claims, leaked sentinel secrets, or
   missing artifact evidence.
 - The gate requires no network access.
+
+### M78 - Local agent runtime
+
+**Goal:** run local tools and agent commands under a small supervised runtime
+that streams workbench-compatible local dev-session events.
+
+**Work:**
+- Add a fakeable runtime contract for Codex, Claude Code, zigeffect, and other
+  local commands.
+- Add a Bun-backed process runner for local development use.
+- Normalize every emitted event through the same redaction/parser boundary used
+  by the live workbench.
+- Support non-zero failures, thrown-runner warnings, and fail-fast execution.
+
+**Acceptance:**
+- Runtime tests prove start/check/done/failed/warning event order.
+- Runtime tests prove sentinel secrets are redacted before posting.
+- Runtime tests prove failure continuation and fail-fast behavior.
+- A real `Bun.spawn` smoke test executes a local command.
+
+### M79 - Local agent artifact capture
+
+**Goal:** persist local command output as redacted workbench evidence.
+
+**Work:**
+- Add an optional runtime artifact sink for stdout, stderr, and runner errors.
+- Add a Bun-backed sink that writes caller-owned local text files.
+- Redact artifact content and secret-shaped filenames before sink writes.
+- Emit `artifact_link` events before related `check_result` events and attach
+  the first artifact path to the check.
+
+**Acceptance:**
+- Runtime tests prove stdout/stderr artifact capture and event ordering.
+- Runtime tests prove thrown-runner error artifact capture.
+- Runtime tests prove sentinel secrets never reach artifact content, event
+  payloads, or generated filenames.
+- A real Bun file-sink smoke test writes a redacted local artifact.
+
+### M80 - Local agent turn receipts
+
+**Goal:** represent Codex/Claude-style turns as first-class Dev Session evidence.
+
+**Work:**
+- Add a normalized local turn model with agent ownership, role, status, summary,
+  input/output snippets, and optional artifact path.
+- Parse static `turns` from dev-session artifacts.
+- Parse and apply live `agent_turn` events from collector feeds.
+- Add turn timeline rows and a turn count metric to the Dev Session view.
+
+**Acceptance:**
+- Static artifact tests prove turn normalization and redaction.
+- Live feed tests prove `agent_turn` upserts preserve earlier snippets while
+  updating summaries/status.
+- UI tests prove the turn metric is present.
+- Public workbench samples include turn receipts.
+
+### M81 - Local agent transcript tail
+
+**Goal:** convert long-running local agent transcript streams into live
+`agent_turn` events.
+
+**Work:**
+- Parse provider-neutral JSONL turn records.
+- Parse simple tagged plaintext lines such as `assistant: ...`.
+- Tail `ReadableStream<Uint8Array>` sources across chunk boundaries.
+- Post every recognized turn through the existing collector event endpoint.
+
+**Acceptance:**
+- Tests prove JSONL transcript lines map to redacted turn events.
+- Tests prove tagged plaintext maps to turn events.
+- Tests prove stream tailing flushes trailing partial lines and ignores junk.
+- All emitted events pass through the existing local dev-session parser/redactor.
+
+### M82 - Local agent process supervisor
+
+**Goal:** own a long-running local agent process from start through terminal
+workbench receipts.
+
+**Work:**
+- Add a fakeable process handle and runner contract with stdout, stderr, exit,
+  and kill ownership.
+- Add a Bun-backed process runner for real local commands.
+- Stream stdout through the transcript tail while draining bounded stderr.
+- Keep lifecycle and transcript sequences monotonic across ignored input lines.
+- Terminate the child on abort and clean it up when stream or collector delivery
+  fails.
+
+**Acceptance:**
+- Tests prove running, turn, check, and terminal event order for successful and
+  failed exits.
+- Tests prove spawn exceptions never claim the agent reached running state.
+- Tests prove abort requests kill the child and emit interrupted failure state.
+- Tests prove bounded stderr and parser normalization prevent sentinel-secret
+  leakage.
+- A real Bun subprocess streams a tagged turn through the supervisor.
+
+### M83 - Native Codex and Claude transcript adapters
+
+**Goal:** normalize the supported public stream envelopes from current Codex
+and Claude Code CLIs into the provider-neutral `agent_turn` protocol.
+
+**Work:**
+- Add explicit Codex JSON event-envelope parsing with representative fixtures.
+- Add explicit Claude Code stream-JSON parsing with representative fixtures.
+- Preserve stable provider turn/item identifiers and distinguish assistant,
+  tool, system, and result records.
+- Document supported CLI invocation shapes and fixture provenance without
+  depending on private transcript storage.
+
+**Acceptance:**
+- Fixtures from both provider envelope families produce redacted turn receipts.
+- Unsupported event kinds are ignored without stopping the owned process.
+- Provider adapters remain isolated from the workbench session model.
+- The local agent gate runs the provider adapter tests without network access.
+
+**Status:** delivered with public-envelope fixtures, provider command builders,
+multi-event transcript sequencing, structured JSON redaction, and process
+supervisor integration.
+
+### M84 - Durable local agent session registry
+
+**Goal:** retain honest, bounded local process ownership across collector or
+workbench restarts.
+
+**Work:**
+- Add a versioned in-memory session registry with copied read models and strict
+  lifecycle transitions.
+- Redact and bound command, cwd, task, label, and diagnostic fields.
+- Restore snapshots all-or-nothing and mark stale starting/running entries
+  interrupted.
+- Evict only the oldest terminal record at capacity.
+- Add fakeable text storage and an atomic Bun file store.
+- Write through starting, running, and terminal state from the process
+  supervisor.
+- Kill and settle a child if initial collector delivery fails.
+
+**Acceptance:**
+- Tests cover lifecycle counters, redaction, text bounds, recovery, corruption,
+  capacity, fake storage, and real Bun file persistence.
+- Supervisor tests cover success, spawn failure, abort, stream failure, and
+  initial collector rejection.
+- Persisted snapshots never claim restored processes are still running.
+
+**Status:** delivered.
+
+### M85 - Local agent control API
+
+**Goal:** expose policy-bounded local list/start/stop/session-detail operations
+to the workbench without introducing a hosted control plane.
+
+**Work:**
+- Add authenticated local HTTP routes over a caller-owned tool allowlist.
+- Own active process abort controllers and reject duplicate session IDs.
+- Serve registry snapshots and individual session records.
+- Emit causal command/guardrail receipts for accepted and rejected operations.
+
+**Acceptance:**
+- Requests can select only caller-owned tool IDs and never submit argv.
+- Bearer authentication, bounded bodies, safe IDs, CORS, and registry capacity
+  are enforced before a start is accepted.
+- Start, stop, list, detail, health, and receipt routes have deterministic tests.
+- Receipt mirroring cannot delay or alter a control decision.
+
+**Status:** delivered.
+
+### M86 - Workbench local operator controls
+
+**Goal:** let a local developer launch approved tools, inspect durable sessions,
+and stop active ownership from the SolidJS collaboration view.
+
+**Work:**
+- Add session history/detail surfaces and explicit start/stop commands.
+- Show recovery interruptions, transcript counters, and persistence state.
+- Keep all mutation controls behind the local control API policy response.
+
+**Acceptance:**
+- Browser control URLs are loopback-only, tokens are ephemeral, and every
+  response is size-bounded and runtime-validated.
+- Polling is single-flight; stale reconnects and cancelled requests cannot
+  overwrite newer operator state.
+- The Solid collaboration view covers connect, approved launch, durable
+  history/detail, stop, recovery interruption, counters, and policy receipts.
+- A supported loopback Bun host composes collector/control routes, restores and
+  immediately persists recovery state, and exposes prompt-only Codex/Claude
+  tools.
+- Desktop and mobile browser checks cover a real inert process launch/stop with
+  no overflow, clipped controls, or browser console errors.
+
+**Status:** delivered.
+
+### M87 - Bidirectional PTY sessions
+
+**Goal:** support interactive local coding-agent processes after durable
+ownership and policy controls exist.
+
+**Work:**
+- Add a bounded PTY adapter with explicit stdin ownership and resize events.
+- Stream redacted terminal output through a bounded cursor ring without
+  pretending VT output is a provider turn transcript.
+- Enforce idle/runtime/output limits, abort cleanup, and no-orphan recovery.
+
+**Acceptance:**
+- A real Bun PTY smoke test proves TTY detection, input, output, resize, and
+  clean exit.
+- Authenticated terminal routes validate cursor, input, and dimensions; reject
+  batch or unavailable sessions; and never copy input into receipts.
+- Secret literals split across delayed output callbacks are redacted before any
+  retained frame or browser payload is visible.
+- Polling is single-flight, input is serialized, resize is coalesced, and all
+  browser/terminal resources are cancelled on disposal.
+- The lazy xterm.js operator proves launch, input, output, resize, exit, retained
+  history, and responsive layout against a real loopback host.
+
+**Status:** delivered. PTY output is deliberately bounded and memory-only;
+durability claims apply to session lifecycle state, not full terminal history.
+
+## Agentic application platform roadmap
+
+M72-M87 delivered the local agent control plane. M88-M95 now turn that
+foundation into the application-development product: agents receive
+requirements, create conventional zigeffect systems, run instrumented local
+workflows, query causal evidence, and leave verifiable handoffs. This sequence
+is local-first and does not require hosting.
+
+The governing design and executable checklist are:
+
+- `docs/superpowers/specs/2026-07-10-zigeffect-agentic-application-platform-design.md`
+- `docs/superpowers/plans/2026-07-10-zigeffect-agentic-application-platform.md`
+
+### M88 - Agentic project contract and skills
+
+Add `zstd.Project` manifests, component graphs, requirements, acceptance
+checks, deterministic generated-file plans, redacted receipts, and matching
+Codex/Claude project skills.
+
+**Status:** delivered on 2026-07-10. `zstd.Project` now fails closed on
+unsupported schemas, malformed names/versions/paths, invalid component graphs,
+broken requirement/check references, and secret-bearing values. Its owned file
+plans are deterministic and collision-safe. Matching Codex and Claude skills
+use the manifest, public stdlib surface, tests, causal evidence, and redacted
+handoffs as the development loop. Acceptance evidence: 26 stdlib tests, stdlib
+examples, 256 workbench tests, 193 core tests across 67 build steps, production
+workbench build, raw core tests, and tool hygiene all passed.
+
+### M89 - Production application scaffold CLI
+
+Add an installable `zigeffect` CLI with real, compile-tested
+`new application|service|library|package|system` generators. Every scaffold
+includes effects, layers, Schema, CLI, HTTP, SQL, config, tests, causal
+instrumentation, workbench attachment, project manifest, and agent skills.
+
+**Status:** delivered on 2026-07-10. The dedicated `packages/zigeffect-cli`
+installs a real `zigeffect` executable and generates all five project kinds
+through the deterministic `zstd.Project.FilePlan`. Dry-runs list every path,
+JSON receipts are stable and redacted, non-empty targets are refused, explicit
+relative/absolute targets are supported, and `--force` replaces only declared
+files through per-file temporary renames. Generated manifests default to
+`agent_safe_v1` with source-policy, Debug, and ReleaseSafe gates. Acceptance
+evidence: 9 CLI unit/writer tests and one isolated integration matrix generated
+all five roots, passed Debug and ReleaseSafe for each, and independently passed
+the system API, worker, and shared-package tests. The expanded local-agent gate
+also passed 256 workbench tests/build, stdlib tests/examples, 193 configured
+core tests, 850 raw core tests, tool hygiene, and diff checks.
+
+### M90 - Instrumented project manager
+
+Add components and boundary modules to existing projects, validate dependency
+graphs, and run manifest-owned doctor/check/test/dev workflows with causal
+receipts and no arbitrary argv boundary.
+
+**Status:** delivered on 2026-07-10. `add service|library|package` validates and
+atomically updates system manifests, adjusts child dependency paths, refuses
+collisions unless explicitly forced, and leaves each child independently
+buildable. `generate service|layer|schema|cli|http|sql|test` writes only inside
+a selected manifest component. `project show|validate|doctor|check|test|dev`
+revalidates the manifest and selects fixed command ids with bounded redacted
+output; no arbitrary command input exists. Check/test/dev persist JSON receipts,
+and dev writes local workbench attachment metadata. Acceptance evidence: 10 CLI
+tests plus the generated-system integration added a real library, generated an
+API schema, rebuilt the aggregate and child, executed project check, and proved
+the persisted receipt.
+
+### M91 - Agent development protocol
+
+Make requirements, tasks, checks, evidence, next actions, and handoffs stable
+provider-neutral JSON/JSONL contracts that Codex, Claude, the CLI, and the
+workbench share.
+
+**Status:** delivered on 2026-07-10. `zstd.Project.Protocol` defines bounded,
+versioned tasks, evidence, next actions, project status, and provider-neutral
+handoffs with owned parsing and fail-closed secret/version/duplicate/limit
+validation. `agent status|requirements|checks|evidence|next|handoff` emits JSON
+or JSONL from a validated manifest and bounded receipt links; handoffs persist
+under `.zigeffect/handoffs`. Matching Codex and Claude skills now orient from
+status/next queries and finish with the same handoff schema. Acceptance
+evidence: protocol-focused stdlib coverage and 14 CLI tests passed, including
+malformed input, redaction, provider metadata, and JSONL parsing.
+
+### M92 - Causal application SDK
+
+Record semantic application facts for config, schema, CLI, HTTP, SQL, external
+calls, artifacts, component dependencies, and acceptance checks so agents can
+debug application intent rather than only low-level runtime mechanics.
+
+**Status:** delivered on 2026-07-10. `zstd.Application` provides nine typed fact
+constructors over the existing semantic `span_recorded` taxonomy, bounded
+validation, redacted JSON receipts, event classification, and an
+application-aware structural comparator that normalizes ids and ordering while
+checking status, references, parent ownership, and causal ownership. Generated
+applications and services emit the facts by default. Acceptance evidence: 49
+stdlib tests and 14 CLI tests passed, including allocation-failure, redaction,
+deterministic trace, and changed-lineage regressions; every generated scaffold
+also passed the integration matrix.
+
+### M93 - Workbench application-development UX
+
+Unify requirements, components, tasks, source-change receipts, commands,
+checks, artifacts, agents, application facts, causal graph focus, comparisons,
+recovery, and approvals in one live development session.
+
+**Status:** delivered on 2026-07-10. The strict
+`zigeffect.project-development.v1` browser model joins validated project
+components, dependencies, requirements, checks, tasks, evidence, commands,
+artifacts, sessions, approvals, recovery, and the nine application fact kinds.
+The collaboration lens provides component/session focus, requirement-to-check-
+to-evidence chains, session comparison, artifact inspection, command copying,
+and application-fact jumps into the shared causal Inspector. The collector's
+redacted `POST /project` path streams the same model over the existing
+WebSocket; live frames now preserve every semantic reference and cause edge.
+Acceptance evidence: typecheck, production build, and 269 Workbench tests
+passed. Browser proof at 1440x1000 and 390x844 exercised the generated-system
+sample, component filtering, session comparison, and Schema-fact graph jump;
+document and panel widths stayed within both viewports.
+
+### M94 - Provider conformance and benchmarks
+
+Run provider-neutral offline Codex/Claude fixtures and opt-in real local runs
+against identical requirements. Score compile/test success, acceptance
+coverage, repair iterations, causal-query use, secret posture, and handoff
+completeness without claiming model-quality results from synthetic fixtures.
+
+**Status:** delivered on 2026-07-10. `zstd.Safety.Conformance` validates and
+scores the versioned provider-neutral event protocol, rejects malformed order,
+duplicates, oversized values, unsupported schemas, and secret-bearing fields,
+and requires a complete provider/scenario matrix for its gate. The checked-in
+14-case suite runs identical success, repair, failure, cancellation, approval,
+large-output, and recovery contracts for Codex and Claude Code. The CLI emits a
+stable comparable report and exits non-zero for incomplete or failed suites.
+Real local runs remain explicitly opt-in, select a manifest-owned
+`benchmark-<provider>` command, accept no passthrough argv, bound and redact
+output, distinguish unavailable executables from provider failures, and persist
+provider receipts. CI remains credential-free and network-free; the docs state
+that synthetic fixtures are protocol evidence, never model-quality evidence.
+
+### M95 - Local distribution and compatibility
+
+Deliver install/version/completion flows, compatibility metadata, upgrade
+dry-runs, scaffold migrations, generated-project snapshots, public API gates,
+and one complete local release command.
+
+**Status:** delivered on 2026-07-10. The installable CLI was version `0.2.0` at
+delivery and is now `0.3.0` after M111,
+declares Zig `>=0.16.0,<0.17.0`, and emits deterministic Bash, Zsh, and Fish
+completions. Every scaffold includes a validated compatibility contract and a
+SHA-256 state file limited to CLI-owned metadata and agent skills. `upgrade` is
+dry-run by default, adopts pristine older scaffolds, migrates
+`zigeffect.project.v0` to v1, preserves user-owned source/tests/build files and
+unrelated files, and refuses the entire apply when a managed file has diverged.
+All five scaffold contracts are pinned by a versioned SHA-256 snapshot and are
+then compiled in Debug and ReleaseSafe; the core public API review remains in
+the gate. `bun run zigeffect:local-release` stage-installs the binary and covers
+stdlib, CLI, generated projects, the 14-case provider matrix, core raw and
+ReleaseSafe tests, the core release gate, Postgres, QUIC, zio, Workbench
+typecheck/tests/build, redaction, docs honesty, and tool hygiene. Compatibility
+and ownership details live in `docs/compatibility.md`.
+
+### M108 - Durable local causal graph runtime
+
+**Status:** delivered on 2026-07-10.
+
+`zstd.CausalGraph.LocalDatabase` is a bounded Zig-native append-only graph WAL
+over the core NenDB-compatible writer contract. It validates complete committed
+rows, repairs only a partial tail, rebuilds bounded indexes, assigns restart-safe
+session/event ids, writes a node and optional parent edge atomically, rejects
+secret-shaped records, and exposes read-only summary/event/children snapshots.
+The stdlib includes allocation-failure, restart, traversal, corruption,
+capacity, redaction, and partial-recovery tests plus a compile-tested example.
+This does not install the upstream NenDB package.
+
+### M109 - Manifest-scoped graph query CLI
+
+**Status:** delivered on 2026-07-10.
+
+`zigeffect graph status|event|children` opens only the graph artifact declared
+by a validated `zigeffect.project.json`. System queries require
+`--component <id>` and resolve the selected component beneath its validated
+path. JSON schemas are stable and bounded; no arbitrary database path or
+command execution surface exists. Real filesystem tests persist, close, reopen,
+and query parent/child evidence.
+
+### M110 - Graph-first executable scaffolds
+
+**Status:** delivered on 2026-07-10.
+
+Application and service templates now generate `src/causal_graph.zig`, declare
+the `causal_graph` capability and `.zigeffect/graph` artifact, attach storage
+before the first fact, record and flush graph artifact evidence, and propagate
+the backend's retained typed failure. Generated tests run against isolated
+roots and reopen the graph; system API and worker services use independent
+roots. README, Git ignore, Workbench attachment, and Codex/Claude skill output
+all include the graph workflow.
+
+### M111 - Graph scaffold compatibility and release
+
+**Status:** delivered on 2026-07-10.
+
+CLI `0.3.0` and scaffold template version `2` pin all five generated project
+contracts with new SHA-256 snapshots. Shell completions, compatibility docs,
+the future-agent briefing, operations guidance, and the local release gate are
+aligned. The generated-project matrix runs every project in Debug and
+ReleaseSafe, builds system children independently, executes real application,
+service, API, and worker binaries, and queries each resulting graph through the
+CLI before the full local release proof.
 
 ## Hardening milestone roadmap
 

@@ -1,0 +1,224 @@
+{
+  "schema": "zigeffect.provider-conformance-suite.v1",
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "claude-approval",
+      "provider": "claude",
+      "scenario": "approval",
+      "expected_terminal": "completed",
+      "events": [
+        { "sequence": 1, "kind": "session_started", "status": "running" },
+        { "sequence": 2, "kind": "approval_requested", "status": "pending", "detail": "database migration requires approval" },
+        { "sequence": 3, "kind": "approval_resolved", "status": "approved", "detail": "local operator approved bounded migration" },
+        { "sequence": 4, "kind": "compile_result", "status": "passed" },
+        { "sequence": 5, "kind": "test_result", "status": "passed" },
+        { "sequence": 6, "kind": "acceptance_result", "status": "passed" },
+        { "sequence": 7, "kind": "handoff", "status": "complete", "artifact": ".zigeffect/handoffs/claude-approval.json", "causal_event_ids": [41] },
+        { "sequence": 8, "kind": "session_completed", "status": "completed" }
+      ]
+    },
+    {
+      "id": "claude-cancellation",
+      "provider": "claude",
+      "scenario": "cancellation",
+      "expected_terminal": "cancelled",
+      "required_acceptance": 0,
+      "events": [
+        { "sequence": 1, "kind": "session_started", "status": "running" },
+        { "sequence": 2, "kind": "tool_call", "status": "running", "detail": "bounded test command" },
+        { "sequence": 3, "kind": "cancellation_requested", "status": "requested" },
+        { "sequence": 4, "kind": "handoff", "status": "interrupted", "artifact": ".zigeffect/handoffs/claude-cancel.json", "causal_event_ids": [52] },
+        { "sequence": 5, "kind": "session_cancelled", "status": "cancelled" }
+      ]
+    },
+    {
+      "id": "claude-failure",
+      "provider": "claude",
+      "scenario": "failure",
+      "expected_terminal": "failed",
+      "events": [
+        { "sequence": 1, "kind": "session_started", "status": "running" },
+        { "sequence": 2, "kind": "compile_result", "status": "passed" },
+        { "sequence": 3, "kind": "test_result", "status": "failed", "detail": "seeded invariant remains" },
+        { "sequence": 4, "kind": "diagnostic_query", "status": "complete", "causal_event_ids": [63] },
+        { "sequence": 5, "kind": "acceptance_result", "status": "failed" },
+        { "sequence": 6, "kind": "handoff", "status": "failed", "artifact": ".zigeffect/handoffs/claude-failure.json", "causal_event_ids": [63] },
+        { "sequence": 7, "kind": "session_failed", "status": "failed" }
+      ]
+    },
+    {
+      "id": "claude-large-output",
+      "provider": "claude",
+      "scenario": "large_output",
+      "expected_terminal": "completed",
+      "events": [
+        { "sequence": 1, "kind": "session_started", "status": "running" },
+        { "sequence": 2, "kind": "output_chunk", "status": "truncated", "detail": "bounded provider output retained as counters", "bytes": 2097152, "truncated": true },
+        { "sequence": 3, "kind": "compile_result", "status": "passed" },
+        { "sequence": 4, "kind": "test_result", "status": "passed" },
+        { "sequence": 5, "kind": "acceptance_result", "status": "passed" },
+        { "sequence": 6, "kind": "handoff", "status": "complete", "artifact": ".zigeffect/handoffs/claude-output.json", "causal_event_ids": [74] },
+        { "sequence": 7, "kind": "session_completed", "status": "completed" }
+      ]
+    },
+    {
+      "id": "claude-recovery",
+      "provider": "claude",
+      "scenario": "recovery",
+      "expected_terminal": "completed",
+      "events": [
+        { "sequence": 1, "kind": "session_started", "status": "running" },
+        { "sequence": 2, "kind": "disconnected", "status": "interrupted" },
+        { "sequence": 3, "kind": "recovered", "status": "recovered", "artifact": ".zigeffect/sessions/claude-recovered.json" },
+        { "sequence": 4, "kind": "diagnostic_query", "status": "complete", "causal_event_ids": [82] },
+        { "sequence": 5, "kind": "compile_result", "status": "passed" },
+        { "sequence": 6, "kind": "test_result", "status": "passed" },
+        { "sequence": 7, "kind": "acceptance_result", "status": "passed" },
+        { "sequence": 8, "kind": "handoff", "status": "complete", "artifact": ".zigeffect/handoffs/claude-recovery.json", "causal_event_ids": [82] },
+        { "sequence": 9, "kind": "session_completed", "status": "completed" }
+      ]
+    },
+    {
+      "id": "claude-repair",
+      "provider": "claude",
+      "scenario": "repair",
+      "expected_terminal": "completed",
+      "events": [
+        { "sequence": 1, "kind": "session_started", "status": "running" },
+        { "sequence": 2, "kind": "compile_result", "status": "passed" },
+        { "sequence": 3, "kind": "test_result", "status": "failed" },
+        { "sequence": 4, "kind": "diagnostic_query", "status": "complete", "causal_event_ids": [93] },
+        { "sequence": 5, "kind": "source_change", "status": "applied", "artifact": "src/invoice.zig" },
+        { "sequence": 6, "kind": "test_result", "status": "passed" },
+        { "sequence": 7, "kind": "acceptance_result", "status": "passed" },
+        { "sequence": 8, "kind": "handoff", "status": "complete", "artifact": ".zigeffect/handoffs/claude-repair.json", "causal_event_ids": [93, 96] },
+        { "sequence": 9, "kind": "session_completed", "status": "completed" }
+      ]
+    },
+    {
+      "id": "claude-success",
+      "provider": "claude",
+      "scenario": "success",
+      "expected_terminal": "completed",
+      "events": [
+        { "sequence": 1, "kind": "session_started", "status": "running" },
+        { "sequence": 2, "kind": "compile_result", "status": "passed" },
+        { "sequence": 3, "kind": "test_result", "status": "passed" },
+        { "sequence": 4, "kind": "acceptance_result", "status": "passed" },
+        { "sequence": 5, "kind": "diagnostic_query", "status": "complete", "causal_event_ids": [104] },
+        { "sequence": 6, "kind": "handoff", "status": "complete", "artifact": ".zigeffect/handoffs/claude-success.json", "causal_event_ids": [104] },
+        { "sequence": 7, "kind": "session_completed", "status": "completed" }
+      ]
+    },
+    {
+      "id": "codex-approval",
+      "provider": "codex",
+      "scenario": "approval",
+      "expected_terminal": "completed",
+      "events": [
+        { "sequence": 1, "kind": "session_started", "status": "running" },
+        { "sequence": 2, "kind": "approval_requested", "status": "pending", "detail": "database migration requires approval" },
+        { "sequence": 3, "kind": "approval_resolved", "status": "approved", "detail": "local operator approved bounded migration" },
+        { "sequence": 4, "kind": "compile_result", "status": "passed" },
+        { "sequence": 5, "kind": "test_result", "status": "passed" },
+        { "sequence": 6, "kind": "acceptance_result", "status": "passed" },
+        { "sequence": 7, "kind": "handoff", "status": "complete", "artifact": ".zigeffect/handoffs/codex-approval.json", "causal_event_ids": [141] },
+        { "sequence": 8, "kind": "session_completed", "status": "completed" }
+      ]
+    },
+    {
+      "id": "codex-cancellation",
+      "provider": "codex",
+      "scenario": "cancellation",
+      "expected_terminal": "cancelled",
+      "required_acceptance": 0,
+      "events": [
+        { "sequence": 1, "kind": "session_started", "status": "running" },
+        { "sequence": 2, "kind": "tool_call", "status": "running", "detail": "bounded test command" },
+        { "sequence": 3, "kind": "cancellation_requested", "status": "requested" },
+        { "sequence": 4, "kind": "handoff", "status": "interrupted", "artifact": ".zigeffect/handoffs/codex-cancel.json", "causal_event_ids": [152] },
+        { "sequence": 5, "kind": "session_cancelled", "status": "cancelled" }
+      ]
+    },
+    {
+      "id": "codex-failure",
+      "provider": "codex",
+      "scenario": "failure",
+      "expected_terminal": "failed",
+      "events": [
+        { "sequence": 1, "kind": "session_started", "status": "running" },
+        { "sequence": 2, "kind": "compile_result", "status": "passed" },
+        { "sequence": 3, "kind": "test_result", "status": "failed", "detail": "seeded invariant remains" },
+        { "sequence": 4, "kind": "diagnostic_query", "status": "complete", "causal_event_ids": [163] },
+        { "sequence": 5, "kind": "acceptance_result", "status": "failed" },
+        { "sequence": 6, "kind": "handoff", "status": "failed", "artifact": ".zigeffect/handoffs/codex-failure.json", "causal_event_ids": [163] },
+        { "sequence": 7, "kind": "session_failed", "status": "failed" }
+      ]
+    },
+    {
+      "id": "codex-large-output",
+      "provider": "codex",
+      "scenario": "large_output",
+      "expected_terminal": "completed",
+      "events": [
+        { "sequence": 1, "kind": "session_started", "status": "running" },
+        { "sequence": 2, "kind": "output_chunk", "status": "truncated", "detail": "bounded provider output retained as counters", "bytes": 2097152, "truncated": true },
+        { "sequence": 3, "kind": "compile_result", "status": "passed" },
+        { "sequence": 4, "kind": "test_result", "status": "passed" },
+        { "sequence": 5, "kind": "acceptance_result", "status": "passed" },
+        { "sequence": 6, "kind": "handoff", "status": "complete", "artifact": ".zigeffect/handoffs/codex-output.json", "causal_event_ids": [174] },
+        { "sequence": 7, "kind": "session_completed", "status": "completed" }
+      ]
+    },
+    {
+      "id": "codex-recovery",
+      "provider": "codex",
+      "scenario": "recovery",
+      "expected_terminal": "completed",
+      "events": [
+        { "sequence": 1, "kind": "session_started", "status": "running" },
+        { "sequence": 2, "kind": "disconnected", "status": "interrupted" },
+        { "sequence": 3, "kind": "recovered", "status": "recovered", "artifact": ".zigeffect/sessions/codex-recovered.json" },
+        { "sequence": 4, "kind": "diagnostic_query", "status": "complete", "causal_event_ids": [182] },
+        { "sequence": 5, "kind": "compile_result", "status": "passed" },
+        { "sequence": 6, "kind": "test_result", "status": "passed" },
+        { "sequence": 7, "kind": "acceptance_result", "status": "passed" },
+        { "sequence": 8, "kind": "handoff", "status": "complete", "artifact": ".zigeffect/handoffs/codex-recovery.json", "causal_event_ids": [182] },
+        { "sequence": 9, "kind": "session_completed", "status": "completed" }
+      ]
+    },
+    {
+      "id": "codex-repair",
+      "provider": "codex",
+      "scenario": "repair",
+      "expected_terminal": "completed",
+      "events": [
+        { "sequence": 1, "kind": "session_started", "status": "running" },
+        { "sequence": 2, "kind": "compile_result", "status": "passed" },
+        { "sequence": 3, "kind": "test_result", "status": "failed" },
+        { "sequence": 4, "kind": "diagnostic_query", "status": "complete", "causal_event_ids": [193] },
+        { "sequence": 5, "kind": "source_change", "status": "applied", "artifact": "src/invoice.zig" },
+        { "sequence": 6, "kind": "test_result", "status": "passed" },
+        { "sequence": 7, "kind": "acceptance_result", "status": "passed" },
+        { "sequence": 8, "kind": "handoff", "status": "complete", "artifact": ".zigeffect/handoffs/codex-repair.json", "causal_event_ids": [193, 196] },
+        { "sequence": 9, "kind": "session_completed", "status": "completed" }
+      ]
+    },
+    {
+      "id": "codex-success",
+      "provider": "codex",
+      "scenario": "success",
+      "expected_terminal": "completed",
+      "events": [
+        { "sequence": 1, "kind": "session_started", "status": "running" },
+        { "sequence": 2, "kind": "compile_result", "status": "passed" },
+        { "sequence": 3, "kind": "test_result", "status": "passed" },
+        { "sequence": 4, "kind": "acceptance_result", "status": "passed" },
+        { "sequence": 5, "kind": "diagnostic_query", "status": "complete", "causal_event_ids": [204] },
+        { "sequence": 6, "kind": "handoff", "status": "complete", "artifact": ".zigeffect/handoffs/codex-success.json", "causal_event_ids": [204] },
+        { "sequence": 7, "kind": "session_completed", "status": "completed" }
+      ]
+    }
+  ]
+}

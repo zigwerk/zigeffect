@@ -588,6 +588,24 @@ test("filterEvents supports text kind and status filters", () => {
   expect(filterEvents(model.events, { status: "failure" }).map((event) => event.idText)).toEqual(["8", "9"]);
 });
 
+test("filterEvents text search matches layer_name and service_key (rail chip drill-down)", () => {
+  const artifact = JSON.stringify({
+    schema: "zigeffect.causal.v1",
+    schema_version: 1,
+    event_taxonomy_version: 1,
+    events: [
+      { id: 1, kind: "run_started", status: "started", service_key: "payments-api" },
+      { id: 2, kind: "resource_acquired", status: "success", layer_id: 1, layer_name: "persistence", service_key: "payments-api" },
+      { id: 3, kind: "service_required", status: "missing", layer_id: 2, layer_name: "integration", service_key: "payments-api" },
+    ],
+  });
+  const model = deriveWorkbenchModel(parseArtifactJson(artifact), { artifactPath: "hub" });
+
+  expect(filterEvents(model.events, { text: "persistence" }).map((event) => event.idText)).toEqual(["2"]);
+  expect(filterEvents(model.events, { text: "integration" }).map((event) => event.idText)).toEqual(["3"]);
+  expect(filterEvents(model.events, { text: "payments-api" }).length).toBe(3);
+});
+
 test("queryCommandsForEvent generates copyable causal-query commands", () => {
   const model = deriveWorkbenchModel(parseArtifactJson(sampleArtifact), {
     artifactPath: ".zig-cache/causal-artifacts/zigeffect-causal-dogfood.json",
@@ -751,6 +769,67 @@ test("deriveLocalDevTimeline creates stable operational rows", () => {
   expect(timeline.map((item) => `${item.kind}:${item.label}`)).toContain("artifact:After Json");
   expect(timeline.map((item) => `${item.kind}:${item.label}`)).toContain("guardrail:Guardrail");
   expect(timeline.map((item) => `${item.kind}:${item.label}`)).toContain("next-action:Next action");
+});
+
+test("deriveLocalDevSessionModel normalizes local agent turns", () => {
+  const session = deriveLocalDevSessionModel({
+    ...sampleLocalDevSession,
+    turns: [
+      {
+        id: "turn-1",
+        agent_id: "codex",
+        agent_label: "Codex",
+        agent_kind: "codex",
+        role: "assistant",
+        status: "completed",
+        summary: "implemented schema token=abc123",
+        input: "please fix password=hunter2",
+        output: "patched output secret=abc123",
+        artifact_path: ".zig-cache/causal-artifacts/codex-turn-1.md",
+      },
+    ],
+  }, { artifactPath: "dev-session.json" });
+
+  expect(session?.turns[0]).toMatchObject({
+    id: "turn-1",
+    agentId: "codex",
+    agentLabel: "Codex",
+    role: "assistant",
+    status: "completed",
+    summary: "implemented schema token=<redacted>",
+    input: "please fix password=<redacted>",
+    output: "patched output secret=<redacted>",
+    artifactPath: ".zig-cache/causal-artifacts/codex-turn-1.md",
+  });
+  expect(deriveLocalDevHealthSummary(session!).turnCount).toBe(1);
+  expect(deriveLocalDevTimeline(session!).map((item) => `${item.kind}:${item.label}`)).toContain(
+    "turn:Codex assistant",
+  );
+  expect(JSON.stringify(session)).not.toContain("abc123");
+  expect(JSON.stringify(session)).not.toContain("hunter2");
+});
+
+test("deriveLocalDevSessionModel normalizes WebTransport bridge status", () => {
+  const session = deriveLocalDevSessionModel({
+    ...sampleLocalDevSession,
+    transports: [
+      {
+        protocol: "webtransport",
+        status: "connected",
+        url: "https://localhost:4433/.well-known/webtransport?password=hunter2",
+        session_id: "42",
+        frame_count: 8,
+        fallback: "websocket",
+        detail: "local bridge ready",
+      },
+    ],
+  }, { artifactPath: "dev-session.json" });
+
+  expect(session?.transports[0]?.protocol).toBe("webtransport");
+  expect(session?.transports[0]?.frameCount).toBe(8);
+  expect(JSON.stringify(session)).not.toContain("hunter2");
+  expect(deriveLocalDevHealthSummary(session!).transportCount).toBe(1);
+  expect(deriveLocalDevTimeline(session!).map((item) => `${item.kind}:${item.label}`)).toContain("transport:WebTransport");
 });
 
 test("deriveLocalDevIssueHighlights detects Schema and CLI errors with redaction", () => {
@@ -1177,8 +1256,12 @@ function minimalEvent(idText: string): CausalEvent {
     parentId: null,
     fiberId: null,
     scopeId: null,
+    layerId: null,
+    boundaryId: null,
     traceId: null,
     spanId: null,
+    layerName: "",
+    serviceKey: "",
     artifactId: "",
     domainEntityRef: "",
     dataSubjectRef: "",

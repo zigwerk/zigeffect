@@ -11,6 +11,12 @@
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import { causalLineToFrame, type LiveFrame } from "./frame";
 import type { LiveCommandFrame } from "../liveAttach";
+import { parseLocalDevSessionEventMessage, type LocalDevSessionEvent } from "../localDevSessionFeed";
+import { redactLocalDevText } from "../localDevRedaction";
+import {
+  parseProjectDevelopmentFrameMessage,
+  type ProjectDevelopmentFrame,
+} from "../development/projectDevelopment";
 
 export type Collector = {
   /** Bun.serve `fetch` handler: upgrades `/live` to WS, ingests `POST /ingest`. */
@@ -25,6 +31,11 @@ export type Collector = {
   ingestFrame: (body: unknown) => LiveFrame | null;
   /** Validate and broadcast one policy-gated live command intent. */
   ingestCommand: (body: unknown) => LiveCommandFrame | null;
+  /** Validate and broadcast one local dev-session event. */
+  ingestAgentEvent: (body: unknown) => LocalDevSessionEvent | null;
+  /** Validate and broadcast local dev-session JSONL. */
+  ingestAgentFeed: (body: string) => number;
+  ingestProjectUpdate: (body: unknown) => ProjectDevelopmentFrame | null;
   /** Return command frames newer than the provided command sequence. */
   commandsSince: (afterSequence: number) => LiveCommandFrame[];
   /** Number of currently-connected WebSocket clients. */
@@ -38,7 +49,7 @@ export function createCollector(): Collector {
   let commandSequence = 0;
 
   const WS_OPEN = 1; // WebSocket.OPEN
-  function broadcast(frame: LiveFrame | LiveCommandFrame): void {
+  function broadcast(frame: LiveFrame | LiveCommandFrame | LocalDevSessionEvent | ProjectDevelopmentFrame): void {
     const message = JSON.stringify(frame);
     for (const client of clients) {
       // Skip a socket that is closing/closed (it is removed on its `close`
@@ -140,6 +151,46 @@ export function createCollector(): Collector {
     return frame;
   }
 
+  function ingestAgentEvent(body: unknown): LocalDevSessionEvent | null {
+    const raw = typeof body === "string" ? body : JSON.stringify(body);
+    const event = parseLocalDevSessionEventMessage(raw);
+    if (!event) return null;
+    broadcast(event);
+    return event;
+  }
+
+  function ingestAgentEventBody(body: unknown): number | null {
+    const events = Array.isArray(body) ? body : [body];
+    let count = 0;
+    for (const event of events) {
+      if (!ingestAgentEvent(event)) return null;
+      count += 1;
+    }
+    return count;
+  }
+
+  function ingestAgentFeed(body: string): number {
+    let count = 0;
+    for (const line of body.split("\n")) {
+      if (line.trim().length === 0) continue;
+      if (ingestAgentEvent(line)) count += 1;
+    }
+    return count;
+  }
+
+  function ingestProjectUpdate(body: unknown): ProjectDevelopmentFrame | null {
+    let safe: string;
+    try {
+      safe = redactLocalDevText(JSON.stringify(body));
+    } catch {
+      return null;
+    }
+    const frame = parseProjectDevelopmentFrameMessage(safe);
+    if (!frame) return null;
+    broadcast(frame);
+    return frame;
+  }
+
   function commandsSince(afterSequence: number): LiveCommandFrame[] {
     return commandHistory.filter((command) => command.sequence > afterSequence);
   }
@@ -199,6 +250,41 @@ export function createCollector(): Collector {
       );
     }
 
+    if (url.pathname === "/agent-events" && request.method === "POST") {
+      return request.json().then(
+        (body) => {
+          const ingested = ingestAgentEventBody(body);
+          if (ingested === null) return new Response("invalid agent event", { status: 400 });
+          return new Response(JSON.stringify({ ingested }), {
+            headers: { "content-type": "application/json" },
+          });
+        },
+        () => new Response("invalid agent event", { status: 400 }),
+      );
+    }
+
+    if (url.pathname === "/agent-feed" && request.method === "POST") {
+      return request.text().then(
+        (body) =>
+          new Response(JSON.stringify({ ingested: ingestAgentFeed(body) }), {
+            headers: { "content-type": "application/json" },
+          }),
+      );
+    }
+
+    if (url.pathname === "/project" && request.method === "POST") {
+      return request.json().then(
+        (body) => {
+          const frame = ingestProjectUpdate(body);
+          if (!frame) return new Response("invalid project update", { status: 400 });
+          return new Response(JSON.stringify({ ingested: 1 }), {
+            headers: { "content-type": "application/json" },
+          });
+        },
+        () => new Response("invalid project update", { status: 400 }),
+      );
+    }
+
     if (url.pathname === "/commands" && request.method === "GET") {
       const rawAfter = url.searchParams.get("after") ?? "0";
       const after = Number(rawAfter);
@@ -221,7 +307,19 @@ export function createCollector(): Collector {
     return new Response("not found", { status: 404 });
   }
 
-  return { fetch, websocket, ingestLine, ingestBody, ingestFrame, ingestCommand, commandsSince, clientCount: () => clients.size };
+  return {
+    fetch,
+    websocket,
+    ingestLine,
+    ingestBody,
+    ingestFrame,
+    ingestCommand,
+    ingestAgentEvent,
+    ingestAgentFeed,
+    ingestProjectUpdate,
+    commandsSince,
+    clientCount: () => clients.size,
+  };
 }
 
 // `engine | bun collector.ts` — serve + pipe stdin NDJSON to connected clients.

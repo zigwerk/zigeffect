@@ -2,27 +2,54 @@ const std = @import("std");
 const Json = @import("../json/root.zig");
 const Schema = @import("../schema/root.zig");
 const Secrets = @import("../secrets/root.zig");
+const Capability = @import("../capability/root.zig");
+const External = @import("../external/root.zig");
 const StdService = @import("../service/root.zig");
 const fx = @import("zigeffect");
+const Stream = @import("../stream/root.zig");
 
 pub const Value = union(enum) {
     null_value,
     text: []const u8,
     integer: i64,
+    float: f64,
     boolean: bool,
+    bytes: []const u8,
+    timestamp: []const u8,
+    decimal: []const u8,
+    text_array: []const []const u8,
 
     pub fn cloneAlloc(self: Value, allocator: std.mem.Allocator) std.mem.Allocator.Error!Value {
         return switch (self) {
             .null_value => .null_value,
             .text => |value| .{ .text = try allocator.dupe(u8, value) },
             .integer => |value| .{ .integer = value },
+            .float => |value| .{ .float = value },
             .boolean => |value| .{ .boolean = value },
+            .bytes => |value| .{ .bytes = try allocator.dupe(u8, value) },
+            .timestamp => |value| .{ .timestamp = try allocator.dupe(u8, value) },
+            .decimal => |value| .{ .decimal = try allocator.dupe(u8, value) },
+            .text_array => |values| blk: {
+                const copied = try allocator.alloc([]const u8, values.len);
+                errdefer allocator.free(copied);
+                var initialized: usize = 0;
+                errdefer for (copied[0..initialized]) |item| allocator.free(item);
+                for (values, 0..) |item, index| {
+                    copied[index] = try allocator.dupe(u8, item);
+                    initialized += 1;
+                }
+                break :blk .{ .text_array = copied };
+            },
         };
     }
 
     pub fn deinit(self: *Value, allocator: std.mem.Allocator) void {
         switch (self.*) {
-            .text => |value| allocator.free(value),
+            .text, .bytes, .timestamp, .decimal => |value| allocator.free(value),
+            .text_array => |values| {
+                for (values) |value| allocator.free(value);
+                allocator.free(values);
+            },
             else => {},
         }
         self.* = .null_value;
@@ -107,6 +134,21 @@ pub const QueryResult = struct {
     }
 };
 
+pub fn rowStreamAlloc(allocator: std.mem.Allocator, result_value: QueryResult) !fx.EffectStream(Row, anyerror, Stream.EmptyEnv) {
+    var result = result_value;
+    errdefer result.deinit(allocator);
+    const Puller = struct {
+        allocator: std.mem.Allocator,
+        result: QueryResult,
+        offset: usize = 0,
+        closed: bool = false,
+        pub fn pull(self: *@This(), _: *fx.Context(Stream.EmptyEnv), output_allocator: std.mem.Allocator, max: usize) anyerror!fx.EffectStream(Row, anyerror, Stream.EmptyEnv).Chunk { const count = @min(max, self.result.rows.len - self.offset); const rows = try output_allocator.alloc(Row, count); @memcpy(rows, self.result.rows[self.offset .. self.offset + count]); self.offset += count; return .{ .allocator = output_allocator, .items = rows, .end = self.offset == self.result.rows.len }; }
+        pub fn close(self: *@This(), _: fx.StreamCloseReason) void { self.closed = true; }
+        pub fn deinit(self: *@This()) void { self.result.deinit(self.allocator); }
+    };
+    return fx.effectStreamFromOwnedPullerAlloc(Row, anyerror, Stream.EmptyEnv, Puller, allocator, .{ .allocator = allocator, .result = result });
+}
+
 pub const Statement = struct {
     sql: []const u8,
     binds: []const Value = &.{},
@@ -118,6 +160,8 @@ pub const Migration = struct {
 };
 
 pub const FakeDatabase = struct {
+    pub const capability = Capability.Builtin.fake_sql_database;
+
     result: QueryResult,
     allocator: ?std.mem.Allocator = null,
     in_transaction: bool = false,
@@ -150,6 +194,13 @@ pub const FakeDatabase = struct {
     pub fn queryAlloc(self: *FakeDatabase, allocator: std.mem.Allocator, statement: Statement) std.mem.Allocator.Error!QueryResult {
         _ = statement;
         return self.result.cloneAlloc(allocator);
+    }
+
+    pub fn queryClassifiedAlloc(self: *FakeDatabase, allocator: std.mem.Allocator, statement: Statement) External.Result(QueryResult) {
+        const result = self.queryAlloc(allocator, statement) catch |err| {
+            return .{ .failure = External.Failure.fromError("fake-sql", "query", err) };
+        };
+        return .{ .success = result };
     }
 
     pub fn begin(self: *FakeDatabase) error{TransactionAlreadyActive}!void {
@@ -360,11 +411,28 @@ fn appendSqlValueJson(output: *std.ArrayList(u8), allocator: std.mem.Allocator, 
     switch (value) {
         .null_value => try output.appendSlice(allocator, "null"),
         .integer => |inner| try output.print(allocator, "{d}", .{inner}),
+        .float => |inner| try output.print(allocator, "{d}", .{inner}),
         .boolean => |inner| try output.appendSlice(allocator, if (inner) "true" else "false"),
         .text => |inner| {
             const redacted = try Secrets.redactAlloc(allocator, inner);
             defer allocator.free(redacted);
             try appendJsonString(output, allocator, redacted);
+        },
+        .bytes => |inner| {
+            try output.appendSlice(allocator, "\"");
+            try output.print(allocator, "{x}", .{inner});
+            try output.appendSlice(allocator, "\"");
+        },
+        .timestamp, .decimal => |inner| try appendJsonString(output, allocator, inner),
+        .text_array => |items| {
+            try output.append(allocator, '[');
+            for (items, 0..) |item, index| {
+                if (index != 0) try output.append(allocator, ',');
+                const redacted = try Secrets.redactAlloc(allocator, item);
+                defer allocator.free(redacted);
+                try appendJsonString(output, allocator, redacted);
+            }
+            try output.append(allocator, ']');
         },
     }
 }
@@ -379,6 +447,7 @@ fn appendBindSummary(output: *std.ArrayList(u8), allocator: std.mem.Allocator, b
     switch (bind) {
         .null_value => try output.appendSlice(allocator, "null"),
         .integer => try output.appendSlice(allocator, "integer"),
+        .float => try output.appendSlice(allocator, "float"),
         .boolean => try output.appendSlice(allocator, "boolean"),
         .text => |inner| {
             const redacted = try Secrets.redactAlloc(allocator, inner);
@@ -389,6 +458,10 @@ fn appendBindSummary(output: *std.ArrayList(u8), allocator: std.mem.Allocator, b
                 try output.appendSlice(allocator, "text");
             }
         },
+        .bytes => try output.appendSlice(allocator, "bytes"),
+        .timestamp => try output.appendSlice(allocator, "timestamp"),
+        .decimal => try output.appendSlice(allocator, "decimal"),
+        .text_array => try output.appendSlice(allocator, "text_array"),
     }
 }
 
@@ -579,6 +652,39 @@ pub fn QueryEffect(comptime EffectEnv: type, comptime Database: type) type {
     };
 }
 
+pub fn QueryClassifiedEffect(comptime EffectEnv: type, comptime Database: type) type {
+    return struct {
+        pub const SuccessType = External.Result(QueryResult);
+        pub const FailureType = error{};
+        pub const EnvType = EffectEnv;
+        pub const RequiredServices = .{Database};
+
+        statement: Statement,
+
+        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
+            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
+        }
+
+        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!SuccessType {
+            const database = ctx.service(Database);
+            const result = database.queryClassifiedAlloc(ctx.allocator, self.statement);
+            switch (result) {
+                .success => {
+                    _ = StdService.recordOperation(ctx, Database, "sql.query", "success", "classified");
+                },
+                .failure => |failure| {
+                    _ = StdService.recordOperation(ctx, Database, "sql.query", @tagName(failure.class), failure.detail);
+                },
+            }
+            return result;
+        }
+    };
+}
+
+pub fn queryClassifiedEffect(comptime EffectEnv: type, comptime Database: type, statement: Statement) QueryClassifiedEffect(EffectEnv, Database) {
+    return .{ .statement = statement };
+}
+
 pub fn CheckoutEffect(comptime EffectEnv: type, comptime Database: type) type {
     const SqlPool = Pool(Database);
     return struct {
@@ -763,6 +869,39 @@ test "Sql fake database returns deterministic rows" {
     try std.testing.expectEqual(@as(usize, 1), result.rows.len);
     try std.testing.expectEqual(@as(i64, 42), result.rows[0].fields[0].value.integer);
     try std.testing.expectEqualStrings("local", result.rows[0].fields[1].value.text);
+}
+
+test "Sql fake database cannot satisfy a production database requirement" {
+    try FakeDatabase.capability.validate();
+    try std.testing.expectEqual(
+        Capability.Match.insufficient_maturity,
+        Capability.match(FakeDatabase.capability, .{
+            .kind = .sql_database,
+            .minimum_maturity = .production_candidate,
+            .requires_live_conformance = true,
+        }),
+    );
+}
+
+test "Sql fake database supports the classified query contract" {
+    var database = FakeDatabase.init(.{ .rows = &.{} });
+    var result = database.queryClassifiedAlloc(std.testing.allocator, .{ .sql = "select 1" });
+    switch (result) {
+        .success => |*rows| rows.deinit(std.testing.allocator),
+        .failure => return error.TestUnexpectedFailure,
+    }
+}
+
+test "Sql classified effect keeps failures in the success channel" {
+    var database = FakeDatabase.init(.{ .rows = &.{} });
+    const zstd = @import("../root.zig");
+    var services = zstd.Service.Provider(.{FakeDatabase}).init(.{&database});
+    var runtime = zstd.fx.Runtime(@TypeOf(services)).init(std.testing.allocator, &services).provides(.{FakeDatabase});
+    var result = try runtime.run(queryClassifiedEffect(@TypeOf(services), FakeDatabase, .{ .sql = "select 1" }));
+    switch (result) {
+        .success => |*rows| rows.deinit(std.testing.allocator),
+        .failure => return error.TestUnexpectedFailure,
+    }
 }
 
 test "Sql redacts connection metadata" {

@@ -7,6 +7,7 @@ cd "$ROOT_DIR"
 build_files=(
   packages/zigeffect/build.zig
   packages/zigeffect-std/build.zig
+  packages/zigeffect-cli/build.zig
   packages/zigeffect-postgres/build.zig
   packages/zigeffect-quic/build.zig
   packages/zigeffect-zio/build.zig
@@ -25,4 +26,12 @@ for file in "${build_files[@]}"; do
   fi
 done
 
-printf 'Testing v2 migration guard passed (%s build files)\n' "${#build_files[@]}"
+template_file=packages/zigeffect-cli/src/templates.zig
+template_tests="$(grep -c 'const tests = b.addTest' "$template_file")"
+template_v2_tests="$(grep 'const tests = b.addTest' "$template_file" | grep -c 'test_runner = .{ .path = testing_runner, .mode = .server }')"
+if [[ "$template_tests" -eq 0 || "$template_tests" -ne "$template_v2_tests" ]]; then
+  printf 'generated project template contains an unmigrated test artifact (%s/%s migrated)\n' "$template_v2_tests" "$template_tests" >&2
+  exit 1
+fi
+
+printf 'Testing v2 migration guard passed (%s build files, %s generated templates)\n' "${#build_files[@]}" "$template_v2_tests"

@@ -1,5 +1,9 @@
 # zigeffect Multi-Runner Transport Implementation Plan
 
+> Historical plan: its production naming was corrected by M131 of the
+> 2026-07-11 production application platform roadmap. The delivered adapters
+> serialize protocol-shaped bytes but dispatch to an in-process handler.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add production HTTP and socket cluster transports with auth hooks, size limits, trace/chunk propagation, backpressure, retries, lifecycle metrics, failure evidence, and runner compatibility across transport modes.

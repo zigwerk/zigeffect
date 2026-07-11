@@ -1,0 +1,24 @@
+{
+  "schema": "zigeffect.causal.v1",
+  "schema_version": 1,
+  "event_taxonomy_version": 1,
+  "events": [
+    { "id": 1, "kind": "run_started", "run_id": 1, "parent_id": null, "fiber_id": null, "scope_id": null, "label": "agentic dev run", "type_name": "DevHarness", "status": "", "redacted_detail": "" },
+    { "id": 2, "kind": "scope_opened", "run_id": 1, "parent_id": 1, "fiber_id": null, "scope_id": 1, "label": "request scope", "type_name": "", "status": "opened", "redacted_detail": "" },
+    { "id": 3, "kind": "service_required", "run_id": 1, "parent_id": 2, "fiber_id": null, "scope_id": null, "layer_id": 2, "layer_name": "integration", "service_key": "payments-api", "label": "PaymentGateway", "type_name": "PaymentGateway", "status": "missing", "redacted_detail": "missing provider for PaymentGateway" },
+    { "id": 4, "kind": "resource_acquired", "run_id": 1, "parent_id": 2, "fiber_id": null, "scope_id": 1, "layer_id": 1, "layer_name": "persistence", "service_key": "payments-api", "label": "primary db", "type_name": "DbConnection", "status": "success", "redacted_detail": "pool checkout" },
+    { "id": 5, "kind": "fiber_forked", "run_id": 1, "parent_id": 2, "fiber_id": 7, "scope_id": 1, "label": "ingest worker", "type_name": "", "status": "pending", "redacted_detail": "" },
+    { "id": 6, "kind": "fiber_started", "run_id": 1, "parent_id": 5, "fiber_id": 7, "scope_id": 1, "label": "ingest worker", "type_name": "", "status": "running", "redacted_detail": "" },
+    { "id": 7, "kind": "resource_acquired", "run_id": 1, "parent_id": 2, "fiber_id": null, "scope_id": 1, "label": "cache lease", "type_name": "CacheHandle", "status": "success", "redacted_detail": "lease acquired" },
+    { "id": 8, "kind": "fiber_forked", "run_id": 1, "parent_id": 2, "fiber_id": 9, "scope_id": 1, "label": "audit worker", "type_name": "", "status": "pending", "redacted_detail": "" },
+    { "id": 9, "kind": "scope_opened", "run_id": 1, "parent_id": 2, "fiber_id": null, "scope_id": 2, "label": "io scope", "type_name": "", "status": "opened", "redacted_detail": "" },
+    { "id": 10, "kind": "resource_acquired", "run_id": 1, "parent_id": 9, "fiber_id": null, "scope_id": 2, "label": "report file", "type_name": "FileHandle", "status": "success", "redacted_detail": "open report.csv" },
+    { "id": 11, "kind": "resource_finalized", "run_id": 1, "parent_id": 9, "fiber_id": null, "scope_id": 2, "label": "report file", "type_name": "FileHandle", "status": "success", "redacted_detail": "flushed and closed" },
+    { "id": 12, "kind": "scope_closed", "run_id": 1, "parent_id": 2, "fiber_id": null, "scope_id": 2, "label": "io scope", "type_name": "", "status": "closed", "redacted_detail": "" },
+    { "id": 13, "kind": "schedule_decision", "run_id": 1, "parent_id": 1, "fiber_id": null, "scope_id": null, "label": "retry policy", "type_name": "Schedule.exponential", "status": "exhausted", "redacted_detail": "retry budget exhausted after 5 attempts" },
+    { "id": 14, "kind": "fiber_joined", "run_id": 1, "parent_id": 5, "fiber_id": 7, "scope_id": 1, "label": "ingest worker", "type_name": "", "status": "success", "redacted_detail": "" },
+    { "id": 15, "kind": "assertion_recorded", "run_id": 1, "parent_id": 1, "fiber_id": null, "scope_id": null, "label": "balance invariant", "type_name": "Invariant", "status": "failure", "redacted_detail": "balance invariant violated: -12" },
+    { "id": 16, "kind": "resource_finalized", "run_id": 1, "parent_id": 2, "fiber_id": null, "scope_id": 1, "label": "primary db", "type_name": "DbConnection", "status": "failure", "redacted_detail": "connection close failed" },
+    { "id": 17, "kind": "scope_closed", "run_id": 1, "parent_id": 2, "fiber_id": null, "scope_id": 1, "label": "request scope", "type_name": "", "status": "closed", "redacted_detail": "" }
+  ]
+}

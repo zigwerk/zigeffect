@@ -67,6 +67,33 @@ test "cluster workflow command json round-trips" {
     try std.testing.expectEqual(@as(?fx.workflow.JournalSequence, 2), parsed.expected_next_sequence);
 }
 
+test "cluster workflow command json escapes control bytes" {
+    const command = fx.ClusterWorkflowCommand{
+        .kind = .append_event,
+        .event_kind = .timer_scheduled,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .workflow_name = "approval",
+        .name = "review \x1b[31mtimeout\x1b[0m",
+        .status = "scheduled",
+        .redacted_detail = "fire_at_ms=1200",
+        .idempotency_key = "timer:escape",
+        .now_ms = 1_000,
+        .timer_id = 55,
+        .expected_next_sequence = 2,
+    };
+
+    const json = try fx.formatClusterWorkflowCommandJson(std.testing.allocator, command);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("review \x1b[31mtimeout\x1b[0m", parsed.value.object.get("name").?.string);
+}
+
 test "cluster workflow result json round-trips" {
     const result = fx.ClusterWorkflowCommandResult{
         .kind = .fire_due_timers,
@@ -241,6 +268,58 @@ test "cluster workflow engine start stores workflow started through owning entit
     try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_started, events.events[0].kind);
     try std.testing.expectEqual(workflow_id, events.events[0].workflow_id);
     try std.testing.expectEqual(execution_id, events.events[0].execution_id);
+}
+
+test "cluster workflow entity mirrors workflow command appends into attached causal store" {
+    var causal = fx.CausalStore.init(std.testing.allocator);
+    defer causal.deinit();
+    const run_id = causal.nextRunId();
+
+    var runner_storage_state = fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer runner_storage_state.deinit();
+    var message_storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer message_storage_state.deinit();
+    const message_storage = message_storage_state.asMessageStorage();
+    var journal_state = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_state.deinit();
+    const journal_store = journal_state.asJournalStore();
+
+    var runner = try workflowRunner(runner_storage_state.asRunnerStorage(), message_storage);
+    defer runner.deinit();
+    var plan = try runner.acquireBalancedShards(1_000);
+    defer plan.deinit();
+
+    var transport_state = try fx.InProcessClusterTransport.init(std.testing.allocator, message_storage, .{ .shard_count = 8 });
+    defer transport_state.deinit();
+    var engine = fx.ClusterWorkflowEngine.init(std.testing.allocator, transport_state.asClusterTransport());
+    defer engine.deinit();
+
+    const workflow_id = fx.workflow.workflowId("approval");
+    const execution_id = fx.workflow.executionId("approval", "case-causal-start");
+    var registry = fx.ClusterWorkflowEntityRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+    _ = try registry.registerExecution(&runner, journal_store, workflow_id, execution_id, 1_000);
+
+    const scope = try runner.entityScope(fx.clusterWorkflowExecutionAddress(execution_id));
+    const raw = (try scope.service(fx.cluster_workflow_entity_service_key)).?;
+    const services: *fx.ClusterWorkflowEntityServices = @ptrCast(@alignCast(raw));
+    services.causal_store = &causal;
+    services.causal_run_id = run_id;
+
+    var submission = try engine.start("approval", "case-causal-start");
+    defer submission.deinit(std.testing.allocator);
+    var result = try processWorkflowSubmission(&runner, message_storage, submission, 1_100);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.appended);
+
+    var snapshot = try causal.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 1), snapshot.events.len);
+    try std.testing.expectEqual(fx.CausalEventKind.workflow_event_recorded, snapshot.events[0].kind);
+    try std.testing.expectEqual(@as(?u64, run_id), snapshot.events[0].run_id);
+    try std.testing.expectEqual(@as(?u64, workflow_id), snapshot.events[0].trace_id);
+    try std.testing.expectEqual(@as(?u64, execution_id), snapshot.events[0].scope_id);
+    try std.testing.expectEqualStrings("workflow.workflow_started", snapshot.events[0].type_name);
 }
 
 test "cluster workflow complete appends completed through owning entity" {

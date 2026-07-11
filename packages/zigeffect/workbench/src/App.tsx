@@ -1,37 +1,14 @@
-import { For, Match, Show, Suspense, Switch, createMemo, createResource, createSignal, lazy } from "solid-js";
+import { For, Show, Suspense, createEffect, createMemo, createResource, createSignal, lazy, onCleanup, onMount } from "solid-js";
 import {
   type CausalEvent,
-  type AppCitationGroup,
-  type AppGateResultModel,
-  type AppIncidentModel,
-  type AppReadinessCheckModel,
-  type AppRemediationModel,
-  type GraphEdge,
-  type GraphLane,
-  type GraphLaneKind,
-  type GovernanceModel,
-  type LocalDevArtifactModel,
-  type LocalDevIssueHighlight,
-  type LocalDevSessionModel,
-  type LocalDevTimelineItem,
-  type QueryCommand,
-  type RemediationChainModel,
-  type ChainSourceStep,
-  type SemanticDiffFinding,
-  type SemanticDiffFiberTerminal,
-  type SemanticDiffLineageEdge,
-  type SemanticDiffModel,
-  type SemanticDiffResourceFinalization,
+  type CausalFinding,
   type VisualGraphLayoutMode,
-  type VisualGraphModel,
   type VisualGraphPerspective,
   causePathForEvent,
   deriveGovernanceModel,
   deriveGraphModel,
   deriveLocalDevHealthSummary,
-  deriveLocalDevIssueHighlights,
   deriveLocalDevSessionModel,
-  deriveLocalDevTimeline,
   deriveSemanticDiffModel,
   deriveVisualGraphModel,
   deriveWorkbenchModel,
@@ -42,11 +19,53 @@ import {
 import { loadPayload, requestEstateScan, type WorkbenchSession } from "./workbenchBridge";
 import { createLiveArtifact, liveUrlFromSearch, webSocketLiveSource } from "./liveAttach";
 import { deriveZiacVisualModel, parseZiacVisualArtifact } from "./ziacVisualArtifact";
+import { correlateEndpoint, createHubServices, hubUrlFromSearch, hubWebSocketSource } from "./liveServices";
+import { parseCorrelation } from "./hub/protocol";
+import { ServicesRail } from "./services/ServicesRail";
+import { PinnedPanes } from "./services/PinnedPanes";
+import { applyThemeToDocument, lens, setLens, theme, toggleLens, toggleTheme, type Lens } from "./theme";
+import { deriveTraceModel, type TraceFindingMark, type TraceModel } from "./trace/traceModel";
+import { agentHue } from "./primitives";
+import { TopBar } from "./ui/TopBar";
+import { Segmented } from "./ui/Segmented";
+import { FindingsBand } from "./findings/FindingsBand";
+import { TraceCanvas } from "./trace/TraceCanvas";
+import { DagPanel, type GraphSurfaceMode } from "./graph/DagPanel";
+import {
+  deriveActorGraphModel,
+  deriveStatechartGraphModel,
+  diffStatechartDefinitions,
+  parseStatechartCatalog,
+  replayInstanceAt,
+} from "./statechart/statechartModel";
+import { comparePathWithXState } from "./statechart/xstateOracle";
+import { deriveStudioModel } from "./statechart/studioModel";
+import { CollabBoard } from "./collab/CollabBoard";
+import { Inspector } from "./inspector/Inspector";
+import { CommandPalette, type AuxView } from "./ui/CommandPalette";
+import { AuxOverlay } from "./ui/AuxOverlay";
+import { ChainView, DiffView, MetadataView, QueriesView } from "./aux/auxViews";
+import {
+  localAgentControlBootstrapFromLocation,
+  scrubLocalAgentControlTokenFragment,
+} from "./localAgentControlClient";
+import { SafetyPanel } from "./safety/SafetyPanel";
+import { loadSafetyReceipt } from "./safety/safetyReceipt";
+import { TestPanel } from "./testing/TestPanel";
+import { loadTestRunReceipt } from "./testing/testReceipt";
+import {
+  deriveProjectDevelopmentModel,
+  type ProjectDevelopmentModel,
+} from "./development/projectDevelopment";
 
-const VisualGraphCanvas = lazy(async () => {
-  const module = await import("./visualGraphAdapter");
-  return { default: module.VisualGraphCanvas };
-});
+const auxTitles: Record<AuxView, string> = {
+  diff: "Semantic diff",
+  chain: "Governance chain",
+  metadata: "Metadata",
+  queries: "Query catalogue",
+  safety: "Agent safety evidence",
+  tests: "Agent test evidence",
+};
 
 const ZiacWorkbenchView = lazy(async () => {
   const module = await import("./ZiacWorkbench");
@@ -77,19 +96,37 @@ export function workbenchTabsForArtifact(schema?: string): WorkbenchTab[] {
   return schema === "ziac.visual.v1" ? ziacTabs : tabs;
 }
 
-const laneKinds: GraphLaneKind[] = ["run", "scope", "fiber", "resource", "retry"];
+function projectDevelopmentFromRaw(raw: unknown): ProjectDevelopmentModel | null {
+  try {
+    return deriveProjectDevelopmentModel(raw);
+  } catch {
+    return null;
+  }
+}
 
-const laneLabels: Record<GraphLaneKind, string> = {
-  run: "Runs",
-  scope: "Scopes",
-  fiber: "Fibers",
-  resource: "Resources",
-  retry: "Retries",
-};
+function localDevSessionFromRaw(raw: unknown, artifactPath: string) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const embedded = (raw as Record<string, unknown>).local_dev_session;
+  return deriveLocalDevSessionModel(embedded ?? raw, { artifactPath });
+}
+
+/** Stable description of the two lenses — the headline navigation axis. */
+export function workbenchLensesForArtifact(): Array<{ id: Lens; label: string }> {
+  return [
+    { id: "execution", label: "Execution" },
+    { id: "collaboration", label: "Collaboration" },
+  ];
+}
+
+/** The auxiliary views the old tab bar dissolved into (reachable via ⌘K / More). */
+export function workbenchAuxViews(): AuxView[] {
+  return ["diff", "chain", "metadata", "queries", "safety", "tests"];
+}
 
 export function App() {
   const [payload, { refetch }] = createResource(loadPayload);
-  const [activeTab, setActiveTab] = createSignal<Tab>("timeline");
+  const [safetyReceipt] = createResource(loadSafetyReceipt);
+  const [testRun] = createResource(loadTestRunReceipt);
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   const [search, setSearch] = createSignal("");
   const [kind, setKind] = createSignal("all");
@@ -97,13 +134,31 @@ export function App() {
   const [copiedCommand, setCopiedCommand] = createSignal<string | null>(null);
   const [layoutMode, setLayoutMode] = createSignal<VisualGraphLayoutMode>("dagre");
   const [graphPerspective, setGraphPerspective] = createSignal<VisualGraphPerspective>("cause");
-  const [selectedGraphNodeId, setSelectedGraphNodeId] = createSignal<string | null>(null);
+  const [graphMode, setGraphMode] = createSignal<GraphSurfaceMode>("causal");
+  const [statechartReplayPosition, setStatechartReplayPosition] = createSignal(Number.MAX_SAFE_INTEGER);
+  const [statechartDefinitionFingerprint, setStatechartDefinitionFingerprint] = createSignal<string | null>(null);
+  const [statechartInstanceId, setStatechartInstanceId] = createSignal<string | null>(null);
+  const [density, setDensity] = createSignal<"comfortable" | "compact">("comfortable");
+  const [findingFocus, setFindingFocus] = createSignal<CausalFinding["kind"] | null>(null);
+  const [paletteOpen, setPaletteOpen] = createSignal(false);
+  const [auxView, setAuxView] = createSignal<AuxView | null>(null);
 
-  // Live-attach: when the workbench is opened with `?live=<ws-url>`, stream
-  // causal-event frames from the engine's live bridge into the SAME artifact
-  // model every view below renders. Absent `?live`, this is a no-op and the
-  // static one-shot snapshot path is used unchanged.
-  const liveUrl = typeof window === "undefined" ? null : liveUrlFromSearch(window.location.search);
+  createEffect(() => applyThemeToDocument(theme()));
+
+  // Live-attach: `?live=<ws-url>` streams one engine's frames into the SAME model
+  // every view renders. Absent `?live`, this is a no-op and the static snapshot path
+  // is used.
+  const locationSearch = typeof window === "undefined" ? "" : window.location.search;
+  const locationHash = typeof window === "undefined" ? "" : window.location.hash;
+  const controlBootstrap = localAgentControlBootstrapFromLocation(locationSearch, locationHash);
+  if (typeof window !== "undefined" && controlBootstrap.token) {
+    window.history.replaceState(
+      window.history.state,
+      "",
+      scrubLocalAgentControlTokenFragment(window.location),
+    );
+  }
+  const liveUrl = liveUrlFromSearch(locationSearch);
   const live = liveUrl ? createLiveArtifact(webSocketLiveSource(liveUrl), { maxFrames: 1000 }) : null;
   const liveSession: WorkbenchSession = {
     schema: "zigeffect.causal.workbench-session.v1",
@@ -112,13 +167,89 @@ export function App() {
     warnings: ["live-attach stream"],
   };
 
+  // Hub mode: `?hub=<ws-url>` fans in MANY services. The ServicesRail lists the live
+  // roster; focusing a service feeds ITS accumulated artifact into the same pipeline.
+  const hubUrl = hubUrlFromSearch(locationSearch);
+  // maxFrames matches the hub's per-service retention (5000): a smaller client
+  // cap would evict backfilled frames that boundary jump links still target.
+  const hubServices = hubUrl ? createHubServices(hubWebSocketSource(hubUrl), { maxFrames: 5000 }) : null;
+  const emptyArtifact = JSON.stringify({ schema: "zigeffect.causal.v1", schema_version: 1, event_taxonomy_version: 1, events: [] });
+
+  // Every focus change goes through here: event ids restart per service, so a
+  // selection carried across services would silently highlight an unrelated
+  // event with the same number.
+  const focusService = (serviceKey: string | null) => {
+    if (!hubServices) {
+      return;
+    }
+    if (hubServices.focused() !== serviceKey) {
+      setSelectedId(null);
+    }
+    hubServices.focus(serviceKey);
+  };
+
+  // Auto-focus the first discovered service so a trace shows the moment one
+  // connects — and re-home focus when the focused service leaves the roster
+  // (hub GC), so the workspace never presents a dead service's trace as live.
+  createEffect(() => {
+    if (!hubServices) {
+      return;
+    }
+    const roster = hubServices.services();
+    const focus = hubServices.focused();
+    const focusAlive = focus !== null && roster.some((service) => service.service_key === focus);
+    if (!focusAlive) {
+      const first = roster[0];
+      focusService(first ? first.service_key : null);
+    }
+  });
+
+  onMount(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen((open) => !open);
+      } else if ((event.metaKey || event.ctrlKey) && event.key === "1") {
+        event.preventDefault();
+        setLens("execution");
+      } else if ((event.metaKey || event.ctrlKey) && event.key === "2") {
+        event.preventDefault();
+        setLens("collaboration");
+      } else if (event.key === "Escape") {
+        setPaletteOpen(false);
+        setAuxView(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    onCleanup(() => window.removeEventListener("keydown", onKey));
+  });
+
   const parsed = createMemo(() => {
-    const liveJson = live?.artifactJson();
-    const loaded = liveJson !== undefined ? { artifactJson: liveJson, session: liveSession } : payload();
+    let loaded: { artifactJson: string; session: WorkbenchSession | null } | undefined;
+    if (hubServices) {
+      const focused = hubServices.focused();
+      const artifactJson = focused ? hubServices.artifactJson(focused) : emptyArtifact;
+      const dropped = focused ? hubServices.droppedFrames(focused) : 0;
+      const warnings = focused ? [`hub live · ${focused}`] : ["hub — select a service"];
+      if (dropped > 0) {
+        warnings.push(`hub evicted ${dropped} earlier frame${dropped === 1 ? "" : "s"} — trace starts mid-run`);
+      }
+      loaded = {
+        artifactJson,
+        session: {
+          schema: "zigeffect.causal.workbench-session.v1",
+          artifact_path: focused ?? "hub",
+          read_only: true,
+          warnings,
+        },
+      };
+    } else {
+      const liveJson = live?.artifactJson();
+      loaded = liveJson !== undefined ? { artifactJson: liveJson, session: liveSession } : payload();
+    }
     if (!loaded) {
       return null;
     }
-
     try {
       const artifactPath = loaded.session?.artifact_path ?? "sample-artifact.json";
       const raw = parseArtifactJson(loaded.artifactJson);
@@ -129,7 +260,9 @@ export function App() {
           semanticDiff: null,
           localDevSession: null,
           ziac: deriveZiacVisualModel(parseZiacVisualArtifact(raw)),
+          projectDevelopment: null,
           raw,
+          statecharts: null,
           session: loaded.session,
           error: null,
         };
@@ -138,11 +271,13 @@ export function App() {
         model: deriveWorkbenchModel(raw, { artifactPath }),
         governance: deriveGovernanceModel(raw, { artifactPath }),
         semanticDiff: deriveSemanticDiffModel(raw, { artifactPath }),
-        localDevSession: deriveLocalDevSessionModel(raw, { artifactPath }),
+        localDevSession: localDevSessionFromRaw(raw, artifactPath) ?? live?.localDevSession() ?? null,
         ziac: null,
+        projectDevelopment: projectDevelopmentFromRaw(raw),
         raw,
+        statecharts: parseStatechartCatalog(raw),
         session: loaded.session,
-        error: null,
+        error: null as string | null,
       };
     } catch (error) {
       return {
@@ -151,7 +286,9 @@ export function App() {
         semanticDiff: null,
         localDevSession: null,
         ziac: null,
+        projectDevelopment: null,
         raw: null,
+        statecharts: null,
         session: loaded.session,
         error: error instanceof Error ? error.message : "failed to parse artifact",
       };
@@ -163,10 +300,41 @@ export function App() {
   const semanticDiff = createMemo(() => parsed()?.semanticDiff ?? null);
   const localDevSession = createMemo(() => parsed()?.localDevSession ?? null);
   const ziacModel = createMemo(() => parsed()?.ziac ?? null);
-  const availableTabs = createMemo(() => workbenchTabsForArtifact());
+  const projectDevelopment = createMemo(() => live?.projectDevelopment() ?? parsed()?.projectDevelopment ?? null);
+  const statecharts = createMemo(() => parsed()?.statecharts ?? null);
+  const studio = createMemo(() => {
+    const raw = parsed()?.raw;
+    if (!raw) return { changes: [], fleet: [], warnings: [] };
+    try {
+      return deriveStudioModel(raw);
+    } catch (error) {
+      return { changes: [], fleet: [], warnings: [error instanceof Error ? error.message : "invalid Statechart Studio artifact"] };
+    }
+  });
+  createEffect(() => {
+    const catalog = statecharts();
+    if (!catalog || catalog.definitions.length === 0) return;
+    const selectedDefinition = statechartDefinitionFingerprint();
+    const definition = catalog.definitions.find((candidate) => candidate.fingerprint === selectedDefinition) ?? catalog.definitions[0]!;
+    if (definition.fingerprint !== selectedDefinition) setStatechartDefinitionFingerprint(definition.fingerprint);
+    const matchingInstances = catalog.instances.filter((instance) => instance.definitionFingerprint === definition.fingerprint);
+    const selectedInstance = statechartInstanceId();
+    if (!matchingInstances.some((instance) => instance.instanceId === selectedInstance)) {
+      setStatechartInstanceId(matchingInstances[0]?.instanceId ?? null);
+    }
+  });
+  const health = createMemo(() => {
+    const session = localDevSession();
+    return session ? deriveLocalDevHealthSummary(session) : null;
+  });
   const graphModel = createMemo(() => {
     const current = model();
     return current ? deriveGraphModel(current.events, current.findings) : null;
+  });
+  const traceModel = createMemo<TraceModel | null>(() => {
+    const current = model();
+    const graph = graphModel();
+    return current && graph ? deriveTraceModel(current.events, graph.lanes, current.findings) : null;
   });
   const visualGraph = createMemo(() => {
     const current = model();
@@ -180,6 +348,85 @@ export function App() {
       selectedEventId: selectedId(),
     });
   });
+  const statechartGraph = createMemo(() => {
+    const catalog = statecharts();
+    const definition = catalog?.definitions.find((candidate) => candidate.fingerprint === statechartDefinitionFingerprint());
+    if (!catalog || !definition) return null;
+    const instance = catalog.instances.find((candidate) => candidate.instanceId === statechartInstanceId() && candidate.definitionFingerprint === definition.fingerprint);
+    const trace = instance ? catalog.executions.filter((execution) => execution.instanceId === instance.instanceId) : [];
+    const position = trace.length > 0 ? Math.max(0, Math.min(statechartReplayPosition(), trace.length - 1)) : 0;
+    const replayed = instance && trace.length > 0 ? replayInstanceAt(catalog, instance, position) : instance;
+    const coverage = catalog.coverage.find((candidate) => candidate.definitionFingerprint === definition.fingerprint);
+    return deriveStatechartGraphModel(definition, replayed, coverage, trace[position]);
+  });
+  const statechartReplay = createMemo(() => {
+    const catalog = statecharts();
+    const instance = catalog?.instances.find((candidate) => candidate.instanceId === statechartInstanceId());
+    if (!catalog || !instance) return null;
+    const total = catalog.executions.filter((execution) => execution.instanceId === instance.instanceId).length;
+    if (total === 0) return null;
+    return {
+      position: Math.max(0, Math.min(statechartReplayPosition(), total - 1)),
+      total,
+      onPosition: setStatechartReplayPosition,
+    };
+  });
+  const statechartControls = createMemo(() => {
+    const catalog = statecharts();
+    const selectedFingerprint = statechartDefinitionFingerprint();
+    const definition = catalog?.definitions.find((candidate) => candidate.fingerprint === selectedFingerprint);
+    if (!catalog || !definition) return null;
+    const instances = catalog.instances.filter((candidate) => candidate.definitionFingerprint === definition.fingerprint);
+    const trace = catalog.executions.filter((execution) => execution.instanceId === statechartInstanceId());
+    const previous = catalog.definitions
+      .filter((candidate) => candidate.id === definition.id && candidate.version < definition.version)
+      .sort((left, right) => right.version - left.version)[0];
+    const diff = previous ? diffStatechartDefinitions(previous, definition) : null;
+    const oracle = comparePathWithXState(definition, trace);
+    return {
+      definitions: catalog.definitions.map((candidate) => ({ value: String(candidate.fingerprint), label: `${candidate.id} v${candidate.version}` })),
+      definition: String(definition.fingerprint),
+      onDefinition: (value: string) => {
+        setStatechartDefinitionFingerprint(value);
+        setStatechartInstanceId(null);
+        setStatechartReplayPosition(Number.MAX_SAFE_INTEGER);
+      },
+      instances: instances.map((candidate) => ({ value: String(candidate.instanceId), label: `instance ${candidate.instanceId}` })),
+      instance: statechartInstanceId() === null ? "" : String(statechartInstanceId()),
+      onInstance: (value: string) => {
+        setStatechartInstanceId(value || null);
+        setStatechartReplayPosition(Number.MAX_SAFE_INTEGER);
+      },
+      oracle: oracle.equivalent ? "XState equivalent" : "XState mismatch",
+      oracleOk: oracle.equivalent,
+      diff: diff ? `v${diff.fromVersion}→v${diff.toVersion} · +${diff.statesAdded.length + diff.transitionsAdded.length} −${diff.statesRemoved.length + diff.transitionsRemoved.length} ~${diff.transitionsChanged.length}` : "first version",
+    };
+  });
+  const actorGraph = createMemo(() => {
+    const catalog = statecharts();
+    if (!catalog || catalog.instances.length === 0) return null;
+    const selected = catalog.instances.filter((instance) =>
+      instance.definitionFingerprint === statechartDefinitionFingerprint() &&
+      (statechartInstanceId() === null || instance.instanceId === statechartInstanceId()));
+    return deriveActorGraphModel({ ...catalog, instances: selected });
+  });
+  const graphSurface = createMemo(() => {
+    if (graphMode() === "statechart") return statechartGraph();
+    if (graphMode() === "actors") return actorGraph();
+    if (graphMode() === "studio") return statechartGraph();
+    return visualGraph();
+  });
+  const studioSurface = createMemo(() => ({
+    model: studio(),
+    definition: statecharts()?.definitions.find((candidate) => candidate.fingerprint === statechartDefinitionFingerprint()) ?? null,
+    onCopy: copyCommand,
+  }));
+  const selectGraphMode = (mode: GraphSurfaceMode) => {
+    setSelectedId(null);
+    setGraphMode(mode);
+  };
+
+  const validEventIds = createMemo(() => new Set((model()?.events ?? []).map((event) => event.idText)));
   const visibleEvents = createMemo(() => {
     const current = model();
     if (!current) {
@@ -193,16 +440,101 @@ export function App() {
   });
   const selectedEvent = createMemo(() => {
     const events = model()?.events ?? [];
-    const selected = selectedId();
-    return events.find((event) => event.idText === selected) ?? visibleEvents()[0] ?? events[0] ?? null;
+    return events.find((event) => event.idText === selectedId()) ?? null;
+  });
+  const causePathEvents = createMemo<CausalEvent[]>(() => {
+    const current = model();
+    const event = selectedEvent();
+    return current && event ? causePathForEvent(current.events, event.idText) : [];
+  });
+  const causePathIds = createMemo(() => causePathEvents().map((event) => event.idText));
+  const selectedFinding = createMemo<TraceFindingMark | null>(() => {
+    const trace = traceModel();
+    const id = selectedId();
+    return trace && id ? trace.findingMarks.find((mark) => mark.eventId === id) ?? null : null;
   });
   const selectedCommands = createMemo(() => {
     const current = model();
     const event = selectedEvent();
-    if (!current || !event) {
+    return current && event ? queryCommandsForEvent(event, current.artifactPath) : [];
+  });
+
+  // Cross-service correlation (hub mode): when the selected event carries a
+  // boundary_id, ask the hub where else that id was observed — the hub indexes
+  // ALL services, including ones this client never subscribed to. The source is
+  // a fresh object per recompute so the fetch re-runs when the selection moves
+  // (even to the same boundary id in another service) and when a new
+  // boundary-tagged frame arrives (late other-side occurrences appear).
+  const boundaryQuery = createMemo(() => {
+    if (!hubUrl || !hubServices) {
+      return null;
+    }
+    hubServices.boundaryActivity();
+    hubServices.focused();
+    const event = selectedEvent();
+    const boundaryId = event?.boundaryId;
+    return boundaryId ? { boundaryId } : null;
+  });
+  const [boundaryOccurrences] = createResource(boundaryQuery, async (query) => {
+    const endpoint = hubUrl ? correlateEndpoint(hubUrl, query.boundaryId) : null;
+    if (!endpoint) {
       return [];
     }
-    return queryCommandsForEvent(event, current.artifactPath);
+    try {
+      const response = await fetch(endpoint);
+      if (!response.ok) {
+        return [];
+      }
+      return parseCorrelation(await response.json());
+    } catch {
+      return [];
+    }
+  });
+
+  const dimmedIds = createMemo<Set<string> | null>(() => {
+    const current = model();
+    if (!current) {
+      return null;
+    }
+    const filterActive = search().trim() !== "" || kind() !== "all" || status() !== "all";
+    const focusKind = findingFocus();
+    if (!filterActive && !focusKind) {
+      return null;
+    }
+    const visibleSet = filterActive ? new Set(visibleEvents().map((event) => event.idText)) : null;
+    let focusSet: Set<string> | null = null;
+    if (focusKind) {
+      focusSet = new Set<string>();
+      for (const finding of current.findings) {
+        if (finding.kind === focusKind) {
+          for (const event of causePathForEvent(current.events, finding.eventId)) {
+            focusSet.add(event.idText);
+          }
+        }
+      }
+    }
+    const dim = new Set<string>();
+    for (const event of current.events) {
+      const hiddenByFilter = visibleSet ? !visibleSet.has(event.idText) : false;
+      const hiddenByFocus = focusSet ? !focusSet.has(event.idText) : false;
+      if (hiddenByFilter || hiddenByFocus) {
+        dim.add(event.idText);
+      }
+    }
+    return dim;
+  });
+
+  const runMeta = createMemo(() => {
+    const current = model();
+    if (!current) {
+      return [];
+    }
+    return [
+      { label: "schema", value: current.schema },
+      { label: "events", value: String(current.events.length) },
+      { label: "findings", value: String(current.findings.length) },
+      { label: "taxonomy", value: current.taxonomyVersion },
+    ];
   });
 
   async function copyCommand(command: string) {
@@ -225,164 +557,267 @@ export function App() {
   }
 
   return (
-    <main class="workbench-shell">
+    <main class="app">
       <Show when={payload.loading}>
-        <div class="loading-state">Loading causal artifact</div>
+        <div class="loading-state">Loading causal artifact…</div>
       </Show>
-
       <Show when={parsed()?.error}>
         <div class="error-state">{parsed()?.error}</div>
       </Show>
 
+      {/* NOT keyed: in live/hub mode model() is a fresh object per frame, and a
+          keyed Show would tear down + rebuild the whole workspace DOM each time.
+          Non-keyed, `current` is an accessor and updates stay fine-grained. */}
       <Show when={model()}>
-        {(current) => (
-          <>
-            <header class="topbar">
-              <div class="title-block">
-                <span class="eyebrow">zigeffect causal workbench</span>
-                <h1>{current().artifactPath}</h1>
-              </div>
-              <div class="metric-strip">
-                <Metric label="schema" value={current().schema} />
-                <Metric label="schema version" value={current().schemaVersion} />
-                <Metric label="taxonomy" value={current().taxonomyVersion} />
-                <Metric label="events" value={String(current().events.length)} />
-                <Metric label="findings" value={String(current().findings.length)} tone={current().findings.length ? "warn" : "ok"} />
-                <Metric label="mode" value="read-only" tone="ok" />
-              </div>
-            </header>
+        {(current) => {
+          const trace = () => traceModel();
+          return (
+            <>
+              <TopBar
+                artifactPath={current().artifactPath}
+                schema={current().schema}
+                lens={lens()}
+                theme={theme()}
+                isLive={liveUrl !== null}
+                liveFrameCount={live?.frameCount() ?? 0}
+                health={health()}
+                search={search()}
+                kind={kind()}
+                status={status()}
+                kinds={current().kinds}
+                statuses={current().statuses}
+                onSearch={setSearch}
+                onKind={setKind}
+                onStatus={setStatus}
+                onLens={setLens}
+                onToggleTheme={toggleTheme}
+                onOpenPalette={() => setPaletteOpen(true)}
+              />
 
-            <section class="layout-grid">
-              <aside class="left-rail">
-                <nav class="tab-list" aria-label="Workbench views">
-                  <For each={availableTabs()}>
-                    {(tab) => (
-                      <button
-                        type="button"
-                        classList={{ active: activeTab() === tab.id }}
-                        onClick={() => setActiveTab(tab.id)}
-                      >
-                        {tab.label}
-                      </button>
-                    )}
-                  </For>
-                </nav>
-
-                <label class="filter-control">
-                  <span>Search</span>
-                  <input
-                    value={search()}
-                    onInput={(event) => setSearch(event.currentTarget.value)}
-                    placeholder="event, kind, label"
-                  />
-                </label>
-
-                <label class="filter-control">
-                  <span>Kind</span>
-                  <select value={kind()} onChange={(event) => setKind(event.currentTarget.value)}>
-                    <option value="all">All kinds</option>
-                    <For each={current().kinds}>
-                      {(value) => <option value={value}>{value}</option>}
-                    </For>
-                  </select>
-                </label>
-
-                <label class="filter-control">
-                  <span>Status</span>
-                  <select value={status()} onChange={(event) => setStatus(event.currentTarget.value)}>
-                    <option value="all">All statuses</option>
-                    <For each={current().statuses}>
-                      {(value) => <option value={value}>{value}</option>}
-                    </For>
-                  </select>
-                </label>
-
-                <div class="safety-panel">
-                  <span>read-only local artifact viewer</span>
-                  <span>no source edits</span>
-                  <span>no registry edits</span>
-                  <span>no policy decisions</span>
-                </div>
-              </aside>
-
-              <section class="main-pane">
-                <Switch>
-                  <Match when={activeTab() === "timeline"}>
-                    <Timeline events={visibleEvents()} selected={selectedEvent()} onSelect={setSelectedId} />
-                  </Match>
-                  <Match when={activeTab() === "agents"}>
-                    <AgentDevelopmentView
-                      session={localDevSession()}
-                      copiedCommand={copiedCommand()}
-                      onCopy={copyCommand}
-                    />
-                  </Match>
-                  <Match when={activeTab() === "findings"}>
-                    <Findings events={current().events} findings={current().findings} onSelect={setSelectedId} />
-                  </Match>
-                  <Match when={activeTab() === "graph"}>
-                    <Graph
-                      events={current().events}
-                      findings={current().findings}
-                      selected={selectedEvent()}
-                      onSelect={setSelectedId}
-                    />
-                  </Match>
-                  <Match when={activeTab() === "visual-graph"}>
-                    <VisualGraphView
-                      model={visualGraph()}
-                      layoutMode={layoutMode()}
-                      perspective={graphPerspective()}
-                      selectedNodeId={selectedGraphNodeId()}
-                      selected={selectedEvent()}
-                      events={current().events}
-                      onLayoutMode={setLayoutMode}
-                      onPerspective={(perspective) => {
-                        setGraphPerspective(perspective);
-                        setSelectedGraphNodeId(null);
+              <div classList={{ workspace: true, "has-rail": hubServices !== null }}>
+                <Show when={hubServices}>
+                  {(hub) => (
+                    <ServicesRail
+                      services={hub().services()}
+                      focused={hub().focused()}
+                      pinned={hub().pinned()}
+                      connected={hub().connected()}
+                      onFocus={(serviceKey) => focusService(serviceKey)}
+                      onTogglePin={(serviceKey) =>
+                        hub().pinned().includes(serviceKey) ? hub().unpin(serviceKey) : hub().pin(serviceKey)
+                      }
+                      onLayer={(serviceKey, layerName) => {
+                        focusService(serviceKey);
+                        setSearch(layerName);
                       }}
+                    />
+                  )}
+                </Show>
+                <div class="stage-split">
+                <Show
+                  when={lens() === "execution"}
+                  fallback={
+                    <section class="stage lens-collaboration">
+                      <div class="stage-body">
+                        <CollabBoard
+                          session={localDevSession()}
+                          project={projectDevelopment()}
+                          operatorBootstrap={controlBootstrap}
+                          validEventIds={validEventIds()}
+                          copiedCommand={copiedCommand()}
+                          onCopy={copyCommand}
+                          onSelectEvent={setSelectedId}
+                        />
+                        <div class="evidence-split">
+                          <TracePane
+                            title="Execution evidence"
+                            eventCount={current().events.length}
+                            trace={trace()}
+                            selectedId={selectedId()}
+                            causePath={causePathIds()}
+                            dimmedIds={dimmedIds()}
+                            density="compact"
+                            showFindings={false}
+                            findingMarks={trace()?.findingMarks ?? []}
+                            findingFocus={findingFocus()}
+                            onToggleFocus={setFindingFocus}
+                            onDensity={setDensity}
+                            onSelect={setSelectedId}
+                          />
+                          <DagPanel
+                            model={graphSurface()}
+                            layoutMode={layoutMode()}
+                            perspective={graphPerspective()}
+                            selectedId={selectedId()}
+                            onLayoutMode={setLayoutMode}
+                            onPerspective={setGraphPerspective}
+                            onSelect={setSelectedId}
+                            mode={graphMode()}
+                            onMode={selectGraphMode}
+                            replay={statechartReplay()}
+                            statechartControls={statechartControls()}
+                            studio={studioSurface()}
+                            compact
+                          />
+                        </div>
+                      </div>
+                    </section>
+                  }
+                >
+                  <section class="stage lens-execution">
+                    <AgentsRibbon
+                      session={localDevSession()}
+                      validEventIds={validEventIds()}
                       onSelectEvent={setSelectedId}
-                      onSelectNode={setSelectedGraphNodeId}
                     />
-                  </Match>
-                  <Match when={activeTab() === "chain"}>
-                    <ChainView
-                      governance={governance()}
-                      events={current().events}
-                      copiedCommand={copiedCommand()}
-                      onCopy={copyCommand}
-                      onSelectEvent={setSelectedId}
+                    <div class="stage-body">
+                      <TracePane
+                        title="Execution trace"
+                        eventCount={current().events.length}
+                        trace={trace()}
+                        selectedId={selectedId()}
+                        causePath={causePathIds()}
+                        dimmedIds={dimmedIds()}
+                        density={density()}
+                        showFindings
+                        findingMarks={trace()?.findingMarks ?? []}
+                        findingFocus={findingFocus()}
+                        onToggleFocus={setFindingFocus}
+                        onDensity={setDensity}
+                        onSelect={setSelectedId}
+                      />
+                      <DagPanel
+                        model={graphSurface()}
+                        layoutMode={layoutMode()}
+                        perspective={graphPerspective()}
+                        selectedId={selectedId()}
+                        onLayoutMode={setLayoutMode}
+                        onPerspective={setGraphPerspective}
+                        onSelect={setSelectedId}
+                        mode={graphMode()}
+                        onMode={selectGraphMode}
+                        replay={statechartReplay()}
+                        statechartControls={statechartControls()}
+                        studio={studioSurface()}
+                      />
+                    </div>
+                  </section>
+                </Show>
+                <Show when={hubServices}>
+                  {(hub) => (
+                    <PinnedPanes
+                      pinned={hub().pinned()}
+                      services={hub().services()}
+                      artifactJson={(serviceKey) => hub().artifactJson(serviceKey)}
+                      droppedFrames={(serviceKey) => hub().droppedFrames(serviceKey)}
+                      onUnpin={(serviceKey) => hub().unpin(serviceKey)}
+                      onPromote={(serviceKey, eventId) => {
+                        focusService(serviceKey);
+                        if (eventId) {
+                          setSelectedId(eventId);
+                        }
+                      }}
                     />
-                  </Match>
-                  <Match when={activeTab() === "diff"}>
-                    <DiffView diff={semanticDiff()} onSelectEvent={setSelectedId} />
-                  </Match>
-                  <Match when={activeTab() === "queries"}>
-                    <Queries
-                      artifactPath={current().artifactPath}
-                      selected={selectedEvent()}
-                      commands={selectedCommands()}
-                      copiedCommand={copiedCommand()}
-                      onCopy={copyCommand}
-                    />
-                  </Match>
-                  <Match when={activeTab() === "metadata"}>
-                    <Metadata model={current()} session={parsed()?.session ?? null} />
-                  </Match>
-                </Switch>
-              </section>
+                  )}
+                </Show>
+                </div>
 
-              <aside class="inspector">
                 <Inspector
                   event={selectedEvent()}
+                  causePath={causePathEvents()}
+                  finding={selectedFinding()}
                   commands={selectedCommands()}
                   copiedCommand={copiedCommand()}
+                  runMeta={runMeta()}
+                  boundary={
+                    hubServices
+                      ? {
+                          // While a refetch is in flight the resource still
+                          // returns the PREVIOUS boundary's occurrences — hide
+                          // them rather than flash wrong jump links.
+                          occurrences: boundaryOccurrences.loading ? [] : boundaryOccurrences() ?? [],
+                          onJump: (serviceKey, eventId) => {
+                            focusService(serviceKey);
+                            setSelectedId(eventId);
+                          },
+                        }
+                      : null
+                  }
                   onCopy={copyCommand}
+                  onSelect={setSelectedId}
                 />
-              </aside>
-            </section>
-          </>
-        )}
+              </div>
+
+              <Show when={paletteOpen()}>
+                <CommandPalette
+                  events={current().events}
+                  findingMarks={trace()?.findingMarks ?? []}
+                  hasDiff={semanticDiff() !== null}
+                  hasChain={governance() !== null}
+                  onClose={() => setPaletteOpen(false)}
+                  onSelectEvent={(id) => {
+                    setSelectedId(id);
+                    setPaletteOpen(false);
+                  }}
+                  onOpenAux={(view) => {
+                    setAuxView(view);
+                    setPaletteOpen(false);
+                  }}
+                  onSetLens={setLens}
+                  onToggleTheme={toggleTheme}
+                />
+              </Show>
+
+              <Show when={auxView()} keyed>
+                {(view) => (
+                  <AuxOverlay title={auxTitles[view]} onClose={() => setAuxView(null)}>
+                    <Show when={view === "diff"}>
+                      <DiffView diff={semanticDiff()} onSelectEvent={(id) => { setSelectedId(id); setAuxView(null); }} />
+                    </Show>
+                    <Show when={view === "chain"}>
+                      <ChainView
+                        governance={governance()}
+                        events={current().events}
+                        copiedCommand={copiedCommand()}
+                        onCopy={copyCommand}
+                        onSelectEvent={(id) => { setSelectedId(id); setAuxView(null); }}
+                      />
+                    </Show>
+                    <Show when={view === "metadata"}>
+                      <MetadataView model={current()} session={parsed()?.session ?? null} />
+                    </Show>
+                    <Show when={view === "queries"}>
+                      <QueriesView
+                        artifactPath={current().artifactPath}
+                        selected={selectedEvent()}
+                        commands={selectedCommands()}
+                        copiedCommand={copiedCommand()}
+                        onCopy={copyCommand}
+                      />
+                    </Show>
+                    <Show when={view === "safety"}>
+                      <SafetyPanel
+                        receipt={safetyReceipt() ?? null}
+                        error={safetyReceipt.error instanceof Error ? safetyReceipt.error.message : undefined}
+                        copiedCommand={copiedCommand()}
+                        onCopy={copyCommand}
+                      />
+                    </Show>
+                    <Show when={view === "tests"}>
+                      <TestPanel
+                        run={testRun() ?? null}
+                        error={testRun.error instanceof Error ? testRun.error.message : undefined}
+                        copiedCommand={copiedCommand()}
+                        onCopy={copyCommand}
+                        onSelectEvent={(id) => { setSelectedId(id); setAuxView(null); }}
+                      />
+                    </Show>
+                  </AuxOverlay>
+                )}
+              </Show>
+            </>
+          );
+        }}
       </Show>
       <Show when={ziacModel()}>
         {(current) => (
@@ -395,1535 +830,93 @@ export function App() {
   );
 }
 
-function AgentDevelopmentView(props: {
-  session: LocalDevSessionModel | null;
-  copiedCommand: string | null;
-  onCopy: (command: string) => void;
-}) {
-  const health = createMemo(() => props.session ? deriveLocalDevHealthSummary(props.session) : null);
-  const timeline = createMemo(() => props.session ? deriveLocalDevTimeline(props.session) : []);
-  const issues = createMemo(() => props.session ? deriveLocalDevIssueHighlights(props.session) : []);
-  const commands = createMemo<QueryCommand[]>(() => {
-    const session = props.session;
-    if (!session) {
-      return [];
-    }
-
-    return [
-      ...session.commands
-        .filter((command) => command.command.length > 0)
-        .map((command) => ({ label: command.label, command: command.command })),
-      ...session.artifacts
-        .filter((artifact) => artifact.workbenchCommand !== null)
-        .map((artifact) => ({ label: artifact.label, command: artifact.workbenchCommand! })),
-    ];
-  });
-
-  return (
-    <div class="view-stack">
-      <div class="view-heading">
-        <h2>Dev Session</h2>
-        <span>{props.session?.status ?? "no local session"}</span>
-      </div>
-
-      <Show when={props.session} fallback={<EmptyState label="Loaded artifact has no local agent development session" />}>
-        {(session) => (
-          <>
-            <div class="agent-summary">
-              <Metric label="target" value={session().target} />
-              <Metric label="phase" value={session().phase} />
-              <Metric label="health" value={health()?.health ?? "unknown"} tone={health()?.health === "fail" ? "warn" : "ok"} />
-              <Metric label="status" value={session().status} tone={session().status === "failed" ? "warn" : "ok"} />
-              <Metric label="pass" value={String(health()?.passedChecks ?? 0)} tone="ok" />
-              <Metric label="fail" value={String(health()?.failedChecks ?? 0)} tone={(health()?.failedChecks ?? 0) ? "warn" : "ok"} />
-              <Metric label="running" value={String(health()?.runningChecks ?? 0)} />
-              <Metric label="agents" value={String(session().agents.length)} />
-              <Metric label="commands" value={String(health()?.commandCount ?? 0)} />
-              <Metric label="artifacts" value={String(health()?.artifactCount ?? 0)} />
-            </div>
-
-            <section class="agent-panel">
-              <div class="agent-session-head">
-                <div>
-                  <h3>{session().title}</h3>
-                  <p>{session().goal}</p>
-                </div>
-                <Badge value={session().mode} />
-              </div>
-              <dl class="metadata-grid">
-                <Meta label="session" value={session().sessionId} />
-                <Meta label="artifact" value={session().artifactPath} />
-                <Meta label="schema" value={session().schema} />
-                <Meta label="schema version" value={session().schemaVersion} />
-              </dl>
-            </section>
-
-            <Show when={issues().length > 0}>
-              <section class="agent-panel">
-                <div class="lane-section-head">
-                  <h3>Schema / CLI issues</h3>
-                  <span>{issues().length}</span>
-                </div>
-                <div class="agent-issue-list">
-                  <For each={issues()}>{(issue) => <AgentIssueRow issue={issue} />}</For>
-                </div>
-              </section>
-            </Show>
-
-            <section class="agent-panel">
-              <div class="lane-section-head">
-                <h3>Development timeline</h3>
-                <span>{timeline().length}</span>
-              </div>
-              <div class="agent-timeline-list">
-                <For each={timeline()} fallback={<EmptyState label="No timeline items" compact />}>
-                  {(item) => <AgentTimelineRow item={item} />}
-                </For>
-              </div>
-            </section>
-
-            <div class="agent-grid">
-              <section class="agent-panel">
-                <div class="lane-section-head">
-                  <h3>Local agents</h3>
-                  <span>{session().agents.length}</span>
-                </div>
-                <div class="agent-row-list">
-                  <For each={session().agents} fallback={<EmptyState label="No agents" compact />}>
-                    {(agent) => (
-                      <div classList={{ "agent-row": true, [agent.status]: true }}>
-                        <span>{agent.kind}</span>
-                        <strong>{agent.label}</strong>
-                        <small>{agent.currentTask ?? agent.artifactPath ?? "no active task"}</small>
-                        <Badge value={agent.status} />
-                      </div>
-                    )}
-                  </For>
-                </div>
-              </section>
-
-              <section class="agent-panel">
-                <div class="lane-section-head">
-                  <h3>Checks</h3>
-                  <span>{session().checks.length}</span>
-                </div>
-                <div class="agent-check-list">
-                  <For each={session().checks} fallback={<EmptyState label="No checks" compact />}>
-                    {(check) => (
-                      <div classList={{ "agent-check-row": true, [check.status]: true }}>
-                        <span>{check.status}</span>
-                        <strong>{check.label}</strong>
-                        <small>{check.detail || check.command || check.artifactPath || "no detail"}</small>
-                      </div>
-                    )}
-                  </For>
-                </div>
-              </section>
-            </div>
-
-            <section class="agent-panel">
-              <div class="lane-section-head">
-                <h3>Artifacts</h3>
-                <span>{session().artifacts.length}</span>
-              </div>
-              <div class="agent-artifact-list">
-                <For each={session().artifacts} fallback={<EmptyState label="No artifact links" compact />}>
-                  {(artifact) => <AgentArtifactRow artifact={artifact} />}
-                </For>
-              </div>
-            </section>
-
-            <Show when={commands().length > 0}>
-              <section class="agent-panel">
-                <div class="lane-section-head">
-                  <h3>Command receipts</h3>
-                  <span>{commands().length}</span>
-                </div>
-                <CommandList commands={commands()} copiedCommand={props.copiedCommand} onCopy={props.onCopy} />
-              </section>
-            </Show>
-
-            <div class="agent-grid">
-              <section class="agent-panel">
-                <div class="lane-section-head">
-                  <h3>Next actions</h3>
-                  <span>{session().nextActions.length}</span>
-                </div>
-                <div class="guardrail-list">
-                  <For each={session().nextActions} fallback={<EmptyState label="No next actions" compact />}>
-                    {(action) => <span>{action}</span>}
-                  </For>
-                </div>
-              </section>
-
-              <section class="agent-panel">
-                <div class="lane-section-head">
-                  <h3>Guardrails</h3>
-                  <span>{session().guardrails.length}</span>
-                </div>
-                <div class="guardrail-list">
-                  <For each={session().guardrails} fallback={<EmptyState label="No guardrails" compact />}>
-                    {(guardrail) => <span>{guardrail}</span>}
-                  </For>
-                </div>
-              </section>
-            </div>
-
-            <Show when={session().warnings.length > 0}>
-              <div class="warning-list">
-                <For each={session().warnings}>{(warning) => <span>{warning}</span>}</For>
-              </div>
-            </Show>
-          </>
-        )}
-      </Show>
-    </div>
-  );
-}
-
-function AgentIssueRow(props: { issue: LocalDevIssueHighlight }) {
-  return (
-    <div class="agent-issue-row">
-      <span>{props.issue.source}</span>
-      <strong>{props.issue.label}</strong>
-      <small>{props.issue.detail}</small>
-      <Show when={props.issue.artifactPath}>
-        <code>{props.issue.artifactPath}</code>
-      </Show>
-    </div>
-  );
-}
-
-function AgentTimelineRow(props: { item: LocalDevTimelineItem }) {
-  return (
-    <div classList={{ "agent-timeline-row": true, [props.item.status]: true }}>
-      <span>{props.item.kind}</span>
-      <strong>{props.item.label}</strong>
-      <small>{props.item.detail}</small>
-      <Show when={props.item.command ?? props.item.artifactPath}>
-        <code>{props.item.command ?? props.item.artifactPath}</code>
-      </Show>
-    </div>
-  );
-}
-
-function AgentArtifactRow(props: { artifact: LocalDevArtifactModel }) {
-  return (
-    <div class="agent-artifact-row">
-      <span>{props.artifact.kind}</span>
-      <strong>{props.artifact.label}</strong>
-      <code>{props.artifact.path}</code>
-    </div>
-  );
-}
-
-function DiffView(props: { diff: SemanticDiffModel | null; onSelectEvent: (id: string) => void }) {
-  return (
-    <div class="view-stack">
-      <div class="view-heading">
-        <h2>Diff</h2>
-        <span>{props.diff?.schema ?? "no semantic diff"}</span>
-      </div>
-
-      <Show when={props.diff} fallback={<EmptyState label="Loaded artifact has no semantic graph diff" />}>
-        {(diff) => (
-          <>
-            <div class="graph-summary diff-summary">
-              <Metric label="resolved findings" value={String(diff().summary.resolvedFindings)} tone={diff().summary.resolvedFindings ? "ok" : undefined} />
-              <Metric label="introduced findings" value={String(diff().summary.introducedFindings)} tone={diff().summary.introducedFindings ? "warn" : "ok"} />
-              <Metric label="fiber terminals +" value={String(diff().summary.addedFiberTerminals)} />
-              <Metric label="resources +" value={String(diff().summary.addedResourceFinalizations)} />
-              <Metric label="lineage edges +" value={String(diff().summary.addedLineageEdges)} />
-            </div>
-
-            <section class="chain-panel">
-              <h3>Artifacts</h3>
-              <div class="metadata-grid">
-                <Meta label="before" value={diff().beforeArtifact} />
-                <Meta label="after" value={diff().afterArtifact} />
-                <Meta label="source" value={diff().artifactPath} />
-              </div>
-            </section>
-
-            <div class="diff-grid">
-              <DiffFindingList title="Resolved findings" entries={diff().resolvedFindings} tone="ok" onSelectEvent={props.onSelectEvent} />
-              <DiffFindingList title="Introduced findings" entries={diff().introducedFindings} tone="warn" onSelectEvent={props.onSelectEvent} />
-              <DiffFiberList title="Added fiber terminals" entries={diff().addedFiberTerminals} onSelectEvent={props.onSelectEvent} />
-              <DiffFiberList title="Removed fiber terminals" entries={diff().removedFiberTerminals} onSelectEvent={props.onSelectEvent} />
-              <DiffResourceList title="Added resource finalizations" entries={diff().addedResourceFinalizations} onSelectEvent={props.onSelectEvent} />
-              <DiffResourceList title="Removed resource finalizations" entries={diff().removedResourceFinalizations} onSelectEvent={props.onSelectEvent} />
-              <DiffLineageList title="Added lineage edges" entries={diff().addedLineageEdges} onSelectEvent={props.onSelectEvent} />
-              <DiffLineageList title="Removed lineage edges" entries={diff().removedLineageEdges} onSelectEvent={props.onSelectEvent} />
-            </div>
-
-            <Show when={diff().warnings.length > 0}>
-              <div class="warning-list">
-                <For each={diff().warnings}>{(warning) => <span>{warning}</span>}</For>
-              </div>
-            </Show>
-          </>
-        )}
-      </Show>
-    </div>
-  );
-}
-
-function DiffFindingList(props: { title: string; entries: SemanticDiffFinding[]; tone: "ok" | "warn"; onSelectEvent: (id: string) => void }) {
-  return (
-    <section class="diff-panel">
-      <div class="lane-section-head">
-        <h3>{props.title}</h3>
-        <span>{props.entries.length}</span>
-      </div>
-      <div class="diff-entry-list">
-        <For each={props.entries} fallback={<EmptyState label="No entries" compact />}>
-          {(entry) => (
-            <button
-              type="button"
-              classList={{ "diff-entry": true, ok: props.tone === "ok", warning: props.tone === "warn" }}
-              disabled={!selectableDiffEventId(entry.eventId)}
-              onClick={() => selectDiffEvent(props.onSelectEvent, entry.eventId)}
-            >
-              <span>#{entry.eventId}</span>
-              <strong>{entry.kind}</strong>
-              <small>{entry.owner}</small>
-            </button>
-          )}
-        </For>
-      </div>
-    </section>
-  );
-}
-
-function DiffFiberList(props: { title: string; entries: SemanticDiffFiberTerminal[]; onSelectEvent: (id: string) => void }) {
-  return (
-    <section class="diff-panel">
-      <div class="lane-section-head">
-        <h3>{props.title}</h3>
-        <span>{props.entries.length}</span>
-      </div>
-      <div class="diff-entry-list">
-        <For each={props.entries} fallback={<EmptyState label="No entries" compact />}>
-          {(entry) => (
-            <button
-              type="button"
-              class="diff-entry"
-              disabled={!selectableDiffEventId(entry.eventId)}
-              onClick={() => selectDiffEvent(props.onSelectEvent, entry.eventId)}
-            >
-              <span>fiber {entry.fiberId}</span>
-              <strong>{entry.terminalKind}</strong>
-              <small>#{entry.eventId} / {entry.status}</small>
-            </button>
-          )}
-        </For>
-      </div>
-    </section>
-  );
-}
-
-function DiffResourceList(props: { title: string; entries: SemanticDiffResourceFinalization[]; onSelectEvent: (id: string) => void }) {
-  return (
-    <section class="diff-panel">
-      <div class="lane-section-head">
-        <h3>{props.title}</h3>
-        <span>{props.entries.length}</span>
-      </div>
-      <div class="diff-entry-list">
-        <For each={props.entries} fallback={<EmptyState label="No entries" compact />}>
-          {(entry) => (
-            <button
-              type="button"
-              class="diff-entry"
-              disabled={!selectableDiffEventId(entry.eventId)}
-              onClick={() => selectDiffEvent(props.onSelectEvent, entry.eventId)}
-            >
-              <span>scope {entry.scopeId}</span>
-              <strong>{entry.typeName}</strong>
-              <small>resource {entry.resourceId} / event #{entry.eventId}</small>
-            </button>
-          )}
-        </For>
-      </div>
-    </section>
-  );
-}
-
-function DiffLineageList(props: { title: string; entries: SemanticDiffLineageEdge[]; onSelectEvent: (id: string) => void }) {
-  return (
-    <section class="diff-panel">
-      <div class="lane-section-head">
-        <h3>{props.title}</h3>
-        <span>{props.entries.length}</span>
-      </div>
-      <div class="diff-entry-list">
-        <For each={props.entries} fallback={<EmptyState label="No entries" compact />}>
-          {(entry) => (
-            <button
-              type="button"
-              class="diff-entry"
-              disabled={!selectableDiffEventId(entry.toEventId, entry.fromEventId)}
-              onClick={() => selectDiffEvent(props.onSelectEvent, entry.toEventId, entry.fromEventId)}
-            >
-              <span>#{entry.fromEventId} -&gt; #{entry.toEventId}</span>
-              <strong>{entry.edgeKind}</strong>
-              <small>semantic edge</small>
-            </button>
-          )}
-        </For>
-      </div>
-    </section>
-  );
-}
-
-function selectableDiffEventId(...ids: string[]): string | null {
-  return ids.find((id) => id.length > 0 && id !== "unknown" && id !== "null") ?? null;
-}
-
-function selectDiffEvent(onSelectEvent: (id: string) => void, ...ids: string[]) {
-  const id = selectableDiffEventId(...ids);
-  if (id) {
-    onSelectEvent(id);
-  }
-}
-
-function ChainView(props: {
-  governance: GovernanceModel | null;
-  events: CausalEvent[];
-  copiedCommand: string | null;
-  onCopy: (command: string) => void;
-  onSelectEvent: (id: string) => void;
-}) {
-  return (
-    <div class="view-stack">
-      <div class="view-heading">
-        <h2>Chain</h2>
-        <span>{props.governance?.kind ?? "no governance artifact"}</span>
-      </div>
-
-      <Show when={props.governance} fallback={<EmptyState label="Loaded artifact has no remediation chain" />}>
-        {(governance) => (
-          <Show
-            when={governance().app}
-            fallback={(
-              <Show when={governance().chain} fallback={<GovernanceSummary governance={governance()} />}>
-                {(chain) => (
-                  <>
-                    <ChainStatus chain={chain()} />
-                    <div class="chain-grid">
-                      <ChainSources
-                        steps={chain().sourceSteps}
-                        copiedCommand={props.copiedCommand}
-                        onCopy={props.onCopy}
-                      />
-                      <ChainVerification
-                        chain={chain()}
-                        copiedCommand={props.copiedCommand}
-                        onCopy={props.onCopy}
-                      />
-                    </div>
-                    <ChainClassifications chain={chain()} />
-                    <ChainGuardrails chain={chain()} />
-                    <div class="warning-list">
-                      <For each={[...governance().warnings, ...chain().warnings]} fallback={<EmptyState label="No chain warnings" compact />}>
-                        {(warning) => <span>{warning}</span>}
-                      </For>
-                    </div>
-                  </>
-                )}
-              </Show>
-            )}
-          >
-            {(app) => (
-              <AppRemediationView
-                app={app()}
-                events={props.events}
-                copiedCommand={props.copiedCommand}
-                onCopy={props.onCopy}
-                onSelectEvent={props.onSelectEvent}
-              />
-            )}
-          </Show>
-        )}
-      </Show>
-    </div>
-  );
-}
-
-function GovernanceSummary(props: { governance: GovernanceModel }) {
-  return (
-    <>
-      <div class="chain-status">
-        <Metric label="schema" value={props.governance.schema} />
-        <Metric label="kind" value={props.governance.kind} />
-        <Metric label="target" value={props.governance.target} />
-        <Metric label="applied" value={String(props.governance.applied ?? "unknown")} />
-        <Metric label="authority" value={props.governance.mutationAuthority ?? "none"} tone="ok" />
-      </div>
-      <div class="chain-panel">
-        <h3>{props.governance.summary}</h3>
-        <EmptyState label="This governance artifact has no audit-chain source graph" compact />
-      </div>
-    </>
-  );
-}
-
-function ChainStatus(props: { chain: RemediationChainModel }) {
-  return (
-    <div class="chain-status">
-      <Metric label="target" value={props.chain.target} />
-      <Metric label="assessment" value={props.chain.assessment} tone={props.chain.assessment === "regressed" ? "warn" : "ok"} />
-      <Metric label="approval" value={props.chain.approvalStatus} />
-      <Metric label="applied" value={String(props.chain.applied ?? "unknown")} tone={props.chain.applied ? "warn" : "ok"} />
-      <Metric label="delta" value={props.chain.findingDelta} />
-    </div>
-  );
-}
-
-function ChainSources(props: {
-  steps: ChainSourceStep[];
-  copiedCommand: string | null;
-  onCopy: (command: string) => void;
-}) {
-  return (
-    <section class="chain-panel">
-      <h3>Source artifacts</h3>
-      <div class="chain-source-list">
-        <For each={props.steps} fallback={<EmptyState label="No source artifact paths" compact />}>
-          {(step) => (
-            <ChainSourceRow
-              step={step}
-              copiedCommand={props.copiedCommand}
-              onCopy={props.onCopy}
-            />
-          )}
-        </For>
-      </div>
-    </section>
-  );
-}
-
-function ChainSourceRow(props: {
-  step: ChainSourceStep;
-  copiedCommand: string | null;
-  onCopy: (command: string) => void;
-}) {
-  return (
-    <div class="chain-source-row">
-      <span>{props.step.label}</span>
-      <code>{props.step.path}</code>
-      <Show when={props.step.workbenchCommand} fallback={<small>text artifact</small>}>
-        {(command) => (
-          <button type="button" onClick={() => props.onCopy(command())}>
-            {props.copiedCommand === command() ? "Copied" : "Copy"}
-          </button>
-        )}
-      </Show>
-    </div>
-  );
-}
-
-function ChainVerification(props: {
-  chain: RemediationChainModel;
-  copiedCommand: string | null;
-  onCopy: (command: string) => void;
-}) {
-  const commands = createMemo<QueryCommand[]>(() => props.chain.verificationCommands.map((command, index) => ({
-    label: `verify ${index + 1}`,
-    command,
-  })));
-
-  return (
-    <section class="chain-panel">
-      <h3>Verification</h3>
-      <CommandList
-        commands={commands()}
-        copiedCommand={props.copiedCommand}
-        onCopy={props.onCopy}
-        compact
-      />
-    </section>
-  );
-}
-
-function ChainClassifications(props: { chain: RemediationChainModel }) {
-  const groups = createMemo(() => [
-    { label: "disappeared", ids: props.chain.classifications.disappeared },
-    { label: "persisting", ids: props.chain.classifications.persisting },
-    { label: "appeared", ids: props.chain.classifications.appeared },
-    { label: "missing", ids: props.chain.classifications.missing },
-  ]);
-
-  return (
-    <section class="chain-panel">
-      <div class="lane-section-head">
-        <h3>Event classification</h3>
-        <span>{props.chain.classifications.eventIds.length} cited ids</span>
-      </div>
-      <div class="chain-classification-grid">
-        <For each={groups()}>
-          {(group) => (
-            <div class="chain-id-list">
-              <span>{group.label}</span>
-              <For each={group.ids} fallback={<small>none</small>}>
-                {(id) => <strong>#{id}</strong>}
-              </For>
-            </div>
-          )}
-        </For>
-      </div>
-    </section>
-  );
-}
-
-function ChainGuardrails(props: { chain: RemediationChainModel }) {
-  return (
-    <section class="chain-panel">
-      <h3>Guardrails</h3>
-      <div class="guardrail-list">
-        <For each={props.chain.guardrails} fallback={<EmptyState label="No guardrails recorded" compact />}>
-          {(guardrail) => <span>{guardrail}</span>}
-        </For>
-      </div>
-    </section>
-  );
-}
-
-function AppRemediationView(props: {
-  app: AppRemediationModel;
-  events: CausalEvent[];
-  copiedCommand: string | null;
-  onCopy: (command: string) => void;
-  onSelectEvent: (id: string) => void;
-}) {
-  return (
-    <>
-      <AppRemediationStatus app={props.app} />
-      <div class="app-remediation-grid">
-        <ChainSources
-          steps={props.app.sourceSteps}
-          copiedCommand={props.copiedCommand}
-          onCopy={props.onCopy}
-        />
-        <AppPolicyGates gates={props.app.policyGates} results={props.app.gateResults} />
-      </div>
-      <AppIncidents
-        incidents={props.app.incidents}
-        events={props.events}
-        copiedCommand={props.copiedCommand}
-        onCopy={props.onCopy}
-        onSelectEvent={props.onSelectEvent}
-      />
-      <div class="app-remediation-grid">
-        <AppCitations citations={props.app.citations} />
-        <AppVerification
-          commands={props.app.verificationCommands}
-          copiedCommand={props.copiedCommand}
-          onCopy={props.onCopy}
-        />
-      </div>
-      <Show when={props.app.kind === "app-application"}>
-        <div class="app-remediation-grid">
-          <AppEvidenceGroups title="Change evidence" groups={props.app.changeEvidence} />
-          <AppBeforeAfterEvidence before={props.app.beforeEvidence} after={props.app.afterEvidence} />
-        </div>
-      </Show>
-      <Show when={props.app.checks.length || props.app.applicationSteps.length}>
-        <div class="app-remediation-grid">
-          <AppReadinessChecks checks={props.app.checks} />
-          <AppApplicationSteps steps={props.app.applicationSteps} />
-        </div>
-      </Show>
-      <AppGuardrails guardrails={props.app.guardrails} />
-      <div class="warning-list">
-        <For each={props.app.warnings} fallback={<EmptyState label="No app remediation warnings" compact />}>
-          {(warning) => <span>{warning}</span>}
-        </For>
-      </div>
-    </>
-  );
-}
-
-function AppRemediationStatus(props: { app: AppRemediationModel }) {
-  const posture = props.app.kind === "app-application"
-    ? props.app.applicationStatus
-    : props.app.kind === "app-application-readiness"
-    ? props.app.readinessStatus
-    : props.app.kind === "app-patch-proposal"
-      ? props.app.proposalStatus
-      : props.app.decision;
-  return (
-    <div class="chain-status app-status">
-      <Metric label="target" value={props.app.target} />
-      <Metric label="kind" value={props.app.kind} />
-      <Metric label="posture" value={posture === "unknown" ? props.app.approvalStatus : posture} />
-      <Show when={props.app.readyForApplication !== null}>
-        <Metric label="ready" value={String(props.app.readyForApplication)} tone={props.app.readyForApplication ? "ok" : "warn"} />
-      </Show>
-      <Metric label="approval" value={props.app.approvalStatus} />
-      <Metric label="applied" value={String(props.app.applied ?? "unknown")} tone={props.app.applied ? "warn" : "ok"} />
-      <Metric label="authority" value={props.app.mutationAuthority ?? "none"} tone={props.app.mutationAuthority === "none" ? "ok" : "warn"} />
-    </div>
-  );
-}
-
-function AppPolicyGates(props: { gates: string[]; results: AppGateResultModel[] }) {
-  return (
-    <section class="chain-panel">
-      <div class="lane-section-head">
-        <h3>Policy gates</h3>
-        <span>{props.gates.length || props.results.length}</span>
-      </div>
-      <div class="gate-chip-list">
-        <For each={props.gates} fallback={<EmptyState label="No policy gates" compact />}>
-          {(gate) => <span class={`gate-chip ${gateToneClass(gate)}`}>{gate}</span>}
-        </For>
-      </div>
-      <div class="gate-result-list">
-        <For each={props.results} fallback={<EmptyState label="No gate result details" compact />}>
-          {(result) => (
-            <div class="gate-result-row">
-              <span class={`gate-chip ${gateToneClass(result.status || result.gate)}`}>{result.status}</span>
-              <strong>{result.gate}</strong>
-              <p>{result.detail || "No detail recorded"}</p>
-            </div>
-          )}
-        </For>
-      </div>
-    </section>
-  );
-}
-
-function AppIncidents(props: {
-  incidents: AppIncidentModel[];
-  events: CausalEvent[];
-  copiedCommand: string | null;
-  onCopy: (command: string) => void;
-  onSelectEvent: (id: string) => void;
-}) {
-  const eventIds = createMemo(() => new Set(props.events.map((event) => event.idText)));
-
-  return (
-    <section class="chain-panel app-remediation-full">
-      <div class="lane-section-head">
-        <h3>App incidents</h3>
-        <span>{props.incidents.length}</span>
-      </div>
-      <div class="app-incident-list">
-        <For each={props.incidents} fallback={<EmptyState label="No app incidents recorded" compact />}>
-          {(incident) => (
-            <div class="app-incident-row">
-              <Show
-                when={eventIds().has(incident.eventId)}
-                fallback={<span class="app-event-chip">#{incident.eventId}</span>}
-              >
-                <button type="button" class="app-event-button" onClick={() => props.onSelectEvent(incident.eventId)}>
-                  #{incident.eventId}
-                </button>
-              </Show>
-              <div>
-                <strong>{incident.action}</strong>
-                <span>{incident.label}</span>
-              </div>
-              <span class={`gate-chip ${gateToneClass(incident.policyGate)}`}>{incident.policyGate}</span>
-              <small>{incident.subsystem}</small>
-              <small>{incident.fixCategory}</small>
-              <CommandList
-                commands={incident.queryCommands.map((command, index) => ({
-                  label: `query ${index + 1}`,
-                  command,
-                }))}
-                copiedCommand={props.copiedCommand}
-                onCopy={props.onCopy}
-                compact
-              />
-            </div>
-          )}
-        </For>
-      </div>
-    </section>
-  );
-}
-
-function AppCitations(props: { citations: AppCitationGroup[] }) {
-  return (
-    <section class="chain-panel">
-      <h3>Citations</h3>
-      <div class="citation-grid">
-        <For each={props.citations} fallback={<EmptyState label="No citation groups" compact />}>
-          {(group) => (
-            <div class="citation-group">
-              <span>{group.label}</span>
-              <For each={group.values} fallback={<small>none</small>}>
-                {(value) => <code>{value}</code>}
-              </For>
-            </div>
-          )}
-        </For>
-      </div>
-    </section>
-  );
-}
-
-function AppEvidenceGroups(props: { title: string; groups: AppCitationGroup[] }) {
-  return (
-    <section class="chain-panel">
-      <h3>{props.title}</h3>
-      <div class="citation-grid">
-        <For each={props.groups} fallback={<EmptyState label="No evidence groups" compact />}>
-          {(group) => (
-            <div class="citation-group">
-              <span>{group.label}</span>
-              <For each={group.values} fallback={<small>none</small>}>
-                {(value) => <code>{value}</code>}
-              </For>
-            </div>
-          )}
-        </For>
-      </div>
-    </section>
-  );
-}
-
-function AppBeforeAfterEvidence(props: { before: string[]; after: string[] }) {
-  return (
-    <section class="chain-panel">
-      <h3>Before and after</h3>
-      <div class="citation-grid">
-        <div class="citation-group">
-          <span>Before</span>
-          <For each={props.before} fallback={<small>none</small>}>
-            {(value) => <code>{value}</code>}
-          </For>
-        </div>
-        <div class="citation-group">
-          <span>After</span>
-          <For each={props.after} fallback={<small>none</small>}>
-            {(value) => <code>{value}</code>}
-          </For>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function AppVerification(props: {
-  commands: string[];
-  copiedCommand: string | null;
-  onCopy: (command: string) => void;
-}) {
-  const commands = createMemo<QueryCommand[]>(() => props.commands.map((command, index) => ({
-    label: `verify ${index + 1}`,
-    command,
-  })));
-
-  return (
-    <section class="chain-panel">
-      <h3>Verification</h3>
-      <CommandList commands={commands()} copiedCommand={props.copiedCommand} onCopy={props.onCopy} compact />
-    </section>
-  );
-}
-
-function AppReadinessChecks(props: { checks: AppReadinessCheckModel[] }) {
-  return (
-    <section class="chain-panel">
-      <div class="lane-section-head">
-        <h3>Readiness checks</h3>
-        <span>{props.checks.length}</span>
-      </div>
-      <div class="gate-result-list">
-        <For each={props.checks} fallback={<EmptyState label="No readiness checks" compact />}>
-          {(check) => (
-            <div class="gate-result-row">
-              <span class={`gate-chip ${gateToneClass(check.status)}`}>{check.status}</span>
-              <strong>{check.name}</strong>
-              <p>{check.detail || "No detail recorded"}</p>
-            </div>
-          )}
-        </For>
-      </div>
-    </section>
-  );
-}
-
-function AppApplicationSteps(props: { steps: string[] }) {
-  return (
-    <section class="chain-panel">
-      <h3>Application steps</h3>
-      <div class="guardrail-list">
-        <For each={props.steps} fallback={<EmptyState label="No application steps recorded" compact />}>
-          {(step) => <span>{step}</span>}
-        </For>
-      </div>
-    </section>
-  );
-}
-
-function AppGuardrails(props: { guardrails: string[] }) {
-  return (
-    <section class="chain-panel app-remediation-full">
-      <h3>Guardrails</h3>
-      <div class="guardrail-list">
-        <For each={props.guardrails} fallback={<EmptyState label="No app guardrails recorded" compact />}>
-          {(guardrail) => <span>{guardrail}</span>}
-        </For>
-      </div>
-    </section>
-  );
-}
-
-function gateToneClass(value: string): string {
-  if (value.includes("block") || value.includes("reject") || value.includes("unknown")) {
-    return "blocked";
-  }
-  if (value.includes("migration") || value.includes("operational") || value.includes("rollback") || value.includes("human")) {
-    return "review";
-  }
-  return "allow";
-}
-
-function Metric(props: { label: string; value: string; tone?: "ok" | "warn" }) {
-  return (
-    <div classList={{ metric: true, ok: props.tone === "ok", warn: props.tone === "warn" }}>
-      <span>{props.label}</span>
-      <strong>{props.value}</strong>
-    </div>
-  );
-}
-
-function Timeline(props: {
-  events: CausalEvent[];
-  selected: CausalEvent | null;
+function TracePane(props: {
+  title: string;
+  eventCount: number;
+  trace: TraceModel | null | undefined;
+  selectedId: string | null;
+  causePath: string[];
+  dimmedIds: Set<string> | null;
+  density: "comfortable" | "compact";
+  showFindings: boolean;
+  findingMarks: TraceFindingMark[];
+  findingFocus: CausalFinding["kind"] | null;
+  onToggleFocus: (kind: CausalFinding["kind"] | null) => void;
+  onDensity: (density: "comfortable" | "compact") => void;
   onSelect: (id: string) => void;
 }) {
   return (
-    <div class="view-stack">
-      <div class="view-heading">
-        <h2>Timeline</h2>
-        <span>{props.events.length} events</span>
-      </div>
-      <div class="event-list">
-        <For each={props.events} fallback={<EmptyState label="No events match" />}>
-          {(event) => (
-            <button
-              type="button"
-              classList={{ "event-row": true, selected: props.selected?.idText === event.idText }}
-              onClick={() => props.onSelect(event.idText)}
-            >
-              <span class="event-id">#{event.idText}</span>
-              <span class="event-main">
-                <strong>{event.kind}</strong>
-                <span>{event.label || event.typeName || "unlabeled"}</span>
-              </span>
-              <Badge value={event.status} />
-              <SmallMeta event={event} />
-            </button>
-          )}
-        </For>
-      </div>
-    </div>
-  );
-}
-
-function Findings(props: {
-  events: CausalEvent[];
-  findings: ReturnType<typeof deriveWorkbenchModel>["findings"];
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <div class="view-stack">
-      <div class="view-heading">
-        <h2>Findings</h2>
-        <span>{props.findings.length} active</span>
-      </div>
-      <div class="finding-list">
-        <For each={props.findings} fallback={<EmptyState label="No findings" />}>
-          {(finding) => (
-            <button type="button" class="finding-row" onClick={() => props.onSelect(finding.eventId)}>
-              <span>{finding.kind}</span>
-              <strong>{finding.title}</strong>
-              <p>{finding.summary}</p>
-              <small>event #{finding.eventId}</small>
-            </button>
-          )}
-        </For>
-      </div>
-    </div>
-  );
-}
-
-function VisualGraphView(props: {
-  model: VisualGraphModel | null;
-  layoutMode: VisualGraphLayoutMode;
-  perspective: VisualGraphPerspective;
-  selectedNodeId: string | null;
-  selected: CausalEvent | null;
-  events: CausalEvent[];
-  onLayoutMode: (mode: VisualGraphLayoutMode) => void;
-  onPerspective: (perspective: VisualGraphPerspective) => void;
-  onSelectEvent: (id: string) => void;
-  onSelectNode: (id: string) => void;
-}) {
-  const modes: VisualGraphLayoutMode[] = ["dagre", "force", "radial"];
-  const perspectives: Array<{ id: VisualGraphPerspective; label: string }> = [
-    { id: "cause", label: "Cause" },
-    { id: "topology", label: "Topology" },
-    { id: "ownership", label: "Ownership" },
-    { id: "lineage", label: "Lineage" },
-  ];
-  const causePath = createMemo(() => (
-    props.selected ? causePathForEvent(props.events, props.selected.idText) : []
-  ));
-
-  return (
-    <div class="view-stack">
-      <div class="view-heading visual-heading">
-        <h2>Visual Graph</h2>
-        <div class="visual-control-stack">
-          <div class="segmented-control" aria-label="Visual graph perspective">
-            <For each={perspectives}>
-              {(perspective) => (
-                <button
-                  type="button"
-                  classList={{ active: props.perspective === perspective.id }}
-                  onClick={() => props.onPerspective(perspective.id)}
-                >
-                  {perspective.label}
-                </button>
-              )}
-            </For>
-          </div>
-          <div class="segmented-control" aria-label="Visual graph layout">
-            <For each={modes}>
-              {(mode) => (
-                <button
-                  type="button"
-                  classList={{ active: props.layoutMode === mode }}
-                  onClick={() => props.onLayoutMode(mode)}
-                >
-                  {mode}
-                </button>
-              )}
-            </For>
-          </div>
+    <section class="stage-pane trace-pane">
+      <div class="pane-head">
+        <div class="pane-title">
+          <h2>{props.title}</h2>
+          <span class="pane-sub">{props.eventCount} events</span>
+        </div>
+        <div class="pane-tools">
+          <Segmented
+            ariaLabel="Trace density"
+            compact
+            options={[{ value: "comfortable", label: "Comfortable" }, { value: "compact", label: "Compact" }]}
+            value={props.density}
+            onChange={props.onDensity}
+          />
         </div>
       </div>
-
-      <Show when={props.model} fallback={<EmptyState label="No visual graph model" />}>
-        {(model) => (
-          <>
-            <div class="visual-graph-summary">
-              <Metric label="perspective" value={model().perspective} />
-              <Metric label="layout" value={model().layoutMode} />
-              <Metric label="nodes" value={String(model().nodes.length)} />
-              <Metric label="edges" value={String(model().edges.length)} />
-              <Metric label="adapter" value={model().adapter.solid} />
-              <Metric label="engine" value={model().adapter.engine} />
-            </div>
-            <div class="visual-graph-shell">
-              <Suspense fallback={<EmptyState label="Loading visual graph" compact />}>
-                <VisualGraphCanvas model={model()} />
-              </Suspense>
-            </div>
-            <div class="visual-debug-grid">
-              <VisualGraphDetail
-                model={model()}
-                selectedNodeId={props.selectedNodeId}
-                selectedEvent={props.selected}
-              />
-              <section class="visual-detail-panel">
-                <div class="lane-section-head">
-                  <h3>Legend</h3>
-                  <span>{model().legend.length}</span>
-                </div>
-                <VisualGraphLegend model={model()} />
-              </section>
-              <VisualGraphWarnings warnings={model().warnings} />
-            </div>
-            <CausePath path={causePath()} selected={props.selected} onSelect={props.onSelectEvent} />
-            <VisualGraphFallback
-              model={model()}
-              selectedNodeId={props.selectedNodeId}
-              selected={props.selected}
-              onSelectEvent={props.onSelectEvent}
-              onSelectNode={props.onSelectNode}
-            />
-          </>
-        )}
+      <Show when={props.showFindings}>
+        <FindingsBand findingMarks={props.findingMarks} activeKind={props.findingFocus} onToggle={props.onToggleFocus} />
       </Show>
-    </div>
-  );
-}
-
-function VisualGraphDetail(props: {
-  model: VisualGraphModel;
-  selectedNodeId: string | null;
-  selectedEvent: CausalEvent | null;
-}) {
-  const selectedNode = createMemo(() => (
-    props.model.nodes.find((node) => node.id === props.selectedNodeId)
-    ?? props.model.nodes.find((node) => node.eventId === props.selectedEvent?.idText)
-    ?? null
-  ));
-
-  return (
-    <section class="visual-detail-panel">
-      <div class="lane-section-head">
-        <h3>Selection</h3>
-        <span>{selectedNode()?.group ?? "none"}</span>
-      </div>
-      <Show when={selectedNode()} fallback={<EmptyState label="No graph node selected" compact />}>
-        {(node) => (
-          <div class="visual-detail-body">
-            <strong>{node().label}</strong>
-            <span>{node().detail}</span>
-            <small>{node().kind} / {node().status}</small>
-            <small>{node().lane} / {node().priority}</small>
-          </div>
+      <Show when={props.trace} fallback={<div class="empty-state">No trace</div>}>
+        {(trace) => (
+          <TraceCanvas
+            trace={trace()}
+            selectedId={props.selectedId}
+            causePath={props.causePath}
+            dimmedIds={props.dimmedIds}
+            density={props.density}
+            onSelect={props.onSelect}
+          />
         )}
       </Show>
     </section>
   );
 }
 
-function VisualGraphLegend(props: { model: VisualGraphModel }) {
-  return (
-    <div class="visual-legend-grid">
-      <For each={props.model.legend}>
-        {(entry) => (
-          <span class={`visual-legend-item ${entry.tone}`}>
-            <strong>{entry.label}</strong>
-            <small>{entry.detail}</small>
-          </span>
-        )}
-      </For>
-    </div>
-  );
-}
-
-function VisualGraphWarnings(props: { warnings: string[] }) {
-  return (
-    <Show when={props.warnings.length > 0}>
-      <section class="warning-panel">
-        <div class="lane-section-head">
-          <h3>Warnings</h3>
-          <span>{props.warnings.length}</span>
-        </div>
-        <ul>
-          <For each={props.warnings}>{(warning) => <li>{warning}</li>}</For>
-        </ul>
-      </section>
-    </Show>
-  );
-}
-
-function VisualGraphFallback(props: {
-  model: VisualGraphModel;
-  selectedNodeId: string | null;
-  selected: CausalEvent | null;
+function AgentsRibbon(props: {
+  session: ReturnType<typeof deriveLocalDevSessionModel>;
+  validEventIds: Set<string>;
   onSelectEvent: (id: string) => void;
-  onSelectNode: (id: string) => void;
 }) {
-  const selectNode = (nodeId: string) => {
-    const node = props.model.nodes.find((candidate) => candidate.id === nodeId);
-    props.onSelectNode(nodeId);
-    if (node?.eventId) {
-      props.onSelectEvent(node.eventId);
-    }
-  };
-
   return (
-    <div class="visual-fallback-grid">
-      <section class="live-panel">
-        <div class="lane-section-head">
-          <h3>Nodes</h3>
-          <span>{props.model.nodes.length}</span>
-        </div>
-        <div class="visual-node-list">
-          <For each={props.model.nodes} fallback={<EmptyState label="No nodes" compact />}>
-            {(node) => (
+    <Show
+      when={props.session}
+      fallback={<div class="agents-ribbon"><span class="ribbon-label">No local agent session in this artifact</span></div>}
+    >
+      {(session) => (
+        <div class="agents-ribbon">
+          <span class="ribbon-label">Agents</span>
+          <For each={session().agents}>
+            {(agent) => (
               <button
                 type="button"
-                classList={{
-                  "visual-node-row": true,
-                  selected: props.selectedNodeId === node.id || props.selected?.idText === node.eventId,
-                  failure: node.tone === "failure",
-                  warning: node.tone === "warning",
+                class="agent-chip"
+                style={`--dot:${agentHue(agent.kind)}`}
+                onClick={() => {
+                  if (agent.lastEventId && props.validEventIds.has(agent.lastEventId)) {
+                    props.onSelectEvent(agent.lastEventId);
+                  }
                 }}
-                onClick={() => selectNode(node.id)}
+                title={agent.currentTask ?? agent.label}
               >
-                <span>{node.group}</span>
-                <strong>{node.label}</strong>
-                <small>{node.kind} / {node.status}</small>
+                <span class="agent-dot" />
+                {agent.label}
               </button>
             )}
           </For>
-        </div>
-      </section>
-      <section class="live-panel">
-        <div class="lane-section-head">
-          <h3>Edges</h3>
-          <span>{props.model.edges.length}</span>
-        </div>
-        <div class="relationship-list">
-          <For each={props.model.edges} fallback={<EmptyState label="No visual edges" compact />}>
-            {(edge) => (
-              <button type="button" class="relationship-row" onClick={() => selectNode(edge.target)}>
-                <span>#{edge.source} -&gt; #{edge.target}</span>
-                <strong>{edge.label}</strong>
-                <small>{edge.kind}</small>
-              </button>
-            )}
-          </For>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function Graph(props: {
-  events: CausalEvent[];
-  findings: ReturnType<typeof deriveWorkbenchModel>["findings"];
-  selected: CausalEvent | null;
-  onSelect: (id: string) => void;
-}) {
-  const graph = createMemo(() => deriveGraphModel(props.events, props.findings));
-  const causePath = createMemo(() => (
-    props.selected ? causePathForEvent(props.events, props.selected.idText) : []
-  ));
-  const lanesByKind = createMemo(() => laneKinds.map((kind) => ({
-    kind,
-    label: laneLabels[kind],
-    lanes: graph().lanes.filter((lane) => lane.kind === kind),
-  })));
-
-  return (
-    <div class="view-stack">
-      <div class="view-heading">
-        <h2>Graph</h2>
-        <span>{props.events.length} events</span>
-      </div>
-
-      <div class="graph-summary">
-        <Metric label="roots" value={String(graph().roots.length)} />
-        <Metric label="edges" value={String(graph().parentEdges.length)} />
-        <Metric label="lanes" value={String(graph().lanes.length)} />
-        <Metric
-          label="unhealthy"
-          value={String(graph().unhealthyLanes.length)}
-          tone={graph().unhealthyLanes.length ? "warn" : "ok"}
-        />
-        <Metric label="orphans" value={String(graph().orphans.length)} tone={graph().orphans.length ? "warn" : "ok"} />
-      </div>
-
-      <CausePath path={causePath()} selected={props.selected} onSelect={props.onSelect} />
-
-      <div class="lane-board">
-        <For each={lanesByKind()}>
-          {(group) => (
-            <LaneSection
-              label={group.label}
-              lanes={group.lanes}
-              selected={props.selected}
-              onSelect={props.onSelect}
-            />
-          )}
-        </For>
-      </div>
-
-      <div class="graph-grid">
-        <EdgeList
-          edges={graph().parentEdges}
-          events={props.events}
-          selected={props.selected}
-          onSelect={props.onSelect}
-        />
-        <OrphanList events={graph().orphans} selected={props.selected} onSelect={props.onSelect} />
-      </div>
-    </div>
-  );
-}
-
-function CausePath(props: {
-  path: CausalEvent[];
-  selected: CausalEvent | null;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <div class="cause-path">
-      <div class="cause-path-heading">
-        <h3>Cause path</h3>
-        <span>{props.selected ? `selected #${props.selected.idText}` : "no selection"}</span>
-      </div>
-      <div class="cause-path-strip">
-        <For each={props.path} fallback={<EmptyState label="No cause path" compact />}>
-          {(event) => (
-            <button
-              type="button"
-              classList={{ "cause-chip": true, selected: props.selected?.idText === event.idText }}
-              onClick={() => props.onSelect(event.idText)}
-            >
-              <span>#{event.idText}</span>
-              <strong>{event.kind}</strong>
-            </button>
-          )}
-        </For>
-      </div>
-    </div>
-  );
-}
-
-function LaneSection(props: {
-  label: string;
-  lanes: GraphLane[];
-  selected: CausalEvent | null;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <section class="lane-section">
-      <div class="lane-section-head">
-        <h3>{props.label}</h3>
-        <span>{props.lanes.length}</span>
-      </div>
-      <div class="lane-card-list">
-        <For each={props.lanes} fallback={<EmptyState label="No lanes" compact />}>
-          {(lane) => (
-            <LaneCard lane={lane} selected={props.selected} onSelect={props.onSelect} />
-          )}
-        </For>
-      </div>
-    </section>
-  );
-}
-
-function LaneCard(props: {
-  lane: GraphLane;
-  selected: CausalEvent | null;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <article classList={{
-      "lane-card": true,
-      failure: props.lane.status === "failure",
-      warning: props.lane.status === "warning",
-      ok: props.lane.status === "ok",
-    }}>
-      <div class="lane-card-head">
-        <div>
-          <span>{props.lane.status}</span>
-          <strong>{props.lane.label}</strong>
-        </div>
-        <small>{props.lane.events.length} events</small>
-      </div>
-      <Show when={props.lane.findingEventIds.length > 0}>
-        <span class="lane-finding-pill">{props.lane.findingEventIds.length} findings</span>
-      </Show>
-      <div class="lane-events">
-        <For each={props.lane.events}>
-          {(event) => (
-            <button
-              type="button"
-              classList={{ selected: props.selected?.idText === event.idText }}
-              onClick={() => props.onSelect(event.idText)}
-            >
-              <span>#{event.idText}</span>
-              <strong>{event.kind}</strong>
-              <small>{event.status}</small>
-            </button>
-          )}
-        </For>
-      </div>
-    </article>
-  );
-}
-
-function EdgeList(props: {
-  edges: GraphEdge[];
-  events: CausalEvent[];
-  selected: CausalEvent | null;
-  onSelect: (id: string) => void;
-}) {
-  const eventById = createMemo(() => new Map(props.events.map((event) => [event.idText, event])));
-
-  return (
-    <div class="relationship-list">
-      <h3>Parent edges</h3>
-      <For each={props.edges} fallback={<EmptyState label="No parent edges" compact />}>
-        {(edge) => {
-          const child = () => eventById().get(edge.to) ?? null;
-          return (
-            <button
-              type="button"
-              classList={{ "relationship-row": true, selected: props.selected?.idText === edge.to }}
-              onClick={() => props.onSelect(edge.to)}
-            >
-              <span>#{edge.from} -&gt; #{edge.to}</span>
-              <strong>{child()?.kind ?? "unknown"}</strong>
-            </button>
-          );
-        }}
-      </For>
-    </div>
-  );
-}
-
-function OrphanList(props: {
-  events: CausalEvent[];
-  selected: CausalEvent | null;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <div class="orphan-list">
-      <h3>Orphans</h3>
-      <For each={props.events} fallback={<EmptyState label="No orphaned events" compact />}>
-        {(event) => (
-          <button
-            type="button"
-            classList={{ "orphan-row": true, selected: props.selected?.idText === event.idText }}
-            onClick={() => props.onSelect(event.idText)}
-          >
-            <span>missing parent #{event.parentId}</span>
-            <strong>#{event.idText} {event.kind}</strong>
+          <button type="button" class="agent-chip ribbon-grow" onClick={() => toggleLens()} title="Open collaboration lens">
+            Collaboration ↗
           </button>
-        )}
-      </For>
-    </div>
-  );
-}
-
-function Queries(props: {
-  artifactPath: string;
-  selected: CausalEvent | null;
-  commands: QueryCommand[];
-  copiedCommand: string | null;
-  onCopy: (command: string) => void;
-}) {
-  const snapshot = `zig build causal-query -- --file ${props.artifactPath} snapshot`;
-  const commands = createMemo<QueryCommand[]>(() => [
-    { label: "Snapshot", command: snapshot },
-    ...props.commands,
-  ]);
-
-  return (
-    <div class="view-stack">
-      <div class="view-heading">
-        <h2>Queries</h2>
-        <span>{props.selected ? `event #${props.selected.idText}` : "artifact"}</span>
-      </div>
-      <CommandList commands={commands()} copiedCommand={props.copiedCommand} onCopy={props.onCopy} />
-    </div>
-  );
-}
-
-function Metadata(props: { model: ReturnType<typeof deriveWorkbenchModel>; session: WorkbenchSession | null }) {
-  const sessionWarnings = () => props.session?.warnings ?? [];
-
-  return (
-    <div class="view-stack">
-      <div class="view-heading">
-        <h2>Metadata</h2>
-        <span>{props.model.safeToShare}</span>
-      </div>
-      <dl class="metadata-grid">
-        <Meta label="artifact" value={props.model.artifactPath} />
-        <Meta label="schema" value={props.model.schema} />
-        <Meta label="schema version" value={props.model.schemaVersion} />
-        <Meta label="taxonomy version" value={props.model.taxonomyVersion} />
-        <Meta label="events" value={String(props.model.events.length)} />
-        <Meta label="findings" value={String(props.model.findings.length)} />
-        <Meta label="read only" value={String(props.session?.read_only ?? true)} />
-        <Meta label="bytes" value={String(props.session?.artifact_bytes ?? "unknown")} />
-      </dl>
-      <div class="warning-list">
-        <For each={[...props.model.warnings, ...sessionWarnings()]} fallback={<EmptyState label="No metadata warnings" compact />}>
-          {(warning) => <span>{warning}</span>}
-        </For>
-      </div>
-    </div>
-  );
-}
-
-function Inspector(props: {
-  event: CausalEvent | null;
-  commands: QueryCommand[];
-  copiedCommand: string | null;
-  onCopy: (command: string) => void;
-}) {
-  return (
-    <Show when={props.event} fallback={<EmptyState label="No event selected" />}>
-      {(event) => (
-        <div class="inspector-stack">
-          <div>
-            <span class="eyebrow">event #{event().idText}</span>
-            <h2>{event().kind}</h2>
-          </div>
-          <Badge value={event().status} />
-          <dl class="inspector-grid">
-            <Meta label="label" value={event().label || "unlabeled"} />
-            <Meta label="type" value={event().typeName || "unknown"} />
-            <Meta label="run" value={event().runId ?? "none"} />
-            <Meta label="scope" value={event().scopeId ?? "none"} />
-            <Meta label="fiber" value={event().fiberId ?? "none"} />
-            <Meta label="parent" value={event().parentId ?? "none"} />
-          </dl>
-          <div class="detail-block">
-            <span>redacted detail</span>
-            <p>{event().redactedDetail || "empty"}</p>
-          </div>
-          <CommandList commands={props.commands} copiedCommand={props.copiedCommand} onCopy={props.onCopy} compact />
         </div>
       )}
     </Show>
   );
-}
-
-function CommandList(props: {
-  commands: QueryCommand[];
-  copiedCommand: string | null;
-  onCopy: (command: string) => void;
-  compact?: boolean;
-}) {
-  return (
-    <div classList={{ "command-list": true, compact: props.compact }}>
-      <For each={props.commands}>
-        {(item) => (
-          <div class="command-row">
-            <span>{item.label}</span>
-            <code>{item.command}</code>
-            <button type="button" onClick={() => props.onCopy(item.command)}>
-              {props.copiedCommand === item.command ? "Copied" : "Copy"}
-            </button>
-          </div>
-        )}
-      </For>
-    </div>
-  );
-}
-
-function SmallMeta(props: { event: CausalEvent }) {
-  return (
-    <span class="small-meta">
-      <span>run {props.event.runId ?? "-"}</span>
-      <span>scope {props.event.scopeId ?? "-"}</span>
-      <span>fiber {props.event.fiberId ?? "-"}</span>
-    </span>
-  );
-}
-
-function Badge(props: { value: string }) {
-  return <span class={`badge status-${props.value.replaceAll("_", "-")}`}>{props.value}</span>;
-}
-
-function Meta(props: { label: string; value: string }) {
-  return (
-    <>
-      <dt>{props.label}</dt>
-      <dd>{props.value}</dd>
-    </>
-  );
-}
-
-function EmptyState(props: { label: string; compact?: boolean }) {
-  return <div classList={{ "empty-state": true, compact: props.compact }}>{props.label}</div>;
 }

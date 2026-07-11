@@ -40,22 +40,22 @@ pub const WorkflowLifecycle = struct {
     }
 
     pub fn suspendWorkflow(self: *WorkflowLifecycle, reason: []const u8) !bool {
-        const status = try self.currentStatus();
-        if (status != .running) return false;
+        const current_status = try self.currentStatus();
+        if (current_status != .running) return false;
         try self.appendLifecycleEvent(.workflow_suspended, "waiting", reason);
         return true;
     }
 
     pub fn resumeWorkflow(self: *WorkflowLifecycle, reason: []const u8) !bool {
-        const status = try self.currentStatus();
-        if (status != .suspended) return false;
+        const current_status = try self.currentStatus();
+        if (current_status != .suspended) return false;
         try self.appendLifecycleEvent(.workflow_resumed, "running", reason);
         return true;
     }
 
     pub fn interrupt(self: *WorkflowLifecycle, reason: []const u8) !bool {
-        const status = try self.currentStatus();
-        if (!isTerminalControllable(status)) return false;
+        const current_status = try self.currentStatus();
+        if (!isTerminalControllable(current_status)) return false;
         try self.terminatePendingWork(.interrupt, reason);
         const detail = try interruptedDetail(self.allocator, reason);
         defer self.allocator.free(detail);
@@ -64,13 +64,17 @@ pub const WorkflowLifecycle = struct {
     }
 
     pub fn cancel(self: *WorkflowLifecycle, reason: []const u8) !bool {
-        const status = try self.currentStatus();
-        if (!isTerminalControllable(status)) return false;
+        const current_status = try self.currentStatus();
+        if (!isTerminalControllable(current_status)) return false;
         try self.terminatePendingWork(.cancel, reason);
         const detail = try cancellationDetail(self.allocator, reason);
         defer self.allocator.free(detail);
         try self.appendLifecycleEvent(.workflow_cancelled, "cancelled", detail);
         return true;
+    }
+
+    pub fn inspectStatus(self: *WorkflowLifecycle) !WorkflowStatus {
+        return self.currentStatus();
     }
 
     fn currentStatus(self: *WorkflowLifecycle) !WorkflowStatus {
@@ -82,7 +86,7 @@ pub const WorkflowLifecycle = struct {
     fn appendLifecycleEvent(
         self: *WorkflowLifecycle,
         kind: journal_mod.WorkflowEventKind,
-        status: []const u8,
+        status_text: []const u8,
         redacted_detail: []const u8,
     ) !void {
         var events = try self.journal_store.readAll(self.allocator);
@@ -97,7 +101,7 @@ pub const WorkflowLifecycle = struct {
                 .kind = kind,
                 .workflow_id = self.workflow_id,
                 .execution_id = self.execution_id,
-                .status = status,
+                .status = status_text,
                 .redacted_detail = redacted_detail,
                 .idempotency_key = idempotency_key,
             },

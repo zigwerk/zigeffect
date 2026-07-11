@@ -1,4 +1,6 @@
 const std = @import("std");
+const causal_mod = @import("../services/causal.zig");
+const workflow_causal = @import("causal.zig");
 const journal = @import("journal.zig");
 const replay = @import("replay.zig");
 
@@ -7,9 +9,15 @@ const Allocator = std.mem.Allocator;
 pub const WorkflowEvent = journal.WorkflowEvent;
 pub const JournalSequence = journal.JournalSequence;
 pub const WorkflowReplayState = replay.WorkflowReplayState;
+pub const CausalStore = causal_mod.CausalStore;
 
 pub const workflow_checkpoint_schema = "zigeffect.workflow.checkpoint.v1";
 pub const workflow_checkpoint_schema_version: u32 = 1;
+
+const CausalJournalSequenceId = struct {
+    workflow_sequence: JournalSequence,
+    causal_id: u64,
+};
 pub const workflow_snapshot_commit_schema = "zigeffect.workflow.snapshot-commit.v1";
 pub const workflow_snapshot_commit_schema_version: u32 = 1;
 
@@ -103,6 +111,7 @@ fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []c
             '\n' => try output.appendSlice(allocator, "\\n"),
             '\r' => try output.appendSlice(allocator, "\\r"),
             '\t' => try output.appendSlice(allocator, "\\t"),
+            0x00...0x08, 0x0b, 0x0c, 0x0e...0x1f => try output.print(allocator, "\\u{x:0>4}", .{byte}),
             else => try output.append(allocator, byte),
         }
     }
@@ -495,6 +504,97 @@ pub const JournalStore = struct {
     pub fn reset(self: JournalStore) void {
         self.vtable.reset(self.context);
     }
+};
+
+pub const CausalJournalStore = struct {
+    allocator: Allocator,
+    inner: JournalStore,
+    causal_store: *CausalStore,
+    run_id: ?u64 = null,
+    sequence_ids: std.ArrayList(CausalJournalSequenceId) = .empty,
+
+    pub fn init(
+        allocator: Allocator,
+        inner: JournalStore,
+        causal_store: *CausalStore,
+        run_id: ?u64,
+    ) CausalJournalStore {
+        return .{
+            .allocator = allocator,
+            .inner = inner,
+            .causal_store = causal_store,
+            .run_id = run_id,
+        };
+    }
+
+    pub fn deinit(self: *CausalJournalStore) void {
+        self.sequence_ids.deinit(self.allocator);
+    }
+
+    pub fn asJournalStore(self: *CausalJournalStore) JournalStore {
+        return .{
+            .context = self,
+            .vtable = &causal_journal_vtable,
+        };
+    }
+
+    fn appendAdapter(context: *anyopaque, request: JournalAppend) JournalStoreAppendError!JournalSequence {
+        const self: *CausalJournalStore = @ptrCast(@alignCast(context));
+        const sequence = try self.inner.append(request);
+        self.recordWorkflowEvent(request.event) catch {};
+        return sequence;
+    }
+
+    fn readAllAdapter(context: *anyopaque, allocator: Allocator) JournalStoreReadError!JournalEventBatch {
+        const self: *CausalJournalStore = @ptrCast(@alignCast(context));
+        return self.inner.readAll(allocator);
+    }
+
+    fn readFromSequenceAdapter(context: *anyopaque, allocator: Allocator, sequence: JournalSequence) JournalStoreReadError!JournalEventBatch {
+        const self: *CausalJournalStore = @ptrCast(@alignCast(context));
+        return self.inner.readFromSequence(allocator, sequence);
+    }
+
+    fn latestStateAdapter(context: *anyopaque, allocator: Allocator) JournalStoreReplayError!WorkflowReplayState {
+        const self: *CausalJournalStore = @ptrCast(@alignCast(context));
+        return self.inner.latestState(allocator);
+    }
+
+    fn resetAdapter(context: *anyopaque) void {
+        const self: *CausalJournalStore = @ptrCast(@alignCast(context));
+        self.inner.reset();
+        self.sequence_ids.clearRetainingCapacity();
+    }
+
+    fn recordWorkflowEvent(self: *CausalJournalStore, event: WorkflowEvent) Allocator.Error!void {
+        try self.sequence_ids.ensureUnusedCapacity(self.allocator, 1);
+        var mapped = try workflow_causal.mapWorkflowEventToCausal(self.allocator, event);
+        defer workflow_causal.deinitMappedEvent(self.allocator, mapped);
+        if (self.run_id) |run_id| mapped.run_id = run_id;
+        if (event.parent_sequence) |parent_sequence| {
+            mapped.parent_id = self.causalIdForSequence(parent_sequence) orelse parent_sequence;
+        }
+        const causal_id = try self.causal_store.record(mapped);
+        self.sequence_ids.appendAssumeCapacity(.{
+            .workflow_sequence = event.sequence,
+            .causal_id = causal_id,
+        });
+    }
+
+    fn causalIdForSequence(self: *const CausalJournalStore, sequence: JournalSequence) ?u64 {
+        for (self.sequence_ids.items) |entry| {
+            if (entry.workflow_sequence == sequence) return entry.causal_id;
+        }
+        return null;
+    }
+};
+
+const causal_journal_vtable: JournalStore.VTable = .{
+    .append = CausalJournalStore.appendAdapter,
+    .read_all = CausalJournalStore.readAllAdapter,
+    .read_from_sequence = CausalJournalStore.readFromSequenceAdapter,
+    .latest_state = CausalJournalStore.latestStateAdapter,
+    .reset = CausalJournalStore.resetAdapter,
 };
 
 pub const InMemoryJournalStore = struct {

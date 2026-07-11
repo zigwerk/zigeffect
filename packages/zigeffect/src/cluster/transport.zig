@@ -5,6 +5,7 @@ const message_storage = @import("message_storage.zig");
 const routing = @import("routing.zig");
 const async_backend_mod = @import("../runtime/async_backend.zig");
 const causal = @import("../services/causal.zig");
+const external_failure = @import("../core/external_failure.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const AsyncBackend = async_backend_mod.AsyncBackend;
@@ -118,6 +119,7 @@ pub const ClusterTransportFailureReport = struct {
     attempts: usize,
     error_name: []const u8,
     redacted_detail: []const u8 = "",
+    class: external_failure.ExternalFailureClass = .internal,
 };
 
 pub const ClusterTransportRequest = struct {
@@ -534,7 +536,7 @@ fn serveLoopbackSocketOnceFallible(ctx: *LoopbackSocketServeContext) !void {
     try writeSocketFrame(stream, ctx.transport.io, response_frame);
 }
 
-pub const RemoteSocketClusterTransportOptions = struct {
+pub const LoopbackRemoteSocketCompatibilityTransportOptions = struct {
     shard_count: ShardCount,
     endpoint_host: []const u8 = "127.0.0.1",
     port: u16 = 19391,
@@ -938,7 +940,9 @@ pub fn runClusterTransportServiceDiscoveryHttpRefreshLoop(
     return report;
 }
 
-pub const RemoteSocketClusterTransport = struct {
+/// Compatibility adapter that exercises the socket codec but creates its
+/// server in-process for every send. It is not a remote production transport.
+pub const LoopbackRemoteSocketCompatibilityTransport = struct {
     endpoint_host: []const u8,
     auth: ClusterTransportAuth = .{},
     tls: ClusterTransportTlsPolicy = .{},
@@ -954,8 +958,8 @@ pub const RemoteSocketClusterTransport = struct {
         allocator: Allocator,
         io: std.Io,
         storage: MessageStorage,
-        options: RemoteSocketClusterTransportOptions,
-    ) !RemoteSocketClusterTransport {
+        options: LoopbackRemoteSocketCompatibilityTransportOptions,
+    ) !LoopbackRemoteSocketCompatibilityTransport {
         if (options.pool_size == 0) return error.InvalidTransportLimits;
         try validateTransportLimits(options.limits);
         try validateTransportTlsPolicy(options.tls);
@@ -980,11 +984,11 @@ pub const RemoteSocketClusterTransport = struct {
         };
     }
 
-    pub fn deinit(self: *RemoteSocketClusterTransport) void {
+    pub fn deinit(self: *LoopbackRemoteSocketCompatibilityTransport) void {
         self.inner.deinit();
     }
 
-    pub fn asClusterTransport(self: *RemoteSocketClusterTransport) ClusterTransport {
+    pub fn asClusterTransport(self: *LoopbackRemoteSocketCompatibilityTransport) ClusterTransport {
         return .{
             .ptr = self,
             .vtable = &.{
@@ -993,15 +997,15 @@ pub const RemoteSocketClusterTransport = struct {
         };
     }
 
-    pub fn snapshotMetrics(self: *const RemoteSocketClusterTransport) ClusterTransportMetricsSnapshot {
+    pub fn snapshotMetrics(self: *const LoopbackRemoteSocketCompatibilityTransport) ClusterTransportMetricsSnapshot {
         return self.lifecycle;
     }
 
-    pub fn lastFailure(self: *const RemoteSocketClusterTransport) ?ClusterTransportFailureReport {
+    pub fn lastFailure(self: *const LoopbackRemoteSocketCompatibilityTransport) ?ClusterTransportFailureReport {
         return self.last_failure;
     }
 
-    pub fn send(self: *RemoteSocketClusterTransport, allocator: Allocator, request: ClusterTransportRequest) !ClusterTransportResponse {
+    pub fn send(self: *LoopbackRemoteSocketCompatibilityTransport, allocator: Allocator, request: ClusterTransportRequest) !ClusterTransportResponse {
         self.lifecycle.sends += 1;
         try self.preflight(request);
         self.lifecycle.in_flight += 1;
@@ -1031,7 +1035,7 @@ pub const RemoteSocketClusterTransport = struct {
         return error.TransportUnavailable;
     }
 
-    fn preflight(self: *RemoteSocketClusterTransport, request: ClusterTransportRequest) ClusterTransportError!void {
+    fn preflight(self: *LoopbackRemoteSocketCompatibilityTransport, request: ClusterTransportRequest) ClusterTransportError!void {
         _ = self.endpoint_host;
         _ = self.pool_size;
         _ = self.tls;
@@ -1054,24 +1058,29 @@ pub const RemoteSocketClusterTransport = struct {
         }
     }
 
-    fn recordFailure(self: *RemoteSocketClusterTransport, attempts: usize, err: anyerror, detail: []const u8) void {
+    fn recordFailure(self: *LoopbackRemoteSocketCompatibilityTransport, attempts: usize, err: anyerror, detail: []const u8) void {
         recordTransportFailure(&self.lifecycle, &self.last_failure, .production_socket, attempts, err, detail);
     }
 
     fn sendOpaque(ptr: *anyopaque, allocator: Allocator, request: ClusterTransportRequest) anyerror!ClusterTransportResponse {
-        const self: *RemoteSocketClusterTransport = @ptrCast(@alignCast(ptr));
+        const self: *LoopbackRemoteSocketCompatibilityTransport = @ptrCast(@alignCast(ptr));
         return self.send(allocator, request);
     }
 };
 
-pub const ProductionHttpClusterTransportOptions = struct {
+/// Deprecated compatibility aliases. Use the explicitly named loopback type
+/// for codec tests or `zigeffect-transport.Client` for real remote endpoints.
+pub const RemoteSocketClusterTransportOptions = LoopbackRemoteSocketCompatibilityTransportOptions;
+pub const RemoteSocketClusterTransport = LoopbackRemoteSocketCompatibilityTransport;
+
+pub const EncodedInProcessHttpClusterTransportOptions = struct {
     shard_count: ShardCount,
     auth: ClusterTransportAuth = .{},
     limits: ClusterTransportLimits = .{},
     failures_before_success: usize = 0,
 };
 
-pub const ProductionHttpClusterTransport = struct {
+pub const EncodedInProcessHttpClusterTransport = struct {
     handler: InProcessClusterTransport,
     auth: ClusterTransportAuth = .{},
     limits: ClusterTransportLimits = .{},
@@ -1079,7 +1088,7 @@ pub const ProductionHttpClusterTransport = struct {
     lifecycle: ClusterTransportLifecycleState = .{},
     last_failure: ?ClusterTransportFailureReport = null,
 
-    pub fn init(allocator: Allocator, storage: MessageStorage, options: ProductionHttpClusterTransportOptions) ClusterTransportError!ProductionHttpClusterTransport {
+    pub fn init(allocator: Allocator, storage: MessageStorage, options: EncodedInProcessHttpClusterTransportOptions) ClusterTransportError!EncodedInProcessHttpClusterTransport {
         try validateTransportLimits(options.limits);
         return .{
             .handler = try InProcessClusterTransport.init(allocator, storage, .{ .shard_count = options.shard_count }),
@@ -1089,11 +1098,11 @@ pub const ProductionHttpClusterTransport = struct {
         };
     }
 
-    pub fn deinit(self: *ProductionHttpClusterTransport) void {
+    pub fn deinit(self: *EncodedInProcessHttpClusterTransport) void {
         self.handler.deinit();
     }
 
-    pub fn asClusterTransport(self: *ProductionHttpClusterTransport) ClusterTransport {
+    pub fn asClusterTransport(self: *EncodedInProcessHttpClusterTransport) ClusterTransport {
         return .{
             .ptr = self,
             .vtable = &.{
@@ -1102,20 +1111,20 @@ pub const ProductionHttpClusterTransport = struct {
         };
     }
 
-    pub fn snapshotMetrics(self: *const ProductionHttpClusterTransport) ClusterTransportMetricsSnapshot {
+    pub fn snapshotMetrics(self: *const EncodedInProcessHttpClusterTransport) ClusterTransportMetricsSnapshot {
         return self.lifecycle;
     }
 
-    pub fn stop(self: *ProductionHttpClusterTransport) void {
+    pub fn stop(self: *EncodedInProcessHttpClusterTransport) void {
         self.lifecycle.started = false;
         self.lifecycle.stopped = true;
     }
 
-    pub fn lastFailure(self: *const ProductionHttpClusterTransport) ?ClusterTransportFailureReport {
+    pub fn lastFailure(self: *const EncodedInProcessHttpClusterTransport) ?ClusterTransportFailureReport {
         return self.last_failure;
     }
 
-    pub fn send(self: *ProductionHttpClusterTransport, allocator: Allocator, request: ClusterTransportRequest) !ClusterTransportResponse {
+    pub fn send(self: *EncodedInProcessHttpClusterTransport, allocator: Allocator, request: ClusterTransportRequest) !ClusterTransportResponse {
         self.lifecycle.sends += 1;
         try self.preflight(request);
 
@@ -1160,7 +1169,7 @@ pub const ProductionHttpClusterTransport = struct {
         return error.RetryLimitExceeded;
     }
 
-    fn preflight(self: *ProductionHttpClusterTransport, request: ClusterTransportRequest) ClusterTransportError!void {
+    fn preflight(self: *EncodedInProcessHttpClusterTransport, request: ClusterTransportRequest) ClusterTransportError!void {
         if (self.lifecycle.stopped) {
             self.recordFailure(1, error.TransportUnavailable, "transport stopped");
             return error.TransportUnavailable;
@@ -1183,19 +1192,19 @@ pub const ProductionHttpClusterTransport = struct {
         }
     }
 
-    fn recordFailure(self: *ProductionHttpClusterTransport, attempts: usize, err: anyerror, detail: []const u8) void {
+    fn recordFailure(self: *EncodedInProcessHttpClusterTransport, attempts: usize, err: anyerror, detail: []const u8) void {
         recordTransportFailure(&self.lifecycle, &self.last_failure, .production_http, attempts, err, detail);
     }
 
     fn sendOpaque(ptr: *anyopaque, allocator: Allocator, request: ClusterTransportRequest) anyerror!ClusterTransportResponse {
-        const self: *ProductionHttpClusterTransport = @ptrCast(@alignCast(ptr));
+        const self: *EncodedInProcessHttpClusterTransport = @ptrCast(@alignCast(ptr));
         return self.send(allocator, request);
     }
 };
 
-pub const ProductionSocketClusterTransportOptions = ProductionHttpClusterTransportOptions;
+pub const EncodedInProcessSocketClusterTransportOptions = EncodedInProcessHttpClusterTransportOptions;
 
-pub const ProductionSocketClusterTransport = struct {
+pub const EncodedInProcessSocketClusterTransport = struct {
     handler: InProcessClusterTransport,
     auth: ClusterTransportAuth = .{},
     limits: ClusterTransportLimits = .{},
@@ -1203,7 +1212,7 @@ pub const ProductionSocketClusterTransport = struct {
     lifecycle: ClusterTransportLifecycleState = .{},
     last_failure: ?ClusterTransportFailureReport = null,
 
-    pub fn init(allocator: Allocator, storage: MessageStorage, options: ProductionSocketClusterTransportOptions) ClusterTransportError!ProductionSocketClusterTransport {
+    pub fn init(allocator: Allocator, storage: MessageStorage, options: EncodedInProcessSocketClusterTransportOptions) ClusterTransportError!EncodedInProcessSocketClusterTransport {
         try validateTransportLimits(options.limits);
         return .{
             .handler = try InProcessClusterTransport.init(allocator, storage, .{ .shard_count = options.shard_count }),
@@ -1213,11 +1222,11 @@ pub const ProductionSocketClusterTransport = struct {
         };
     }
 
-    pub fn deinit(self: *ProductionSocketClusterTransport) void {
+    pub fn deinit(self: *EncodedInProcessSocketClusterTransport) void {
         self.handler.deinit();
     }
 
-    pub fn asClusterTransport(self: *ProductionSocketClusterTransport) ClusterTransport {
+    pub fn asClusterTransport(self: *EncodedInProcessSocketClusterTransport) ClusterTransport {
         return .{
             .ptr = self,
             .vtable = &.{
@@ -1226,20 +1235,20 @@ pub const ProductionSocketClusterTransport = struct {
         };
     }
 
-    pub fn snapshotMetrics(self: *const ProductionSocketClusterTransport) ClusterTransportMetricsSnapshot {
+    pub fn snapshotMetrics(self: *const EncodedInProcessSocketClusterTransport) ClusterTransportMetricsSnapshot {
         return self.lifecycle;
     }
 
-    pub fn stop(self: *ProductionSocketClusterTransport) void {
+    pub fn stop(self: *EncodedInProcessSocketClusterTransport) void {
         self.lifecycle.started = false;
         self.lifecycle.stopped = true;
     }
 
-    pub fn lastFailure(self: *const ProductionSocketClusterTransport) ?ClusterTransportFailureReport {
+    pub fn lastFailure(self: *const EncodedInProcessSocketClusterTransport) ?ClusterTransportFailureReport {
         return self.last_failure;
     }
 
-    pub fn send(self: *ProductionSocketClusterTransport, allocator: Allocator, request: ClusterTransportRequest) !ClusterTransportResponse {
+    pub fn send(self: *EncodedInProcessSocketClusterTransport, allocator: Allocator, request: ClusterTransportRequest) !ClusterTransportResponse {
         self.lifecycle.sends += 1;
         try self.preflight(request);
 
@@ -1284,7 +1293,7 @@ pub const ProductionSocketClusterTransport = struct {
         return error.RetryLimitExceeded;
     }
 
-    fn preflight(self: *ProductionSocketClusterTransport, request: ClusterTransportRequest) ClusterTransportError!void {
+    fn preflight(self: *EncodedInProcessSocketClusterTransport, request: ClusterTransportRequest) ClusterTransportError!void {
         if (self.lifecycle.stopped) {
             self.recordFailure(1, error.TransportUnavailable, "transport stopped");
             return error.TransportUnavailable;
@@ -1307,15 +1316,26 @@ pub const ProductionSocketClusterTransport = struct {
         }
     }
 
-    fn recordFailure(self: *ProductionSocketClusterTransport, attempts: usize, err: anyerror, detail: []const u8) void {
+    fn recordFailure(self: *EncodedInProcessSocketClusterTransport, attempts: usize, err: anyerror, detail: []const u8) void {
         recordTransportFailure(&self.lifecycle, &self.last_failure, .production_socket, attempts, err, detail);
     }
 
     fn sendOpaque(ptr: *anyopaque, allocator: Allocator, request: ClusterTransportRequest) anyerror!ClusterTransportResponse {
-        const self: *ProductionSocketClusterTransport = @ptrCast(@alignCast(ptr));
+        const self: *EncodedInProcessSocketClusterTransport = @ptrCast(@alignCast(ptr));
         return self.send(allocator, request);
     }
 };
+
+/// Deprecated compatibility name. This adapter serializes HTTP-shaped bytes
+/// but dispatches to an in-process handler; use the explicit model name.
+pub const ProductionHttpClusterTransportOptions = EncodedInProcessHttpClusterTransportOptions;
+/// Deprecated compatibility name; use `EncodedInProcessHttpClusterTransport`.
+pub const ProductionHttpClusterTransport = EncodedInProcessHttpClusterTransport;
+/// Deprecated compatibility name. This adapter serializes socket-shaped frames
+/// but dispatches to an in-process handler; use the explicit model name.
+pub const ProductionSocketClusterTransportOptions = EncodedInProcessSocketClusterTransportOptions;
+/// Deprecated compatibility name; use `EncodedInProcessSocketClusterTransport`.
+pub const ProductionSocketClusterTransport = EncodedInProcessSocketClusterTransport;
 
 const ClusterTransportEncodedSend = struct {
     response: ClusterTransportResponse,
@@ -1671,9 +1691,10 @@ fn readSocketFrame(allocator: Allocator, stream: std.Io.net.Stream, io: std.Io, 
 pub fn formatClusterTransportFailureReport(allocator: Allocator, report: ClusterTransportFailureReport) Allocator.Error![]const u8 {
     return std.fmt.allocPrint(
         allocator,
-        "cluster transport failure transport={s} retryable={} attempts={d} error={s} detail={s}",
+        "cluster transport failure transport={s} class={s} retryable={} attempts={d} error={s} detail={s}",
         .{
             @tagName(report.transport),
+            @tagName(report.class),
             report.retryable,
             report.attempts,
             report.error_name,
@@ -1746,9 +1767,7 @@ fn validateTransportEnvelopeLimits(request: ClusterTransportRequest, limits: Clu
 }
 
 fn isRetryableTransportError(err: anyerror) bool {
-    return err == error.TransportUnavailable or
-        err == error.TransportBackpressured or
-        err == error.TransportTimeout;
+    return external_failure.classifyExternalError(err).retryable();
 }
 
 fn recordTransportFailure(
@@ -1768,6 +1787,7 @@ fn recordTransportFailure(
         .attempts = attempts,
         .error_name = @errorName(err),
         .redacted_detail = detail,
+        .class = external_failure.classifyExternalError(err),
     };
 }
 
@@ -1817,6 +1837,7 @@ fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []c
             '\n' => try output.appendSlice(allocator, "\\n"),
             '\r' => try output.appendSlice(allocator, "\\r"),
             '\t' => try output.appendSlice(allocator, "\\t"),
+            0x00...0x08, 0x0b, 0x0c, 0x0e...0x1f => try output.print(allocator, "\\u{x:0>4}", .{byte}),
             else => try output.append(allocator, byte),
         }
     }

@@ -1,0 +1,1 @@
+{"schema":"zigeffect.schema.projection.v2","target":"openapi","document":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string","minLength":1,"maxLength":32},"age":{"type":"integer","minimum":0},"roles":{"type":"array","items":{"type":"string","enum":["reader","writer"]}}},"required":["name","age","roles"]}}

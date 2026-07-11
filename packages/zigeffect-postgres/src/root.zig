@@ -10,6 +10,7 @@ pub const PostgresError = error{
     MissingCliCommand,
     MissingCliValue,
     PsqlFailed,
+    UnsupportedBindings,
     UnknownCliCommand,
 };
 
@@ -53,6 +54,20 @@ pub const Diagnostic = struct {
 };
 
 pub const PsqlClient = struct {
+    pub const capability = zstd.Capability.Descriptor{
+        .id = "zigeffect-postgres.psql-client",
+        .kind = .sql_database,
+        .maturity = .local_development,
+        .package = "zigeffect-postgres",
+        .version = "0.1.0",
+        .features = &.{ "queries", "migrations" },
+        .side_effects = .local_process,
+        .limitations = &.{
+            "executes the psql subprocess for each operation",
+            "does not provide native parameter binding pooling or transaction leases",
+        },
+    };
+
     config: ConnectionConfig,
     io: std.Io,
     stdout_limit: std.Io.Limit = .limited(1024 * 1024),
@@ -75,6 +90,7 @@ pub const PsqlClient = struct {
         diagnostic: *Diagnostic,
     ) anyerror!Sql.QueryResult {
         diagnostic.reset();
+        if (statement.binds.len != 0) return PostgresError.UnsupportedBindings;
         const argv = try buildPsqlJsonArgv(allocator, self.config, statement.sql);
         defer freeArgv(allocator, argv);
         var environ = try connectionEnviron(allocator, self.config.url);
@@ -98,6 +114,13 @@ pub const PsqlClient = struct {
         diagnostic.outcome = .definite;
 
         return parseJsonRowsAlloc(allocator, run_result.stdout);
+    }
+
+    pub fn queryClassifiedAlloc(self: *PsqlClient, allocator: std.mem.Allocator, statement: Sql.Statement) zstd.External.Result(Sql.QueryResult) {
+        const result = self.queryAlloc(allocator, statement) catch |err| {
+            return .{ .failure = zstd.External.Failure.fromError("postgres-psql", "query", err) };
+        };
+        return .{ .success = result };
     }
 
     pub fn executeRawAlloc(self: *PsqlClient, allocator: std.mem.Allocator, sql: []const u8) anyerror![]const u8 {
@@ -615,6 +638,37 @@ test "Postgres adapter wraps local queries as deterministic JSON row SQL" {
     const argv = try buildPsqlJsonArgv(std.testing.allocator, config, "select 1");
     defer freeArgv(std.testing.allocator, argv);
     try std.testing.expect(std.mem.indexOf(u8, argv[7], "json_agg") != null);
+}
+
+test "Postgres psql adapter is local only and rejects ignored binds" {
+    try PsqlClient.capability.validate();
+    try std.testing.expectEqual(zstd.Capability.Maturity.local_development, PsqlClient.capability.maturity);
+    try std.testing.expectEqual(
+        zstd.Capability.Match.insufficient_maturity,
+        zstd.Capability.match(PsqlClient.capability, .{
+            .kind = .sql_database,
+            .minimum_maturity = .production_candidate,
+            .requires_live_conformance = true,
+        }),
+    );
+
+    var client = PsqlClient.init(.{ .url = "postgres://localhost/test" }, std.testing.io);
+    try std.testing.expectError(
+        PostgresError.UnsupportedBindings,
+        client.queryAlloc(std.testing.allocator, .{
+            .sql = "select $1",
+            .binds = &.{.{ .integer = 42 }},
+        }),
+    );
+
+    const classified = client.queryClassifiedAlloc(std.testing.allocator, .{
+        .sql = "select $1",
+        .binds = &.{.{ .integer = 42 }},
+    });
+    switch (classified) {
+        .success => return error.TestExpectedFailure,
+        .failure => |failure| try std.testing.expectEqual(zstd.External.Class.unsupported, failure.class),
+    }
 }
 
 test "Postgres migration planner generates apply SQL and redacted receipts" {

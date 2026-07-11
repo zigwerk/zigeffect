@@ -127,7 +127,6 @@ pub fn main(init: std.process.Init.Minimal) void {
         return mainTerminal(init);
     }
 }
-
 fn mainServer(init: std.process.Init.Minimal) !void {
     @disableInstrumentation();
     stdin_reader = .initStreaming(.stdin(), runner_threaded_io, &stdin_buffer);

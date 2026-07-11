@@ -1,6 +1,7 @@
 const std = @import("std");
 const StdService = @import("../service/root.zig");
 const fx = @import("zigeffect");
+const Stream = @import("../stream/root.zig");
 
 pub const ParsedLines = struct {
     lines: []const []const u8,
@@ -12,6 +13,18 @@ pub const ParsedLines = struct {
         allocator.free(self.trailing);
     }
 };
+
+pub fn lineStreamAlloc(allocator: std.mem.Allocator, input: []const u8) !fx.EffectStream([]const u8, anyerror, Stream.EmptyEnv) {
+    const Puller = struct {
+        allocator: std.mem.Allocator,
+        parsed: ParsedLines,
+        offset: usize = 0,
+        pub fn pull(self: *@This(), _: *fx.Context(Stream.EmptyEnv), output_allocator: std.mem.Allocator, max: usize) anyerror!fx.EffectStream([]const u8, anyerror, Stream.EmptyEnv).Chunk { const count = @min(max, self.parsed.lines.len - self.offset); const output = try output_allocator.alloc([]const u8, count); @memcpy(output, self.parsed.lines[self.offset .. self.offset + count]); self.offset += count; return .{ .allocator = output_allocator, .items = output, .end = self.offset == self.parsed.lines.len }; }
+        pub fn close(_: *@This(), _: fx.StreamCloseReason) void {}
+        pub fn deinit(self: *@This()) void { self.parsed.deinit(self.allocator); }
+    };
+    return fx.effectStreamFromOwnedPullerAlloc([]const u8, anyerror, Stream.EmptyEnv, Puller, allocator, .{ .allocator = allocator, .parsed = try parseLinesAlloc(allocator, input) });
+}
 
 pub fn appendRecordAlloc(
     allocator: std.mem.Allocator,

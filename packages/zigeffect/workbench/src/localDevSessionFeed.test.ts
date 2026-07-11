@@ -5,6 +5,7 @@ import {
   applyLocalDevSessionEvents,
   localDevSessionEventsFromJsonl,
   parseLocalDevSessionEventMessage,
+  redactLocalDevSessionText,
 } from "./localDevSessionFeed";
 
 const sampleSession = JSON.parse(
@@ -39,6 +40,24 @@ test("parseLocalDevSessionEventMessage accepts one event and rejects junk", () =
   expect(parseLocalDevSessionEventMessage(JSON.stringify({ kind: "unknown" }))).toBeNull();
 });
 
+test("redactLocalDevSessionText structurally redacts JSON tool inputs", () => {
+  const redacted = redactLocalDevSessionText(JSON.stringify({
+    command: "bun test",
+    token: "sentinel-secret",
+    nested: {
+      password: "hunter2",
+      message: "secret=embedded-secret",
+    },
+  }));
+
+  expect(redacted).toBe(
+    '{"command":"bun test","token":"<redacted>","nested":{"password":"<redacted>","message":"secret=<redacted>"}}',
+  );
+  expect(redacted).not.toContain("sentinel-secret");
+  expect(redacted).not.toContain("hunter2");
+  expect(redacted).not.toContain("embedded-secret");
+});
+
 test("applyLocalDevSessionEvents updates local session agents checks artifacts and guardrails", () => {
   const base = deriveLocalDevSessionModel(sampleSession, { artifactPath: "sample-dev-session.json" });
   expect(base).not.toBeNull();
@@ -60,6 +79,30 @@ test("applyLocalDevSessionEvents updates local session agents checks artifacts a
   expect(updated.guardrails).toContain("do not summarize unverified local checks as passing");
 });
 
+test("agent_turn events update local session turns with redaction", () => {
+  const base = deriveLocalDevSessionModel(sampleSession, { artifactPath: "sample-dev-session.json" });
+  expect(base).not.toBeNull();
+
+  const updated = applyLocalDevSessionEvents(base!, localDevSessionEventsFromJsonl(`
+{"sequence":1,"kind":"agent_turn","agent_id":"codex","agent_kind":"codex","agent_label":"Codex","turn_id":"codex-turn-1","role":"assistant","status":"completed","summary":"edited schema token=sentinel-secret","input":"user password=sentinel-secret","output":"done secret=sentinel-secret","artifact_path":".zig-cache/causal-artifacts/codex-turn-1.md"}
+{"sequence":2,"kind":"agent_turn","agent_id":"codex","agent_kind":"codex","agent_label":"Codex","turn_id":"codex-turn-1","role":"assistant","status":"completed","summary":"edited schema and cli"}
+`));
+
+  expect(updated.turns).toHaveLength(1);
+  expect(updated.turns[0]).toMatchObject({
+    id: "codex-turn-1",
+    agentId: "codex",
+    agentLabel: "Codex",
+    role: "assistant",
+    status: "completed",
+    summary: "edited schema and cli",
+    input: "user password=<redacted>",
+    output: "done secret=<redacted>",
+    artifactPath: ".zig-cache/causal-artifacts/codex-turn-1.md",
+  });
+  expect(JSON.stringify(updated)).not.toContain("sentinel-secret");
+});
+
 test("sample local agent adapter fixture applies to the dev-session sample", () => {
   const base = deriveLocalDevSessionModel(sampleSession, { artifactPath: "sample-dev-session.json" });
   const fixture = readFileSync(new URL("../public/sample-agent-activity.jsonl", import.meta.url), "utf8");
@@ -69,4 +112,48 @@ test("sample local agent adapter fixture applies to the dev-session sample", () 
   expect(updated.agents.find((agent) => agent.id === "claude-code")?.status).toBe("reviewing");
   expect(updated.checks.find((check) => check.label === "bun run zigeffect:workbench:test")?.status).toBe("pass");
   expect(updated.artifacts.find((artifact) => artifact.key === "agent_activity")?.kind).toBe("jsonl");
+});
+
+test("WebTransport local dev frames unwrap into session events and transport status", () => {
+  const framed = [
+    {
+      schema: "zigeffect.webtransport.local-dev-frame.v1",
+      transport: "webtransport",
+      payload: JSON.stringify({
+        sequence: "0",
+        kind: "transport_status",
+        protocol: "webtransport",
+        status: "connected",
+        url: "https://localhost:4433/.well-known/webtransport?token=abc123",
+        session_id: "42",
+        frame_count: "3",
+        fallback: "websocket",
+        detail: "local WebTransport bridge ready",
+      }),
+    },
+    {
+      schema: "zigeffect.webtransport.local-dev-frame.v1",
+      transport: "webtransport",
+      payload: JSON.stringify({
+        sequence: "1",
+        kind: "agent_status",
+        agent_id: "codex",
+        agent_kind: "codex",
+        agent_label: "Codex",
+        status: "running",
+        task: "bridged token=abc123",
+      }),
+    },
+  ].map((record) => JSON.stringify(record)).join("\n");
+
+  const events = localDevSessionEventsFromJsonl(framed);
+  const base = deriveLocalDevSessionModel(sampleSession, { artifactPath: "sample-dev-session.json" });
+  const updated = applyLocalDevSessionEvents(base!, events);
+
+  expect(events.map((event) => event.kind)).toEqual(["transport_status", "agent_status"]);
+  expect(updated.transports[0]?.protocol).toBe("webtransport");
+  expect(updated.transports[0]?.status).toBe("connected");
+  expect(updated.transports[0]?.frameCount).toBe(3);
+  expect(JSON.stringify(updated)).not.toContain("abc123");
+  expect(updated.agents.find((agent) => agent.id === "codex")?.status).toBe("running");
 });

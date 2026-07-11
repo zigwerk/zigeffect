@@ -319,6 +319,24 @@ Deliverables:
 - WebTransport stream/datagram receipt JSON with redaction.
 - copyable HTTP/3 and WebTransport examples.
 
+### M19 - WebTransport Workbench Bridge
+
+Status: delivered on 2026-06-27.
+
+Make the experimental transport visible in the local agent workbench without
+requiring hosted infrastructure or live browser WebTransport in CI.
+
+Deliverables:
+
+- deterministic `bridgeLocalDevSessionJsonlAlloc` for wrapping
+  `zstd.Agent.Session` JSONL as
+  `zigeffect.webtransport.local-dev-frame.v1` frames.
+- redacted bridge receipts and deterministic fake WebTransport message capture.
+- workbench parser support for WebTransport-framed local dev-session events.
+- `transport_status` events, transport health model, timeline rows, and Dev
+  Session transport panel.
+- copyable WebTransport bridge example.
+
 ## Dependency Order
 
 ```text
@@ -340,6 +358,7 @@ M1 Service Kernel
   -> M16 HTTP Router / Local Server
   -> M17 Postgres Maturity
   -> M18 Experimental QUIC / HTTP3 / WebTransport Adapter
+  -> M19 WebTransport Workbench Bridge
 ```
 
 M1 must happen first because it defines the service/layer/effect/causal contract

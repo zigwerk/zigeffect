@@ -126,6 +126,7 @@ pub const CausalNendbStorageBackendState = struct {
     written_event_count: u64 = 0,
     failed_event_count: u64 = 0,
     flushed_count: u64 = 0,
+    last_failure: ?anyerror = null,
 
     pub fn init(
         allocator: Allocator,
@@ -164,6 +165,10 @@ pub const CausalNendbStorageBackendState = struct {
 
     pub fn failedEventCount(self: *const CausalNendbStorageBackendState) u64 {
         return self.failed_event_count;
+    }
+
+    pub fn lastFailure(self: *const CausalNendbStorageBackendState) ?anyerror {
+        return self.last_failure;
     }
 
     pub fn flushedCount(self: *const CausalNendbStorageBackendState) u64 {
@@ -220,7 +225,10 @@ pub const CausalNendbStorageBackendState = struct {
 
     pub fn flush(self: *CausalNendbStorageBackendState) anyerror!void {
         if (self.writer.flush) |flush_writer| {
-            try flush_writer(self.writer.state);
+            flush_writer(self.writer.state) catch |err| {
+                self.last_failure = err;
+                return err;
+            };
             self.flushed_count += 1;
         }
     }
@@ -460,6 +468,8 @@ fn cloneEvent(allocator: Allocator, event: causal.CausalEvent) Allocator.Error!c
     errdefer if (owned.label.len > 0) allocator.free(owned.label);
     owned.type_name = try cloneSlice(allocator, event.type_name);
     errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
+    owned.layer_name = try cloneSlice(allocator, event.layer_name);
+    errdefer if (owned.layer_name.len > 0) allocator.free(owned.layer_name);
     owned.service_key = try cloneSlice(allocator, event.service_key);
     errdefer if (owned.service_key.len > 0) allocator.free(owned.service_key);
     owned.artifact_id = try cloneSlice(allocator, event.artifact_id);
@@ -480,6 +490,7 @@ fn cloneEvent(allocator: Allocator, event: causal.CausalEvent) Allocator.Error!c
 fn deinitEventStrings(allocator: Allocator, event: causal.CausalEvent) void {
     if (event.label.len > 0) allocator.free(event.label);
     if (event.type_name.len > 0) allocator.free(event.type_name);
+    if (event.layer_name.len > 0) allocator.free(event.layer_name);
     if (event.service_key.len > 0) allocator.free(event.service_key);
     if (event.artifact_id.len > 0) allocator.free(event.artifact_id);
     if (event.domain_entity_ref.len > 0) allocator.free(event.domain_entity_ref);
@@ -530,6 +541,7 @@ fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []c
             '\n' => try output.appendSlice(allocator, "\\n"),
             '\r' => try output.appendSlice(allocator, "\\r"),
             '\t' => try output.appendSlice(allocator, "\\t"),
+            0x00...0x08, 0x0b, 0x0c, 0x0e...0x1f => try output.print(allocator, "\\u{x:0>4}", .{byte}),
             else => try output.append(allocator, byte),
         }
     }
@@ -559,6 +571,8 @@ fn appendNodeCommonProperties(output: *std.ArrayList(u8), allocator: Allocator, 
     try appendOptionalJsonU64(output, allocator, event.scope_id);
     try output.appendSlice(allocator, ",\"layer_id\":");
     try appendOptionalJsonU64(output, allocator, event.layer_id);
+    try output.appendSlice(allocator, ",\"layer_name\":");
+    try appendJsonString(output, allocator, event.layer_name);
     try output.appendSlice(allocator, ",\"service_key\":");
     try appendJsonString(output, allocator, event.service_key);
     try output.appendSlice(allocator, ",\"resource_id\":");
@@ -567,6 +581,8 @@ fn appendNodeCommonProperties(output: *std.ArrayList(u8), allocator: Allocator, 
     try appendOptionalJsonU64(output, allocator, event.cause_event_id);
     try output.appendSlice(allocator, ",\"schedule_id\":");
     try appendOptionalJsonU64(output, allocator, event.schedule_id);
+    try output.appendSlice(allocator, ",\"boundary_id\":");
+    try appendOptionalJsonU64(output, allocator, event.boundary_id);
     try output.appendSlice(allocator, ",\"artifact_id\":");
     try appendJsonString(output, allocator, event.artifact_id);
     try output.appendSlice(allocator, ",\"domain_entity_ref\":");
@@ -630,29 +646,34 @@ fn recordNendbStorageBackend(raw: ?*anyopaque, event: causal.CausalEvent) anyerr
     if (state.max_events) |max_events| {
         if (state.events.items.len >= max_events) {
             state.failed_event_count += 1;
-            return error.CausalNendbStorageBackendFull;
+            state.last_failure = error.CausalNendbStorageBackendFull;
+            return state.last_failure.?;
         }
     }
 
     state.events.ensureUnusedCapacity(state.allocator, 1) catch |err| {
         state.failed_event_count += 1;
+        state.last_failure = err;
         return err;
     };
 
     const owned_event = cloneEvent(state.allocator, event) catch |err| {
         state.failed_event_count += 1;
+        state.last_failure = err;
         return err;
     };
     errdefer deinitEventStrings(state.allocator, owned_event);
 
     var write = mapCausalEventToNendbWrite(state.allocator, event) catch |err| {
         state.failed_event_count += 1;
+        state.last_failure = err;
         return err;
     };
     defer deinitCausalNendbWrite(state.allocator, &write);
 
     state.writer.write(state.writer.state, write) catch |err| {
         state.failed_event_count += 1;
+        state.last_failure = err;
         return err;
     };
 

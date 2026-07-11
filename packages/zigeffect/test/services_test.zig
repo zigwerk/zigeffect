@@ -365,6 +365,47 @@ test "causal store records events snapshots and lineage deterministically" {
     try std.testing.expectEqual(child, lineage.events[1].id);
 }
 
+test "causal store stamps its default service key onto events without one" {
+    var store = fx.CausalStore.initForService(std.testing.allocator, "billing");
+    defer store.deinit();
+
+    _ = try store.record(.{ .kind = .run_started, .status = "started" });
+    _ = try store.record(.{ .kind = .run_completed, .status = "success", .service_key = "auditor" });
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), snapshot.events.len);
+    // Unset service_key inherits the store default; an explicit key wins.
+    try std.testing.expectEqualStrings("billing", snapshot.events[0].service_key);
+    try std.testing.expectEqualStrings("auditor", snapshot.events[1].service_key);
+}
+
+test "causal store allocates boundary ids and snapshots them on events" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    try std.testing.expectEqual(@as(u64, 1), store.nextBoundaryId());
+    try std.testing.expectEqual(@as(u64, 2), store.nextBoundaryId());
+
+    _ = try store.record(.{ .kind = .effect_started, .status = "started", .boundary_id = 42 });
+    _ = try store.record(.{ .kind = .run_started, .status = "started" });
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+
+    // The boundary id survives the store's clone; unset stays null.
+    try std.testing.expectEqual(@as(u64, 42), snapshot.events[0].boundary_id.?);
+    try std.testing.expectEqual(@as(?u64, null), snapshot.events[1].boundary_id);
+
+    // And the saved artifact emits it — the workbench's cross-service jump
+    // links depend on this field being on disk, not just in memory.
+    const json = try fx.formatCausalJson(std.testing.allocator, &store);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"boundary_id\": 42") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"boundary_id\": null") != null);
+}
+
 test "bounded causal store keeps newest events and reports dropped count" {
     var store = fx.CausalStore.initBounded(std.testing.allocator, 2);
     defer store.deinit();
@@ -652,6 +693,7 @@ test "causal store preserves deep runtime identity fields" {
         .run_id = run_id,
         .cause_event_id = parent,
         .layer_id = layer_id,
+        .layer_name = "persistence",
         .service_key = "token=raw-secret stable-service-key-stable-service-key",
         .resource_id = resource_id,
         .schedule_id = schedule_id,
@@ -663,6 +705,7 @@ test "causal store preserves deep runtime identity fields" {
 
     try std.testing.expectEqual(@as(usize, 2), snapshot.events.len);
     try std.testing.expectEqual(@as(?u64, layer_id), snapshot.events[1].layer_id);
+    try std.testing.expectEqualStrings("persistence", snapshot.events[1].layer_name);
     try std.testing.expectEqual(@as(?u64, resource_id), snapshot.events[1].resource_id);
     try std.testing.expectEqual(@as(?u64, parent), snapshot.events[1].cause_event_id);
     try std.testing.expectEqual(@as(?u64, schedule_id), snapshot.events[1].schedule_id);
@@ -687,11 +730,32 @@ test "causal store preserves deep runtime identity fields" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"schema\": \"zigeffect.causal.v1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"event_taxonomy_version\": 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"layer_id\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"layer_name\": \"persistence\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"service_key\": \"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"resource_id\": 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"cause_event_id\": 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"schedule_id\": 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "raw-secret") == null);
+}
+
+test "causal json artifact escapes control bytes into parseable json" {
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    _ = try store.record(.{
+        .kind = .run_started,
+        .run_id = store.nextRunId(),
+        .label = "ansi \x1b[31mred\x1b[0m label",
+    });
+
+    const json = try fx.formatCausalJson(std.testing.allocator, &store);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
 }
 
 test "causal findings surface missing cleanup pending fibers finalizer failures exhausted retries and missing services" {

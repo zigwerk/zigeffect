@@ -34,8 +34,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_tests.step);
 
     const examples_step = b.step("examples", "Build zigeffect-quic examples");
-    addExample(b, examples_step, target, optimize, testing_runner, need_libc, zigeffect_quic, "http3-smoke", "examples/http3_smoke.zig");
-    addExample(b, examples_step, target, optimize, testing_runner, need_libc, zigeffect_quic, "webtransport-receipt", "examples/webtransport_receipt.zig");
+    addExample(b, examples_step, target, optimize, need_libc, testing_runner, zigeffect_quic, "http3-smoke", "examples/http3_smoke.zig");
+    addExample(b, examples_step, target, optimize, need_libc, testing_runner, zigeffect_quic, "webtransport-receipt", "examples/webtransport_receipt.zig");
 }
 
 fn addExample(
@@ -43,8 +43,8 @@ fn addExample(
     examples_step: *std.Build.Step,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
-    testing_runner: std.Build.LazyPath,
     link_libc: ?bool,
+    testing_runner: std.Build.LazyPath,
     zigeffect_quic: *std.Build.Module,
     name: []const u8,
     path: []const u8,

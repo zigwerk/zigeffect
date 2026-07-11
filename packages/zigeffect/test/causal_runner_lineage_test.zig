@@ -110,6 +110,50 @@ test "runner lineage artifact includes deployment metadata and cross-runner edge
     try std.testing.expect(std.mem.indexOf(u8, json, "\"to_runner_id\":\"runner-b\"") != null);
 }
 
+test "runner lineage artifact escapes control bytes into parseable json" {
+    const runner_a_events = [_]fx.CausalEvent{
+        .{
+            .id = 1,
+            .kind = .cluster_message_submitted,
+            .run_id = 100,
+            .label = "submit from runner a",
+            .status = "submitted",
+        },
+    };
+    const runner_b_events = [_]fx.CausalEvent{
+        .{
+            .id = 2,
+            .kind = .cluster_message_replied,
+            .run_id = 200,
+            .cause_event_id = 1,
+            .label = "reply from runner b",
+            .status = "replied",
+        },
+    };
+
+    var stitched = try fx.stitchCausalRunnerLineage(std.testing.allocator, &.{
+        .{ .runner_id = "runner\x1ba", .events = &runner_a_events },
+        .{ .runner_id = "runner\x1bb", .events = &runner_b_events },
+    });
+    defer stitched.deinit();
+
+    const json = try fx.formatCausalRunnerLineageJson(std.testing.allocator, stitched, .{
+        .deployment_id = "deploy\x082026",
+    });
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\\u0008") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x1b) == null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x08) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+    const edge = parsed.value.object.get("cross_runner_edges").?.array.items[0];
+    try std.testing.expectEqualStrings("runner\x1ba", edge.object.get("from_runner_id").?.string);
+    try std.testing.expectEqualStrings("runner\x1bb", edge.object.get("to_runner_id").?.string);
+}
+
 test "runner deployment metadata validation reports unsafe deployment evidence" {
     const deployments = [_]fx.CausalRunnerDeploymentMetadata{
         .{

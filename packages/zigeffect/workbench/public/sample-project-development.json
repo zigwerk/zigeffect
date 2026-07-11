@@ -1,0 +1,224 @@
+{
+  "schema": "zigeffect.project-development.v1",
+  "schema_version": 1,
+  "sequence": 12,
+  "connection": "live",
+  "recovery_state": "clean",
+  "approval_state": "pending",
+  "current_session": "codex-session-12",
+  "baseline_session": "claude-session-11",
+  "manifest": {
+    "schema": "zigeffect.project.v1",
+    "name": "invoice-system",
+    "version": "0.1.0",
+    "kind": "system",
+    "components": [
+      {
+        "id": "api-service",
+        "kind": "service",
+        "path": "services/api",
+        "depends_on": ["shared-domain"],
+        "capabilities": ["cli", "http", "sql", "config", "observability", "agent", "workbench"]
+      },
+      {
+        "id": "worker-service",
+        "kind": "service",
+        "path": "services/worker",
+        "depends_on": ["shared-domain"],
+        "capabilities": ["sql", "config", "observability", "agent", "workbench"]
+      },
+      {
+        "id": "shared-domain",
+        "kind": "package",
+        "path": "packages/shared",
+        "depends_on": [],
+        "capabilities": ["observability", "agent", "workbench"]
+      }
+    ],
+    "commands": [
+      { "id": "check", "argv": ["zig", "build", "test"] },
+      { "id": "dev", "argv": ["zig", "build", "run"], "component": "api-service" },
+      { "id": "check-safe", "argv": ["zig", "build", "test", "-Doptimize=ReleaseSafe"] }
+    ],
+    "requirements": [
+      {
+        "id": "req-invoice-api",
+        "summary": "Serve Schema-validated invoices",
+        "component": "api-service",
+        "status": "active"
+      },
+      {
+        "id": "req-worker",
+        "summary": "Persist accepted invoices transactionally",
+        "component": "worker-service",
+        "status": "planned"
+      },
+      {
+        "id": "req-domain",
+        "summary": "Share the Invoice contract",
+        "component": "shared-domain",
+        "status": "satisfied"
+      }
+    ],
+    "acceptance_checks": [
+      {
+        "id": "check-api",
+        "requirement": "req-invoice-api",
+        "command": "check",
+        "expectation": "typed request and response tests pass",
+        "status": "failed"
+      },
+      {
+        "id": "check-worker",
+        "requirement": "req-worker",
+        "command": "check-safe",
+        "expectation": "transaction tests pass in ReleaseSafe",
+        "status": "pending"
+      }
+    ]
+  },
+  "status": {
+    "schema": "zigeffect.project-status.v1",
+    "project": "invoice-system",
+    "requirements_total": 3,
+    "requirements_open": 2,
+    "checks_total": 2,
+    "checks_pending": 1,
+    "checks_failed": 1,
+    "tasks": [
+      {
+        "id": "task-api",
+        "requirement": "req-invoice-api",
+        "component": "api-service",
+        "summary": "Repair Invoice response decoding",
+        "status": "active"
+      },
+      {
+        "id": "task-worker",
+        "requirement": "req-worker",
+        "component": "worker-service",
+        "summary": "Add transaction integration evidence",
+        "status": "planned"
+      }
+    ],
+    "evidence": [
+      {
+        "id": "evidence-api",
+        "requirement": "req-invoice-api",
+        "acceptance_check": "check-api",
+        "component": "api-service",
+        "kind": "test_result",
+        "artifact": ".zigeffect/receipts/check.json",
+        "causal_event_ids": [3],
+        "summary": "Schema decode failed at the response boundary"
+      },
+      {
+        "id": "evidence-safety",
+        "requirement": "req-worker",
+        "acceptance_check": "check-worker",
+        "component": "worker-service",
+        "kind": "artifact",
+        "artifact": ".zigeffect/receipts/latest-safety.json",
+        "causal_event_ids": [8],
+        "summary": "ReleaseSafe verification has not run"
+      }
+    ],
+    "next_actions": [
+      {
+        "id": "next-api",
+        "requirement": "req-invoice-api",
+        "component": "api-service",
+        "summary": "Inspect Schema decode evidence and repair the response",
+        "command": "check"
+      },
+      {
+        "id": "next-worker",
+        "requirement": "req-worker",
+        "component": "worker-service",
+        "summary": "Run the ReleaseSafe transaction gate",
+        "command": "check-safe"
+      }
+    ]
+  },
+  "handoff": {
+    "schema": "zigeffect.agent-handoff.v1",
+    "project": "invoice-system",
+    "provider": "codex",
+    "session": "codex-session-12",
+    "summary": "Response repair is active and approval remains pending",
+    "tasks": [],
+    "evidence": [],
+    "next_actions": [],
+    "blockers": ["Approval is required before applying the database migration"]
+  },
+  "sessions": [
+    {
+      "id": "claude-session-11",
+      "provider": "claude-code",
+      "status": "completed",
+      "connection": "recovered",
+      "recovery": "recovered",
+      "approval": "approved",
+      "task_ids": [],
+      "evidence_ids": [],
+      "artifact_ids": [],
+      "summary": "Created the initial Invoice contract"
+    },
+    {
+      "id": "codex-session-12",
+      "provider": "codex",
+      "status": "running",
+      "connection": "live",
+      "recovery": "clean",
+      "approval": "pending",
+      "task_ids": ["task-api", "task-worker"],
+      "evidence_ids": ["evidence-api", "evidence-safety"],
+      "artifact_ids": [".zigeffect/receipts/check.json", ".zigeffect/receipts/latest-safety.json"],
+      "summary": "Repairing the response and collecting transaction evidence"
+    }
+  ],
+  "local_dev_session": {
+    "schema": "zigeffect.causal.dev-session.v1",
+    "schema_version": 1,
+    "mode": "live",
+    "session_id": "codex-session-12",
+    "title": "Invoice system development",
+    "goal": "Deliver typed invoice boundaries with causal acceptance evidence.",
+    "target": "invoice-system",
+    "phase": "repair",
+    "status": "running",
+    "agents": [
+      { "id": "codex", "kind": "codex", "label": "Codex", "status": "running", "current_task": "Repair Invoice response", "last_event_id": 3 }
+    ],
+    "checks": [
+      { "label": "typed request and response tests", "status": "fail", "detail": "response Schema decode failed" },
+      { "label": "transaction ReleaseSafe gate", "status": "running", "detail": "awaiting execution" }
+    ],
+    "commands": [
+      { "label": "Project check", "command": "zigeffect project check --agent --json", "status": "failed" }
+    ],
+    "turns": [],
+    "artifacts": {
+      "check": { "label": "Check receipt", "path": ".zigeffect/receipts/check.json", "kind": "json" },
+      "safety": { "label": "Safety receipt", "path": ".zigeffect/receipts/latest-safety.json", "kind": "json" }
+    },
+    "transports": [],
+    "next_actions": ["Repair the response Schema", "Run the ReleaseSafe transaction gate"],
+    "guardrails": ["Do not claim the pending migration approval"],
+    "warnings": []
+  },
+  "event_taxonomy_version": 1,
+  "events": [
+    { "id": 1, "kind": "run_started", "run_id": 1, "status": "started", "label": "invoice-system" },
+    { "id": 2, "kind": "span_recorded", "run_id": 1, "parent_id": 1, "label": "app.config.load", "type_name": "zigeffect.app.data_read", "status": "success", "service_key": "api-service", "data_subject_ref": "application", "redacted_detail": "source=local" },
+    { "id": 3, "kind": "span_recorded", "run_id": 1, "parent_id": 1, "cause_event_id": 2, "label": "app.schema.decode", "type_name": "zigeffect.app.data_transformed", "status": "failure", "service_key": "api-service", "schema_ref": "InvoiceResponse.v1", "redacted_detail": "missing field total" },
+    { "id": 4, "kind": "span_recorded", "run_id": 1, "parent_id": 1, "label": "app.command.execute", "type_name": "zigeffect.app.function_boundary", "status": "success", "service_key": "api-service", "domain_entity_ref": "serve", "redacted_detail": "typed CLI decoded" },
+    { "id": 5, "kind": "span_recorded", "run_id": 1, "parent_id": 1, "label": "app.request.handle", "type_name": "zigeffect.app.function_boundary", "status": "failure", "service_key": "api-service", "domain_entity_ref": "POST /invoices", "redacted_detail": "status=500" },
+    { "id": 6, "kind": "span_recorded", "run_id": 1, "parent_id": 1, "label": "app.sql.transaction", "type_name": "zigeffect.app.service_call", "status": "pending", "service_key": "worker-service", "domain_entity_ref": "invoice-create" },
+    { "id": 7, "kind": "span_recorded", "run_id": 1, "parent_id": 1, "label": "app.external.call", "type_name": "zigeffect.app.service_call", "status": "success", "service_key": "api-service", "domain_entity_ref": "local-http-router" },
+    { "id": 8, "kind": "span_recorded", "run_id": 1, "parent_id": 1, "label": "app.artifact.produce", "type_name": "zigeffect.app.artifact_emitted", "status": "created", "service_key": "worker-service", "artifact_id": ".zigeffect/receipts/latest-safety.json" },
+    { "id": 9, "kind": "span_recorded", "run_id": 1, "parent_id": 1, "label": "app.component.dependency", "type_name": "zigeffect.app.service_call", "status": "resolved", "service_key": "shared-domain", "domain_entity_ref": "api-service" },
+    { "id": 10, "kind": "span_recorded", "run_id": 1, "parent_id": 1, "cause_event_id": 3, "label": "app.acceptance.evaluate", "type_name": "zigeffect.app.policy_decision", "status": "failed", "service_key": "api-service", "domain_entity_ref": "check-api", "redacted_detail": "response check failed" },
+    { "id": 11, "kind": "run_completed", "run_id": 1, "parent_id": 1, "status": "failure", "label": "invoice-system" }
+  ]
+}

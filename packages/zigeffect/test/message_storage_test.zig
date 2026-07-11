@@ -162,6 +162,30 @@ test "stored message record json round-trips" {
     try std.testing.expectEqualStrings(record.envelope.payload, parsed.envelope.payload);
 }
 
+test "stored message record json escapes control bytes" {
+    const address = fx.entityAddress("counter", "escape");
+    var storage_state = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer storage_state.deinit();
+    const storage = storage_state.asMessageStorage();
+    var submitted = try storage.submit(.{
+        .shard_id = 7,
+        .now_ms = 2_000,
+        .envelope = .{ .kind = .request, .address = address, .idempotency_key = "escape", .payload = "ansi \x1b[31mred\x1b[0m payload" },
+    });
+    defer submitted.deinit(std.testing.allocator);
+    var record = (try storage.unprocessedById(submitted.envelope.id, std.testing.allocator)).?;
+    defer record.deinit(std.testing.allocator);
+
+    const json = try fx.formatStoredMessageRecordJson(std.testing.allocator, record);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+}
+
 test "file message storage replays unprocessed messages after reopen" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

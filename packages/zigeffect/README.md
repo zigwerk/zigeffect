@@ -65,6 +65,13 @@ const result = try Program
   metrics, tracing, and assertion helpers for deterministic tests.
 - **`serviceNotFound`**: compile-time diagnostics for missing environment
   services.
+- **Production statecharts**: typed flat/hierarchical/parallel/history machines,
+  actors and supervision, durable workflow journals, cluster fencing, causal
+  evidence, governed agent-authored workflow plans, immutable proof/review/
+  approval chains, policy-gated fleet control, XState v5 projection/conformance,
+  and the synchronized SolidJS Studio. See
+  [docs/statecharts-production.md](docs/statecharts-production.md) and
+  [docs/agent-workflow-studio.md](docs/agent-workflow-studio.md).
 
 See [docs/usage.md](docs/usage.md), [docs/architecture.md](docs/architecture.md),
 [docs/effectts-parity.md](docs/effectts-parity.md), and the
@@ -183,6 +190,12 @@ nonzero, fall back to the in-memory trace): JSON Lines, DOT, OpenTelemetry-shape
 records, scan-based graph history, a NenDB node/edge write-contract, and a bounded
 async stream. Each has a focused gate (`zig build causal-*-backend`).
 
+For generated local applications, `zigeffect-std` implements that writer
+contract as `zstd.CausalGraph.LocalDatabase`, a bounded restart-safe Zig graph
+WAL at `.zigeffect/graph/causal-graph.jsonl`. The `zigeffect` CLI scaffolds the
+attachment and exposes manifest-scoped status, event, and child queries. It does
+not install or claim the upstream NenDB package.
+
 ## Schema governance and budgets
 
 ```bash
@@ -203,6 +216,27 @@ zig build release-gate    # the full release pipeline
 ```
 
 Or from the repo root: `bun run zigeffect:test`.
+
+For the complete local application-development distribution, install the
+`packages/zigeffect-cli` executable and run
+`bun run zigeffect:local-release`. The CLI generates five compile-tested project
+kinds, embeds compatibility and scaffold-ownership metadata, emits Bash/Zsh/Fish
+completions, and performs dry-run-first conflict-safe upgrades. See
+[docs/compatibility.md](docs/compatibility.md).
+
+The distribution also includes Testing v2: the CLI selects a scenario through
+a fixed control protocol, requires a matching native `TestContext` receipt, and
+exposes semantic `coverage`, `gaps`, bounded `stress`, deterministic `replay`,
+and validated `history`. Public `zstd.Testing` modules cover statechart models,
+schedules, structural shrinking, differential executors, distributed virtual
+faults, mutation analysis, performance budgets, and side-effect authority. See
+[docs/agent-first-testing.md](docs/agent-first-testing.md).
+
+Every first-party and template-v5 `b.addTest` artifact also uses the
+`zigeffect_test_runner` server runner. It preserves idiomatic `std.testing`
+tests while atomically emitting complete suite receipts under
+`.zigeffect/tests/suites/`; missing executions, failures, leaks, and logged
+errors fail closed.
 
 ## Tools
 
@@ -226,11 +260,14 @@ record-only clone tools; see [docs/roadmap.md](docs/roadmap.md).
 - [Data](docs/data.md) · [Pattern Matching](docs/pattern-matching.md) ·
   [Module Pattern](docs/module-pattern.md) · [EffectTS Parity](docs/effectts-parity.md)
 - [Agent-Observable Causal Runtime](docs/agent-observable-runtime.md) ·
+  [How Codex Builds Applications](docs/agent-first-application-development.md) ·
   [Agent Guide](docs/agent-guide.md) · [Causal Scenarios](docs/causal-scenarios.md) ·
-  [Causal Dev Harness](docs/causal-dev-harness.md)
+  [Causal Dev Harness](docs/causal-dev-harness.md) ·
+  [Local Agentic Development](docs/local-agentic-development.md) ·
+  [Agent Safety Plane](docs/agent-safety-plane.md)
 - [Operations](docs/operations.md) · [Schema Governance](docs/schema-governance.md) ·
   [Performance Budget](docs/performance-budget.md) ·
   [Self-Improving AI Engine](docs/self-improving-ai-engine.md)
-- [Roadmap](docs/roadmap.md) · [Tool Roadmap](docs/tool-roadmap.md) ·
+- [Agent-first testing](docs/agent-first-testing.md) · [Roadmap](docs/roadmap.md) · [Tool Roadmap](docs/tool-roadmap.md) ·
   [Devex Review](docs/devex-review.md) ·
   [Migration to Durable Runtime](docs/migration-to-durable-runtime.md)

@@ -473,11 +473,17 @@ pub fn parse(
         }
     }
 
+    const owned_path = try path.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_path);
+    const owned_options = try options.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_options);
+    const owned_positionals = try positionals.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_positionals);
     return .{
         .command = active.name,
-        .path = try path.toOwnedSlice(allocator),
-        .options = try options.toOwnedSlice(allocator),
-        .positionals = try positionals.toOwnedSlice(allocator),
+        .path = owned_path,
+        .options = owned_options,
+        .positionals = owned_positionals,
     };
 }
 
@@ -1225,6 +1231,20 @@ test "Cli parses short flags and integer options" {
     try std.testing.expectEqualStrings("3", parsed.optionValue("count").?);
 }
 
+test "Cli parser releases every partial result on allocation failure" {
+    const command = CommandSpec{
+        .name = "zg",
+        .options = &.{.{ .name = "count", .short = 'c', .kind = .integer, .required = true }},
+    };
+    const Harness = struct {
+        fn run(allocator: std.mem.Allocator, spec: CommandSpec) !void {
+            var parsed = try parse(allocator, spec, &.{ "-c", "3", "item" });
+            defer parsed.deinit(allocator);
+        }
+    };
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, Harness.run, .{command});
+}
+
 test "Cli maps errors to deterministic exit codes" {
     try std.testing.expectEqual(ExitCode.usage, exitCodeForError(CliError.UnknownOption));
     try std.testing.expectEqual(ExitCode.config, exitCodeForError(error.MissingVariable));
@@ -1659,4 +1679,19 @@ test "Cli runEffect participates in runtime dependency validation" {
         error.MissingServiceRequirement,
         runtime.run(runEffect(Provider, HandlerFailure, app, &.{})),
     );
+}
+
+test "Cli parse releases staged owned slices on every allocation failure" {
+    const Probe = struct {
+        fn run(allocator: std.mem.Allocator) !void {
+            const command = CommandSpec{
+                .name = "serve",
+                .options = &.{.{ .name = "port", .kind = .integer }},
+            };
+            var parsed = try parse(allocator, command, &.{ "--port", "5178", "workspace" });
+            defer parsed.deinit(allocator);
+        }
+    };
+
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, Probe.run, .{});
 }

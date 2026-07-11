@@ -1,0 +1,12 @@
+.{
+    .name = .zfx_ref_orders_shared,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0x4f458599277616e1,
+    .dependencies = .{
+        .zigeffect_std = .{ .path = "../../../zigeffect-std" },
+
+
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "README.md", "src", "test" },
+}

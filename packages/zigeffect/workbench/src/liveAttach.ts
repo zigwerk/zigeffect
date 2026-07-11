@@ -13,7 +13,22 @@
 // local command polling harness to the engine-side policy bridge.
 
 import { createSignal, onCleanup } from "solid-js";
-import type { UnknownRecord } from "./causalArtifact";
+import {
+  deriveLocalDevSessionModel,
+  type LocalDevSessionModel,
+  type UnknownRecord,
+} from "./causalArtifact";
+import {
+  applyLocalDevSessionEvents,
+  parseLocalDevSessionEventMessage,
+  type LocalDevSessionEvent,
+} from "./localDevSessionFeed";
+import {
+  deriveProjectDevelopmentModel,
+  parseProjectDevelopmentFrameMessage,
+  type ProjectDevelopmentFrame,
+  type ProjectDevelopmentModel,
+} from "./development/projectDevelopment";
 
 // ── Live wire format — one frame per causal-event delta ───────────────────────
 export type LiveFrame = {
@@ -26,6 +41,28 @@ export type LiveFrame = {
   parent_id?: number | null;
   finding_kind?: string | null;
   dashboard_priority?: string | null;
+  // service + layer identity carried from the engine (already emitted by
+  // formatCausalJsonLine); enables multi-service discovery + layer grouping.
+  service_key?: string;
+  layer_id?: number | null;
+  layer_name?: string;
+  // Raw structural ids + type name. Without these, live-mode analysis diverges
+  // from artifact mode: resource-leak findings match on scope/type identity and
+  // all-null values make ANY finalize suppress EVERY leak finding.
+  run_id?: number | null;
+  fiber_id?: number | null;
+  scope_id?: number | null;
+  resource_id?: number | null;
+  cause_event_id?: number | null;
+  type_name?: string;
+  artifact_id?: string;
+  domain_entity_ref?: string;
+  data_subject_ref?: string;
+  schema_ref?: string;
+  redacted_detail?: string;
+  // Cross-service correlation: one id stamped on both sides of a service
+  // boundary (origin's outbound event + callee's inbound run/scope).
+  boundary_id?: number | null;
 };
 
 export type LiveCommandRequest = {
@@ -198,6 +235,10 @@ export type LiveStreamMeta = {
   schema?: string;
   schemaVersion?: number | string;
   taxonomyVersion?: string;
+  localDevSessionId?: string;
+  localDevSessionTitle?: string;
+  localDevSessionGoal?: string;
+  localDevSessionTarget?: string;
   /** Ring-buffer window; <= 0 / undefined keeps every frame. */
   maxFrames?: number;
 };
@@ -207,6 +248,8 @@ const DEFAULT_SCHEMA = "zigeffect.causal.live-dashboard-stream.v1";
 // ── Transport abstraction ─────────────────────────────────────────────────────
 export type LiveSubscriber = {
   onFrame: (frame: LiveFrame) => void;
+  onLocalDevEvent?: (event: LocalDevSessionEvent) => void;
+  onProjectUpdate?: (frame: ProjectDevelopmentFrame) => void;
   onError?: (error: unknown) => void;
   onClose?: () => void;
 };
@@ -232,6 +275,21 @@ export function frameToEventRecord(frame: LiveFrame): UnknownRecord {
     lane: frame.lane ?? null,
     finding_kind: frame.finding_kind ?? null,
     dashboard_priority: frame.dashboard_priority ?? null,
+    layer_id: frame.layer_id ?? null,
+    layer_name: frame.layer_name ?? "",
+    service_key: frame.service_key ?? "",
+    run_id: frame.run_id ?? null,
+    fiber_id: frame.fiber_id ?? null,
+    scope_id: frame.scope_id ?? null,
+    resource_id: frame.resource_id ?? null,
+    cause_event_id: frame.cause_event_id ?? null,
+    type_name: frame.type_name ?? "",
+    artifact_id: frame.artifact_id ?? "",
+    domain_entity_ref: frame.domain_entity_ref ?? "",
+    data_subject_ref: frame.data_subject_ref ?? "",
+    schema_ref: frame.schema_ref ?? "",
+    redacted_detail: frame.redacted_detail ?? "",
+    boundary_id: frame.boundary_id ?? null,
   };
 }
 
@@ -885,6 +943,60 @@ export class LiveCausalBuffer {
   }
 }
 
+export class LiveLocalDevSessionBuffer {
+  private readonly events: LocalDevSessionEvent[] = [];
+
+  constructor(private readonly meta: LiveStreamMeta = {}) {}
+
+  ingest(event: LocalDevSessionEvent): void {
+    this.events.push(parseLocalDevSessionEventMessage(JSON.stringify(event)) ?? event);
+  }
+
+  get count(): number {
+    return this.events.length;
+  }
+
+  session(): LocalDevSessionModel | null {
+    if (this.events.length === 0) {
+      return null;
+    }
+    const base = deriveLocalDevSessionModel({
+      schema: "zigeffect.causal.dev-session.v1",
+      schema_version: 1,
+      mode: "live",
+      session_id: this.meta.localDevSessionId ?? "live-agent-session",
+      title: this.meta.localDevSessionTitle ?? "Live Agent Session",
+      goal: this.meta.localDevSessionGoal ?? "Observe local agent development as it happens.",
+      target: this.meta.localDevSessionTarget ?? "local",
+      phase: "live",
+      status: "running",
+      agents: [],
+      checks: [],
+      commands: [],
+      turns: [],
+      artifacts: {},
+      transports: [],
+      next_actions: [],
+      guardrails: [],
+      warnings: [],
+    }, { artifactPath: "live-agent-session" });
+    return base ? applyLocalDevSessionEvents(base, this.events) : null;
+  }
+}
+
+export class LiveProjectDevelopmentBuffer {
+  private latest: ProjectDevelopmentModel | null = null;
+
+  ingest(frame: ProjectDevelopmentFrame): void {
+    const model = deriveProjectDevelopmentModel(frame);
+    if (!this.latest || model.sequence >= this.latest.sequence) this.latest = model;
+  }
+
+  model(): ProjectDevelopmentModel | null {
+    return this.latest;
+  }
+}
+
 // ── Mock source (tests / offline demo) ────────────────────────────────────────
 export function mockLiveSource(
   frames: readonly LiveFrame[],
@@ -954,10 +1066,19 @@ export function webSocketLiveSource(
     subscribe(subscriber) {
       const socket = factory(url);
       socket.addEventListener("message", (event) => {
-        const frame = parseFrameMessage(socketMessageData(event));
+        const data = socketMessageData(event);
+        const frame = parseFrameMessage(data);
         if (frame) {
           subscriber.onFrame(frame);
+          return;
         }
+        const localDevEvent = parseLocalDevSessionEventMessage(data);
+        if (localDevEvent) {
+          subscriber.onLocalDevEvent?.(localDevEvent);
+          return;
+        }
+        const projectUpdate = parseProjectDevelopmentFrameMessage(data);
+        if (projectUpdate) subscriber.onProjectUpdate?.(projectUpdate);
       });
       socket.addEventListener("error", (event) => subscriber.onError?.(event));
       socket.addEventListener("close", () => subscriber.onClose?.());
@@ -969,6 +1090,9 @@ export function webSocketLiveSource(
 // ── SolidJS reactive integration ──────────────────────────────────────────────
 export type LiveArtifactHandle = {
   artifactJson: () => string;
+  localDevSession: () => LocalDevSessionModel | null;
+  localDevSessionEventCount: () => number;
+  projectDevelopment: () => ProjectDevelopmentModel | null;
   frameCount: () => number;
   dropped: () => number;
   connected: () => boolean;
@@ -979,7 +1103,12 @@ export type LiveArtifactHandle = {
  * (component body or `createRoot`) so the subscription is cleaned up. */
 export function createLiveArtifact(source: LiveSource, meta: LiveStreamMeta = {}): LiveArtifactHandle {
   const buffer = new LiveCausalBuffer(meta);
+  const localDevBuffer = new LiveLocalDevSessionBuffer(meta);
+  const projectBuffer = new LiveProjectDevelopmentBuffer();
   const [artifactJson, setArtifactJson] = createSignal(buffer.artifactJson());
+  const [localDevSession, setLocalDevSession] = createSignal<LocalDevSessionModel | null>(localDevBuffer.session());
+  const [localDevSessionEventCount, setLocalDevSessionEventCount] = createSignal(localDevBuffer.count);
+  const [projectDevelopment, setProjectDevelopment] = createSignal<ProjectDevelopmentModel | null>(projectBuffer.model());
   const [frameCount, setFrameCount] = createSignal(0);
   const [dropped, setDropped] = createSignal(0);
   const [connected, setConnected] = createSignal(true);
@@ -991,13 +1120,22 @@ export function createLiveArtifact(source: LiveSource, meta: LiveStreamMeta = {}
       setFrameCount(buffer.size);
       setDropped(buffer.dropped);
     },
+    onLocalDevEvent: (event) => {
+      localDevBuffer.ingest(event);
+      setLocalDevSession(localDevBuffer.session());
+      setLocalDevSessionEventCount(localDevBuffer.count);
+    },
+    onProjectUpdate: (frame) => {
+      projectBuffer.ingest(frame);
+      setProjectDevelopment(projectBuffer.model());
+    },
     onError: () => setConnected(false),
     onClose: () => setConnected(false),
   });
 
   onCleanup(unsubscribe);
 
-  return { artifactJson, frameCount, dropped, connected };
+  return { artifactJson, localDevSession, localDevSessionEventCount, projectDevelopment, frameCount, dropped, connected };
 }
 
 /** Extract a live-attach websocket URL from a `?live=<url>` query string. */

@@ -1,0 +1,113 @@
+{
+  "schema": "zigeffect.project.v1",
+  "name": "zigeffect-reference-orders",
+  "version": "0.1.0",
+  "kind": "system",
+  "components": [
+    {"id":"api-service","kind":"service","path":"services/api","depends_on":["shared-domain"],"capabilities":["cli","http","sql","config","observability","agent","workbench","causal_graph","statecharts"]},
+    {"id":"worker-service","kind":"service","path":"services/worker","depends_on":["shared-domain"],"capabilities":["cli","sql","config","observability","agent","workbench","causal_graph","statecharts"]},
+    {"id":"shared-domain","kind":"package","path":"packages/shared","depends_on":[],"capabilities":["config","observability","agent","workbench"]}
+  ],
+  "commands": [
+    {"id":"build","argv":["zig","build"],"component":null},
+    {"id":"check","argv":["zig","build","test"],"component":null},
+    {"id":"check-debug","argv":["zig","build","test","-Doptimize=Debug"],"component":null},
+    {"id":"check-safe","argv":["zig","build","test","-Doptimize=ReleaseSafe"],"component":null},
+    {"id":"test","argv":["zig","build","test"],"component":null},
+    {"id":"live-conformance","argv":["bash","test/run_live_stack.sh"],"component":null},
+    {"id":"process-conformance","argv":["bash","test/run_process_stack.sh"],"component":null},
+    {"id":"fault-matrix","argv":["zig","build","fault-matrix"],"component":null},
+    {"id":"thread-sanitizer","argv":["bash","test/run_thread_sanitizer.sh"],"component":null},
+    {"id":"fuzz-smoke","argv":["bash","test/run_fuzz_smoke.sh"],"component":null},
+    {"id":"load-conformance","argv":["bash","test/run_load_conformance.sh"],"component":null},
+    {"id":"production-check","argv":["bash","test/check_release_evidence.sh"],"component":null},
+    {"id":"dev","argv":["zig","build","test"],"component":null},
+    {"id":"doctor","argv":["zig","build","test"],"component":null}
+  ],
+  "requirements": [
+    {"id":"req-local-contracts","summary":"All service and domain contracts compile and pass deterministically","component":"api-service","status":"satisfied"},
+    {"id":"req-live-stack","summary":"Real database broker and object storage preserve the order contract","component":"api-service","status":"satisfied"},
+    {"id":"req-process-stack","summary":"Independent API worker collector and infrastructure processes complete and drain","component":"api-service","status":"satisfied"},
+    {"id":"req-recovery","summary":"Provider faults schedules mutations and model differentials remain complete","component":"worker-service","status":"satisfied"},
+    {"id":"req-load","summary":"The production-shaped stack stays within its bounded release load budget","component":"api-service","status":"satisfied"}
+  ],
+  "acceptance_checks": [
+    {"id":"check-local-contracts","requirement":"req-local-contracts","command":"test","expectation":"all local Testing v2 suites pass without leaks or incomplete evidence","status":"passed"},
+    {"id":"check-live-stack","requirement":"req-live-stack","command":"live-conformance","expectation":"real Postgres Redis and MinIO agree with the deterministic model","status":"passed"},
+    {"id":"check-process-stack","requirement":"req-process-stack","command":"process-conformance","expectation":"independent service processes complete duplicate-safe order processing and drain","status":"passed"},
+    {"id":"check-recovery","requirement":"req-recovery","command":"fault-matrix","expectation":"all planned faults schedules differentials and mutations produce complete evidence","status":"passed"},
+    {"id":"check-load","requirement":"req-load","command":"load-conformance","expectation":"the configured multi-order workload completes inside the declared regression budget","status":"passed"}
+  ],
+  "test_scenarios": [
+    {"id":"local-contracts","label":"local service and domain contracts","requirement":"req-local-contracts","acceptance_check":"check-local-contracts","component":"api-service","command":"test","source_roots":["services/api","packages/shared","src","test"],"tags":["acceptance","deterministic"],"default_seed":1001,"fault_profile":"standard","required":true},
+    {"id":"live-order-stack","label":"real infrastructure order contract","requirement":"req-live-stack","acceptance_check":"check-live-stack","component":"api-service","command":"live-conformance","source_roots":["services/api","services/worker","test"],"tags":["acceptance","live","infrastructure"],"default_seed":4242,"fault_profile":"recovery","required":true},
+    {"id":"process-order-stack","label":"independent production shaped service topology","requirement":"req-process-stack","acceptance_check":"check-process-stack","component":"api-service","command":"process-conformance","source_roots":["services/api","services/worker","test"],"tags":["acceptance","live","process","tls"],"default_seed":8801,"fault_profile":"recovery","required":true},
+    {"id":"provider-fault-matrix","label":"provider fault differential schedule and mutation matrix","requirement":"req-recovery","acceptance_check":"check-recovery","component":"worker-service","command":"fault-matrix","source_roots":["services/worker","src","test"],"tags":["acceptance","fault","schedule","mutation","differential"],"default_seed":24301,"fault_profile":"exhaustive","required":true},
+    {"id":"bounded-load","label":"bounded production stack load regression","requirement":"req-load","acceptance_check":"check-load","component":"api-service","command":"load-conformance","source_roots":["services/api","services/worker","test"],"tags":["acceptance","live","load"],"default_seed":9001,"fault_profile":"none","required":true}
+  ],
+  "execution_posture": "production",
+  "capability_requirements": [
+    {"id":"http-server","component":"api-service","kind":"http_server","minimum_maturity":"production_candidate","features":["http1","graceful-drain"],"target":"native","requires_live_conformance":true},
+    {"id":"sql-database","component":"api-service","kind":"sql_database","minimum_maturity":"production_candidate","features":["safe-bindings","transactions"],"target":"native","requires_live_conformance":true},
+    {"id":"workflow-journal","component":"worker-service","kind":"workflow_journal","minimum_maturity":"production_candidate","features":["workflow-journal","checkpoints"],"target":"native","requires_live_conformance":true},
+    {"id":"lease-storage","component":"worker-service","kind":"lease_storage","minimum_maturity":"production_candidate","features":["fenced-leases","epochs"],"target":"native","requires_live_conformance":true},
+    {"id":"service-transport","component":"api-service","kind":"cluster_transport","minimum_maturity":"production_candidate","features":["real-tcp","peer-verification","request-deadlines"],"target":"native","requires_live_conformance":true},
+    {"id":"telemetry","component":"api-service","kind":"telemetry","minimum_maturity":"production_candidate","features":["logs","metrics","traces"],"target":"native","requires_live_conformance":true},
+    {"id":"broker","component":"worker-service","kind":"broker","minimum_maturity":"production_candidate","features":["redis-streams","redelivery","idempotency"],"target":"native","requires_live_conformance":true},
+    {"id":"object-storage","component":"api-service","kind":"object_storage","minimum_maturity":"production_candidate","features":["sigv4","sha256"],"target":"native","requires_live_conformance":true},
+    {"id":"config","component":"api-service","kind":"config","minimum_maturity":"production_candidate","features":["environment","schema-decode","provenance"],"target":"native","requires_live_conformance":true},
+    {"id":"clock","component":"worker-service","kind":"clock","minimum_maturity":"production_candidate","features":["wall","monotonic"],"target":"native","requires_live_conformance":true},
+    {"id":"secrets","component":"api-service","kind":"secrets","minimum_maturity":"production_candidate","features":["references","environment","zeroization"],"target":"native","requires_live_conformance":true}
+  ],
+  "capability_descriptors": [
+    {"id":"zigeffect-http.server","kind":"http_server","maturity":"production_candidate","package":"zigeffect-http","version":"0.1.0","features":["http1","chunked","middleware","graceful-drain"],"targets":["native"],"side_effects":"real","conformance":{"schema":"zigeffect.reference-stack-conformance","version":1,"receipt":"conformance/reference-stack-live.v1.json","authority":"live_external","observed_at_ms":1783777336000,"valid_until_ms":1791553336000,"content_sha256":"sha256:4d62af459d76eefea4b1af0a23aa1daef8b6945444c68211f3caa8040e72bfc9"},"limitations":["HTTP/2 is not demonstrated"]},
+    {"id":"zigeffect-postgres.libpq","kind":"sql_database","maturity":"production_candidate","package":"zigeffect-postgres-libpq","version":"0.1.0","features":["safe-bindings","transactions","pooling","migrations"],"targets":["native"],"side_effects":"real","conformance":{"schema":"zigeffect.reference-stack-conformance","version":1,"receipt":"conformance/reference-stack-live.v1.json","authority":"live_external","observed_at_ms":1783777336000,"valid_until_ms":1791553336000,"content_sha256":"sha256:4d62af459d76eefea4b1af0a23aa1daef8b6945444c68211f3caa8040e72bfc9"},"limitations":["requires system libpq"]},
+    {"id":"zigeffect-storage.postgres","kind":"workflow_journal","maturity":"production_candidate","package":"zigeffect-storage-postgres","version":"0.1.0","features":["workflow-journal","checkpoints","fenced-leases","outbox-inbox"],"targets":["native"],"side_effects":"real","conformance":{"schema":"zigeffect.reference-stack-conformance","version":1,"receipt":"conformance/reference-stack-live.v1.json","authority":"live_external","observed_at_ms":1783777336000,"valid_until_ms":1791553336000,"content_sha256":"sha256:4d62af459d76eefea4b1af0a23aa1daef8b6945444c68211f3caa8040e72bfc9"},"limitations":["database provider operates multi-region failover"]},
+    {"id":"zigeffect-storage.postgres-leases","kind":"lease_storage","maturity":"production_candidate","package":"zigeffect-storage-postgres","version":"0.1.0","features":["fenced-leases","epochs","refresh","expiry","process-restart"],"targets":["native"],"side_effects":"real","conformance":{"schema":"zigeffect.reference-stack-conformance","version":1,"receipt":"conformance/reference-stack-live.v1.json","authority":"live_external","observed_at_ms":1783777336000,"valid_until_ms":1791553336000,"content_sha256":"sha256:4d62af459d76eefea4b1af0a23aa1daef8b6945444c68211f3caa8040e72bfc9"},"limitations":["database provider operates multi-region failover"]},
+    {"id":"zigeffect-transport.tcp-tls","kind":"cluster_transport","maturity":"production_candidate","package":"zigeffect-transport","version":"0.1.0","features":["real-tcp","tls1.3","peer-verification","request-deadlines","credential-rotation","connection-pooling"],"targets":["native"],"side_effects":"real","conformance":{"schema":"zigeffect.reference-stack-conformance","version":1,"receipt":"conformance/reference-stack-live.v1.json","authority":"live_external","observed_at_ms":1783777336000,"valid_until_ms":1791553336000,"content_sha256":"sha256:4d62af459d76eefea4b1af0a23aa1daef8b6945444c68211f3caa8040e72bfc9"},"limitations":["requires system OpenSSL 3"]},
+    {"id":"zigeffect-otel.otlp-http-json","kind":"telemetry","maturity":"production_candidate","package":"zigeffect-otel","version":"0.1.0","features":["logs","metrics","traces","retry","bounded-queue"],"targets":["native"],"side_effects":"real","conformance":{"schema":"zigeffect.reference-stack-conformance","version":1,"receipt":"conformance/reference-stack-live.v1.json","authority":"live_external","observed_at_ms":1783777336000,"valid_until_ms":1791553336000,"content_sha256":"sha256:4d62af459d76eefea4b1af0a23aa1daef8b6945444c68211f3caa8040e72bfc9"},"limitations":["plain HTTP to a local authenticated collector"]},
+    {"id":"zigeffect-redis.streams-broker","kind":"broker","maturity":"production_candidate","package":"zigeffect-redis","version":"0.1.0","features":["redis-streams","publish","ack","nack","redelivery","idempotency"],"targets":["native"],"side_effects":"real","conformance":{"schema":"zigeffect.reference-stack-conformance","version":1,"receipt":"conformance/reference-stack-live.v1.json","authority":"live_external","observed_at_ms":1783777336000,"valid_until_ms":1791553336000,"content_sha256":"sha256:4d62af459d76eefea4b1af0a23aa1daef8b6945444c68211f3caa8040e72bfc9"},"limitations":["Redis Cluster and direct TLS are not demonstrated"]},
+    {"id":"zigeffect-s3.object-storage","kind":"object_storage","maturity":"production_candidate","package":"zigeffect-s3","version":"0.1.0","features":["s3-compatible","sigv4","put","get","sha256"],"targets":["native"],"side_effects":"real","conformance":{"schema":"zigeffect.reference-stack-conformance","version":1,"receipt":"conformance/reference-stack-live.v1.json","authority":"live_external","observed_at_ms":1783777336000,"valid_until_ms":1791553336000,"content_sha256":"sha256:4d62af459d76eefea4b1af0a23aa1daef8b6945444c68211f3caa8040e72bfc9"},"limitations":["path style endpoint is demonstrated"]},
+    {"id":"zigeffect-std.config.layered","kind":"config","maturity":"production_candidate","package":"zigeffect-std","version":"0.1.0","features":["environment","layering","provenance","schema-decode"],"targets":["native"],"side_effects":"real","conformance":{"schema":"zigeffect.reference-stack-conformance","version":1,"receipt":"conformance/reference-stack-live.v1.json","authority":"live_external","observed_at_ms":1783777336000,"valid_until_ms":1791553336000,"content_sha256":"sha256:4d62af459d76eefea4b1af0a23aa1daef8b6945444c68211f3caa8040e72bfc9"},"limitations":["reload is explicit"]},
+    {"id":"zigeffect-std.clock.system","kind":"clock","maturity":"production_candidate","package":"zigeffect-std","version":"0.1.0","features":["wall","monotonic","sleep"],"targets":["native"],"side_effects":"real","conformance":{"schema":"zigeffect.reference-stack-conformance","version":1,"receipt":"conformance/reference-stack-live.v1.json","authority":"live_external","observed_at_ms":1783777336000,"valid_until_ms":1791553336000,"content_sha256":"sha256:4d62af459d76eefea4b1af0a23aa1daef8b6945444c68211f3caa8040e72bfc9"},"limitations":[]},
+    {"id":"zigeffect-std.secrets.environment","kind":"secrets","maturity":"production_candidate","package":"zigeffect-std","version":"0.1.0","features":["references","environment","audit","zeroization","boundary-redaction"],"targets":["native"],"side_effects":"real","conformance":{"schema":"zigeffect.reference-stack-conformance","version":1,"receipt":"conformance/reference-stack-live.v1.json","authority":"live_external","observed_at_ms":1783777336000,"valid_until_ms":1791553336000,"content_sha256":"sha256:4d62af459d76eefea4b1af0a23aa1daef8b6945444c68211f3caa8040e72bfc9"},"limitations":["managed secret stores require a caller-owned Provider"]}
+  ],
+  "adapter_profiles": [
+    {"id":"production","target":"native","bindings":[
+      {"requirement":"http-server","adapter":"zigeffect-http.server"},
+      {"requirement":"sql-database","adapter":"zigeffect-postgres.libpq"},
+      {"requirement":"workflow-journal","adapter":"zigeffect-storage.postgres"},
+      {"requirement":"lease-storage","adapter":"zigeffect-storage.postgres-leases"},
+      {"requirement":"service-transport","adapter":"zigeffect-transport.tcp-tls"},
+      {"requirement":"telemetry","adapter":"zigeffect-otel.otlp-http-json"},
+      {"requirement":"broker","adapter":"zigeffect-redis.streams-broker"},
+      {"requirement":"object-storage","adapter":"zigeffect-s3.object-storage"},
+      {"requirement":"config","adapter":"zigeffect-std.config.layered"},
+      {"requirement":"clock","adapter":"zigeffect-std.clock.system"},
+      {"requirement":"secrets","adapter":"zigeffect-std.secrets.environment"}
+    ]}
+  ],
+  "policy":{"allow_network":true,"require_approval_for_processes":true,"persist_raw_terminal":false},
+  "safety":{"profile":"agent_safe_v1","safe_roots":["services/api","packages/shared","conformance"],"audited_roots":["services/worker","src","test"],"allowances":[
+    {"id":"allow-worker-joined-thread","path":"services/worker/src/production_wiring.zig","construct":"unmanaged_thread","fingerprint":"sha256:0b01606f361ee270430b5e2ef94cb24bd33b9ac5fc956c402d3e5f7c08fffd1f","justification":"The transport accept thread is bounded by expected requests and joined before lifecycle stop.","required_check":"process-conformance"},
+    {"id":"allow-model-clock-box","path":"src/model_clock.zig","construct":"manual_allocator_escape","fingerprint":"sha256:7b0fce725c8c14c86bcd7581f79789b28f22d7c0c248578a33d229591d969614","justification":"The fake clock has stable address ownership and is destroyed exactly once by the model clock boundary.","required_check":"fault-matrix"},
+    {"id":"allow-model-owned-copy","path":"src/model.zig","construct":"manual_allocator_escape","fingerprint":"sha256:604d1989c786e8490c3383a15982929ef2fb1b3d7ca549fe2e97e7c4d29c1e65","justification":"All model-owned byte copies have explicit rollback and deinit coverage under allocation failure.","required_check":"fault-matrix"},
+    {"id":"allow-testing-erased-state","path":"test/fault_matrix_test.zig","construct":"opaque_pointer","fingerprint":"sha256:d315a753d2509a0863995f9ecedea3f3490be6e4e665e1ec21b5302250234190","justification":"Testing v2 differential callbacks use the framework type-erased state boundary with bounded test lifetime.","required_check":"fault-matrix"},
+    {"id":"allow-testing-state-cast","path":"test/fault_matrix_test.zig","construct":"pointer_cast","fingerprint":"sha256:13b8687ae48fcc3823be6b345e702c00c51cf5a0b7a7f711ad5074c10b4313fe","justification":"The cast reverses the exact DifferentialState pointer passed to the synchronous Testing v2 callback.","required_check":"fault-matrix"}
+  ],"gates":[
+    {"kind":"source_policy","required":true,"command":null},
+    {"kind":"compile_debug","required":true,"command":"check-debug"},
+    {"kind":"compile_release_safe","required":true,"command":"check-safe"},
+    {"kind":"allocation_failures","required":true,"command":"fault-matrix"},
+    {"kind":"leak_detection","required":true,"command":"check-debug"},
+    {"kind":"causal_invariants","required":true,"command":"fault-matrix"},
+    {"kind":"schedule_exploration","required":true,"command":"fault-matrix"},
+    {"kind":"executor_equivalence","required":true,"command":"fault-matrix"},
+    {"kind":"thread_sanitizer","required":false,"command":"thread-sanitizer"},
+    {"kind":"c_undefined_behavior","required":false,"command":null},
+    {"kind":"stack_protection","required":false,"command":null},
+    {"kind":"fuzz","required":false,"command":"fuzz-smoke"}
+  ],"limits":{"max_source_bytes":8388608,"max_findings":1024,"max_diagnostics":1024,"max_schedules":10000,"max_fuzz_cases":100000,"max_artifact_bytes":16777216,"max_runtime_events":100000},"production_posture":{"retain_generation_checks":true,"retain_critical_invariants":true,"retain_causal_findings":true}},
+  "artifacts":{"sessions":".zigeffect/sessions","causal":".zigeffect/causal","receipts":".zigeffect/receipts","graph":".zigeffect/graph","statecharts":".zigeffect/statecharts"},
+  "dependencies":{"zigeffect":"../zigeffect","zigeffect_std":"../zigeffect-std"}
+}

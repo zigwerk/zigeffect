@@ -1218,3 +1218,19 @@ test "compile fail fixture captures unknown pattern arm diagnostics" {
         "zigeffect pattern arm 'score' is not a tag",
     );
 }
+
+test "compile fail fixture rejects pointer-bearing safe borrow returns" {
+    try expectCompileFailDiagnostic(
+        "invalid_safe_borrow_return.zig",
+        ".zig-cache/invalid_safe_borrow_return_compile_fail.txt",
+        "zigeffect safe borrow return contains pointer-bearing state",
+    );
+}
+
+test "compile fail fixture rejects non-sendable agent messages" {
+    try expectCompileFailDiagnostic(
+        "invalid_agent_sendable.zig",
+        ".zig-cache/invalid_agent_sendable_compile_fail.txt",
+        "zigeffect agent message is not sendable",
+    );
+}

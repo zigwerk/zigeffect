@@ -9,6 +9,7 @@ const routing = @import("routing.zig");
 const runner_storage = @import("runner_storage.zig");
 const transport = @import("transport.zig");
 const workflow_clock = @import("../workflow/clock.zig");
+const causal_mod = @import("../services/causal.zig");
 const workflow_deferred = @import("../workflow/deferred.zig");
 const workflow_engine = @import("../workflow/engine.zig");
 const journal = @import("../workflow/journal.zig");
@@ -24,6 +25,8 @@ pub const EntityEnvelope = entity.EntityEnvelope;
 pub const EntityHandlerResult = entity.EntityHandlerResult;
 pub const EntityScope = entity.EntityScope;
 pub const JournalStore = store.JournalStore;
+pub const CausalStore = causal_mod.CausalStore;
+pub const CausalJournalStore = store.CausalJournalStore;
 pub const LocalClusterRunner = local_cluster.LocalClusterRunner;
 pub const MessageCorrelationId = envelope.MessageCorrelationId;
 pub const MessageEnvelope = envelope.MessageEnvelope;
@@ -401,6 +404,8 @@ pub const ClusterWorkflowEntityServices = struct {
     journal_store: JournalStore,
     runner_storage: ?RunnerStorage = null,
     lease_fence: ?fencing.ShardLeaseFence = null,
+    causal_store: ?*CausalStore = null,
+    causal_run_id: ?u64 = null,
     workflow_id: WorkflowId,
     execution_id: ExecutionId,
     last_reply_json: []const u8 = "",
@@ -553,7 +558,13 @@ pub const ClusterWorkflowEntityHandler = struct {
             )
         else
             null;
-        const journal_store = if (guarded_store) |*guarded| guarded.asJournalStore() else services.journal_store;
+        const guarded_or_inner = if (guarded_store) |*guarded| guarded.asJournalStore() else services.journal_store;
+        var causal_journal_store = if (services.causal_store) |causal_store|
+            CausalJournalStore.init(scope.allocator, guarded_or_inner, causal_store, services.causal_run_id)
+        else
+            null;
+        defer if (causal_journal_store) |*causal| causal.deinit();
+        const journal_store = if (causal_journal_store) |*causal| causal.asJournalStore() else guarded_or_inner;
 
         var result = try applyClusterWorkflowCommand(scope.allocator, journal_store, command);
         defer result.deinit(scope.allocator);
@@ -1255,6 +1266,7 @@ fn appendJsonString(output: *std.ArrayList(u8), allocator: Allocator, value: []c
             '\n' => try output.appendSlice(allocator, "\\n"),
             '\r' => try output.appendSlice(allocator, "\\r"),
             '\t' => try output.appendSlice(allocator, "\\t"),
+            0x00...0x08, 0x0b, 0x0c, 0x0e...0x1f => try output.print(allocator, "\\u{x:0>4}", .{byte}),
             else => try output.append(allocator, byte),
         }
     }

@@ -1,3 +1,5 @@
+import { redactLocalDevText } from "./localDevRedaction";
+
 export type UnknownRecord = Record<string, unknown>;
 
 export type CausalEvent = {
@@ -12,8 +14,12 @@ export type CausalEvent = {
   parentId: string | null;
   fiberId: string | null;
   scopeId: string | null;
+  layerId: string | null;
+  boundaryId: string | null;
   traceId: string | null;
   spanId: string | null;
+  layerName: string;
+  serviceKey: string;
   artifactId: string;
   domainEntityRef: string;
   dataSubjectRef: string;
@@ -69,6 +75,7 @@ export type GraphModel = {
 export type VisualGraphLayoutMode = "dagre" | "force" | "radial";
 
 export type VisualGraphPerspective = "cause" | "topology" | "ownership" | "lineage";
+export type WorkbenchGraphPerspective = VisualGraphPerspective | "statechart" | "actors";
 
 export type VisualGraphNodeTone = "ok" | "warning" | "failure";
 
@@ -83,7 +90,9 @@ export type VisualGraphNodeGroup =
   | "retry"
   | "service"
   | "artifact"
-  | "data";
+  | "data"
+  | "state"
+  | "actor";
 
 export type VisualGraphEdgeKind =
   | "parent"
@@ -94,7 +103,10 @@ export type VisualGraphEdgeKind =
   | "reads"
   | "writes"
   | "transforms"
-  | "emits";
+  | "emits"
+  | "contains"
+  | "transition"
+  | "invokes";
 
 export type VisualGraphRefSet = {
   artifactId: string | null;
@@ -122,6 +134,7 @@ export type VisualGraphNode = {
   refs: VisualGraphRefSet;
   tone: VisualGraphNodeTone;
   priority: VisualGraphNodePriority;
+  sourceLocation?: string;
 };
 
 export type VisualGraphEdge = {
@@ -135,16 +148,16 @@ export type VisualGraphEdge = {
 };
 
 export type VisualGraphModel = {
-  perspective: VisualGraphPerspective;
+  perspective: WorkbenchGraphPerspective;
   layoutMode: VisualGraphLayoutMode;
   nodes: VisualGraphNode[];
   edges: VisualGraphEdge[];
   legend: VisualGraphLegendEntry[];
   warnings: string[];
   adapter: {
-    solid: "@dschz/solid-g6";
-    engine: "@antv/g6";
-    directEngineApi: "not-required";
+    solid: string;
+    engine: string;
+    directEngineApi: "implemented" | "not-required";
   };
 };
 
@@ -302,6 +315,10 @@ export type LocalDevAgentStatus = "idle" | "running" | "reviewing" | "blocked" |
 
 export type LocalDevCheckStatus = "pass" | "fail" | "running" | "skipped" | "unknown";
 
+export type LocalDevTurnRole = "user" | "assistant" | "tool" | "system" | "unknown";
+
+export type LocalDevTurnStatus = "started" | "completed" | "failed" | "unknown";
+
 export type LocalDevAgentModel = {
   id: string;
   label: string;
@@ -329,12 +346,35 @@ export type LocalDevCommandModel = {
   stderrSnippet: string;
 };
 
+export type LocalDevTurnModel = {
+  id: string;
+  agentId: string;
+  agentLabel: string;
+  agentKind: LocalDevAgentKind;
+  role: LocalDevTurnRole;
+  status: LocalDevTurnStatus;
+  summary: string;
+  input: string | null;
+  output: string | null;
+  artifactPath: string | null;
+};
+
 export type LocalDevArtifactModel = {
   key: string;
   label: string;
   path: string;
   kind: "json" | "jsonl" | "text" | "markdown" | "other";
   workbenchCommand: string | null;
+};
+
+export type LocalDevTransportModel = {
+  protocol: "webtransport" | "websocket" | "http" | "other";
+  status: string;
+  url: string | null;
+  sessionId: string | null;
+  frameCount: number;
+  fallback: string | null;
+  detail: string;
 };
 
 export type LocalDevSessionModel = {
@@ -351,7 +391,9 @@ export type LocalDevSessionModel = {
   agents: LocalDevAgentModel[];
   checks: LocalDevCheckModel[];
   commands: LocalDevCommandModel[];
+  turns: LocalDevTurnModel[];
   artifacts: LocalDevArtifactModel[];
+  transports: LocalDevTransportModel[];
   nextActions: string[];
   guardrails: string[];
   warnings: string[];
@@ -368,14 +410,18 @@ export type LocalDevHealthSummary = {
   failedAgents: number;
   activeAgents: number;
   commandCount: number;
+  turnCount: number;
   artifactCount: number;
+  transportCount: number;
 };
 
 export type LocalDevTimelineKind =
   | "agent"
+  | "turn"
   | "check"
   | "command"
   | "artifact"
+  | "transport"
   | "guardrail"
   | "warning"
   | "next-action";
@@ -568,7 +614,9 @@ export function deriveLocalDevSessionModel(raw: unknown, options: WorkbenchOptio
   const phase = textValue(artifact.phase, "unknown");
   const status = textValue(artifact.status, "unknown");
   const commands = localDevCommands(artifact.commands);
+  const turns = localDevTurns(artifact.turns);
   const artifacts = localDevArtifacts(artifact.artifacts);
+  const transports = localDevTransports(artifact.transports, artifact.transport);
   const explicitAgents = localDevAgents(artifact.agents);
   const explicitChecks = localDevChecks(artifact.checks);
 
@@ -586,7 +634,9 @@ export function deriveLocalDevSessionModel(raw: unknown, options: WorkbenchOptio
     agents: explicitAgents.length > 0 ? explicitAgents : fallbackLocalDevAgents(commands, status),
     checks: explicitChecks.length > 0 ? explicitChecks : commands.map(checkFromLocalDevCommand),
     commands,
+    turns,
     artifacts,
+    transports,
     nextActions: stringList(artifact.next_actions),
     guardrails: stringList(artifact.guardrails),
     warnings,
@@ -617,7 +667,9 @@ export function deriveLocalDevHealthSummary(session: LocalDevSessionModel): Loca
     failedAgents,
     activeAgents,
     commandCount: session.commands.length,
+    turnCount: session.turns.length,
     artifactCount: session.artifacts.length,
+    transportCount: session.transports.length,
   };
 }
 
@@ -646,6 +698,17 @@ export function deriveLocalDevTimeline(session: LocalDevSessionModel): LocalDevT
     });
   }
 
+  for (const turn of session.turns) {
+    items.push({
+      kind: "turn",
+      label: `${turn.agentLabel} ${turn.role}`,
+      status: turn.status,
+      detail: turn.summary || turn.output || turn.input || turn.id,
+      command: null,
+      artifactPath: turn.artifactPath,
+    });
+  }
+
   for (const command of session.commands) {
     items.push({
       kind: "command",
@@ -665,6 +728,17 @@ export function deriveLocalDevTimeline(session: LocalDevSessionModel): LocalDevT
       detail: artifact.path,
       command: artifact.workbenchCommand,
       artifactPath: artifact.path,
+    });
+  }
+
+  for (const transport of session.transports) {
+    items.push({
+      kind: "transport",
+      label: transportLabel(transport.protocol),
+      status: transport.status,
+      detail: transport.detail || transport.url || `${transport.frameCount} frames`,
+      command: null,
+      artifactPath: null,
     });
   }
 
@@ -750,17 +824,6 @@ function actionLooksLikeCommand(value: string): boolean {
 
 function looksLikeSchemaOrCliIssue(value: string): boolean {
   return /\b(schema|cli|missing_field|invalid_type|invalid_value|unknown_enum|constraint_failed|decode_failed|parse failed|--[a-z][a-z0-9-]*)\b/i.test(value);
-}
-
-function redactLocalDevText(value: string): string {
-  return value
-    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^/?#\s:@]+:[^/?#\s@]+@/gi, "$1<redacted>@")
-    .replace(/\b(authorization|proxy-authorization)\s*:\s*(bearer|basic)\s+[^;\s,]+/gi, "$1: $2 <redacted>")
-    .replace(/\bcookie\s*:\s*[^,\n\r]+/gi, "Cookie: <redacted>")
-    .replace(
-      /\b(api[_-]?key|x-api-key|token|password|secret|session(?:_id)?|sid)\b\s*[:=]\s*("[^"]*"|'[^']*'|[^;\s,}\]]+)/gi,
-      "$1=<redacted>",
-    );
 }
 
 export function queryCommandsForEvent(event: CausalEvent, artifactPath: string): QueryCommand[] {
@@ -1811,6 +1874,32 @@ function localDevCommands(value: unknown): LocalDevCommandModel[] {
     }));
 }
 
+function localDevTurns(value: unknown): LocalDevTurnModel[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(isRecord)
+    .map((turn, index) => {
+      const agentKind = localDevAgentKind(turn.agent_kind ?? turn.agentKind ?? turn.kind);
+      const agentId = textValue(turn.agent_id ?? turn.agentId, localDevAgentId(agentKind, index));
+      const role = localDevTurnRole(turn.role);
+      return {
+        id: textValue(turn.id ?? turn.turn_id ?? turn.turnId, `turn-${index + 1}`),
+        agentId,
+        agentLabel: textValue(turn.agent_label ?? turn.agentLabel, localDevAgentKindLabel(agentKind)),
+        agentKind,
+        role,
+        status: localDevTurnStatus(turn.status),
+        summary: redactLocalDevText(textValue(turn.summary ?? turn.value, "")),
+        input: nullableRedactedTextValue(turn.input ?? turn.prompt),
+        output: nullableRedactedTextValue(turn.output ?? turn.response),
+        artifactPath: nullableRedactedTextValue(turn.artifact_path ?? turn.artifactPath),
+      };
+    });
+}
+
 function localDevCommandText(command: UnknownRecord): string {
   const explicit = textValue(command.command, "");
   if (explicit.length > 0) {
@@ -1847,6 +1936,45 @@ function localDevArtifacts(value: unknown): LocalDevArtifactModel[] {
       } satisfies LocalDevArtifactModel;
     })
     .filter((artifact): artifact is LocalDevArtifactModel => artifact !== null);
+}
+
+function localDevTransports(value: unknown, legacyValue: unknown): LocalDevTransportModel[] {
+  const records = Array.isArray(value)
+    ? value.filter(isRecord)
+    : isRecord(legacyValue)
+      ? [legacyValue]
+      : [];
+
+  return records.map((transport) => ({
+    protocol: localDevTransportProtocol(transport.protocol),
+    status: textValue(transport.status, "unknown"),
+    url: nullableRedactedTextValue(transport.url),
+    sessionId: nullableTextValue(transport.session_id),
+    frameCount: numericValue(transport.frame_count) ?? 0,
+    fallback: nullableTextValue(transport.fallback),
+    detail: redactLocalDevText(textValue(transport.detail, "")),
+  }));
+}
+
+function localDevTransportProtocol(value: unknown): LocalDevTransportModel["protocol"] {
+  const protocol = textValue(value, "other");
+  if (protocol === "webtransport" || protocol === "websocket" || protocol === "http") {
+    return protocol;
+  }
+  return "other";
+}
+
+function transportLabel(protocol: LocalDevTransportModel["protocol"]): string {
+  switch (protocol) {
+    case "webtransport":
+      return "WebTransport";
+    case "websocket":
+      return "WebSocket";
+    case "http":
+      return "HTTP";
+    case "other":
+      return "Transport";
+  }
 }
 
 function fallbackLocalDevAgents(commands: LocalDevCommandModel[], sessionStatus: string): LocalDevAgentModel[] {
@@ -1897,6 +2025,28 @@ function localDevAgentStatus(value: unknown): LocalDevAgentStatus {
     status === "failed"
   ) {
     return status;
+  }
+  return "unknown";
+}
+
+function localDevTurnRole(value: unknown): LocalDevTurnRole {
+  const role = textValue(value, "");
+  if (role === "user" || role === "assistant" || role === "tool" || role === "system") {
+    return role;
+  }
+  return "unknown";
+}
+
+function localDevTurnStatus(value: unknown): LocalDevTurnStatus {
+  const status = textValue(value, "");
+  if (status === "started" || status === "running") {
+    return "started";
+  }
+  if (status === "completed" || status === "complete" || status === "done" || status === "success") {
+    return "completed";
+  }
+  if (status === "failed" || status === "fail" || status === "error") {
+    return "failed";
   }
   return "unknown";
 }
@@ -2073,8 +2223,12 @@ function normalizeEvent(raw: UnknownRecord, index: number): CausalEvent {
     parentId: nullableIdValue(raw.parent_id),
     fiberId: nullableIdValue(raw.fiber_id),
     scopeId: nullableIdValue(raw.scope_id),
+    layerId: nullableIdValue(raw.layer_id),
+    boundaryId: nullableIdValue(raw.boundary_id),
     traceId: nullableIdValue(raw.trace_id),
     spanId: nullableIdValue(raw.span_id),
+    layerName: textValue(raw.layer_name, ""),
+    serviceKey: textValue(raw.service_key, ""),
     artifactId: textValue(raw.artifact_id, ""),
     domainEntityRef: textValue(raw.domain_entity_ref, ""),
     dataSubjectRef: textValue(raw.data_subject_ref, ""),
@@ -2103,6 +2257,10 @@ function searchableEventText(event: CausalEvent): string {
     event.status,
     event.label,
     event.typeName,
+    // Layer + service identity: lets the rail's layer chips drive the text
+    // filter (drill down service → layer).
+    event.layerName,
+    event.serviceKey,
     event.redactedDetail,
     event.runId,
     event.parentId,
@@ -2138,6 +2296,11 @@ function textValue(value: unknown, fallback: string): string {
 function nullableTextValue(value: unknown): string | null {
   const text = textValue(value, "");
   return text.length > 0 ? text : null;
+}
+
+function nullableRedactedTextValue(value: unknown): string | null {
+  const text = nullableTextValue(value);
+  return text === null ? null : redactLocalDevText(text);
 }
 
 function booleanValue(value: unknown): boolean | null {

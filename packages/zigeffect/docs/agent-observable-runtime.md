@@ -966,6 +966,18 @@ dependency; a future wrapper can adapt `nendb.EmbeddedDB.addNode`, `addEdge`,
 and `flush` once the upstream package can be pinned cleanly. Its focused gate is
 `zig build causal-nendb-storage-backend`.
 
+The application-facing concrete durable implementation is
+`zstd.CausalGraph.LocalDatabase` in `zigeffect-std`. It implements the injected
+writer as an append-only JSONL graph WAL, remaps process-local event ids to
+restart-safe durable ids, rebuilds bounded indexes on open, stores each node and
+optional parent edge in one committed row, and exposes bounded read snapshots
+for summary, event, and child queries. Generated executable scaffolds attach it
+before the first fact and propagate `CausalNendbStorageBackendState.lastFailure`
+after flushing, while the deterministic store still retains its in-memory fact
+if an adapter fails. The installed CLI resolves the database only from
+`zigeffect.project.json`; system graph queries also resolve a validated
+component id. No upstream NenDB package is installed by this implementation.
+
 The same adapter exposes `CausalNendbRetentionPolicy` and
 `CausalNendbRetentionReport` for record-only retention evaluation. The report
 uses schema `zigeffect.causal.nendb-retention-report.v1` and records retained
@@ -1281,8 +1293,8 @@ Candidate adapters:
 - JSON Lines artifact adapter for tools and CI;
 - DOT adapter for visualization;
 - OpenTelemetry adapter for production span ecosystems;
-- NenDB embedded graph adapter for local/agent graph queries and storage-writer
-  contracts;
+- the shipped local graph WAL for application scaffolds and an optional future
+  upstream NenDB adapter behind the existing storage-writer contract;
 - bounded async backend event streams.
 
 ### Phase 8: Controlled Remediation

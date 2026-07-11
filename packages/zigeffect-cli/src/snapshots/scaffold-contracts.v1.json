@@ -1,0 +1,14 @@
+{
+  "schema": "zigeffect.scaffold-contract-snapshot.v1",
+  "schema_version": 1,
+  "template_schema": "zigeffect.scaffold-template.v1",
+  "template_version": 6,
+  "project": "snapshot-project",
+  "cases": [
+    { "kind": "application", "files": 20, "sha256": "sha256:e05ac6673585b5b981924d840ec6131ec336c73d95a65af4e126da2a0aad44b5" },
+    { "kind": "service", "files": 20, "sha256": "sha256:e76bbca9a9aaf3617361397fc2c3b09a831d19c0ee0f8b2bd373f1784ccd200f" },
+    { "kind": "library", "files": 12, "sha256": "sha256:d7f1c419d52b9c713ded1b144ff1bd8833c29525b5ea7f753f15107d5a6ae607" },
+    { "kind": "package", "files": 13, "sha256": "sha256:9bc2ae4a4ca172486218aa4cdee341f61b558bd1cc94ba244d1e17580009d7d5" },
+    { "kind": "system", "files": 43, "sha256": "sha256:54178197c5569ab463f6a91b9b4d0b1786c253c2119dc04eebdeb371e65b6e60" }
+  ]
+}

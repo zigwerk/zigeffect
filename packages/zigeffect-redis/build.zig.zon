@@ -1,0 +1,1 @@
+.{ .name = .zigeffect_redis, .version = "0.1.0", .minimum_zig_version = "0.16.0", .fingerprint = 0x238a31c5137b0072, .dependencies = .{ .zigeffect_std = .{ .path = "../zigeffect-std" } }, .paths = .{ "build.zig", "build.zig.zon", "README.md", "conformance", "src", "tests" } }

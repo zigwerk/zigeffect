@@ -1,0 +1,11 @@
+{
+  "schema": "zigeffect.reference.alert-policy.v1",
+  "alerts": [
+    {"id":"api-not-ready","signal":"lifecycle_ready","condition":"value == 0 for 60s","severity":"critical","runbook":"docs/operations.md#api-or-worker-not-ready"},
+    {"id":"order-failure-rate","signal":"http_orders_failures","condition":"rate_5m > 0.01","severity":"critical","runbook":"docs/operations.md#order-processing-failures"},
+    {"id":"outbox-backlog","signal":"reference_outbox_pending","condition":"value > 100 for 300s","severity":"warning","runbook":"docs/operations.md#outbox-or-broker-backlog"},
+    {"id":"lease-loss","signal":"worker_lease_loss_total","condition":"increase_5m > 0","severity":"critical","runbook":"docs/operations.md#lease-loss"},
+    {"id":"telemetry-backpressure","signal":"otel_queue_utilization","condition":"value > 0.8 for 300s","severity":"warning","runbook":"docs/operations.md#telemetry-outage"},
+    {"id":"evidence-incomplete","signal":"testing_receipt_complete","condition":"value == 0","severity":"critical","runbook":"docs/operations.md#incomplete-release-evidence"}
+  ]
+}

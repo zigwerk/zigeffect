@@ -316,6 +316,28 @@ test "workflow event json includes schema metadata and optional ids" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"idempotency_key\":\"event-1\"") != null);
 }
 
+test "workflow event json escapes control bytes" {
+    const event = fx.workflow.WorkflowEvent{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 7,
+        .execution_id = 8,
+        .name = "ansi \x1b[31mred\x1b[0m workflow",
+        .status = "running",
+        .idempotency_key = "escape-start",
+    };
+
+    const json = try fx.workflow.formatWorkflowEventJson(std.testing.allocator, event);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("ansi \x1b[31mred\x1b[0m workflow", parsed.value.object.get("name").?.string);
+}
+
 test "workflow event text is readable for agents and CLIs" {
     const event = fx.workflow.WorkflowEvent{
         .sequence = 2,
@@ -637,6 +659,45 @@ test "workflow lifecycle suspend and resume are durable and idempotent" {
     try std.testing.expectEqualStrings("operator", events.events[1].redacted_detail);
     try std.testing.expectEqual(fx.workflow.WorkflowEventKind.workflow_resumed, events.events[2].kind);
     try std.testing.expectEqualStrings("operator", events.events[2].redacted_detail);
+}
+
+test "workflow lifecycle is governed through the shared statechart control plane" {
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 71,
+        .execution_id = 81,
+        .name = "controlled-workflow",
+        .status = "running",
+        .idempotency_key = "controlled-start",
+    } });
+
+    const Event = enum { unused };
+    const Plane = fx.statechart.ControlPlane(Event);
+    var lifecycle = fx.workflow.WorkflowLifecycle.init(std.testing.allocator, journal, 71, 81);
+    var adapter = fx.workflow.WorkflowControlAdapter(Event).init(&lifecycle, 4242, 9);
+    var plane = Plane.init(adapter.adapter());
+    const Allow = struct {
+        fn decide(_: *anyopaque, _: Plane.Request) fx.statechart.ControlDecision {
+            return .allow;
+        }
+    };
+    var policy_context: u8 = 0;
+    plane.policy = .{ .context = &policy_context, .decide_fn = Allow.decide };
+    const receipt = try plane.execute(.{
+        .request_id = "suspend-workflow-71",
+        .machine_id = "agent.controlled-workflow",
+        .instance_id = 71,
+        .operation = .@"suspend",
+        .expected_definition_fingerprint = 4242,
+        .expected_fence_epoch = 9,
+        .reason = "human operator investigation",
+    });
+    try std.testing.expectEqual(fx.statechart.ControlStatus.applied, receipt.status);
+    try std.testing.expectEqual(fx.workflow.WorkflowStatus.suspended, try lifecycle.inspectStatus());
 }
 
 test "workflow lifecycle interrupt is terminal and idempotent after restart" {
@@ -998,6 +1059,49 @@ test "workflow inspector formats event inspection reports" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"events\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"step_failed\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"redacted_detail\":\"exit.cause.failure:Boom\"") != null);
+}
+
+test "workflow inspector json escapes control bytes" {
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{
+            .sequence = 1,
+            .kind = .workflow_started,
+            .workflow_id = 7,
+            .execution_id = 8,
+            .name = "ansi \x1b[31mred\x1b[0m workflow",
+            .status = "running",
+            .idempotency_key = "escape-inspect",
+        },
+    };
+    var report = try fx.workflow.inspectExecution(std.testing.allocator, &events, null);
+    defer report.deinit();
+
+    const json = try fx.workflow.formatInspectReportJson(std.testing.allocator, &report, &events);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+}
+
+test "workflow checkpoint json escapes control bytes" {
+    const events = [_]fx.workflow.WorkflowEvent{
+        .{ .sequence = 1, .kind = .workflow_started, .workflow_id = 7, .execution_id = 8, .idempotency_key = "start" },
+        .{ .sequence = 2, .kind = .activity_scheduled, .workflow_id = 7, .execution_id = 8, .activity_id = 10, .attempt = 1, .name = "charge \x1b[31mcard\x1b[0m" },
+    };
+    var state = try fx.workflow.WorkflowReplayState.fold(std.testing.allocator, &events);
+    defer state.deinit();
+
+    const json = try fx.workflow.formatWorkflowCheckpointJson(std.testing.allocator, &state);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\\u001b") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, json, 0x1b) == null);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
 }
 
 test "workflow causal mapping links journal events to causal ids" {
@@ -2169,6 +2273,48 @@ test "workflow engine rejects duplicate executions and missing providers" {
     }
 }
 
+test "workflow engine starts child workflows durably and idempotently" {
+    const Payload = struct { request_id: u64 };
+    const Helpers = struct {
+        fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+            return std.fmt.allocPrint(allocator, "request:{d}", .{payload.request_id});
+        }
+    };
+    const ParentWorkflow = fx.workflow
+        .Workflow("parent", Payload, void, error{Failed}, fx.TestServices)
+        .withIdempotencyKey(Helpers.key);
+    const ChildWorkflow = fx.workflow
+        .Workflow("child", Payload, void, error{Failed}, fx.TestServices)
+        .withIdempotencyKey(Helpers.key);
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+    var engine = fx.workflow.WorkflowEngine.init(std.testing.allocator, journal);
+    defer engine.deinit();
+
+    try engine.register(ParentWorkflow);
+    try engine.register(ChildWorkflow);
+    const parent = try engine.execute(ParentWorkflow, .{ .request_id = 1 });
+    const child = try engine.executeChild(parent.workflow_id, parent.execution_id, ChildWorkflow, .{ .request_id = 2 });
+    const duplicate = try engine.executeChild(parent.workflow_id, parent.execution_id, ChildWorkflow, .{ .request_id = 2 });
+
+    try std.testing.expectEqual(child.execution_id, duplicate.execution_id);
+    try std.testing.expectEqual(@as(?u64, parent.workflow_id), child.parent_workflow_id);
+    try std.testing.expectEqual(@as(?u64, parent.execution_id), child.parent_execution_id);
+    try std.testing.expectError(
+        error.ParentWorkflowNotFound,
+        engine.executeChild(parent.workflow_id + 1, parent.execution_id, ChildWorkflow, .{ .request_id = 3 }),
+    );
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 2), events.events.len);
+    try std.testing.expectEqual(@as(?u64, parent.started_sequence), events.events[1].parent_sequence);
+    try std.testing.expectEqual(@as(?u64, parent.workflow_id), events.events[1].parent_workflow_id);
+    try std.testing.expectEqual(@as(?u64, parent.execution_id), events.events[1].parent_execution_id);
+}
+
 test "workflow engine stores backend capabilities and checks requirements" {
     var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
     defer journal_memory.deinit();
@@ -2266,6 +2412,134 @@ test "workflow context replays recorded u64 step without rerunning function" {
     try std.testing.expectEqual(fx.workflow.WorkflowEventKind.step_completed, events.events[2].kind);
     try std.testing.expectEqualStrings("compute", events.events[2].name);
     try std.testing.expectEqualStrings("42", events.events[2].redacted_detail);
+}
+
+test "workflow context mirrors successful journal appends into attached causal store" {
+    const Step = struct {
+        fn run() !u64 {
+            return 42;
+        }
+    };
+
+    var causal = fx.CausalStore.init(std.testing.allocator);
+    defer causal.deinit();
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+
+    var context = try fx.workflow.WorkflowContext.init(std.testing.allocator, journal, .{
+        .workflow_id = 700,
+        .execution_id = 800,
+        .causal_store = &causal,
+        .causal_run_id = 99,
+    });
+    defer context.deinit();
+
+    const value = try context.stepU64("live-step", Step.run);
+    try std.testing.expectEqual(@as(u64, 42), value);
+
+    var snapshot = try causal.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 2), snapshot.events.len);
+    try std.testing.expectEqual(fx.CausalEventKind.workflow_event_recorded, snapshot.events[0].kind);
+    try std.testing.expectEqual(@as(?u64, 99), snapshot.events[0].run_id);
+    try std.testing.expectEqual(@as(?u64, 800), snapshot.events[0].scope_id);
+    try std.testing.expectEqual(@as(?u64, 700), snapshot.events[0].trace_id);
+    try std.testing.expectEqualStrings("workflow.step_started", snapshot.events[0].type_name);
+    try std.testing.expectEqualStrings("live-step", snapshot.events[0].label);
+    try std.testing.expectEqualStrings("workflow.step_completed", snapshot.events[1].type_name);
+    try std.testing.expectEqualStrings("42", snapshot.events[1].redacted_detail);
+}
+
+test "causal journal store records only successful workflow appends" {
+    var causal = fx.CausalStore.init(std.testing.allocator);
+    defer causal.deinit();
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    var causal_journal = fx.workflow.CausalJournalStore.init(
+        std.testing.allocator,
+        journal_memory.asJournalStore(),
+        &causal,
+        11,
+    );
+    defer causal_journal.deinit();
+    const journal = causal_journal.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 700,
+        .execution_id = 800,
+        .name = "dedupe-workflow",
+        .status = "running",
+        .idempotency_key = "dedupe-start",
+    } });
+
+    try std.testing.expectError(error.DuplicateEvent, journal.append(.{ .event = .{
+        .sequence = 2,
+        .kind = .workflow_started,
+        .workflow_id = 700,
+        .execution_id = 800,
+        .name = "dedupe-workflow",
+        .status = "running",
+        .idempotency_key = "dedupe-start",
+    } }));
+
+    var snapshot = try causal.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 1), snapshot.events.len);
+    try std.testing.expectEqual(fx.CausalEventKind.workflow_event_recorded, snapshot.events[0].kind);
+    try std.testing.expectEqual(@as(?u64, 11), snapshot.events[0].run_id);
+    try std.testing.expectEqualStrings("workflow.workflow_started", snapshot.events[0].type_name);
+}
+
+test "causal journal store maps workflow parent sequences to causal event ids" {
+    var causal = fx.CausalStore.init(std.testing.allocator);
+    defer causal.deinit();
+    _ = try causal.record(.{
+        .kind = .run_started,
+        .label = "pre-existing engine event",
+    });
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    var causal_journal = fx.workflow.CausalJournalStore.init(
+        std.testing.allocator,
+        journal_memory.asJournalStore(),
+        &causal,
+        11,
+    );
+    defer causal_journal.deinit();
+    const journal = causal_journal.asJournalStore();
+
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 700,
+        .execution_id = 800,
+        .name = "causal-parent-map",
+        .status = "running",
+        .idempotency_key = "parent-start",
+    } });
+    _ = try journal.append(.{ .event = .{
+        .sequence = 2,
+        .parent_sequence = 1,
+        .kind = .step_completed,
+        .workflow_id = 700,
+        .execution_id = 800,
+        .name = "causal-child",
+        .status = "completed",
+        .redacted_detail = "ok",
+        .idempotency_key = "parent-child",
+    } });
+
+    var snapshot = try causal.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 3), snapshot.events.len);
+    try std.testing.expectEqualStrings("pre-existing engine event", snapshot.events[0].label);
+    try std.testing.expectEqualStrings("workflow.workflow_started", snapshot.events[1].type_name);
+    try std.testing.expectEqualStrings("workflow.step_completed", snapshot.events[2].type_name);
+    try std.testing.expectEqual(@as(?u64, snapshot.events[1].id), snapshot.events[2].parent_id);
 }
 
 test "workflow context records failed u64 steps with typed error names" {

@@ -35,6 +35,31 @@ test("causalLineToFrame maps an engine line onto the LiveFrame wire shape", () =
   expect(isLiveFrame(frame)).toBe(true);
 });
 
+test("service + layer identity survives the NDJSON → frame mapping", () => {
+  const frame = causalLineToFrame(
+    engineLine({ service_key: "payments-api", layer_id: 4, layer_name: "persistence" }),
+    1,
+  );
+  expect(frame).not.toBeNull();
+  expect(frame!.service_key).toBe("payments-api");
+  expect(frame!.layer_id).toBe(4);
+  expect(frame!.layer_name).toBe("persistence");
+  // absent identity degrades to empty/null, never undefined-breaks the wire guard.
+  const bare = causalLineToFrame(engineLine({}), 2);
+  expect(bare!.service_key).toBe("");
+  expect(bare!.layer_id).toBeNull();
+  expect(bare!.layer_name).toBe("");
+});
+
+test("service_key / layer_name are redacted like other free text", () => {
+  const frame = causalLineToFrame(
+    engineLine({ service_key: "svc token=sentinel-secret-key-123", layer_name: "api_key=sentinel-layer-key-123" }),
+    1,
+  );
+  expect(frame!.service_key).not.toContain("sentinel-secret-key-123");
+  expect(frame!.layer_name).not.toContain("sentinel-layer-key-123");
+});
+
 test("lane derivation is most-specific-first: fiber → scope → run", () => {
   expect(causalLineToFrame(engineLine({ fiber_id: 5, scope_id: 2, run_id: 1 }), 1)!.lane).toBe("fiber:5");
   expect(causalLineToFrame(engineLine({ fiber_id: null, scope_id: 2, run_id: 1 }), 1)!.lane).toBe("scope:2");
@@ -88,4 +113,55 @@ test("non-integer / out-of-range ids are rejected, not silently corrupted", () =
   const frame = causalLineToFrame(JSON.stringify({ id: 1, kind: "x", parent_id: 2.5 }), 1);
   expect(frame).not.toBeNull();
   expect(frame!.parent_id).toBeNull();
+});
+
+test("structural ids + type_name survive the mapping, so live analysis matches artifact analysis", () => {
+  const frame = causalLineToFrame(
+    JSON.stringify({
+      id: 4,
+      kind: "resource_acquired",
+      status: "success",
+      run_id: 1,
+      fiber_id: 7,
+      scope_id: 3,
+      resource_id: 9,
+      type_name: "DbPool",
+    }),
+    1,
+  );
+  expect(frame).not.toBeNull();
+  expect(frame!.run_id).toBe(1);
+  expect(frame!.fiber_id).toBe(7);
+  expect(frame!.scope_id).toBe(3);
+  expect(frame!.resource_id).toBe(9);
+  expect(frame!.type_name).toBe("DbPool");
+  expect(isLiveFrame(frame)).toBe(true);
+});
+
+test("boundary_id survives the mapping (cross-service correlation)", () => {
+  const frame = causalLineToFrame(JSON.stringify({ id: 5, kind: "effect_started", boundary_id: 7 }), 1);
+  expect(frame!.boundary_id).toBe(7);
+  const none = causalLineToFrame(JSON.stringify({ id: 6, kind: "run_started" }), 2);
+  expect(none!.boundary_id).toBeNull();
+});
+
+test("application semantic references survive redacted live mapping", () => {
+  const frame = causalLineToFrame(engineLine({
+    id: 12,
+    kind: "span_recorded",
+    cause_event_id: 11,
+    artifact_id: "receipt-12",
+    domain_entity_ref: "invoice-42",
+    data_subject_ref: "request-body",
+    schema_ref: "Invoice.v1",
+    redacted_detail: "token=sentinel-secret-for-tests",
+  }), 3);
+  expect(frame).toMatchObject({
+    cause_event_id: 11,
+    artifact_id: "receipt-12",
+    domain_entity_ref: "invoice-42",
+    data_subject_ref: "request-body",
+    schema_ref: "Invoice.v1",
+  });
+  expect(frame!.redacted_detail).not.toContain("sentinel-secret");
 });

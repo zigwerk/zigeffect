@@ -246,9 +246,19 @@ pub const LoopbackSocketClusterTransportOptions = transport.LoopbackSocketCluste
 pub const LoopbackSocketClusterTransport = transport.LoopbackSocketClusterTransport;
 pub const RemoteSocketClusterTransportOptions = transport.RemoteSocketClusterTransportOptions;
 pub const RemoteSocketClusterTransport = transport.RemoteSocketClusterTransport;
+pub const LoopbackRemoteSocketCompatibilityTransportOptions = transport.LoopbackRemoteSocketCompatibilityTransportOptions;
+pub const LoopbackRemoteSocketCompatibilityTransport = transport.LoopbackRemoteSocketCompatibilityTransport;
+pub const EncodedInProcessHttpClusterTransportOptions = transport.EncodedInProcessHttpClusterTransportOptions;
+pub const EncodedInProcessHttpClusterTransport = transport.EncodedInProcessHttpClusterTransport;
+pub const EncodedInProcessSocketClusterTransportOptions = transport.EncodedInProcessSocketClusterTransportOptions;
+pub const EncodedInProcessSocketClusterTransport = transport.EncodedInProcessSocketClusterTransport;
+/// Deprecated compatibility alias; use `EncodedInProcessHttpClusterTransportOptions`.
 pub const ProductionHttpClusterTransportOptions = transport.ProductionHttpClusterTransportOptions;
+/// Deprecated compatibility alias; use `EncodedInProcessHttpClusterTransport`.
 pub const ProductionHttpClusterTransport = transport.ProductionHttpClusterTransport;
+/// Deprecated compatibility alias; use `EncodedInProcessSocketClusterTransportOptions`.
 pub const ProductionSocketClusterTransportOptions = transport.ProductionSocketClusterTransportOptions;
+/// Deprecated compatibility alias; use `EncodedInProcessSocketClusterTransport`.
 pub const ProductionSocketClusterTransport = transport.ProductionSocketClusterTransport;
 pub const formatClusterTransportRequestJson = transport.formatClusterTransportRequestJson;
 pub const parseClusterTransportRequestJson = transport.parseClusterTransportRequestJson;
