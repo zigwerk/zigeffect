@@ -1,5 +1,6 @@
 const std = @import("std");
 const Secrets = @import("../secrets/root.zig");
+const Capability = @import("../capability/root.zig");
 
 pub const handoff_schema = "zigeffect.agent-handoff.v1";
 pub const status_schema = "zigeffect.project-status.v1";
@@ -55,10 +56,13 @@ pub const ProjectStatus = struct {
     tasks: []const Task = &.{},
     evidence: []const Evidence = &.{},
     next_actions: []const NextAction = &.{},
+    adapter_profile: []const u8 = "",
+    adapters: []const Capability.AdapterEvidence = &.{},
 
     pub fn validate(self: ProjectStatus) ProtocolError!void {
         if (!std.mem.eql(u8, self.schema, status_schema)) return error.UnsupportedSchema;
         try validateCommon(self.project, self.tasks, self.evidence, self.next_actions);
+        try validateCapabilityEvidence(self.adapter_profile, self.adapters);
         if (self.requirements_open > self.requirements_total or self.checks_pending + self.checks_failed > self.checks_total) {
             return error.InvalidProtocol;
         }
@@ -80,6 +84,8 @@ pub const AgentHandoff = struct {
     evidence: []const Evidence = &.{},
     next_actions: []const NextAction = &.{},
     blockers: []const []const u8 = &.{},
+    adapter_profile: []const u8 = "",
+    adapters: []const Capability.AdapterEvidence = &.{},
 
     pub fn validate(self: AgentHandoff) ProtocolError!void {
         if (!std.mem.eql(u8, self.schema, handoff_schema)) return error.UnsupportedSchema;
@@ -88,6 +94,7 @@ pub const AgentHandoff = struct {
         try validateText(self.summary);
         for (self.blockers) |blocker| try validateText(blocker);
         try validateCommon(self.project, self.tasks, self.evidence, self.next_actions);
+        try validateCapabilityEvidence(self.adapter_profile, self.adapters);
     }
 
     pub fn jsonAlloc(self: AgentHandoff, allocator: std.mem.Allocator) ![]u8 {
@@ -134,6 +141,19 @@ fn validateCommon(project: []const u8, tasks: []const Task, evidence: []const Ev
     }
 }
 
+fn validateCapabilityEvidence(profile: []const u8, adapters: []const Capability.AdapterEvidence) ProtocolError!void {
+    if (profile.len == 0 and adapters.len == 0) return;
+    if (profile.len == 0 or adapters.len > max_protocol_items) return error.InvalidProtocol;
+    try validateText(profile);
+    for (adapters, 0..) |adapter, index| {
+        adapter.validate() catch |err| return if (err == error.SecretDetected) error.SecretDetected else error.InvalidProtocol;
+        if (!std.mem.eql(u8, adapter.profile_id, profile)) return error.InvalidProtocol;
+        for (adapters[0..index]) |previous| {
+            if (std.mem.eql(u8, previous.requirement_id, adapter.requirement_id)) return error.DuplicateId;
+        }
+    }
+}
+
 fn validateText(value: []const u8) ProtocolError!void {
     if (value.len == 0) return error.InvalidProtocol;
     if (Secrets.containsSecret(value)) return error.SecretDetected;
@@ -145,6 +165,14 @@ test "agent handoff round trips provider-neutral tasks evidence and actions" {
         .provider = "codex",
         .session = "session-42",
         .summary = "implemented typed invoice validation",
+        .adapter_profile = "local",
+        .adapters = &.{Capability.AdapterEvidence.fromDescriptor(
+            "local",
+            "public-http",
+            "aarch64-macos",
+            Capability.Builtin.memory_http_server,
+            .insufficient_maturity,
+        )},
         .tasks = &.{.{ .id = "task-invoice", .requirement = "req-invoice", .component = "api", .summary = "validate invoice", .status = .completed }},
         .evidence = &.{.{ .id = "evidence-test", .requirement = "req-invoice", .acceptance_check = "check-invoice", .component = "api", .kind = .test_result, .artifact = ".zigeffect/receipts/check.json", .causal_event_ids = &.{ 41, 42 }, .summary = "tests passed" }},
         .next_actions = &.{.{ .id = "next-review", .requirement = "req-invoice", .component = "api", .summary = "review migration", .command = "check" }},
@@ -155,6 +183,8 @@ test "agent handoff round trips provider-neutral tasks evidence and actions" {
     defer parsed.deinit();
     try std.testing.expectEqualStrings("codex", parsed.value.provider);
     try std.testing.expectEqual(@as(usize, 2), parsed.value.evidence[0].causal_event_ids.len);
+    try std.testing.expectEqualStrings("local", parsed.value.adapter_profile);
+    try std.testing.expectEqualStrings("zigeffect-std.memory-http", parsed.value.adapters[0].adapter_id);
 }
 
 test "agent protocol rejects unknown versions duplicates limits and secrets" {

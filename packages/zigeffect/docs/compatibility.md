@@ -6,9 +6,9 @@ not require a hosted service.
 | Surface | Supported contract |
 |---|---|
 | Zig | `>= 0.16.0`, `< 0.17.0` |
-| zigeffect CLI | `0.3.0` |
+| zigeffect CLI | `0.5.0` |
 | project manifest | `zigeffect.project.v1` |
-| scaffold template | `zigeffect.scaffold-template.v1`, version `2` |
+| scaffold template | `zigeffect.scaffold-template.v1`, version `5` |
 | core API | `0.1.x` |
 | zigeffect-std API | `0.1.x` |
 | local causal graph | `zigeffect.causal.local-graph-record.v1` under the manifest-owned graph path |
@@ -61,6 +61,11 @@ zigeffect graph status --root ./system --component api-service --json
 
 This local adapter uses the core's NenDB-compatible writer contract. It is not
 a compatibility claim for the upstream NenDB package.
+
+Template version `5` makes Testing v2 the default compiler-test harness. Every
+generated test artifact obtains `zigeffect_test_runner` transitively from
+`zigeffect_std` and writes a complete suite receipt under
+`.zigeffect/tests/suites/`; no extra application dependency is required.
 
 ## Install
 

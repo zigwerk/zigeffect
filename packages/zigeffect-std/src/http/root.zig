@@ -2,8 +2,11 @@ const std = @import("std");
 const Json = @import("../json/root.zig");
 const Schema = @import("../schema/root.zig");
 const Secrets = @import("../secrets/root.zig");
+const Capability = @import("../capability/root.zig");
+const External = @import("../external/root.zig");
 const StdService = @import("../service/root.zig");
 const fx = @import("zigeffect");
+const Stream = @import("../stream/root.zig");
 
 pub const Header = struct {
     name: []const u8,
@@ -16,6 +19,9 @@ pub const Request = struct {
     headers: []const Header = &.{},
     body: []const u8 = "",
 };
+
+pub fn requestBodyStreamAlloc(allocator: std.mem.Allocator, request: Request) !fx.EffectStream(u8, anyerror, Stream.EmptyEnv) { return Stream.ownedBytesAlloc(allocator, request.body); }
+pub fn responseBodyStreamAlloc(allocator: std.mem.Allocator, response: Response) !fx.EffectStream(u8, anyerror, Stream.EmptyEnv) { return Stream.ownedBytesAlloc(allocator, response.body); }
 
 pub const Response = struct {
     status: u16,
@@ -43,6 +49,8 @@ pub const RouteResult = struct {
 };
 
 pub const FakeClient = struct {
+    pub const capability = Capability.Builtin.fake_http_client;
+
     response: Response,
 
     pub fn init(response: Response) FakeClient {
@@ -57,6 +65,13 @@ pub const FakeClient = struct {
     pub fn sendAlloc(self: *FakeClient, allocator: std.mem.Allocator, request: Request) std.mem.Allocator.Error!Response {
         _ = request;
         return cloneResponseAlloc(allocator, self.response);
+    }
+
+    pub fn sendClassifiedAlloc(self: *FakeClient, allocator: std.mem.Allocator, request: Request) External.Result(Response) {
+        const response = self.sendAlloc(allocator, request) catch |err| {
+            return .{ .failure = External.Failure.fromError("fake-http", "send", err) };
+        };
+        return .{ .success = response };
     }
 };
 
@@ -165,6 +180,8 @@ pub fn router(routes: anytype) Router(@TypeOf(routes)) {
 }
 
 pub const LocalClient = struct {
+    pub const capability = Capability.Builtin.local_http_client;
+
     client: std.http.Client,
     response_body_limit: usize = 1024 * 1024,
 
@@ -213,9 +230,18 @@ pub const LocalClient = struct {
             .body = body,
         };
     }
+
+    pub fn sendClassifiedAlloc(self: *LocalClient, allocator: std.mem.Allocator, request: Request) External.Result(Response) {
+        const response = self.sendAlloc(allocator, request) catch |err| {
+            return .{ .failure = External.Failure.fromError("http", "send", err) };
+        };
+        return .{ .success = response };
+    }
 };
 
 pub const MemoryServer = struct {
+    pub const capability = Capability.Builtin.memory_http_server;
+
     const Route = struct {
         method: []const u8,
         path: []const u8,
@@ -358,6 +384,35 @@ pub fn SendEffect(comptime EffectEnv: type, comptime Client: type) type {
     };
 }
 
+pub fn SendClassifiedEffect(comptime EffectEnv: type, comptime Client: type) type {
+    return struct {
+        pub const SuccessType = External.Result(Response);
+        pub const FailureType = error{};
+        pub const EnvType = EffectEnv;
+        pub const RequiredServices = .{Client};
+
+        request: Request,
+
+        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
+            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
+        }
+
+        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!SuccessType {
+            const client = ctx.service(Client);
+            const result = client.sendClassifiedAlloc(ctx.allocator, self.request);
+            switch (result) {
+                .success => {
+                    _ = StdService.recordOperation(ctx, Client, "http.send", "success", "classified");
+                },
+                .failure => |failure| {
+                    _ = StdService.recordOperation(ctx, Client, "http.send", @tagName(failure.class), failure.detail);
+                },
+            }
+            return result;
+        }
+    };
+}
+
 pub fn HandleEffect(comptime EffectEnv: type) type {
     return struct {
         pub const SuccessType = Response;
@@ -390,6 +445,10 @@ pub fn HandleEffect(comptime EffectEnv: type) type {
 }
 
 pub fn sendEffect(comptime EffectEnv: type, comptime Client: type, request: Request) SendEffect(EffectEnv, Client) {
+    return .{ .request = request };
+}
+
+pub fn sendClassifiedEffect(comptime EffectEnv: type, comptime Client: type, request: Request) SendClassifiedEffect(EffectEnv, Client) {
     return .{ .request = request };
 }
 
@@ -665,6 +724,52 @@ test "Http LocalClient exposes live adapter contract without network access" {
     try std.testing.expect(@hasDecl(LocalClient, "sendAlloc"));
 }
 
+test "Http adapters publish truthful capability maturity" {
+    try FakeClient.capability.validate();
+    try LocalClient.capability.validate();
+    try MemoryServer.capability.validate();
+    try std.testing.expectEqual(Capability.Maturity.fake, MemoryServer.capability.maturity);
+    try std.testing.expectEqual(
+        Capability.Match.insufficient_maturity,
+        Capability.match(MemoryServer.capability, .{
+            .kind = .http_server,
+            .minimum_maturity = .production_candidate,
+            .requires_live_conformance = true,
+        }),
+    );
+}
+
+test "Http classified clients return backend neutral recovery failures" {
+    var local = LocalClient.init(std.testing.allocator, std.testing.io);
+    defer local.deinit();
+    const result = local.sendClassifiedAlloc(std.testing.allocator, .{
+        .method = "NOT-A-METHOD",
+        .url = "http://localhost/",
+    });
+    switch (result) {
+        .success => return error.TestExpectedFailure,
+        .failure => |failure| {
+            try std.testing.expectEqual(@import("../external/root.zig").Class.unsupported, failure.class);
+            try std.testing.expect(!failure.retryable());
+        },
+    }
+}
+
+test "Http classified effect keeps failures in the success channel" {
+    var client = FakeClient.init(.{ .status = 204 });
+    const zstd = @import("../root.zig");
+    var services = zstd.Service.Provider(.{FakeClient}).init(.{&client});
+    var runtime = zstd.fx.Runtime(@TypeOf(services)).init(std.testing.allocator, &services).provides(.{FakeClient});
+    var result = try runtime.run(sendClassifiedEffect(@TypeOf(services), FakeClient, .{
+        .method = "GET",
+        .url = "https://example.invalid/health",
+    }));
+    switch (result) {
+        .success => |*response| response.deinit(std.testing.allocator),
+        .failure => return error.TestUnexpectedFailure,
+    }
+}
+
 test "Http memory server routes requests through effect-native handler" {
     const zstd = @import("../root.zig");
 
@@ -848,4 +953,24 @@ test "Http typed router effect records causal facts" {
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
     try std.testing.expect(zstd.Service.hasOperation(snapshot, RouterType, "http.route", "success"));
+}
+
+test "Http request and response body streams own bounded chunked data" {
+    var request_bytes = [_]u8{ 'r', 'e', 'q', 'u', 'e', 's', 't' };
+    var response_bytes = [_]u8{ 'r', 'e', 's', 'p', 'o', 'n', 's', 'e' };
+    var request_stream = try requestBodyStreamAlloc(std.testing.allocator, .{ .method = "POST", .url = "/", .body = &request_bytes });
+    defer request_stream.deinit();
+    var response_stream = try responseBodyStreamAlloc(std.testing.allocator, .{ .status = 200, .body = &response_bytes });
+    defer response_stream.deinit();
+    @memset(&request_bytes, 0);
+    @memset(&response_bytes, 0);
+
+    var env = Stream.EmptyEnv{};
+    var context = fx.Context(Stream.EmptyEnv).init(std.testing.allocator, &env, null);
+    const request = try request_stream.runCollectAlloc(&context, std.testing.allocator, 2);
+    defer std.testing.allocator.free(request);
+    const response = try response_stream.runCollectAlloc(&context, std.testing.allocator, 3);
+    defer std.testing.allocator.free(response);
+    try std.testing.expectEqualStrings("request", request);
+    try std.testing.expectEqualStrings("response", response);
 }

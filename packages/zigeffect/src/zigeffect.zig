@@ -6,10 +6,15 @@ pub const traits = @import("traits/root.zig");
 pub const data = @import("data/root.zig");
 pub const match = @import("match/root.zig");
 pub const pattern = @import("pattern/root.zig");
+pub const statechart = @import("statechart/root.zig");
 pub const workflow = @import("workflow/root.zig");
 pub const cluster = @import("cluster/root.zig");
 pub const storage = @import("storage/root.zig");
 pub const performance = @import("performance/root.zig");
+pub const external_failure = @import("core/external_failure.zig");
+pub const ExternalFailureClass = external_failure.ExternalFailureClass;
+pub const classifyExternalError = external_failure.classifyExternalError;
+pub const containsSensitiveMaterial = @import("core/secret_scan.zig").containsSensitiveMaterial;
 
 pub const storage_catalog_schema = storage.storage_catalog_schema;
 pub const storage_catalog_schema_version = storage.storage_catalog_schema_version;
@@ -52,6 +57,7 @@ pub const core = struct {
     pub const context = @import("core/context.zig");
     pub const safe_resource = @import("core/safe_resource.zig");
     pub const tracked_allocator = @import("core/tracked_allocator.zig");
+    pub const external_failure = @import("core/external_failure.zig");
 
     pub const Cause = result.Cause;
     pub const CauseTree = result.CauseTree;
@@ -67,6 +73,8 @@ pub const core = struct {
     pub const AllocationRecord = tracked_allocator.AllocationRecord;
     pub const MemorySafetySnapshot = tracked_allocator.MemorySafetySnapshot;
     pub const TrackedAllocator = tracked_allocator.TrackedAllocator;
+    pub const ExternalFailureClass = @This().external_failure.ExternalFailureClass;
+    pub const classifyExternalError = @This().external_failure.classifyExternalError;
 };
 
 pub const dependency = struct {
@@ -92,6 +100,7 @@ pub const effect = struct {
     pub const resource = @import("effect/resource.zig");
     pub const schedule = @import("effect/schedule.zig");
     pub const stream = @import("effect/stream.zig");
+    pub const effect_stream = @import("effect/effect_stream.zig");
     pub const stm = @import("effect/stm.zig");
 
     pub const Effect = program.Effect;
@@ -99,6 +108,7 @@ pub const effect = struct {
     pub const acquireReleaseValue = resource.acquireReleaseValue;
     pub const Schedule = schedule.Schedule;
     pub const ScheduleProgram = schedule.ScheduleProgram;
+    pub const EffectStream = effect_stream.EffectStream;
 };
 
 pub const runtime = struct {
@@ -497,6 +507,7 @@ pub const services = struct {
 
 pub const testing = struct {
     pub const test_env = @import("testing/test_env.zig");
+    pub const SuiteReceipt = @import("testing/suite_receipt.zig");
 
     pub const TestFixtureRegistry = test_env.TestFixtureRegistry;
     pub const TestServices = test_env.TestServices;
@@ -908,9 +919,19 @@ pub const LoopbackSocketClusterTransportOptions = cluster.LoopbackSocketClusterT
 pub const LoopbackSocketClusterTransport = cluster.LoopbackSocketClusterTransport;
 pub const RemoteSocketClusterTransportOptions = cluster.RemoteSocketClusterTransportOptions;
 pub const RemoteSocketClusterTransport = cluster.RemoteSocketClusterTransport;
+pub const LoopbackRemoteSocketCompatibilityTransportOptions = cluster.LoopbackRemoteSocketCompatibilityTransportOptions;
+pub const LoopbackRemoteSocketCompatibilityTransport = cluster.LoopbackRemoteSocketCompatibilityTransport;
+pub const EncodedInProcessHttpClusterTransportOptions = cluster.EncodedInProcessHttpClusterTransportOptions;
+pub const EncodedInProcessHttpClusterTransport = cluster.EncodedInProcessHttpClusterTransport;
+pub const EncodedInProcessSocketClusterTransportOptions = cluster.EncodedInProcessSocketClusterTransportOptions;
+pub const EncodedInProcessSocketClusterTransport = cluster.EncodedInProcessSocketClusterTransport;
+/// Deprecated compatibility alias; use `EncodedInProcessHttpClusterTransportOptions`.
 pub const ProductionHttpClusterTransportOptions = cluster.ProductionHttpClusterTransportOptions;
+/// Deprecated compatibility alias; use `EncodedInProcessHttpClusterTransport`.
 pub const ProductionHttpClusterTransport = cluster.ProductionHttpClusterTransport;
+/// Deprecated compatibility alias; use `EncodedInProcessSocketClusterTransportOptions`.
 pub const ProductionSocketClusterTransportOptions = cluster.ProductionSocketClusterTransportOptions;
+/// Deprecated compatibility alias; use `EncodedInProcessSocketClusterTransport`.
 pub const ProductionSocketClusterTransport = cluster.ProductionSocketClusterTransport;
 pub const formatClusterTransportRequestJson = cluster.formatClusterTransportRequestJson;
 pub const parseClusterTransportRequestJson = cluster.parseClusterTransportRequestJson;
@@ -1107,8 +1128,18 @@ pub const LayerGraphRuntime = layer.graph.LayerGraphRuntime;
 pub const layerGraph = layer.graph.layerGraph;
 
 pub const Schedule = effect.schedule.Schedule;
-pub const Stream = effect.stream.Stream;
+/// Compatibility synchronous value stream. New IO uses `EffectStream`.
+pub const ValueStream = effect.stream.Stream;
+pub const Stream = ValueStream;
 pub const streamFromSlice = effect.stream.fromSlice;
+pub const EffectStream = effect.effect_stream.EffectStream;
+pub const effectStreamFromSliceAlloc = effect.effect_stream.fromSliceAlloc;
+pub const effectStreamFromPuller = effect.effect_stream.fromPuller;
+pub const effectStreamFromOwnedPullerAlloc = effect.effect_stream.fromOwnedPullerAlloc;
+pub const StreamError = effect.effect_stream.StreamError;
+pub const StreamCloseReason = effect.effect_stream.CloseReason;
+pub const StreamBackpressureStrategy = effect.effect_stream.BackpressureStrategy;
+pub const BoundedStreamBuffer = effect.effect_stream.BoundedBuffer;
 pub const Stm = effect.stm.Stm;
 pub const TRef = effect.stm.TRef;
 pub const Transaction = effect.stm.Transaction;

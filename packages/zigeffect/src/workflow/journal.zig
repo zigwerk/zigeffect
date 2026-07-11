@@ -111,6 +111,8 @@ pub const WorkflowEvent = struct {
     workflow_id: WorkflowId,
     execution_id: ExecutionId,
     parent_sequence: ?JournalSequence = null,
+    parent_workflow_id: ?WorkflowId = null,
+    parent_execution_id: ?ExecutionId = null,
     activity_id: ?ActivityId = null,
     timer_id: ?TimerId = null,
     deferred_id: ?DeferredId = null,
@@ -156,6 +158,8 @@ const WorkflowEventJsonRow = struct {
     workflow_id: WorkflowId,
     execution_id: ExecutionId,
     parent_sequence: ?JournalSequence = null,
+    parent_workflow_id: ?WorkflowId = null,
+    parent_execution_id: ?ExecutionId = null,
     activity_id: ?ActivityId = null,
     timer_id: ?TimerId = null,
     deferred_id: ?DeferredId = null,
@@ -268,6 +272,8 @@ fn parseWorkflowEventJsonV1(allocator: Allocator, row_json: []const u8) !Workflo
         .workflow_id = parsed.value.workflow_id,
         .execution_id = parsed.value.execution_id,
         .parent_sequence = parsed.value.parent_sequence,
+        .parent_workflow_id = parsed.value.parent_workflow_id,
+        .parent_execution_id = parsed.value.parent_execution_id,
         .activity_id = parsed.value.activity_id,
         .timer_id = parsed.value.timer_id,
         .deferred_id = parsed.value.deferred_id,
@@ -327,6 +333,10 @@ pub fn formatWorkflowEventJson(allocator: std.mem.Allocator, event: WorkflowEven
     try output.print(allocator, ",\"execution_id\":{d}", .{event.execution_id});
     try output.appendSlice(allocator, ",\"parent_sequence\":");
     try appendOptionalJsonU64(&output, allocator, event.parent_sequence);
+    try output.appendSlice(allocator, ",\"parent_workflow_id\":");
+    try appendOptionalJsonU64(&output, allocator, event.parent_workflow_id);
+    try output.appendSlice(allocator, ",\"parent_execution_id\":");
+    try appendOptionalJsonU64(&output, allocator, event.parent_execution_id);
     try output.appendSlice(allocator, ",\"activity_id\":");
     try appendOptionalJsonU64(&output, allocator, event.activity_id);
     try output.appendSlice(allocator, ",\"timer_id\":");
@@ -363,6 +373,8 @@ pub fn formatWorkflowEventText(allocator: std.mem.Allocator, event: WorkflowEven
     try output.print(allocator, "workflow_id: {d}\n", .{event.workflow_id});
     try output.print(allocator, "execution_id: {d}\n", .{event.execution_id});
     try appendOptionalTextU64(&output, allocator, "parent_sequence", event.parent_sequence);
+    try appendOptionalTextU64(&output, allocator, "parent_workflow_id", event.parent_workflow_id);
+    try appendOptionalTextU64(&output, allocator, "parent_execution_id", event.parent_execution_id);
     try appendOptionalTextU64(&output, allocator, "activity_id", event.activity_id);
     try appendOptionalTextU64(&output, allocator, "timer_id", event.timer_id);
     try appendOptionalTextU64(&output, allocator, "deferred_id", event.deferred_id);

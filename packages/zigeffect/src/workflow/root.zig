@@ -13,6 +13,8 @@ pub const queue = @import("queue.zig");
 pub const lifecycle = @import("lifecycle.zig");
 pub const inspect = @import("inspect.zig");
 pub const causal = @import("causal.zig");
+pub const statechart = @import("statechart.zig");
+pub const statechart_control = @import("statechart_control.zig");
 pub const scheduler = @import("scheduler.zig");
 
 pub const workflow_journal_event_schema = journal.workflow_journal_event_schema;
@@ -158,6 +160,7 @@ pub const WorkflowScheduler = scheduler.WorkflowScheduler;
 
 pub const LifecycleActionResult = lifecycle.LifecycleActionResult;
 pub const WorkflowLifecycle = lifecycle.WorkflowLifecycle;
+pub const WorkflowControlAdapter = statechart_control.WorkflowControlAdapter;
 
 pub const workflow_inspect_schema = inspect.workflow_inspect_schema;
 pub const workflow_replay_schema = inspect.workflow_replay_schema;
@@ -188,3 +191,8 @@ pub const collectWorkflowCausalFindings = causal.collectWorkflowCausalFindings;
 pub const formatWorkflowCausalReport = causal.formatWorkflowCausalReport;
 pub const formatWorkflowCausalJson = causal.formatWorkflowCausalJson;
 pub const formatWorkflowCausalDot = causal.formatWorkflowCausalDot;
+pub const statechart_record_schema = statechart.statechart_record_schema;
+pub const statechart_record_schema_version = statechart.statechart_record_schema_version;
+pub const StatechartJournalError = statechart.StatechartJournalError;
+pub const DurableStatechart = statechart.DurableStatechart;
+pub const DurableConfigurationStatechart = statechart.DurableConfigurationStatechart;

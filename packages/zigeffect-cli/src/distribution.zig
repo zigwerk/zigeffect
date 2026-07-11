@@ -1,8 +1,8 @@
 const std = @import("std");
 const zstd = @import("zigeffect_std");
 
-pub const cli_version = "0.3.0";
-pub const template_version: u32 = 2;
+pub const cli_version = "0.6.0";
+pub const template_version: u32 = 6;
 pub const template_schema = "zigeffect.scaffold-template.v1";
 pub const compatibility_schema = "zigeffect.compatibility.v1";
 pub const scaffold_state_schema = "zigeffect.scaffold-state.v1";
@@ -156,7 +156,7 @@ pub fn completionScript(shell: Shell) []const u8 {
         .bash =>
         \\# zigeffect bash completion
         \\_zigeffect_complete() {
-        \\  local commands="new add generate graph project safety agent benchmark compatibility upgrade completions help version"
+        \\  local commands="new add generate graph statechart test project safety agent benchmark compatibility upgrade completions help version"
         \\  local kinds="application service library package system"
         \\  if [[ ${COMP_CWORD} -eq 1 ]]; then COMPREPLY=( $(compgen -W "$commands" -- "${COMP_WORDS[COMP_CWORD]}") ); return; fi
         \\  if [[ ${COMP_WORDS[1]} == new && ${COMP_CWORD} -eq 2 ]]; then COMPREPLY=( $(compgen -W "$kinds" -- "${COMP_WORDS[COMP_CWORD]}") ); return; fi
@@ -169,7 +169,7 @@ pub fn completionScript(shell: Shell) []const u8 {
         \\#compdef zigeffect
         \\_zigeffect() {
         \\  local -a commands
-        \\  commands=(new add generate graph project safety agent benchmark compatibility upgrade completions help version)
+        \\  commands=(new add generate graph statechart test project safety agent benchmark compatibility upgrade completions help version)
         \\  if (( CURRENT == 2 )); then _describe 'command' commands; return; fi
         \\  _arguments '*:argument:->args'
         \\}
@@ -179,7 +179,7 @@ pub fn completionScript(shell: Shell) []const u8 {
         .fish =>
         \\# zigeffect fish completion
         \\complete -c zigeffect -f
-        \\complete -c zigeffect -n '__fish_use_subcommand' -a 'new add generate graph project safety agent benchmark compatibility upgrade completions help version'
+        \\complete -c zigeffect -n '__fish_use_subcommand' -a 'new add generate graph statechart test project safety agent benchmark compatibility upgrade completions help version'
         \\complete -c zigeffect -n '__fish_seen_subcommand_from new' -a 'application service library package system'
         \\complete -c zigeffect -l root -r
         \\complete -c zigeffect -l json
@@ -324,7 +324,7 @@ test "distribution metadata validates managed hashes and legacy manifest migrati
     future_template.template_version = template_version + 1;
     try std.testing.expectError(error.UnsupportedTemplateSchema, future_template.validate());
     var future_cli = state;
-    future_cli.cli_version = "0.4.0";
+    future_cli.cli_version = "0.7.0";
     try std.testing.expectError(error.NewerCliRequired, future_cli.validate());
 }
 

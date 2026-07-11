@@ -1,0 +1,1 @@
+{"schema":"zigeffect.reference.normalized-trace.v1","order":{"status":"completed","version":3},"outbox":{"dispatched":true},"broker":{"deliveries":1,"duplicates_suppressed":1},"object":{"checksum":"verified"},"transport":{"authenticated":true},"telemetry":{"api":true,"worker":true}}

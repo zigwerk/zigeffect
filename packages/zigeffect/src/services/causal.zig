@@ -13,12 +13,14 @@ pub const causal_truncation_marker = "<truncated>";
 pub const CausalExtensionDomain = enum {
     workflow,
     cluster,
+    statechart,
 };
 
 pub fn causalExtensionDomainName(domain: CausalExtensionDomain) []const u8 {
     return switch (domain) {
         .workflow => "workflow",
         .cluster => "cluster",
+        .statechart => "statechart",
     };
 }
 
@@ -79,6 +81,7 @@ pub const CausalEventKind = enum {
     span_recorded,
     assertion_recorded,
     workflow_event_recorded,
+    statechart_event_recorded,
     race_started,
     race_winner_selected,
     race_loser_interrupted,
@@ -152,6 +155,7 @@ pub fn causalEventTaxonomy(kind: CausalEventKind) CausalEventTaxonomy {
         .schedule_decision,
         .assertion_recorded,
         .workflow_event_recorded,
+        .statechart_event_recorded,
         .race_started,
         .race_winner_selected,
         .race_loser_interrupted,

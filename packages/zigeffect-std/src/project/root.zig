@@ -1,5 +1,6 @@
 const std = @import("std");
 const Secrets = @import("../secrets/root.zig");
+const CapabilityContract = @import("../capability/root.zig");
 
 pub const Protocol = @import("protocol.zig");
 
@@ -23,6 +24,9 @@ pub const ProjectError = error{
     DuplicateRequirement,
     InvalidAcceptanceCheck,
     DuplicateAcceptanceCheck,
+    InvalidTestScenario,
+    DuplicateTestScenario,
+    MissingTestCoverage,
     SecretDetected,
     DuplicatePath,
     MissingSafeRoot,
@@ -34,6 +38,14 @@ pub const ProjectError = error{
     DuplicateSafetyAllowance,
     UnauditedSafetyAllowance,
     DuplicateSafetyGate,
+    InvalidCapabilityRequirement,
+    DuplicateCapabilityRequirement,
+    InvalidCapabilityDescriptor,
+    DuplicateCapabilityDescriptor,
+    InvalidAdapterProfile,
+    DuplicateAdapterProfile,
+    DuplicateAdapterBinding,
+    IncompleteProductionProfile,
 };
 
 pub const ProjectKind = enum {
@@ -60,6 +72,7 @@ pub const Capability = enum {
     agent,
     workbench,
     causal_graph,
+    statecharts,
 };
 
 pub const Component = struct {
@@ -105,10 +118,79 @@ pub const AcceptanceCheck = struct {
     status: AcceptanceStatus = .pending,
 };
 
+pub const TestFaultProfile = enum {
+    none,
+    standard,
+    exhaustive,
+    allocation,
+    schedule,
+    recovery,
+    executor,
+};
+
+/// Manifest-owned test intent. Commands remain the only executable authority;
+/// scenarios add requirement, source, seed, and fault-selection semantics.
+pub const TestScenario = struct {
+    id: []const u8,
+    label: []const u8,
+    requirement: []const u8,
+    acceptance_check: []const u8,
+    component: []const u8,
+    command: []const u8,
+    source_roots: []const []const u8 = &.{},
+    tags: []const []const u8 = &.{},
+    default_seed: u64 = 1,
+    fault_profile: TestFaultProfile = .standard,
+    required: bool = true,
+};
+
 pub const Policy = struct {
     allow_network: bool = false,
     require_approval_for_processes: bool = true,
     persist_raw_terminal: bool = false,
+};
+
+pub const ExecutionPosture = enum {
+    local,
+    production,
+};
+
+pub const CapabilityRequirement = struct {
+    id: []const u8,
+    component: []const u8,
+    kind: CapabilityContract.Kind,
+    minimum_maturity: CapabilityContract.Maturity = .fake,
+    features: []const []const u8 = &.{},
+    target: ?[]const u8 = null,
+    requires_live_conformance: bool = false,
+
+    pub fn contract(self: CapabilityRequirement) CapabilityContract.Requirement {
+        return .{
+            .kind = self.kind,
+            .minimum_maturity = self.minimum_maturity,
+            .features = self.features,
+            .target = self.target,
+            .requires_live_conformance = self.requires_live_conformance,
+        };
+    }
+};
+
+pub const AdapterBinding = struct {
+    requirement: []const u8,
+    adapter: []const u8,
+};
+
+pub const AdapterProfile = struct {
+    id: []const u8,
+    target: []const u8,
+    bindings: []const AdapterBinding = &.{},
+};
+
+pub const BoundCapabilityResolution = struct {
+    requirement_id: []const u8,
+    adapter_id: []const u8,
+    descriptor: ?CapabilityContract.Descriptor,
+    result: CapabilityContract.Match,
 };
 
 pub const SafetyProfile = enum {
@@ -273,6 +355,7 @@ pub const ArtifactPaths = struct {
     causal: []const u8 = ".zigeffect/causal",
     receipts: []const u8 = ".zigeffect/receipts",
     graph: []const u8 = ".zigeffect/graph",
+    statecharts: []const u8 = ".zigeffect/statecharts",
 };
 
 pub const DependencyPaths = struct {
@@ -289,6 +372,11 @@ pub const Manifest = struct {
     commands: []const Command = &.{},
     requirements: []const Requirement = &.{},
     acceptance_checks: []const AcceptanceCheck = &.{},
+    test_scenarios: []const TestScenario = &.{},
+    execution_posture: ExecutionPosture = .local,
+    capability_requirements: []const CapabilityRequirement = &.{},
+    capability_descriptors: []const CapabilityContract.Descriptor = &.{},
+    adapter_profiles: []const AdapterProfile = &.{},
     policy: Policy = .{},
     safety: SafetyPolicy = .{},
     artifacts: ArtifactPaths = .{},
@@ -373,10 +461,116 @@ pub const Manifest = struct {
             }
         }
 
+        for (self.test_scenarios, 0..) |scenario, index| {
+            try validateIdentifier(scenario.id);
+            try ensureSafe(scenario.label);
+            if (scenario.label.len == 0 or scenario.default_seed == 0) return error.InvalidTestScenario;
+            const requirement_item = self.requirement(scenario.requirement) orelse return error.InvalidTestScenario;
+            const acceptance = self.acceptanceCheck(scenario.acceptance_check) orelse return error.InvalidTestScenario;
+            if (self.component(scenario.component) == null or self.command(scenario.command) == null) return error.InvalidTestScenario;
+            if (!std.mem.eql(u8, requirement_item.component, scenario.component) or
+                !std.mem.eql(u8, acceptance.requirement, scenario.requirement) or
+                !std.mem.eql(u8, acceptance.command, scenario.command)) return error.InvalidTestScenario;
+            for (scenario.source_roots, 0..) |root, root_index| {
+                try validateRelativePath(root, false);
+                try ensureSafe(root);
+                for (scenario.source_roots[0..root_index]) |previous| if (std.mem.eql(u8, previous, root)) return error.InvalidTestScenario;
+            }
+            for (scenario.tags, 0..) |tag, tag_index| {
+                try validateIdentifier(tag);
+                for (scenario.tags[0..tag_index]) |previous| if (std.mem.eql(u8, previous, tag)) return error.InvalidTestScenario;
+            }
+            for (self.test_scenarios[0..index]) |previous| if (std.mem.eql(u8, previous.id, scenario.id)) return error.DuplicateTestScenario;
+        }
+        if (self.test_scenarios.len != 0) {
+            for (self.acceptance_checks) |check| {
+                var covered = false;
+                for (self.test_scenarios) |scenario| {
+                    if (scenario.required and std.mem.eql(u8, scenario.acceptance_check, check.id)) {
+                        covered = true;
+                        break;
+                    }
+                }
+                if (!covered) return error.MissingTestCoverage;
+            }
+        }
+
+        for (self.capability_requirements, 0..) |capability_requirement, index| {
+            validateIdentifier(capability_requirement.id) catch return error.InvalidCapabilityRequirement;
+            if (self.component(capability_requirement.component) == null) return error.InvalidCapabilityRequirement;
+            try ensureSafe(capability_requirement.component);
+            for (capability_requirement.features, 0..) |feature, feature_index| {
+                validateIdentifier(feature) catch return error.InvalidCapabilityRequirement;
+                for (capability_requirement.features[0..feature_index]) |previous| {
+                    if (std.mem.eql(u8, feature, previous)) return error.InvalidCapabilityRequirement;
+                }
+            }
+            if (capability_requirement.target) |target| {
+                if (!validTarget(target)) return error.InvalidCapabilityRequirement;
+                try ensureSafe(target);
+            }
+            for (self.capability_requirements[0..index]) |previous| {
+                if (std.mem.eql(u8, previous.id, capability_requirement.id)) {
+                    return error.DuplicateCapabilityRequirement;
+                }
+            }
+            if (self.execution_posture == .production and
+                (!capability_requirement.minimum_maturity.satisfies(.production_candidate) or
+                    !capability_requirement.requires_live_conformance))
+            {
+                return error.IncompleteProductionProfile;
+            }
+        }
+
+        for (self.capability_descriptors, 0..) |descriptor, index| {
+            descriptor.validate() catch return error.InvalidCapabilityDescriptor;
+            for (self.capability_descriptors[0..index]) |previous| {
+                if (std.mem.eql(u8, previous.id, descriptor.id)) return error.DuplicateCapabilityDescriptor;
+            }
+        }
+
+        for (self.adapter_profiles, 0..) |profile, profile_index| {
+            validateIdentifier(profile.id) catch return error.InvalidAdapterProfile;
+            if (!validTarget(profile.target)) return error.InvalidAdapterProfile;
+            try ensureSafe(profile.target);
+            for (self.adapter_profiles[0..profile_index]) |previous| {
+                if (std.mem.eql(u8, previous.id, profile.id)) return error.DuplicateAdapterProfile;
+            }
+            for (profile.bindings, 0..) |binding, binding_index| {
+                if (self.capabilityRequirement(binding.requirement) == null or !validAdapterId(binding.adapter)) {
+                    return error.InvalidAdapterProfile;
+                }
+                try ensureSafe(binding.adapter);
+                for (profile.bindings[0..binding_index]) |previous| {
+                    if (std.mem.eql(u8, previous.requirement, binding.requirement)) {
+                        return error.DuplicateAdapterBinding;
+                    }
+                }
+            }
+            if (self.execution_posture == .production) {
+                for (self.capability_requirements) |capability_requirement| {
+                    var found = false;
+                    for (profile.bindings) |binding| {
+                        if (std.mem.eql(u8, binding.requirement, capability_requirement.id)) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) return error.IncompleteProductionProfile;
+                }
+            }
+        }
+        if (self.execution_posture == .production and
+            (self.capability_requirements.len == 0 or self.adapter_profiles.len == 0))
+        {
+            return error.IncompleteProductionProfile;
+        }
+
         try validateRelativePath(self.artifacts.sessions, false);
         try validateRelativePath(self.artifacts.causal, false);
         try validateRelativePath(self.artifacts.receipts, false);
         try validateRelativePath(self.artifacts.graph, false);
+        try validateRelativePath(self.artifacts.statecharts, false);
         try validateDependencyPath(self.dependencies.zigeffect);
         try validateDependencyPath(self.dependencies.zigeffect_std);
         try self.safety.validate(self);
@@ -401,6 +595,148 @@ pub const Manifest = struct {
             if (std.mem.eql(u8, candidate.id, id)) return candidate;
         }
         return null;
+    }
+
+    pub fn acceptanceCheck(self: Manifest, id: []const u8) ?AcceptanceCheck {
+        for (self.acceptance_checks) |candidate| {
+            if (std.mem.eql(u8, candidate.id, id)) return candidate;
+        }
+        return null;
+    }
+
+    pub fn testScenario(self: Manifest, id: []const u8) ?TestScenario {
+        for (self.test_scenarios) |candidate| {
+            if (std.mem.eql(u8, candidate.id, id)) return candidate;
+        }
+        return null;
+    }
+
+    pub fn capabilityRequirement(self: Manifest, id: []const u8) ?CapabilityRequirement {
+        for (self.capability_requirements) |candidate| {
+            if (std.mem.eql(u8, candidate.id, id)) return candidate;
+        }
+        return null;
+    }
+
+    pub fn adapterProfile(self: Manifest, id: []const u8) ?AdapterProfile {
+        for (self.adapter_profiles) |candidate| {
+            if (std.mem.eql(u8, candidate.id, id)) return candidate;
+        }
+        return null;
+    }
+
+    pub fn resolveCapability(
+        self: Manifest,
+        profile_id: []const u8,
+        requirement_id: []const u8,
+        descriptors: []const CapabilityContract.Descriptor,
+    ) !BoundCapabilityResolution {
+        try self.validate();
+        const profile = self.adapterProfile(profile_id) orelse return error.InvalidAdapterProfile;
+        const capability_requirement = self.capabilityRequirement(requirement_id) orelse {
+            return error.InvalidCapabilityRequirement;
+        };
+        var adapter_id: ?[]const u8 = null;
+        for (profile.bindings) |binding| {
+            if (std.mem.eql(u8, binding.requirement, requirement_id)) {
+                adapter_id = binding.adapter;
+                break;
+            }
+        }
+        const selected_adapter_id = adapter_id orelse return error.InvalidAdapterProfile;
+
+        // Resolution validates every descriptor and rejects duplicate ids even
+        // when the selected adapter itself is absent or incompatible.
+        var contract = capability_requirement.contract();
+        if (contract.target == null) contract.target = profile.target;
+        _ = try CapabilityContract.resolve(descriptors, contract);
+
+        for (descriptors) |descriptor| {
+            if (!std.mem.eql(u8, descriptor.id, selected_adapter_id)) continue;
+            return .{
+                .requirement_id = requirement_id,
+                .adapter_id = selected_adapter_id,
+                .descriptor = descriptor,
+                .result = CapabilityContract.match(descriptor, contract),
+            };
+        }
+        return .{
+            .requirement_id = requirement_id,
+            .adapter_id = selected_adapter_id,
+            .descriptor = null,
+            .result = .adapter_not_found,
+        };
+    }
+
+    pub fn resolveProfileAlloc(
+        self: Manifest,
+        allocator: std.mem.Allocator,
+        profile_id: []const u8,
+        descriptors: []const CapabilityContract.Descriptor,
+        evidence_time_ms: i64,
+    ) ![]CapabilityContract.AdapterEvidence {
+        try self.validate();
+        const profile = self.adapterProfile(profile_id) orelse return error.InvalidAdapterProfile;
+
+        for (descriptors, 0..) |descriptor, index| {
+            try descriptor.validate();
+            for (descriptors[0..index]) |previous| {
+                if (std.mem.eql(u8, descriptor.id, previous.id)) return error.DuplicateAdapterId;
+            }
+        }
+
+        const evidence = try allocator.alloc(CapabilityContract.AdapterEvidence, profile.bindings.len);
+        errdefer allocator.free(evidence);
+        for (profile.bindings, 0..) |binding, index| {
+            const capability_requirement = self.capabilityRequirement(binding.requirement) orelse {
+                return error.InvalidCapabilityRequirement;
+            };
+            var contract = capability_requirement.contract();
+            if (contract.target == null) contract.target = profile.target;
+            contract.evidence_time_ms = evidence_time_ms;
+
+            var selected: ?CapabilityContract.Descriptor = null;
+            for (descriptors) |descriptor| {
+                if (std.mem.eql(u8, descriptor.id, binding.adapter)) {
+                    selected = descriptor;
+                    break;
+                }
+            }
+            evidence[index] = if (selected) |descriptor|
+                CapabilityContract.AdapterEvidence.fromDescriptor(
+                    profile.id,
+                    capability_requirement.id,
+                    contract.target.?,
+                    descriptor,
+                    CapabilityContract.match(descriptor, contract),
+                )
+            else
+                .{
+                    .profile_id = profile.id,
+                    .requirement_id = capability_requirement.id,
+                    .target = contract.target.?,
+                    .adapter_id = binding.adapter,
+                    .kind = capability_requirement.kind,
+                    .maturity = .fake,
+                    .result = .adapter_not_found,
+                };
+            try evidence[index].validate();
+        }
+        return evidence;
+    }
+
+    pub fn scenarioAffectedBy(self: Manifest, scenario: TestScenario, changed_path: []const u8) bool {
+        for (scenario.source_roots) |root| {
+            if (pathIsWithin(changed_path, root) or pathIsWithin(root, changed_path)) return true;
+        }
+        if (scenario.source_roots.len != 0) return false;
+        const scenario_component = self.component(scenario.component) orelse return false;
+        if (pathIsWithin(changed_path, scenario_component.path)) return true;
+        for (self.components) |candidate| {
+            if (!pathIsWithin(changed_path, candidate.path)) continue;
+            for (scenario_component.depends_on) |dependency| if (std.mem.eql(u8, dependency, candidate.id)) return true;
+        }
+        return false;
     }
 
     pub fn jsonAlloc(self: Manifest, allocator: std.mem.Allocator) ![]u8 {
@@ -601,8 +937,76 @@ fn isSemanticVersion(value: []const u8) bool {
     return count == 3;
 }
 
+fn validTarget(value: []const u8) bool {
+    if (value.len == 0 or value.len > 96) return false;
+    for (value) |byte| {
+        if (std.ascii.isAlphanumeric(byte) or byte == '-' or byte == '_' or byte == '.') continue;
+        return false;
+    }
+    return true;
+}
+
+fn validAdapterId(value: []const u8) bool {
+    if (value.len == 0 or value.len > 128) return false;
+    for (value) |byte| {
+        if (std.ascii.isLower(byte) or std.ascii.isDigit(byte)) continue;
+        if (byte == '-' or byte == '_' or byte == '.' or byte == ':') continue;
+        return false;
+    }
+    return true;
+}
+
 fn ensureSafe(value: []const u8) ProjectError!void {
     if (Secrets.containsSecret(value)) return error.SecretDetected;
+}
+
+test "Project test scenarios bind requirement acceptance command and affected source roots" {
+    const manifest = Manifest{
+        .name = "demo",
+        .kind = .application,
+        .components = &.{.{ .id = "demo", .kind = .application, .path = "." }},
+        .commands = &.{.{ .id = "test", .argv = &.{ "zig", "build", "test" } }},
+        .requirements = &.{.{ .id = "req-test", .summary = "prove behavior", .component = "demo" }},
+        .acceptance_checks = &.{.{ .id = "check-test", .requirement = "req-test", .command = "test", .expectation = "tests pass" }},
+        .test_scenarios = &.{.{
+            .id = "scenario-test",
+            .label = "behavior remains correct",
+            .requirement = "req-test",
+            .acceptance_check = "check-test",
+            .component = "demo",
+            .command = "test",
+            .source_roots = &.{ "src", "test" },
+            .tags = &.{"acceptance"},
+            .default_seed = 42,
+        }},
+    };
+    try manifest.validate();
+    try std.testing.expect(manifest.testScenario("scenario-test") != null);
+    try std.testing.expect(manifest.scenarioAffectedBy(manifest.test_scenarios[0], "src/main.zig"));
+    try std.testing.expect(!manifest.scenarioAffectedBy(manifest.test_scenarios[0], "README.md"));
+    const json = try manifest.jsonAlloc(std.testing.allocator);
+    defer std.testing.allocator.free(json);
+    var parsed = try parseManifest(std.testing.allocator, json);
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(usize, 1), parsed.value.test_scenarios.len);
+    try std.testing.expectEqual(@as(u64, 42), parsed.value.test_scenarios[0].default_seed);
+}
+
+test "Project rejects duplicate mismatched and uncovered test scenarios" {
+    const base = Manifest{
+        .name = "demo",
+        .kind = .application,
+        .components = &.{.{ .id = "demo", .kind = .application, .path = "." }},
+        .commands = &.{.{ .id = "test", .argv = &.{ "zig", "build", "test" } }},
+        .requirements = &.{.{ .id = "req-test", .summary = "prove behavior", .component = "demo" }},
+        .acceptance_checks = &.{.{ .id = "check-test", .requirement = "req-test", .command = "test", .expectation = "tests pass" }},
+    };
+    var uncovered = base;
+    uncovered.test_scenarios = &.{.{ .id = "optional", .label = "optional", .requirement = "req-test", .acceptance_check = "check-test", .component = "demo", .command = "test", .required = false }};
+    try std.testing.expectError(error.MissingTestCoverage, uncovered.validate());
+    var mismatch = base;
+    mismatch.test_scenarios = &.{.{ .id = "bad", .label = "bad", .requirement = "req-test", .acceptance_check = "missing", .component = "demo", .command = "test" }};
+    try std.testing.expectError(error.InvalidTestScenario, mismatch.validate());
 }
 
 fn lessThanFile(_: void, left: GeneratedFile, right: GeneratedFile) bool {
@@ -660,6 +1064,7 @@ test "Project validates a production system manifest and round trips stable JSON
     try parsed.value.validate();
     try std.testing.expectEqualStrings("billing-system", parsed.value.name);
     try std.testing.expectEqual(@as(usize, 3), parsed.value.components.len);
+    try std.testing.expectEqualStrings(".zigeffect/statecharts", parsed.value.artifacts.statecharts);
 
     const encoded_again = try parsed.value.jsonAlloc(std.testing.allocator);
     defer std.testing.allocator.free(encoded_again);
@@ -679,6 +1084,11 @@ test "Project rejects unknown schemas unsafe paths and invalid component graphs"
     invalid_graph_path.schema = schema_version;
     invalid_graph_path.artifacts.graph = "../outside";
     try std.testing.expectError(error.InvalidPath, invalid_graph_path.validate());
+
+    var invalid_statechart_path = unknown_schema;
+    invalid_statechart_path.schema = schema_version;
+    invalid_statechart_path.artifacts.statecharts = "../outside";
+    try std.testing.expectError(error.InvalidPath, invalid_statechart_path.validate());
 
     const traversal = Manifest{
         .name = "demo-app",
@@ -992,4 +1402,160 @@ test "Project safety policy rejects duplicates stale shapes and secrets" {
         .gates = &.{.{ .kind = .source_policy }},
     };
     try std.testing.expectError(error.SecretDetected, secret.validate());
+}
+
+test "Project capability requirements and adapter profiles round trip" {
+    const manifest = Manifest{
+        .name = "api",
+        .kind = .service,
+        .components = &.{.{ .id = "api", .kind = .service, .path = "." }},
+        .capability_requirements = &.{.{
+            .id = "public-http",
+            .component = "api",
+            .kind = .http_server,
+            .minimum_maturity = .production_candidate,
+            .features = &.{ "http1", "graceful-drain" },
+            .target = "x86_64-linux",
+            .requires_live_conformance = true,
+        }},
+        .adapter_profiles = &.{.{
+            .id = "production-linux",
+            .target = "x86_64-linux",
+            .bindings = &.{.{
+                .requirement = "public-http",
+                .adapter = "zigeffect-http.server",
+            }},
+        }},
+    };
+
+    try manifest.validate();
+    try std.testing.expectEqual(
+        CapabilityContract.Maturity.production_candidate,
+        manifest.capabilityRequirement("public-http").?.minimum_maturity,
+    );
+    try std.testing.expect(manifest.adapterProfile("production-linux") != null);
+
+    const json = try manifest.jsonAlloc(std.testing.allocator);
+    defer std.testing.allocator.free(json);
+    var parsed = try parseManifest(std.testing.allocator, json);
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(usize, 1), parsed.value.capability_requirements.len);
+    try std.testing.expectEqual(@as(usize, 1), parsed.value.adapter_profiles.len);
+}
+
+test "Project legacy manifests decode with an explicitly local empty profile" {
+    const json =
+        \\{"schema":"zigeffect.project.v1","name":"demo","kind":"application","components":[{"id":"demo","kind":"application","path":"."}]}
+    ;
+    var parsed = try parseManifest(std.testing.allocator, json);
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(usize, 0), parsed.value.capability_requirements.len);
+    try std.testing.expectEqual(@as(usize, 0), parsed.value.adapter_profiles.len);
+    try std.testing.expectEqual(ExecutionPosture.local, parsed.value.execution_posture);
+}
+
+test "Project rejects invalid capability requirements and adapter bindings" {
+    const base = Manifest{
+        .name = "api",
+        .kind = .service,
+        .components = &.{.{ .id = "api", .kind = .service, .path = "." }},
+        .capability_requirements = &.{.{
+            .id = "public-http",
+            .component = "api",
+            .kind = .http_server,
+        }},
+    };
+
+    var missing_component = base;
+    missing_component.capability_requirements = &.{.{
+        .id = "public-http",
+        .component = "missing",
+        .kind = .http_server,
+    }};
+    try std.testing.expectError(error.InvalidCapabilityRequirement, missing_component.validate());
+
+    var duplicate = base;
+    duplicate.capability_requirements = &.{ base.capability_requirements[0], base.capability_requirements[0] };
+    try std.testing.expectError(error.DuplicateCapabilityRequirement, duplicate.validate());
+
+    var missing_requirement = base;
+    missing_requirement.adapter_profiles = &.{.{
+        .id = "production",
+        .target = "x86_64-linux",
+        .bindings = &.{.{ .requirement = "missing", .adapter = "adapter.http" }},
+    }};
+    try std.testing.expectError(error.InvalidAdapterProfile, missing_requirement.validate());
+
+    var duplicate_binding = base;
+    duplicate_binding.adapter_profiles = &.{.{
+        .id = "production",
+        .target = "x86_64-linux",
+        .bindings = &.{
+            .{ .requirement = "public-http", .adapter = "adapter.http" },
+            .{ .requirement = "public-http", .adapter = "adapter.other" },
+        },
+    }};
+    try std.testing.expectError(error.DuplicateAdapterBinding, duplicate_binding.validate());
+}
+
+test "Project production capability cannot resolve to a memory adapter" {
+    const manifest = Manifest{
+        .name = "api",
+        .kind = .service,
+        .components = &.{.{ .id = "api", .kind = .service, .path = "." }},
+        .capability_requirements = &.{.{
+            .id = "public-http",
+            .component = "api",
+            .kind = .http_server,
+            .minimum_maturity = .production_candidate,
+            .requires_live_conformance = true,
+        }},
+        .adapter_profiles = &.{.{
+            .id = "production",
+            .target = "x86_64-linux",
+            .bindings = &.{.{
+                .requirement = "public-http",
+                .adapter = "zigeffect-std.memory-http",
+            }},
+        }},
+    };
+    const descriptors = [_]CapabilityContract.Descriptor{.{
+        .id = "zigeffect-std.memory-http",
+        .kind = .http_server,
+        .maturity = .fake,
+        .package = "zigeffect-std",
+        .version = "0.1.0",
+    }};
+
+    const resolution = try manifest.resolveCapability("production", "public-http", &descriptors);
+    try std.testing.expectEqual(CapabilityContract.Match.insufficient_maturity, resolution.result);
+    try std.testing.expectEqualStrings("zigeffect-std.memory-http", resolution.adapter_id);
+
+    const evidence = try manifest.resolveProfileAlloc(
+        std.testing.allocator,
+        "production",
+        &descriptors,
+        1_500,
+    );
+    defer std.testing.allocator.free(evidence);
+    try std.testing.expectEqual(@as(usize, 1), evidence.len);
+    try std.testing.expectEqual(CapabilityContract.Match.insufficient_maturity, evidence[0].result);
+}
+
+test "Project production posture requires complete live capability profiles" {
+    var manifest = Manifest{
+        .name = "api",
+        .kind = .service,
+        .components = &.{.{ .id = "api", .kind = .service, .path = "." }},
+        .execution_posture = .production,
+    };
+    try std.testing.expectError(error.IncompleteProductionProfile, manifest.validate());
+
+    manifest.capability_requirements = &.{.{
+        .id = "public-http",
+        .component = "api",
+        .kind = .http_server,
+        .minimum_maturity = .local_development,
+    }};
+    try std.testing.expectError(error.IncompleteProductionProfile, manifest.validate());
 }

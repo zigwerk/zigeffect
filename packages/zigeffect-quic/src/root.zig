@@ -19,6 +19,16 @@ pub const ClientConfig = struct {
 };
 
 pub const FakeQuicHttpClient = struct {
+    pub const capability = zstd.Capability.Descriptor{
+        .id = "zigeffect-quic.fake-http-client",
+        .kind = .http_client,
+        .maturity = .fake,
+        .package = "zigeffect-quic",
+        .version = "0.1.0",
+        .features = &.{ "http3", "quic" },
+        .limitations = &.{"returns a configured response without QUIC network IO"},
+    };
+
     response: zstd.Http.Response,
     allocator: ?std.mem.Allocator = null,
 
@@ -46,6 +56,17 @@ pub const FakeQuicHttpClient = struct {
 };
 
 pub const QuicHttpClient = struct {
+    pub const capability = zstd.Capability.Descriptor{
+        .id = "zigeffect-quic.http3-client",
+        .kind = .http_client,
+        .maturity = .local_development,
+        .package = "zigeffect-quic",
+        .version = "0.1.0",
+        .features = &.{ "http3", "quic", "tls" },
+        .side_effects = .real,
+        .limitations = &.{"has no live release conformance recovery or bounded-load receipt"},
+    };
+
     config: ClientConfig = .{},
 
     pub fn init(config: ClientConfig) QuicHttpClient {
@@ -204,6 +225,15 @@ pub const WebTransportMessage = struct {
 };
 
 pub const FakeWebTransportClient = struct {
+    pub const capability = zstd.Capability.Descriptor{
+        .id = "zigeffect-quic.fake-web-transport-client",
+        .kind = .web_transport,
+        .maturity = .fake,
+        .package = "zigeffect-quic",
+        .version = "0.1.0",
+        .limitations = &.{"records messages in memory without a WebTransport session"},
+    };
+
     allocator: std.mem.Allocator,
     messages: std.ArrayList(WebTransportMessage) = .empty,
 
@@ -466,6 +496,23 @@ fn requestPath(url: []const u8) []const u8 {
 
 test "zigeffect-quic imports quic-zig" {
     try std.testing.expect(@hasDecl(quic, "event_loop"));
+}
+
+test "QUIC adapters publish truthful pre-production capabilities" {
+    try FakeQuicHttpClient.capability.validate();
+    try QuicHttpClient.capability.validate();
+    try FakeWebTransportClient.capability.validate();
+    try std.testing.expectEqual(zstd.Capability.Maturity.fake, FakeQuicHttpClient.capability.maturity);
+    try std.testing.expectEqual(zstd.Capability.Maturity.local_development, QuicHttpClient.capability.maturity);
+    try std.testing.expectEqual(zstd.Capability.Maturity.fake, FakeWebTransportClient.capability.maturity);
+    try std.testing.expectEqual(
+        zstd.Capability.Match.insufficient_maturity,
+        zstd.Capability.match(QuicHttpClient.capability, .{
+            .kind = .http_client,
+            .minimum_maturity = .production_candidate,
+            .requires_live_conformance = true,
+        }),
+    );
 }
 
 test "QUIC fake HTTP client works through zstd Http sendEffect with redacted causal facts" {

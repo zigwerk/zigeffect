@@ -75,6 +75,7 @@ export type GraphModel = {
 export type VisualGraphLayoutMode = "dagre" | "force" | "radial";
 
 export type VisualGraphPerspective = "cause" | "topology" | "ownership" | "lineage";
+export type WorkbenchGraphPerspective = VisualGraphPerspective | "statechart" | "actors";
 
 export type VisualGraphNodeTone = "ok" | "warning" | "failure";
 
@@ -89,7 +90,9 @@ export type VisualGraphNodeGroup =
   | "retry"
   | "service"
   | "artifact"
-  | "data";
+  | "data"
+  | "state"
+  | "actor";
 
 export type VisualGraphEdgeKind =
   | "parent"
@@ -100,7 +103,10 @@ export type VisualGraphEdgeKind =
   | "reads"
   | "writes"
   | "transforms"
-  | "emits";
+  | "emits"
+  | "contains"
+  | "transition"
+  | "invokes";
 
 export type VisualGraphRefSet = {
   artifactId: string | null;
@@ -128,6 +134,7 @@ export type VisualGraphNode = {
   refs: VisualGraphRefSet;
   tone: VisualGraphNodeTone;
   priority: VisualGraphNodePriority;
+  sourceLocation?: string;
 };
 
 export type VisualGraphEdge = {
@@ -141,16 +148,16 @@ export type VisualGraphEdge = {
 };
 
 export type VisualGraphModel = {
-  perspective: VisualGraphPerspective;
+  perspective: WorkbenchGraphPerspective;
   layoutMode: VisualGraphLayoutMode;
   nodes: VisualGraphNode[];
   edges: VisualGraphEdge[];
   legend: VisualGraphLegendEntry[];
   warnings: string[];
   adapter: {
-    solid: "@dschz/solid-g6";
-    engine: "@antv/g6";
-    directEngineApi: "not-required";
+    solid: string;
+    engine: string;
+    directEngineApi: "implemented" | "not-required";
   };
 };
 

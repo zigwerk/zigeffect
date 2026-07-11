@@ -1,0 +1,205 @@
+name: zigeffect production
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/zigeffect-production.yml"
+      - "packages/zigeffect/**"
+      - "packages/zigeffect-std/**"
+      - "packages/zigeffect-cli/**"
+      - "packages/zigeffect-http/**"
+      - "packages/zigeffect-http-tls-openssl/**"
+      - "packages/zigeffect-postgres-libpq/**"
+      - "packages/zigeffect-storage-postgres/**"
+      - "packages/zigeffect-transport/**"
+      - "packages/zigeffect-otel/**"
+      - "packages/zigeffect-redis/**"
+      - "packages/zigeffect-s3/**"
+      - "packages/zigeffect-reference-system/**"
+      - ".agents/skills/zigeffect-development/**"
+      - ".claude/skills/zigeffect-development/**"
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/zigeffect-production.yml"
+      - "packages/zigeffect*/**"
+      - ".agents/skills/zigeffect-development/**"
+      - ".claude/skills/zigeffect-development/**"
+  schedule:
+    - cron: "17 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ZIG_VERSION: 0.16.0
+
+jobs:
+  native:
+    name: native ${{ matrix.os }} ${{ matrix.optimize }} shard-${{ matrix.shard }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        optimize: [Debug, ReleaseSafe]
+        shard: [core, std-cli, adapters, reference]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install native libraries on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libpq-dev libssl-dev jq redis-server rsync
+      - name: Install native libraries on macOS
+        if: runner.os == 'macOS'
+        run: brew install libpq openssl@3 jq redis rsync
+      - name: Core shard
+        if: matrix.shard == 'core'
+        working-directory: packages/zigeffect
+        run: zig build test-raw -Doptimize=${{ matrix.optimize }} --summary all
+      - name: Standard library and CLI shard
+        if: matrix.shard == 'std-cli'
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd packages/zigeffect-std && zig build test -Doptimize=${{ matrix.optimize }} --summary all)
+          (cd packages/zigeffect-cli && zig build test -Doptimize=${{ matrix.optimize }} --summary all)
+      - name: Adapter shard
+        if: matrix.shard == 'adapters'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for package in zigeffect-http zigeffect-http-tls-openssl zigeffect-postgres-libpq zigeffect-storage-postgres zigeffect-transport zigeffect-otel zigeffect-redis zigeffect-s3; do
+            (cd "packages/$package" && zig build test -Doptimize=${{ matrix.optimize }} --summary all)
+          done
+      - name: Reference and Workbench shard
+        if: matrix.shard == 'reference'
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd packages/zigeffect-reference-system && zig build test -Doptimize=${{ matrix.optimize }} --summary all && zig build fault-matrix -Doptimize=${{ matrix.optimize }} --summary all)
+          if [[ '${{ matrix.optimize }}' == Debug ]]; then
+            bun install --frozen-lockfile
+            bun run zigeffect:workbench:typecheck
+            bun run zigeffect:workbench:test
+            bun run zigeffect:workbench:build
+          fi
+      - name: Write agent failure handoff
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p .zigeffect/ci
+          printf '{"schema":"zigeffect.ci-failure-handoff.v1","status":"failed","os":"%s","optimize":"%s","shard":"%s","run_id":"%s","repair_hint":"replay the named shard command and inspect the first Testing v2 assertion causal id"}\n' '${{ matrix.os }}' '${{ matrix.optimize }}' '${{ matrix.shard }}' '${{ github.run_id }}' > .zigeffect/ci/handoff.json
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: native-failure-${{ matrix.os }}-${{ matrix.optimize }}-${{ matrix.shard }}
+          retention-days: 14
+          if-no-files-found: ignore
+          path: |
+            .zigeffect/ci/handoff.json
+            packages/**/.zigeffect/**/*.json
+            packages/**/.zig-cache/causal-artifacts/*
+
+  contracts:
+    name: evidence scaffolds hygiene and release gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - uses: oven-sh/setup-bun@v2
+      - run: sudo apt-get update && sudo apt-get install -y libpq-dev libssl-dev jq redis-server rsync
+      - name: Tool and Testing v2 hygiene
+        run: |
+          packages/zigeffect/tools/check_tool_hygiene.sh
+          packages/zigeffect/scripts/check_testing_v2_migration.sh
+      - name: Content-addressed production evidence
+        run: packages/zigeffect/scripts/check_production_evidence.sh
+      - name: Generated scaffold Debug and ReleaseSafe matrix
+        working-directory: packages/zigeffect-cli
+        run: zig build integration-test --summary all
+      - name: Fast affected-test selection
+        working-directory: packages/zigeffect-cli
+        run: zig build run -- test affected --root ../zigeffect-reference-system --changed services/api/src/production_wiring.zig --json | jq -e '.schema == "zigeffect.test-list.v1" and .selected >= 1'
+      - name: Core durable release gate
+        working-directory: packages/zigeffect
+        run: zig build release-gate -Doptimize=ReleaseSafe --summary all
+      - name: Documentation honesty API and diff hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -n '^- \[ \]' docs/superpowers/plans/2026-07-11-zigeffect-production-application-platform-roadmap.md; then
+            echo 'production roadmap contains incomplete work' >&2
+            exit 1
+          fi
+          git diff --check
+
+  live:
+    name: live external adapter and multi-service evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: sudo apt-get update && sudo apt-get install -y libpq-dev libssl-dev jq redis-server curl openssl
+      - name: Required live matrix
+        run: packages/zigeffect/scripts/check_production_release.sh live
+      - name: Validate production manifest and receipt digests
+        working-directory: packages/zigeffect-cli
+        run: zig build run -- project validate --root ../zigeffect-reference-system --json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-live-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            packages/zigeffect/conformance/production-release-evidence.v1.json
+            packages/zigeffect-*/conformance/*.json
+            packages/zigeffect-reference-system/.zigeffect/**/*.json
+
+  scheduled-stress:
+    name: scheduled fuzz stress soak and performance
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: sudo apt-get update && sudo apt-get install -y libpq-dev libssl-dev jq redis-server curl openssl rsync
+      - name: Engine performance and generated crash properties
+        working-directory: packages/zigeffect
+        run: |
+          zig build performance-bounds -Doptimize=ReleaseSafe --summary all
+          zig build property-crash -Doptimize=ReleaseSafe --summary all
+          zig build thread-sanitizer --summary all
+      - name: Bounded HTTP parser fuzzing
+        working-directory: packages/zigeffect-http
+        run: zig build test --fuzz=25K --test-timeout 15m --summary all
+      - name: Repeated PostgreSQL and CockroachDB conformance
+        working-directory: packages/zigeffect-postgres-libpq
+        env:
+          ZIGEFFECT_DATABASE_STRESS_ITERATIONS: 3
+        run: bash tests/run_stress_conformance.sh
+      - name: Reference soak
+        working-directory: packages/zigeffect-reference-system
+        env:
+          ZIGEFFECT_REFERENCE_SOAK_ITERATIONS: 5
+          ZIGEFFECT_REFERENCE_SOAK_REQUESTS: 25
+        run: bash test/run_soak_conformance.sh
+      - name: Clean source snapshot release gate
+        run: packages/zigeffect/scripts/check_clean_snapshot_release.sh

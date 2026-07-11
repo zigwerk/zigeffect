@@ -93,6 +93,18 @@ test("loadPayloadFromBridge can load the local dev session sample", async () => 
   expect(payload.artifactJson).toContain("Claude Code");
 });
 
+test("loadPayloadFromBridge can load the statechart and actor development sample", async () => {
+  const payload = await loadPayloadFromBridge(
+    {},
+    async (sampleName) => readFileSync(new URL(`../public/${sampleName}`, import.meta.url), "utf8"),
+    "?sample=statechart",
+  );
+
+  expect(payload.session?.artifact_path).toBe("sample-statechart-workbench.json");
+  expect(payload.artifactJson).toContain("zigeffect.statechart.definition.v1");
+  expect(payload.artifactJson).toContain("agent.research-review");
+});
+
 test("workbench HTML loads the WebUI bridge before the Solid bundle", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const webuiScript = html.indexOf('src="/webui.js"');

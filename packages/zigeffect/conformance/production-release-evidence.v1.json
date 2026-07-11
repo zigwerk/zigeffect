@@ -1,0 +1,30 @@
+{
+  "schema": "zigeffect.production-release-evidence.v1",
+  "version": "0.1.0",
+  "generated_at_ms": 1783777336000,
+  "status": "passed",
+  "artifacts": [
+    {"adapter":"zigeffect-http-tls-openssl","receipt":"packages/zigeffect-http-tls-openssl/conformance/tls-loopback-live.v1.json","sha256":"6fb32bcb3bc3944f45e4101a72587839652a52523d205a5d65a8b05684262990"},
+    {"adapter":"zigeffect-http.server","receipt":"packages/zigeffect-http/conformance/http-live.v1.json","sha256":"818cd10afbf38ff139a45541d33b54abdf58e60e20a5fdffe3d627ce2a9ae2df"},
+    {"adapter":"zigeffect-otel.otlp-http-json","receipt":"packages/zigeffect-otel/conformance/otlp-http-live.v1.json","sha256":"ca7db537af861210ae00800d0fc08ef1f03e0413c94ec76aefc5e1e4e31b2192"},
+    {"adapter":"zigeffect-postgres.libpq","receipt":"packages/zigeffect-postgres-libpq/conformance/postgres-cockroach-live.v1.json","sha256":"afc72df4c305d9911b20a8baf28d62f255308627f2d833054a7dcb34a67d81fa"},
+    {"adapter":"zigeffect-redis","receipt":"packages/zigeffect-redis/conformance/redis-live.v1.json","sha256":"5c489050fc04a52d2c6ac96c4f3450c777af08e80d2e4298c1a055a025db5f3d"},
+    {"adapter":"zigeffect-s3.object-storage","receipt":"packages/zigeffect-s3/conformance/minio-live.v1.json","sha256":"6767bb1a464008824bb38d42eb880fbd451ffe2d55ecbb3271cd8d4e2f4edfc2"},
+    {"adapter":"zigeffect-std.system-primitives","receipt":"packages/zigeffect-std/conformance/system-primitives-live.v1.json","sha256":"fddc0718cbc27865cde9292dddfd68e7ec0ba093c27954aa9242292001de4d49"},
+    {"adapter":"zigeffect-storage.postgres","receipt":"packages/zigeffect-storage-postgres/conformance/storage-restart-live.v1.json","sha256":"bf137fe1648d1a46679c4a99dd440827b558074acc0d780d1e8b31379b3d8ca3"},
+    {"adapter":"zigeffect-transport.tcp-tls","receipt":"packages/zigeffect-transport/conformance/tls-process-live.v1.json","sha256":"6a324a28a11126e4481e7733a69a4ef613ca9e9982668f4b5f13662765c85bf0"},
+    {"adapter":"zigeffect-reference-orders","receipt":"packages/zigeffect-reference-system/conformance/reference-stack-live.v1.json","sha256":"4d62af459d76eefea4b1af0a23aa1daef8b6945444c68211f3caa8040e72bfc9"},
+    {"adapter":"zigeffect-reference-orders-trace","receipt":"packages/zigeffect-reference-system/conformance/reference-stack-trace.v1.json","sha256":"b5a361c0ada9c00a104830b4d62cac6ab101c34870ea91652597fd278705d880"}
+  ],
+  "claims": [
+    "production-candidate adapters have content-addressed live conformance",
+    "the reference API worker and collector execute as independent processes",
+    "required Testing v2 model schedule differential mutation and live receipts are complete",
+    "explicit limitations remain part of each release claim"
+  ],
+  "limitations": [
+    "production-verified maturity requires deployment-specific soak SLO and operator review",
+    "Linux evidence is enforced by CI and macOS arm64 evidence is captured locally",
+    "ThreadSanitizer executes in Linux CI; Zig LLVM 0.16 TSan is compile-only on macOS arm64 because its runtime terminates before main"
+  ]
+}

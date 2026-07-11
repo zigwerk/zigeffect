@@ -1,5 +1,6 @@
 const std = @import("std");
 const Secrets = @import("../secrets/root.zig");
+const Capability = @import("../capability/root.zig");
 const StdService = @import("../service/root.zig");
 const fx = @import("zigeffect");
 
@@ -44,6 +45,8 @@ pub const RunOutput = struct {
 };
 
 pub const FakeRunner = struct {
+    pub const capability = Capability.Builtin.fake_process_runner;
+
     result: Result,
 
     pub fn init(result: Result) FakeRunner {
@@ -85,6 +88,8 @@ pub const FakeRunner = struct {
 };
 
 pub const LocalRunner = struct {
+    pub const capability = Capability.Builtin.local_process_runner;
+
     io: std.Io,
     stdout_limit: std.Io.Limit = .limited(1024 * 1024),
     stderr_limit: std.Io.Limit = .limited(1024 * 1024),

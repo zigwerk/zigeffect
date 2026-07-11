@@ -2,6 +2,8 @@ const std = @import("std");
 const fx = @import("zigeffect");
 const Secrets = @import("../secrets/root.zig");
 
+pub const Lifecycle = @import("lifecycle.zig");
+
 pub const receipt_schema = "zigeffect.application-fact.v1";
 pub const max_fact_string_bytes: usize = 4096;
 
@@ -20,6 +22,7 @@ pub const FactKind = enum {
     artifact_production,
     component_dependency,
     acceptance_evaluation,
+    lifecycle_transition,
 };
 
 pub const References = struct {
@@ -64,6 +67,7 @@ pub fn label(kind: FactKind) []const u8 {
         .artifact_production => "app.artifact.produce",
         .component_dependency => "app.component.dependency",
         .acceptance_evaluation => "app.acceptance.evaluate",
+        .lifecycle_transition => "app.lifecycle.transition",
     };
 }
 
@@ -71,7 +75,7 @@ pub fn semanticKind(kind: FactKind) fx.CausalAppSemanticKind {
     return switch (kind) {
         .config_load => .data_read,
         .schema_decode => .data_transformed,
-        .command_execution, .request_handling => .function_boundary,
+        .command_execution, .request_handling, .lifecycle_transition => .function_boundary,
         .sql_transaction, .external_call, .component_dependency => .service_call,
         .artifact_production => .artifact_emitted,
         .acceptance_evaluation => .policy_decision,
@@ -152,6 +156,15 @@ pub fn componentDependency(component: []const u8, dependency: []const u8, status
 
 pub fn acceptanceEvaluation(check_id: []const u8, status: []const u8, detail: []const u8) Fact {
     return .{ .kind = .acceptance_evaluation, .status = status, .detail = detail, .refs = .{ .domain_entity_ref = check_id } };
+}
+
+pub fn lifecycleTransition(state: Lifecycle.State, status: []const u8, cause_event_id: ?u64) Fact {
+    return .{
+        .kind = .lifecycle_transition,
+        .status = status,
+        .detail = @tagName(state),
+        .refs = .{ .domain_entity_ref = @tagName(state), .cause_event_id = cause_event_id },
+    };
 }
 
 pub fn receiptJsonAlloc(allocator: std.mem.Allocator, fact: Fact) ![]u8 {
@@ -283,6 +296,7 @@ test "application facts record stable semantic intent and references" {
         artifactProduction("receipt-42", "created", "application receipt"),
         componentDependency("api", "shared-domain", "resolved"),
         acceptanceEvaluation("check-health", "passed", "health route passed"),
+        lifecycleTransition(.ready, "ready", null),
     };
     for (facts) |fact| try std.testing.expect(record(&ctx, fact) != null);
 

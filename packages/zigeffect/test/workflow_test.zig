@@ -661,6 +661,45 @@ test "workflow lifecycle suspend and resume are durable and idempotent" {
     try std.testing.expectEqualStrings("operator", events.events[2].redacted_detail);
 }
 
+test "workflow lifecycle is governed through the shared statechart control plane" {
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+    _ = try journal.append(.{ .event = .{
+        .sequence = 1,
+        .kind = .workflow_started,
+        .workflow_id = 71,
+        .execution_id = 81,
+        .name = "controlled-workflow",
+        .status = "running",
+        .idempotency_key = "controlled-start",
+    } });
+
+    const Event = enum { unused };
+    const Plane = fx.statechart.ControlPlane(Event);
+    var lifecycle = fx.workflow.WorkflowLifecycle.init(std.testing.allocator, journal, 71, 81);
+    var adapter = fx.workflow.WorkflowControlAdapter(Event).init(&lifecycle, 4242, 9);
+    var plane = Plane.init(adapter.adapter());
+    const Allow = struct {
+        fn decide(_: *anyopaque, _: Plane.Request) fx.statechart.ControlDecision {
+            return .allow;
+        }
+    };
+    var policy_context: u8 = 0;
+    plane.policy = .{ .context = &policy_context, .decide_fn = Allow.decide };
+    const receipt = try plane.execute(.{
+        .request_id = "suspend-workflow-71",
+        .machine_id = "agent.controlled-workflow",
+        .instance_id = 71,
+        .operation = .@"suspend",
+        .expected_definition_fingerprint = 4242,
+        .expected_fence_epoch = 9,
+        .reason = "human operator investigation",
+    });
+    try std.testing.expectEqual(fx.statechart.ControlStatus.applied, receipt.status);
+    try std.testing.expectEqual(fx.workflow.WorkflowStatus.suspended, try lifecycle.inspectStatus());
+}
+
 test "workflow lifecycle interrupt is terminal and idempotent after restart" {
     var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
     defer journal_memory.deinit();
@@ -2232,6 +2271,48 @@ test "workflow engine rejects duplicate executions and missing providers" {
         defer events.deinit();
         try std.testing.expectEqual(@as(usize, 1), events.events.len);
     }
+}
+
+test "workflow engine starts child workflows durably and idempotently" {
+    const Payload = struct { request_id: u64 };
+    const Helpers = struct {
+        fn key(allocator: std.mem.Allocator, payload: Payload) ![]const u8 {
+            return std.fmt.allocPrint(allocator, "request:{d}", .{payload.request_id});
+        }
+    };
+    const ParentWorkflow = fx.workflow
+        .Workflow("parent", Payload, void, error{Failed}, fx.TestServices)
+        .withIdempotencyKey(Helpers.key);
+    const ChildWorkflow = fx.workflow
+        .Workflow("child", Payload, void, error{Failed}, fx.TestServices)
+        .withIdempotencyKey(Helpers.key);
+
+    var journal_memory = fx.workflow.InMemoryJournalStore.init(std.testing.allocator);
+    defer journal_memory.deinit();
+    const journal = journal_memory.asJournalStore();
+    var engine = fx.workflow.WorkflowEngine.init(std.testing.allocator, journal);
+    defer engine.deinit();
+
+    try engine.register(ParentWorkflow);
+    try engine.register(ChildWorkflow);
+    const parent = try engine.execute(ParentWorkflow, .{ .request_id = 1 });
+    const child = try engine.executeChild(parent.workflow_id, parent.execution_id, ChildWorkflow, .{ .request_id = 2 });
+    const duplicate = try engine.executeChild(parent.workflow_id, parent.execution_id, ChildWorkflow, .{ .request_id = 2 });
+
+    try std.testing.expectEqual(child.execution_id, duplicate.execution_id);
+    try std.testing.expectEqual(@as(?u64, parent.workflow_id), child.parent_workflow_id);
+    try std.testing.expectEqual(@as(?u64, parent.execution_id), child.parent_execution_id);
+    try std.testing.expectError(
+        error.ParentWorkflowNotFound,
+        engine.executeChild(parent.workflow_id + 1, parent.execution_id, ChildWorkflow, .{ .request_id = 3 }),
+    );
+
+    var events = try journal.readAll(std.testing.allocator);
+    defer events.deinit();
+    try std.testing.expectEqual(@as(usize, 2), events.events.len);
+    try std.testing.expectEqual(@as(?u64, parent.started_sequence), events.events[1].parent_sequence);
+    try std.testing.expectEqual(@as(?u64, parent.workflow_id), events.events[1].parent_workflow_id);
+    try std.testing.expectEqual(@as(?u64, parent.execution_id), events.events[1].parent_execution_id);
 }
 
 test "workflow engine stores backend capabilities and checks requirements" {

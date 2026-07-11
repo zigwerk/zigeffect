@@ -41,6 +41,30 @@ semantic fact comparison, not exact event-id graph isomorphism.
 | 14 | Multi-runner causal evidence | **local lineage stitcher plus deployment artifact metadata** | `src/services/causal_runner_lineage.zig` |
 | 15 | Effect-grade standard library | **M1-M19 delivered**: service kernel, production Schema, production Schema-powered CLI, effect-native config/JSON/secrets, streams/queues/pubsub/sinks, local process/workspace/FS adapters, observability recorder/artifacts, HTTP/WebSocket contracts/adapters, Schema-coded local HTTP router, SQL contracts plus local Postgres adapter, typed SQL row decoding, Postgres migration planning/apply SQL, experimental QUIC/HTTP3/WebTransport adapter, local WebTransport workbench bridge, local agent toolkit, real local-tool cookbook examples, local agent supervisor, and workbench dev-session UX | `packages/zigeffect-std`, `packages/zigeffect-postgres`, `packages/zigeffect-quic`, `packages/zigeffect-std/docs/cookbook.md`, `docs/superpowers/specs/2026-06-25-zigeffect-std-effectts-grade-roadmap-design.md` |
 | 16 | Agentic application platform | **M88-M95 delivered**: project contracts, Codex/Claude skills, five production scaffolds, instrumented project workflows, provider-neutral development protocol, semantic application facts, Workbench project UX, offline provider conformance, install/completions, compatibility metadata, conflict-safe upgrades, generated snapshots, and one local release gate | `packages/zigeffect-cli`, `packages/zigeffect-std/src/project`, `packages/zigeffect-std/src/application`, `workbench/`, `docs/compatibility.md` |
+| 17 | Agent-first testing platform | **M112-M137 delivered locally**: native control/process-receipt protocol, execution identity, semantic coverage/gaps, typed statechart and schedule exploration, structural/custom shrinking, differential execution, deterministic distributed virtual world, mutation analysis, performance budgets, side-effect firewall, stress/history CLI, Testing v2 Workbench, universal suite receipts, repository-wide package migration, migration guard, and template-v5 generated projects | `packages/zigeffect/src/testing`, `packages/zigeffect-std/src/testing`, `packages/zigeffect-cli`, `workbench/src/testing`, `docs/agent-first-testing.md` |
+| 18 | Agentic statecharts and workflows | **production implementation complete**: deterministic SCXML-derived semantics, actors and durable trees, workflow command adapters, cluster fencing, immutable proposal/proof/review/application governance, native semantic version diff, bounded simulation and invariants, policy-gated actor/workflow controls, exact-fingerprint snapshot migration, portable plan compiler, twelve reusable agentic patterns, CLI lifecycle, XState v5 oracle, and SolidJS Statechart Studio | `src/statechart`, `src/workflow/statechart.zig`, `packages/zigeffect-std/src/statechart`, `packages/zigeffect-cli`, `docs/statecharts-production.md`, `workbench/src/statechart` |
+
+## Testing v2 delivery map (M121–M130)
+
+All ten milestones are implemented locally as one additive receipt-v1 release:
+
+| Milestone | Delivered capability |
+|---|---|
+| M121 | Fixed control/process-receipt protocol, atomic publication, native receipt validation, source/command/target identity |
+| M122 | Semantic targets, hits, required/advisory gaps, CLI `coverage` and `gaps` |
+| M123 | Typed statechart model exploration and core schedule exploration with shortest retained failures |
+| M124 | Boundary generation, structural/custom shrinking, shrink paths, normalized differential executors |
+| M125 | Deterministic virtual time/network/queue/store/crash faults and default-deny real side-effect firewall |
+| M126 | Stable requirement-linked mutation points and deterministic absolute/relative performance budgets |
+| M127 | Bounded multi-seed stress, atomic validated history, introduced/resolved failure matching |
+| M128 | Workbench protocol, gap, evidence, replay, shrink, and history surfaces |
+| M129 | Template-v4 scaffolds, generated/project Codex and Claude skills, guides, and compatibility state |
+| M130 | Direct public API discovery, schema validation, package/release gates, and generated-application proof |
+
+The governing design and acceptance plan are
+[`docs/superpowers/specs/2026-07-10-zigeffect-testing-v2-design.md`](../../../docs/superpowers/specs/2026-07-10-zigeffect-testing-v2-design.md)
+and
+[`docs/superpowers/plans/2026-07-10-zigeffect-testing-v2.md`](../../../docs/superpowers/plans/2026-07-10-zigeffect-testing-v2.md).
 
 ## What is real today
 

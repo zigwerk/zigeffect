@@ -46,6 +46,10 @@ export type ProjectSessionModel = {
   recovery: ProjectRecoveryState; approval: ProjectApprovalState; taskIds: string[];
   evidenceIds: string[]; artifactIds: string[]; summary: string;
 };
+export type ProjectCapabilityModel = {
+  id: string; profileId: string; requirementId: string; target: string; adapterId: string;
+  kind: string; maturity: string; result: string; conformanceReceipt: string;
+};
 export type ProjectDevelopmentModel = {
   schema: typeof PROJECT_DEVELOPMENT_SCHEMA; sequence: number; project: string; version: string; kind: string;
   connection: ProjectConnectionState; recovery: ProjectRecoveryState; approval: ProjectApprovalState;
@@ -54,6 +58,7 @@ export type ProjectDevelopmentModel = {
   requirements: ProjectRequirementModel[]; checks: ProjectAcceptanceModel[]; tasks: ProjectTaskModel[];
   evidence: ProjectEvidenceModel[]; nextActions: ProjectNextActionModel[]; artifacts: ProjectArtifactModel[];
   applicationFacts: ApplicationFactModel[]; sessions: ProjectSessionModel[]; blockers: string[];
+  adapterProfile: string | null; capabilities: ProjectCapabilityModel[]; capabilityGaps: number;
 };
 export type ProjectDevelopmentFrame = Record<string, unknown> & {
   schema: typeof PROJECT_DEVELOPMENT_SCHEMA; sequence: number;
@@ -210,6 +215,28 @@ function parseSessions(value: unknown): ProjectSessionModel[] {
     };
   }), "session");
 }
+function parseCapabilities(source: UnknownRecord | null, label: string): { profile: string | null; adapters: ProjectCapabilityModel[] } {
+  if (!source) return { profile: null, adapters: [] };
+  const profile = optionalText(source.adapter_profile, `${label}.adapter_profile`);
+  const adapters = unique(array(source.adapters, `${label}.adapters`).map((entry, index) => {
+    const item = object(entry, `${label}.adapter[${index}]`);
+    const profileId = text(item.profile_id, `${label}.adapter[${index}].profile_id`);
+    const requirementId = text(item.requirement_id, `${label}.adapter[${index}].requirement_id`);
+    if (!profile || profileId !== profile) throw new Error(`${label} adapter profile mismatch`);
+    return {
+      id: `${profileId}:${requirementId}`,
+      profileId,
+      requirementId,
+      target: text(item.target, `${label}.adapter[${index}].target`),
+      adapterId: text(item.adapter_id, `${label}.adapter[${index}].adapter_id`),
+      kind: text(item.kind, `${label}.adapter[${index}].kind`),
+      maturity: text(item.maturity, `${label}.adapter[${index}].maturity`),
+      result: text(item.result, `${label}.adapter[${index}].result`),
+      conformanceReceipt: text(item.conformance_receipt ?? "", `${label}.adapter[${index}].conformance_receipt`, true),
+    };
+  }), `${label} adapter`);
+  return { profile, adapters };
+}
 function parseApplicationFacts(value: unknown, componentIds: Set<string>): ApplicationFactModel[] {
   const facts: ApplicationFactModel[] = [];
   for (const [index, entry] of array(value, "events").entries()) {
@@ -277,6 +304,13 @@ export function deriveProjectDevelopmentModel(input: unknown): ProjectDevelopmen
     throw new Error("handoff project does not match manifest");
   }
   const statusSession = currentSession ?? handoffSession;
+  const statusCapabilities = parseCapabilities(status, "status");
+  const handoffCapabilities = parseCapabilities(handoff, "handoff");
+  if (statusCapabilities.profile && handoffCapabilities.profile && statusCapabilities.profile !== handoffCapabilities.profile) {
+    throw new Error("status and handoff adapter profiles do not match");
+  }
+  const capabilities = mergeUnique(statusCapabilities.adapters, handoffCapabilities.adapters, "capability");
+  const adapterProfile = statusCapabilities.profile ?? handoffCapabilities.profile;
   const tasks = mergeUnique(status ? parseTasks(status.tasks, statusSession) : [], handoff ? parseTasks(handoff.tasks, handoffSession) : [], "task");
   const evidence = mergeUnique(status ? parseEvidence(status.evidence, statusSession) : [], handoff ? parseEvidence(handoff.evidence, handoffSession) : [], "evidence");
   const nextActions = mergeUnique(status ? parseActions(status.next_actions, statusSession) : [], handoff ? parseActions(handoff.next_actions, handoffSession) : [], "next action");
@@ -328,6 +362,9 @@ export function deriveProjectDevelopmentModel(input: unknown): ProjectDevelopmen
     commands, requirements, checks, tasks, evidence, nextActions, artifacts,
     applicationFacts: parseApplicationFacts(root.events, componentIds), sessions,
     blockers: handoff ? stringList(handoff.blockers, "handoff.blockers") : [],
+    adapterProfile,
+    capabilities,
+    capabilityGaps: capabilities.filter((capability) => capability.result !== "matched").length,
   };
 }
 

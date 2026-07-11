@@ -1,0 +1,7 @@
+{
+  "port": 8080,
+  "database_url": "postgresql://database:5432/app?sslmode=require",
+  "otlp_host": "otel-collector",
+  "otlp_port": 4318,
+  "migration_dialect": "postgresql"
+}

@@ -17,7 +17,7 @@ test("workbench labels the lenses for humans", () => {
 test("the dissolved tabs survive as auxiliary views", () => {
   const auxIds = workbenchAuxViews();
 
-  expect(auxIds).toEqual(["diff", "chain", "metadata", "queries", "safety"]);
+  expect(auxIds).toEqual(["diff", "chain", "metadata", "queries", "safety", "tests"]);
   // the old flat tab bar is gone; these are reachable via the command palette / More.
   expect(auxIds).not.toContain("timeline");
   expect(auxIds).not.toContain("visual-graph");

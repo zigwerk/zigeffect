@@ -1,0 +1,16 @@
+.{
+    .name = .zigeffect_reference_orders,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0xca83de9177c23741,
+    .dependencies = .{
+        .api = .{ .path = "services/api" },
+        .worker = .{ .path = "services/worker" },
+        .shared = .{ .path = "packages/shared" },
+        .zigeffect_std = .{ .path = "../zigeffect-std" },
+        .zigeffect_postgres_libpq = .{ .path = "../zigeffect-postgres-libpq" },
+        .zigeffect_redis = .{ .path = "../zigeffect-redis" },
+        .zigeffect_s3 = .{ .path = "../zigeffect-s3" },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "README.md", "conformance", "src", "test" },
+}

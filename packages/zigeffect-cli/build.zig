@@ -1,9 +1,17 @@
 const std = @import("std");
 
+fn addV2Test(b: *std.Build, runner: std.Build.LazyPath, options: std.Build.TestOptions) *std.Build.Step.Compile {
+    var configured = options;
+    configured.test_runner = .{ .path = runner, .mode = .server };
+    return b.addTest(configured);
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const zigeffect_std = b.dependency("zigeffect_std", .{}).module("zigeffect_std");
+    const zigeffect_std_dependency = b.dependency("zigeffect_std", .{});
+    const zigeffect_std = zigeffect_std_dependency.module("zigeffect_std");
+    const testing_runner = zigeffect_std_dependency.module("zigeffect_test_runner").root_source_file.?;
 
     const cli = b.addModule("zigeffect_cli", .{
         .root_source_file = b.path("src/root.zig"),
@@ -28,7 +36,7 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the zigeffect CLI");
     run_step.dependOn(&run.step);
 
-    const tests = b.addTest(.{
+    const tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-cli-tests",
         .root_module = cli,
     });
@@ -42,7 +50,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     integration_module.addImport("zigeffect_cli", cli);
-    const integration_tests = b.addTest(.{
+    const integration_tests = addV2Test(b, testing_runner, .{
         .name = "zigeffect-generated-project-tests",
         .root_module = integration_module,
     });

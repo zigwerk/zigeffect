@@ -719,11 +719,13 @@ try std.testing.expect(!backend.can_suspend);
 the same capability contract. Async backend additions should preserve `Scope`,
 `Exit`, `Cause`, and service lookup contracts.
 
-Use production cluster transports when runner ingress should cross a byte
-protocol boundary while still landing in durable `MessageStorage`:
+Use the encoded in-process cluster transports to test byte-protocol
+compatibility while still landing in local `MessageStorage`. These adapters do
+not cross an operating-system process or network boundary and cannot satisfy a
+production cluster-transport capability requirement:
 
 ```zig
-var transport_state = try fx.ProductionHttpClusterTransport.init(allocator, message_storage, .{
+var transport_state = try fx.EncodedInProcessHttpClusterTransport.init(allocator, message_storage, .{
     .shard_count = 32,
     .auth = .{ .mode = .bearer_token, .credential = "runner-token" },
     .limits = .{
@@ -747,10 +749,15 @@ var response = try transport_state.asClusterTransport().send(allocator, .{
 defer response.deinit(allocator);
 ```
 
-`ProductionSocketClusterTransport` uses the same auth, limit, retry, and
-lifecycle metrics contract with deterministic `ZIGFX/1` socket frames.
+`EncodedInProcessSocketClusterTransport` uses the same auth, limit, retry, and
+lifecycle metrics contract with deterministic `ZIGFX/1` socket frames. The old
+`ProductionHttpClusterTransport` and `ProductionSocketClusterTransport` names
+remain deprecated source-compatibility aliases only.
 `chunkedClusterTransportRequest` can attach chunk metadata before sending a
 large payload while keeping the durable payload bytes intact.
+
+Use a future `zigeffect-transport` production adapter, backed by separate
+processes and authenticated TLS sockets, for real runner-to-runner ingress.
 
 ## Real Cluster Control Plane
 

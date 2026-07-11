@@ -16,5 +16,6 @@ test("project development panel renders requirements sessions artifacts and appl
   expect(model.artifacts.some((item) => item.path === ".zigeffect/receipts/check.json")).toBe(true);
   expect(source).toContain("Session comparison");
   expect(source).toContain("Application facts");
+  expect(source).toContain("Capability gaps");
   expect(source).toContain("onSelectEvent(fact.eventId)");
 });

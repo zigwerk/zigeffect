@@ -22,6 +22,8 @@ test "cluster transport public exports are available" {
     try std.testing.expect(@hasDecl(fx.cluster, "LoopbackHttpClusterTransport"));
     try std.testing.expect(@hasDecl(fx.cluster, "LoopbackSocketClusterTransport"));
     try std.testing.expect(@hasDecl(fx.cluster, "RemoteSocketClusterTransport"));
+    try std.testing.expect(@hasDecl(fx.cluster, "EncodedInProcessHttpClusterTransport"));
+    try std.testing.expect(@hasDecl(fx.cluster, "EncodedInProcessSocketClusterTransport"));
     try std.testing.expect(@hasDecl(fx.cluster, "ProductionHttpClusterTransport"));
     try std.testing.expect(@hasDecl(fx.cluster, "ProductionSocketClusterTransport"));
     try std.testing.expect(@hasDecl(fx.cluster, "formatClusterTransportSocketFrame"));
@@ -33,8 +35,12 @@ test "cluster transport public exports are available" {
     try std.testing.expect(@hasDecl(fx, "ClusterTransportBackpressurePolicy"));
     try std.testing.expect(@hasDecl(fx, "LoopbackSocketClusterTransport"));
     try std.testing.expect(@hasDecl(fx, "RemoteSocketClusterTransport"));
+    try std.testing.expect(@hasDecl(fx, "EncodedInProcessHttpClusterTransport"));
+    try std.testing.expect(@hasDecl(fx, "EncodedInProcessSocketClusterTransport"));
     try std.testing.expect(@hasDecl(fx, "ProductionHttpClusterTransport"));
     try std.testing.expect(@hasDecl(fx, "ProductionSocketClusterTransport"));
+    try std.testing.expect(fx.ProductionHttpClusterTransport == fx.EncodedInProcessHttpClusterTransport);
+    try std.testing.expect(fx.ProductionSocketClusterTransport == fx.EncodedInProcessSocketClusterTransport);
 }
 
 test "transport request json round-trips" {
@@ -664,6 +670,7 @@ test "production http transport stops after retry limit without durable submissi
     try std.testing.expectEqual(@as(usize, 0), by_shard.records.len);
     const failure = transport_state.lastFailure().?;
     try std.testing.expectEqual(fx.ClusterTransportKind.production_http, failure.transport);
+    try std.testing.expectEqual(fx.ExternalFailureClass.capacity, failure.class);
     try std.testing.expectEqualStrings("RetryLimitExceeded", failure.error_name);
 }
 
@@ -945,6 +952,7 @@ test "remote socket transport rejects wrong auth before durable submission" {
     try std.testing.expectEqual(@as(usize, 1), metrics.failures);
     try std.testing.expectEqualStrings("TransportUnauthorized", metrics.last_error_name);
     const failure = transport_state.lastFailure().?;
+    try std.testing.expectEqual(fx.ExternalFailureClass.unauthorized, failure.class);
     try std.testing.expect(std.mem.indexOf(u8, failure.redacted_detail, "server-secret") == null);
     try std.testing.expect(std.mem.indexOf(u8, failure.redacted_detail, "wrong-secret") == null);
 }

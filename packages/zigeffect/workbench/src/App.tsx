@@ -29,7 +29,16 @@ import { TopBar } from "./ui/TopBar";
 import { Segmented } from "./ui/Segmented";
 import { FindingsBand } from "./findings/FindingsBand";
 import { TraceCanvas } from "./trace/TraceCanvas";
-import { DagPanel } from "./graph/DagPanel";
+import { DagPanel, type GraphSurfaceMode } from "./graph/DagPanel";
+import {
+  deriveActorGraphModel,
+  deriveStatechartGraphModel,
+  diffStatechartDefinitions,
+  parseStatechartCatalog,
+  replayInstanceAt,
+} from "./statechart/statechartModel";
+import { comparePathWithXState } from "./statechart/xstateOracle";
+import { deriveStudioModel } from "./statechart/studioModel";
 import { CollabBoard } from "./collab/CollabBoard";
 import { Inspector } from "./inspector/Inspector";
 import { CommandPalette, type AuxView } from "./ui/CommandPalette";
@@ -41,6 +50,8 @@ import {
 } from "./localAgentControlClient";
 import { SafetyPanel } from "./safety/SafetyPanel";
 import { loadSafetyReceipt } from "./safety/safetyReceipt";
+import { TestPanel } from "./testing/TestPanel";
+import { loadTestRunReceipt } from "./testing/testReceipt";
 import {
   deriveProjectDevelopmentModel,
   type ProjectDevelopmentModel,
@@ -52,6 +63,7 @@ const auxTitles: Record<AuxView, string> = {
   metadata: "Metadata",
   queries: "Query catalogue",
   safety: "Agent safety evidence",
+  tests: "Agent test evidence",
 };
 
 function projectDevelopmentFromRaw(raw: unknown): ProjectDevelopmentModel | null {
@@ -78,12 +90,13 @@ export function workbenchLensesForArtifact(): Array<{ id: Lens; label: string }>
 
 /** The auxiliary views the old tab bar dissolved into (reachable via ⌘K / More). */
 export function workbenchAuxViews(): AuxView[] {
-  return ["diff", "chain", "metadata", "queries", "safety"];
+  return ["diff", "chain", "metadata", "queries", "safety", "tests"];
 }
 
 export function App() {
   const [payload] = createResource(loadPayload);
   const [safetyReceipt] = createResource(loadSafetyReceipt);
+  const [testRun] = createResource(loadTestRunReceipt);
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   const [search, setSearch] = createSignal("");
   const [kind, setKind] = createSignal("all");
@@ -91,6 +104,10 @@ export function App() {
   const [copiedCommand, setCopiedCommand] = createSignal<string | null>(null);
   const [layoutMode, setLayoutMode] = createSignal<VisualGraphLayoutMode>("dagre");
   const [graphPerspective, setGraphPerspective] = createSignal<VisualGraphPerspective>("cause");
+  const [graphMode, setGraphMode] = createSignal<GraphSurfaceMode>("causal");
+  const [statechartReplayPosition, setStatechartReplayPosition] = createSignal(Number.MAX_SAFE_INTEGER);
+  const [statechartDefinitionFingerprint, setStatechartDefinitionFingerprint] = createSignal<string | null>(null);
+  const [statechartInstanceId, setStatechartInstanceId] = createSignal<string | null>(null);
   const [density, setDensity] = createSignal<"comfortable" | "compact">("comfortable");
   const [findingFocus, setFindingFocus] = createSignal<CausalFinding["kind"] | null>(null);
   const [paletteOpen, setPaletteOpen] = createSignal(false);
@@ -213,6 +230,7 @@ export function App() {
         localDevSession: localDevSessionFromRaw(raw, artifactPath) ?? live?.localDevSession() ?? null,
         projectDevelopment: projectDevelopmentFromRaw(raw),
         raw,
+        statecharts: parseStatechartCatalog(raw),
         session: loaded.session,
         error: null as string | null,
       };
@@ -224,6 +242,7 @@ export function App() {
         localDevSession: null,
         projectDevelopment: null,
         raw: null,
+        statecharts: null,
         session: loaded.session,
         error: error instanceof Error ? error.message : "failed to parse artifact",
       };
@@ -235,6 +254,28 @@ export function App() {
   const semanticDiff = createMemo(() => parsed()?.semanticDiff ?? null);
   const localDevSession = createMemo(() => parsed()?.localDevSession ?? null);
   const projectDevelopment = createMemo(() => live?.projectDevelopment() ?? parsed()?.projectDevelopment ?? null);
+  const statecharts = createMemo(() => parsed()?.statecharts ?? null);
+  const studio = createMemo(() => {
+    const raw = parsed()?.raw;
+    if (!raw) return { changes: [], fleet: [], warnings: [] };
+    try {
+      return deriveStudioModel(raw);
+    } catch (error) {
+      return { changes: [], fleet: [], warnings: [error instanceof Error ? error.message : "invalid Statechart Studio artifact"] };
+    }
+  });
+  createEffect(() => {
+    const catalog = statecharts();
+    if (!catalog || catalog.definitions.length === 0) return;
+    const selectedDefinition = statechartDefinitionFingerprint();
+    const definition = catalog.definitions.find((candidate) => candidate.fingerprint === selectedDefinition) ?? catalog.definitions[0]!;
+    if (definition.fingerprint !== selectedDefinition) setStatechartDefinitionFingerprint(definition.fingerprint);
+    const matchingInstances = catalog.instances.filter((instance) => instance.definitionFingerprint === definition.fingerprint);
+    const selectedInstance = statechartInstanceId();
+    if (!matchingInstances.some((instance) => instance.instanceId === selectedInstance)) {
+      setStatechartInstanceId(matchingInstances[0]?.instanceId ?? null);
+    }
+  });
   const health = createMemo(() => {
     const session = localDevSession();
     return session ? deriveLocalDevHealthSummary(session) : null;
@@ -261,6 +302,83 @@ export function App() {
       selectedEventId: selectedId(),
     });
   });
+  const statechartGraph = createMemo(() => {
+    const catalog = statecharts();
+    const definition = catalog?.definitions.find((candidate) => candidate.fingerprint === statechartDefinitionFingerprint());
+    if (!catalog || !definition) return null;
+    const instance = catalog.instances.find((candidate) => candidate.instanceId === statechartInstanceId() && candidate.definitionFingerprint === definition.fingerprint);
+    const trace = instance ? catalog.executions.filter((execution) => execution.instanceId === instance.instanceId) : [];
+    const position = trace.length > 0 ? Math.max(0, Math.min(statechartReplayPosition(), trace.length - 1)) : 0;
+    const replayed = instance && trace.length > 0 ? replayInstanceAt(catalog, instance, position) : instance;
+    const coverage = catalog.coverage.find((candidate) => candidate.definitionFingerprint === definition.fingerprint);
+    return deriveStatechartGraphModel(definition, replayed, coverage, trace[position]);
+  });
+  const statechartReplay = createMemo(() => {
+    const catalog = statecharts();
+    const instance = catalog?.instances.find((candidate) => candidate.instanceId === statechartInstanceId());
+    if (!catalog || !instance) return null;
+    const total = catalog.executions.filter((execution) => execution.instanceId === instance.instanceId).length;
+    if (total === 0) return null;
+    return {
+      position: Math.max(0, Math.min(statechartReplayPosition(), total - 1)),
+      total,
+      onPosition: setStatechartReplayPosition,
+    };
+  });
+  const statechartControls = createMemo(() => {
+    const catalog = statecharts();
+    const selectedFingerprint = statechartDefinitionFingerprint();
+    const definition = catalog?.definitions.find((candidate) => candidate.fingerprint === selectedFingerprint);
+    if (!catalog || !definition) return null;
+    const instances = catalog.instances.filter((candidate) => candidate.definitionFingerprint === definition.fingerprint);
+    const trace = catalog.executions.filter((execution) => execution.instanceId === statechartInstanceId());
+    const previous = catalog.definitions
+      .filter((candidate) => candidate.id === definition.id && candidate.version < definition.version)
+      .sort((left, right) => right.version - left.version)[0];
+    const diff = previous ? diffStatechartDefinitions(previous, definition) : null;
+    const oracle = comparePathWithXState(definition, trace);
+    return {
+      definitions: catalog.definitions.map((candidate) => ({ value: String(candidate.fingerprint), label: `${candidate.id} v${candidate.version}` })),
+      definition: String(definition.fingerprint),
+      onDefinition: (value: string) => {
+        setStatechartDefinitionFingerprint(value);
+        setStatechartInstanceId(null);
+        setStatechartReplayPosition(Number.MAX_SAFE_INTEGER);
+      },
+      instances: instances.map((candidate) => ({ value: String(candidate.instanceId), label: `instance ${candidate.instanceId}` })),
+      instance: statechartInstanceId() === null ? "" : String(statechartInstanceId()),
+      onInstance: (value: string) => {
+        setStatechartInstanceId(value || null);
+        setStatechartReplayPosition(Number.MAX_SAFE_INTEGER);
+      },
+      oracle: oracle.equivalent ? "XState equivalent" : "XState mismatch",
+      oracleOk: oracle.equivalent,
+      diff: diff ? `v${diff.fromVersion}→v${diff.toVersion} · +${diff.statesAdded.length + diff.transitionsAdded.length} −${diff.statesRemoved.length + diff.transitionsRemoved.length} ~${diff.transitionsChanged.length}` : "first version",
+    };
+  });
+  const actorGraph = createMemo(() => {
+    const catalog = statecharts();
+    if (!catalog || catalog.instances.length === 0) return null;
+    const selected = catalog.instances.filter((instance) =>
+      instance.definitionFingerprint === statechartDefinitionFingerprint() &&
+      (statechartInstanceId() === null || instance.instanceId === statechartInstanceId()));
+    return deriveActorGraphModel({ ...catalog, instances: selected });
+  });
+  const graphSurface = createMemo(() => {
+    if (graphMode() === "statechart") return statechartGraph();
+    if (graphMode() === "actors") return actorGraph();
+    if (graphMode() === "studio") return statechartGraph();
+    return visualGraph();
+  });
+  const studioSurface = createMemo(() => ({
+    model: studio(),
+    definition: statecharts()?.definitions.find((candidate) => candidate.fingerprint === statechartDefinitionFingerprint()) ?? null,
+    onCopy: copyCommand,
+  }));
+  const selectGraphMode = (mode: GraphSurfaceMode) => {
+    setSelectedId(null);
+    setGraphMode(mode);
+  };
 
   const validEventIds = createMemo(() => new Set((model()?.events ?? []).map((event) => event.idText)));
   const visibleEvents = createMemo(() => {
@@ -470,13 +588,18 @@ export function App() {
                             onSelect={setSelectedId}
                           />
                           <DagPanel
-                            model={visualGraph()}
+                            model={graphSurface()}
                             layoutMode={layoutMode()}
                             perspective={graphPerspective()}
                             selectedId={selectedId()}
                             onLayoutMode={setLayoutMode}
                             onPerspective={setGraphPerspective}
                             onSelect={setSelectedId}
+                            mode={graphMode()}
+                            onMode={selectGraphMode}
+                            replay={statechartReplay()}
+                            statechartControls={statechartControls()}
+                            studio={studioSurface()}
                             compact
                           />
                         </div>
@@ -507,13 +630,18 @@ export function App() {
                         onSelect={setSelectedId}
                       />
                       <DagPanel
-                        model={visualGraph()}
+                        model={graphSurface()}
                         layoutMode={layoutMode()}
                         perspective={graphPerspective()}
                         selectedId={selectedId()}
                         onLayoutMode={setLayoutMode}
                         onPerspective={setGraphPerspective}
                         onSelect={setSelectedId}
+                        mode={graphMode()}
+                        onMode={selectGraphMode}
+                        replay={statechartReplay()}
+                        statechartControls={statechartControls()}
+                        studio={studioSurface()}
                       />
                     </div>
                   </section>
@@ -616,6 +744,15 @@ export function App() {
                         error={safetyReceipt.error instanceof Error ? safetyReceipt.error.message : undefined}
                         copiedCommand={copiedCommand()}
                         onCopy={copyCommand}
+                      />
+                    </Show>
+                    <Show when={view === "tests"}>
+                      <TestPanel
+                        run={testRun() ?? null}
+                        error={testRun.error instanceof Error ? testRun.error.message : undefined}
+                        copiedCommand={copiedCommand()}
+                        onCopy={copyCommand}
+                        onSelectEvent={(id) => { setSelectedId(id); setAuxView(null); }}
                       />
                     </Show>
                   </AuxOverlay>

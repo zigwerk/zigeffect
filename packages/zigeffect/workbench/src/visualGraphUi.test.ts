@@ -12,12 +12,18 @@ test("the single DAG panel exposes perspective and layout controls plus a legend
   expect(source).toContain('ariaLabel="Causal graph layout"');
   expect(source).toContain("dag-legend");
   expect(source).toContain("CausalDag");
+  expect(source).toContain('ariaLabel="Graph surface mode"');
+  expect(source).toContain('{ value: "statechart", label: "Statechart" }');
+  expect(source).toContain('{ value: "actors", label: "Actors" }');
 });
 
 test("App drives the DAG with a shared perspective + selection", () => {
   const source = appSource();
 
   expect(source).toContain("graphPerspective");
+  expect(source).toContain("graphMode");
+  expect(source).toContain("deriveStatechartGraphModel");
+  expect(source).toContain("deriveActorGraphModel");
   expect(source).toContain("<DagPanel");
   expect(source).toContain("selectedId={selectedId()}");
   expect(source).toContain("createEffect(() => applyThemeToDocument(theme()))");

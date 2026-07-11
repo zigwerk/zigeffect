@@ -4,7 +4,10 @@ pub const executable_build =
     \\pub fn build(b: *std.Build) void {
     \\    const target = b.standardTargetOptions(.{});
     \\    const optimize = b.standardOptimizeOption(.{});
-    \\    const zigeffect_std = b.dependency("zigeffect_std", .{}).module("zigeffect_std");
+    \\    const zigeffect_std_dependency = b.dependency("zigeffect_std", .{ .target = target, .optimize = optimize });
+    \\    const zigeffect_std = zigeffect_std_dependency.module("zigeffect_std");
+    \\    const testing_runner = zigeffect_std_dependency.module("zigeffect_test_runner").root_source_file.?;
+    \\__ADAPTER_DEPENDENCIES__
     \\__SHARED_DEPENDENCY__
     \\    const app = b.addModule("app", .{
     \\        .root_source_file = b.path("src/app.zig"),
@@ -12,6 +15,7 @@ pub const executable_build =
     \\        .optimize = optimize,
     \\    });
     \\    app.addImport("zigeffect_std", zigeffect_std);
+    \\__ADAPTER_IMPORTS__
     \\__SHARED_IMPORT__
     \\    const main_module = b.createModule(.{
     \\        .root_source_file = b.path("src/main.zig"),
@@ -34,7 +38,7 @@ pub const executable_build =
     \\    });
     \\    test_module.addImport("app", app);
     \\    test_module.addImport("zigeffect_std", zigeffect_std);
-    \\    const tests = b.addTest(.{ .name = "__PROJECT_NAME__-tests", .root_module = test_module });
+    \\    const tests = b.addTest(.{ .name = "__PROJECT_NAME__-tests", .root_module = test_module, .test_runner = .{ .path = testing_runner, .mode = .server } });
     \\    const test_step = b.step("test", "Run __PROJECT_NAME__ tests");
     \\    test_step.dependOn(&b.addRunArtifact(tests).step);
     \\}
@@ -48,6 +52,7 @@ pub const executable_zon =
     \\    .fingerprint = 0x__FINGERPRINT__,
     \\    .dependencies = .{
     \\        .zigeffect_std = .{ .path = "__STD_PATH__" },
+    \\__ADAPTER_ZON_DEPENDENCIES__
     \\__SHARED_ZON_DEPENDENCY__
     \\    },
     \\    .paths = .{ "build.zig", "build.zig.zon", "README.md", "src", "test" },
@@ -60,6 +65,88 @@ pub const main_source =
     \\
     \\pub fn main(init: std.process.Init) !void {
     \\    try app.run(init.gpa, init.io, std.Io.Dir.cwd());
+    \\}
+;
+
+pub const production_app_source =
+    \\const std = @import("std");
+    \\const production = @import("production_wiring.zig");
+    \\
+    \\pub const component_name = "__PROJECT_NAME__";
+    \\pub fn productionContract() bool { return production.compileContract(); }
+    \\pub fn run(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir) !void {
+    \\    return production.run(allocator, io, root);
+    \\}
+;
+
+pub const production_wiring_source =
+    \\const std = @import("std");
+    \\const zstd = @import("zigeffect_std");
+    \\const http = @import("zigeffect_http");
+    \\const postgres = @import("zigeffect_postgres_libpq");
+    \\const otel = @import("zigeffect_otel");
+    \\
+    \\pub const Config = struct { port: i64, database_url: []const u8, otlp_host: []const u8, otlp_port: i64, migration_dialect: []const u8 };
+    \\pub const config_schema = zstd.Schema.structSchema(Config, .{
+    \\    zstd.Schema.field("port", zstd.Schema.integer().min(1).max(65535)),
+    \\    zstd.Schema.field("database_url", zstd.Schema.string().nonEmpty()),
+    \\    zstd.Schema.field("otlp_host", zstd.Schema.string().nonEmpty()),
+    \\    zstd.Schema.field("otlp_port", zstd.Schema.integer().min(1).max(65535)),
+    \\    zstd.Schema.field("migration_dialect", zstd.Schema.stringEnum(&.{ "postgresql", "cockroachdb" })),
+    \\});
+    \\
+    \\const Health = struct {
+    \\    pub fn handleAlloc(_: *@This(), allocator: std.mem.Allocator, request: zstd.Http.Request) !zstd.Http.Response {
+    \\        if (!std.mem.eql(u8, request.url, "/health/ready")) return zstd.Http.cloneResponseAlloc(allocator, .{ .status = 404, .body = "not found" });
+    \\        return zstd.Http.cloneResponseAlloc(allocator, .{ .status = 200, .body = "ready" });
+    \\    }
+    \\};
+    \\
+    \\pub fn compileContract() bool {
+    \\    return @hasDecl(http, "Server") and @hasDecl(postgres, "Pool") and @hasDecl(otel, "Exporter") and @hasDecl(zstd.Application.Lifecycle, "Manager");
+    \\}
+    \\
+    \\pub fn run(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir) !void {
+    \\    var layered = zstd.Config.LayeredConfig.init(allocator);
+    \\    defer layered.deinit();
+    \\    var mutable_root = root;
+    \\    _ = try layered.loadJsonFile(io, &mutable_root, "config.json", 64 * 1024, 1);
+    \\    var decoded = try layered.decodeDetailedAlloc(allocator, config_schema);
+    \\    defer decoded.deinit();
+    \\    if (!decoded.ok()) return error.InvalidProductionConfiguration;
+    \\    const config = decoded.value.?;
+    \\    var lifecycle = zstd.Application.Lifecycle.Manager.init(allocator);
+    \\    defer lifecycle.deinit();
+    \\    try lifecycle.start();
+    \\    var migration_session = try postgres.Session.init(allocator, .{ .connection_url = config.database_url });
+    \\    defer migration_session.deinit();
+    \\    const migrations = [_]zstd.Sql.Migration{.{ .id = "001_bootstrap", .sql = "create table if not exists zigeffect_service_health (id bigint primary key, checked_at timestamptz not null default now())" }};
+    \\    var migration_report = try postgres.applyMigrationsAlloc(allocator, &migration_session, .{ .dialect = if (std.mem.eql(u8, config.migration_dialect, "cockroachdb")) .cockroachdb else .postgresql }, &migrations);
+    \\    defer migration_report.deinit();
+    \\    var pool = try postgres.Pool.initAlloc(allocator, io, .{ .session = .{ .connection_url = config.database_url } });
+    \\    defer pool.deinit();
+    \\    var exporter = try otel.Exporter.init(allocator, io, .{ .host = config.otlp_host, .port = @intCast(config.otlp_port) });
+    \\    defer exporter.deinit();
+    \\    var health = Health{};
+    \\    var server = try http.Server.init(allocator, io, .{ .port = @intCast(config.port) }, http.Handler.from(Health, &health));
+    \\    defer server.deinit();
+    \\    try lifecycle.ready();
+    \\    _ = try server.serveOne(allocator);
+    \\    try lifecycle.drain();
+    \\    try server.drain();
+    \\    _ = try server.shutdown(.{});
+    \\    try exporter.shutdown();
+    \\    try pool.close();
+    \\    try lifecycle.stop();
+    \\}
+;
+
+pub const production_test =
+    \\const std = @import("std");
+    \\const app = @import("app");
+    \\
+    \\test "production profile compiles real adapter and lifecycle wiring" {
+    \\    try std.testing.expect(app.productionContract());
     \\}
 ;
 
@@ -323,6 +410,23 @@ pub const executable_test =
     \\    try app.run(allocator, std.testing.io, tmp.dir);
     \\}
     \\
+    \\fn acceptanceScenario() zstd.Testing.Scenario {
+    \\    return .{ .id = "bootstrap-boundaries", .label = "generated boundaries remain safe", .requirement = "req-bootstrap", .acceptance_check = "check-bootstrap", .component = "__PROJECT_NAME__", .command = "test", .source_roots = &.{ "src", "test" } };
+    \\}
+    \\
+    \\test "agent-first TestContext emits a complete replayable receipt" {
+    \\    var context = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{ .project = "__PROJECT_NAME__", .suite = "acceptance", .scenario = acceptanceScenario(), .seed = 42 });
+    \\    defer context.deinit();
+    \\    const assertions = zstd.Testing.AssertionRecorder.init(&context);
+    \\    try assertions.boolean(.{ .id = "context-ready", .label = "typed test context is ready", .repair_hint = "initialize through zstd.Testing.TestContext" }, true);
+    \\    try assertions.noFindings(.{ .id = "causal-clean", .label = "runtime has no causal findings" });
+    \\    try context.authorizeSideEffect(.{ .effect = .clock, .adapter = .fake, .causal_event_id = 1 });
+    \\    var budgets = try zstd.Testing.Budgets.evaluateAlloc(std.testing.allocator, &.{.{ .id = "bootstrap-steps", .kind = .deterministic_steps, .value = 1 }}, &.{.{ .id = "bootstrap-budget", .metric_id = "bootstrap-steps", .absolute_max = 10 }});
+    \\    defer budgets.deinit();
+    \\    try context.recordReport(.performance, budgets);
+    \\    try context.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+    \\}
+    \\
     \\test "application boundaries produce causal evidence" {
     \\    var tmp = std.testing.tmpDir(.{});
     \\    defer tmp.cleanup();
@@ -382,7 +486,9 @@ pub const library_build =
     \\pub fn build(b: *std.Build) void {
     \\    const target = b.standardTargetOptions(.{});
     \\    const optimize = b.standardOptimizeOption(.{});
-    \\    const zigeffect_std = b.dependency("zigeffect_std", .{}).module("zigeffect_std");
+    \\    const zigeffect_std_dependency = b.dependency("zigeffect_std", .{ .target = target, .optimize = optimize });
+    \\    const zigeffect_std = zigeffect_std_dependency.module("zigeffect_std");
+    \\    const testing_runner = zigeffect_std_dependency.module("zigeffect_test_runner").root_source_file.?;
     \\    const library = b.addModule("__MODULE_NAME__", .{
     \\        .root_source_file = b.path("src/root.zig"),
     \\        .target = target,
@@ -396,7 +502,7 @@ pub const library_build =
     \\    });
     \\    test_module.addImport("library", library);
     \\    test_module.addImport("zigeffect_std", zigeffect_std);
-    \\    const tests = b.addTest(.{ .name = "__PROJECT_NAME__-tests", .root_module = test_module });
+    \\    const tests = b.addTest(.{ .name = "__PROJECT_NAME__-tests", .root_module = test_module, .test_runner = .{ .path = testing_runner, .mode = .server } });
     \\    const test_step = b.step("test", "Run __PROJECT_NAME__ tests");
     \\    test_step.dependOn(&b.addRunArtifact(tests).step);
     \\}
@@ -452,6 +558,10 @@ pub const library_test =
     \\const library = @import("library");
     \\const zstd = @import("zigeffect_std");
     \\
+    \\fn acceptanceScenario() zstd.Testing.Scenario {
+    \\    return .{ .id = "bootstrap-boundaries", .label = "generated library remains safe", .requirement = "req-bootstrap", .acceptance_check = "check-bootstrap", .component = "__PROJECT_NAME__", .command = "test", .source_roots = &.{ "src", "test" } };
+    \\}
+    \\
     \\fn runWithAllocator(allocator: std.mem.Allocator) !void {
     \\    _ = try zstd.Schema.decodeJsonAlloc(allocator, zstd.Schema.derive(library.Input, .{
     \\        .value = zstd.Schema.integer(),
@@ -459,7 +569,24 @@ pub const library_test =
     \\}
     \\
     \\test "public effect validates input and runs through its layer" {
-    \\    try std.testing.expectEqual(@as(i64, 42), try library.run(std.testing.allocator, "{\"value\":21}"));
+    \\    const actual = try library.run(std.testing.allocator, "{\"value\":21}");
+    \\    try std.testing.expectEqual(@as(i64, 42), actual);
+    \\    var context = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{ .project = "__PROJECT_NAME__", .suite = "acceptance", .scenario = acceptanceScenario() });
+    \\    defer context.deinit();
+    \\    const assertions = zstd.Testing.AssertionRecorder.init(&context);
+    \\    try assertions.equal(.{ .id = "double-value", .label = "public effect doubles valid input" }, @as(i64, 42), actual);
+    \\    var budgets = try zstd.Testing.Budgets.evaluateAlloc(std.testing.allocator, &.{.{ .id = "double-steps", .kind = .deterministic_steps, .value = 1 }}, &.{.{ .id = "double-budget", .metric_id = "double-steps", .absolute_max = 8 }});
+    \\    defer budgets.deinit();
+    \\    try context.recordReport(.performance, budgets);
+    \\    try context.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+    \\}
+    \\
+    \\test "Schema-derived properties are deterministic and replayable" {
+    \\    const Property = struct { fn check(_: void, value: i64) !void { if (value < 0 or value > 100) return error.OutOfBounds; } };
+    \\    var receipt = try zstd.Testing.Generators.runProperty(std.testing.allocator, zstd.Schema.integer().min(0).max(100), {}, Property.check, .{ .seed = 42, .cases = 64 });
+    \\    defer receipt.deinit();
+    \\    try std.testing.expect(receipt.passed);
+    \\    try std.testing.expectEqual(@as(usize, 64), receipt.executed);
     \\}
     \\
     \\test "library survives every deterministic allocation failure" {
@@ -506,9 +633,12 @@ pub const system_build =
     \\pub fn build(b: *std.Build) void {
     \\    const target = b.standardTargetOptions(.{});
     \\    const optimize = b.standardOptimizeOption(.{});
-    \\    const api = b.dependency("api", .{}).module("app");
-    \\    const worker = b.dependency("worker", .{}).module("app");
-    \\    const shared = b.dependency("shared", .{}).module("shared");
+    \\    const api = b.dependency("api", .{ .target = target, .optimize = optimize }).module("app");
+    \\    const worker = b.dependency("worker", .{ .target = target, .optimize = optimize }).module("app");
+    \\    const shared = b.dependency("shared", .{ .target = target, .optimize = optimize }).module("shared");
+    \\    const zigeffect_std_dependency = b.dependency("zigeffect_std", .{ .target = target, .optimize = optimize });
+    \\    const zigeffect_std = zigeffect_std_dependency.module("zigeffect_std");
+    \\    const testing_runner = zigeffect_std_dependency.module("zigeffect_test_runner").root_source_file.?;
     \\    const system = b.addModule("system", .{
     \\        .root_source_file = b.path("src/root.zig"),
     \\        .target = target,
@@ -523,7 +653,8 @@ pub const system_build =
     \\        .optimize = optimize,
     \\    });
     \\    test_module.addImport("system", system);
-    \\    const tests = b.addTest(.{ .name = "__PROJECT_NAME__-tests", .root_module = test_module });
+    \\    test_module.addImport("zigeffect_std", zigeffect_std);
+    \\    const tests = b.addTest(.{ .name = "__PROJECT_NAME__-tests", .root_module = test_module, .test_runner = .{ .path = testing_runner, .mode = .server } });
     \\    const test_step = b.step("test", "Run all local system components");
     \\    test_step.dependOn(&b.addRunArtifact(tests).step);
     \\}
@@ -539,6 +670,7 @@ pub const system_zon =
     \\        .api = .{ .path = "services/api" },
     \\        .worker = .{ .path = "services/worker" },
     \\        .shared = .{ .path = "packages/shared" },
+    \\        .zigeffect_std = .{ .path = "__STD_PATH__" },
     \\    },
     \\    .paths = .{ "build.zig", "build.zig.zon", "README.md", "src", "test" },
     \\}
@@ -566,6 +698,7 @@ pub const system_source =
 pub const system_test =
     \\const std = @import("std");
     \\const system = @import("system");
+    \\const zstd = @import("zigeffect_std");
     \\
     \\test "all components run against the shared contract" {
     \\    var tmp = std.testing.tmpDir(.{});
@@ -577,6 +710,46 @@ pub const system_test =
     \\    defer worker_graph.close(std.testing.io);
     \\    try api_graph.access(std.testing.io, "causal-graph.jsonl", .{});
     \\    try worker_graph.access(std.testing.io, "causal-graph.jsonl", .{});
+    \\}
+    \\
+    \\test "system boundary scenario records cross-component acceptance" {
+    \\    const scenario = zstd.Testing.Scenario{ .id = "bootstrap-boundaries", .label = "api worker and shared package agree", .requirement = "req-bootstrap", .acceptance_check = "check-bootstrap", .component = "api-service", .command = "test" };
+    \\    var context = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{ .project = "__PROJECT_NAME__", .suite = "system", .scenario = scenario });
+    \\    defer context.deinit();
+    \\    const assertions = zstd.Testing.AssertionRecorder.init(&context);
+    \\    try assertions.equal(.{ .id = "shared-contract", .label = "shared contract version" }, @as(u32, 1), system.shared.contract_version);
+    \\    var world = try zstd.Testing.VirtualWorld.runAlloc(std.testing.allocator, &.{
+    \\        .{ .kind = .send, .actor = "api", .target = "worker", .value = "bootstrap" },
+    \\        .{ .kind = .queue_delivery, .actor = "queue", .target = "worker", .value = "bootstrap" },
+    \\    }, &.{.{ .step = 1, .kind = .queue_redelivery }}, .{ .seed = 42 });
+    \\    defer world.deinit();
+    \\    try context.recordReport(.virtual_world, world);
+    \\    try context.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+    \\}
+;
+
+pub const production_system_source =
+    \\pub const api = @import("api");
+    \\pub const worker = @import("worker");
+    \\pub const shared = @import("shared");
+    \\pub fn productionContract() bool { return shared.contract_version == 1 and api.productionContract() and worker.productionContract(); }
+;
+
+pub const production_system_test =
+    \\const std = @import("std");
+    \\const system = @import("system");
+    \\const zstd = @import("zigeffect_std");
+    \\
+    \\test "production system compiles separate API worker and shared contracts" {
+    \\    try std.testing.expect(system.productionContract());
+    \\}
+    \\test "production system emits a Testing v2 capability scenario" {
+    \\    const scenario = zstd.Testing.Scenario{ .id = "bootstrap-boundaries", .label = "production adapters resolve before launch", .requirement = "req-bootstrap", .acceptance_check = "check-bootstrap", .component = "api-service", .command = "test" };
+    \\    var context = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{ .project = "__PROJECT_NAME__", .suite = "production-system", .scenario = scenario });
+    \\    defer context.deinit();
+    \\    const assertions = zstd.Testing.AssertionRecorder.init(&context);
+    \\    try assertions.boolean(.{ .id = "real-wiring", .label = "all production wiring compiles" }, system.productionContract());
+    \\    try context.publish(std.testing.io, std.Io.Dir.cwd(), 1);
     \\}
 ;
 
@@ -598,6 +771,7 @@ pub const readme =
     \\# __PROJECT_NAME__
     \\
     \\Generated by zigeffect for local-first, agent-readable Zig development.
+    \\Scaffold profile: `__PROFILE__`. Receipts and capability resolution must be interpreted under this profile.
     \\
     \\## Develop
     \\
@@ -607,6 +781,14 @@ pub const readme =
     \\zigeffect project validate --json
     \\zigeffect project check --agent --json
     \\zigeffect project test --json
+    \\zigeffect test list --json
+    \\zigeffect test affected --changed src/example.zig --json
+    \\zigeffect test run --requirement req-bootstrap --json
+    \\zigeffect test coverage --requirement req-bootstrap --json
+    \\zigeffect test gaps --requirement req-bootstrap --json
+    \\zigeffect test stress --requirement req-bootstrap --runs 32 --json
+    \\zigeffect test history --json
+    \\zigeffect test explain bootstrap-boundaries --json
     \\zigeffect project dev
     \\zigeffect graph status --json
     \\zigeffect graph event <event-id> --json
@@ -621,6 +803,13 @@ pub const readme =
     \\`.zigeffect/graph/causal-graph.jsonl`; the graph commands validate the
     \\manifest before opening that artifact. For a system root, add
     \\`--component <manifest-component-id>` to graph queries.
+    \\Test scenarios bind requirements to deterministic seeds, fault profiles,
+    \\source roots, replay commands, causal events, and semantic snapshots. The
+    \\CLI control and native process receipts prevent exit-code-only false passes.
+    \\The latest agent-readable run is `.zigeffect/tests/latest.json`; open it in
+    \\the Workbench Tests view for protocol identity, semantic gaps, adversarial
+    \\evidence, minimal failures, regressions, and replay instead of reconstructing
+    \\failures from terminal text.
 ;
 
 pub const changelog =
@@ -631,38 +820,227 @@ pub const changelog =
     \\- Initial public package contract.
 ;
 
+pub const statechart_source =
+    \\const zstd = @import("zigeffect_std");
+    \\
+    \\pub const State = enum { root, idle, running, done };
+    \\pub const Event = enum { start, finish };
+    \\pub const Context = struct { attempts: u32 = 0 };
+    \\pub const Command = union(enum) { begin_work, publish_result };
+    \\pub const Definition = zstd.fx.statechart.Definition(State, Event, Context, Command);
+    \\pub const definition = Definition.init(.{
+    \\    .id = "agent.__MACHINE_NAME__",
+    \\    .version = 1,
+    \\    .initial = .root,
+    \\    .states = &.{
+    \\        .{ .id = .root, .kind = .compound, .initial = .idle },
+    \\        .{ .id = .idle, .parent = .root, .description = "Waiting for typed work" },
+    \\        .{ .id = .running, .parent = .root, .description = "Executing through Effect services" },
+    \\        .{ .id = .done, .kind = .final, .parent = .root },
+    \\    },
+    \\    .transitions = &.{
+    \\        .{ .id = "start", .source = .idle, .event = .start, .target = .running },
+    \\        .{ .id = "finish", .source = .running, .event = .finish, .target = .done },
+    \\    },
+    \\});
+    \\pub const Runtime = zstd.fx.statechart.ConfigurationMachine(Definition);
+    \\pub const Artifacts = zstd.fx.statechart.ConfigurationArtifacts(Definition);
+    \\pub const Analysis = zstd.fx.statechart.Analyzer(Definition);
+;
+
+pub const statechart_actor_source =
+    \\const zstd = @import("zigeffect_std");
+    \\
+    \\pub const State = enum { idle, running, done };
+    \\pub const Event = enum { start, finish };
+    \\pub const Context = struct {};
+    \\pub const Command = union(enum) { begin_work, publish_result };
+    \\pub const Definition = zstd.fx.statechart.Definition(State, Event, Context, Command);
+    \\pub const definition = Definition.init(.{
+    \\    .id = "agent.__MACHINE_NAME__",
+    \\    .version = 1,
+    \\    .initial = .idle,
+    \\    .states = &.{ .{ .id = .idle }, .{ .id = .running }, .{ .id = .done, .kind = .final } },
+    \\    .transitions = &.{
+    \\        .{ .id = "start", .source = .idle, .event = .start, .target = .running },
+    \\        .{ .id = "finish", .source = .running, .event = .finish, .target = .done },
+    \\    },
+    \\});
+    \\pub const Actor = zstd.fx.statechart.Actor(Definition);
+    \\pub const ActorSystem = zstd.fx.statechart.ActorSystem(Definition);
+;
+
+pub const durable_statechart_source =
+    \\const zstd = @import("zigeffect_std");
+    \\
+    \\pub const State = enum { idle, running, done };
+    \\pub const Event = enum { start, finish };
+    \\pub const Context = struct {};
+    \\pub const Command = union(enum) { activity, timer, signal, queue };
+    \\pub const Definition = zstd.fx.statechart.Definition(State, Event, Context, Command);
+    \\pub const definition = Definition.init(.{
+    \\    .id = "workflow.__MACHINE_NAME__",
+    \\    .version = 1,
+    \\    .initial = .idle,
+    \\    .states = &.{ .{ .id = .idle }, .{ .id = .running }, .{ .id = .done, .kind = .final } },
+    \\    .transitions = &.{
+    \\        .{ .id = "start", .source = .idle, .event = .start, .target = .running },
+    \\        .{ .id = "finish", .source = .running, .event = .finish, .target = .done },
+    \\    },
+    \\});
+    \\pub const Durable = zstd.fx.workflow.DurableStatechart(Definition);
+;
+
+pub const statechart_test_source =
+    \\const std = @import("std");
+    \\const zstd = @import("zigeffect_std");
+    \\
+    \\test "__MACHINE_NAME__ definition is valid and deterministic" {
+    \\    const State = enum { idle, done };
+    \\    const Event = enum { finish };
+    \\    const Definition = zstd.fx.statechart.Definition(State, Event, void, void);
+    \\    const definition = Definition.init(.{
+    \\        .id = "agent.__MACHINE_NAME__",
+    \\        .version = 1,
+    \\        .initial = .idle,
+    \\        .states = &.{ .{ .id = .idle }, .{ .id = .done, .kind = .final } },
+    \\        .transitions = &.{.{ .id = "finish", .source = .idle, .event = .finish, .target = .done }},
+    \\    });
+    \\    try std.testing.expect(definition.validate().isValid());
+    \\    try std.testing.expect(definition.fingerprint() != 0);
+    \\}
+;
+
 pub const gitignore =
     \\.zig-cache/
     \\zig-out/
     \\.zigeffect/sessions/
     \\.zigeffect/causal/
     \\.zigeffect/graph/
+    \\.zigeffect/statecharts/
     \\.zigeffect/receipts/
+    \\.zigeffect/tests/actual/
+    \\.zigeffect/tests/raw/
+    \\.zigeffect/tests/receipts/
+    \\.zigeffect/tests/process-receipts/
+    \\.zigeffect/tests/control.json
+    \\.zigeffect/tests/history.jsonl
+    \\.zigeffect/tests/latest.json
 ;
 
 pub const skill =
     \\---
     \\name: zigeffect-development
-    \\description: Build, debug, test, or review this zigeffect project through its typed manifest, public modules, causal evidence, acceptance checks, and redacted handoffs.
+    \\description: Build, change, debug, test, or review this ZigEffect application through zigeffect.project.json, public zigeffect_std APIs, zstd.Testing scenarios, causal evidence, deterministic replay, semantic snapshots, and evidence-backed agent handoffs.
     \\---
     \\
-    \\# zigeffect Development
+    \\# ZigEffect Development
     \\
-    \\1. Run `zigeffect compatibility --json`, then read
-    \\   `zigeffect.project.json` before editing. Use `zigeffect upgrade --dry-run`
-    \\   to inspect migrations; never rewrite around a reported conflict.
-    \\2. Map the request to a requirement, acceptance check, and component.
-    \\3. Use public `zigeffect_std` APIs and component facades; do not import
-    \\   another component's internals.
-    \\4. Add a failing deterministic test before changing behavior.
-    \\5. Use `zigeffect add` and `zigeffect generate` for framework structure.
-    \\6. Run `zigeffect project check --agent --json`; treat failed, incomplete,
-    \\   truncated, or unsupported required evidence as an unpassed handoff.
-    \\7. Use `zigeffect safety explain <finding-id>` for source-linked repair
-    \\   guidance. Never add unmanaged roots or unaudited escape hatches.
-    \\8. Run `zigeffect graph status --json`, adding `--component <id>` for a
-    \\   system root, then query graph events and children before reconstructing
-    \\   failures from text output.
-    \\9. Attach the bounded redacted safety receipt to the handoff and never
-    \\   claim an unpassed check.
+    \\Treat the manifest and structured evidence as the source of truth. Terminal
+    \\text is a bounded diagnostic artifact, not proof that a requirement passed.
+    \\
+    \\## Establish intent
+    \\
+    \\1. Run `zigeffect compatibility --json`, read `zigeffect.project.json`, and
+    \\   inspect migrations with `zigeffect upgrade --dry-run --json`. Never work
+    \\   around a conflict or unsupported manifest.
+    \\2. Run:
+    \\
+    \\       zigeffect project validate --json
+    \\       zigeffect agent status --json
+    \\       zigeffect agent next --json
+    \\       zigeffect test list --json
+    \\
+    \\3. Map the request to a requirement, acceptance check, component,
+    \\   manifest-owned command, and one or more `test_scenarios`. Declare missing
+    \\   intent before implementing behavior.
+    \\4. Read the component's public facade, layers, schemas, tests, and causal
+    \\   helpers. Use public `zigeffect_std` APIs; never import another component's
+    \\   internals.
+    \\
+    \\## Implement inspectable behavior
+    \\
+    \\- Model fallible boundaries with typed effects, service layers, Schema,
+    \\  typed errors, scoped resources, and deterministic providers for config,
+    \\  clock, filesystem, process, HTTP, SQL, IDs, logging, and tracing.
+    \\- Use `zigeffect add` and `zigeffect generate` before hand-writing framework
+    \\  structure.
+    \\- Emit semantic facts at external, workflow, statechart, artifact, and
+    \\  acceptance boundaries. Use typed statecharts for inspectable long-lived
+    \\  control flow and durable statecharts for replayable workflows.
+    \\- Never put credentials, personal data, or raw terminal scrollback in
+    \\  manifests, facts, receipts, fixtures, snapshots, or Workbench payloads.
+    \\
+    \\## Test requirements with `zstd.Testing`
+    \\
+    \\Add a failing deterministic test before changing behavior. Register its
+    \\scenario in `test_scenarios` with a requirement, acceptance check, component,
+    \\command, source roots, stable seed, fault profile, and required status.
+    \\
+    \\    const std = @import("std");
+    \\    const zstd = @import("zigeffect_std");
+    \\
+    \\    var context = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{
+    \\        .project = "app",
+    \\        .suite = "acceptance",
+    \\        .scenario = scenario,
+    \\        .seed = 42,
+    \\    });
+    \\    defer context.deinit();
+    \\    const assertions = zstd.Testing.AssertionRecorder.init(&context);
+    \\    try assertions.equal(.{
+    \\        .id = "stable-acceptance-id",
+    \\        .label = "user-visible behavior holds",
+    \\        .repair_hint = "repair the responsible typed boundary",
+    \\    }, expected, actual);
+    \\    try assertions.noPendingFibers(.{ .id = "fibers-clean", .label = "no work escaped its scope" });
+    \\    try assertions.noFindings(.{ .id = "causal-clean", .label = "runtime invariants remain clean" });
+    \\    try context.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+    \\
+    \\Use `AssertionRecorder` for values, semantic JSON, `Exit`, `Cause`, events,
+    \\findings, fibers, and secret scans. Use `FaultMatrix` for bounded hostile
+    \\runtime cases, `Generators.runProperty` for structural shrinking,
+    \\`Models.StatechartExplorer` and `Schedules` for bounded exploration,
+    \\`Differential` for cross-executor comparison, `VirtualWorld` for
+    \\distributed faults, `Mutation` for requirement-linked mutant evidence,
+    \\`Budgets` for deterministic performance contracts, `Sandbox.Firewall` for
+    \\side-effect authority, and semantic snapshots for durable artifacts.
+    \\Unsupported cases, exhausted bounds, dropped evidence, or truncation are not
+    \\passes.
+    \\
+    \\## Iterate from evidence
+    \\
+    \\1. Select the smallest declared set with `zigeffect test affected --changed
+    \\   <path> --json`, then run a scenario or `zigeffect test run --requirement
+    \\   <id> --json`.
+    \\2. Read `.zigeffect/tests/latest.json`; require its schema/version, selected
+    \\   count, and status counters to agree.
+    \\   Run `zigeffect test coverage --json` and `zigeffect test gaps --json`;
+    \\   required semantic gaps are unpassed evidence.
+    \\3. On failure, inspect the first assertion's source, repair hint, and causal
+    \\   event IDs. Query `zigeffect graph event <id> --json` and `zigeffect graph
+    \\   children <id> --json` before reconstructing the failure from text.
+    \\4. Copy the receipt's exact replay command, preserving its seed, fault,
+    \\   root, and bounds. Use `zigeffect safety explain <finding-id>` for a
+    \\   source-linked safety repair.
+    \\5. Compare with `zigeffect test snapshot <scenario> --json`. Apply only an
+    \\   inspected intentional change with `--apply --json`; never bless an
+    \\   unexplained diff.
+    \\
+    \\## Verify and hand off
+    \\
+    \\    zigeffect project validate --json
+    \\    zigeffect test run --requirement <id> --json
+    \\    zigeffect test coverage --requirement <id> --json
+    \\    zigeffect test gaps --requirement <id> --json
+    \\    zigeffect test stress --requirement <id> --runs 32 --json
+    \\    zigeffect test history --json
+    \\    zigeffect project test --json
+    \\    zigeffect project check --agent --json
+    \\    zigeffect agent handoff --provider <harness> --session <id> --json
+    \\
+    \\Attach changed requirements, acceptance status, bounded redacted receipts,
+    \\replay commands, and relevant causal IDs. State failed or unrun gates. Never
+    \\claim safety or completeness beyond the compiler mode, platform, cases, and
+    \\bounds recorded in the evidence.
 ;

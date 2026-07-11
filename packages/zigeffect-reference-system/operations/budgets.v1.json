@@ -1,0 +1,10 @@
+{
+  "schema": "zigeffect.reference.operations-budgets.v1",
+  "profile": "production-candidate",
+  "workload": {"orders":25,"max_workload_seconds":30,"soak_iterations":3,"orders_per_soak_iteration":10},
+  "latency_ms": {"health_p99":1000,"create_p99":5000,"read_p99":1000,"worker_completion_p99":15000},
+  "capacity": {"http_connections":64,"http_requests_per_connection":8,"postgres_pool_per_worker":2,"transport_in_flight":1024,"telemetry_queue_items":512,"max_request_body_bytes":1048576},
+  "recovery_ms": {"http_drain":5000,"telemetry_shutdown":10000,"broker_visibility":2000,"worker_poll_deadline":30000},
+  "evidence": {"max_artifact_bytes":16777216,"max_runtime_events":100000,"required_statuses":["passed"],"forbidden_statuses":["incomplete","unsupported","truncated"]},
+  "posture": "Regression budgets are release gates for the reference topology, not universal customer SLOs. Rebaseline only from reviewed receipts."
+}

@@ -1,11 +1,14 @@
 const std = @import("std");
 const Secrets = @import("../secrets/root.zig");
+const Capability = @import("../capability/root.zig");
 const StdService = @import("../service/root.zig");
 const fx = @import("zigeffect");
 
 pub const FileSystemError = error{FileNotFound};
 
 pub const MemoryFileSystem = struct {
+    pub const capability = Capability.Builtin.memory_filesystem;
+
     allocator: std.mem.Allocator,
     files: std.StringHashMap([]const u8),
 
@@ -91,6 +94,8 @@ pub const MemoryFileSystem = struct {
 };
 
 pub const LocalFileSystem = struct {
+    pub const capability = Capability.Builtin.local_filesystem;
+
     dir: *std.Io.Dir,
     io: std.Io,
     read_limit: std.Io.Limit = .limited(1024 * 1024),

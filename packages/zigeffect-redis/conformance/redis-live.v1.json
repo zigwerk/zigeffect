@@ -1,0 +1,11 @@
+{
+  "schema": "zigeffect.live-conformance-receipt.v1",
+  "adapter": "zigeffect-redis",
+  "version": "0.1.0",
+  "status": "passed",
+  "observed_at_ms": 1783777336000,
+  "environment": {"zig":"0.16.0","redis":"8.6.3"},
+  "command": "tests/run_conformance.sh",
+  "checks": ["password authentication and invalid credential rejection","cache get set delete CAS and TTL","distributed lock ownership","fixed-window rate limit","pubsub","Streams consumer groups","ack and immediate redelivery","server-scheduled delayed nack without caller blocking","idempotent publish"],
+  "limitations": ["TLS and Redis Cluster redirection are not implemented","stream retention is operator configured"]
+}

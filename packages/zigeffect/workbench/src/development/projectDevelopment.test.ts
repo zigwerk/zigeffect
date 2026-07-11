@@ -43,6 +43,16 @@ const fixture = {
     checks_total: 1,
     checks_pending: 0,
     checks_failed: 1,
+    adapter_profile: "production",
+    adapters: [{
+      profile_id: "production",
+      requirement_id: "public-http",
+      target: "aarch64-macos",
+      adapter_id: "zigeffect-std.memory-http",
+      kind: "http_server",
+      maturity: "fake",
+      result: "insufficient_maturity",
+    }],
     tasks: [{ id: "task-api", requirement: "req-api", component: "api", summary: "implement route", status: "active" }],
     evidence: [{
       id: "evidence-test",
@@ -94,6 +104,9 @@ test("project development model joins manifest protocol sessions and application
   expect(model.requirements[0]?.evidence[0]?.id).toBe("evidence-test");
   expect(model.applicationFacts[0]).toMatchObject({ eventId: "12", kind: "schema_decode", schemaRef: "Invoice.v1" });
   expect(model.sessions[1]).toMatchObject({ id: "session-2", approval: "pending", recovery: "clean" });
+  expect(model.adapterProfile).toBe("production");
+  expect(model.capabilityGaps).toBe(1);
+  expect(model.capabilities[0]).toMatchObject({ adapterId: "zigeffect-std.memory-http", maturity: "fake", result: "insufficient_maturity" });
   expect(JSON.stringify(model)).not.toContain("sentinel-secret");
 });
 

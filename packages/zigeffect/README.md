@@ -65,6 +65,13 @@ const result = try Program
   metrics, tracing, and assertion helpers for deterministic tests.
 - **`serviceNotFound`**: compile-time diagnostics for missing environment
   services.
+- **Production statecharts**: typed flat/hierarchical/parallel/history machines,
+  actors and supervision, durable workflow journals, cluster fencing, causal
+  evidence, governed agent-authored workflow plans, immutable proof/review/
+  approval chains, policy-gated fleet control, XState v5 projection/conformance,
+  and the synchronized SolidJS Studio. See
+  [docs/statecharts-production.md](docs/statecharts-production.md) and
+  [docs/agent-workflow-studio.md](docs/agent-workflow-studio.md).
 
 See [docs/usage.md](docs/usage.md), [docs/architecture.md](docs/architecture.md),
 [docs/effectts-parity.md](docs/effectts-parity.md), and the
@@ -217,6 +224,20 @@ kinds, embeds compatibility and scaffold-ownership metadata, emits Bash/Zsh/Fish
 completions, and performs dry-run-first conflict-safe upgrades. See
 [docs/compatibility.md](docs/compatibility.md).
 
+The distribution also includes Testing v2: the CLI selects a scenario through
+a fixed control protocol, requires a matching native `TestContext` receipt, and
+exposes semantic `coverage`, `gaps`, bounded `stress`, deterministic `replay`,
+and validated `history`. Public `zstd.Testing` modules cover statechart models,
+schedules, structural shrinking, differential executors, distributed virtual
+faults, mutation analysis, performance budgets, and side-effect authority. See
+[docs/agent-first-testing.md](docs/agent-first-testing.md).
+
+Every first-party and template-v5 `b.addTest` artifact also uses the
+`zigeffect_test_runner` server runner. It preserves idiomatic `std.testing`
+tests while atomically emitting complete suite receipts under
+`.zigeffect/tests/suites/`; missing executions, failures, leaks, and logged
+errors fail closed.
+
 ## Tools
 
 The `tools/` directory holds the 46 approved CLI tools (causal harness, query
@@ -247,6 +268,6 @@ record-only clone tools; see [docs/roadmap.md](docs/roadmap.md).
 - [Operations](docs/operations.md) · [Schema Governance](docs/schema-governance.md) ·
   [Performance Budget](docs/performance-budget.md) ·
   [Self-Improving AI Engine](docs/self-improving-ai-engine.md)
-- [Roadmap](docs/roadmap.md) · [Tool Roadmap](docs/tool-roadmap.md) ·
+- [Agent-first testing](docs/agent-first-testing.md) · [Roadmap](docs/roadmap.md) · [Tool Roadmap](docs/tool-roadmap.md) ·
   [Devex Review](docs/devex-review.md) ·
   [Migration to Durable Runtime](docs/migration-to-durable-runtime.md)

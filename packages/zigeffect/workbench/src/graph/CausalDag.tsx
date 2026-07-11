@@ -101,6 +101,7 @@ export function CausalDag(props: {
   layoutMode: VisualGraphLayoutMode;
   selectedId: string | null;
   onSelect: (eventId: string) => void;
+  ariaLabel?: string;
 }) {
   const placed = createMemo<Placed[]>(() => {
     const positions = props.layoutMode === "radial" ? radialPositions(props.model) : layeredPositions(props.model);
@@ -166,7 +167,7 @@ export function CausalDag(props: {
         width={box().width}
         height={box().height}
         role="img"
-        aria-label="Causal graph"
+        aria-label={props.ariaLabel ?? "Causal graph"}
       >
         <defs>
           <marker id="dag-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -180,7 +181,7 @@ export function CausalDag(props: {
               const target = () => byId().get(edge.target);
               return (
                 <Show when={source() && target()}>
-                  <path class="dag-edge" d={edgePath(source()!, target()!)} marker-end="url(#dag-arrow)" />
+                  <path class={`dag-edge ${edge.tone}`} d={edgePath(source()!, target()!)} marker-end="url(#dag-arrow)" />
                 </Show>
               );
             }}

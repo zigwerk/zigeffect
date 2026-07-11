@@ -4,6 +4,11 @@ Date: 2026-06-10
 
 Milestone: 49 - Multi-Runner Transport
 
+Status: superseded for production-readiness claims by
+`docs/superpowers/specs/2026-07-11-zigeffect-production-application-platform-design.md`.
+The delivered transports below are encoded in-process compatibility models,
+not production network transports.
+
 ## Goal
 
 Promote the existing deterministic cluster transport boundary into a

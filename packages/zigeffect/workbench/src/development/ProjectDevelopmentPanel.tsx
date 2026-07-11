@@ -51,6 +51,7 @@ export function ProjectDevelopmentPanel(props: {
         <Metric label="components" value={String(props.model.components.length)} />
         <Metric label="open requirements" value={String(props.model.requirements.filter((item) => item.status !== "satisfied").length)} />
         <Metric label="failed checks" value={String(props.model.checks.filter((item) => item.status === "failed").length)} tone={props.model.checks.some((item) => item.status === "failed") ? "warn" : "ok"} />
+        <Metric label="Capability gaps" value={String(props.model.capabilityGaps)} tone={props.model.capabilityGaps ? "warn" : "ok"} />
         <Metric label="application facts" value={String(props.model.applicationFacts.length)} />
         <Metric label="sessions" value={String(props.model.sessions.length)} />
       </div>
@@ -74,6 +75,20 @@ export function ProjectDevelopmentPanel(props: {
 
       <div class="project-development-grid">
         <div class="project-development-column">
+          <div class="collab-section-head"><h3>Capabilities</h3><span class="count">{props.model.capabilities.length}</span></div>
+          <div class="project-list">
+            <For each={props.model.capabilities} fallback={<EmptyState label="No adapter profile evidence" compact />}>
+              {(capability) => (
+                <div>
+                  <Badge value={capability.result} />
+                  <strong>{capability.requirementId}</strong>
+                  <code>{capability.adapterId}</code>
+                  <small>{capability.kind} · {capability.maturity} · {capability.target}</small>
+                </div>
+              )}
+            </For>
+          </div>
+
           <div class="collab-section-head"><h3><span aria-hidden="true">◇</span> Components</h3><span class="count">{focused().components.length}</span></div>
           <div class="component-map">
             <For each={focused().components} fallback={<EmptyState label="No components in focus" compact />}>

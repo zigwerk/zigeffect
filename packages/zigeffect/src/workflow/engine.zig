@@ -31,6 +31,7 @@ pub const WorkflowEngineError = error{
     DuplicateWorkflowExecution,
     MissingServiceRequirement,
     UnsupportedBackendCapability,
+    ParentWorkflowNotFound,
 };
 
 pub const WorkflowExecution = struct {
@@ -39,6 +40,8 @@ pub const WorkflowExecution = struct {
     execution_id: ExecutionId,
     status: WorkflowExecutionStatus,
     started_sequence: JournalSequence,
+    parent_workflow_id: ?WorkflowId = null,
+    parent_execution_id: ?ExecutionId = null,
 };
 
 pub const WorkflowExecutionList = struct {
@@ -145,12 +148,46 @@ pub const WorkflowEngine = struct {
     }
 
     pub fn execute(self: *WorkflowEngine, comptime WorkflowType: type, payload: WorkflowType.PayloadType) anyerror!WorkflowExecution {
+        return self.executeInternal(WorkflowType, payload, null, false);
+    }
+
+    /// Starts a child workflow with durable parent identity. Repeating the same
+    /// child command is idempotent and returns the existing child execution.
+    pub fn executeChild(
+        self: *WorkflowEngine,
+        parent_workflow_id: WorkflowId,
+        parent_execution_id: ExecutionId,
+        comptime WorkflowType: type,
+        payload: WorkflowType.PayloadType,
+    ) anyerror!WorkflowExecution {
+        const parent = self.findExecution(parent_execution_id) orelse return error.ParentWorkflowNotFound;
+        if (parent.workflow_id != parent_workflow_id) return error.ParentWorkflowNotFound;
+        return self.executeInternal(WorkflowType, payload, parent, true);
+    }
+
+    fn executeInternal(
+        self: *WorkflowEngine,
+        comptime WorkflowType: type,
+        payload: WorkflowType.PayloadType,
+        parent: ?WorkflowExecution,
+        idempotent_duplicate: bool,
+    ) anyerror!WorkflowExecution {
         const registration = self.findRegistration(WorkflowType.name) orelse return error.WorkflowNotRegistered;
         const idempotency_key = try WorkflowType.idempotencyKey(self.allocator, payload);
         defer self.allocator.free(idempotency_key);
 
         const execution_id = executionId(WorkflowType.name, idempotency_key);
-        if (self.findExecution(execution_id) != null) return error.DuplicateWorkflowExecution;
+        if (self.findExecution(execution_id)) |existing| {
+            const expected_parent_workflow_id: ?WorkflowId = if (parent) |value| value.workflow_id else null;
+            const expected_parent_execution_id: ?ExecutionId = if (parent) |value| value.execution_id else null;
+            if (idempotent_duplicate and
+                existing.parent_workflow_id == expected_parent_workflow_id and
+                existing.parent_execution_id == expected_parent_execution_id)
+            {
+                return existing;
+            }
+            return error.DuplicateWorkflowExecution;
+        }
 
         const sequence = try self.nextJournalSequence();
         const execution = WorkflowExecution{
@@ -159,6 +196,8 @@ pub const WorkflowEngine = struct {
             .execution_id = execution_id,
             .status = .running,
             .started_sequence = sequence,
+            .parent_workflow_id = if (parent) |value| value.workflow_id else null,
+            .parent_execution_id = if (parent) |value| value.execution_id else null,
         };
 
         try self.executions.ensureUnusedCapacity(self.allocator, 1);
@@ -168,6 +207,9 @@ pub const WorkflowEngine = struct {
                 .kind = .workflow_started,
                 .workflow_id = execution.workflow_id,
                 .execution_id = execution.execution_id,
+                .parent_sequence = if (parent) |value| value.started_sequence else null,
+                .parent_workflow_id = execution.parent_workflow_id,
+                .parent_execution_id = execution.parent_execution_id,
                 .name = WorkflowType.name,
                 .status = "running",
                 .idempotency_key = idempotency_key,
