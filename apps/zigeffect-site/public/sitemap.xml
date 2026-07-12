@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://zigeffect.dev/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url><loc>https://zigeffect.dev/how-it-works</loc></url>
+  <url><loc>https://zigeffect.dev/why-zig</loc></url>
+  <url><loc>https://zigeffect.dev/runtime</loc></url>
+  <url><loc>https://zigeffect.dev/causal-graph</loc></url>
+  <url><loc>https://zigeffect.dev/testing</loc></url>
+  <url><loc>https://zigeffect.dev/agents</loc></url>
+  <url><loc>https://zigeffect.dev/standard-library</loc></url>
+  <url><loc>https://zigeffect.dev/workflows</loc></url>
+  <url><loc>https://zigeffect.dev/built-with</loc></url>
+</urlset>

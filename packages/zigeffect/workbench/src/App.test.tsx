@@ -51,16 +51,7 @@ test("the collaboration board keeps the transports panel and turn count", () => 
   expect(source).toContain("<ProjectDevelopmentPanel");
 });
 
-test("workbenchTabsForArtifact exposes dedicated synchronized Ziac views", () => {
-  expect(workbenchTabsForArtifact("ziac.visual.v1")).toEqual([
-    { id: "ziac-topology", label: "Topology" },
-    { id: "ziac-map", label: "Global Map" },
-  ]);
-});
-
-test("Ziac estate refresh uses the host scanner and refetches the actual artifact", () => {
-  const value = source();
-  expect(value).toContain("requestEstateScan");
-  expect(value).toContain("refetch");
-  expect(value).toContain("onEstateRefresh={refreshEstate}");
+test("workbench tabs remain scoped to ZigEffect artifacts", () => {
+  expect(workbenchTabsForArtifact()).not.toContainEqual(expect.objectContaining({ id: "ziac-topology" }));
+  expect(source()).not.toContain("ZiacWorkbench");
 });

@@ -1,4 +1,4 @@
-import { For, Show, Suspense, createEffect, createMemo, createResource, createSignal, lazy, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup, onMount } from "solid-js";
 import {
   type CausalEvent,
   type CausalFinding,
@@ -16,9 +16,8 @@ import {
   parseArtifactJson,
   queryCommandsForEvent,
 } from "./causalArtifact";
-import { loadPayload, requestEstateScan, type WorkbenchSession } from "./workbenchBridge";
+import { loadPayload, type WorkbenchSession } from "./workbenchBridge";
 import { createLiveArtifact, liveUrlFromSearch, webSocketLiveSource } from "./liveAttach";
-import { deriveZiacVisualModel, parseZiacVisualArtifact } from "./ziacVisualArtifact";
 import { correlateEndpoint, createHubServices, hubUrlFromSearch, hubWebSocketSource } from "./liveServices";
 import { parseCorrelation } from "./hub/protocol";
 import { ServicesRail } from "./services/ServicesRail";
@@ -67,12 +66,7 @@ const auxTitles: Record<AuxView, string> = {
   tests: "Agent test evidence",
 };
 
-const ZiacWorkbenchView = lazy(async () => {
-  const module = await import("./ZiacWorkbench");
-  return { default: module.ZiacWorkbench };
-});
-
-type Tab = "timeline" | "agents" | "findings" | "graph" | "visual-graph" | "diff" | "chain" | "queries" | "metadata" | "ziac-topology" | "ziac-map";
+type Tab = "timeline" | "agents" | "findings" | "graph" | "visual-graph" | "diff" | "chain" | "queries" | "metadata";
 type WorkbenchTab = { id: Tab; label: string };
 
 const tabs: WorkbenchTab[] = [
@@ -87,13 +81,8 @@ const tabs: WorkbenchTab[] = [
   { id: "metadata", label: "Metadata" },
 ];
 
-const ziacTabs: WorkbenchTab[] = [
-  { id: "ziac-topology", label: "Topology" },
-  { id: "ziac-map", label: "Global Map" },
-];
-
-export function workbenchTabsForArtifact(schema?: string): WorkbenchTab[] {
-  return schema === "ziac.visual.v1" ? ziacTabs : tabs;
+export function workbenchTabsForArtifact(): WorkbenchTab[] {
+  return tabs;
 }
 
 function projectDevelopmentFromRaw(raw: unknown): ProjectDevelopmentModel | null {
@@ -124,7 +113,7 @@ export function workbenchAuxViews(): AuxView[] {
 }
 
 export function App() {
-  const [payload, { refetch }] = createResource(loadPayload);
+  const [payload] = createResource(loadPayload);
   const [safetyReceipt] = createResource(loadSafetyReceipt);
   const [testRun] = createResource(loadTestRunReceipt);
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
@@ -253,26 +242,11 @@ export function App() {
     try {
       const artifactPath = loaded.session?.artifact_path ?? "sample-artifact.json";
       const raw = parseArtifactJson(loaded.artifactJson);
-      if (typeof raw === "object" && raw !== null && "schema" in raw && raw.schema === "ziac.visual.v1") {
-        return {
-          model: null,
-          governance: null,
-          semanticDiff: null,
-          localDevSession: null,
-          ziac: deriveZiacVisualModel(parseZiacVisualArtifact(raw)),
-          projectDevelopment: null,
-          raw,
-          statecharts: null,
-          session: loaded.session,
-          error: null,
-        };
-      }
       return {
         model: deriveWorkbenchModel(raw, { artifactPath }),
         governance: deriveGovernanceModel(raw, { artifactPath }),
         semanticDiff: deriveSemanticDiffModel(raw, { artifactPath }),
         localDevSession: localDevSessionFromRaw(raw, artifactPath) ?? live?.localDevSession() ?? null,
-        ziac: null,
         projectDevelopment: projectDevelopmentFromRaw(raw),
         raw,
         statecharts: parseStatechartCatalog(raw),
@@ -285,7 +259,6 @@ export function App() {
         governance: null,
         semanticDiff: null,
         localDevSession: null,
-        ziac: null,
         projectDevelopment: null,
         raw: null,
         statecharts: null,
@@ -299,7 +272,6 @@ export function App() {
   const governance = createMemo(() => parsed()?.governance ?? null);
   const semanticDiff = createMemo(() => parsed()?.semanticDiff ?? null);
   const localDevSession = createMemo(() => parsed()?.localDevSession ?? null);
-  const ziacModel = createMemo(() => parsed()?.ziac ?? null);
   const projectDevelopment = createMemo(() => live?.projectDevelopment() ?? parsed()?.projectDevelopment ?? null);
   const statecharts = createMemo(() => parsed()?.statecharts ?? null);
   const studio = createMemo(() => {
@@ -542,17 +514,6 @@ export function App() {
       await navigator.clipboard.writeText(command);
       setCopiedCommand(command);
       window.setTimeout(() => setCopiedCommand(null), 1200);
-    }
-  }
-
-  async function refreshEstate() {
-    try {
-      const result = await requestEstateScan();
-      if (!result.ok) return false;
-      await refetch();
-      return true;
-    } catch {
-      return false;
     }
   }
 
@@ -818,13 +779,6 @@ export function App() {
             </>
           );
         }}
-      </Show>
-      <Show when={ziacModel()}>
-        {(current) => (
-          <Suspense fallback={<div class="loading-state">Loading Ziac infrastructure</div>}>
-            <ZiacWorkbenchView model={current()} session={parsed()?.session ?? null} onEstateRefresh={refreshEstate} />
-          </Suspense>
-        )}
       </Show>
     </main>
   );
