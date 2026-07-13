@@ -13,11 +13,13 @@ pub fn build(b: *std.Build) void {
     const zigeffect_std_dependency = b.dependency("zigeffect_std", .{});
     const zigeffect_std = zigeffect_std_dependency.module("zigeffect_std");
     const testing_runner = zigeffect_std_dependency.module("zigeffect_test_runner").root_source_file.?;
+    const openssl_include_path = b.option(std.Build.LazyPath, "openssl_include_path", "OpenSSL include directory for the selected target");
     const pg = b.dependency("pg", .{
         .target = target,
         .optimize = optimize,
         .openssl = true,
         .openssl_lib_name = @as([]const u8, "ssl"),
+        .openssl_include_path = openssl_include_path,
     }).module("pg");
 
     const zigeffect_postgres = b.addModule("zigeffect_postgres", .{
