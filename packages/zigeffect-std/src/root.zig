@@ -36,6 +36,7 @@ pub const Observability = @import("observability/root.zig");
 pub const Testing = @import("testing/root.zig");
 pub const Sql = @import("sql/root.zig");
 pub const Http = @import("http/root.zig");
+pub const Grpc = @import("grpc/root.zig");
 pub const Agent = @import("agent/root.zig");
 pub const Application = @import("application/root.zig");
 pub const CausalGraph = @import("causal_graph/root.zig");
@@ -51,6 +52,13 @@ test "root exports Observability namespace" {
     const zstd = @import("root.zig");
     try std.testing.expect(@hasDecl(zstd, "Observability"));
     try std.testing.expect(@hasDecl(zstd.Observability, "Recorder"));
+}
+
+test "root exports the repository-owned gRPC namespace" {
+    const zstd = @import("root.zig");
+    try std.testing.expect(@hasDecl(zstd, "Grpc"));
+    try std.testing.expect(@hasDecl(zstd.Grpc, "frameMessageAlloc"));
+    try std.testing.expect(@hasDecl(zstd.Grpc, "invokeEffect"));
 }
 
 test "root exports causal Application namespace" {
@@ -95,6 +103,7 @@ test {
     std.testing.refAllDecls(Capability);
     std.testing.refAllDecls(SystemCapabilities);
     std.testing.refAllDecls(Http);
+    std.testing.refAllDecls(Grpc);
     std.testing.refAllDecls(Sql);
     std.testing.refAllDecls(Clock);
     std.testing.refAllDecls(Randomness);

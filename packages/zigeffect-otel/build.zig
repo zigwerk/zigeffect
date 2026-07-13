@@ -1,5 +1,22 @@
 const std = @import("std");
 
+fn linkTls(module: *std.Build.Module, target: std.Build.ResolvedTarget) void {
+    module.link_libc = true;
+    if (target.result.os.tag == .macos) {
+        if (target.result.cpu.arch == .aarch64) {
+            module.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
+            module.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
+            module.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/opt/openssl@3/lib" });
+        } else {
+            module.addIncludePath(.{ .cwd_relative = "/usr/local/include" });
+            module.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
+            module.addLibraryPath(.{ .cwd_relative = "/usr/local/opt/openssl@3/lib" });
+        }
+    }
+    module.linkSystemLibrary("ssl", .{});
+    module.linkSystemLibrary("crypto", .{});
+}
+
 fn addV2Test(b: *std.Build, runner: std.Build.LazyPath, options: std.Build.TestOptions) *std.Build.Step.Compile {
     var configured = options;
     configured.test_runner = .{ .path = runner, .mode = .server };
@@ -17,6 +34,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{.{ .name = "zigeffect_std", .module = zstd }},
     });
+    linkTls(module, target);
     const tests = addV2Test(b, zstd_dep.module("zigeffect_test_runner").root_source_file.?, .{
         .name = "zigeffect-otel-tests",
         .root_module = module,

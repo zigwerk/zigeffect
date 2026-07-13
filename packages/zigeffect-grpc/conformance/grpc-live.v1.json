@@ -1,0 +1,32 @@
+{
+  "schema": "zigeffect.grpc-live-conformance",
+  "version": 1,
+  "status": "passed",
+  "complete": true,
+  "observed_at_ms": 1783891730000,
+  "valid_until_ms": 1791667730000,
+  "environment": {
+    "zig": "0.16.0",
+    "target": "aarch64-macos",
+    "nghttp2": "1.69.0",
+    "openssl": "3.6.2",
+    "python_grpcio": "1.82.1"
+  },
+  "checks": [
+    {"id":"zig-client-python-server-all-shapes-plaintext","status":"passed"},
+    {"id":"zig-client-python-server-all-shapes-tls-alpn-h2","status":"passed"},
+    {"id":"python-client-zig-server-all-shapes-plaintext","status":"passed"},
+    {"id":"python-client-zig-server-all-shapes-tls-alpn-h2","status":"passed"},
+    {"id":"zig-client-zig-server-plaintext","status":"passed"},
+    {"id":"zig-client-zig-server-tls-peer-verified","status":"passed"},
+    {"id":"deadline-interrupts-blocked-read","status":"passed"},
+    {"id":"multiplexed-unary-rpcs-one-connection","status":"passed"},
+    {"id":"testing-v2-suite","status":"passed","discovered":7,"executed":7,"failed":0,"pending":0,"leaks":0,"log_errors":0}
+  ],
+  "command": "zig build test && zig build external-test -Dpython=<grpcio-python>",
+  "limitations": [
+    "ordinary NativeClient invocations open a new HTTP/2 connection",
+    "connection reuse and multiplexing are exposed explicitly through invokeBatchAlloc rather than an automatic cross-call pool",
+    "streaming APIs are bounded and buffered rather than exposing an unbounded pull interface"
+  ]
+}

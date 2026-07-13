@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package zigeffect.grpc.v1;
+
+import "google/protobuf/descriptor.proto";
+
+// Marks methods whose generated adapters must keep every queued message within
+// the configured stream-capacity bound.
+extend google.protobuf.MethodOptions {
+  bool bounded_stream = 51001;
+}

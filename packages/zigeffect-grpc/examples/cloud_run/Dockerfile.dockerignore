@@ -1,0 +1,14 @@
+*
+!packages/
+!packages/zigeffect/
+!packages/zigeffect/**
+!packages/zigeffect-std/
+!packages/zigeffect-std/**
+!packages/zigeffect-otel/
+!packages/zigeffect-otel/**
+!packages/zigeffect-grpc/
+!packages/zigeffect-grpc/**
+**/.zig-cache
+**/zig-out
+**/zig-pkg
+**/.zigeffect

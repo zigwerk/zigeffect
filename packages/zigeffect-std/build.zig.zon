@@ -12,6 +12,7 @@
         "build.zig",
         "build.zig.zon",
         "README.md",
+        "THIRD_PARTY_NOTICES.md",
         "conformance",
         "examples",
         "src",

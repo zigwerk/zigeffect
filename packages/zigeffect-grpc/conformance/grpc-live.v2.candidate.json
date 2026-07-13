@@ -1,0 +1,51 @@
+{
+  "schema": "zigeffect.grpc-live-conformance",
+  "version": 2,
+  "status": "passed",
+  "complete": true,
+  "qualification": "production-candidate",
+  "observed_at_ms": 1783967676000,
+  "valid_until_ms": 1791743676000,
+  "source": {
+    "state": "working-tree-candidate",
+    "normalized_sha256": "b423f45d8c00abe429f2f37bf87d7f091d98ea94bfcc7666d9d451ea66dbf983",
+    "digest_command": "python3 packages/zigeffect-grpc/tests/source_digest.py ."
+  },
+  "environments": [
+    {"target":"aarch64-macos","execution":"native","zig":"0.16.0"},
+    {"target":"aarch64-linux","execution":"native-container","zig":"0.16.0"}
+  ],
+  "checks": [
+    {"id":"testing-v2-release-safe","status":"passed","discovered":82,"executed":82,"failed":0,"pending":0,"leaks":0,"log_errors":0},
+    {"id":"testing-v2-release-fast","status":"passed","discovered":82,"executed":82,"failed":0,"pending":0,"leaks":0,"log_errors":0},
+    {"id":"linux-arm64-release-safe","status":"passed","receipt":"conformance/linux-arm64-release-safe.testing-v2.json"},
+    {"id":"linux-arm64-release-fast","status":"passed","receipt":"conformance/linux-arm64-release-fast.testing-v2.json"},
+    {"id":"official-grpc-python-both-roles-plaintext-and-tls","status":"passed","portable_cases_per_role_mode":14,"role_mode_runs":56},
+    {"id":"grpc-go-differential-both-roles-plaintext-and-tls","status":"passed","portable_cases_per_role_mode":14,"role_mode_runs":56},
+    {"id":"official-connect-stable-server-conformance","status":"passed","passed":120,"failed":0,"unsupported":0},
+    {"id":"official-connect-stable-client-conformance","status":"passed","passed":55,"failed":0,"unsupported":["http2","tls","get","compression","streaming"]},
+    {"id":"connect-es-browser-client","status":"passed"},
+    {"id":"generated-solid-query-client","status":"passed"},
+    {"id":"buf-schema-lint-generation-and-breaking","status":"passed","baseline":"conformance/buf-v1.binpb","negative_fixture":"published-field-deletion-rejected"},
+    {"id":"coverage-guided-parser-and-protobuf-fuzz","status":"passed","iteration_limit":100000,"reported_runs":304815,"unique_runs":647,"covered_points":1850,"instrumented_points":29121},
+    {"id":"malformed-frame-and-live-certificate-rotation","status":"passed","iterations":1000,"receipt":".zigeffect/tests/suites/zigeffect-grpc-adversarial-tests.json"},
+    {"id":"cloud-run-container-mixed-shape-load","status":"passed","soak_seconds":900,"completed_calls":1541632,"failures":0,"memory_growth_bytes":11460608,"max_memory_growth_bytes":67108864,"receipt":"conformance/cloud-run-arm64-15m.v2.json"},
+    {"id":"four-runtime-differential-benchmark","status":"passed","targets":12,"receipt":"conformance/benchmarks-linux-arm64.v1.json"},
+    {"id":"incremental-final-message-commit-race","status":"passed","concurrent_server_streams":200000,"regression":"empty-poll-completion-recheck"},
+    {"id":"production-causal-boundaries","status":"passed","facts":["resolve","connect","pick","attempt","stream","handler","drain"]},
+    {"id":"native-otlp-observability","status":"passed","instruments":["rpc.server.call.attempts","rpc.client.attempt.duration","rpc.client.connections.usage"],"histograms":true,"propagation_links":true,"exemplars":true},
+    {"id":"virtual-network-fault-and-schedule-matrix","status":"passed"},
+    {"id":"downstream-zigeffect-std-examples-ziac-and-root","status":"passed","zigeffect_std":"273/273","ziac":"453/454 with one intentional skip","web":"4/4","root":"bun run check"}
+  ],
+  "blocking_promotion_checks": [
+    "native-linux-amd64-workflow-receipt-on-committed-source",
+    "24-hour-mixed-shape-bounded-memory-campaign-on-committed-source",
+    "deployed-gcp-cloud-run-service-to-service-receipt"
+  ],
+  "limitations": [
+    "This receipt qualifies production-candidate capability slices; it does not claim production_verified maturity.",
+    "The checked-in 24-hour workflow is executable but has not yet produced its 24-hour artifact.",
+    "Linux amd64 must run on the checked-in source in the native GitHub runner; local emulation is not promotion evidence.",
+    "Cloud Run behavior is container-qualified locally; deployment to a GCP project remains an external promotion action."
+  ]
+}

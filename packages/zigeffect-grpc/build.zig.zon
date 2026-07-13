@@ -1,0 +1,15 @@
+.{
+    .name = .zigeffect_grpc,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0xece926b1fc7e16e0,
+    .dependencies = .{
+        .zigeffect_std = .{ .path = "../zigeffect-std" },
+        .zigeffect_otel = .{ .path = "../zigeffect-otel" },
+        .protobuf = .{
+            .url = "git+https://github.com/Arwalk/zig-protobuf.git#2b7103e1f71a02cb19bb464820ab6fa7376e5a17",
+            .hash = "protobuf-5.0.0-0e82apH3KQCe2L15XA_xb4QX_VuFH8tuRiQudst0DwjP",
+        },
+    },
+    .paths = .{ "benchmarks", "build.zig", "build.zig.zon", "README.md", "THIRD_PARTY_NOTICES.md", "buf.gen.yaml", "buf.yaml", "conformance", "docs", "examples", "proto", "src", "tests" },
+}
