@@ -36,6 +36,8 @@ with one import:
   redacted artifacts.
 - `examples/http_router.zig` for Schema-coded local HTTP routes with receipts
   and traces.
+- `examples/grpc_unary.zig` for exact in-process gRPC method routing through
+  the same contract used by qualified native transports.
 - `examples/http_sql_smoke.zig` for local HTTP/SQL contract smoke tests.
 - `examples/local_toolbelt.zig` for a composed local automation command.
 - `examples/causal_graph.zig` for restart-safe local graph persistence and
@@ -84,6 +86,16 @@ with one import:
   provides deterministic memory routing, Schema-coded local JSON routes,
   credential-safe request redaction, route receipts/traces, and WebSocket frame
   codecs for local workbench feeds.
+- `Grpc` is the repository-owned gRPC protocol and Effect boundary derived from
+  the public-domain gRPC-zig source material. It provides canonical bounded
+  message framing, fragmented stream decoding, metadata and deadlines,
+  statuses and trailers, exact method routing, unary and streaming call shapes,
+  fake/scripted/in-process providers, health state, qualified transports,
+  secret-free receipts, and causal `grpc.call` facts. Live HTTP/2 transports
+  must prove TLS, trailers, cancellation, multiplexing, connection reuse, flow
+  control, bounds, and redacted diagnostics before qualification. The native
+  `packages/zigeffect-grpc` adapter supplies that qualified boundary with all
+  four RPC shapes and Python gRPC interoperability evidence.
 - `Agent` records workbench-compatible local agent JSONL sessions, Codex and
   Claude Code process adapter commands, guardrails, artifacts, check receipts,
   effect-native process-backed agent runs, and supervised local multi-tool
@@ -141,6 +153,7 @@ zstd.Clock
 zstd.Schedule
 zstd.Sql
 zstd.Http
+zstd.Grpc
 zstd.Agent
 zstd.Application
 zstd.CausalGraph

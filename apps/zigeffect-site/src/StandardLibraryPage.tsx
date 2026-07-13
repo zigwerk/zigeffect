@@ -140,7 +140,38 @@ const order = try appLayer.provide(allocator, PlaceOrder);`}</CodeWindow>
 
       <section class="deep-section">
         <SectionHeading
-          eyebrow="05 / WHY IT MATTERS FOR AGENTS"
+          eyebrow="05 / NATIVE GRPC + CONNECT"
+          title="One Protobuf contract, from Zig service to Solid client."
+          copy="ZigEffect now generates typed messages, client stubs and server bindings for all four gRPC call shapes. Trusted Cloud Run services use bounded persistent HTTP/2 channels; browsers use generated Connect clients with TanStack Solid Query against the same contract."
+        />
+        <div class="assembly-flow" data-reveal>
+          <span><Braces size={20} /><strong>Protobuf</strong><small>one checked-in contract</small></span>
+          <span><Network size={20} /><strong>Native gRPC</strong><small>Zig service to service</small></span>
+          <span><CloudCog size={20} /><strong>Cloud Run</strong><small>health + drain + identity</small></span>
+          <span><GitBranch size={20} /><strong>Connect</strong><small>Solid Query in the browser</small></span>
+        </div>
+        <div class="two-column-example">
+          <CodeWindow label="contract + qualification" badge="generated + tested">{`zig build gen-proto
+zig build schema-compatibility-test
+zig build connect-conformance-test
+zig build test -Doptimize=ReleaseSafe
+
+# Testing v2
+82 discovered · 82 executed · 82 passed
+0 pending · 0 leaks · 0 logged errors`}</CodeWindow>
+          <div class="plain-card">
+            <ShieldCheck size={25} />
+            <h3>Production candidate, with the boundary stated.</h3>
+            <p>The transport has typed streaming, bounded backpressure, commitment-aware retry, health, reflection, Channelz, auth, OTLP and redacted causal facts.</p>
+            <strong>Production verification still requires committed-source Linux amd64, the 24-hour soak and a deployed GCP service-to-service receipt.</strong>
+          </div>
+        </div>
+        <p class="boundary-note"><ShieldCheck size={18} /> The checked-in schema-v2 candidate records the completed applicable gRPC, Connect, Linux ARM64, fuzz, adversarial and load gates. A workflow definition or unsupported case is never promoted into evidence.</p>
+      </section>
+
+      <section class="deep-section">
+        <SectionHeading
+          eyebrow="06 / WHY IT MATTERS FOR AGENTS"
           title="Stop making every agent invent the plumbing again."
           copy="A broad standard library reduces ambiguity at exactly the boundaries where generated systems usually become inconsistent: retries, cancellation, cleanup, serialization, secrets, I/O, testing, and operational evidence."
         />

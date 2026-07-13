@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package zigeffect.grpc.v1;
+
+import "google/protobuf/descriptor.proto";
+import "google/protobuf/timestamp.proto";
+import "zigeffect/grpc/v1/options.proto";
+
+message NestedValue {
+  string label = 1;
+}
+
+enum ExampleState {
+  EXAMPLE_STATE_UNSPECIFIED = 0;
+  EXAMPLE_STATE_READY = 1;
+}
+
+message UnaryRequest {
+  string id = 1;
+  int64 sequence = 2;
+  bytes payload = 3;
+  repeated string tags = 4;
+  map<string, int64> counters = 5;
+  optional string note = 6;
+  NestedValue nested = 7;
+  ExampleState state = 8;
+  oneof selector {
+    string name = 9;
+    uint64 number = 10;
+  }
+  google.protobuf.Timestamp observed_at = 11;
+}
+
+message UnaryResponse {
+  string id = 1;
+  int64 accepted_sequence = 2;
+}
+
+message ClientStreamRequest { int64 sequence = 1; }
+message ClientStreamResponse { int64 accepted_count = 1; }
+message ServerStreamRequest { int64 count = 1; }
+message ServerStreamResponse { int64 sequence = 1; }
+message BidiStreamRequest { int64 sequence = 1; }
+message BidiStreamResponse { int64 sequence = 1; }
+
+service ConformanceService {
+  rpc Unary(UnaryRequest) returns (UnaryResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc ClientStream(stream ClientStreamRequest) returns (ClientStreamResponse);
+  rpc ServerStream(ServerStreamRequest) returns (stream ServerStreamResponse) {
+    option (bounded_stream) = true;
+  }
+  rpc BidiStream(stream BidiStreamRequest) returns (stream BidiStreamResponse) {
+    option (bounded_stream) = true;
+  }
+}

@@ -1,0 +1,170 @@
+name: zigeffect grpc gcp qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: GCP project containing the qualification resources
+        required: true
+        type: string
+      region:
+        description: Cloud Run and Artifact Registry region
+        required: true
+        default: europe-west1
+        type: string
+      artifact_repository:
+        description: Existing Artifact Registry Docker repository
+        required: true
+        type: string
+      service_name:
+        description: Temporary private Cloud Run service name
+        required: true
+        default: zigeffect-grpc-qualification
+        type: string
+      runtime_service_account:
+        description: Service account email used by the service and probe job
+        required: true
+        type: string
+      workload_identity_provider:
+        description: GitHub Workload Identity Provider resource name
+        required: true
+        type: string
+      deployer_service_account:
+        description: Service account email impersonated by GitHub Actions
+        required: true
+        type: string
+      cleanup:
+        description: Delete the Cloud Run service and job after qualification
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PROJECT_ID: ${{ inputs.project_id }}
+      REGION: ${{ inputs.region }}
+      REPOSITORY: ${{ inputs.artifact_repository }}
+      SERVICE: ${{ inputs.service_name }}
+      RUNTIME_SERVICE_ACCOUNT: ${{ inputs.runtime_service_account }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ inputs.workload_identity_provider }}
+          service_account: ${{ inputs.deployer_service_account }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Verify candidate receipt source binding
+        run: test "$(python3 packages/zigeffect-grpc/tests/source_digest.py .)" = "$(jq -r .source.normalized_sha256 packages/zigeffect-grpc/conformance/grpc-live.v2.candidate.json)"
+      - name: Define immutable images
+        run: |
+          registry="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}"
+          echo "SERVER_IMAGE=${registry}/${SERVICE}-server:${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "PROBE_IMAGE=${registry}/${SERVICE}-probe:${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "PROBE_JOB=${SERVICE}-probe" >> "$GITHUB_ENV"
+      - name: Build and publish server and probe images
+        run: |
+          gcloud builds submit . \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --config packages/zigeffect-grpc/examples/cloud_run/cloudbuild.gcp.yaml \
+            --substitutions "_SERVER_IMAGE=${SERVER_IMAGE},_PROBE_IMAGE=${PROBE_IMAGE}"
+      - name: Deploy private HTTP/2 service
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --platform managed \
+            --image "$SERVER_IMAGE" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --use-http2 \
+            --no-allow-unauthenticated \
+            --quiet
+          gcloud run services add-iam-policy-binding "$SERVICE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --member "serviceAccount:${RUNTIME_SERVICE_ACCOUNT}" \
+            --role roles/run.invoker \
+            --quiet
+          url="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')"
+          test -n "$url"
+          echo "SERVICE_URL=${url}" >> "$GITHUB_ENV"
+      - name: Run authenticated Cloud Run service-to-service probe
+        run: |
+          gcloud run jobs deploy "$PROBE_JOB" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --image "$PROBE_IMAGE" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "GRPC_TARGET=${SERVICE_URL},GRPC_AUDIENCE=${SERVICE_URL}" \
+            --max-retries 0 \
+            --task-timeout 5m \
+            --quiet
+          gcloud run jobs execute "$PROBE_JOB" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --wait \
+            --quiet
+          execution="$(gcloud run jobs executions list --job "$PROBE_JOB" --project "$PROJECT_ID" --region "$REGION" --sort-by='~metadata.creationTimestamp' --limit=1 --format='value(metadata.name)')"
+          test -n "$execution"
+          echo "PROBE_EXECUTION=${execution}" >> "$GITHUB_ENV"
+      - name: Verify probe output and write receipt
+        run: |
+          payload=""
+          for attempt in $(seq 1 24); do
+            payload="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${PROBE_JOB} AND textPayload:\"ZIGEFFECT_GRPC_GCP_PROBE=\"" \
+              --project "$PROJECT_ID" \
+              --freshness 1h \
+              --limit 20 \
+              --format='value(textPayload)' | sed -n 's/^ZIGEFFECT_GRPC_GCP_PROBE=//p' | head -1)"
+            if [ -n "$payload" ]; then break; fi
+            sleep 5
+          done
+          test -n "$payload"
+          PROBE_PAYLOAD="$payload" python3 - <<'PY'
+          import json, os
+          probe = json.loads(os.environ["PROBE_PAYLOAD"])
+          if probe.get("status") != "passed" or probe.get("checks") != [
+              "unary", "client_streaming", "server_streaming", "bidirectional_streaming"
+          ]:
+              raise SystemExit("Cloud Run probe receipt is incomplete")
+          receipt = {
+              "schema": "zigeffect.grpc-gcp-cloud-run-qualification",
+              "version": 1,
+              "status": "passed",
+              "complete": True,
+              "commit": os.environ["GITHUB_SHA"],
+              "source_sha256": __import__("subprocess").check_output(
+                  ["python3", "packages/zigeffect-grpc/tests/source_digest.py", "."],
+                  text=True,
+              ).strip(),
+              "project_id": os.environ["PROJECT_ID"],
+              "region": os.environ["REGION"],
+              "service": os.environ["SERVICE"],
+              "service_url": os.environ["SERVICE_URL"],
+              "server_image": os.environ["SERVER_IMAGE"],
+              "probe_image": os.environ["PROBE_IMAGE"],
+              "probe_execution": os.environ["PROBE_EXECUTION"],
+              "probe": probe,
+          }
+          with open("/tmp/zigeffect-grpc-gcp.json", "w", encoding="utf-8") as output:
+              json.dump(receipt, output, sort_keys=True)
+              output.write("\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zigeffect-grpc-gcp-${{ github.run_id }}
+          retention-days: 365
+          path: /tmp/zigeffect-grpc-gcp.json
+      - name: Remove temporary Cloud Run resources
+        if: always() && inputs.cleanup
+        run: |
+          gcloud run jobs delete "$PROBE_JOB" --project "$PROJECT_ID" --region "$REGION" --quiet || true
+          gcloud run services delete "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --quiet || true

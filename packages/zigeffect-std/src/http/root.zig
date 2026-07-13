@@ -63,8 +63,12 @@ pub const SendOptions = struct {
     }
 };
 
-pub fn requestBodyStreamAlloc(allocator: std.mem.Allocator, request: Request) !fx.EffectStream(u8, anyerror, Stream.EmptyEnv) { return Stream.ownedBytesAlloc(allocator, request.body); }
-pub fn responseBodyStreamAlloc(allocator: std.mem.Allocator, response: Response) !fx.EffectStream(u8, anyerror, Stream.EmptyEnv) { return Stream.ownedBytesAlloc(allocator, response.body); }
+pub fn requestBodyStreamAlloc(allocator: std.mem.Allocator, request: Request) !fx.EffectStream(u8, anyerror, Stream.EmptyEnv) {
+    return Stream.ownedBytesAlloc(allocator, request.body);
+}
+pub fn responseBodyStreamAlloc(allocator: std.mem.Allocator, response: Response) !fx.EffectStream(u8, anyerror, Stream.EmptyEnv) {
+    return Stream.ownedBytesAlloc(allocator, response.body);
+}
 
 pub const Response = struct {
     status: u16,
@@ -398,7 +402,7 @@ pub const LocalClient = struct {
         }) catch |err| return mapConnectError(err);
         defer live_request.deinit();
 
-        if (request.body.len == 0) {
+        if (request.body.len == 0 and !method.requestHasBody()) {
             live_request.sendBodiless() catch |err| return mapRequestError(err);
         } else {
             live_request.transfer_encoding = .{ .content_length = request.body.len };

@@ -1,0 +1,7 @@
+FROM python:3.12.10-slim-bookworm
+
+RUN pip install --no-cache-dir grpcio==1.82.1 google-auth==2.40.3 requests==2.32.5
+COPY packages/zigeffect-grpc/tests/gcp_probe.py /app/gcp_probe.py
+
+USER 65532:65532
+ENTRYPOINT ["python", "/app/gcp_probe.py"]

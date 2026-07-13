@@ -133,6 +133,14 @@ describe("ZigEffect expanded marketing journey", () => {
     expect(standardLibrary).toContain("Agent");
     expect(standardLibrary).toContain('const zstd = @import("zigeffect_std")');
     expect(standardLibrary).toContain("Adapters declare their production posture");
+    expect(standardLibrary).toContain("NATIVE GRPC + CONNECT");
+    expect(standardLibrary).toContain("One Protobuf contract");
+    expect(standardLibrary).toContain("TanStack Solid Query");
+    expect(standardLibrary).toContain("82 discovered · 82 executed · 82 passed");
+    expect(standardLibrary).toContain("Production candidate");
+    expect(standardLibrary).toContain("committed-source Linux amd64");
+    expect(standardLibrary).toContain("24-hour soak");
+    expect(standardLibrary).toContain("deployed GCP service-to-service receipt");
   });
 
   test("surfaces system assembly on the homepage", () => {
@@ -142,6 +150,8 @@ describe("ZigEffect expanded marketing journey", () => {
     expect(landing).toContain('href="/standard-library"');
     expect(landing).toContain('href="/workflows"');
     expect(landing).toContain("DURABLE CONTROL FLOW");
+    expect(landing).toContain("Generated gRPC/Connect");
+    expect(landing).toContain("native Zig services on Cloud Run");
   });
 
   test("keeps the deep-page system responsive and horizontally safe", () => {
