@@ -5,7 +5,7 @@ const std = @import("std");
 pub fn containsSensitiveMaterial(input: []const u8) bool {
     return containsInsensitive(input, "sentinel-secret") or
         containsInsensitive(input, "authorization:") or
-        containsInsensitive(input, "authorization\"") or
+        containsAssignment(input, "authorization") or
         containsInsensitive(input, "proxy-authorization:") or
         containsInsensitive(input, "bearer ") or
         containsInsensitive(input, "-----begin private key-----") or
@@ -58,7 +58,10 @@ fn containsAwsAccessKey(input: []const u8) bool {
         if (!(std.mem.startsWith(u8, input[offset..], "AKIA") or std.mem.startsWith(u8, input[offset..], "ASIA"))) continue;
         var valid = true;
         for (input[offset + 4 .. offset + 20]) |byte| {
-            if (!((byte >= 'A' and byte <= 'Z') or std.ascii.isDigit(byte))) { valid = false; break; }
+            if (!((byte >= 'A' and byte <= 'Z') or std.ascii.isDigit(byte))) {
+                valid = false;
+                break;
+            }
         }
         if (valid) return true;
     }
@@ -95,4 +98,5 @@ test "secret scanner detects structured credentials without rejecting safe schem
     const unsafe = [_][]const u8{ "postgresql://user:pass@db/orders", "{\"password\":\"hunter2\"}", "Authorization: Bearer abc", "client_secret=abc", "-----BEGIN PRIVATE KEY-----", "AKIAIOSFODNN7EXAMPLE" };
     for (unsafe) |value| try std.testing.expect(containsSensitiveMaterial(value));
     try std.testing.expect(!containsSensitiveMaterial("{\"password\":null,\"idempotency_key\":\"safe\",\"secret_reference\":\"secret://vault/db\"}"));
+    try std.testing.expect(!containsSensitiveMaterial("{\"assetType\":\"certificatemanager.googleapis.com/DnsAuthorization\"}"));
 }
