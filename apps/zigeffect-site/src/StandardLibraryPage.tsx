@@ -157,7 +157,7 @@ zig build connect-conformance-test
 zig build test -Doptimize=ReleaseSafe
 
 # Testing v2
-82 discovered · 82 executed · 82 passed
+94 discovered · 94 executed · 94 passed
 0 pending · 0 leaks · 0 logged errors`}</CodeWindow>
           <div class="plain-card">
             <ShieldCheck size={25} />

@@ -96,6 +96,22 @@ handlers return an owned response, transferring that response to the binding.
 Use the allocator-aware form whenever a handler constructs owned strings,
 messages, maps, or repeated fields.
 
+## Performance
+
+The latest schema-v2 ARM64 Docker optimization diagnostic held the container
+images, driver, 1 KiB payload, 32 client workers, one persistent connection,
+warm-up, and 50,000 measured calls constant. It measured ZigEffect at 11,792
+RPC/s, 2.42 ms p50, 6.06 ms p99, and 7.0 server allocations per RPC. That is
+96.6% of grpc-go in the same receipt and 13.4% higher throughput than Tonic.
+
+This is candidate engineering evidence, not the checked-in release benchmark,
+native Linux evidence, or deployed Cloud Run latency. Comparative claims must
+come from one complete receipt; promotion still requires native Linux amd64,
+the complete 24-hour mixed-shape campaign, and deployed GCP qualification on
+committed source. See [`benchmarks/PERFORMANCE.md`](benchmarks/PERFORMANCE.md)
+for the profile, optimization decisions, exact runtime table, and measurement
+boundary.
+
 ## Cloud Run
 
 The example in `examples/cloud_run` binds `0.0.0.0:$PORT`, serves h2c behind

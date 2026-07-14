@@ -167,8 +167,8 @@ pub fn UnaryBinding(
             // ownership of it and should use request-scoped/context storage.
             const result = try invoke_fn(self.context, decoded);
             const encoded = try encodeAlloc(allocator, result);
-            defer allocator.free(encoded);
-            return Grpc.UnaryResponse.initAlloc(allocator, encoded, .ok());
+            errdefer allocator.free(encoded);
+            return Grpc.UnaryResponse.initOwnedAlloc(allocator, encoded, .ok());
         }
     };
 }
@@ -436,15 +436,15 @@ pub fn GeneratedServer(comptime Service: type, comptime Implementation: type) ty
                             var response = try @call(.auto, implementation_method, .{ self.implementation, allocator, decoded });
                             defer deinitMessage(Response, allocator, &response);
                             const bytes = try encodeAlloc(allocator, response);
-                            defer allocator.free(bytes);
-                            return Grpc.UnaryResponse.initAlloc(allocator, bytes, .ok());
+                            errdefer allocator.free(bytes);
+                            return Grpc.UnaryResponse.initOwnedAlloc(allocator, bytes, .ok());
                         } else if (comptime implementation_info.params.len == 2) {
                             // The conventional handler returns a borrowed
                             // response and may safely project decoded fields.
                             const response = try @call(.auto, implementation_method, .{ self.implementation, decoded });
                             const bytes = try encodeAlloc(allocator, response);
-                            defer allocator.free(bytes);
-                            return Grpc.UnaryResponse.initAlloc(allocator, bytes, .ok());
+                            errdefer allocator.free(bytes);
+                            return Grpc.UnaryResponse.initOwnedAlloc(allocator, bytes, .ok());
                         } else @compileError("generated unary handler must accept (self, request) or (self, allocator, request)");
                     }
                 }
@@ -500,6 +500,25 @@ test "typed unary binding decodes the request and owns its response" {
     });
     defer response.deinit();
     try std.testing.expectEqualSlices(u8, &.{42}, response.payload);
+}
+
+test "owned unary response transfers the encoded payload without cloning" {
+    const encoded = try std.testing.allocator.dupe(u8, "encoded");
+    errdefer std.testing.allocator.free(encoded);
+    const original_pointer = encoded.ptr;
+    var response = try Grpc.UnaryResponse.initOwnedAlloc(std.testing.allocator, encoded, .ok());
+    defer response.deinit();
+    try std.testing.expectEqual(original_pointer, response.payload.ptr);
+}
+
+test "owned unary response payload can move into the transport frame" {
+    const encoded = try std.testing.allocator.dupe(u8, "frame-me");
+    errdefer std.testing.allocator.free(encoded);
+    var response = try Grpc.UnaryResponse.initOwnedAlloc(std.testing.allocator, encoded, .ok());
+    const transferred = response.takePayload();
+    response.deinit();
+    defer std.testing.allocator.free(transferred);
+    try std.testing.expectEqualStrings("frame-me", transferred);
 }
 
 test "typed unary binding permits a response to borrow decoded protobuf storage" {

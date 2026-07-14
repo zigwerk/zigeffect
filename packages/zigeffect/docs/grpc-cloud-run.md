@@ -16,6 +16,23 @@ deployed GCP service-to-service qualification, all run against committed source.
 See [`packages/zigeffect-grpc/README.md`](../../zigeffect-grpc/README.md) for the
 current exact matrix and receipt paths.
 
+## Performance Evidence
+
+The latest schema-v2 ARM64 Docker optimization diagnostic measured the common
+1 KiB unary path at 11,792 RPC/s, 2.42 ms p50, 6.06 ms p99, and 7.0 server
+allocations per RPC across 50,000 measured calls after warm-up. Inside that
+same receipt, ZigEffect reached 96.6% of grpc-go and recorded 13.4% higher
+throughput than Tonic.
+
+Use this result to guide capacity experiments, not to predict a deployment.
+It is candidate evidence from Docker loopback, not a release receipt, native
+Linux benchmark, or Cloud Run latency measurement. A durable comparative claim
+requires a complete schema-v2 receipt from committed source on native Linux
+amd64 and arm64. Production promotion also retains the complete 24-hour
+mixed-shape soak and deployed GCP service-to-service qualification gates.
+The profiling record and exact benchmark method live in
+[`packages/zigeffect-grpc/benchmarks/PERFORMANCE.md`](../../zigeffect-grpc/benchmarks/PERFORMANCE.md).
+
 ## Deployment Shape
 
 ```text

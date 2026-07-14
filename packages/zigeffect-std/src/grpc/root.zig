@@ -773,6 +773,7 @@ pub const ResponseTemplate = struct {
 pub const UnaryResponse = struct {
     allocator: std.mem.Allocator,
     payload: []u8,
+    owns_payload: bool = true,
     initial_metadata: []Metadata,
     trailing_metadata: []Metadata,
     status: Status,
@@ -784,17 +785,48 @@ pub const UnaryResponse = struct {
         return cloneResponseAlloc(allocator, .{ .payload = payload, .status = status });
     }
 
+    /// Transfers `payload` into the response without cloning it. On failure,
+    /// ownership remains with the caller; on success `deinit` releases it.
+    pub fn initOwnedAlloc(allocator: std.mem.Allocator, payload: []u8, status: Status) !UnaryResponse {
+        const initial_metadata = try allocator.alloc(Metadata, 0);
+        errdefer allocator.free(initial_metadata);
+        const trailing_metadata = try allocator.alloc(Metadata, 0);
+        errdefer allocator.free(trailing_metadata);
+        const status_message = try allocator.dupe(u8, status.message);
+        errdefer allocator.free(status_message);
+        const status_details = try allocator.dupe(u8, status.details_bin);
+        errdefer allocator.free(status_details);
+        return .{
+            .allocator = allocator,
+            .payload = payload,
+            .initial_metadata = initial_metadata,
+            .trailing_metadata = trailing_metadata,
+            .status = .{ .code = status.code, .message = status_message, .details_bin = status_details },
+            .retry_pushback_millis = null,
+            .owned_status_message = status_message,
+            .owned_status_details = status_details,
+        };
+    }
+
     pub fn initFullAlloc(allocator: std.mem.Allocator, template: ResponseTemplate) !UnaryResponse {
         return cloneResponseAlloc(allocator, template);
     }
 
     pub fn deinit(self: *UnaryResponse) void {
-        self.allocator.free(self.payload);
+        if (self.owns_payload) self.allocator.free(self.payload);
         freeMetadata(self.allocator, self.initial_metadata);
         freeMetadata(self.allocator, self.trailing_metadata);
         self.allocator.free(self.owned_status_message);
         self.allocator.free(self.owned_status_details);
         self.* = undefined;
+    }
+
+    /// Moves the encoded payload out of the response. The caller becomes
+    /// responsible for releasing the returned allocation.
+    pub fn takePayload(self: *UnaryResponse) []u8 {
+        std.debug.assert(self.owns_payload);
+        self.owns_payload = false;
+        return self.payload;
     }
 };
 
@@ -975,9 +1007,11 @@ pub const Registry = struct {
 
     allocator: std.mem.Allocator,
     entries: std.ArrayList(RegistryEntry) = .empty,
+    route_keys: std.ArrayList([]u8) = .empty,
+    index: std.StringHashMap(usize),
 
     pub fn init(allocator: std.mem.Allocator) Registry {
-        return .{ .allocator = allocator };
+        return .{ .allocator = allocator, .index = std.StringHashMap(usize).init(allocator) };
     }
 
     pub fn deinit(self: *Registry) void {
@@ -985,31 +1019,39 @@ pub const Registry = struct {
             self.allocator.free(entry.service);
             self.allocator.free(entry.method);
         }
+        self.index.deinit();
+        for (self.route_keys.items) |key| self.allocator.free(key);
+        self.route_keys.deinit(self.allocator);
         self.entries.deinit(self.allocator);
         self.* = undefined;
     }
 
     pub fn register(self: *Registry, entry: RegistryEntry) !void {
         try (Method{ .service = entry.service, .method = entry.method }).validate();
-        for (self.entries.items) |existing| {
-            if (std.mem.eql(u8, existing.service, entry.service) and std.mem.eql(u8, existing.method, entry.method)) return error.DuplicateMethod;
-        }
+        const route_key = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ entry.service, entry.method });
+        errdefer self.allocator.free(route_key);
+        if (self.index.contains(route_key)) return error.DuplicateMethod;
         const service = try self.allocator.dupe(u8, entry.service);
         errdefer self.allocator.free(service);
         const method = try self.allocator.dupe(u8, entry.method);
         errdefer self.allocator.free(method);
-        try self.entries.append(self.allocator, .{ .service = service, .method = method, .handler = entry.handler });
+        try self.entries.ensureUnusedCapacity(self.allocator, 1);
+        try self.route_keys.ensureUnusedCapacity(self.allocator, 1);
+        try self.index.put(route_key, self.entries.items.len);
+        self.entries.appendAssumeCapacity(.{ .service = service, .method = method, .handler = entry.handler });
+        self.route_keys.appendAssumeCapacity(route_key);
     }
 
     pub fn invokeAlloc(self: *Registry, allocator: std.mem.Allocator, request: UnaryRequest, options: CallOptions) anyerror!UnaryResponse {
         try options.checkActive();
         try request.validate(options.limits);
-        for (self.entries.items) |entry| {
-            if (std.mem.eql(u8, entry.service, request.service) and std.mem.eql(u8, entry.method, request.method)) {
-                return entry.handler.invokeAlloc(allocator, request);
-            }
-        }
-        return error.MethodNotFound;
+        var route_buffer: [512 + 1 + 256]u8 = undefined;
+        const route_length = request.service.len + 1 + request.method.len;
+        @memcpy(route_buffer[0..request.service.len], request.service);
+        route_buffer[request.service.len] = '/';
+        @memcpy(route_buffer[request.service.len + 1 .. route_length], request.method);
+        const entry_index = self.index.get(route_buffer[0..route_length]) orelse return error.MethodNotFound;
+        return self.entries.items[entry_index].handler.invokeAlloc(allocator, request);
     }
 };
 

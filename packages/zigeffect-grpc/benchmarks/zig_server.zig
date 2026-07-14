@@ -151,6 +151,7 @@ const ServeContext = struct {
 
 pub fn main(init: std.process.Init) !void {
     const port = try std.fmt.parseInt(u16, init.environ_map.get("PORT") orelse "8080", 10);
+    const handler_workers = try std.fmt.parseInt(usize, init.environ_map.get("HANDLER_WORKERS") orelse "8", 10);
     var counter = CountingAllocator{ .backing = std.heap.smp_allocator };
     const allocator = counter.allocator();
     var service = ConformanceService{};
@@ -172,6 +173,8 @@ pub fn main(init: std.process.Init) !void {
         .port = port,
         .max_connections = 80,
         .max_calls_per_connection = 1_000_000,
+        .handler_worker_count = handler_workers,
+        .handler_queue_capacity = @max(1024, handler_workers),
         .connection_idle_timeout_millis = null,
         .connection_max_age_millis = null,
     }, &unary);

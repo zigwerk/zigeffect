@@ -413,17 +413,49 @@ fn requireH2(ssl: *SSL) !void {
     if (length != 2 or !std.mem.eql(u8, selected[0..length], "h2")) return error.TlsAlpnNegotiationFailed;
 }
 
+fn configureTcpNoDelay(handle: std.posix.socket_t, enabled: bool) !void {
+    const value: c_int = @intFromBool(enabled);
+    try std.posix.setsockopt(
+        handle,
+        std.posix.IPPROTO.TCP,
+        std.posix.TCP.NODELAY,
+        std.mem.asBytes(&value),
+    );
+}
+
 fn checkNghttp(result: anytype) !void {
     if (result < 0) return error.Http2Failure;
 }
 
 fn flushSession(session: *c.nghttp2_session, wire: Wire) !void {
+    // nghttp2 exposes one serialized frame at a time. Writing each fragment
+    // separately turns a unary response (headers, DATA, trailers) into several
+    // tiny TCP/TLS writes. Coalesce one flush cycle without heap allocation.
+    var pending: [64 * 1024]u8 = undefined;
+    var pending_len: usize = 0;
     while (true) {
         var data: [*c]const u8 = null;
         const length = c.nghttp2_session_mem_send(session, &data);
         if (length < 0) return error.Http2SendFailure;
-        if (length == 0) return;
-        try wire.writeAll(data[0..@intCast(length)]);
+        if (length == 0) {
+            if (pending_len != 0) try wire.writeAll(pending[0..pending_len]);
+            return;
+        }
+        const bytes = data[0..@intCast(length)];
+        if (bytes.len > pending.len) {
+            if (pending_len != 0) {
+                try wire.writeAll(pending[0..pending_len]);
+                pending_len = 0;
+            }
+            try wire.writeAll(bytes);
+            continue;
+        }
+        if (pending_len + bytes.len > pending.len) {
+            try wire.writeAll(pending[0..pending_len]);
+            pending_len = 0;
+        }
+        @memcpy(pending[pending_len .. pending_len + bytes.len], bytes);
+        pending_len += bytes.len;
     }
 }
 
@@ -491,6 +523,74 @@ test "incremental transport wakeup coalesces notifications without timer polling
     try std.testing.expectEqual(@as(usize, 0), try std.posix.poll(&descriptors, 0));
 }
 
+test "grpc sockets default to tcp nodelay" {
+    try std.testing.expect((ClientOptions{}).tcp_nodelay);
+    try std.testing.expect((ServerOptions{}).tcp_nodelay);
+    const address = try std.Io.net.IpAddress.resolve(std.testing.io, "127.0.0.1", 0);
+    var listener = try address.listen(std.testing.io, .{ .reuse_address = true });
+    defer listener.deinit(std.testing.io);
+    try configureTcpNoDelay(listener.socket.handle, true);
+}
+
+test "one HTTP2 flush coalesces pending control frames into one write" {
+    const CountingWire = struct {
+        writes: usize = 0,
+        bytes: usize = 0,
+
+        fn wire(self: *@This()) Wire {
+            return .{
+                .pointer = self,
+                .read_fn = read,
+                .write_fn = write,
+                .cancel_fn = cancel,
+                .close_fn = close,
+                .socket_handle_fn = socketHandle,
+            };
+        }
+
+        fn read(_: *anyopaque, _: []u8) anyerror!usize {
+            return error.UnexpectedRead;
+        }
+
+        fn write(pointer: *anyopaque, bytes: []const u8) anyerror!void {
+            const self: *@This() = @ptrCast(@alignCast(pointer));
+            self.writes += 1;
+            self.bytes += bytes.len;
+        }
+
+        fn cancel(_: *anyopaque) void {}
+        fn close(_: *anyopaque) void {}
+        fn socketHandle(_: *anyopaque) std.posix.fd_t {
+            return -1;
+        }
+    };
+
+    var callbacks: ?*c.nghttp2_session_callbacks = null;
+    try checkNghttp(c.nghttp2_session_callbacks_new(&callbacks));
+    defer c.nghttp2_session_callbacks_del(callbacks);
+    var maybe_session: ?*c.nghttp2_session = null;
+    try checkNghttp(c.nghttp2_session_server_new(&maybe_session, callbacks, null));
+    const session = maybe_session orelse return error.Http2InitializationFailed;
+    defer c.nghttp2_session_del(session);
+    try checkNghttp(c.nghttp2_submit_settings(session, c.NGHTTP2_FLAG_NONE, null, 0));
+    try checkNghttp(c.nghttp2_submit_ping(session, c.NGHTTP2_FLAG_NONE, null));
+    try checkNghttp(c.nghttp2_submit_goaway(session, c.NGHTTP2_FLAG_NONE, 0, c.NGHTTP2_NO_ERROR, null, 0));
+
+    var counting = CountingWire{};
+    try flushSession(session, counting.wire());
+    try std.testing.expect(counting.bytes > 0);
+    try std.testing.expectEqual(@as(usize, 1), counting.writes);
+}
+
+test "identity unary frame decoding borrows the validated payload" {
+    const framed = try Grpc.frameMessageAlloc(std.testing.allocator, "payload", .{});
+    defer std.testing.allocator.free(framed);
+    var decoded = try decodeUnaryBody(std.testing.allocator, framed, .identity, .{});
+    defer decoded.deinit();
+    try std.testing.expectEqual(@intFromPtr(framed.ptr + 5), @intFromPtr(decoded.bytes.ptr));
+    try std.testing.expectEqualStrings("payload", decoded.bytes);
+}
+
 test "server flow control advertises production windows above the 64 KiB cliff" {
     const options = ServerOptions{};
     const settings = serverSettings(options);
@@ -500,7 +600,7 @@ test "server flow control advertises production windows above the 64 KiB cliff" 
     try std.testing.expect(options.initial_connection_window_bytes >= options.initial_stream_window_bytes);
 }
 
-test "incremental executor reuses a bounded worker set" {
+test "handler executor reuses a bounded worker set" {
     const Probe = struct {
         io: std.Io,
         expected: usize,
@@ -512,7 +612,7 @@ test "incremental executor reuses a bounded worker set" {
             if (self.completed.fetchAdd(1, .acq_rel) + 1 == self.expected) self.done.set(self.io);
         }
     };
-    var executor = try IncrementalExecutor.create(std.testing.allocator, std.testing.io, 2, 64, 512 * 1024);
+    var executor = try HandlerExecutor.create(std.testing.allocator, std.testing.io, 2, 64, 512 * 1024);
     defer executor.destroy();
     var probe = Probe{ .io = std.testing.io, .expected = 100 };
     for (0..probe.expected) |_| try executor.schedule(.{ .pointer = &probe, .run_fn = Probe.run });
@@ -524,9 +624,12 @@ test "incremental executor reuses a bounded worker set" {
 /// Resolves DNS names through Zig's cancellable host lookup and tries every
 /// returned address. Numeric IPv4/IPv6 literals stay on the allocation-free
 /// fast path. This is deliberately shared by ephemeral and persistent clients.
-fn connectHost(io: std.Io, host: []const u8, port: u16) !std.Io.net.Stream {
+fn connectHost(io: std.Io, host: []const u8, port: u16, tcp_nodelay: bool) !std.Io.net.Stream {
     if (std.Io.net.IpAddress.resolve(io, host, port)) |address| {
-        return address.connect(io, .{ .mode = .stream });
+        const stream = try address.connect(io, .{ .mode = .stream });
+        errdefer stream.close(io);
+        try configureTcpNoDelay(stream.socket.handle, tcp_nodelay);
+        return stream;
     } else |_| {}
 
     const host_name = try std.Io.net.HostName.init(host);
@@ -538,7 +641,13 @@ fn connectHost(io: std.Io, host: []const u8, port: u16) !std.Io.net.Stream {
         .canonical_name => {},
         .address => |address| {
             saw_address = true;
-            if (address.connect(io, .{ .mode = .stream })) |stream| return stream else |_| {}
+            if (address.connect(io, .{ .mode = .stream })) |stream| {
+                configureTcpNoDelay(stream.socket.handle, tcp_nodelay) catch {
+                    stream.close(io);
+                    continue;
+                };
+                return stream;
+            } else |_| {}
         },
     } else |err| switch (err) {
         error.Closed => {},
@@ -548,12 +657,10 @@ fn connectHost(io: std.Io, host: []const u8, port: u16) !std.Io.net.Stream {
 }
 
 fn receiveServerEvent(session: *c.nghttp2_session, connection: *ServerConnection, wire: Wire, buffer: []u8) !void {
-    // Installing incremental routes must not put ordinary unary traffic
-    // through a cancellable Select on every socket read. Besides the extra
-    // scheduling work, cancelled queue waits can retain runtime bookkeeping
-    // during a long-lived high-throughput connection. Enter the notification
-    // race only while at least one incremental call is actually live.
-    if (connection.incremental_registry == null or !connection.hasIncrementalStreams()) {
+    // Ordinary idle connections stay on the direct read path. Once a unary
+    // job or incremental call is live, poll the socket and the shared handler
+    // wakeup together so nghttp2 remains single-owner without timer polling.
+    if (!connection.hasAsyncWork()) {
         _ = try receiveSession(session, wire, buffer);
         return;
     }
@@ -561,6 +668,7 @@ fn receiveServerEvent(session: *c.nghttp2_session, connection: *ServerConnection
     if (!try feedBlockedIncrementalInputs(connection)) {
         _ = try connection.notifications.getOne(connection.io);
         try resumeAllIncrementalOutputs(session, connection);
+        try completeUnaryResponses(session, connection);
         _ = try feedBlockedIncrementalInputs(connection);
         try flushServerSession(session, connection, wire);
         return;
@@ -619,6 +727,7 @@ fn receiveServerEvent(session: *c.nghttp2_session, connection: *ServerConnection
         }
         try resumeAllIncrementalOutputs(session, connection);
     }
+    try completeUnaryResponses(session, connection);
     try flushServerSession(session, connection, wire);
 }
 
@@ -932,13 +1041,25 @@ fn retryPushbackMillis(headers: []const OwnedHeader) !?i64 {
     return result;
 }
 
-fn decodeUnaryBodyAlloc(allocator: std.mem.Allocator, body: []const u8, encoding: Grpc.Compression, limits: Grpc.Limits) ![]u8 {
-    if (body.len == 0) return allocator.dupe(u8, "");
+const DecodedUnaryBody = struct {
+    allocator: std.mem.Allocator,
+    bytes: []const u8,
+    owned: ?[]u8 = null,
+
+    fn deinit(self: *DecodedUnaryBody) void {
+        if (self.owned) |bytes| self.allocator.free(bytes);
+        self.* = undefined;
+    }
+};
+
+fn decodeUnaryBody(allocator: std.mem.Allocator, body: []const u8, encoding: Grpc.Compression, limits: Grpc.Limits) !DecodedUnaryBody {
+    if (body.len == 0) return .{ .allocator = allocator, .bytes = "" };
     const compressed = body[0] == 1;
     const payload = try Grpc.unframeMessage(body, .{ .limits = limits, .compressed = compressed });
-    if (!compressed) return allocator.dupe(u8, payload);
+    if (!compressed) return .{ .allocator = allocator, .bytes = payload };
     if (encoding == .identity) return error.UnsupportedCompression;
-    return Compression.decompressAlloc(allocator, encoding, payload, limits.max_message_bytes);
+    const restored = try Compression.decompressAlloc(allocator, encoding, payload, limits.max_message_bytes);
+    return .{ .allocator = allocator, .bytes = restored, .owned = restored };
 }
 
 fn requestForTransport(options: ClientOptions, request: Grpc.UnaryRequest) Grpc.UnaryRequest {
@@ -1071,10 +1192,10 @@ fn parseResponseContextAlloc(allocator: std.mem.Allocator, call: *const ClientCa
 fn unaryResponseFromCallAlloc(allocator: std.mem.Allocator, call: *const ClientCall) !Grpc.UnaryResponse {
     var context = try parseResponseContextAlloc(allocator, call);
     defer context.deinit();
-    const message = try decodeUnaryBodyAlloc(allocator, call.response_body.items, context.compression, call.limits.grpc);
-    defer allocator.free(message);
+    var message = try decodeUnaryBody(allocator, call.response_body.items, context.compression, call.limits.grpc);
+    defer message.deinit();
     return Grpc.UnaryResponse.initFullAlloc(allocator, .{
-        .payload = message,
+        .payload = message.bytes,
         .initial_metadata = context.initial_metadata.entries,
         .trailing_metadata = context.trailing_metadata.entries,
         .status = context.status.status,
@@ -1124,6 +1245,9 @@ pub const ClientOptions = struct {
     port: u16 = 50051,
     limits: Limits = .{},
     tls: ?ClientTlsConfig = null,
+    /// Disable Nagle's algorithm for latency-sensitive HTTP/2 control and
+    /// trailer writes. gRPC defaults this on for both plaintext and TLS.
+    tcp_nodelay: bool = true,
     max_concurrent_streams: usize = 100,
     keepalive_interval_millis: ?u64 = 60_000,
     keepalive_timeout_millis: u64 = 20_000,
@@ -1169,7 +1293,7 @@ pub const NativeClient = struct {
         forwarded.metadata = metadata.entries;
         try forwarded.validate(self.options.limits.grpc);
 
-        const stream = try connectHost(self.io, self.options.host, self.options.port);
+        const stream = try connectHost(self.io, self.options.host, self.options.port, self.options.tcp_nodelay);
         var owns_stream = true;
         defer if (owns_stream) stream.close(self.io);
         if (self.options.tls) |tls| {
@@ -1249,7 +1373,7 @@ pub const NativeClient = struct {
             forwarded[index].metadata = metadata[index].entries;
             try forwarded[index].validate(self.options.limits.grpc);
         }
-        const stream = try connectHost(self.io, self.options.host, self.options.port);
+        const stream = try connectHost(self.io, self.options.host, self.options.port, self.options.tcp_nodelay);
         var owns_stream = true;
         defer if (owns_stream) stream.close(self.io);
         if (self.options.tls) |tls| {
@@ -1291,7 +1415,7 @@ pub const NativeClient = struct {
         var forwarded = request;
         forwarded.metadata = metadata.entries;
         try forwarded.validate(self.options.limits.grpc);
-        const stream = try connectHost(self.io, self.options.host, self.options.port);
+        const stream = try connectHost(self.io, self.options.host, self.options.port, self.options.tcp_nodelay);
         var owns_stream = true;
         defer if (owns_stream) stream.close(self.io);
         if (self.options.tls) |tls| {
@@ -1520,7 +1644,7 @@ const ClientConnection = struct {
     storage: ClientWireStorage,
 
     fn init(client: *NativeClient) !ClientConnection {
-        const stream = try connectHost(client.io, client.options.host, client.options.port);
+        const stream = try connectHost(client.io, client.options.host, client.options.port, client.options.tcp_nodelay);
         var owns_stream = true;
         errdefer if (owns_stream) stream.close(client.io);
         var storage: ClientWireStorage = if (client.options.tls) |tls| blk: {
@@ -3508,26 +3632,72 @@ pub const ChannelPool = struct {
     }
 };
 
+fn SmallByteBuffer(comptime inline_capacity: usize) type {
+    return struct {
+        items: []u8 = &.{},
+        inline_storage: [inline_capacity]u8 = undefined,
+        overflow: std.ArrayList(u8) = .empty,
+
+        fn appendSlice(self: *@This(), allocator: std.mem.Allocator, bytes: []const u8) !void {
+            if (bytes.len == 0) return;
+            const new_len = std.math.add(usize, self.items.len, bytes.len) catch return error.OutOfMemory;
+            if (self.overflow.capacity == 0 and new_len <= inline_capacity) {
+                @memcpy(self.inline_storage[self.items.len..new_len], bytes);
+                self.items = self.inline_storage[0..new_len];
+                return;
+            }
+            if (self.overflow.capacity == 0) {
+                try self.overflow.ensureTotalCapacityPrecise(allocator, new_len);
+                self.overflow.appendSliceAssumeCapacity(self.items);
+            }
+            try self.overflow.appendSlice(allocator, bytes);
+            self.items = self.overflow.items;
+        }
+
+        fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            self.overflow.deinit(allocator);
+            self.* = undefined;
+        }
+    };
+}
+
+test "small request header values stay allocation free" {
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    var value: SmallByteBuffer(64) = .{};
+    defer value.deinit(failing.allocator());
+    try value.appendSlice(failing.allocator(), "application/grpc");
+    try std.testing.expectEqualStrings("application/grpc", value.items);
+}
+
+test "request header values preserve bytes after bounded overflow" {
+    var value: SmallByteBuffer(8) = .{};
+    defer value.deinit(std.testing.allocator);
+    try value.appendSlice(std.testing.allocator, "application/");
+    try value.appendSlice(std.testing.allocator, "grpc");
+    try std.testing.expectEqualStrings("application/grpc", value.items);
+}
+
 const ServerStream = struct {
     allocator: std.mem.Allocator,
     stream_id: i32,
     grpc_limits: Grpc.Limits = .{},
-    path: std.ArrayList(u8) = .empty,
-    authority: std.ArrayList(u8) = .empty,
-    method: std.ArrayList(u8) = .empty,
-    scheme: std.ArrayList(u8) = .empty,
-    te: std.ArrayList(u8) = .empty,
-    content_type: std.ArrayList(u8) = .empty,
-    accept_encoding: std.ArrayList(u8) = .empty,
-    origin: std.ArrayList(u8) = .empty,
-    protocol_version: std.ArrayList(u8) = .empty,
-    authorization: std.ArrayList(u8) = .empty,
-    iap_jwt: std.ArrayList(u8) = .empty,
-    traceparent: std.ArrayList(u8) = .empty,
-    tracestate: std.ArrayList(u8) = .empty,
-    baggage: std.ArrayList(u8) = .empty,
-    request_id: std.ArrayList(u8) = .empty,
+    path: SmallByteBuffer(128) = .{},
+    authority: SmallByteBuffer(64) = .{},
+    method: SmallByteBuffer(8) = .{},
+    scheme: SmallByteBuffer(8) = .{},
+    te: SmallByteBuffer(16) = .{},
+    content_type: SmallByteBuffer(64) = .{},
+    accept_encoding: SmallByteBuffer(64) = .{},
+    origin: SmallByteBuffer(64) = .{},
+    protocol_version: SmallByteBuffer(8) = .{},
+    authorization: SmallByteBuffer(64) = .{},
+    iap_jwt: SmallByteBuffer(64) = .{},
+    traceparent: SmallByteBuffer(64) = .{},
+    tracestate: SmallByteBuffer(64) = .{},
+    baggage: SmallByteBuffer(64) = .{},
+    request_id: SmallByteBuffer(64) = .{},
     body: std.ArrayList(u8) = .empty,
+    body_capacity_reserved: bool = false,
     request_headers: std.ArrayList(OwnedHeader) = .empty,
     header_count: usize = 0,
     header_bytes: usize = 0,
@@ -3547,6 +3717,13 @@ const ServerStream = struct {
     incremental_frame_final: bool = false,
     incremental_provider_active: bool = false,
     incremental_headers_submitted: bool = false,
+    unary_connection: ?*ServerConnection = null,
+    unary_job_scheduled: bool = false,
+    unary_job_complete: std.atomic.Value(bool) = .init(false),
+    unary_job_finished: std.Io.Event = .unset,
+    unary_response: ?Grpc.UnaryResponse = null,
+    unary_error: ?anyerror = null,
+    peer_closed: bool = false,
 
     fn deinit(self: *ServerStream) void {
         // The handler thread borrows route/authority slices and middleware
@@ -3557,6 +3734,8 @@ const ServerStream = struct {
             runtime.destroy();
             self.incremental_runtime = null;
         }
+        if (self.unary_job_scheduled) self.unary_job_finished.waitUncancelable(self.unary_connection.?.io);
+        if (self.unary_response) |*response| response.deinit();
         self.path.deinit(self.allocator);
         self.authority.deinit(self.allocator);
         self.method.deinit(self.allocator);
@@ -3582,25 +3761,83 @@ const ServerStream = struct {
         self.allocator.destroy(self);
     }
 
-    fn addRequestHeader(self: *ServerStream, limits: Limits, name: []const u8, value: []const u8) !void {
+    fn observeRequestHeader(self: *ServerStream, limits: Limits, name: []const u8, value: []const u8) !void {
         if (self.header_count >= limits.max_header_count) return error.MetadataTooLarge;
         const added = std.math.add(usize, name.len, value.len) catch return error.MetadataTooLarge;
         const total = std.math.add(usize, self.header_bytes, added) catch return error.MetadataTooLarge;
         if (total > limits.max_header_bytes) return error.MetadataTooLarge;
+        self.header_count += 1;
+        self.header_bytes = total;
+    }
+
+    fn addApplicationRequestHeader(self: *ServerStream, name: []const u8, value: []const u8) !void {
+        if (!Grpc.isApplicationMetadataName(name)) return;
         const owned_name = try self.allocator.dupe(u8, name);
         errdefer self.allocator.free(owned_name);
         const owned_value = try self.allocator.dupe(u8, value);
         errdefer self.allocator.free(owned_value);
         try self.request_headers.append(self.allocator, .{ .name = owned_name, .value = owned_value });
-        self.header_count += 1;
-        self.header_bytes = total;
+    }
+
+    fn reserveDeclaredMessageBody(self: *ServerStream, limits: Grpc.Limits) !void {
+        if (self.body_capacity_reserved or self.body.items.len < 5) return;
+        if (self.body.items[0] > 1) return error.InvalidCompressedFlag;
+        const message_len: usize = std.mem.readInt(u32, self.body.items[1..5], .big);
+        if (message_len > limits.max_message_bytes) return error.MessageTooLarge;
+        const framed_len = std.math.add(usize, message_len, 5) catch return error.MessageTooLarge;
+        if (framed_len > limits.max_buffered_message_bytes) return error.MessageTooLarge;
+        try self.body.ensureTotalCapacityPrecise(self.allocator, framed_len);
+        self.body_capacity_reserved = true;
+    }
+
+    fn runUnary(pointer: *anyopaque) void {
+        const self: *ServerStream = @ptrCast(@alignCast(pointer));
+        const connection = self.unary_connection.?;
+        if (invokeUnaryResponseAlloc(connection, self)) |response| {
+            self.unary_response = response;
+        } else |err| {
+            self.unary_error = err;
+        }
+        self.unary_job_complete.store(true, .release);
+        self.unary_job_finished.set(connection.io);
+        _ = connection.notifications.put(connection.io, &.{self.stream_id}, 0) catch {};
+        connection.wakeup.signal();
     }
 };
 
 fn requestMetadataAlloc(stream: *const ServerStream, limits: Grpc.Limits) !Grpc.MetadataBlock {
-    const headers = try stream.allocator.alloc(Grpc.Header, stream.request_headers.items.len);
+    var dedicated_count: usize = 0;
+    if (stream.authorization.items.len != 0) dedicated_count += 1;
+    if (stream.iap_jwt.items.len != 0) dedicated_count += 1;
+    if (stream.traceparent.items.len != 0) dedicated_count += 1;
+    if (stream.tracestate.items.len != 0) dedicated_count += 1;
+    if (stream.baggage.items.len != 0) dedicated_count += 1;
+    if (stream.request_id.items.len != 0) dedicated_count += 1;
+    const headers = try stream.allocator.alloc(Grpc.Header, stream.request_headers.items.len + dedicated_count);
     defer stream.allocator.free(headers);
     for (stream.request_headers.items, 0..) |header, index| headers[index] = header.borrowed();
+    var index = stream.request_headers.items.len;
+    if (stream.authorization.items.len != 0) {
+        headers[index] = .{ .name = "authorization", .value = stream.authorization.items };
+        index += 1;
+    }
+    if (stream.iap_jwt.items.len != 0) {
+        headers[index] = .{ .name = "x-goog-iap-jwt-assertion", .value = stream.iap_jwt.items };
+        index += 1;
+    }
+    if (stream.traceparent.items.len != 0) {
+        headers[index] = .{ .name = "traceparent", .value = stream.traceparent.items };
+        index += 1;
+    }
+    if (stream.tracestate.items.len != 0) {
+        headers[index] = .{ .name = "tracestate", .value = stream.tracestate.items };
+        index += 1;
+    }
+    if (stream.baggage.items.len != 0) {
+        headers[index] = .{ .name = "baggage", .value = stream.baggage.items };
+        index += 1;
+    }
+    if (stream.request_id.items.len != 0) headers[index] = .{ .name = "x-request-id", .value = stream.request_id.items };
     return Grpc.metadataFromHeadersAlloc(stream.allocator, headers, limits);
 }
 
@@ -3610,8 +3847,10 @@ fn setResponseTrailers(stream: *ServerStream, status: Grpc.Status, metadata: []c
 
 fn setResponseTrailersFull(stream: *ServerStream, status: Grpc.Status, metadata: []const Grpc.Metadata, retry_pushback_millis: ?i64, limits: Grpc.Limits) !void {
     if (stream.response_trailers) |*existing| existing.deinit();
-    stream.response_trailers = try Grpc.statusTrailersWithPushbackAlloc(stream.allocator, status, metadata, retry_pushback_millis, limits);
+    stream.response_trailers = null;
     stream.response_status = status.code;
+    if (status.code == .ok and status.message.len == 0 and status.details_bin.len == 0 and metadata.len == 0 and retry_pushback_millis == null) return;
+    stream.response_trailers = try Grpc.statusTrailersWithPushbackAlloc(stream.allocator, status, metadata, retry_pushback_millis, limits);
 }
 
 fn submitTrailerBlock(session: *c.nghttp2_session, stream_id: i32, allocator: std.mem.Allocator, block: Grpc.HeaderBlock) c_int {
@@ -3621,7 +3860,7 @@ fn submitTrailerBlock(session: *c.nghttp2_session, stream_id: i32, allocator: st
     return c.nghttp2_submit_trailer(session, stream_id, trailers.ptr, trailers.len);
 }
 
-const IncrementalJob = struct {
+const HandlerJob = struct {
     pointer: *anyopaque,
     run_fn: *const fn (*anyopaque) void,
 };
@@ -3631,18 +3870,18 @@ const IncrementalJob = struct {
 /// but creating and destroying an OS thread for every RPC is both expensive
 /// and unbounded. This executor caps resident stacks and queues excess work so
 /// admission pressure propagates back to the HTTP/2 connection.
-const IncrementalExecutor = struct {
+const HandlerExecutor = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
-    storage: []IncrementalJob,
-    queue: std.Io.Queue(IncrementalJob),
+    storage: []HandlerJob,
+    queue: std.Io.Queue(HandlerJob),
     threads: []std.Thread,
 
-    fn create(allocator: std.mem.Allocator, io: std.Io, worker_count: usize, queue_capacity: usize, stack_bytes: usize) !*IncrementalExecutor {
+    fn create(allocator: std.mem.Allocator, io: std.Io, worker_count: usize, queue_capacity: usize, stack_bytes: usize) !*HandlerExecutor {
         if (worker_count == 0 or queue_capacity == 0 or stack_bytes < 128 * 1024) return error.InvalidLimits;
-        const self = try allocator.create(IncrementalExecutor);
+        const self = try allocator.create(HandlerExecutor);
         errdefer allocator.destroy(self);
-        const storage = try allocator.alloc(IncrementalJob, queue_capacity);
+        const storage = try allocator.alloc(HandlerJob, queue_capacity);
         errdefer allocator.free(storage);
         const threads = try allocator.alloc(std.Thread, worker_count);
         errdefer allocator.free(threads);
@@ -3650,7 +3889,7 @@ const IncrementalExecutor = struct {
             .allocator = allocator,
             .io = io,
             .storage = storage,
-            .queue = std.Io.Queue(IncrementalJob).init(storage),
+            .queue = std.Io.Queue(HandlerJob).init(storage),
             .threads = threads,
         };
         var spawned: usize = 0;
@@ -3665,7 +3904,7 @@ const IncrementalExecutor = struct {
         return self;
     }
 
-    fn destroy(self: *IncrementalExecutor) void {
+    fn destroy(self: *HandlerExecutor) void {
         self.queue.close(self.io);
         for (self.threads) |thread| thread.join();
         self.allocator.free(self.threads);
@@ -3674,11 +3913,11 @@ const IncrementalExecutor = struct {
         allocator.destroy(self);
     }
 
-    fn schedule(self: *IncrementalExecutor, job: IncrementalJob) !void {
+    fn schedule(self: *HandlerExecutor, job: HandlerJob) !void {
         try self.queue.putOne(self.io, job);
     }
 
-    fn worker(self: *IncrementalExecutor) void {
+    fn worker(self: *HandlerExecutor) void {
         while (true) {
             const job = self.queue.getOne(self.io) catch |err| switch (err) {
                 error.Closed => return,
@@ -3688,7 +3927,7 @@ const IncrementalExecutor = struct {
         }
     }
 
-    fn workerCount(self: *const IncrementalExecutor) usize {
+    fn workerCount(self: *const HandlerExecutor) usize {
         return self.threads.len;
     }
 };
@@ -3775,7 +4014,7 @@ const IncrementalRuntime = struct {
             .set_trailing_metadata_fn = setTrailingMetadataErased,
             .set_final_status_fn = setFinalStatusErased,
         };
-        const executor = connection.incremental_executor orelse return error.IncrementalExecutorMissing;
+        const executor = connection.handler_executor orelse return error.HandlerExecutorMissing;
         try executor.schedule(.{ .pointer = self, .run_fn = runScheduled });
         return self;
     }
@@ -4021,7 +4260,7 @@ const ServerConnection = struct {
     completed_calls: usize = 0,
     peer_keepalive: PeerKeepaliveGuard,
     protocol_policy: ServerProtocolPolicy,
-    incremental_executor: ?*IncrementalExecutor = null,
+    handler_executor: ?*HandlerExecutor = null,
     close_after_flush: bool = false,
     call_counters: ?*ServerCallCounters = null,
     causal: ?*Middleware.CausalFacts = null,
@@ -4073,6 +4312,20 @@ const ServerConnection = struct {
         return created;
     }
 
+    fn callbackStream(self: *ServerConnection, session: *c.nghttp2_session, stream_id: i32, create: bool) !*ServerStream {
+        if (c.nghttp2_session_get_stream_user_data(session, stream_id)) |raw| {
+            return @ptrCast(@alignCast(raw));
+        }
+        if (!create) return error.ServerStreamMissing;
+        const existing = self.findStream(stream_id);
+        const stream_value = if (existing) |active| active else try self.stream(stream_id);
+        if (c.nghttp2_session_set_stream_user_data(session, stream_id, stream_value) < 0) {
+            if (existing == null) _ = self.removeStream(stream_id);
+            return error.Http2StreamUserDataFailed;
+        }
+        return stream_value;
+    }
+
     fn findStream(self: *ServerConnection, stream_id: i32) ?*ServerStream {
         for (self.streams.items) |active_stream| if (active_stream.stream_id == stream_id) return active_stream;
         return null;
@@ -4091,6 +4344,15 @@ const ServerConnection = struct {
     fn hasIncrementalStreams(self: *const ServerConnection) bool {
         for (self.streams.items) |active_stream| if (active_stream.incremental_runtime != null) return true;
         return false;
+    }
+
+    fn hasUnaryJobs(self: *const ServerConnection) bool {
+        for (self.streams.items) |active_stream| if (active_stream.unary_job_scheduled) return true;
+        return false;
+    }
+
+    fn hasAsyncWork(self: *const ServerConnection) bool {
+        return self.hasIncrementalStreams() or self.hasUnaryJobs();
     }
 };
 
@@ -4131,6 +4393,41 @@ test "closed server streams do not grow connection storage" {
     return error.ConcurrentStreamLimitNotEnforced;
 }
 
+test "server callbacks use nghttp2 stream user data for constant time lookup" {
+    try std.testing.expect(@hasDecl(ServerConnection, "callbackStream"));
+}
+
+test "server retains application metadata without duplicating reserved headers" {
+    const stream = try std.testing.allocator.create(ServerStream);
+    stream.* = .{ .allocator = std.testing.allocator, .stream_id = 1 };
+    defer stream.deinit();
+    try stream.observeRequestHeader(.{}, ":path", "/example.v1.Echo/Say");
+    try stream.observeRequestHeader(.{}, "x-tenant", "blue");
+    try stream.addApplicationRequestHeader("x-tenant", "blue");
+    try std.testing.expectEqual(@as(usize, 2), stream.header_count);
+    try std.testing.expectEqual(@as(usize, 1), stream.request_headers.items.len);
+    try std.testing.expectEqualStrings("x-tenant", stream.request_headers.items[0].name);
+}
+
+test "common OK response trailers stay on the allocation free path" {
+    const stream = try std.testing.allocator.create(ServerStream);
+    stream.* = .{ .allocator = std.testing.allocator, .stream_id = 1 };
+    defer stream.deinit();
+    try setResponseTrailers(stream, .ok(), &.{}, .{});
+    try std.testing.expect(stream.response_trailers == null);
+    try std.testing.expectEqual(Grpc.Code.ok, stream.response_status);
+}
+
+test "server request body reserves the bounded declared gRPC frame size" {
+    const stream = try std.testing.allocator.create(ServerStream);
+    stream.* = .{ .allocator = std.testing.allocator, .stream_id = 1 };
+    defer stream.deinit();
+    try stream.body.appendSlice(std.testing.allocator, &.{ 0, 0, 1, 0, 0 });
+    try stream.reserveDeclaredMessageBody(.{});
+    try std.testing.expect(stream.body.capacity >= 65_541);
+    try std.testing.expect(stream.body_capacity_reserved);
+}
+
 test "server advertises and enforces a bounded concurrent stream limit" {
     try std.testing.expect(@hasField(ServerOptions, "max_concurrent_streams"));
 }
@@ -4162,7 +4459,7 @@ test "native server validates mandatory gRPC HTTP2 request fields" {
 }
 
 fn serverOnHeader(
-    _: ?*c.nghttp2_session,
+    maybe_session: ?*c.nghttp2_session,
     frame: [*c]const c.nghttp2_frame,
     name: [*c]const u8,
     name_len: usize,
@@ -4173,12 +4470,13 @@ fn serverOnHeader(
 ) callconv(.c) c_int {
     if (frame.*.hd.type != c.NGHTTP2_DATA and frame.*.hd.type != c.NGHTTP2_HEADERS) return 0;
     const connection: *ServerConnection = @ptrCast(@alignCast(user_data.?));
-    const stream = connection.stream(frame.*.hd.stream_id) catch |err| {
+    const session = maybe_session orelse return c.NGHTTP2_ERR_CALLBACK_FAILURE;
+    const stream = connection.callbackStream(session, frame.*.hd.stream_id, true) catch |err| {
         connection.callback_error = err;
         return c.NGHTTP2_ERR_CALLBACK_FAILURE;
     };
     const header_name = name[0..name_len];
-    stream.addRequestHeader(connection.limits, header_name, value[0..value_len]) catch |err| {
+    stream.observeRequestHeader(connection.limits, header_name, value[0..value_len]) catch |err| {
         connection.callback_error = err;
         return c.NGHTTP2_ERR_CALLBACK_FAILURE;
     };
@@ -4297,12 +4595,17 @@ fn serverOnHeader(
             connection.callback_error = err;
             return c.NGHTTP2_ERR_CALLBACK_FAILURE;
         };
+    } else {
+        stream.addApplicationRequestHeader(header_name, value[0..value_len]) catch |err| {
+            connection.callback_error = err;
+            return c.NGHTTP2_ERR_CALLBACK_FAILURE;
+        };
     }
     return 0;
 }
 
 fn serverOnData(
-    _: ?*c.nghttp2_session,
+    maybe_session: ?*c.nghttp2_session,
     _: u8,
     stream_id: i32,
     data: [*c]const u8,
@@ -4311,7 +4614,8 @@ fn serverOnData(
 ) callconv(.c) c_int {
     const connection: *ServerConnection = @ptrCast(@alignCast(user_data.?));
     connection.peer_keepalive.observeData();
-    const stream = connection.stream(stream_id) catch |err| {
+    const session = maybe_session orelse return c.NGHTTP2_ERR_CALLBACK_FAILURE;
+    const stream = connection.callbackStream(session, stream_id, false) catch |err| {
         connection.callback_error = err;
         return c.NGHTTP2_ERR_CALLBACK_FAILURE;
     };
@@ -4342,11 +4646,24 @@ fn serverOnData(
         }
         return 0;
     }
-    if (stream.body.items.len + length > connection.limits.grpc.max_buffered_message_bytes) return c.NGHTTP2_ERR_CALLBACK_FAILURE;
+    const buffered = std.math.add(usize, stream.body.items.len, length) catch {
+        connection.callback_error = error.MessageTooLarge;
+        return c.NGHTTP2_ERR_CALLBACK_FAILURE;
+    };
+    if (buffered > connection.limits.grpc.max_buffered_message_bytes) {
+        connection.callback_error = error.MessageTooLarge;
+        return c.NGHTTP2_ERR_CALLBACK_FAILURE;
+    }
     stream.body.appendSlice(connection.allocator, data[0..length]) catch |err| {
         connection.callback_error = err;
         return c.NGHTTP2_ERR_CALLBACK_FAILURE;
     };
+    if (usesFramedRequestBody(stream.content_type.items)) {
+        stream.reserveDeclaredMessageBody(connection.limits.grpc) catch |err| {
+            connection.callback_error = err;
+            return c.NGHTTP2_ERR_CALLBACK_FAILURE;
+        };
+    }
     return 0;
 }
 
@@ -4423,6 +4740,16 @@ fn isConnectStreamingContentType(value: []const u8) bool {
     return std.mem.eql(u8, media_type, Connect.streaming_proto_content_type);
 }
 
+fn usesFramedRequestBody(value: []const u8) bool {
+    return isGrpcContentType(value) or isConnectStreamingContentType(value);
+}
+
+test "request body framing distinguishes raw Connect unary payloads" {
+    try std.testing.expect(usesFramedRequestBody(Grpc.content_type));
+    try std.testing.expect(usesFramedRequestBody(Connect.streaming_proto_content_type));
+    try std.testing.expect(!usesFramedRequestBody(Connect.unary_proto_content_type));
+}
+
 fn validateConnectStreamingRequest(stream: *const ServerStream) !void {
     if (!std.mem.eql(u8, stream.method.items, "POST")) return error.InvalidHttpMethod;
     if (!std.mem.eql(u8, stream.scheme.items, "http") and !std.mem.eql(u8, stream.scheme.items, "https")) return error.InvalidScheme;
@@ -4454,6 +4781,20 @@ fn frameResponseMessageAlloc(connection: *const ServerConnection, stream: *Serve
     const compressed = try Compression.compressAlloc(connection.allocator, stream.response_compression, message, connection.limits.grpc.max_message_bytes);
     defer connection.allocator.free(compressed);
     return Grpc.frameMessageAlloc(connection.allocator, compressed, .{ .limits = connection.limits.grpc, .compressed = true });
+}
+
+fn frameOwnedUnaryResponseAlloc(connection: *const ServerConnection, stream: *ServerStream, response: *Grpc.UnaryResponse) ![]u8 {
+    prepareResponseCompression(connection, stream);
+    if (stream.response_compression != .identity) return frameResponseMessageAlloc(connection, stream, response.payload);
+    if (response.payload.len > connection.limits.grpc.max_message_bytes or response.payload.len > std.math.maxInt(u32)) return error.MessageTooLarge;
+    const message_len = response.payload.len;
+    const payload = response.takePayload();
+    errdefer connection.allocator.free(payload);
+    const frame = try connection.allocator.realloc(payload, message_len + 5);
+    std.mem.copyBackwards(u8, frame[5..], frame[0..message_len]);
+    frame[0] = 0;
+    std.mem.writeInt(u32, frame[1..5], @intCast(message_len), .big);
+    return frame;
 }
 
 const MiddlewareRun = struct {
@@ -4775,10 +5116,12 @@ fn serverDataRead(
     stream.response_offset += count;
     if (stream.response_offset == frame.len) {
         data_flags.* |= c.NGHTTP2_DATA_FLAG_EOF | c.NGHTTP2_DATA_FLAG_NO_END_STREAM;
-        if (stream.response_trailers == null) {
-            setResponseTrailers(stream, .{ .code = stream.response_status }, &.{}, stream.grpc_limits) catch return c.NGHTTP2_ERR_CALLBACK_FAILURE;
+        if (stream.response_trailers) |trailers| {
+            if (submitTrailerBlock(session.?, stream_id, stream.allocator, trailers) < 0) return c.NGHTTP2_ERR_CALLBACK_FAILURE;
+        } else {
+            var trailers = [_]c.nghttp2_nv{nv("grpc-status", "0")};
+            if (c.nghttp2_submit_trailer(session.?, stream_id, &trailers, trailers.len) < 0) return c.NGHTTP2_ERR_CALLBACK_FAILURE;
         }
-        if (submitTrailerBlock(session.?, stream_id, stream.allocator, stream.response_trailers.?) < 0) return c.NGHTTP2_ERR_CALLBACK_FAILURE;
     }
     return @intCast(count);
 }
@@ -4889,39 +5232,97 @@ fn submitServerResponse(session: *c.nghttp2_session, connection: *ServerConnecti
         stream.response_frame = try frames.toOwnedSlice(connection.allocator);
         return submitResponseWithMetadata(session, stream, response.initial_metadata);
     };
+    var response = try invokeUnaryResponseAlloc(connection, stream);
+    defer response.deinit();
+    try submitUnaryResponse(session, connection, stream, &response);
+}
+
+fn invokeUnaryResponseAlloc(connection: *ServerConnection, stream: *ServerStream) !Grpc.UnaryResponse {
+    validateGrpcRequest(stream) catch |err| {
+        var diagnostic: [128]u8 = undefined;
+        const message = std.fmt.bufPrint(&diagnostic, "invalid gRPC request headers: {s}", .{@errorName(err)}) catch "invalid gRPC request headers";
+        return Grpc.UnaryResponse.initAlloc(connection.allocator, "", .{ .code = .invalid_argument, .message = message });
+    };
+    const route = splitPath(stream.path.items) catch {
+        return Grpc.UnaryResponse.initAlloc(connection.allocator, "", .{ .code = .unimplemented, .message = "invalid gRPC method path" });
+    };
     var middleware = beginMiddleware(connection, stream, route, .grpc, .unary);
-    if (middleware.denied) |status| {
-        try setResponseTrailers(stream, status, &.{}, connection.limits.grpc);
-        stream.response_frame = try connection.allocator.dupe(u8, "");
-        return submitResponse(session, stream);
-    }
+    if (middleware.denied) |status| return Grpc.UnaryResponse.initAlloc(connection.allocator, "", status);
     var outcome_code: Grpc.Code = .unknown;
     defer finishMiddleware(connection, &middleware.run, outcome_code, 1, 1);
-    const payload = try decodeUnaryBodyAlloc(connection.allocator, stream.body.items, stream.request_compression, connection.limits.grpc);
-    defer connection.allocator.free(payload);
+    var payload = try decodeUnaryBody(connection.allocator, stream.body.items, stream.request_compression, connection.limits.grpc);
+    defer payload.deinit();
     var request_metadata = try requestMetadataAlloc(stream, connection.limits.grpc);
     defer request_metadata.deinit();
-    var response = connection.registry.invokeAlloc(connection.allocator, .{
+    const response = connection.registry.invokeAlloc(connection.allocator, .{
         .authority = stream.authority.items,
         .service = route.service,
         .method = route.method,
-        .payload = payload,
+        .payload = payload.bytes,
         .scheme = stream.scheme.items,
         .metadata = request_metadata.entries,
         .timeout_millis = stream.timeout_millis,
     }, .{ .limits = connection.limits.grpc }) catch |err| switch (err) {
         error.MethodNotFound => {
-            try setResponseTrailers(stream, .{ .code = .unimplemented, .message = "method not found" }, &.{}, connection.limits.grpc);
-            stream.response_frame = try connection.allocator.dupe(u8, "");
-            return submitResponse(session, stream);
+            outcome_code = .unimplemented;
+            return Grpc.UnaryResponse.initAlloc(connection.allocator, "", .{ .code = .unimplemented, .message = "method not found" });
         },
         else => return err,
     };
-    defer response.deinit();
-    try setResponseTrailersFull(stream, response.status, response.trailing_metadata, response.retry_pushback_millis, connection.limits.grpc);
     outcome_code = response.status.code;
-    stream.response_frame = try frameResponseMessageAlloc(connection, stream, response.payload);
+    return response;
+}
+
+fn submitUnaryResponse(session: *c.nghttp2_session, connection: *ServerConnection, stream: *ServerStream, response: *Grpc.UnaryResponse) !void {
+    try setResponseTrailersFull(stream, response.status, response.trailing_metadata, response.retry_pushback_millis, connection.limits.grpc);
+    stream.response_frame = if (response.status.code != .ok and response.payload.len == 0)
+        try connection.allocator.dupe(u8, "")
+    else
+        try frameOwnedUnaryResponseAlloc(connection, stream, response);
     try submitResponseWithMetadata(session, stream, response.initial_metadata);
+}
+
+fn shouldScheduleUnary(connection: *const ServerConnection, stream: *const ServerStream) bool {
+    if (std.mem.eql(u8, stream.method.items, "OPTIONS")) return false;
+    if (connection.protocol_policy == .connect_only or !isGrpcContentType(stream.content_type.items)) return false;
+    const route = splitPath(stream.path.items) catch return false;
+    if (connection.streaming_registry) |registry| if (registry.shapeFor(route.service, route.method) != null) return false;
+    return true;
+}
+
+fn scheduleUnary(connection: *ServerConnection, stream: *ServerStream) !void {
+    if (stream.unary_job_scheduled) return error.UnaryJobAlreadyScheduled;
+    const executor = connection.handler_executor orelse return error.HandlerExecutorMissing;
+    stream.unary_connection = connection;
+    stream.unary_job_scheduled = true;
+    executor.schedule(.{ .pointer = stream, .run_fn = ServerStream.runUnary }) catch |err| {
+        stream.unary_job_scheduled = false;
+        stream.unary_connection = null;
+        return err;
+    };
+}
+
+fn completeUnaryResponses(session: *c.nghttp2_session, connection: *ServerConnection) !void {
+    var index: usize = 0;
+    while (index < connection.streams.items.len) {
+        const stream = connection.streams.items[index];
+        if (!stream.unary_job_scheduled or !stream.unary_job_complete.load(.acquire)) {
+            index += 1;
+            continue;
+        }
+        if (stream.peer_closed) {
+            _ = connection.removeStream(stream.stream_id);
+            continue;
+        }
+        stream.unary_job_scheduled = false;
+        stream.unary_connection = null;
+        if (stream.unary_error) |err| return err;
+        var response = stream.unary_response orelse return error.UnaryResponseMissing;
+        stream.unary_response = null;
+        defer response.deinit();
+        try submitUnaryResponse(session, connection, stream, &response);
+        index += 1;
+    }
 }
 
 fn corsAllowed(connection: *ServerConnection, stream: *ServerStream) bool {
@@ -5169,6 +5570,16 @@ fn submitResponse(session: *c.nghttp2_session, stream: *ServerStream) !void {
 }
 
 fn submitResponseWithMetadata(session: *c.nghttp2_session, stream: *ServerStream, metadata: []const Grpc.Metadata) !void {
+    var provider = c.nghttp2_data_provider{ .source = .{ .ptr = stream }, .read_callback = serverDataRead };
+    if (metadata.len == 0) {
+        var headers = [_]c.nghttp2_nv{
+            nv(":status", "200"),
+            nv("content-type", Grpc.content_type),
+            nv("grpc-encoding", stream.response_compression.headerValue()),
+        };
+        try checkNghttp(c.nghttp2_submit_response(session, stream.stream_id, &headers, headers.len, &provider));
+        return;
+    }
     var metadata_headers = try Grpc.metadataHeadersAlloc(stream.allocator, metadata, stream.grpc_limits);
     defer metadata_headers.deinit();
     const headers = try stream.allocator.alloc(c.nghttp2_nv, metadata_headers.headers.len + 3);
@@ -5177,7 +5588,6 @@ fn submitResponseWithMetadata(session: *c.nghttp2_session, stream: *ServerStream
     headers[1] = nv("content-type", Grpc.content_type);
     headers[2] = nv("grpc-encoding", stream.response_compression.headerValue());
     for (metadata_headers.headers, 0..) |header, index| headers[index + 3] = nv(header.name, header.value);
-    var provider = c.nghttp2_data_provider{ .source = .{ .ptr = stream }, .read_callback = serverDataRead };
     try checkNghttp(c.nghttp2_submit_response(session, stream.stream_id, headers.ptr, headers.len, &provider));
 }
 
@@ -5199,8 +5609,9 @@ fn serverOnFrame(
         return 0;
     }
     if (frame.*.hd.type != c.NGHTTP2_DATA and frame.*.hd.type != c.NGHTTP2_HEADERS) return 0;
-    const stream = connection.findStream(frame.*.hd.stream_id) orelse {
-        connection.callback_error = error.ServerStreamMissing;
+    const session = maybe_session orelse return c.NGHTTP2_ERR_CALLBACK_FAILURE;
+    const stream = connection.callbackStream(session, frame.*.hd.stream_id, false) catch |err| {
+        connection.callback_error = err;
         return c.NGHTTP2_ERR_CALLBACK_FAILURE;
     };
     if (frame.*.hd.type == c.NGHTTP2_HEADERS and !stream.response_started) {
@@ -5220,6 +5631,13 @@ fn serverOnFrame(
         return 0;
     }
     if (stream.response_started) return 0;
+    if (shouldScheduleUnary(connection, stream)) {
+        scheduleUnary(connection, stream) catch |err| {
+            connection.callback_error = err;
+            return c.NGHTTP2_ERR_CALLBACK_FAILURE;
+        };
+        return 0;
+    }
     submitServerResponse(maybe_session.?, connection, stream) catch |err| {
         connection.callback_error = err;
         return c.NGHTTP2_ERR_CALLBACK_FAILURE;
@@ -5228,12 +5646,17 @@ fn serverOnFrame(
 }
 
 fn serverOnClose(
-    _: ?*c.nghttp2_session,
+    maybe_session: ?*c.nghttp2_session,
     stream_id: i32,
     _: u32,
     user_data: ?*anyopaque,
 ) callconv(.c) c_int {
     const connection: *ServerConnection = @ptrCast(@alignCast(user_data.?));
+    if (maybe_session) |session| _ = c.nghttp2_session_set_stream_user_data(session, stream_id, null);
+    if (connection.findStream(stream_id)) |stream| if (stream.unary_job_scheduled) {
+        stream.peer_closed = true;
+        return 0;
+    };
     _ = connection.removeStream(stream_id);
     return 0;
 }
@@ -5254,6 +5677,8 @@ pub const ServerOptions = struct {
     port: u16 = 50051,
     limits: Limits = .{},
     tls: ?ServerTlsConfig = null,
+    /// Disable Nagle's algorithm on every accepted gRPC connection.
+    tcp_nodelay: bool = true,
     response_compression: Grpc.Compression = .identity,
     max_calls_per_connection: usize = 100_000,
     max_connections: usize = 80,
@@ -5265,7 +5690,10 @@ pub const ServerOptions = struct {
     connection_max_age_millis: ?u64 = 60 * 60 * 1000,
     connection_max_age_grace_millis: u64 = 30_000,
     stream_queue_capacity: usize = 16,
-    handler_worker_count: usize = 80,
+    /// Eight workers is the measured Linux default for the synchronous
+    /// handler contract. Services with deliberately blocking handlers may
+    /// raise this bound without changing HTTP/2 connection ownership.
+    handler_worker_count: usize = 8,
     handler_queue_capacity: usize = 1024,
     handler_worker_stack_bytes: usize = 512 * 1024,
     peer_keepalive: PeerKeepalivePolicy = .{},
@@ -5385,7 +5813,7 @@ pub const NativeServer = struct {
     registry: *Grpc.Registry,
     streaming_registry: ?*Grpc.StreamingRegistry = null,
     incremental_registry: ?*Incremental.Registry = null,
-    incremental_executor: ?*IncrementalExecutor = null,
+    handler_executor: ?*HandlerExecutor = null,
     listener: std.Io.net.Server,
     tls_context: ?*SSL_CTX = null,
     tls_mutex: std.atomic.Mutex = .unlocked,
@@ -5409,6 +5837,15 @@ pub const NativeServer = struct {
         const active_registry = try ActiveRegistry.create(allocator, options.max_connections);
         errdefer active_registry.destroy();
         const tls_context = if (options.tls) |tls| try createServerTlsContext(tls) else null;
+        errdefer if (tls_context) |context| SSL_CTX_free(context);
+        const handler_executor = try HandlerExecutor.create(
+            allocator,
+            io,
+            options.handler_worker_count,
+            options.handler_queue_capacity,
+            options.handler_worker_stack_bytes,
+        );
+        errdefer handler_executor.destroy();
         return .{
             .allocator = allocator,
             .io = io,
@@ -5416,6 +5853,7 @@ pub const NativeServer = struct {
             .registry = registry,
             .listener = listener,
             .tls_context = tls_context,
+            .handler_executor = handler_executor,
             .certificate_generation = std.atomic.Value(u64).init(if (tls_context == null) 0 else 1),
             .accepting = std.atomic.Value(bool).init(true),
             .active_registry = active_registry,
@@ -5431,14 +5869,7 @@ pub const NativeServer = struct {
     /// Installs queue-backed streaming handlers. Call before `serve`.
     pub fn installIncremental(self: *NativeServer, registry: *Incremental.Registry) !void {
         if (!self.ready() or self.activeConnections() != 0) return error.ServerAlreadyServing;
-        if (self.incremental_executor != null) return error.IncrementalRegistryAlreadyInstalled;
-        self.incremental_executor = try IncrementalExecutor.create(
-            self.allocator,
-            self.io,
-            self.options.handler_worker_count,
-            self.options.handler_queue_capacity,
-            self.options.handler_worker_stack_bytes,
-        );
+        if (self.incremental_registry != null) return error.IncrementalRegistryAlreadyInstalled;
         self.incremental_registry = registry;
     }
 
@@ -5449,7 +5880,7 @@ pub const NativeServer = struct {
         self.tls_context = null;
         self.tls_mutex.unlock();
         if (context) |value| SSL_CTX_free(value);
-        if (self.incremental_executor) |executor| executor.destroy();
+        if (self.handler_executor) |executor| executor.destroy();
         self.active_registry.destroy();
         self.* = undefined;
     }
@@ -5552,6 +5983,10 @@ pub const NativeServer = struct {
         if (!self.ready()) return error.ServerNotReady;
         const allocator = self.allocator;
         const stream = try self.acceptOne();
+        configureTcpNoDelay(stream.socket.handle, self.options.tcp_nodelay) catch |err| {
+            stream.close(self.io);
+            return err;
+        };
         try self.active_registry.register(stream.socket);
         defer self.active_registry.unregister(stream.socket.handle);
         self.lockTls();
@@ -5603,7 +6038,7 @@ pub const NativeServer = struct {
 
         var connection = try ServerConnection.init(allocator, self.io, self.registry, self.streaming_registry, self.incremental_registry, self.options.limits, self.options.response_compression, self.options.cors, self.options.interceptors, self.options.stream_queue_capacity, self.options.max_concurrent_streams, self.options.peer_keepalive, self.options.protocol_policy);
         defer connection.deinit();
-        connection.incremental_executor = self.incremental_executor;
+        connection.handler_executor = self.handler_executor;
         connection.call_counters = &self.call_counters;
         connection.causal = self.options.causal;
         const callbacks = try serverCallbacks();
@@ -5653,7 +6088,7 @@ pub const NativeServer = struct {
                     break;
                 }
             };
-            const dispatch_without_readiness = connection.hasIncrementalStreams() or connection.pending_wire.items.len != 0 or connection.parser_paused;
+            const dispatch_without_readiness = connection.hasAsyncWork() or connection.pending_wire.items.len != 0 or connection.parser_paused;
             if (!dispatch_without_readiness) {
                 var descriptors = [_]std.posix.pollfd{.{
                     .fd = wire.socketHandle(),
@@ -6870,8 +7305,15 @@ test "ordinary concurrent calls multiplex over one persistent HTTP/2 channel" {
     const Echo = struct {
         entered: std.atomic.Value(usize) = .init(0),
         pub fn invoke(self: *@This(), allocator: std.mem.Allocator, request: Grpc.UnaryRequest) anyerror!Grpc.UnaryResponse {
-            _ = self.entered.fetchAdd(1, .monotonic);
-            try sleepMilliseconds(std.testing.io, 100);
+            const entered = self.entered.fetchAdd(1, .acq_rel) + 1;
+            if (entered == 1) {
+                const deadline = deadlineFromNow(std.testing.io, 500);
+                while (self.entered.load(.acquire) < 2 and !deadlineReached(std.testing.io, deadline)) {
+                    try sleepMilliseconds(std.testing.io, 1);
+                }
+                if (self.entered.load(.acquire) < 2) return error.UnaryHandlersSerialized;
+            }
+            try sleepMilliseconds(std.testing.io, 20);
             return Grpc.UnaryResponse.initAlloc(allocator, request.payload, .ok());
         }
     };

@@ -20,7 +20,7 @@ const schema = JSON.stringify({
     {
       "@type": "FAQPage",
       mainEntity: [
-        { "@type": "Question", name: "Are we faster than Go?", acceptedAnswer: { "@type": "Answer", text: "In the recorded 1 KiB unary benchmark, ZigEffect measured lower latency and server CPU per RPC, while grpc-go measured higher aggregate throughput." } },
+        { "@type": "Question", name: "Are we faster than Go?", acceptedAnswer: { "@type": "Answer", text: "In the latest same-receipt 1 KiB unary optimization diagnostic, ZigEffect reached 96.6% of grpc-go throughput and measured 13.4% higher throughput than Tonic. Results vary by host and workload." } },
         { "@type": "Question", name: "Is ZigEffect gRPC pure Zig?", acceptedAnswer: { "@type": "Answer", text: "It is a Zig-native implementation without the gRPC C core. nghttp2 supplies HTTP/2 and OpenSSL supplies TLS." } },
         { "@type": "Question", name: "Can it run on Cloud Run?", acceptedAnswer: { "@type": "Answer", text: "Yes. The server supports Cloud Run's h2c container contract, readiness, identity middleware, bounded resources, and graceful shutdown." } },
         { "@type": "Question", name: "Is it production verified?", acceptedAnswer: { "@type": "Answer", text: "It is production candidate pending native Linux amd64, a complete 24-hour soak, and deployed GCP qualification on committed source." } },

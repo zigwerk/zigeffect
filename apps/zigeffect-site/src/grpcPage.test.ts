@@ -12,6 +12,12 @@ const standardLibrary = await source("./StandardLibraryPage.tsx");
 const config = await source("../app.config.ts");
 const sitemap = await source("../public/sitemap.xml");
 const styles = await source("./styles.css");
+const rootReadme = await source("../../../README.md");
+const packageReadme = await source("../../../packages/zigeffect-grpc/README.md");
+const cloudRunGuide = await source("../../../packages/zigeffect/docs/grpc-cloud-run.md");
+const agentGuide = await source("../../../AGENTS.md");
+const codexSkill = await source("../../../.agents/skills/zigeffect-development/SKILL.md");
+const claudeSkill = await source("../../../.claude/skills/zigeffect-development/SKILL.md");
 
 describe("ZigEffect gRPC product page", () => {
   test("publishes a discoverable route in the shared marketing journey", () => {
@@ -43,26 +49,29 @@ describe("ZigEffect gRPC product page", () => {
     expect(page).toContain("Testing v2");
   });
 
-  test("publishes exact receipt-backed performance observations", () => {
-    expect(page).toContain("4,094");
-    expect(page).toContain("3.27 ms");
-    expect(page).toContain("7.06 ms");
-    expect(page).toContain("71.5 µs");
-    expect(page).toContain("1,379");
-    expect(page).toContain("17.21 ms");
-    expect(page).toContain("34.67 ms");
+  test("publishes exact schema-v2 optimization observations", () => {
+    expect(page).toContain("11,792");
+    expect(page).toContain("2.42 ms");
+    expect(page).toContain("6.06 ms");
+    expect(page).toContain("7.0 allocations");
+    expect(page).toContain("12,206");
+    expect(page).toContain("10,403");
+    expect(page).toContain("96.6%");
+    expect(page).toContain("13.4%");
     expect(page).toContain("1,541,632");
     expect(page).toContain("zero failures");
     expect(page).toContain("10.9 MiB");
     expect(page).toContain("ARM64 Docker loopback");
+    expect(page).toContain("50,000 measured calls");
+    expect(page).toContain("optimization diagnostic");
     expect(page).toContain("observations, not universal deployment guarantees");
   });
 
-  test("answers the Go question positively without hiding the throughput result", () => {
+  test("answers the Go question positively without overstating the result", () => {
     expect(page).toContain("Are we faster than Go?");
-    expect(page).toContain("In this recorded 1 KiB unary lane, yes on latency and server CPU per RPC");
-    expect(page).toContain("7,402");
-    expect(page).toContain("grpc-go delivered more aggregate throughput");
+    expect(page).toContain("same performance class as grpc-go");
+    expect(page).toContain("grpc-go led this run by 3.4%");
+    expect(page).toContain("ZigEffect led Tonic by 13.4%");
     expect(page).toContain("not provided by grpc-go alone");
     expect(page).toContain("We have not yet published an apples-to-apples Go REST benchmark");
     expect(page).not.toContain("Go cannot");
@@ -80,6 +89,20 @@ describe("ZigEffect gRPC product page", () => {
     expect(page).toContain("deployed GCP service-to-service qualification");
     expect(page).toContain("120 / 120");
     expect(page).toContain("1,000 iterations");
+    expect(page).toContain("94 / 94");
+  });
+
+  test("keeps README, documentation, and agent guidance on the same evidence boundary", () => {
+    for (const document of [rootReadme, packageReadme, cloudRunGuide, agentGuide, codexSkill]) {
+      const normalized = document.replace(/\s+/g, " ");
+      expect(normalized).toContain("11,792 RPC/s");
+      expect(normalized).toContain("96.6% of grpc-go");
+      expect(normalized).toContain("13.4% higher throughput than Tonic");
+      expect(normalized).toContain("native Linux amd64");
+      expect(normalized).toContain("24-hour");
+      expect(normalized).toContain("deployed GCP");
+    }
+    expect(codexSkill).toBe(claudeSkill);
   });
 
   test("uses accessible FAQ disclosures and responsive data layouts", () => {

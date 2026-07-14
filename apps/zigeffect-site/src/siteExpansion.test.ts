@@ -139,7 +139,7 @@ describe("ZigEffect expanded marketing journey", () => {
     expect(standardLibrary).toContain("NATIVE GRPC + CONNECT");
     expect(standardLibrary).toContain("One Protobuf contract");
     expect(standardLibrary).toContain("TanStack Solid Query");
-    expect(standardLibrary).toContain("82 discovered · 82 executed · 82 passed");
+    expect(standardLibrary).toContain("94 discovered · 94 executed · 94 passed");
     expect(standardLibrary).toContain("Production candidate");
     expect(standardLibrary).toContain("committed-source Linux amd64");
     expect(standardLibrary).toContain("24-hour soak");
@@ -149,7 +149,8 @@ describe("ZigEffect expanded marketing journey", () => {
   test("gives native gRPC and Connect an evidence-backed product chapter", () => {
     expect(grpc).toContain("Native gRPC + Connect");
     expect(grpc).toContain("Are we faster than Go?");
-    expect(grpc).toContain("grpc-go delivered more aggregate throughput");
+    expect(grpc).toContain("96.6% of grpc-go");
+    expect(grpc).toContain("13.4% higher throughput than Tonic");
     expect(grpc).toContain("1,541,632");
     expect(grpc).toContain("Production candidate");
   });

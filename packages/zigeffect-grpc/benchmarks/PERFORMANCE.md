@@ -30,11 +30,52 @@ changes are:
 - the server advertises 4 MiB stream and 16 MiB connection flow-control
   windows, avoiding the 64 KiB HTTP/2 throughput cliff.
 
+The July 2026 unary pass then removed costs that the original 400-call receipt
+could not isolate reliably:
+
+- TCP_NODELAY is applied to client and accepted server sockets;
+- nghttp2 output from one flush cycle is coalesced into one logical write;
+- callback stream lookup uses nghttp2 stream user data instead of a linear
+  scan;
+- unary handlers run concurrently on the bounded shared executor while the
+  connection thread remains the only nghttp2 owner;
+- identity request payloads are borrowed, typed response payloads transfer
+  ownership into the transport frame, and declared message lengths reserve
+  exact request capacity;
+- common request header values use bounded inline storage, common response
+  headers/trailers use fixed fields, and route dispatch uses a hash index.
+
 Every changed primitive has a deterministic regression test. TLS contexts and
 message-frame storage were not pooled speculatively: the profile did not
 identify them as dominant costs, and extending their lifetime would increase
 credential-rotation and ownership risk. They remain candidates for a future
 profile if workload evidence changes.
+
+## July 2026 diagnostic unary result
+
+After a Linux 4/8/16/32/64 handler-worker sweep, eight workers became the
+configurable default. The common 1 KiB unary path fell from 43.1 measured
+allocations per RPC in the v1 receipt to 7.0 in a 50,000-call schema-v2
+diagnostic run.
+
+On the same ARM64 Docker Desktop host, with 32 client workers, one persistent
+HTTP/2 connection, 512 warm-up calls plus two warm-up seconds, and five 10,000
+call repetitions, the diagnostic result was:
+
+| Runtime | Throughput | p50 | p99 |
+| --- | ---: | ---: | ---: |
+| grpc-go | 12,206 RPC/s | 2.35 ms | 5.67 ms |
+| ZigEffect | 11,792 RPC/s | 2.42 ms | 6.06 ms |
+| Tonic | 10,403 RPC/s | 2.69 ms | 8.54 ms |
+| gRPC C++ | 10,394 RPC/s | 2.82 ms | 6.33 ms |
+
+This same-receipt result passed the enforced unary budget at 96.6% of
+grpc-go's throughput and 1.07x its p99, while exceeding Tonic throughput by
+13.4% with a lower p99 in that run. It remains an uncommitted diagnostic
+measurement, not a release or marketing receipt. Host contention affects tail
+latency, so only a schema-v2 run from committed source on native Linux amd64
+and arm64 may replace the checked-in v1 receipt or support a durable
+comparative claim.
 
 ## Observed effect
 

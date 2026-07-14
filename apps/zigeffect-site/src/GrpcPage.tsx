@@ -43,7 +43,7 @@ const integratedAdvantages = [
 const faqItems = [
   {
     question: "Are we faster than Go?",
-    answer: <>In this recorded 1 KiB unary lane, yes on latency and server CPU per RPC: ZigEffect measured 3.27 ms p50, 7.06 ms p99, and 71.5 µs of server CPU per call, against grpc-go at 3.55 ms, 8.91 ms, and 141.7 µs. But grpc-go delivered more aggregate throughput—7,402 versus 4,094 RPC/s—so we do not claim to win every workload. The larger win is the complete ZigEffect development system around the transport.</>,
+    answer: <>In the latest schema-v2 optimization diagnostic, ZigEffect reached the same performance class as grpc-go: 11,792 versus 12,206 RPC/s, so grpc-go led this run by 3.4%. ZigEffect led Tonic by 13.4%, with 2.42 ms p50, 6.06 ms p99, and 7.0 allocations per RPC. That is a strong same-receipt result, not a claim that ZigEffect wins every machine or workload. The larger advantage is the complete ZigEffect development system around the transport.</>,
   },
   {
     question: "Is it faster than a Go REST API?",
@@ -82,7 +82,7 @@ export function GrpcPage() {
       eyebrow="ZIGEFFECT GRPC"
       title={<>Native gRPC + Connect, <span>from service to browser.</span></>}
       lede="One Protobuf contract becomes typed Zig clients and servers, SolidJS query clients, persistent HTTP/2 channels, bounded streams, operational evidence, and a Cloud Run-ready backend."
-      facts={["4 RPC shapes", "1.54M mixed calls", "0 load failures", "One contract to Solid"]}
+      facts={["96.6% of grpc-go", "7 allocs / unary RPC", "1.54M mixed calls", "One contract to Solid"]}
       visual={
         <div class="grpc-channel-visual" aria-label="Protobuf contract flowing through ZigEffect gRPC to Cloud Run and SolidJS">
           <div class="grpc-channel-topline"><span>zigeffect-grpc</span><strong><i /> production candidate</strong></div>
@@ -132,27 +132,28 @@ zig build schema-compatibility-test`}</CodeWindow>
         <SectionHeading
           eyebrow="02 / MEASURED PERFORMANCE"
           title="Receipts, not benchmark folklore."
-          copy="The current evidence holds architecture, containers, driver, payload, and concurrency constant across ZigEffect, grpc-go, Tonic, and gRPC C++. It records throughput, latency, CPU, memory, and allocations rather than selecting one flattering number."
+          copy="The latest optimization diagnostic holds architecture, containers, driver, payload, and concurrency constant across ZigEffect, grpc-go, Tonic, and gRPC C++. It records throughput, latency, and allocations rather than selecting one flattering number."
         />
         <div class="grpc-metric-strip" data-reveal>
-          <article><span>1 KiB unary</span><strong>4,094</strong><small>RPC/s · 32 workers</small></article>
-          <article><span>Median latency</span><strong>3.27 ms</strong><small>p99 · 7.06 ms</small></article>
-          <article><span>Server CPU</span><strong>71.5 µs</strong><small>per 1 KiB unary RPC</small></article>
-          <article><span>Mixed-shape load</span><strong>1,541,632</strong><small>calls · zero failures</small></article>
+          <article><span>1 KiB unary</span><strong>11,792</strong><small>RPC/s · 32 client workers</small></article>
+          <article><span>Against grpc-go</span><strong>96.6%</strong><small>of best same-receipt throughput</small></article>
+          <article><span>Unary latency</span><strong>2.42 ms</strong><small>p99 · 6.06 ms</small></article>
+          <article><span>Server allocation</span><strong>7.0 allocations</strong><small>per 1 KiB unary RPC</small></article>
         </div>
         <div class="grpc-data-scroll">
           <table class="grpc-benchmark-table">
-            <caption>Checked-in ARM64 differential benchmark observations</caption>
-            <thead><tr><th scope="col">Lane</th><th scope="col">RPC/s</th><th scope="col">p50</th><th scope="col">p95</th><th scope="col">p99</th><th scope="col">CPU/RPC</th></tr></thead>
+            <caption>Schema-v2 ARM64 optimization diagnostic · one receipt</caption>
+            <thead><tr><th scope="col">Runtime</th><th scope="col">RPC/s</th><th scope="col">p50</th><th scope="col">p99</th><th scope="col">vs grpc-go</th></tr></thead>
             <tbody>
-              <tr><th scope="row">ZigEffect · 1 KiB unary</th><td>4,094</td><td>3.27 ms</td><td>5.84 ms</td><td>7.06 ms</td><td>71.5 µs</td></tr>
-              <tr><th scope="row">grpc-go · 1 KiB unary</th><td>7,402</td><td>3.55 ms</td><td>7.38 ms</td><td>8.91 ms</td><td>141.7 µs</td></tr>
-              <tr><th scope="row">ZigEffect · 64 KiB unary</th><td>1,379</td><td>17.21 ms</td><td>32.87 ms</td><td>34.67 ms</td><td>195.3 µs</td></tr>
+              <tr><th scope="row">grpc-go</th><td>12,206</td><td>2.35 ms</td><td>5.67 ms</td><td>100%</td></tr>
+              <tr><th scope="row">ZigEffect</th><td>11,792</td><td>2.42 ms</td><td>6.06 ms</td><td>96.6%</td></tr>
+              <tr><th scope="row">Tonic</th><td>10,403</td><td>2.69 ms</td><td>8.54 ms</td><td>85.2%</td></tr>
+              <tr><th scope="row">gRPC C++</th><td>10,394</td><td>2.82 ms</td><td>6.33 ms</td><td>85.2%</td></tr>
             </tbody>
           </table>
         </div>
-        <div class="grpc-soak-note"><Waves size={22} /><p><strong>Fifteen minutes under mixed traffic.</strong> The Cloud Run-compatible container completed equal unary, client-streaming, server-streaming, and bidirectional workloads at 64 workers with zero failures and 10.9 MiB memory growth inside a 64 MiB budget.</p></div>
-        <p class="grpc-method-note">ARM64 Docker loopback · plaintext HTTP/2 · 400 calls per differential result. These are observations, not universal deployment guarantees, and they are not deployed Cloud Run latency.</p>
+        <div class="grpc-soak-note"><Waves size={22} /><p><strong>Fifteen minutes under mixed traffic.</strong> The separate Cloud Run-compatible candidate receipt completed 1,541,632 unary, client-streaming, server-streaming, and bidirectional calls at 64 workers with zero failures and 10.9 MiB memory growth inside a 64 MiB budget.</p></div>
+        <p class="grpc-method-note">Schema-v2 optimization diagnostic · ARM64 Docker loopback · plaintext HTTP/2 · 32 client workers · one persistent connection · 50,000 measured calls after warm-up. These are observations, not universal deployment guarantees, and this diagnostic is not the checked-in release receipt or deployed Cloud Run latency.</p>
       </section>
 
       <section class="deep-band deep-band-dark">
@@ -165,15 +166,15 @@ zig build schema-compatibility-test`}</CodeWindow>
           <div class="grpc-go-comparison" data-reveal>
             <article class="grpc-go-score">
               <Gauge size={28} />
-              <span>THE RECORDED 1 KiB LANE</span>
-              <h3>Lower ZigEffect latency and CPU. Higher grpc-go throughput.</h3>
+              <span>THE SCHEMA-V2 1 KiB LANE</span>
+              <h3>ZigEffect reached 96.6% of grpc-go—and led Tonic.</h3>
               <dl>
-                <div><dt>p50 advantage</dt><dd>8% lower</dd></div>
-                <div><dt>p99 advantage</dt><dd>21% lower</dd></div>
-                <div><dt>CPU/RPC</dt><dd>49% lower</dd></div>
-                <div><dt>Throughput</dt><dd>Go 81% higher</dd></div>
+                <div><dt>grpc-go gap</dt><dd>3.4%</dd></div>
+                <div><dt>p50 gap</dt><dd>+0.07 ms</dd></div>
+                <div><dt>p99 ratio</dt><dd>1.07x Go</dd></div>
+                <div><dt>vs Tonic</dt><dd>+13.4%</dd></div>
               </dl>
-              <p>That is a useful engineering result, not permission to write “fastest.” Different payloads and streaming shapes produce different leaders.</p>
+              <p>ZigEffect delivered 13.4% higher throughput than Tonic in this run. That is a useful engineering result, not permission to write “fastest.” Different payloads, hosts, and streaming shapes produce different leaders.</p>
             </article>
             <article class="grpc-system-score">
               <Network size={28} />
@@ -235,7 +236,7 @@ zig build schema-compatibility-test`}</CodeWindow>
           <article><strong>120 / 120</strong><span>stable Connect server cases</span><small>zero unsupported server cases</small></article>
           <article><strong>56 runs</strong><span>official gRPC role/mode matrix</span><small>both roles · plaintext + TLS</small></article>
           <article><strong>1,000 iterations</strong><span>malformed frames + TLS rotation</span><small>one bounded defensive campaign</small></article>
-          <article><strong>82 / 82</strong><span>ReleaseSafe Testing v2</span><small>zero pending · leaks · log errors</small></article>
+          <article><strong>94 / 94</strong><span>ReleaseSafe Testing v2</span><small>zero pending · leaks · log errors</small></article>
         </div>
         <div class="grpc-promotion-gates">
           <span><i>01</i> native Linux amd64 committed-source receipt</span>
