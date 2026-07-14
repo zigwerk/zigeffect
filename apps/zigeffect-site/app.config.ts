@@ -7,6 +7,7 @@ export default defineConfig({
   vite: {
     resolve: {
       conditions: ["solid"],
+      dedupe: ["solid-js"],
     },
     ssr: {
       noExternal: ["lucide-solid"],
@@ -24,6 +25,7 @@ export default defineConfig({
         "/testing",
         "/agents",
         "/standard-library",
+        "/grpc",
         "/workflows",
         "/built-with",
       ],

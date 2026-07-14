@@ -167,6 +167,7 @@ zig build test -Doptimize=ReleaseSafe
           </div>
         </div>
         <p class="boundary-note"><ShieldCheck size={18} /> The checked-in schema-v2 candidate records the completed applicable gRPC, Connect, Linux ARM64, fuzz, adversarial and load gates. A workflow definition or unsupported case is never promoted into evidence.</p>
+        <a class="text-link grpc-chapter-link" href="/grpc">Explore native gRPC performance, Cloud Run architecture, and the Go comparison</a>
       </section>
 
       <section class="deep-section">
