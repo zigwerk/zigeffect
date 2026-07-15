@@ -1,0 +1,31 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  ignore_only:
+    ENUM_VALUE_PREFIX:
+      - proto/grpc/health/v1/health.proto
+      - proto/grpc/channelz/v1/channelz.proto
+    ENUM_ZERO_VALUE_SUFFIX:
+      - proto/grpc/health/v1/health.proto
+      - proto/grpc/channelz/v1/channelz.proto
+    RPC_REQUEST_RESPONSE_UNIQUE:
+      - proto/grpc/health/v1/health.proto
+    RPC_REQUEST_STANDARD_NAME:
+      - proto/grpc/health/v1/health.proto
+      - proto/grpc/reflection/v1/reflection.proto
+      - proto/grpc/reflection/v1alpha/reflection.proto
+    RPC_RESPONSE_STANDARD_NAME:
+      - proto/grpc/health/v1/health.proto
+      - proto/grpc/reflection/v1/reflection.proto
+      - proto/grpc/reflection/v1alpha/reflection.proto
+    SERVICE_SUFFIX:
+      - proto/grpc/health/v1/health.proto
+      - proto/grpc/channelz/v1/channelz.proto
+      - proto/grpc/reflection/v1/reflection.proto
+      - proto/grpc/reflection/v1alpha/reflection.proto
+breaking:
+  use:
+    - FILE

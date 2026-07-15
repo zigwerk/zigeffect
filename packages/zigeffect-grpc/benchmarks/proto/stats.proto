@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package zigeffect.benchmark.v1;
+option go_package = "zigeffect-grpc-bench/gen/stats;stats";
+
+message Empty {}
+message AllocationStats {
+  uint64 allocations = 1;
+  uint64 frees = 2;
+  uint64 allocated_bytes = 3;
+  uint64 live_bytes = 4;
+  uint64 peak_live_bytes = 5;
+}
+
+service Stats {
+  rpc Snapshot(Empty) returns (AllocationStats);
+}

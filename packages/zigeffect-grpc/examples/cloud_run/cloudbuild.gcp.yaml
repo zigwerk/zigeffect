@@ -1,0 +1,16 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file=packages/zigeffect-grpc/examples/cloud_run/Dockerfile
+      - --tag=${_SERVER_IMAGE}
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file=packages/zigeffect-grpc/tests/Dockerfile.gcp-probe
+      - --tag=${_PROBE_IMAGE}
+      - .
+images:
+  - ${_SERVER_IMAGE}
+  - ${_PROBE_IMAGE}

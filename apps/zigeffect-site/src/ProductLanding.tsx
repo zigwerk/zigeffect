@@ -36,7 +36,7 @@ const capabilities = [
   { icon: GitBranch, title: "Causal evidence", copy: "Every important action records what happened, why, and what it caused next." },
   { icon: Workflow, title: "Durable statecharts", copy: "Long-lived workflows stay typed, replayable, inspectable and governable." },
   { icon: ShieldCheck, title: "Testing v2", copy: "Deterministic scenarios publish complete receipts with exact replay evidence." },
-  { icon: Network, title: "Real boundaries", copy: "HTTP, Postgres, storage, transport, telemetry, Redis and S3 run through typed adapters." },
+  { icon: Network, title: "Real boundaries", copy: "Generated gRPC/Connect, HTTP, Postgres, storage and telemetry run through typed adapters with declared production evidence." },
 ] as const;
 
 export function ProductLanding() {
@@ -181,8 +181,8 @@ export function ProductLanding() {
                 <div class="system-layer-index">01 / STANDARD LIBRARY</div>
                 <SquareTerminal size={27} />
                 <h3>40+ modules. One effect model.</h3>
-                <p>Services, schemas, HTTP, SQL, files, processes, queues, pub/sub, outbox, storage, config, secrets, resilience, observability, testing and agent tooling share one public facade.</p>
-                <div class="system-module-rail"><span>Http</span><span>Sql</span><span>Queue</span><span>Storage</span><span>Testing</span></div>
+                <p>Services, schemas, generated gRPC/Connect, HTTP, SQL, queues, storage, resilience, observability, testing and agent tooling share one public facade and one evidence model.</p>
+                <div class="system-module-rail"><span>Grpc</span><span>Connect</span><span>Sql</span><span>Storage</span><span>Testing</span></div>
                 <a class="text-link" href="/standard-library">Explore the standard library <ArrowRight size={16} /></a>
               </article>
 
@@ -237,7 +237,7 @@ export function ProductLanding() {
                   <span>Backend</span><span>Infrastructure</span><span>Cloud</span>
                 </div>
                 <p class="product-description">
-                  Yachdee exercises the full application path: HTTP services, durable workflows, PostgreSQL, object storage, telemetry and agent-verifiable release evidence.
+                  Yachdee exercises the full application path: native Zig services on Cloud Run, gRPC between services, generated Connect clients for SolidJS, durable workflows, PostgreSQL, telemetry and agent-verifiable release evidence.
                 </p>
                 <a href="/built-with" aria-label="Read the Yachdee proof">Read the proof <ArrowRight size={16} /></a>
               </article>

@@ -13,6 +13,7 @@ const routes = [
   "testing",
   "agents",
   "standard-library",
+  "grpc",
   "workflows",
   "built-with",
 ] as const;
@@ -31,13 +32,14 @@ const causal = await source("./CausalGraphPage.tsx");
 const testing = await source("./TestingPage.tsx");
 const agents = await source("./AgentsPage.tsx");
 const standardLibrary = await source("./StandardLibraryPage.tsx");
+const grpc = await source("./GrpcPage.tsx");
 const workflows = await source("./WorkflowsPage.tsx");
 const proof = await source("./BuiltWithPage.tsx");
 const landing = await source("./ProductLanding.tsx");
 const styles = await source("./styles.css");
 
 describe("ZigEffect expanded marketing journey", () => {
-  test("publishes and prerenders a complete ten-chapter site", () => {
+  test("publishes and prerenders a complete eleven-chapter site", () => {
     for (const route of routes) {
       expect(routeSources[route].length).toBeGreaterThan(0);
       expect(appConfig).toContain(`"/${route}"`);
@@ -65,6 +67,7 @@ describe("ZigEffect expanded marketing journey", () => {
     expect(chrome).toContain('href: "/testing"');
     expect(chrome).toContain('href: "/agents"');
     expect(chrome).toContain('href: "/standard-library"');
+    expect(chrome).toContain('href: "/grpc"');
     expect(chrome).toContain('href: "/built-with"');
     expect(chrome).toContain("NextChapter");
   });
@@ -133,6 +136,23 @@ describe("ZigEffect expanded marketing journey", () => {
     expect(standardLibrary).toContain("Agent");
     expect(standardLibrary).toContain('const zstd = @import("zigeffect_std")');
     expect(standardLibrary).toContain("Adapters declare their production posture");
+    expect(standardLibrary).toContain("NATIVE GRPC + CONNECT");
+    expect(standardLibrary).toContain("One Protobuf contract");
+    expect(standardLibrary).toContain("TanStack Solid Query");
+    expect(standardLibrary).toContain("94 discovered · 94 executed · 94 passed");
+    expect(standardLibrary).toContain("Production candidate");
+    expect(standardLibrary).toContain("committed-source Linux amd64");
+    expect(standardLibrary).toContain("24-hour soak");
+    expect(standardLibrary).toContain("deployed GCP service-to-service receipt");
+  });
+
+  test("gives native gRPC and Connect an evidence-backed product chapter", () => {
+    expect(grpc).toContain("Native gRPC + Connect");
+    expect(grpc).toContain("Are we faster than Go?");
+    expect(grpc).toContain("96.6% of grpc-go");
+    expect(grpc).toContain("13.4% higher throughput than Tonic");
+    expect(grpc).toContain("1,541,632");
+    expect(grpc).toContain("Production candidate");
   });
 
   test("surfaces system assembly on the homepage", () => {
@@ -142,6 +162,8 @@ describe("ZigEffect expanded marketing journey", () => {
     expect(landing).toContain('href="/standard-library"');
     expect(landing).toContain('href="/workflows"');
     expect(landing).toContain("DURABLE CONTROL FLOW");
+    expect(landing).toContain("Generated gRPC/Connect");
+    expect(landing).toContain("native Zig services on Cloud Run");
   });
 
   test("keeps the deep-page system responsive and horizontally safe", () => {

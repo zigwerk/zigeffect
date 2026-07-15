@@ -18,6 +18,8 @@ pub const Maturity = enum(u8) {
 pub const Kind = enum {
     http_client,
     http_server,
+    grpc_client,
+    grpc_server,
     sql_database,
     workflow_journal,
     message_storage,
@@ -356,6 +358,20 @@ pub const Builtin = struct {
         .none,
         &.{"does not listen on an operating-system socket"},
     );
+    pub const fake_grpc_client = descriptor(
+        "zigeffect-std.fake-grpc-client",
+        .grpc_client,
+        .fake,
+        .none,
+        &.{"returns configured gRPC responses without network IO"},
+    );
+    pub const in_process_grpc_server = descriptor(
+        "zigeffect-std.in-process-grpc-server",
+        .grpc_server,
+        .deterministic_model,
+        .modeled,
+        &.{"routes gRPC calls only inside the current process"},
+    );
     pub const fake_sql_database = descriptor(
         "zigeffect-std.fake-sql-database",
         .sql_database,
@@ -480,6 +496,8 @@ pub const Builtin = struct {
         fake_http_client,
         local_http_client,
         memory_http_server,
+        fake_grpc_client,
+        in_process_grpc_server,
         fake_sql_database,
         fake_clock,
         fake_process_runner,

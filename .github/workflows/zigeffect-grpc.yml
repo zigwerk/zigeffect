@@ -1,0 +1,322 @@
+name: zigeffect grpc
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/zigeffect-grpc.yml"
+      - ".github/workflows/zigeffect-grpc-24h.yml"
+      - ".github/workflows/zigeffect-grpc-gcp.yml"
+      - "packages/zigeffect-grpc/**"
+      - "packages/zigeffect-grpc-web/**"
+      - "packages/zigeffect-std/src/grpc/**"
+      - "packages/zigeffect-std/src/application/lifecycle.zig"
+      - "package.json"
+      - "bun.lock"
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/zigeffect-grpc.yml"
+      - "packages/zigeffect-grpc/**"
+      - "packages/zigeffect-grpc-web/**"
+      - "packages/zigeffect-std/src/grpc/**"
+  schedule:
+    - cron: "31 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      adversarial_iterations:
+        description: "Malformed-frame/certificate-rotation repetitions"
+        required: false
+        default: "1000"
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  ZIG_VERSION: 0.16.0
+  CONNECT_CONFORMANCE_COMMIT: 5b2b709b99e2c8d4aa872fe51bb6a75f09d370e4
+
+jobs:
+  linux:
+    name: linux ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - uses: actions/setup-go@v5
+        if: matrix.arch == 'amd64'
+        with:
+          go-version: '1.25.x'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install native and interoperability dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnghttp2-dev libssl-dev python3-venv
+          python3 -m venv /tmp/zigeffect-grpc-venv
+          /tmp/zigeffect-grpc-venv/bin/pip install --disable-pip-version-check \
+            grpcio==1.82.1 protobuf==6.33.5 absl-py==2.3.1 \
+            google-auth==2.40.3 cryptography==45.0.7 requests==2.32.5
+          if [ "${{ matrix.arch }}" = amd64 ]; then
+            go install "connectrpc.com/conformance/cmd/connectconformance@${CONNECT_CONFORMANCE_COMMIT}"
+            go install google.golang.org/grpc/interop/client@v1.81.1
+            mv "$HOME/go/bin/client" "$HOME/go/bin/grpc-go-interop-client"
+            go install google.golang.org/grpc/interop/server@v1.81.1
+            mv "$HOME/go/bin/server" "$HOME/go/bin/grpc-go-interop-server"
+          fi
+      - name: Native package tests (ReleaseSafe)
+        working-directory: packages/zigeffect-grpc
+        run: zig build test -Doptimize=ReleaseSafe --summary all
+      - name: Native package tests (ReleaseFast)
+        working-directory: packages/zigeffect-grpc
+        run: zig build test -Doptimize=ReleaseFast --summary all
+      - name: Protobuf lint and Buf breaking compatibility
+        if: matrix.arch == 'amd64'
+        run: |
+          bun install --frozen-lockfile
+          cd packages/zigeffect-grpc
+          zig build schema-compatibility-test -Dbuf=../../node_modules/.bin/buf --summary all
+      - name: Verify candidate receipt source binding
+        working-directory: packages/zigeffect-grpc
+        run: test "$(python3 tests/source_digest.py ../..)" = "$(jq -r .source.normalized_sha256 conformance/grpc-live.v2.candidate.json)"
+      - name: Coverage-guided parser and Protobuf fuzz campaign
+        if: matrix.arch == 'amd64'
+        working-directory: packages/zigeffect-grpc
+        run: zig build test -Doptimize=ReleaseSafe --fuzz=100K --summary all
+      - name: External gRPC interoperability
+        working-directory: packages/zigeffect-grpc
+        run: zig build external-test -Doptimize=ReleaseSafe -Dpython=/tmp/zigeffect-grpc-venv/bin/python --summary all
+      - name: Official gRPC interoperability (both roles, plaintext and TLS)
+        working-directory: packages/zigeffect-grpc
+        run: zig build official-interop-test -Doptimize=ReleaseSafe -Dpython=/tmp/zigeffect-grpc-venv/bin/python --summary all
+      - name: Official stable Connect client and server conformance
+        if: matrix.arch == 'amd64'
+        working-directory: packages/zigeffect-grpc
+        run: zig build connect-conformance-test -Doptimize=ReleaseSafe -Dconnect-conformance-runner="$HOME/go/bin/connectconformance" --summary all
+      - name: grpc-go differential interoperability (both roles, plaintext and TLS)
+        if: matrix.arch == 'amd64'
+        working-directory: packages/zigeffect-grpc
+        run: zig build grpc-go-interop-test -Doptimize=ReleaseSafe -Dgrpc-go-client="$HOME/go/bin/grpc-go-interop-client" -Dgrpc-go-server="$HOME/go/bin/grpc-go-interop-server" --summary all
+      - name: Connect-ES interoperability
+        if: matrix.arch == 'amd64'
+        working-directory: packages/zigeffect-grpc
+        run: zig build connect-test -Doptimize=ReleaseSafe --summary all
+      - name: Generated Solid client
+        if: matrix.arch == 'amd64'
+        run: |
+          bun install --frozen-lockfile
+          bun run --cwd packages/zigeffect-grpc-web typecheck
+          bun run --cwd packages/zigeffect-grpc-web test
+      - name: Cloud Run container smoke
+        env:
+          TARGETARCH: ${{ matrix.arch }}
+        run: packages/zigeffect-grpc/tests/run_cloud_run_container.sh /tmp/zigeffect-grpc-venv/bin/python
+      - name: Write passed architecture receipt
+        env:
+          ARCH: ${{ matrix.arch }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          arch = os.environ["ARCH"]
+          checks = [
+              "native-package-tests-release-safe",
+              "native-package-tests-release-fast",
+              "python-grpc-plaintext-and-tls-both-directions",
+              "official-grpc-applicable-cases-both-roles-plaintext-and-tls",
+              "cloud-run-container-smoke",
+          ]
+          if arch == "amd64":
+              checks.extend(["coverage-guided-fuzz-100k", "protobuf-buf-breaking-compatibility", "official-connect-server-conformance-120-cases", "official-connect-client-conformance-55-cases", "grpc-go-differential-both-roles-plaintext-and-tls", "connect-es-interoperability", "solid-generated-client"])
+          receipt = {
+              "schema": "zigeffect.grpc-linux-qualification",
+              "version": 1,
+              "status": "passed",
+              "complete": True,
+              "commit": os.environ["COMMIT_SHA"],
+              "run_id": os.environ["RUN_ID"],
+              "architecture": arch,
+              "checks": [{"id": check, "status": "passed"} for check in checks],
+          }
+          path = f"/tmp/zigeffect-grpc-linux-{arch}.json"
+          with open(path, "w", encoding="utf-8") as output:
+              json.dump(receipt, output, sort_keys=True)
+              output.write("\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zigeffect-grpc-linux-${{ matrix.arch }}-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            /tmp/zigeffect-grpc-linux-${{ matrix.arch }}.json
+            packages/zigeffect-grpc/.zigeffect/tests/suites/zigeffect-grpc-tests.json
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: zigeffect-grpc-${{ matrix.arch }}-${{ github.run_id }}
+          retention-days: 14
+          if-no-files-found: ignore
+          path: packages/zigeffect-grpc/.zigeffect/**/*.json
+
+  scheduled-load:
+    name: cloud run soak and adversarial campaign
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Install native and load dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnghttp2-dev libssl-dev python3-venv
+          python3 -m venv /tmp/zigeffect-grpc-venv
+          /tmp/zigeffect-grpc-venv/bin/pip install --disable-pip-version-check grpcio==1.82.1
+      - name: Malformed-frame and certificate-rotation campaign
+        env:
+          GRPC_ADVERSARIAL_ITERATIONS: ${{ inputs.adversarial_iterations || '1000' }}
+        run: packages/zigeffect-grpc/tests/run_adversarial_campaign.sh
+      - name: Fifteen-minute Cloud Run soak
+        env:
+          GRPC_LOAD_CALLS: 10000
+          GRPC_LOAD_WORKERS: 64
+          GRPC_SOAK_SECONDS: 900
+          GRPC_LOAD_RECEIPT: /tmp/zigeffect-grpc-cloud-run-soak.json
+        run: packages/zigeffect-grpc/tests/run_cloud_run_container.sh /tmp/zigeffect-grpc-venv/bin/python
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zigeffect-grpc-soak-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            /tmp/zigeffect-grpc-cloud-run-soak.json
+            packages/zigeffect-grpc/.zigeffect/tests/suites/zigeffect-grpc-adversarial-tests.json
+
+  differential-benchmark:
+    name: grpc-go tonic C++ differential benchmark
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install benchmark driver
+        run: |
+          python3 -m venv /tmp/zigeffect-grpc-venv
+          /tmp/zigeffect-grpc-venv/bin/pip install --disable-pip-version-check grpcio==1.82.1
+      - name: Run all runtimes, payload sizes, and RPC shapes
+        env:
+          GRPC_BENCH_RECEIPT: /tmp/zigeffect-grpc-differential-benchmark.json
+        run: packages/zigeffect-grpc/benchmarks/run_benchmarks.sh /tmp/zigeffect-grpc-venv/bin/python
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zigeffect-grpc-benchmark-${{ github.run_id }}
+          retention-days: 90
+          path: /tmp/zigeffect-grpc-differential-benchmark.json
+
+  release-candidate:
+    name: merge live prequalification evidence
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: [linux, scheduled-load, differential-benchmark]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: zigeffect-grpc-linux-*-${{ github.run_id }}
+          path: /tmp/zigeffect-grpc-qualification
+      - uses: actions/download-artifact@v4
+        with:
+          name: zigeffect-grpc-soak-${{ github.run_id }}
+          path: /tmp/zigeffect-grpc-qualification/soak
+      - uses: actions/download-artifact@v4
+        with:
+          name: zigeffect-grpc-benchmark-${{ github.run_id }}
+          path: /tmp/zigeffect-grpc-qualification/benchmark
+      - name: Merge architecture and soak evidence
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import glob, json, os
+          architecture_paths = glob.glob(
+              "/tmp/zigeffect-grpc-qualification/**/zigeffect-grpc-linux-*.json",
+              recursive=True,
+          )
+          architectures = [json.load(open(path, encoding="utf-8")) for path in architecture_paths]
+          if sorted(item["architecture"] for item in architectures) != ["amd64", "arm64"]:
+              raise SystemExit("both native Linux architecture receipts are required")
+          if any(item["status"] != "passed" or not item["complete"] for item in architectures):
+              raise SystemExit("an architecture receipt is incomplete")
+          soak_path = "/tmp/zigeffect-grpc-qualification/soak/zigeffect-grpc-cloud-run-soak.json"
+          soak = json.load(open(soak_path, encoding="utf-8"))
+          if soak["failures"] != 0 or soak["elapsed_seconds"] < 900:
+              raise SystemExit("the scheduled soak is incomplete")
+          if not soak.get("memory", {}).get("qualified", False):
+              raise SystemExit("the scheduled soak lacks bounded-memory evidence")
+          adversarial_paths = glob.glob(
+              "/tmp/zigeffect-grpc-qualification/soak/**/zigeffect-grpc-adversarial-tests.json",
+              recursive=True,
+          )
+          if len(adversarial_paths) != 1:
+              raise SystemExit("the defensive adversarial receipt is required")
+          adversarial = json.load(open(adversarial_paths[0], encoding="utf-8"))
+          counts = adversarial.get("counts", {})
+          if (
+              adversarial.get("status") != "passed"
+              or not adversarial.get("complete")
+              or counts.get("discovered") != counts.get("executed")
+              or counts.get("failed") != 0
+              or counts.get("pending") != 0
+              or counts.get("leaks") != 0
+              or counts.get("log_errors") != 0
+              or "GRPC_ADVERSARIAL_ITERATIONS=1000" not in adversarial.get("execution", {}).get("replay_command", "")
+          ):
+              raise SystemExit("the defensive adversarial receipt is incomplete")
+          benchmark_path = "/tmp/zigeffect-grpc-qualification/benchmark/zigeffect-grpc-differential-benchmark.json"
+          benchmark = json.load(open(benchmark_path, encoding="utf-8"))
+          if (
+              benchmark.get("status") != "passed"
+              or not benchmark.get("complete")
+              or len(benchmark.get("targets", [])) != 12
+          ):
+              raise SystemExit("the four-runtime differential benchmark is incomplete")
+          candidate = {
+              "schema": "zigeffect.grpc-live-prequalification",
+              "version": 2,
+              "status": "incomplete",
+              "complete": False,
+              "commit": os.environ["COMMIT_SHA"],
+              "run_id": os.environ["RUN_ID"],
+              "architectures": sorted(architectures, key=lambda item: item["architecture"]),
+              "adversarial": adversarial,
+              "benchmark": benchmark,
+              "soak": soak,
+              "blocking_checks": [
+                  "mixed-shape-24-hour-soak",
+                  "deployed-gcp-cloud-run-service-to-service",
+              ],
+              "promotion": "combine this evidence with the blocking checks; never promote this prequalification artifact by itself",
+          }
+          with open("/tmp/zigeffect-grpc-live-candidate.json", "w", encoding="utf-8") as output:
+              json.dump(candidate, output, sort_keys=True)
+              output.write("\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zigeffect-grpc-live-candidate-${{ github.run_id }}
+          retention-days: 90
+          path: /tmp/zigeffect-grpc-live-candidate.json

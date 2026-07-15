@@ -13,6 +13,7 @@ export type MarketingRoute =
   | "testing"
   | "agents"
   | "standard-library"
+  | "grpc"
   | "workflows"
   | "built-with";
 
@@ -22,6 +23,7 @@ const navItems: readonly { label: string; href: string; route: MarketingRoute }[
   { label: "Testing", href: "/testing", route: "testing" },
   { label: "Agents", href: "/agents", route: "agents" },
   { label: "Stdlib", href: "/standard-library", route: "standard-library" },
+  { label: "gRPC", href: "/grpc", route: "grpc" },
   { label: "Workflows", href: "/workflows", route: "workflows" },
   { label: "Built with it", href: "/built-with", route: "built-with" },
 ] as const;
@@ -79,7 +81,7 @@ export function MarketingFooter() {
     <footer class="site-footer deep-footer">
       <a class="brand footer-brand" href="/"><span class="brand-mark"><Layers3 size={21} /></span> ZigEffect</a>
       <p>Built with AI. Grounded in Zig. Verified by evidence.</p>
-      <div><a href="/how-it-works">How it works</a><a href="/standard-library">Stdlib</a><a href="/workflows">Workflows</a><a href="/built-with">Proof</a></div>
+      <div><a href="/how-it-works">How it works</a><a href="/standard-library">Stdlib</a><a href="/grpc">gRPC</a><a href="/workflows">Workflows</a><a href="/built-with">Proof</a></div>
     </footer>
   );
 }

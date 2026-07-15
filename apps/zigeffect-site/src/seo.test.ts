@@ -22,6 +22,11 @@ describe("ZigEffect marketing SEO contract", () => {
     expect(packageSource).toContain('"build": "vinxi build"');
   });
 
+  test("hydrates through one Solid runtime", () => {
+    expect(packageSource).toContain('"solid-js": "1.9.13"');
+    expect(appConfig).toContain('dedupe: ["solid-js"]');
+  });
+
   test("ships route-owned search social and application metadata", () => {
     expect(routeSource).toContain("<Title>");
     expect(routeSource).toContain('name="description"');
