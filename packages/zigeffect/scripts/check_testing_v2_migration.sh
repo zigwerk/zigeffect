@@ -4,24 +4,32 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT_DIR"
 
-build_files=(
-  packages/zigeffect/build.zig
-  packages/zigeffect-std/build.zig
-  packages/zigeffect-cli/build.zig
-  packages/zigeffect-postgres/build.zig
-  packages/zigeffect-quic/build.zig
-  packages/zigeffect-zio/build.zig
-  packages/ziac/build.zig
-  packages/zgroach/build.zig
-)
+mapfile_compat() {
+  local output_var="$1"
+  shift
+  local values=()
+  while IFS= read -r value; do values+=("$value"); done < <("$@")
+  eval "$output_var=(\"\${values[@]}\")"
+}
 
+list_build_files() {
+  git ls-files '**/build.zig' |
+    grep -Ev '^(packages/references/|.*/(zig-pkg|zig-out|\.zig-cache)/)'
+}
+
+mapfile_compat build_files list_build_files
+checked=0
 for file in "${build_files[@]}"; do
-  if ! grep -q 'test_runner = .{ .path = runner, .mode = .server }' "$file"; then
-    printf 'Testing v2 migration missing server runner helper: %s\n' "$file" >&2
+  if ! grep -q 'b\.addTest(' "$file"; then
+    continue
+  fi
+  checked=$((checked + 1))
+  if ! grep -q 'test_runner' "$file" || ! grep -q '\.mode = \.server' "$file"; then
+    printf 'Testing v2 server runner missing from tracked test build: %s\n' "$file" >&2
     exit 1
   fi
-  if grep -Eq '^[[:space:]]*const [^=]+=[[:space:]]*b\.addTest\(' "$file"; then
-    printf 'unmigrated direct b.addTest artifact: %s\n' "$file" >&2
+  if ! grep -q 'zigeffect_test_runner' "$file"; then
+    printf 'Testing v2 runner must come from an exported dependency module: %s\n' "$file" >&2
     exit 1
   fi
 done
@@ -34,4 +42,4 @@ if [[ "$template_tests" -eq 0 || "$template_tests" -ne "$template_v2_tests" ]]; 
   exit 1
 fi
 
-printf 'Testing v2 migration guard passed (%s build files, %s generated templates)\n' "${#build_files[@]}" "$template_v2_tests"
+printf 'Testing v2 migration guard passed (%s tracked test builds, %s generated templates).\n' "$checked" "$template_v2_tests"

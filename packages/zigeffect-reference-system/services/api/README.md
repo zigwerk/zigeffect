@@ -11,10 +11,12 @@ composes descriptions; only the process root or a runtime-backed transport
 interprets them. Do not introduce `EffectEnv`, `LayerGraph`, `ctx.runEffect`,
 or per-endpoint runtimes.
 
-The production profile currently isolates HTTP, Postgres, and OTLP behind a
-documented compatibility adapter bridge until those packages publish canonical
-kernel layers. That bridge is migration debt, not a second application
-architecture.
+The production API composes config, secrets, HTTP, Postgres, Redis, S3,
+transport, OTLP, lifecycle, and process signals as canonical scoped layers.
+The process owns one managed runtime and exposes its complete application map
+at `/.well-known/zigeffect/application-map`. The endpoint requires the
+`TRANSPORT_SECRET` value as a bearer credential and never constructs a second
+inspection runtime.
 
 ## Develop
 

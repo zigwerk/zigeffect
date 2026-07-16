@@ -42,110 +42,86 @@ pub fn Service(comptime Item: type) type {
     };
 }
 
-pub fn OfferEffect(comptime EffectEnv: type, comptime Item: type) type {
-    const QueueService = Service(Item);
+pub fn API(comptime Item: type) type {
     return struct {
-        pub const SuccessType = void;
-        pub const FailureType = std.mem.Allocator.Error || fx.FiberPrimitiveError;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{QueueService};
+        pub const operations: []const []const u8 = &.{ "Queue.offer", "Queue.take", "Queue.stats", "Queue.shutdown" };
+        queue: *Service(Item),
 
-        item: Item,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
+        pub fn offer(self: @This(), item: Item) (std.mem.Allocator.Error || fx.FiberPrimitiveError)!void {
+            return self.queue.offer(item);
         }
+        pub fn take(self: @This()) fx.FiberPrimitiveError!Item {
+            return self.queue.take();
+        }
+        pub fn stats(self: @This()) QueueStats {
+            return self.queue.stats();
+        }
+        pub fn shutdown(self: @This()) void {
+            self.queue.shutdown();
+        }
+    };
+}
 
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!void {
-            const queue = ctx.service(QueueService);
-            queue.offer(self.item) catch |err| {
-                _ = StdService.recordOperation(ctx, QueueService, "offer", queueOfferFailureStatus(err), @typeName(Item));
-                return err;
+pub fn Queue(comptime Item: type) type {
+    return fx.kernel.Service("zigeffect/std/Queue/" ++ @typeName(Item), API(Item));
+}
+
+pub fn layer(comptime Item: type, queue: *Service(Item)) @TypeOf(
+    fx.kernel.Layer.succeed(Queue(Item), API(Item){ .queue = queue }),
+) {
+    return fx.kernel.Layer.succeed(Queue(Item), .{ .queue = queue });
+}
+
+pub fn offer(comptime Item: type, item: Item) fx.kernel.Effect(
+    void,
+    std.mem.Allocator.Error || fx.FiberPrimitiveError,
+    .{Queue(Item)},
+).Stateful(Item) {
+    const Offer = fx.kernel.Effect(void, std.mem.Allocator.Error || fx.FiberPrimitiveError, .{Queue(Item)});
+    return Offer.fromState(Item, item, struct {
+        fn run(value: Item, ctx: *Offer.Context) Offer.FailureType!void {
+            ctx.service(Queue(Item)).offer(value) catch |failure| {
+                _ = StdService.recordSemantic(ctx, .span_recorded, Queue(Item).service_key, "Queue.offer", queueOfferFailureStatus(failure), @typeName(Item));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, QueueService, "offer", "success", @typeName(Item));
+            _ = StdService.recordSemantic(ctx, .span_recorded, Queue(Item).service_key, "Queue.offer", "success", @typeName(Item));
         }
-    };
+    }.run);
 }
 
-pub fn TakeEffect(comptime EffectEnv: type, comptime Item: type) type {
-    const QueueService = Service(Item);
-    return struct {
-        pub const SuccessType = Item;
-        pub const FailureType = fx.FiberPrimitiveError;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{QueueService};
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(_: @This(), ctx: *fx.Context(EffectEnv)) FailureType!Item {
-            const queue = ctx.service(QueueService);
-            const item = queue.take() catch |err| {
-                _ = StdService.recordOperation(ctx, QueueService, "take", queueTakeFailureStatus(err), @typeName(Item));
-                return err;
+pub fn take(comptime Item: type) fx.kernel.Effect(Item, fx.FiberPrimitiveError, .{Queue(Item)}) {
+    const Take = fx.kernel.Effect(Item, fx.FiberPrimitiveError, .{Queue(Item)});
+    return Take.fromFn(struct {
+        fn run(ctx: *Take.Context) fx.FiberPrimitiveError!Item {
+            const value = ctx.service(Queue(Item)).take() catch |failure| {
+                _ = StdService.recordSemantic(ctx, .span_recorded, Queue(Item).service_key, "Queue.take", queueTakeFailureStatus(failure), @typeName(Item));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, QueueService, "take", "success", @typeName(Item));
-            return item;
+            _ = StdService.recordSemantic(ctx, .span_recorded, Queue(Item).service_key, "Queue.take", "success", @typeName(Item));
+            return value;
         }
-    };
+    }.run);
 }
 
-pub fn StatsEffect(comptime EffectEnv: type, comptime Item: type) type {
-    const QueueService = Service(Item);
-    return struct {
-        pub const SuccessType = QueueStats;
-        pub const FailureType = error{};
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{QueueService};
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
+pub fn stats(comptime Item: type) fx.kernel.Effect(QueueStats, error{}, .{Queue(Item)}) {
+    const Stats = fx.kernel.Effect(QueueStats, error{}, .{Queue(Item)});
+    return Stats.fromFn(struct {
+        fn run(ctx: *Stats.Context) error{}!QueueStats {
+            const value = ctx.service(Queue(Item)).stats();
+            _ = StdService.recordSemantic(ctx, .span_recorded, Queue(Item).service_key, "Queue.stats", "success", @typeName(Item));
+            return value;
         }
+    }.run);
+}
 
-        pub fn run(_: @This(), ctx: *fx.Context(EffectEnv)) FailureType!QueueStats {
-            const queue = ctx.service(QueueService);
-            const queue_stats = queue.stats();
-            _ = StdService.recordOperation(ctx, QueueService, "stats", "success", @typeName(Item));
-            return queue_stats;
+pub fn shutdown(comptime Item: type) fx.kernel.Effect(void, error{}, .{Queue(Item)}) {
+    const Shutdown = fx.kernel.Effect(void, error{}, .{Queue(Item)});
+    return Shutdown.fromFn(struct {
+        fn run(ctx: *Shutdown.Context) error{}!void {
+            ctx.service(Queue(Item)).shutdown();
+            _ = StdService.recordSemantic(ctx, .span_recorded, Queue(Item).service_key, "Queue.shutdown", "closed", @typeName(Item));
         }
-    };
-}
-
-pub fn ShutdownEffect(comptime EffectEnv: type, comptime Item: type) type {
-    const QueueService = Service(Item);
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = error{};
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{QueueService};
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(_: @This(), ctx: *fx.Context(EffectEnv)) FailureType!void {
-            const queue = ctx.service(QueueService);
-            queue.shutdown();
-            _ = StdService.recordOperation(ctx, QueueService, "shutdown", "closed", @typeName(Item));
-        }
-    };
-}
-
-pub fn offerEffect(comptime EffectEnv: type, comptime Item: type, item: Item) OfferEffect(EffectEnv, Item) {
-    return .{ .item = item };
-}
-
-pub fn takeEffect(comptime EffectEnv: type, comptime Item: type) TakeEffect(EffectEnv, Item) {
-    return .{};
-}
-
-pub fn statsEffect(comptime EffectEnv: type, comptime Item: type) StatsEffect(EffectEnv, Item) {
-    return .{};
-}
-
-pub fn shutdownEffect(comptime EffectEnv: type, comptime Item: type) ShutdownEffect(EffectEnv, Item) {
-    return .{};
+    }.run);
 }
 
 fn queueOfferFailureStatus(err: anyerror) []const u8 {
@@ -165,52 +141,48 @@ fn queueTakeFailureStatus(err: anyerror) []const u8 {
 }
 
 test "Queue service offer take stats and shutdown are effect-native" {
-    const zstd = @import("../root.zig");
     const TextQueue = Service([]const u8);
 
     var queue = TextQueue.bounded(std.testing.allocator, 4);
     defer queue.deinit();
-    var provider = zstd.Service.Provider(.{TextQueue}).init(.{&queue});
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{TextQueue});
+    const root = layer([]const u8, &queue);
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{});
+    defer runtime.deinit();
 
-    try runtime.run(offerEffect(@TypeOf(provider), []const u8, "one"));
-    try runtime.run(offerEffect(@TypeOf(provider), []const u8, "two"));
+    try runtime.run(offer([]const u8, "one"));
+    try runtime.run(offer([]const u8, "two"));
 
-    const stats = try runtime.run(statsEffect(@TypeOf(provider), []const u8));
-    try std.testing.expectEqual(@as(usize, 2), stats.len);
-    try std.testing.expectEqual(@as(?usize, 2), stats.remaining_capacity);
+    const current = try runtime.run(stats([]const u8));
+    try std.testing.expectEqual(@as(usize, 2), current.len);
+    try std.testing.expectEqual(@as(?usize, 2), current.remaining_capacity);
 
-    try std.testing.expectEqualStrings("one", try runtime.run(takeEffect(@TypeOf(provider), []const u8)));
+    try std.testing.expectEqualStrings("one", try runtime.run(take([]const u8)));
 
-    try runtime.run(shutdownEffect(@TypeOf(provider), []const u8));
+    try runtime.run(shutdown([]const u8));
     try std.testing.expectError(
         error.QueueShutdown,
-        runtime.run(offerEffect(@TypeOf(provider), []const u8, "after-close")),
+        runtime.run(offer([]const u8, "after-close")),
     );
 }
 
 test "Queue offerEffect records backpressure when bounded queue is full" {
-    const zstd = @import("../root.zig");
     const TextQueue = Service([]const u8);
 
     var queue = TextQueue.bounded(std.testing.allocator, 1);
     defer queue.deinit();
-    var provider = zstd.Service.Provider(.{TextQueue}).init(.{&queue});
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    const root = layer([]const u8, &queue);
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{TextQueue})
-        .withCausalStore(&store);
-
-    try runtime.run(offerEffect(@TypeOf(provider), []const u8, "one"));
+    try runtime.run(offer([]const u8, "one"));
     try std.testing.expectError(
         error.QueueFull,
-        runtime.run(offerEffect(@TypeOf(provider), []const u8, "two")),
+        runtime.run(offer([]const u8, "two")),
     );
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, TextQueue, "offer", "backpressure"));
+    try std.testing.expect(StdService.hasOperation(snapshot, Queue([]const u8), "Queue.offer", "backpressure"));
 }

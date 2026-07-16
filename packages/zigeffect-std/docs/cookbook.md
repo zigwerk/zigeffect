@@ -13,11 +13,9 @@ Each example imports only the public facade:
 const zstd = @import("zigeffect_std");
 ```
 
-These are compile-tested capability examples. Copy application composition only
-from examples that use `zstd.fx.kernel` and one `ManagedRuntime`. The current
-`grpc_unary.zig` example intentionally exercises the adapter's legacy
-`LayerGraph` bridge until the native gRPC migration roadmap reaches G5; it is a
-compatibility test, not the recommended application root.
+These are compile-tested capability examples. Every effectful example uses
+`zstd.fx.kernel` and one `ManagedRuntime`; their layer composition is safe to
+copy into an application root.
 
 ## `schema_cli.zig`
 
@@ -196,10 +194,10 @@ This is the copyable starting point for local project automation.
 ## `grpc_unary.zig`
 
 This example verifies exact in-process gRPC method routing through the same
-contract consumed by the native transport. Its current `LayerGraph` wiring is
-explicit migration debt. Follow
-[`zigeffect-grpc/docs/effect-native-roadmap.md`](../../zigeffect-grpc/docs/effect-native-roadmap.md)
-instead of copying that root into a new application.
+contract consumed by the native transport. It provides the client with a
+canonical layer and executes the call through one managed runtime. Production
+services replace the in-process client with generated/native scoped layers
+without changing the calling effect.
 
 ## `causal_graph.zig`
 

@@ -55,7 +55,7 @@ Libraries and packages expose a
 tested effect-native public facade. Systems contain two independently buildable
 services and a shared package.
 
-Template-v12 local application/service projects use canonical service tags,
+Template-v14 local application/service projects use canonical service tags,
 fluent effects and layers, one named root program, and one
 `zstd.ManagedRuntime`. The runtime automatically owns the memory recorder,
 embedded NenDB topology, crash-safe property WAL, application map, and checked
@@ -63,10 +63,14 @@ shutdown. Libraries and generated service/layer modules export effects and
 default layers without hiding their own runtime. Tests replace layers without
 changing the program or its causal shape.
 
-The production profile still composes config, lifecycle, HTTP, Postgres, and
-OTLP through their legacy scoped-layer adapters. It remains a migration surface
-until those packages publish canonical kernel layers; it must not be treated as
-the reference architecture for new application code.
+The production profile composes config, lifecycle and process signals, HTTP,
+Postgres, and OTLP through canonical service tags and memoized scoped layers.
+It exports one root layer and one root program; the process creates exactly one
+`zstd.ManagedRuntime`. The same runtime serves a bounded, bearer-guarded agent
+map at `/.well-known/zigeffect/application-map`; database and map credentials
+come from `ZIGEFFECT_SECRET_DATABASE_URL` and
+`ZIGEFFECT_SECRET_AGENT_MAP_TOKEN`. Debug/ReleaseSafe integration tests compile
+this profile as standalone applications, services, and system children.
 
 Every generated manifest defaults to `agent_safe_v1` and declares source-policy,
 Debug, ReleaseSafe, allocation/leak, causal, schedule, and executor-equivalence

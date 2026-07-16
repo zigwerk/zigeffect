@@ -1,7 +1,9 @@
 {
   "port": 8080,
-  "database_url": "postgresql://database:5432/app?sslmode=require",
-  "otlp_host": "otel-collector",
+  "redis_port": 6379,
+  "s3_port": 9000,
+  "worker_transport_port": 7443,
   "otlp_port": 4318,
-  "migration_dialect": "postgresql"
+  "expected_connections": 100,
+  "allow_test_shutdown": false
 }

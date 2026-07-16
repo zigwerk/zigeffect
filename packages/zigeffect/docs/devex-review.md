@@ -50,14 +50,15 @@ Zig control flow remain non-negotiable.
 
 ## Remaining migration debt
 
-- Some standard-library modules still expose provider and environment-shaped
-  compatibility APIs.
-- HTTP, Postgres, OTEL, and parts of gRPC still publish legacy scoped-layer
-  adapters rather than canonical kernel layers.
-- The generated production profile therefore contains a documented adapter
-  bridge and is not the reference architecture for new application code.
-- Older engine domains still use `Effect(..., Env)`, `LayerGraph`, and
-  `ctx.runEffect` internally.
+- Older engine regression domains still use `Effect(..., Env)`, `LayerGraph`,
+  and related compatibility internals; canonical packages and applications do
+  not depend on them.
+- Production promotion still requires the declared Linux, live-service, soak,
+  and authenticated qualification matrices. Local passing receipts do not
+  promote unsupported targets.
+- Ziac still tracks targeted domain/provider migration work in its composition
+  roadmap, but its process roots and executor now use canonical services,
+  layers, runtime handles, statecharts, and workflows.
 
 Migration status is authoritative in:
 

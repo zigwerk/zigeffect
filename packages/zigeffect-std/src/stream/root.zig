@@ -20,9 +20,18 @@ pub fn ownedBytesAlloc(allocator: std.mem.Allocator, bytes: []const u8) !fx.Effe
         bytes: []u8,
         offset: usize = 0,
         closed: bool = false,
-        pub fn pull(self: *@This(), _: *fx.Context(EmptyEnv), output_allocator: std.mem.Allocator, max: usize) anyerror!fx.EffectStream(u8, anyerror, EmptyEnv).Chunk { const count = @min(max, self.bytes.len - self.offset); const output = try output_allocator.dupe(u8, self.bytes[self.offset .. self.offset + count]); self.offset += count; return .{ .allocator = output_allocator, .items = output, .end = self.offset == self.bytes.len }; }
-        pub fn close(self: *@This(), _: fx.StreamCloseReason) void { self.closed = true; }
-        pub fn deinit(self: *@This()) void { self.allocator.free(self.bytes); }
+        pub fn pull(self: *@This(), _: *fx.Context(EmptyEnv), output_allocator: std.mem.Allocator, max: usize) anyerror!fx.EffectStream(u8, anyerror, EmptyEnv).Chunk {
+            const count = @min(max, self.bytes.len - self.offset);
+            const output = try output_allocator.dupe(u8, self.bytes[self.offset .. self.offset + count]);
+            self.offset += count;
+            return .{ .allocator = output_allocator, .items = output, .end = self.offset == self.bytes.len };
+        }
+        pub fn close(self: *@This(), _: fx.StreamCloseReason) void {
+            self.closed = true;
+        }
+        pub fn deinit(self: *@This()) void {
+            self.allocator.free(self.bytes);
+        }
     };
     return fx.effectStreamFromOwnedPullerAlloc(u8, anyerror, EmptyEnv, Puller, allocator, .{ .allocator = allocator, .bytes = try allocator.dupe(u8, bytes) });
 }
@@ -82,7 +91,9 @@ test "effect stream backpressure model explores every bounded producer consumer 
         count: u8 = 0,
         valid_order: bool = true,
 
-        pub fn actionCount(_: @This()) usize { return 2; }
+        pub fn actionCount(_: @This()) usize {
+            return 2;
+        }
         pub fn runnable(self: @This(), action: usize) bool {
             return switch (action) {
                 0 => self.produced < 3 and self.count < self.queue.len,
@@ -107,8 +118,12 @@ test "effect stream backpressure model explores every bounded producer consumer 
                 else => unreachable,
             }
         }
-        pub fn isComplete(self: @This()) bool { return self.produced == 3 and self.consumed == 3; }
-        pub fn invariant(self: @This()) bool { return self.valid_order and self.count <= self.queue.len; }
+        pub fn isComplete(self: @This()) bool {
+            return self.produced == 3 and self.consumed == 3;
+        }
+        pub fn invariant(self: @This()) bool {
+            return self.valid_order and self.count <= self.queue.len;
+        }
         pub fn stateHash(self: @This()) u64 {
             return @as(u64, self.produced) |
                 (@as(u64, self.consumed) << 8) |
@@ -116,7 +131,9 @@ test "effect stream backpressure model explores every bounded producer consumer 
                 (@as(u64, self.queue[0]) << 24) |
                 (@as(u64, self.queue[1]) << 32);
         }
-        pub fn sourceRef(_: @This(), action: usize) ?u64 { return 138_000 + action; }
+        pub fn sourceRef(_: @This(), action: usize) ?u64 {
+            return 138_000 + action;
+        }
     };
 
     var evidence = try Schedules.explore(std.testing.allocator, Model{}, .{

@@ -3,6 +3,7 @@ const fx = @import("zigeffect");
 
 pub const Studio = @import("studio.zig");
 pub const Plan = @import("plan.zig");
+pub const Effect = @import("effect.zig");
 
 test {
     _ = @import("studio_test.zig");

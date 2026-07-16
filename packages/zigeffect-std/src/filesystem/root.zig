@@ -18,6 +18,7 @@ pub const API = struct {
         "FileSystem.readFile",
         "FileSystem.exists",
         "FileSystem.remove",
+        "FileSystem.listPaths",
     };
 
     state: *anyopaque,
@@ -25,6 +26,7 @@ pub const API = struct {
     read_file_alloc_fn: *const fn (*anyopaque, std.mem.Allocator, []const u8) FileSystemError![]const u8,
     exists_fn: *const fn (*anyopaque, []const u8) FileSystemError!bool,
     remove_fn: *const fn (*anyopaque, []const u8) FileSystemError!void,
+    list_paths_alloc_fn: *const fn (*anyopaque, std.mem.Allocator) FileSystemError![]const []const u8,
 
     pub fn from(comptime Implementation: type, implementation: *Implementation) API {
         return .{
@@ -53,6 +55,15 @@ pub const API = struct {
                     callDelete(typed, path) catch |failure| return mapFileSystemError(failure);
                 }
             }.call,
+            .list_paths_alloc_fn = struct {
+                fn call(raw: *anyopaque, allocator: std.mem.Allocator) FileSystemError![]const []const u8 {
+                    const typed: *Implementation = @ptrCast(@alignCast(raw));
+                    if (comptime @hasDecl(Implementation, "listPaths")) {
+                        return typed.listPaths(allocator) catch |failure| return mapFileSystemError(failure);
+                    }
+                    return error.IoFailure;
+                }
+            }.call,
         };
     }
 
@@ -70,6 +81,10 @@ pub const API = struct {
 
     pub fn remove(self: API, path: []const u8) FileSystemError!void {
         return self.remove_fn(self.state, path);
+    }
+
+    pub fn listPaths(self: API, allocator: std.mem.Allocator) FileSystemError![]const []const u8 {
+        return self.list_paths_alloc_fn(self.state, allocator);
     }
 };
 
@@ -218,135 +233,6 @@ pub const LocalFileSystem = struct {
         try self.dir.deleteFile(self.io, path);
     }
 };
-
-pub fn WriteFileEffect(comptime EffectEnv: type, comptime FileSystemService: type) type {
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{FileSystemService};
-
-        path: []const u8,
-        content: []const u8,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!void {
-            const fs = ctx.service(FileSystemService);
-            fs.writeFile(self.path, self.content) catch |err| {
-                _ = StdService.recordOperation(ctx, FileSystemService, "writeFile", "failure", self.path);
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, FileSystemService, "writeFile", "success", self.path);
-        }
-    };
-}
-
-pub fn ReadFileEffect(comptime EffectEnv: type, comptime FileSystemService: type) type {
-    return struct {
-        pub const SuccessType = []const u8;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{FileSystemService};
-
-        path: []const u8,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType![]const u8 {
-            const fs = ctx.service(FileSystemService);
-            const content = fs.readFileAlloc(ctx.allocator, self.path) catch |err| {
-                _ = StdService.recordOperation(ctx, FileSystemService, "readFile", "failure", self.path);
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, FileSystemService, "readFile", "success", self.path);
-            return content;
-        }
-    };
-}
-
-pub fn DeleteFileEffect(comptime EffectEnv: type, comptime FileSystemService: type) type {
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{FileSystemService};
-
-        path: []const u8,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!void {
-            const fs = ctx.service(FileSystemService);
-            try callDelete(fs, self.path);
-            _ = StdService.recordOperation(ctx, FileSystemService, "deleteFile", "success", self.path);
-        }
-    };
-}
-
-pub fn ExistsEffect(comptime EffectEnv: type, comptime FileSystemService: type) type {
-    return struct {
-        pub const SuccessType = bool;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{FileSystemService};
-
-        path: []const u8,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!bool {
-            const fs = ctx.service(FileSystemService);
-            const exists_value = callExists(fs, self.path) catch |err| {
-                _ = StdService.recordOperation(ctx, FileSystemService, "exists", "failure", self.path);
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, FileSystemService, "exists", if (exists_value) "present" else "missing", self.path);
-            return exists_value;
-        }
-    };
-}
-
-pub fn writeFileEffect(
-    comptime EffectEnv: type,
-    comptime FileSystemService: type,
-    path: []const u8,
-    content: []const u8,
-) WriteFileEffect(EffectEnv, FileSystemService) {
-    return .{ .path = path, .content = content };
-}
-
-pub fn readFileEffect(
-    comptime EffectEnv: type,
-    comptime FileSystemService: type,
-    path: []const u8,
-) ReadFileEffect(EffectEnv, FileSystemService) {
-    return .{ .path = path };
-}
-
-pub fn deleteFileEffect(
-    comptime EffectEnv: type,
-    comptime FileSystemService: type,
-    path: []const u8,
-) DeleteFileEffect(EffectEnv, FileSystemService) {
-    return .{ .path = path };
-}
-
-pub fn existsEffect(
-    comptime EffectEnv: type,
-    comptime FileSystemService: type,
-    path: []const u8,
-) ExistsEffect(EffectEnv, FileSystemService) {
-    return .{ .path = path };
-}
 
 const WriteInput = struct { path: []const u8, content: []const u8 };
 
@@ -501,34 +387,32 @@ test "FileSystem redacts secret-shaped paths in diagnostics" {
     try std.testing.expectEqualStrings("[REDACTED]", diagnostic);
 }
 
-test "FileSystem memory service effects read write delete and record facts" {
-    const zstd = @import("../root.zig");
-
+test "FileSystem memory layer effects read write delete and record facts" {
     var fs = MemoryFileSystem.init(std.testing.allocator);
     defer fs.deinit();
-    var provider = zstd.Service.Provider(.{MemoryFileSystem}).init(.{&fs});
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    const root = memory(&fs);
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{MemoryFileSystem})
-        .withCausalStore(&store);
+    try runtime.run(writeFile("notes/a.txt", "hello"));
+    try std.testing.expect(try runtime.run(exists("notes/a.txt")));
 
-    try runtime.run(writeFileEffect(@TypeOf(provider), MemoryFileSystem, "notes/a.txt", "hello"));
-    try std.testing.expect(try runtime.run(existsEffect(@TypeOf(provider), MemoryFileSystem, "notes/a.txt")));
-
-    const content = try runtime.run(readFileEffect(@TypeOf(provider), MemoryFileSystem, "notes/a.txt"));
+    const content = try runtime.run(readFileAlloc("notes/a.txt"));
     defer std.testing.allocator.free(content);
     try std.testing.expectEqualStrings("hello", content);
 
-    try runtime.run(deleteFileEffect(@TypeOf(provider), MemoryFileSystem, "notes/a.txt"));
-    try std.testing.expect(!try runtime.run(existsEffect(@TypeOf(provider), MemoryFileSystem, "notes/a.txt")));
+    try runtime.run(remove("notes/a.txt"));
+    try std.testing.expect(!try runtime.run(exists("notes/a.txt")));
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, MemoryFileSystem, "writeFile", "success"));
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, MemoryFileSystem, "readFile", "success"));
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, MemoryFileSystem, "deleteFile", "success"));
+    var completed: usize = 0;
+    for (snapshot.events) |event| {
+        if (event.kind == .io_completed and std.mem.eql(u8, event.service_key, FileSystem.service_key)) completed += 1;
+    }
+    try std.testing.expect(completed >= 4);
 }
 
 test "FileSystem local adapter writes reads exists and deletes in a temp dir" {

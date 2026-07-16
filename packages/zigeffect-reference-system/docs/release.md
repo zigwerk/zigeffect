@@ -6,12 +6,12 @@ The reference system is versioned with semantic versions and requires Zig
 and its SHA-256 digest are the release authority; package names or documentation
 alone are not.
 
-This system currently uses the generated production compatibility bridge for
-HTTP, Postgres, and OTLP. Its receipts qualify the recorded platform behavior;
-they do not qualify that legacy wiring as the canonical ZigEffect application
-architecture. Composition promotion additionally requires those adapters to
-publish canonical kernel layers and the reference system to use one
-`fx.kernel.ManagedRuntime` root.
+This system composes HTTP, Postgres, Redis, S3, transport, OTLP, configuration,
+secrets, lifecycle, workflow, and statechart capabilities as canonical kernel
+services and scoped layers. Each process owns one `zstd.ManagedRuntime`; its
+runtime-owned causal graph and guarded application map are the inspection
+authority. The conformance receipts qualify only the recorded platform matrix,
+not untested targets or future adapter versions.
 
 Supported evidence matrix:
 

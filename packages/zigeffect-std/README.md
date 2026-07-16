@@ -38,11 +38,12 @@ standard-library boundaries emit
 structural and semantic evidence through causal storage, logging, metrics, and
 tracing automatically.
 
-The standard library migration is incremental. `fx.kernel`, runtime-default
-facades, and the canonical FileSystem/Process service pattern are the reference
-architecture. Modules that still expose `EffectEnv`, provider tuples, or
-`layerGraph` are compatibility surfaces, not examples to copy. See the
-[canonical migration roadmap](docs/effect-native-roadmap.md) for exact status.
+The application-facing standard library now uses the canonical kernel
+throughout. Environment-shaped effects and layer graphs are quarantined inside
+the framework's retired engine tests; they are not exported by `zigeffect_std`
+modules or accepted by the architecture gate. See the
+[canonical migration roadmap](docs/effect-native-roadmap.md) for the completed
+surface and remaining low-level engine retirement work.
 
 ## Verify
 
@@ -83,62 +84,58 @@ with one import:
 
 - `fx.kernel` is the canonical service/effect/layer kernel and low-level,
   I/O-free managed interpreter.
-  `Service` currently contains migration helpers for legacy modules and is not
-  the application composition API.
+  `Service` provides semantic operation helpers for canonical service APIs.
 - `Schema` validates, decodes, encodes, transforms, and derives JSON/config
   boundaries with path-aware redacted issue lists.
+- `Parser` defines bounded, owned source-document facts and a replaceable parser
+  service/layer. The optional `zigeffect-parser` package supplies the pinned
+  native TypeScript/TSX/JavaScript/JSX provider.
 - `Json` writes deterministic redacted JSON payloads.
 - `Jsonl` appends and parses newline-delimited JSON feeds.
 - `Stream` re-exports engine pull streams and adds local line helpers.
 - `Sink` provides deterministic memory line sinks with redacted JSONL receipts.
-- `Queue` wraps engine queues; its stable-tag canonical layer migration is
-  pending S3.
-- `PubSub` wraps engine hubs; its stable-tag canonical layer migration is
-  pending S3.
+- `Queue` and `PubSub` expose stable tags, operation effects, and replaceable
+  memory/live layers.
 - `Cli` parses deterministic command specs, nested subcommands, Schema-powered
   typed options, source-aware defaults, built-ins, completions, effect-native
-  handlers, exit-code mapping, and run receipts. Command-to-effect routing is
-  behavior-complete; canonical runtime launch is pending S5.
+  handlers, exit-code mapping, run receipts, and a replaceable Runner service.
 - `Console` exposes requirement-free stdout/stderr effects over the runtime
   default plus captured/live override adapters.
-- `Env` provides an owned environment map for deterministic local runs; it is
-  not the canonical effect requirement model and migrates under S3.
+- `Env` provides owned environment data and canonical lookup effects; service
+  requirements remain tags rather than environment structs.
 - `Config` exposes a requirement-free lookup effect over the runtime default
   ConfigProvider plus layered deterministic override data.
-- `Secrets` provides shared redaction and secret-display helpers; a portable
-  secret-reference resolver service remains pending S3.
+- `Secrets` provides redaction, secret references, audits, and replaceable
+  resolver services/layers.
 - `FileSystem` defines the stable `zigeffect/std/FileSystem` service, canonical
   read/write/remove/exists effects, and memory/local layers.
 - `Path` joins, normalizes, and splits project paths.
-- `Workspace` models local project roots, snapshots, changed files, ignore
-  filtering, and snapshot/diff operations. Its canonical FileSystem-dependent
-  service layer remains pending S3.
+- `Workspace` provides a stable service, layers, and effects for project roots,
+  snapshots, changes, and ignore-aware diffs.
 - `Process` defines the stable `zigeffect/std/Process` service, a canonical run
   effect, and fake/local layers with bounded capture and redacted receipts.
-- `Observability` provides semantic annotations and redacted workbench/OTLP
-  shapes. Structural visibility comes from runtime aspects; legacy provider
-  wrappers remain migration debt.
+- `Observability` provides a stable recorder service plus logging, metric,
+  span, artifact, and redacted workbench/OTLP effects. Structural visibility
+  comes from runtime aspects.
 - `Testing` provides JSON and sentinel-secret assertions.
 - `Clock` exposes requirement-free time and sleep effects over the runtime
   default Clock reference.
 - `Randomness` exposes requirement-free fill and integer effects over the
   runtime default Random reference plus cryptographic/deterministic overrides.
-- `Ids` derives UUIDv7 and monotonic ULID values from Clock and Randomness. Its
-  selectable ID-policy service is not yet canonical.
+- `Ids` derives UUIDv7 and monotonic ULID values from Clock and Randomness
+  through a selectable canonical ID-policy service.
 - `Schedule` provides deterministic retry/polling steppers.
 - `Sql` defines SQL query contracts, owned results, Schema-backed
   row decoding, fake databases, transaction receipts, migrations, pool
-  leases/stats, and lifecycle facts. The local Postgres adapter lives in
-  `packages/zigeffect-postgres`; canonical service and scoped pool layers are
-  pending S4.
+  leases/stats, migrations, stable database/pool tags, and scoped layers. Live
+  Postgres implementations live in the adapter packages.
 - `Http` defines one portable client contract shared by live, fake, and
   scripted transports. Responses own their headers and bodies, header lookup is
   case-insensitive, and provider clients receive typed timeout, cancellation,
   body-limit, and transport failures plus parsed `Retry-After` metadata. It also
   provides deterministic memory routing, Schema-coded local JSON routes,
-  credential-safe request redaction, route receipts/traces, and WebSocket frame
-  codecs for local workbench feeds. Canonical client/server tags and scoped
-  adapter layers are pending S4.
+  credential-safe request redaction, route receipts/traces, WebSocket codecs,
+  and canonical client/server/router tags with scoped adapter layers.
 - `Grpc` is the repository-owned gRPC protocol and Effect boundary derived from
   the public-domain gRPC-zig source material. It provides canonical bounded
   message framing, fragmented stream decoding, metadata and deadlines,
@@ -147,15 +144,19 @@ with one import:
   secret-free receipts, and causal `grpc.call` facts. Live HTTP/2 transports
   must prove TLS, trailers, cancellation, multiplexing, connection reuse, flow
   control, bounds, and redacted diagnostics before qualification. The native
-  `packages/zigeffect-grpc` adapter supplies that qualified boundary with all
-  four RPC shapes and Python gRPC interoperability evidence. Its application
-  composition remains on the documented compatibility bridge until the native
-  gRPC roadmap reaches G5.
+  `packages/zigeffect-grpc` adapter supplies that boundary with generated
+  client/route layers, native server/channel layers, all four RPC shapes, and
+  Python gRPC interoperability evidence.
 - `Agent` records workbench-compatible local agent JSONL sessions, Codex and
   Claude Code process adapter commands, guardrails, artifacts, check receipts,
   effect-native process-backed agent runs, and supervised local multi-tool
-  sessions with redacted stdout/stderr artifacts. Higher-level canonical
-  program migration is pending S6.
+  sessions with redacted stdout/stderr artifacts through a canonical session
+  service and Process dependency.
+- `Statechart.Effect` turns a pure typed machine definition into a service
+  layer and requirement-typed step effect whose decisions are recorded into
+  the owning causal graph.
+- `Workflow` provides a journal service/layer plus append and replay effects so
+  durable work composes with ordinary application services.
 - `Application` records stable semantic facts for config loads, Schema decodes,
   CLI commands, requests, SQL transactions, external calls, artifacts,
   component dependencies, and acceptance checks. It reuses the core causal

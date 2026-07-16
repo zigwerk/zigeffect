@@ -42,120 +42,91 @@ pub fn Service(comptime Item: type) type {
     };
 }
 
-pub fn SubscribeEffect(comptime EffectEnv: type, comptime Item: type) type {
-    const PubSubService = Service(Item);
+pub fn API(comptime Item: type) type {
     return struct {
-        pub const SuccessType = SubscriptionId;
-        pub const FailureType = PubSubError;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{PubSubService};
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
+        pub const operations: []const []const u8 = &.{ "PubSub.subscribe", "PubSub.publish", "PubSub.take", "PubSub.unsubscribe" };
+        service: *Service(Item),
+        pub fn subscribe(self: @This()) PubSubError!SubscriptionId {
+            return self.service.subscribe();
         }
+        pub fn publish(self: @This(), item: Item) PubSubError!void {
+            return self.service.publish(item);
+        }
+        pub fn take(self: @This(), id: SubscriptionId) PubSubError!?Item {
+            return self.service.take(id);
+        }
+        pub fn unsubscribe(self: @This(), id: SubscriptionId) PubSubError!void {
+            return self.service.unsubscribe(id);
+        }
+    };
+}
 
-        pub fn run(_: @This(), ctx: *fx.Context(EffectEnv)) FailureType!SubscriptionId {
-            const pubsub = ctx.service(PubSubService);
-            const id = pubsub.subscribe() catch |err| {
-                _ = StdService.recordOperation(ctx, PubSubService, "subscribe", "failure", @typeName(Item));
-                return err;
+pub fn PubSub(comptime Item: type) type {
+    return fx.kernel.Service("zigeffect/std/PubSub/" ++ @typeName(Item), API(Item));
+}
+
+pub fn layer(comptime Item: type, service: *Service(Item)) @TypeOf(
+    fx.kernel.Layer.succeed(PubSub(Item), API(Item){ .service = service }),
+) {
+    return fx.kernel.Layer.succeed(PubSub(Item), .{ .service = service });
+}
+
+fn record(ctx: anytype, comptime Item: type, operation: []const u8, status: []const u8) void {
+    _ = StdService.recordSemantic(ctx, .span_recorded, PubSub(Item).service_key, operation, status, @typeName(Item));
+}
+
+pub fn subscribe(comptime Item: type) fx.kernel.Effect(SubscriptionId, PubSubError, .{PubSub(Item)}) {
+    const Subscribe = fx.kernel.Effect(SubscriptionId, PubSubError, .{PubSub(Item)});
+    return Subscribe.fromFn(struct {
+        fn run(ctx: *Subscribe.Context) PubSubError!SubscriptionId {
+            const id = ctx.service(PubSub(Item)).subscribe() catch |failure| {
+                record(ctx, Item, "PubSub.subscribe", "failure");
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, PubSubService, "subscribe", "success", @typeName(Item));
+            record(ctx, Item, "PubSub.subscribe", "success");
             return id;
         }
-    };
+    }.run);
 }
 
-pub fn PublishEffect(comptime EffectEnv: type, comptime Item: type) type {
-    const PubSubService = Service(Item);
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = PubSubError;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{PubSubService};
-
-        item: Item,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!void {
-            const pubsub = ctx.service(PubSubService);
-            pubsub.publish(self.item) catch |err| {
-                _ = StdService.recordOperation(ctx, PubSubService, "publish", publishFailureStatus(err), @typeName(Item));
-                return err;
+pub fn publish(comptime Item: type, item: Item) fx.kernel.Effect(void, PubSubError, .{PubSub(Item)}).Stateful(Item) {
+    const Publish = fx.kernel.Effect(void, PubSubError, .{PubSub(Item)});
+    return Publish.fromState(Item, item, struct {
+        fn run(value: Item, ctx: *Publish.Context) PubSubError!void {
+            ctx.service(PubSub(Item)).publish(value) catch |failure| {
+                record(ctx, Item, "PubSub.publish", publishFailureStatus(failure));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, PubSubService, "publish", "success", @typeName(Item));
+            record(ctx, Item, "PubSub.publish", "success");
         }
-    };
+    }.run);
 }
 
-pub fn TakeEffect(comptime EffectEnv: type, comptime Item: type) type {
-    const PubSubService = Service(Item);
-    return struct {
-        pub const SuccessType = ?Item;
-        pub const FailureType = PubSubError;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{PubSubService};
-
-        id: SubscriptionId,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!?Item {
-            const pubsub = ctx.service(PubSubService);
-            const item = pubsub.take(self.id) catch |err| {
-                _ = StdService.recordOperation(ctx, PubSubService, "take", takeFailureStatus(err), @typeName(Item));
-                return err;
+pub fn take(comptime Item: type, id: SubscriptionId) fx.kernel.Effect(?Item, PubSubError, .{PubSub(Item)}).Stateful(SubscriptionId) {
+    const Take = fx.kernel.Effect(?Item, PubSubError, .{PubSub(Item)});
+    return Take.fromState(SubscriptionId, id, struct {
+        fn run(value: SubscriptionId, ctx: *Take.Context) PubSubError!?Item {
+            const item = ctx.service(PubSub(Item)).take(value) catch |failure| {
+                record(ctx, Item, "PubSub.take", takeFailureStatus(failure));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, PubSubService, "take", if (item == null) "empty" else "success", @typeName(Item));
+            record(ctx, Item, "PubSub.take", if (item == null) "empty" else "success");
             return item;
         }
-    };
+    }.run);
 }
 
-pub fn UnsubscribeEffect(comptime EffectEnv: type, comptime Item: type) type {
-    const PubSubService = Service(Item);
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = PubSubError;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{PubSubService};
-
-        id: SubscriptionId,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!void {
-            const pubsub = ctx.service(PubSubService);
-            pubsub.unsubscribe(self.id) catch |err| {
-                _ = StdService.recordOperation(ctx, PubSubService, "unsubscribe", takeFailureStatus(err), @typeName(Item));
-                return err;
+pub fn unsubscribe(comptime Item: type, id: SubscriptionId) fx.kernel.Effect(void, PubSubError, .{PubSub(Item)}).Stateful(SubscriptionId) {
+    const Unsubscribe = fx.kernel.Effect(void, PubSubError, .{PubSub(Item)});
+    return Unsubscribe.fromState(SubscriptionId, id, struct {
+        fn run(value: SubscriptionId, ctx: *Unsubscribe.Context) PubSubError!void {
+            ctx.service(PubSub(Item)).unsubscribe(value) catch |failure| {
+                record(ctx, Item, "PubSub.unsubscribe", takeFailureStatus(failure));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, PubSubService, "unsubscribe", "success", @typeName(Item));
+            record(ctx, Item, "PubSub.unsubscribe", "success");
         }
-    };
-}
-
-pub fn subscribeEffect(comptime EffectEnv: type, comptime Item: type) SubscribeEffect(EffectEnv, Item) {
-    return .{};
-}
-
-pub fn publishEffect(comptime EffectEnv: type, comptime Item: type, item: Item) PublishEffect(EffectEnv, Item) {
-    return .{ .item = item };
-}
-
-pub fn takeEffect(comptime EffectEnv: type, comptime Item: type, id: SubscriptionId) TakeEffect(EffectEnv, Item) {
-    return .{ .id = id };
-}
-
-pub fn unsubscribeEffect(comptime EffectEnv: type, comptime Item: type, id: SubscriptionId) UnsubscribeEffect(EffectEnv, Item) {
-    return .{ .id = id };
+    }.run);
 }
 
 fn publishFailureStatus(err: anyerror) []const u8 {
@@ -173,52 +144,48 @@ fn takeFailureStatus(err: anyerror) []const u8 {
 }
 
 test "PubSub service broadcasts to multiple subscribers through effects" {
-    const zstd = @import("../root.zig");
     const TextPubSub = Service([]const u8);
 
     var pubsub = TextPubSub.init(std.testing.allocator, .bounded, 2);
     defer pubsub.deinit();
-    var provider = zstd.Service.Provider(.{TextPubSub}).init(.{&pubsub});
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{TextPubSub});
+    const root = layer([]const u8, &pubsub);
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{});
+    defer runtime.deinit();
 
-    const first = try runtime.run(subscribeEffect(@TypeOf(provider), []const u8));
-    const second = try runtime.run(subscribeEffect(@TypeOf(provider), []const u8));
+    const first = try runtime.run(subscribe([]const u8));
+    const second = try runtime.run(subscribe([]const u8));
 
-    try runtime.run(publishEffect(@TypeOf(provider), []const u8, "event-one"));
+    try runtime.run(publish([]const u8, "event-one"));
 
-    try std.testing.expectEqualStrings("event-one", (try runtime.run(takeEffect(@TypeOf(provider), []const u8, first))).?);
-    try std.testing.expectEqualStrings("event-one", (try runtime.run(takeEffect(@TypeOf(provider), []const u8, second))).?);
+    try std.testing.expectEqualStrings("event-one", (try runtime.run(take([]const u8, first))).?);
+    try std.testing.expectEqualStrings("event-one", (try runtime.run(take([]const u8, second))).?);
 
-    try runtime.run(unsubscribeEffect(@TypeOf(provider), []const u8, first));
-    try runtime.run(publishEffect(@TypeOf(provider), []const u8, "event-two"));
+    try runtime.run(unsubscribe([]const u8, first));
+    try runtime.run(publish([]const u8, "event-two"));
 
-    try std.testing.expectError(error.UnknownSubscription, runtime.run(takeEffect(@TypeOf(provider), []const u8, first)));
-    try std.testing.expectEqualStrings("event-two", (try runtime.run(takeEffect(@TypeOf(provider), []const u8, second))).?);
+    try std.testing.expectError(error.UnknownSubscription, runtime.run(take([]const u8, first)));
+    try std.testing.expectEqualStrings("event-two", (try runtime.run(take([]const u8, second))).?);
 }
 
 test "PubSub publishEffect records backpressure for bounded subscribers" {
-    const zstd = @import("../root.zig");
     const TextPubSub = Service([]const u8);
 
     var pubsub = TextPubSub.init(std.testing.allocator, .bounded, 1);
     defer pubsub.deinit();
-    var provider = zstd.Service.Provider(.{TextPubSub}).init(.{&pubsub});
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    const root = layer([]const u8, &pubsub);
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{TextPubSub})
-        .withCausalStore(&store);
-
-    _ = try runtime.run(subscribeEffect(@TypeOf(provider), []const u8));
-    try runtime.run(publishEffect(@TypeOf(provider), []const u8, "one"));
+    _ = try runtime.run(subscribe([]const u8));
+    try runtime.run(publish([]const u8, "one"));
     try std.testing.expectError(
         error.SubscriberFull,
-        runtime.run(publishEffect(@TypeOf(provider), []const u8, "two")),
+        runtime.run(publish([]const u8, "two")),
     );
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, TextPubSub, "publish", "backpressure"));
+    try std.testing.expect(StdService.hasOperation(snapshot, PubSub([]const u8), "PubSub.publish", "backpressure"));
 }

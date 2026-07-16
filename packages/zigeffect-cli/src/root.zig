@@ -2613,7 +2613,7 @@ fn addExecutableProject(
         .{ "__ADAPTER_ZON_DEPENDENCIES__", adapter_zon },
         .{ "__SHARED_ZON_DEPENDENCY__", if (with_shared) "        .shared = .{ .path = \"../../packages/shared\" }," else "" },
     });
-    try addRenderedAt(plan, prefix, "src/main.zig", templates.main_source, &.{});
+    try addRenderedAt(plan, prefix, "src/main.zig", if (real_profile) templates.production_main_source else templates.main_source, &.{});
     try addRenderedAt(plan, prefix, "src/app.zig", if (real_profile) templates.production_app_source else templates.app_source, &.{
         .{ "__PROJECT_NAME__", component_name },
         .{ "__SHARED_SOURCE_IMPORT__", if (with_shared) "const shared = @import(\"shared\");" else "" },
@@ -2622,7 +2622,7 @@ fn addExecutableProject(
     if (real_profile) {
         try addRenderedAt(plan, prefix, "src/production_wiring.zig", templates.production_wiring_source, &.{});
         try addRenderedAt(plan, prefix, "src/causal_graph.zig", templates.causal_graph_source, &.{});
-        try addRenderedAt(plan, prefix, "config.example.json", "{\n  \"port\": 8080,\n  \"database_url\": \"postgresql://database:5432/app?sslmode=require\",\n  \"otlp_host\": \"otel-collector\",\n  \"otlp_port\": 4318,\n  \"migration_dialect\": \"postgresql\"\n}\n", &.{});
+        try addRenderedAt(plan, prefix, "config.example.json", "{\n  \"port\": 8080,\n  \"otlp_host\": \"otel-collector\",\n  \"otlp_port\": 4318,\n  \"migration_dialect\": \"postgresql\"\n}\n", &.{});
         try addRenderedAt(plan, prefix, "test/root_test.zig", templates.production_test, &.{});
     } else {
         try addRenderedAt(plan, prefix, "src/config.zig", templates.config_source, &.{});
@@ -4156,7 +4156,7 @@ test "local application scaffolds teach only the canonical service layer and man
     }) |contract| try std.testing.expect(std.mem.indexOf(u8, skill, contract) != null);
     try std.testing.expect(std.mem.indexOf(u8, readme, "## Architecture") != null);
     try std.testing.expect(std.mem.indexOf(u8, readme, "`zstd.ManagedRuntime`") != null);
-    try std.testing.expect(std.mem.indexOf(u8, readme, "compatibility adapter bridge") != null);
+    try std.testing.expect(std.mem.indexOf(u8, readme, "memoized scoped") != null);
     try std.testing.expect(std.mem.indexOf(u8, acceptance_test, "context.causalStore()") != null);
     try std.testing.expect(std.mem.indexOf(u8, acceptance_test, "app.rootLayer()") != null);
     try std.testing.expect(std.mem.indexOf(u8, acceptance_test, "assertions.event(") != null);
@@ -4243,11 +4243,23 @@ test "production scaffolds compose adapters as layers outside the root effect" {
         "postgres.sessionLayer()",
         "postgres.poolLayer()",
         "otel.exporterLayer()",
-        "zstd.fx.layerGraph",
-        ".withCausalStore(&causal_store)",
+        "zstd.ManagedRuntime",
+        "pub fn rootLayer",
+        "http.ApplicationMapSlot",
+        "http.RuntimeApplicationMapHandler",
+        "zstd.Security.secureEql",
+        "runtime.agentMapJsonAlloc",
+        "zstd.Application.Lifecycle.signalLayer()",
     }) |contract| try std.testing.expect(std.mem.indexOf(u8, wiring, contract) != null);
 
-    const effect_start = std.mem.indexOf(u8, wiring, "fn ProductionEffect") orelse return error.MissingProductionEffect;
+    const config_example = plan.find("config.example.json").?.content;
+    try std.testing.expect(std.mem.indexOf(u8, config_example, "database_url") == null);
+    try std.testing.expect(std.mem.indexOf(u8, config_example, "agent_map_token") == null);
+    try std.testing.expect(std.mem.indexOf(u8, plan.find("src/main.zig").?.content, "init.minimal.environ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, wiring, "allocator.create(") == null);
+    try std.testing.expect(std.mem.indexOf(u8, wiring, "HandlerBundle") == null);
+
+    const effect_start = std.mem.indexOf(u8, wiring, "pub fn program") orelse return error.MissingProductionEffect;
     const root_start = std.mem.indexOfPos(u8, wiring, effect_start, "pub fn run(") orelse return error.MissingCompositionRoot;
     const effect_source = wiring[effect_start..root_start];
     for ([_][]const u8{
@@ -4255,6 +4267,8 @@ test "production scaffolds compose adapters as layers outside the root effect" {
         "postgres.Session.init",
         "postgres.Pool.initAlloc",
         "otel.Exporter.init",
+        "CausalStore.init",
+        "layerGraph",
     }) |forbidden| try std.testing.expect(std.mem.indexOf(u8, effect_source, forbidden) == null);
 }
 

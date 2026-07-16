@@ -142,9 +142,19 @@ pub fn rowStreamAlloc(allocator: std.mem.Allocator, result_value: QueryResult) !
         result: QueryResult,
         offset: usize = 0,
         closed: bool = false,
-        pub fn pull(self: *@This(), _: *fx.Context(Stream.EmptyEnv), output_allocator: std.mem.Allocator, max: usize) anyerror!fx.EffectStream(Row, anyerror, Stream.EmptyEnv).Chunk { const count = @min(max, self.result.rows.len - self.offset); const rows = try output_allocator.alloc(Row, count); @memcpy(rows, self.result.rows[self.offset .. self.offset + count]); self.offset += count; return .{ .allocator = output_allocator, .items = rows, .end = self.offset == self.result.rows.len }; }
-        pub fn close(self: *@This(), _: fx.StreamCloseReason) void { self.closed = true; }
-        pub fn deinit(self: *@This()) void { self.result.deinit(self.allocator); }
+        pub fn pull(self: *@This(), _: *fx.Context(Stream.EmptyEnv), output_allocator: std.mem.Allocator, max: usize) anyerror!fx.EffectStream(Row, anyerror, Stream.EmptyEnv).Chunk {
+            const count = @min(max, self.result.rows.len - self.offset);
+            const rows = try output_allocator.alloc(Row, count);
+            @memcpy(rows, self.result.rows[self.offset .. self.offset + count]);
+            self.offset += count;
+            return .{ .allocator = output_allocator, .items = rows, .end = self.offset == self.result.rows.len };
+        }
+        pub fn close(self: *@This(), _: fx.StreamCloseReason) void {
+            self.closed = true;
+        }
+        pub fn deinit(self: *@This()) void {
+            self.result.deinit(self.allocator);
+        }
     };
     return fx.effectStreamFromOwnedPullerAlloc(Row, anyerror, Stream.EmptyEnv, Puller, allocator, .{ .allocator = allocator, .result = result });
 }
@@ -486,13 +496,13 @@ pub fn poolStatsJsonAlloc(allocator: std.mem.Allocator, stats: PoolStats) std.me
     });
 }
 
-pub fn Pool(comptime Database: type) type {
+pub fn Pool(comptime DatabaseImplementation: type) type {
     return struct {
         const Self = @This();
 
         pub const Lease = struct {
             pool: *Self,
-            database: *Database,
+            database: *DatabaseImplementation,
             released: bool = false,
 
             pub fn release(self: *@This()) error{PoolReleaseWithoutCheckout}!void {
@@ -506,15 +516,15 @@ pub fn Pool(comptime Database: type) type {
             }
         };
 
-        database: *Database,
+        database: *DatabaseImplementation,
         capacity: usize,
         checked_out: usize = 0,
 
-        pub fn init(database: *Database, capacity: usize) Self {
+        pub fn init(database: *DatabaseImplementation, capacity: usize) Self {
             return .{ .database = database, .capacity = capacity };
         }
 
-        pub fn checkout(self: *Self) error{PoolExhausted}!*Database {
+        pub fn checkout(self: *Self) error{PoolExhausted}!*DatabaseImplementation {
             if (self.checked_out >= self.capacity) return error.PoolExhausted;
             self.checked_out += 1;
             return self.database;
@@ -621,237 +631,237 @@ fn transactionReceiptJsonAlloc(
     });
 }
 
-pub fn QueryEffect(comptime EffectEnv: type, comptime Database: type) type {
-    return struct {
-        pub const SuccessType = QueryResult;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Database};
-
-        statement: Statement,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!QueryResult {
-            const database = ctx.service(Database);
-            const detail = redactStatementAlloc(ctx.allocator, self.statement) catch |err| {
-                _ = StdService.recordOperation(ctx, Database, "sql.query", "failure", @errorName(err));
-                return err;
-            };
-            defer ctx.allocator.free(detail);
-
-            const result = database.queryAlloc(ctx.allocator, self.statement) catch |err| {
-                _ = StdService.recordOperation(ctx, Database, "sql.query", "failure", detail);
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, Database, "sql.query", "success", detail);
-            return result;
-        }
+pub const DatabaseApi = struct {
+    pub const operations: []const []const u8 = &.{
+        "Sql.query",
+        "Sql.queryClassified",
+        "Sql.begin",
+        "Sql.commit",
+        "Sql.rollback",
+        "Sql.migrate",
     };
+
+    state: *anyopaque,
+    query_alloc_fn: *const fn (*anyopaque, std.mem.Allocator, Statement) anyerror!QueryResult,
+    query_classified_fn: *const fn (*anyopaque, std.mem.Allocator, Statement) External.Result(QueryResult),
+    begin_fn: *const fn (*anyopaque) anyerror!void,
+    commit_fn: *const fn (*anyopaque) anyerror!void,
+    rollback_fn: *const fn (*anyopaque) anyerror!void,
+    migrate_fn: *const fn (*anyopaque, std.mem.Allocator, []const Migration) anyerror!void,
+
+    pub fn from(comptime Implementation: type, implementation: *Implementation) DatabaseApi {
+        return .{
+            .state = implementation,
+            .query_alloc_fn = struct {
+                fn call(raw: *anyopaque, allocator: std.mem.Allocator, statement: Statement) anyerror!QueryResult {
+                    return (@as(*Implementation, @ptrCast(@alignCast(raw)))).queryAlloc(allocator, statement);
+                }
+            }.call,
+            .query_classified_fn = struct {
+                fn call(raw: *anyopaque, allocator: std.mem.Allocator, statement: Statement) External.Result(QueryResult) {
+                    const typed: *Implementation = @ptrCast(@alignCast(raw));
+                    if (comptime @hasDecl(Implementation, "queryClassifiedAlloc")) return typed.queryClassifiedAlloc(allocator, statement);
+                    const result = typed.queryAlloc(allocator, statement) catch |failure| {
+                        return .{ .failure = External.Failure.fromError("sql", "query", failure) };
+                    };
+                    return .{ .success = result };
+                }
+            }.call,
+            .begin_fn = operationFn(Implementation, "begin"),
+            .commit_fn = operationFn(Implementation, "commit"),
+            .rollback_fn = operationFn(Implementation, "rollback"),
+            .migrate_fn = struct {
+                fn call(raw: *anyopaque, allocator: std.mem.Allocator, migrations: []const Migration) anyerror!void {
+                    const typed: *Implementation = @ptrCast(@alignCast(raw));
+                    if (comptime @hasDecl(Implementation, "migrateAlloc")) return typed.migrateAlloc(allocator, migrations);
+                    return error.UnsupportedSqlOperation;
+                }
+            }.call,
+        };
+    }
+
+    fn operationFn(comptime Implementation: type, comptime name: []const u8) *const fn (*anyopaque) anyerror!void {
+        return struct {
+            fn call(raw: *anyopaque) anyerror!void {
+                const typed: *Implementation = @ptrCast(@alignCast(raw));
+                if (comptime @hasDecl(Implementation, name)) return @call(.auto, @field(Implementation, name), .{typed});
+                return error.UnsupportedSqlOperation;
+            }
+        }.call;
+    }
+
+    pub fn queryAlloc(self: DatabaseApi, allocator: std.mem.Allocator, statement: Statement) anyerror!QueryResult {
+        return self.query_alloc_fn(self.state, allocator, statement);
+    }
+    pub fn queryClassifiedAlloc(self: DatabaseApi, allocator: std.mem.Allocator, statement: Statement) External.Result(QueryResult) {
+        return self.query_classified_fn(self.state, allocator, statement);
+    }
+    pub fn begin(self: DatabaseApi) anyerror!void {
+        return self.begin_fn(self.state);
+    }
+    pub fn commit(self: DatabaseApi) anyerror!void {
+        return self.commit_fn(self.state);
+    }
+    pub fn rollback(self: DatabaseApi) anyerror!void {
+        return self.rollback_fn(self.state);
+    }
+    pub fn migrate(self: DatabaseApi, allocator: std.mem.Allocator, migrations: []const Migration) anyerror!void {
+        return self.migrate_fn(self.state, allocator, migrations);
+    }
+};
+
+pub const Database = fx.kernel.Service("zigeffect/std/SqlDatabase", DatabaseApi);
+
+pub fn databaseLayer(comptime Implementation: type, implementation: *Implementation) @TypeOf(
+    fx.kernel.Layer.succeed(Database, DatabaseApi.from(Implementation, implementation)),
+) {
+    return fx.kernel.Layer.succeed(Database, DatabaseApi.from(Implementation, implementation));
 }
 
-pub fn QueryClassifiedEffect(comptime EffectEnv: type, comptime Database: type) type {
-    return struct {
-        pub const SuccessType = External.Result(QueryResult);
-        pub const FailureType = error{};
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Database};
+pub const PoolApi = struct {
+    pub const operations: []const []const u8 = &.{ "SqlPool.checkout", "SqlPool.release", "SqlPool.stats" };
+    state: *anyopaque,
+    checkout_fn: *const fn (*anyopaque) anyerror!DatabaseApi,
+    release_fn: *const fn (*anyopaque) anyerror!void,
+    stats_fn: *const fn (*anyopaque) PoolStats,
 
-        statement: Statement,
+    pub fn from(comptime Implementation: type, pool: *Pool(Implementation)) PoolApi {
+        return .{
+            .state = pool,
+            .checkout_fn = struct {
+                fn call(raw: *anyopaque) anyerror!DatabaseApi {
+                    const typed: *Pool(Implementation) = @ptrCast(@alignCast(raw));
+                    return DatabaseApi.from(Implementation, try typed.checkout());
+                }
+            }.call,
+            .release_fn = struct {
+                fn call(raw: *anyopaque) anyerror!void {
+                    return (@as(*Pool(Implementation), @ptrCast(@alignCast(raw)))).release();
+                }
+            }.call,
+            .stats_fn = struct {
+                fn call(raw: *anyopaque) PoolStats {
+                    return (@as(*Pool(Implementation), @ptrCast(@alignCast(raw)))).stats();
+                }
+            }.call,
+        };
+    }
 
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
+    pub fn checkout(self: PoolApi) anyerror!DatabaseApi {
+        return self.checkout_fn(self.state);
+    }
+    pub fn release(self: PoolApi) anyerror!void {
+        return self.release_fn(self.state);
+    }
+    pub fn stats(self: PoolApi) PoolStats {
+        return self.stats_fn(self.state);
+    }
+};
+
+pub const DatabasePool = fx.kernel.Service("zigeffect/std/SqlDatabasePool", PoolApi);
+
+pub fn poolLayer(comptime Implementation: type, pool: *Pool(Implementation)) @TypeOf(
+    fx.kernel.Layer.succeed(DatabasePool, PoolApi.from(Implementation, pool)),
+) {
+    return fx.kernel.Layer.succeed(DatabasePool, PoolApi.from(Implementation, pool));
+}
+
+pub fn query(statement: Statement) fx.kernel.Effect(QueryResult, anyerror, .{Database}).Stateful(Statement) {
+    const Query = fx.kernel.Effect(QueryResult, anyerror, .{Database});
+    return Query.fromState(Statement, statement, struct {
+        fn run(value: Statement, ctx: *Query.Context) anyerror!QueryResult {
+            const detail = try redactStatementAlloc(ctx.allocator(), value);
+            defer ctx.allocator().free(detail);
+            const operation = StdService.beginOperation(ctx, Database.service_key, "Sql.query", detail);
+            const result = ctx.service(Database).queryAlloc(ctx.allocator(), value) catch |failure| {
+                _ = StdService.completeOperation(ctx, operation, "failure", @errorName(failure));
+                return failure;
+            };
+            _ = StdService.completeOperation(ctx, operation, "success", detail);
+            return result;
         }
+    }.run);
+}
 
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!SuccessType {
-            const database = ctx.service(Database);
-            const result = database.queryClassifiedAlloc(ctx.allocator, self.statement);
+pub fn queryClassified(statement: Statement) fx.kernel.Effect(External.Result(QueryResult), error{}, .{Database}).Stateful(Statement) {
+    const Query = fx.kernel.Effect(External.Result(QueryResult), error{}, .{Database});
+    return Query.fromState(Statement, statement, struct {
+        fn run(value: Statement, ctx: *Query.Context) error{}!External.Result(QueryResult) {
+            const result = ctx.service(Database).queryClassifiedAlloc(ctx.allocator(), value);
             switch (result) {
-                .success => {
-                    _ = StdService.recordOperation(ctx, Database, "sql.query", "success", "classified");
-                },
-                .failure => |failure| {
-                    _ = StdService.recordOperation(ctx, Database, "sql.query", @tagName(failure.class), failure.detail);
-                },
+                .success => _ = StdService.recordSemantic(ctx, .span_recorded, Database.service_key, "Sql.queryClassified", "success", "classified result"),
+                .failure => |failure| _ = StdService.recordSemantic(ctx, .span_recorded, Database.service_key, "Sql.queryClassified", @tagName(failure.class), failure.detail),
             }
             return result;
         }
-    };
+    }.run);
 }
 
-pub fn queryClassifiedEffect(comptime EffectEnv: type, comptime Database: type, statement: Statement) QueryClassifiedEffect(EffectEnv, Database) {
-    return .{ .statement = statement };
-}
-
-pub fn CheckoutEffect(comptime EffectEnv: type, comptime Database: type) type {
-    const SqlPool = Pool(Database);
-    return struct {
-        pub const SuccessType = *Database;
-        pub const FailureType = error{PoolExhausted};
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{SqlPool};
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(_: @This(), ctx: *fx.Context(EffectEnv)) FailureType!*Database {
-            const pool = ctx.service(SqlPool);
-            const database = pool.checkout() catch |err| {
-                _ = StdService.recordOperation(ctx, SqlPool, "sql.checkout", "failure", @errorName(err));
-                return err;
+pub fn checkout() fx.kernel.Effect(DatabaseApi, anyerror, .{DatabasePool}) {
+    return fx.kernel.Effect(DatabaseApi, anyerror, .{DatabasePool}).fromFn(struct {
+        fn run(ctx: *fx.kernel.ContextView(.{DatabasePool})) anyerror!DatabaseApi {
+            const database = ctx.service(DatabasePool).checkout() catch |failure| {
+                _ = StdService.recordSemantic(ctx, .span_recorded, DatabasePool.service_key, "SqlPool.checkout", "failure", @errorName(failure));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, SqlPool, "sql.checkout", "success", @typeName(Database));
+            _ = StdService.recordSemantic(ctx, .span_recorded, DatabasePool.service_key, "SqlPool.checkout", "success", "bounded lease");
             return database;
         }
-    };
+    }.run);
 }
 
-pub fn ReleaseEffect(comptime EffectEnv: type, comptime Database: type) type {
-    const SqlPool = Pool(Database);
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = error{PoolReleaseWithoutCheckout};
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{SqlPool};
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(_: @This(), ctx: *fx.Context(EffectEnv)) FailureType!void {
-            const pool = ctx.service(SqlPool);
-            pool.release() catch |err| {
-                _ = StdService.recordOperation(ctx, SqlPool, "sql.release", "failure", @errorName(err));
-                return err;
+pub fn release() fx.kernel.Effect(void, anyerror, .{DatabasePool}) {
+    return fx.kernel.Effect(void, anyerror, .{DatabasePool}).fromFn(struct {
+        fn run(ctx: *fx.kernel.ContextView(.{DatabasePool})) anyerror!void {
+            ctx.service(DatabasePool).release() catch |failure| {
+                _ = StdService.recordSemantic(ctx, .span_recorded, DatabasePool.service_key, "SqlPool.release", "failure", @errorName(failure));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, SqlPool, "sql.release", "success", @typeName(Database));
+            _ = StdService.recordSemantic(ctx, .span_recorded, DatabasePool.service_key, "SqlPool.release", "success", "lease returned");
         }
-    };
+    }.run);
 }
 
-pub fn BeginEffect(comptime EffectEnv: type, comptime Database: type) type {
-    const SqlPool = Pool(Database);
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{SqlPool};
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(_: @This(), ctx: *fx.Context(EffectEnv)) FailureType!void {
-            const pool = ctx.service(SqlPool);
-            pool.database.begin() catch |err| {
-                _ = StdService.recordOperation(ctx, SqlPool, "sql.begin", "failure", @errorName(err));
-                return err;
+const DatabaseOperation = enum { begin, commit, rollback };
+fn databaseOperation(comptime operation: DatabaseOperation) fx.kernel.Effect(void, anyerror, .{Database}) {
+    return fx.kernel.Effect(void, anyerror, .{Database}).fromFn(struct {
+        fn run(ctx: *fx.kernel.ContextView(.{Database})) anyerror!void {
+            const database = ctx.service(Database).*;
+            const result = switch (operation) {
+                .begin => database.begin(),
+                .commit => database.commit(),
+                .rollback => database.rollback(),
             };
-            _ = StdService.recordOperation(ctx, SqlPool, "sql.begin", "success", @typeName(Database));
-        }
-    };
-}
-
-pub fn CommitEffect(comptime EffectEnv: type, comptime Database: type) type {
-    const SqlPool = Pool(Database);
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{SqlPool};
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(_: @This(), ctx: *fx.Context(EffectEnv)) FailureType!void {
-            const pool = ctx.service(SqlPool);
-            pool.database.commit() catch |err| {
-                _ = StdService.recordOperation(ctx, SqlPool, "sql.commit", "failure", @errorName(err));
-                return err;
+            result catch |failure| {
+                _ = StdService.recordSemantic(ctx, .span_recorded, Database.service_key, "Sql." ++ @tagName(operation), "failure", @errorName(failure));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, SqlPool, "sql.commit", "success", @typeName(Database));
+            _ = StdService.recordSemantic(ctx, .span_recorded, Database.service_key, "Sql." ++ @tagName(operation), "success", "transaction transition");
         }
-    };
+    }.run);
 }
 
-pub fn RollbackEffect(comptime EffectEnv: type, comptime Database: type) type {
-    const SqlPool = Pool(Database);
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{SqlPool};
+pub fn begin() fx.kernel.Effect(void, anyerror, .{Database}) {
+    return databaseOperation(.begin);
+}
+pub fn commit() fx.kernel.Effect(void, anyerror, .{Database}) {
+    return databaseOperation(.commit);
+}
+pub fn rollback() fx.kernel.Effect(void, anyerror, .{Database}) {
+    return databaseOperation(.rollback);
+}
 
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(_: @This(), ctx: *fx.Context(EffectEnv)) FailureType!void {
-            const pool = ctx.service(SqlPool);
-            pool.database.rollback() catch |err| {
-                _ = StdService.recordOperation(ctx, SqlPool, "sql.rollback", "failure", @errorName(err));
-                return err;
+pub fn migrate(migrations: []const Migration) fx.kernel.Effect(void, anyerror, .{Database}).Stateful([]const Migration) {
+    const Migrate = fx.kernel.Effect(void, anyerror, .{Database});
+    return Migrate.fromState([]const Migration, migrations, struct {
+        fn run(value: []const Migration, ctx: *Migrate.Context) anyerror!void {
+            ctx.service(Database).migrate(ctx.allocator(), value) catch |failure| {
+                _ = StdService.recordSemantic(ctx, .span_recorded, Database.service_key, "Sql.migrate", "failure", @errorName(failure));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, SqlPool, "sql.rollback", "success", @typeName(Database));
+            _ = StdService.recordSemantic(ctx, .span_recorded, Database.service_key, "Sql.migrate", "success", "migrations applied");
         }
-    };
-}
-
-pub fn MigrateEffect(comptime EffectEnv: type, comptime Database: type) type {
-    const SqlPool = Pool(Database);
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{SqlPool};
-
-        migrations: []const Migration,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!void {
-            const pool = ctx.service(SqlPool);
-            pool.database.migrateAlloc(ctx.allocator, self.migrations) catch |err| {
-                _ = StdService.recordOperation(ctx, SqlPool, "sql.migrate", "failure", @errorName(err));
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, SqlPool, "sql.migrate", "success", @typeName(Database));
-        }
-    };
-}
-
-pub fn queryEffect(comptime EffectEnv: type, comptime Database: type, statement: Statement) QueryEffect(EffectEnv, Database) {
-    return .{ .statement = statement };
-}
-
-pub fn checkoutEffect(comptime EffectEnv: type, comptime Database: type) CheckoutEffect(EffectEnv, Database) {
-    return .{};
-}
-
-pub fn releaseEffect(comptime EffectEnv: type, comptime Database: type) ReleaseEffect(EffectEnv, Database) {
-    return .{};
-}
-
-pub fn beginEffect(comptime EffectEnv: type, comptime Database: type) BeginEffect(EffectEnv, Database) {
-    return .{};
-}
-
-pub fn commitEffect(comptime EffectEnv: type, comptime Database: type) CommitEffect(EffectEnv, Database) {
-    return .{};
-}
-
-pub fn rollbackEffect(comptime EffectEnv: type, comptime Database: type) RollbackEffect(EffectEnv, Database) {
-    return .{};
-}
-
-pub fn migrateEffect(comptime EffectEnv: type, comptime Database: type, migrations: []const Migration) MigrateEffect(EffectEnv, Database) {
-    return .{ .migrations = migrations };
+    }.run);
 }
 
 test "Sql fake database returns deterministic rows" {
@@ -894,10 +904,10 @@ test "Sql fake database supports the classified query contract" {
 
 test "Sql classified effect keeps failures in the success channel" {
     var database = FakeDatabase.init(.{ .rows = &.{} });
-    const zstd = @import("../root.zig");
-    var services = zstd.Service.Provider(.{FakeDatabase}).init(.{&database});
-    var runtime = zstd.fx.Runtime(@TypeOf(services)).init(std.testing.allocator, &services).provides(.{FakeDatabase});
-    var result = try runtime.run(queryClassifiedEffect(@TypeOf(services), FakeDatabase, .{ .sql = "select 1" }));
+    const root = databaseLayer(FakeDatabase, &database);
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{});
+    defer runtime.deinit();
+    var result = try runtime.run(queryClassified(.{ .sql = "select 1" }));
     switch (result) {
         .success => |*rows| rows.deinit(std.testing.allocator),
         .failure => return error.TestUnexpectedFailure,
@@ -911,9 +921,7 @@ test "Sql redacts connection metadata" {
     try std.testing.expectEqualStrings("[REDACTED]", display);
 }
 
-test "Sql queryEffect uses database services and records redacted causal facts" {
-    const zstd = @import("../root.zig");
-
+test "Sql.query uses the database service and records redacted causal facts" {
     const fields = [_]Field{
         .{ .name = "id", .value = .{ .integer = 42 } },
     };
@@ -921,15 +929,13 @@ test "Sql queryEffect uses database services and records redacted causal facts" 
     var database = try FakeDatabase.initOwned(std.testing.allocator, .{ .rows = rows[0..] });
     defer database.deinit();
 
-    var provider = zstd.Service.Provider(.{FakeDatabase}).init(.{&database});
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    const root = databaseLayer(FakeDatabase, &database);
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{FakeDatabase})
-        .withCausalStore(&store);
-
-    var result = try runtime.run(queryEffect(@TypeOf(provider), FakeDatabase, .{
+    var result = try runtime.run(query(.{
         .sql = "select * from projects where token = $1",
         .binds = &.{.{ .text = "token=abc123" }},
     }));
@@ -940,44 +946,47 @@ test "Sql queryEffect uses database services and records redacted causal facts" 
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    const event_index = zstd.Service.findOperation(snapshot, FakeDatabase, "sql.query", "success");
-    try std.testing.expect(event_index != null);
-    try std.testing.expect(std.mem.indexOf(u8, snapshot.events[event_index.?].redacted_detail, "abc123") == null);
+    var saw = false;
+    for (snapshot.events) |event| {
+        if (event.kind == .io_completed and std.mem.eql(u8, event.service_key, Database.service_key)) {
+            saw = true;
+            try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "abc123") == null);
+        }
+    }
+    try std.testing.expect(saw);
 }
 
 test "Sql transactions migrations and pool service record lifecycle facts" {
-    const zstd = @import("../root.zig");
-
     var database = try FakeDatabase.initOwned(std.testing.allocator, .{ .rows = &.{} });
     defer database.deinit();
     var pool = Pool(FakeDatabase).init(&database, 2);
 
-    var provider = zstd.Service.Provider(.{Pool(FakeDatabase)}).init(.{&pool});
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    const root = fx.kernel.Layer.mergeAll(.{
+        databaseLayer(FakeDatabase, &database),
+        poolLayer(FakeDatabase, &pool),
+    });
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{Pool(FakeDatabase)})
-        .withCausalStore(&store);
-
-    const checkout = try runtime.run(checkoutEffect(@TypeOf(provider), FakeDatabase));
-    try std.testing.expect(checkout == &database);
-    try runtime.run(releaseEffect(@TypeOf(provider), FakeDatabase));
-    try runtime.run(beginEffect(@TypeOf(provider), FakeDatabase));
-    try runtime.run(commitEffect(@TypeOf(provider), FakeDatabase));
+    _ = try runtime.run(checkout());
+    try runtime.run(release());
+    try runtime.run(begin());
+    try runtime.run(commit());
 
     const migrations = [_]Migration{
         .{ .id = "001", .sql = "create table projects(id int)" },
     };
-    try runtime.run(migrateEffect(@TypeOf(provider), FakeDatabase, migrations[0..]));
+    try runtime.run(migrate(migrations[0..]));
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, Pool(FakeDatabase), "sql.checkout", "success"));
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, Pool(FakeDatabase), "sql.release", "success"));
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, Pool(FakeDatabase), "sql.begin", "success"));
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, Pool(FakeDatabase), "sql.commit", "success"));
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, Pool(FakeDatabase), "sql.migrate", "success"));
+    try std.testing.expect(StdService.hasOperation(snapshot, DatabasePool, "SqlPool.checkout", "success"));
+    try std.testing.expect(StdService.hasOperation(snapshot, DatabasePool, "SqlPool.release", "success"));
+    try std.testing.expect(StdService.hasOperation(snapshot, Database, "Sql.begin", "success"));
+    try std.testing.expect(StdService.hasOperation(snapshot, Database, "Sql.commit", "success"));
+    try std.testing.expect(StdService.hasOperation(snapshot, Database, "Sql.migrate", "success"));
 }
 
 test "Sql typed query decodes rows through Schema and redacts row JSON" {
@@ -1008,12 +1017,12 @@ test "Sql typed query decodes rows through Schema and redacts row JSON" {
         .name = zstd.Schema.string().nonEmpty(),
         .active = zstd.Schema.boolean(),
     });
-    const query = typedQuery(.{
+    const typed_query = typedQuery(.{
         .sql = "select id, name, active from projects where token = $1",
         .binds = &.{.{ .text = "token=abc123" }},
     }, schema);
 
-    var decoded = try query.decodeRowsDetailedAlloc(std.testing.allocator, result);
+    var decoded = try typed_query.decodeRowsDetailedAlloc(std.testing.allocator, result);
     defer decoded.deinit();
 
     try std.testing.expect(decoded.ok());

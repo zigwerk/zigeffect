@@ -14,11 +14,9 @@ The checked-in external receipt currently qualifies plaintext collector mode;
 the direct-TLS path has a local live collector test and remains
 `local_development` until an external secure-collector receipt is checked in.
 
-`ExporterLayerConfig` and `exporterLayer()` are the current compatibility
-bridge. They give the application scope ownership of the bounded queue and
+`ExporterConfigService`, `ExporterService`, and `exporterLayer()` are the
+canonical scoped adapter surface. They give the application scope ownership of
+the bounded queue and
 shutdown, while `flushExporterEffect` and `shutdownExporterEffect` emit causal
-operation facts. The bridge still uses the legacy environment-shaped layer
-kernel and must not be copied into new application roots.
-
-The canonical migration will expose an exporter service tag and scoped
-`fx.kernel.Layer`. Direct `Exporter.init` remains the imperative driver API.
+operation facts. Direct `Exporter.init` remains the imperative driver API for
+focused adapter and conformance work.

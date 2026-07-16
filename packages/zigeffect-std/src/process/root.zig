@@ -179,44 +179,6 @@ pub fn local(implementation: *LocalRunner) @TypeOf(layer(LocalRunner, implementa
     return layer(LocalRunner, implementation);
 }
 
-pub fn RunEffect(comptime EffectEnv: type, comptime Runner: type) type {
-    return struct {
-        pub const SuccessType = RunOutput;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Runner};
-
-        command: Command,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!RunOutput {
-            const runner = ctx.service(Runner);
-            const output = runner.runOutputAlloc(ctx.allocator, self.command) catch |err| {
-                const detail = formatCommandAlloc(ctx.allocator, self.command) catch {
-                    _ = StdService.recordOperation(ctx, Runner, "run", "failure", @errorName(err));
-                    return err;
-                };
-                defer ctx.allocator.free(detail);
-                _ = StdService.recordOperation(ctx, Runner, "run", "failure", detail);
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, Runner, "run", output.receipt.status, output.receipt.command);
-            return output;
-        }
-    };
-}
-
-pub fn runEffect(
-    comptime EffectEnv: type,
-    comptime Runner: type,
-    command: Command,
-) RunEffect(EffectEnv, Runner) {
-    return .{ .command = command };
-}
-
 pub fn run(command: Command) fx.kernel.Effect(
     RunOutput,
     ProcessError,
@@ -294,19 +256,15 @@ test "Process fake runner returns redacted receipts" {
     try std.testing.expectEqual(@as(i32, 0), receipt.exit_code);
 }
 
-test "Process runEffect uses fake runner and records redacted causal facts" {
-    const zstd = @import("../root.zig");
-
+test "Process.run uses a fake layer and records redacted causal facts" {
     var runner = FakeRunner.init(.{ .exit_code = 0, .stdout = "token=abc123" });
-    var provider = zstd.Service.Provider(.{FakeRunner}).init(.{&runner});
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    const root = fake(&runner);
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{FakeRunner})
-        .withCausalStore(&store);
-
-    var output = try runtime.run(runEffect(@TypeOf(provider), FakeRunner, .{
+    var output = try runtime.run(run(.{
         .argv = &.{ "echo", "token=abc123" },
     }));
     defer output.deinit(std.testing.allocator);
@@ -316,9 +274,14 @@ test "Process runEffect uses fake runner and records redacted causal facts" {
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    const event_index = zstd.Service.findOperation(snapshot, FakeRunner, "run", "success");
-    try std.testing.expect(event_index != null);
-    try std.testing.expect(std.mem.indexOf(u8, snapshot.events[event_index.?].redacted_detail, "abc123") == null);
+    var saw_completion = false;
+    for (snapshot.events) |event| {
+        if (event.kind == .io_completed and std.mem.eql(u8, event.service_key, Process.service_key)) {
+            saw_completion = true;
+            try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "abc123") == null);
+        }
+    }
+    try std.testing.expect(saw_completion);
 }
 
 test "Process local runner executes a real local command with bounded capture" {

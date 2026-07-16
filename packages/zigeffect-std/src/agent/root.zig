@@ -239,6 +239,17 @@ pub const Session = struct {
     }
 };
 
+pub const SessionApi = struct {
+    pub const operations: []const []const u8 = &.{ "Agent.run", "Agent.supervise" };
+    session: *Session,
+};
+
+pub const AgentSession = fx.kernel.Service("zigeffect/std/AgentSession", SessionApi);
+
+pub fn sessionLayer(session: *Session) @TypeOf(fx.kernel.Layer.succeed(AgentSession, SessionApi{ .session = session })) {
+    return fx.kernel.Layer.succeed(AgentSession, .{ .session = session });
+}
+
 pub fn eventJsonAlloc(allocator: std.mem.Allocator, event: Event) ![]const u8 {
     const sequence = try std.fmt.allocPrint(allocator, "{d}", .{event.sequence});
     defer allocator.free(sequence);
@@ -336,79 +347,69 @@ pub fn localProcessAdapter(
     };
 }
 
-pub fn RunAgentEffect(comptime EffectEnv: type, comptime Runner: type) type {
-    return struct {
-        pub const SuccessType = RunSummary;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{ Session, Runner };
-
-        adapter: AdapterSpec,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!RunSummary {
-            const session = ctx.service(Session);
-            const runner = ctx.service(Runner);
+pub fn runAgent(adapter: AdapterSpec) fx.kernel.Effect(
+    RunSummary,
+    anyerror,
+    .{ AgentSession, Process.Process },
+).Stateful(AdapterSpec) {
+    const RunAgent = fx.kernel.Effect(RunSummary, anyerror, .{ AgentSession, Process.Process });
+    return RunAgent.fromState(AdapterSpec, adapter, struct {
+        fn run(value: AdapterSpec, ctx: *RunAgent.Context) anyerror!RunSummary {
+            const session = ctx.service(AgentSession).session;
+            const runner = ctx.service(Process.Process);
 
             try session.recordAgentStatus(.{
-                .agent_id = self.adapter.id,
-                .agent_kind = self.adapter.kind,
-                .agent_label = self.adapter.label,
+                .agent_id = value.id,
+                .agent_kind = value.kind,
+                .agent_label = value.label,
                 .status = .running,
-                .task = self.adapter.task,
+                .task = value.task,
             });
 
-            const command = self.adapter.command();
-            var output = runner.runOutputAlloc(ctx.allocator, command) catch |err| {
+            const command = value.command();
+            var output = runner.runOutputAlloc(ctx.allocator(), command) catch |failure| {
                 _ = session.recordAgentStatus(.{
-                    .agent_id = self.adapter.id,
-                    .agent_kind = self.adapter.kind,
-                    .agent_label = self.adapter.label,
+                    .agent_id = value.id,
+                    .agent_kind = value.kind,
+                    .agent_label = value.label,
                     .status = .failed,
-                    .task = @errorName(err),
+                    .task = @errorName(failure),
                 }) catch {};
-                _ = StdService.recordOperation(ctx, Session, "agent.run", "failure", self.adapter.id);
-                return err;
+                _ = StdService.recordSemantic(ctx, .span_recorded, AgentSession.service_key, "Agent.run", "failure", value.id);
+                return failure;
             };
-            defer output.deinit(ctx.allocator);
+            defer output.deinit(ctx.allocator());
 
             const status: []const u8 = if (output.receipt.exit_code == 0) "success" else "failure";
             try session.recordCheck(.{
-                .label = self.adapter.label,
+                .label = value.label,
                 .command = output.receipt.command,
                 .status = if (output.receipt.exit_code == 0) .pass else .fail,
                 .detail = output.stdout,
             });
             try session.recordAgentStatus(.{
-                .agent_id = self.adapter.id,
-                .agent_kind = self.adapter.kind,
-                .agent_label = self.adapter.label,
+                .agent_id = value.id,
+                .agent_kind = value.kind,
+                .agent_label = value.label,
                 .status = if (output.receipt.exit_code == 0) .done else .failed,
-                .task = self.adapter.task,
+                .task = value.task,
             });
 
-            const receipt_json = try receiptJsonAlloc(ctx.allocator, .{
-                .agent = self.adapter.id,
+            const receipt_json = try receiptJsonAlloc(ctx.allocator(), .{
+                .agent = value.id,
                 .workspace = session.workspace,
                 .status = status,
             });
-            errdefer ctx.allocator.free(receipt_json);
+            errdefer ctx.allocator().free(receipt_json);
 
-            _ = StdService.recordOperation(ctx, Session, "agent.run", status, self.adapter.id);
+            _ = StdService.recordSemantic(ctx, .span_recorded, AgentSession.service_key, "Agent.run", status, value.id);
             return .{
-                .agent_id = self.adapter.id,
+                .agent_id = value.id,
                 .status = status,
                 .receipt_json = receipt_json,
             };
         }
-    };
-}
-
-pub fn runAgentEffect(comptime EffectEnv: type, comptime Runner: type, adapter: AdapterSpec) RunAgentEffect(EffectEnv, Runner) {
-    return .{ .adapter = adapter };
+    }.run);
 }
 
 pub fn runSupervisorAlloc(
@@ -424,40 +425,25 @@ pub fn runSupervisorAlloc(
     return runSupervisorWithSessionAlloc(allocator, &session, runner, tools, policy);
 }
 
-pub fn RunSupervisorEffect(comptime EffectEnv: type, comptime Runner: type) type {
-    return struct {
-        pub const SuccessType = SupervisorSummary;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{ Session, Runner };
+const SuperviseInput = struct { tools: []const SupervisedTool, policy: SupervisorPolicy };
 
-        tools: []const SupervisedTool,
-        policy: SupervisorPolicy,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!SupervisorSummary {
-            const session = ctx.service(Session);
-            const runner = ctx.service(Runner);
-            const summary = runSupervisorWithSessionAlloc(ctx.allocator, session, runner, self.tools, self.policy) catch |err| {
-                _ = StdService.recordOperation(ctx, Session, "agent.supervisor", "failure", @errorName(err));
-                return err;
+pub fn supervise(tools: []const SupervisedTool, policy: SupervisorPolicy) fx.kernel.Effect(
+    SupervisorSummary,
+    anyerror,
+    .{ AgentSession, Process.Process },
+).Stateful(SuperviseInput) {
+    const Supervise = fx.kernel.Effect(SupervisorSummary, anyerror, .{ AgentSession, Process.Process });
+    return Supervise.fromState(SuperviseInput, .{ .tools = tools, .policy = policy }, struct {
+        fn run(input: SuperviseInput, ctx: *Supervise.Context) anyerror!SupervisorSummary {
+            const session = ctx.service(AgentSession).session;
+            const summary = runSupervisorWithSessionAlloc(ctx.allocator(), session, ctx.service(Process.Process), input.tools, input.policy) catch |failure| {
+                _ = StdService.recordSemantic(ctx, .span_recorded, AgentSession.service_key, "Agent.supervise", "failure", @errorName(failure));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, Session, "agent.supervisor", summary.status, session.id);
+            _ = StdService.recordSemantic(ctx, .span_recorded, AgentSession.service_key, "Agent.supervise", summary.status, session.id);
             return summary;
         }
-    };
-}
-
-pub fn runSupervisorEffect(
-    comptime EffectEnv: type,
-    comptime Runner: type,
-    tools: []const SupervisedTool,
-    policy: SupervisorPolicy,
-) RunSupervisorEffect(EffectEnv, Runner) {
-    return .{ .tools = tools, .policy = policy };
+    }.run);
 }
 
 fn runSupervisorWithSessionAlloc(
@@ -688,26 +674,22 @@ test "Agent builds Codex and Claude Code process commands" {
     try std.testing.expectEqualStrings("test", local_command.argv[2]);
 }
 
-test "Agent runAgentEffect executes process runner and records session plus causal facts" {
-    const zstd = @import("../root.zig");
-
+test "Agent.run executes the Process service and records session plus causal facts" {
     var session = Session.init(std.testing.allocator, "session-1", "/repo");
     defer session.deinit();
-    var runner = zstd.Process.FakeRunner.init(.{
+    var runner = Process.FakeRunner.init(.{
         .exit_code = 0,
         .stdout = "ok token=abc123",
         .stderr = "",
     });
 
-    var provider = zstd.Service.Provider(.{ Session, zstd.Process.FakeRunner }).init(.{ &session, &runner });
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    const root = fx.kernel.Layer.mergeAll(.{ sessionLayer(&session), Process.fake(&runner) });
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{ Session, zstd.Process.FakeRunner })
-        .withCausalStore(&store);
-
-    var summary = try runtime.run(runAgentEffect(@TypeOf(provider), zstd.Process.FakeRunner, codexAdapter("codex", "/repo", "test")));
+    var summary = try runtime.run(runAgent(codexAdapter("codex", "/repo", "test")));
     defer summary.deinit(std.testing.allocator);
 
     try std.testing.expectEqualStrings("success", summary.status);
@@ -717,7 +699,7 @@ test "Agent runAgentEffect executes process runner and records session plus caus
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, Session, "agent.run", "success"));
+    try std.testing.expect(StdService.hasOperation(snapshot, AgentSession, "Agent.run", "success"));
 }
 
 const ScriptedRunner = struct {
@@ -788,8 +770,8 @@ test "Agent supervisor fail-fast stops after first failing tool" {
             .{ .exit_code = 0, .stdout = "should not run", .stderr = "" },
         },
     };
-    const first = try localProcessAdapter("first", "First", "/repo", &.{ "first" });
-    const second = try localProcessAdapter("second", "Second", "/repo", &.{ "second" });
+    const first = try localProcessAdapter("first", "First", "/repo", &.{"first"});
+    const second = try localProcessAdapter("second", "Second", "/repo", &.{"second"});
     const tools = [_]SupervisedTool{
         .{ .adapter = first, .check_label = "first" },
         .{ .adapter = second, .check_label = "second" },
@@ -803,9 +785,7 @@ test "Agent supervisor fail-fast stops after first failing tool" {
     try std.testing.expect(std.mem.indexOf(u8, summary.feed_jsonl, "Second") == null);
 }
 
-test "Agent runSupervisorEffect records session and causal facts" {
-    const zstd = @import("../root.zig");
-
+test "Agent.supervise records session and causal facts" {
     var session = Session.init(std.testing.allocator, "effect-supervisor", "/repo");
     defer session.deinit();
     var runner = Process.FakeRunner.init(.{ .exit_code = 0, .stdout = "ok token=abc123", .stderr = "" });
@@ -814,15 +794,13 @@ test "Agent runSupervisorEffect records session and causal facts" {
         .{ .adapter = adapter, .check_label = "std tests" },
     };
 
-    var provider = zstd.Service.Provider(.{ Session, Process.FakeRunner }).init(.{ &session, &runner });
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    const root = fx.kernel.Layer.mergeAll(.{ sessionLayer(&session), Process.fake(&runner) });
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{ Session, Process.FakeRunner })
-        .withCausalStore(&store);
-
-    var summary = try runtime.run(runSupervisorEffect(@TypeOf(provider), Process.FakeRunner, tools[0..], .{}));
+    var summary = try runtime.run(supervise(tools[0..], .{}));
     defer summary.deinit(std.testing.allocator);
 
     try std.testing.expectEqualStrings("success", summary.status);
@@ -830,5 +808,5 @@ test "Agent runSupervisorEffect records session and causal facts" {
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, Session, "agent.supervisor", "success"));
+    try std.testing.expect(StdService.hasOperation(snapshot, AgentSession, "Agent.supervise", "success"));
 }

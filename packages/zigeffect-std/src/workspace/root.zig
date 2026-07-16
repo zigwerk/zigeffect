@@ -59,6 +59,8 @@ pub const IgnoreRule = struct {
 };
 
 pub const Service = struct {
+    pub const operations: []const []const u8 = &.{ "Workspace.resolve", "Workspace.snapshot", "Workspace.diff" };
+
     workspace: Workspace,
     ignores: []const IgnoreRule = &.{},
 
@@ -81,95 +83,71 @@ pub const Service = struct {
     }
 };
 
-pub fn ResolveEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = []const u8;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Service};
+pub const WorkspaceService = fx.kernel.Service("zigeffect/std/Workspace", Service);
 
-        relative: []const u8,
+pub fn layer(service: Service) @TypeOf(fx.kernel.Layer.succeed(WorkspaceService, service)) {
+    return fx.kernel.Layer.succeed(WorkspaceService, service);
+}
 
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType![]const u8 {
-            const workspace = ctx.service(Service);
-            const resolved = workspace.resolveAlloc(ctx.allocator, self.relative) catch |err| {
-                _ = StdService.recordOperation(ctx, Service, "resolve", "failure", self.relative);
-                return err;
+pub fn resolve(relative: []const u8) fx.kernel.Effect(
+    []const u8,
+    anyerror,
+    .{WorkspaceService},
+).Stateful([]const u8) {
+    const Resolve = fx.kernel.Effect([]const u8, anyerror, .{WorkspaceService});
+    return Resolve.fromState([]const u8, relative, struct {
+        fn run(value: []const u8, ctx: *Resolve.Context) anyerror![]const u8 {
+            const operation = StdService.beginOperation(ctx, WorkspaceService.service_key, "Workspace.resolve", value);
+            const resolved = ctx.service(WorkspaceService).resolveAlloc(ctx.allocator(), value) catch |failure| {
+                _ = StdService.completeOperation(ctx, operation, "failure", @errorName(failure));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, Service, "resolve", "success", self.relative);
+            _ = StdService.completeOperation(ctx, operation, "success", value);
             return resolved;
         }
-    };
+    }.run);
 }
 
-pub fn SnapshotEffect(comptime EffectEnv: type, comptime FileSystemService: type) type {
-    return struct {
-        pub const SuccessType = []const FileSnapshot;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{ Service, FileSystemService };
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(_: @This(), ctx: *fx.Context(EffectEnv)) FailureType![]const FileSnapshot {
-            const workspace = ctx.service(Service);
-            const fs = ctx.service(FileSystemService);
-            const snapshot = snapshotWithIgnoresAlloc(ctx.allocator, workspace.*, fs) catch |err| {
-                _ = StdService.recordOperation(ctx, Service, "snapshot", "failure", workspace.workspace.root);
-                return err;
+pub fn capture() fx.kernel.Effect(
+    []const FileSnapshot,
+    anyerror,
+    .{ WorkspaceService, FileSystem.FileSystem },
+) {
+    const SnapshotFiles = fx.kernel.Effect([]const FileSnapshot, anyerror, .{ WorkspaceService, FileSystem.FileSystem });
+    return SnapshotFiles.fromFn(struct {
+        fn run(ctx: *SnapshotFiles.Context) anyerror![]const FileSnapshot {
+            const workspace = ctx.service(WorkspaceService);
+            const operation = StdService.beginOperation(ctx, WorkspaceService.service_key, "Workspace.snapshot", workspace.workspace.root);
+            const result = snapshotWithIgnoresAlloc(ctx.allocator(), workspace.*, ctx.service(FileSystem.FileSystem).*) catch |failure| {
+                _ = StdService.completeOperation(ctx, operation, "failure", @errorName(failure));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, Service, "snapshot", "success", workspace.workspace.root);
-            return snapshot;
+            _ = StdService.completeOperation(ctx, operation, "success", workspace.workspace.root);
+            return result;
         }
-    };
+    }.run);
 }
 
-pub fn DiffEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = []const []const u8;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Service};
+const DiffInput = struct { before: []const FileSnapshot, after: []const FileSnapshot };
 
-        before: []const FileSnapshot,
-        after: []const FileSnapshot,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType![]const []const u8 {
-            const workspace = ctx.service(Service);
-            const diff = diffWithIgnoresAlloc(ctx.allocator, workspace.*, self.before, self.after) catch |err| {
-                _ = StdService.recordOperation(ctx, Service, "diff", "failure", workspace.workspace.root);
-                return err;
+pub fn changes(before: []const FileSnapshot, after: []const FileSnapshot) fx.kernel.Effect(
+    []const []const u8,
+    anyerror,
+    .{WorkspaceService},
+).Stateful(DiffInput) {
+    const Diff = fx.kernel.Effect([]const []const u8, anyerror, .{WorkspaceService});
+    return Diff.fromState(DiffInput, .{ .before = before, .after = after }, struct {
+        fn run(input: DiffInput, ctx: *Diff.Context) anyerror![]const []const u8 {
+            const workspace = ctx.service(WorkspaceService);
+            const operation = StdService.beginOperation(ctx, WorkspaceService.service_key, "Workspace.diff", workspace.workspace.root);
+            const result = diffWithIgnoresAlloc(ctx.allocator(), workspace.*, input.before, input.after) catch |failure| {
+                _ = StdService.completeOperation(ctx, operation, "failure", @errorName(failure));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, Service, "diff", "success", workspace.workspace.root);
-            return diff;
+            _ = StdService.completeOperation(ctx, operation, "success", workspace.workspace.root);
+            return result;
         }
-    };
-}
-
-pub fn resolveEffect(comptime EffectEnv: type, relative: []const u8) ResolveEffect(EffectEnv) {
-    return .{ .relative = relative };
-}
-
-pub fn snapshotEffect(comptime EffectEnv: type, comptime FileSystemService: type) SnapshotEffect(EffectEnv, FileSystemService) {
-    return .{};
-}
-
-pub fn diffEffect(
-    comptime EffectEnv: type,
-    before: []const FileSnapshot,
-    after: []const FileSnapshot,
-) DiffEffect(EffectEnv) {
-    return .{ .before = before, .after = after };
+    }.run);
 }
 
 pub fn diffAlloc(
@@ -303,51 +281,47 @@ test "Workspace diff reports changed files" {
 }
 
 test "Workspace service resolves and snapshots through FileSystem effects" {
-    const zstd = @import("../root.zig");
-
     var fs = FileSystem.MemoryFileSystem.init(std.testing.allocator);
     defer fs.deinit();
     try fs.writeFile("src/main.zig", "pub fn main() void {}");
     try fs.writeFile(".zig-cache/tmp", "ignored");
 
     const ignores = [_]IgnoreRule{.{ .prefix = ".zig-cache/" }};
-    var workspace = Service.init("/repo", ignores[0..]);
-    var provider = zstd.Service.Provider(.{ Service, FileSystem.MemoryFileSystem }).init(.{ &workspace, &fs });
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    const workspace = Service.init("/repo", ignores[0..]);
+    const root = fx.kernel.Layer.mergeAll(.{ layer(workspace), FileSystem.memory(&fs) });
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{ Service, FileSystem.MemoryFileSystem })
-        .withCausalStore(&store);
-
-    const resolved = try runtime.run(resolveEffect(@TypeOf(provider), "src/main.zig"));
+    const resolved = try runtime.run(resolve("src/main.zig"));
     defer std.testing.allocator.free(resolved);
     try std.testing.expectEqualStrings("/repo/src/main.zig", resolved);
 
-    const snapshot = try runtime.run(snapshotEffect(@TypeOf(provider), FileSystem.MemoryFileSystem));
-    defer freeSnapshot(std.testing.allocator, snapshot);
+    const files = try runtime.run(capture());
+    defer freeSnapshot(std.testing.allocator, files);
 
-    try std.testing.expectEqual(@as(usize, 1), snapshot.len);
-    try std.testing.expectEqualStrings("src/main.zig", snapshot[0].path);
+    try std.testing.expectEqual(@as(usize, 1), files.len);
+    try std.testing.expectEqualStrings("src/main.zig", files[0].path);
 
     var causal_snapshot = try store.snapshot(std.testing.allocator);
     defer causal_snapshot.deinit();
     try std.testing.expect(causal_snapshot.events.len >= 2);
-    try std.testing.expectEqualStrings(@typeName(Service), causal_snapshot.events[0].service_key);
+    var saw = false;
+    for (causal_snapshot.events) |event| {
+        if (std.mem.eql(u8, event.service_key, WorkspaceService.service_key)) saw = true;
+    }
+    try std.testing.expect(saw);
 }
 
 test "Workspace diff filters ignored paths and records causal facts" {
-    const zstd = @import("../root.zig");
-
     const ignores = [_]IgnoreRule{.{ .prefix = ".zig-cache/" }};
-    var workspace = Service.init("/repo", ignores[0..]);
-    var provider = zstd.Service.Provider(.{Service}).init(.{&workspace});
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    const workspace = Service.init("/repo", ignores[0..]);
+    const root = layer(workspace);
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
-
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{Service})
-        .withCausalStore(&store);
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
     const before = [_]FileSnapshot{
         .{ .path = "src/main.zig", .content = "old" },
@@ -358,13 +332,17 @@ test "Workspace diff filters ignored paths and records causal facts" {
         .{ .path = ".zig-cache/tmp", .content = "new" },
     };
 
-    const diff = try runtime.run(diffEffect(@TypeOf(provider), before[0..], after[0..]));
-    defer freeDiff(std.testing.allocator, diff);
+    const changed = try runtime.run(changes(before[0..], after[0..]));
+    defer freeDiff(std.testing.allocator, changed);
 
-    try std.testing.expectEqual(@as(usize, 1), diff.len);
-    try std.testing.expectEqualStrings("src/main.zig", diff[0]);
+    try std.testing.expectEqual(@as(usize, 1), changed.len);
+    try std.testing.expectEqualStrings("src/main.zig", changed[0]);
 
     var causal_snapshot = try store.snapshot(std.testing.allocator);
     defer causal_snapshot.deinit();
-    try std.testing.expect(zstd.Service.hasOperation(causal_snapshot, Service, "diff", "success"));
+    var saw = false;
+    for (causal_snapshot.events) |event| {
+        if (event.kind == .io_completed and std.mem.eql(u8, event.service_key, WorkspaceService.service_key)) saw = true;
+    }
+    try std.testing.expect(saw);
 }

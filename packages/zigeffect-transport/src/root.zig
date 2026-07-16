@@ -44,7 +44,9 @@ pub const StorageHandler = struct {
         return .{ .inner = try fx.InProcessClusterTransport.init(allocator, storage, .{ .shard_count = shard_count }) };
     }
 
-    pub fn deinit(self: *StorageHandler) void { self.inner.deinit(); }
+    pub fn deinit(self: *StorageHandler) void {
+        self.inner.deinit();
+    }
 
     pub fn handleAlloc(self: *StorageHandler, allocator: std.mem.Allocator, request: fx.ClusterTransportRequest) !fx.ClusterTransportResponse {
         var response = try self.inner.send(allocator, request);
@@ -313,7 +315,10 @@ pub const Server = struct {
         self.options.auth = .{ .mode = auth.mode, .credential = if (replacement) |credential| credential else "" };
         const epoch = self.auth_epoch.fetchAdd(1, .acq_rel) + 1;
         self.auth_mutex.unlock();
-        if (previous) |credential| { @memset(credential, 0); self.allocator.free(credential); }
+        if (previous) |credential| {
+            @memset(credential, 0);
+            self.allocator.free(credential);
+        }
         return epoch;
     }
 
@@ -346,6 +351,152 @@ pub const ClientOptions = struct {
     acquisition_poll_ms: u64 = 1,
     max_connection_lifetime_ms: u64 = 3_600_000,
 };
+
+pub const ClientConfig = struct { io: std.Io, options: ClientOptions = .{} };
+pub const ClientConfigService = zstd.fx.kernel.Service("zigeffect/transport/ClientConfig", ClientConfig);
+pub const ClientApi = struct {
+    pub const operations: []const []const u8 = &.{ "ClusterTransport.send", "ClusterTransport.refreshDiscovery", "ClusterTransport.rotateAuth", "ClusterTransport.snapshot" };
+    client: Client,
+};
+pub const ClientService = zstd.fx.kernel.Service("zigeffect/transport/Client", ClientApi);
+
+pub fn clientConfigLayer(config: ClientConfig) @TypeOf(zstd.fx.kernel.Layer.succeed(ClientConfigService, config)) {
+    return zstd.fx.kernel.Layer.succeed(ClientConfigService, config);
+}
+
+const ClientLifecycle = struct {
+    fn acquire(ctx: *zstd.fx.kernel.ContextView(.{ClientConfigService})) anyerror!ClientApi {
+        const config = ctx.service(ClientConfigService);
+        return .{ .client = try Client.initAlloc(ctx.allocator(), config.io, config.options) };
+    }
+
+    fn release(api: *ClientApi) void {
+        api.client.close() catch {};
+        api.client.deinit();
+    }
+};
+
+pub fn clientLayer() @TypeOf(zstd.fx.kernel.Layer.scoped(
+    ClientService,
+    anyerror,
+    .{ClientConfigService},
+    ClientLifecycle.acquire,
+    ClientLifecycle.release,
+)) {
+    return zstd.fx.kernel.Layer.scoped(
+        ClientService,
+        anyerror,
+        .{ClientConfigService},
+        ClientLifecycle.acquire,
+        ClientLifecycle.release,
+    );
+}
+
+pub const ClusterTransportService = zstd.fx.kernel.Service("zigeffect/cluster/Transport", fx.ClusterTransport);
+const ClusterTransportFactory = struct {
+    fn make(ctx: *zstd.fx.kernel.ContextView(.{ClientService})) fx.ClusterTransport {
+        return ctx.service(ClientService).client.asClusterTransport();
+    }
+};
+
+pub fn clusterTransportLayer() @TypeOf(zstd.fx.kernel.Layer.sync(
+    ClusterTransportService,
+    .{ClientService},
+    ClusterTransportFactory.make,
+)) {
+    return zstd.fx.kernel.Layer.sync(ClusterTransportService, .{ClientService}, ClusterTransportFactory.make);
+}
+
+pub fn configuredClientLayer(config: ClientConfig) @TypeOf(
+    clusterTransportLayer().provideMerge(clientLayer().provideMerge(clientConfigLayer(config))),
+) {
+    return clusterTransportLayer().provideMerge(clientLayer().provideMerge(clientConfigLayer(config)));
+}
+
+pub const ServerConfig = struct { io: std.Io, options: ServerOptions = .{}, handler: Handler };
+pub const ServerConfigService = zstd.fx.kernel.Service("zigeffect/transport/ServerConfig", ServerConfig);
+pub const ServerApi = struct {
+    pub const operations: []const []const u8 = &.{ "ClusterTransportServer.serveOne", "ClusterTransportServer.drain", "ClusterTransportServer.snapshot" };
+    server: Server,
+};
+pub const ServerService = zstd.fx.kernel.Service("zigeffect/transport/Server", ServerApi);
+
+pub fn serverConfigLayer(config: ServerConfig) @TypeOf(zstd.fx.kernel.Layer.succeed(ServerConfigService, config)) {
+    return zstd.fx.kernel.Layer.succeed(ServerConfigService, config);
+}
+
+const ServerLifecycle = struct {
+    fn acquire(ctx: *zstd.fx.kernel.ContextView(.{ServerConfigService})) anyerror!ServerApi {
+        const config = ctx.service(ServerConfigService);
+        return .{ .server = try Server.init(ctx.allocator(), config.io, config.options, config.handler) };
+    }
+
+    fn release(api: *ServerApi) void {
+        api.server.drain();
+        api.server.deinit();
+    }
+};
+
+pub fn serverLayer() @TypeOf(zstd.fx.kernel.Layer.scoped(
+    ServerService,
+    anyerror,
+    .{ServerConfigService},
+    ServerLifecycle.acquire,
+    ServerLifecycle.release,
+)) {
+    return zstd.fx.kernel.Layer.scoped(
+        ServerService,
+        anyerror,
+        .{ServerConfigService},
+        ServerLifecycle.acquire,
+        ServerLifecycle.release,
+    );
+}
+
+pub fn configuredServerLayer(config: ServerConfig) @TypeOf(serverLayer().provideMerge(serverConfigLayer(config))) {
+    return serverLayer().provideMerge(serverConfigLayer(config));
+}
+
+pub const ServeOneEffect = zstd.fx.kernel.Effect(usize, anyerror, .{ServerService});
+pub fn serveOneEffect() ServeOneEffect {
+    return ServeOneEffect.fromFn(struct {
+        fn run(ctx: *ServeOneEffect.Context) anyerror!usize {
+            const operation = zstd.Service.beginOperation(ctx, ServerService.service_key, "cluster.transport.server.serve-one", "serving one bounded transport connection");
+            const handled = ctx.service(ServerService).server.serveOne(ctx.allocator()) catch |failure| {
+                _ = zstd.Service.completeOperation(ctx, operation, "failure", @errorName(failure));
+                return failure;
+            };
+            _ = zstd.Service.completeOperation(ctx, operation, "success", "bounded transport connection completed");
+            return handled;
+        }
+    }.run);
+}
+
+pub const DrainServerEffect = zstd.fx.kernel.Effect(void, error{}, .{ServerService});
+pub fn drainServerEffect() DrainServerEffect {
+    return DrainServerEffect.fromFn(struct {
+        fn run(ctx: *DrainServerEffect.Context) error{}!void {
+            ctx.service(ServerService).server.drain();
+            _ = zstd.Service.recordSemantic(ctx, .resource_finalized, ServerService.service_key, "cluster.transport.server.drain", "success", "transport listener drained");
+        }
+    }.run);
+}
+
+const SendRequest = struct { request: fx.ClusterTransportRequest };
+pub const SendEffect = zstd.fx.kernel.Effect(fx.ClusterTransportResponse, anyerror, .{ClusterTransportService}).Stateful(SendRequest);
+pub fn sendEffect(request: fx.ClusterTransportRequest) SendEffect {
+    return SendEffect.init(.{ .request = request }, struct {
+        fn run(state: SendRequest, ctx: *SendEffect.Context) anyerror!fx.ClusterTransportResponse {
+            const operation = zstd.Service.beginOperation(ctx, ClusterTransportService.service_key, "cluster.transport.send", "sending bounded redacted cluster envelope");
+            const response = ctx.service(ClusterTransportService).send(ctx.allocator(), state.request) catch |err| {
+                _ = zstd.Service.completeOperation(ctx, operation, "failure", @errorName(err));
+                return err;
+            };
+            _ = zstd.Service.completeOperation(ctx, operation, "success", "cluster envelope completed");
+            return response;
+        }
+    }.run);
+}
 
 pub const ClientSnapshot = struct {
     sends: usize,
@@ -429,7 +580,10 @@ pub const Client = struct {
             self.mutex.unlock();
         };
         self.allocator.free(self.owned_host);
-        if (self.owned_auth_credential) |credential| { @memset(credential, 0); self.allocator.free(credential); }
+        if (self.owned_auth_credential) |credential| {
+            @memset(credential, 0);
+            self.allocator.free(credential);
+        }
         self.allocator.free(self.slots);
         self.* = undefined;
     }
@@ -442,13 +596,19 @@ pub const Client = struct {
         const mutable: *Client = @constCast(self);
         mutable.lock();
         var checked_out: usize = 0;
-        for (self.slots) |slot| if (slot.leased) { checked_out += 1; };
+        for (self.slots) |slot| if (slot.leased) {
+            checked_out += 1;
+        };
         mutable.mutex.unlock();
         return .{
-            .sends = self.sends.load(.acquire), .successes = self.successes.load(.acquire),
-            .failures = self.failures.load(.acquire), .reconnects = self.reconnects.load(.acquire),
-            .bytes_sent = self.bytes_sent.load(.acquire), .bytes_received = self.bytes_received.load(.acquire),
-            .checked_out = checked_out, .available = self.slots.len - checked_out,
+            .sends = self.sends.load(.acquire),
+            .successes = self.successes.load(.acquire),
+            .failures = self.failures.load(.acquire),
+            .reconnects = self.reconnects.load(.acquire),
+            .bytes_sent = self.bytes_sent.load(.acquire),
+            .bytes_received = self.bytes_received.load(.acquire),
+            .checked_out = checked_out,
+            .available = self.slots.len - checked_out,
             .backpressured = self.backpressured.load(.acquire),
         };
     }
@@ -521,7 +681,10 @@ pub const Client = struct {
         self.options.auth = .{ .mode = auth.mode, .credential = if (replacement) |credential| credential else "" };
         const epoch = self.auth_epoch.fetchAdd(1, .acq_rel) + 1;
         self.auth_mutex.unlock();
-        if (previous) |credential| { @memset(credential, 0); self.allocator.free(credential); }
+        if (previous) |credential| {
+            @memset(credential, 0);
+            self.allocator.free(credential);
+        }
         self.closeConnections();
         return epoch;
     }
@@ -532,12 +695,19 @@ pub const Client = struct {
         if ((self.options.tls != null) != selected.tls_enabled) return error.TransportTlsPolicyMismatch;
         const replacement = try self.allocator.dupe(u8, selected.host);
         self.lock();
-        for (self.slots) |slot| if (slot.leased) { self.mutex.unlock(); self.allocator.free(replacement); return error.TransportPoolBusy; };
+        for (self.slots) |slot| if (slot.leased) {
+            self.mutex.unlock();
+            self.allocator.free(replacement);
+            return error.TransportPoolBusy;
+        };
         const previous = self.owned_host;
         self.owned_host = replacement;
         self.options.host = replacement;
         self.options.port = selected.port;
-        for (self.slots) |*slot| if (slot.connection) |*connection| { connection.close(); slot.connection = null; };
+        for (self.slots) |*slot| if (slot.connection) |*connection| {
+            connection.close();
+            slot.connection = null;
+        };
         const epoch = self.discovery_epoch.fetchAdd(1, .acq_rel) + 1;
         self.mutex.unlock();
         self.allocator.free(previous);
@@ -577,7 +747,10 @@ pub const Client = struct {
         }
         while (true) {
             self.lock();
-            if (self.closing.load(.acquire)) { self.mutex.unlock(); return error.TransportUnavailable; }
+            if (self.closing.load(.acquire)) {
+                self.mutex.unlock();
+                return error.TransportUnavailable;
+            }
             var selected: ?usize = null;
             for (self.slots, 0..) |*slot, index| {
                 if (slot.leased) continue;
@@ -591,7 +764,7 @@ pub const Client = struct {
                 const now = nowMilliseconds(self.io);
                 const expired = slot.connection != null and
                     (elapsedAtLeast(now, slot.created_ms, self.options.max_connection_lifetime_ms) or
-                    elapsedAtLeast(now, slot.last_used_ms, self.options.pool.idle_timeout_ms));
+                        elapsedAtLeast(now, slot.last_used_ms, self.options.pool.idle_timeout_ms));
                 if (expired) {
                     slot.connection.?.close();
                     slot.connection = null;
@@ -656,7 +829,9 @@ pub const Client = struct {
         self.slots[index].connection = null;
     }
 
-    fn lock(self: *Client) void { while (!self.mutex.tryLock()) std.Thread.yield() catch {}; }
+    fn lock(self: *Client) void {
+        while (!self.mutex.tryLock()) std.Thread.yield() catch {};
+    }
 };
 
 const ClientLease = struct {
@@ -664,8 +839,12 @@ const ClientLease = struct {
     index: usize,
     released: bool = false,
 
-    fn wire(self: *ClientLease) Wire { return self.client.slots[self.index].connection.?.wire(); }
-    fn invalidate(self: *ClientLease) void { self.client.invalidateSlot(self.index); }
+    fn wire(self: *ClientLease) Wire {
+        return self.client.slots[self.index].connection.?.wire();
+    }
+    fn invalidate(self: *ClientLease) void {
+        self.client.invalidateSlot(self.index);
+    }
     fn release(self: *ClientLease) void {
         if (self.released) return;
         self.client.releaseSlot(self.index);
@@ -681,16 +860,24 @@ const Wire = struct {
     write_fn: *const fn (*anyopaque, []const u8) anyerror!void,
     cancel_fn: *const fn (*anyopaque) void,
 
-    fn read(self: Wire, buffer: []u8) !usize { return self.read_fn(self.pointer, buffer); }
-    fn write(self: Wire, bytes: []const u8) !void { return self.write_fn(self.pointer, bytes); }
-    fn cancelRead(self: Wire) void { self.cancel_fn(self.pointer); }
+    fn read(self: Wire, buffer: []u8) !usize {
+        return self.read_fn(self.pointer, buffer);
+    }
+    fn write(self: Wire, bytes: []const u8) !void {
+        return self.write_fn(self.pointer, bytes);
+    }
+    fn cancelRead(self: Wire) void {
+        self.cancel_fn(self.pointer);
+    }
 };
 
 const PlainWireState = struct {
     stream: std.Io.net.Stream,
     io: std.Io,
 
-    fn wire(self: *PlainWireState) Wire { return .{ .pointer = self, .read_fn = read, .write_fn = write, .cancel_fn = cancel }; }
+    fn wire(self: *PlainWireState) Wire {
+        return .{ .pointer = self, .read_fn = read, .write_fn = write, .cancel_fn = cancel };
+    }
     fn read(pointer: *anyopaque, buffer: []u8) !usize {
         const self: *PlainWireState = @ptrCast(@alignCast(pointer));
         var parts = [_][]u8{buffer};
@@ -717,8 +904,13 @@ const TlsWireState = struct {
     io: std.Io,
     ssl: *SSL,
 
-    fn wire(self: *TlsWireState) Wire { return .{ .pointer = self, .read_fn = read, .write_fn = write, .cancel_fn = cancel }; }
-    fn deinit(self: *TlsWireState) void { _ = SSL_shutdown(self.ssl); SSL_free(self.ssl); }
+    fn wire(self: *TlsWireState) Wire {
+        return .{ .pointer = self, .read_fn = read, .write_fn = write, .cancel_fn = cancel };
+    }
+    fn deinit(self: *TlsWireState) void {
+        _ = SSL_shutdown(self.ssl);
+        SSL_free(self.ssl);
+    }
     fn read(pointer: *anyopaque, buffer: []u8) !usize {
         const self: *TlsWireState = @ptrCast(@alignCast(pointer));
         if (buffer.len == 0) return 0;
@@ -735,7 +927,10 @@ const TlsWireState = struct {
         var offset: usize = 0;
         while (offset < bytes.len) {
             const result = SSL_write(self.ssl, bytes[offset..].ptr, @intCast(@min(bytes.len - offset, std.math.maxInt(c_int))));
-            if (result > 0) { offset += @intCast(result); continue; }
+            if (result > 0) {
+                offset += @intCast(result);
+                continue;
+            }
             switch (SSL_get_error(self.ssl, result)) {
                 ssl_error_want_read, ssl_error_want_write => continue,
                 else => return error.TlsWriteFailed,
@@ -817,7 +1012,10 @@ fn timedTlsHandshake(io: std.Io, state: *TlsWireState, server_side: bool, timeou
     var select = std.Io.Select(HandshakeRace).init(io, &results);
     select.async(.handshake, tlsHandshakeTask, .{ state, server_side });
     select.async(.timeout, deadlineTask, .{ io, deadlineFromNow(io, timeout_ms) });
-    const first = select.await() catch |err| { select.cancelDiscard(); return err; };
+    const first = select.await() catch |err| {
+        select.cancelDiscard();
+        return err;
+    };
     switch (first) {
         .handshake => |result| {
             select.cancelDiscard();
@@ -885,9 +1083,15 @@ fn timedRead(io: std.Io, wire: Wire, buffer: []u8, deadline: ?std.Io.Clock.Times
     var select = std.Io.Select(Race).init(io, &results);
     select.async(.read, wireReadTask, .{ wire, buffer });
     select.async(.timeout, deadlineTask, .{ io, timestamp });
-    const first = select.await() catch |err| { select.cancelDiscard(); return err; };
+    const first = select.await() catch |err| {
+        select.cancelDiscard();
+        return err;
+    };
     return switch (first) {
-        .read => |result| blk: { select.cancelDiscard(); break :blk result; },
+        .read => |result| blk: {
+            select.cancelDiscard();
+            break :blk result;
+        },
         .timeout => |result| {
             try result;
             wire.cancelRead();
@@ -897,8 +1101,12 @@ fn timedRead(io: std.Io, wire: Wire, buffer: []u8, deadline: ?std.Io.Clock.Times
     };
 }
 
-fn wireReadTask(wire: Wire, buffer: []u8) anyerror!usize { return wire.read(buffer); }
-fn deadlineTask(io: std.Io, deadline: std.Io.Clock.Timestamp) std.Io.Cancelable!void { return deadline.wait(io); }
+fn wireReadTask(wire: Wire, buffer: []u8) anyerror!usize {
+    return wire.read(buffer);
+}
+fn deadlineTask(io: std.Io, deadline: std.Io.Clock.Timestamp) std.Io.Cancelable!void {
+    return deadline.wait(io);
+}
 fn deadlineFromNow(io: std.Io, milliseconds: u64) std.Io.Clock.Timestamp {
     return std.Io.Clock.Timestamp.fromNow(io, .{ .raw = .fromMilliseconds(@intCast(milliseconds)), .clock = .awake });
 }
@@ -985,7 +1193,8 @@ test "plain TCP client and server exchange through independent socket ownership"
     var port: u16 = 26_200;
     while (port < 26_300) : (port += 1) {
         server = Server.init(std.testing.allocator, std.testing.io, .{
-            .port = port, .auth = .{ .mode = .shared_secret, .credential = "test-secret" },
+            .port = port,
+            .auth = .{ .mode = .shared_secret, .credential = "test-secret" },
         }, Handler.from(StorageHandler, &storage_handler)) catch |err| switch (err) {
             error.AddressInUse => continue,
             else => return err,
@@ -998,17 +1207,28 @@ test "plain TCP client and server exchange through independent socket ownership"
         server: *Server,
         result: ?usize = null,
         failure: ?anyerror = null,
-        fn run(self: *@This()) void { self.result = self.server.serveOne(std.testing.allocator) catch |err| { self.failure = err; return; }; }
+        fn run(self: *@This()) void {
+            self.result = self.server.serveOne(std.testing.allocator) catch |err| {
+                self.failure = err;
+                return;
+            };
+        }
     };
     var context: Context = .{ .server = &server.? };
     const thread = try std.Thread.spawn(.{}, Context.run, .{&context});
     var client = try Client.init(std.testing.io, .{ .port = port, .auth = .{ .mode = .shared_secret, .credential = "test-secret" } });
     var response = try client.sendAlloc(std.testing.allocator, .{
-        .kind = .tell, .address = fx.entityAddress("transport-test", "one"), .payload = "hello", .idempotency_key = "send-1",
+        .kind = .tell,
+        .address = fx.entityAddress("transport-test", "one"),
+        .payload = "hello",
+        .idempotency_key = "send-1",
     });
     defer response.deinit(std.testing.allocator);
     var second_response = try client.sendAlloc(std.testing.allocator, .{
-        .kind = .tell, .address = fx.entityAddress("transport-test", "two"), .payload = "again", .idempotency_key = "send-2",
+        .kind = .tell,
+        .address = fx.entityAddress("transport-test", "two"),
+        .payload = "again",
+        .idempotency_key = "send-2",
     });
     defer second_response.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("again", second_response.envelope.payload);
@@ -1031,14 +1251,18 @@ test "TLS client and server verify host and mutual certificate identity and relo
     var storage_handler = try StorageHandler.init(std.testing.allocator, memory.asMessageStorage(), 16);
     defer storage_handler.deinit();
     const tls = ServerTlsConfig{
-        .certificate_chain_path = certificate, .private_key_path = key,
-        .client_ca_path = certificate, .require_client_certificate = true,
+        .certificate_chain_path = certificate,
+        .private_key_path = key,
+        .client_ca_path = certificate,
+        .require_client_certificate = true,
     };
     var server: ?Server = null;
     var port: u16 = 26_300;
     while (port < 26_400) : (port += 1) {
         server = Server.init(std.testing.allocator, std.testing.io, .{
-            .port = port, .tls = tls, .auth = .{ .mode = .shared_secret, .credential = "tls-secret" },
+            .port = port,
+            .tls = tls,
+            .auth = .{ .mode = .shared_secret, .credential = "tls-secret" },
         }, Handler.from(StorageHandler, &storage_handler)) catch |err| switch (err) {
             error.AddressInUse => continue,
             else => return err,
@@ -1052,7 +1276,12 @@ test "TLS client and server verify host and mutual certificate identity and relo
         server: *Server,
         result: ?usize = null,
         failure: ?anyerror = null,
-        fn run(self: *@This()) void { self.result = self.server.serveOne(std.testing.allocator) catch |err| { self.failure = err; return; }; }
+        fn run(self: *@This()) void {
+            self.result = self.server.serveOne(std.testing.allocator) catch |err| {
+                self.failure = err;
+                return;
+            };
+        }
     };
     var context: Context = .{ .server = &server.? };
     const thread = try std.Thread.spawn(.{}, Context.run, .{&context});
@@ -1060,12 +1289,17 @@ test "TLS client and server verify host and mutual certificate identity and relo
         .port = port,
         .auth = .{ .mode = .shared_secret, .credential = "tls-secret" },
         .tls = .{
-            .ca_path = certificate, .server_name = "localhost",
-            .client_certificate_chain_path = certificate, .client_private_key_path = key,
+            .ca_path = certificate,
+            .server_name = "localhost",
+            .client_certificate_chain_path = certificate,
+            .client_private_key_path = key,
         },
     });
     var response = try client.sendAlloc(std.testing.allocator, .{
-        .kind = .tell, .address = fx.entityAddress("tls-transport", "one"), .payload = "encrypted", .idempotency_key = "tls-send-1",
+        .kind = .tell,
+        .address = fx.entityAddress("tls-transport", "one"),
+        .payload = "encrypted",
+        .idempotency_key = "tls-send-1",
     });
     defer response.deinit(std.testing.allocator);
     client.deinit();
@@ -1076,14 +1310,21 @@ test "TLS client and server verify host and mutual certificate identity and relo
 }
 
 test "discovery and credential rotation move live traffic between servers" {
-    var first_memory = fx.InMemoryMessageStorage.init(std.testing.allocator); defer first_memory.deinit();
-    var second_memory = fx.InMemoryMessageStorage.init(std.testing.allocator); defer second_memory.deinit();
-    var first_handler = try StorageHandler.init(std.testing.allocator, first_memory.asMessageStorage(), 16); defer first_handler.deinit();
-    var second_handler = try StorageHandler.init(std.testing.allocator, second_memory.asMessageStorage(), 16); defer second_handler.deinit();
+    var first_memory = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer first_memory.deinit();
+    var second_memory = fx.InMemoryMessageStorage.init(std.testing.allocator);
+    defer second_memory.deinit();
+    var first_handler = try StorageHandler.init(std.testing.allocator, first_memory.asMessageStorage(), 16);
+    defer first_handler.deinit();
+    var second_handler = try StorageHandler.init(std.testing.allocator, second_memory.asMessageStorage(), 16);
+    defer second_handler.deinit();
     var first_server: ?Server = null;
     var first_port: u16 = 26_400;
     while (first_port < 26_450) : (first_port += 1) {
-        first_server = Server.init(std.testing.allocator, std.testing.io, .{ .port = first_port, .auth = .{ .mode = .shared_secret, .credential = "old-secret" } }, Handler.from(StorageHandler, &first_handler)) catch |err| switch (err) { error.AddressInUse => continue, else => return err };
+        first_server = Server.init(std.testing.allocator, std.testing.io, .{ .port = first_port, .auth = .{ .mode = .shared_secret, .credential = "old-secret" } }, Handler.from(StorageHandler, &first_handler)) catch |err| switch (err) {
+            error.AddressInUse => continue,
+            else => return err,
+        };
         break;
     }
     if (first_server == null) return error.NoDiscoveryPort;
@@ -1091,7 +1332,10 @@ test "discovery and credential rotation move live traffic between servers" {
     var second_server: ?Server = null;
     var second_port: u16 = 26_450;
     while (second_port < 26_500) : (second_port += 1) {
-        second_server = Server.init(std.testing.allocator, std.testing.io, .{ .port = second_port, .auth = .{ .mode = .shared_secret, .credential = "old-secret" } }, Handler.from(StorageHandler, &second_handler)) catch |err| switch (err) { error.AddressInUse => continue, else => return err };
+        second_server = Server.init(std.testing.allocator, std.testing.io, .{ .port = second_port, .auth = .{ .mode = .shared_secret, .credential = "old-secret" } }, Handler.from(StorageHandler, &second_handler)) catch |err| switch (err) {
+            error.AddressInUse => continue,
+            else => return err,
+        };
         break;
     }
     if (second_server == null) return error.NoDiscoveryPort;
@@ -1101,7 +1345,12 @@ test "discovery and credential rotation move live traffic between servers" {
         server: *Server,
         handled: ?usize = null,
         failure: ?anyerror = null,
-        fn run(self: *@This()) void { self.handled = self.server.serveOne(std.testing.allocator) catch |err| { self.failure = err; return; }; }
+        fn run(self: *@This()) void {
+            self.handled = self.server.serveOne(std.testing.allocator) catch |err| {
+                self.failure = err;
+                return;
+            };
+        }
     };
     var first_context: ServeContext = .{ .server = &first_server.? };
     var second_context: ServeContext = .{ .server = &second_server.? };
@@ -1119,7 +1368,8 @@ test "discovery and credential rotation move live traffic between servers" {
     var second_response = try client.sendAlloc(std.testing.allocator, .{ .kind = .tell, .address = fx.entityAddress("discovery", "second"), .idempotency_key = "discovery-2" });
     defer second_response.deinit(std.testing.allocator);
     client.deinit();
-    first_thread.join(); second_thread.join();
+    first_thread.join();
+    second_thread.join();
     if (first_context.failure) |err| return err;
     if (second_context.failure) |err| return err;
     try std.testing.expectEqual(@as(usize, 1), first_context.handled.?);

@@ -71,167 +71,232 @@ pub const main_source =
     \\}
 ;
 
+pub const production_main_source =
+    \\const std = @import("std");
+    \\const app = @import("app");
+    \\
+    \\pub fn main(init: std.process.Init) !void {
+    \\    try app.run(init.gpa, init.io, std.Io.Dir.cwd(), init.minimal.environ);
+    \\}
+;
+
 pub const production_app_source =
     \\const std = @import("std");
     \\const production = @import("production_wiring.zig");
     \\
     \\pub const component_name = "__PROJECT_NAME__";
     \\pub fn productionContract() bool { return production.compileContract(); }
-    \\pub fn run(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir) !void {
-    \\    return production.run(allocator, io, root);
+    \\pub fn run(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, environ: std.process.Environ) !void {
+    \\    return production.run(allocator, io, root, environ);
     \\}
 ;
 
 pub const production_wiring_source =
     \\const std = @import("std");
     \\const zstd = @import("zigeffect_std");
+    \\const kernel = zstd.fx.kernel;
     \\const http = @import("zigeffect_http");
     \\const postgres = @import("zigeffect_postgres_libpq");
     \\const otel = @import("zigeffect_otel");
     \\const causal_graph = @import("causal_graph.zig");
     \\
-    \\pub const Config = struct { port: i64, database_url: []const u8, otlp_host: []const u8, otlp_port: i64, migration_dialect: []const u8 };
+    \\pub const Config = struct { port: i64, otlp_host: []const u8, otlp_port: i64, migration_dialect: []const u8 };
     \\pub const config_schema = zstd.Schema.structSchema(Config, .{
     \\    zstd.Schema.field("port", zstd.Schema.integer().min(1).max(65535)),
-    \\    zstd.Schema.field("database_url", zstd.Schema.string().nonEmpty()),
     \\    zstd.Schema.field("otlp_host", zstd.Schema.string().nonEmpty()),
     \\    zstd.Schema.field("otlp_port", zstd.Schema.integer().min(1).max(65535)),
     \\    zstd.Schema.field("migration_dialect", zstd.Schema.stringEnum(&.{ "postgresql", "cockroachdb" })),
     \\});
     \\
+    \\const RuntimeInputs = struct {
+    \\    io: std.Io,
+    \\    root: std.Io.Dir,
+    \\    environ: std.process.Environ,
+    \\    application_map: *http.ApplicationMapSlot,
+    \\};
+    \\const RuntimeInputsService = kernel.Service("application/RuntimeInputs", RuntimeInputs);
+    \\const ConfigState = struct {
+    \\    pub const operations: []const []const u8 = &.{"ApplicationConfig.read"};
+    \\    layered: zstd.Config.LayeredConfig,
+    \\    decoded: zstd.Schema.DecodeResult(Config),
+    \\    config: Config,
+    \\};
+    \\const ApplicationConfig = kernel.Service("application/Config", ConfigState);
+    \\
+    \\pub fn compileContract() bool {
+    \\    return @hasDecl(http, "ServerService") and @hasDecl(http, "serverLayer") and
+    \\        @hasDecl(postgres, "SessionService") and @hasDecl(postgres, "PoolService") and
+    \\        @hasDecl(otel, "ExporterService") and @hasDecl(zstd, "ManagedRuntime") and
+    \\        @hasDecl(zstd.Application.Lifecycle, "Lifecycle");
+    \\}
+    \\
+    \\fn runtimeInputsLayer(inputs: RuntimeInputs) @TypeOf(kernel.Layer.succeed(RuntimeInputsService, inputs)) {
+    \\    return kernel.Layer.succeed(RuntimeInputsService, inputs);
+    \\}
+    \\
+    \\const ConfigLifecycle = struct {
+    \\    fn acquire(ctx: *kernel.ContextView(.{RuntimeInputsService})) anyerror!ConfigState {
+    \\        const inputs = ctx.service(RuntimeInputsService);
+    \\        var layered = zstd.Config.LayeredConfig.init(ctx.allocator());
+    \\        errdefer layered.deinit();
+    \\        var root = inputs.root;
+    \\        _ = try layered.loadJsonFile(inputs.io, &root, "config.json", 64 * 1024, 1);
+    \\        var decoded = try layered.decodeDetailedAlloc(ctx.allocator(), config_schema);
+    \\        errdefer decoded.deinit();
+    \\        if (!decoded.ok()) return error.InvalidProductionConfiguration;
+    \\        return .{ .layered = layered, .decoded = decoded, .config = decoded.value.? };
+    \\    }
+    \\    fn release(state: *ConfigState) void { state.decoded.deinit(); state.layered.deinit(); }
+    \\};
+    \\
+    \\fn configLayer() @TypeOf(kernel.Layer.scoped(ApplicationConfig, anyerror, .{RuntimeInputsService}, ConfigLifecycle.acquire, ConfigLifecycle.release)) {
+    \\    return kernel.Layer.scoped(ApplicationConfig, anyerror, .{RuntimeInputsService}, ConfigLifecycle.acquire, ConfigLifecycle.release);
+    \\}
+    \\
+    \\const SecretState = struct {
+    \\    database_url: zstd.Secrets.Value,
+    \\    agent_map_token: zstd.Secrets.Value,
+    \\};
+    \\const ApplicationSecrets = kernel.Service("application/Secrets", SecretState);
+    \\const SecretLifecycle = struct {
+    \\    fn acquire(ctx: *kernel.ContextView(.{RuntimeInputsService})) anyerror!SecretState {
+    \\        const allocator = ctx.allocator();
+    \\        var provider = zstd.Secrets.EnvironmentProvider{ .environ = ctx.service(RuntimeInputsService).environ };
+    \\        var audit = zstd.Secrets.Audit.init(allocator);
+    \\        defer audit.deinit();
+    \\        var database_url = try provider.resolveAlloc(allocator, .{ .provider = "environment", .key = "DATABASE_URL" }, &audit);
+    \\        errdefer database_url.deinit();
+    \\        var agent_map_token = try provider.resolveAlloc(allocator, .{ .provider = "environment", .key = "AGENT_MAP_TOKEN" }, &audit);
+    \\        errdefer agent_map_token.deinit();
+    \\        return .{ .database_url = database_url, .agent_map_token = agent_map_token };
+    \\    }
+    \\    fn release(state: *SecretState) void {
+    \\        state.database_url.deinit();
+    \\        state.agent_map_token.deinit();
+    \\    }
+    \\};
+    \\fn secretsLayer() @TypeOf(kernel.Layer.scoped(ApplicationSecrets, anyerror, .{RuntimeInputsService}, SecretLifecycle.acquire, SecretLifecycle.release)) {
+    \\    return kernel.Layer.scoped(ApplicationSecrets, anyerror, .{RuntimeInputsService}, SecretLifecycle.acquire, SecretLifecycle.release);
+    \\}
+    \\
+    \\const HttpConfigFactory = struct { fn make(ctx: *kernel.ContextView(.{ ApplicationConfig, RuntimeInputsService })) http.ServerLayerConfig { return .{ .io = ctx.service(RuntimeInputsService).io, .options = .{ .host = "0.0.0.0", .port = @intCast(ctx.service(ApplicationConfig).config.port) } }; } };
+    \\const SessionConfigFactory = struct { fn make(ctx: *kernel.ContextView(.{ApplicationSecrets})) postgres.SessionLayerConfig { return .{ .config = .{ .connection_url = ctx.service(ApplicationSecrets).database_url.expose() } }; } };
+    \\const PoolConfigFactory = struct { fn make(ctx: *kernel.ContextView(.{ ApplicationSecrets, RuntimeInputsService })) postgres.PoolLayerConfig { return .{ .io = ctx.service(RuntimeInputsService).io, .config = .{ .session = .{ .connection_url = ctx.service(ApplicationSecrets).database_url.expose() } } }; } };
+    \\const ExporterConfigFactory = struct { fn make(ctx: *kernel.ContextView(.{ ApplicationConfig, RuntimeInputsService })) otel.ExporterLayerConfig { const config = ctx.service(ApplicationConfig).config; return .{ .io = ctx.service(RuntimeInputsService).io, .options = .{ .host = config.otlp_host, .port = @intCast(config.otlp_port) } }; } };
+    \\
+    \\fn httpConfigLayer() @TypeOf(kernel.Layer.sync(http.ServerConfigService, .{ ApplicationConfig, RuntimeInputsService }, HttpConfigFactory.make)) { return kernel.Layer.sync(http.ServerConfigService, .{ ApplicationConfig, RuntimeInputsService }, HttpConfigFactory.make); }
+    \\fn sessionConfigLayer() @TypeOf(kernel.Layer.sync(postgres.SessionConfigService, .{ApplicationSecrets}, SessionConfigFactory.make)) { return kernel.Layer.sync(postgres.SessionConfigService, .{ApplicationSecrets}, SessionConfigFactory.make); }
+    \\fn poolConfigLayer() @TypeOf(kernel.Layer.sync(postgres.PoolConfigService, .{ ApplicationSecrets, RuntimeInputsService }, PoolConfigFactory.make)) { return kernel.Layer.sync(postgres.PoolConfigService, .{ ApplicationSecrets, RuntimeInputsService }, PoolConfigFactory.make); }
+    \\fn exporterConfigLayer() @TypeOf(kernel.Layer.sync(otel.ExporterConfigService, .{ ApplicationConfig, RuntimeInputsService }, ExporterConfigFactory.make)) { return kernel.Layer.sync(otel.ExporterConfigService, .{ ApplicationConfig, RuntimeInputsService }, ExporterConfigFactory.make); }
+    \\
+    \\const application_map_path = "/.well-known/zigeffect/application-map";
     \\const Health = struct {
-    \\    pub fn handleAlloc(_: *@This(), allocator: std.mem.Allocator, request: zstd.Http.Request) !zstd.Http.Response {
+    \\    pub fn handleAlloc(_: *Health, allocator: std.mem.Allocator, request: zstd.Http.Request) !zstd.Http.Response {
     \\        if (!std.mem.eql(u8, request.url, "/health/ready")) return zstd.Http.cloneResponseAlloc(allocator, .{ .status = 404, .body = "not found" });
     \\        return zstd.Http.cloneResponseAlloc(allocator, .{ .status = 200, .body = "ready" });
     \\    }
     \\};
-    \\
-    \\pub fn compileContract() bool {
-    \\    return @hasDecl(http, "serverLayer") and @hasDecl(postgres, "sessionLayer") and
-    \\        @hasDecl(postgres, "poolLayer") and @hasDecl(otel, "exporterLayer") and
-    \\        @hasDecl(zstd.Application.Lifecycle, "managerLayer");
-    \\}
-    \\
-    \\const RuntimeInputs = struct { io: std.Io, root: std.Io.Dir };
-    \\const ConfigLayerEnv = struct {
-    \\    allocator: std.mem.Allocator,
-    \\    layered: zstd.Config.LayeredConfig,
-    \\    decoded: zstd.Schema.DecodeResult(Config),
-    \\    config: Config,
-    \\    http_config: http.ServerLayerConfig,
-    \\    session_config: postgres.SessionLayerConfig,
-    \\    pool_config: postgres.PoolLayerConfig,
-    \\    exporter_config: otel.ExporterLayerConfig,
-    \\
-    \\    pub fn service(self: *@This(), comptime Requested: type) *Requested {
-    \\        if (Requested == Config) return &self.config;
-    \\        if (Requested == http.ServerLayerConfig) return &self.http_config;
-    \\        if (Requested == postgres.SessionLayerConfig) return &self.session_config;
-    \\        if (Requested == postgres.PoolLayerConfig) return &self.pool_config;
-    \\        if (Requested == otel.ExporterLayerConfig) return &self.exporter_config;
-    \\        return zstd.fx.serviceNotFound(@This(), Requested);
+    \\const ApplicationMapGuard = struct {
+    \\    credential: []const u8,
+    \\    pub fn check(self: *ApplicationMapGuard, request: zstd.Http.Request) ?zstd.External.Failure {
+    \\        const auth_header = requestHeader(request, "authorization") orelse return denied();
+    \\        const scheme = "Bearer";
+    \\        if (auth_header.len <= scheme.len or !std.mem.eql(u8, auth_header[0..scheme.len], scheme) or auth_header[scheme.len] != ' ' or !zstd.Security.secureEql(auth_header[scheme.len + 1 ..], self.credential)) return denied();
+    \\        return null;
+    \\    }
+    \\    fn denied() zstd.External.Failure { return .init("application-map", "authorize", .unauthorized, "invalid agent credential", "policy"); }
+    \\};
+    \\const ApplicationRoutes = struct {
+    \\    health: *Health,
+    \\    application_map: *http.RuntimeApplicationMapHandler,
+    \\    pub fn handleAlloc(self: *ApplicationRoutes, allocator: std.mem.Allocator, request: zstd.Http.Request) !zstd.Http.Response {
+    \\        if (std.mem.eql(u8, request.url, application_map_path)) return self.application_map.handleAlloc(allocator, request);
+    \\        return self.health.handleAlloc(allocator, request);
     \\    }
     \\};
+    \\const HandlerPartsApi = struct {
+    \\    health: Health,
+    \\    guard: ApplicationMapGuard,
+    \\};
+    \\const HandlerParts = kernel.Service("application/HandlerParts", HandlerPartsApi);
+    \\const HandlerPartsFactory = struct {
+    \\    fn make(ctx: *kernel.ContextView(.{ApplicationSecrets})) HandlerPartsApi { return .{ .health = .{}, .guard = .{ .credential = ctx.service(ApplicationSecrets).agent_map_token.expose() } }; }
+    \\};
+    \\fn handlerPartsLayer() @TypeOf(kernel.Layer.sync(HandlerParts, .{ApplicationSecrets}, HandlerPartsFactory.make)) { return kernel.Layer.sync(HandlerParts, .{ApplicationSecrets}, HandlerPartsFactory.make); }
+    \\const ApplicationMapHandler = kernel.Service("application/ApplicationMapHandler", http.RuntimeApplicationMapHandler);
+    \\const ApplicationMapFactory = struct {
+    \\    fn make(ctx: *kernel.ContextView(.{ RuntimeInputsService, HandlerParts })) anyerror!http.RuntimeApplicationMapHandler { return http.RuntimeApplicationMapHandler.init(ctx.service(RuntimeInputsService).application_map, application_map_path, http.Guard.from(ApplicationMapGuard, &ctx.service(HandlerParts).guard), .{}); }
+    \\};
+    \\fn applicationMapLayer() @TypeOf(kernel.Layer.effect(ApplicationMapHandler, anyerror, .{ RuntimeInputsService, HandlerParts }, ApplicationMapFactory.make)) { return kernel.Layer.effect(ApplicationMapHandler, anyerror, .{ RuntimeInputsService, HandlerParts }, ApplicationMapFactory.make); }
+    \\const ApplicationRoutesService = kernel.Service("application/Routes", ApplicationRoutes);
+    \\const RoutesFactory = struct { fn make(ctx: *kernel.ContextView(.{ HandlerParts, ApplicationMapHandler })) ApplicationRoutes { return .{ .health = &ctx.service(HandlerParts).health, .application_map = ctx.service(ApplicationMapHandler) }; } };
+    \\fn routesLayer() @TypeOf(kernel.Layer.sync(ApplicationRoutesService, .{ HandlerParts, ApplicationMapHandler }, RoutesFactory.make)) { return kernel.Layer.sync(ApplicationRoutesService, .{ HandlerParts, ApplicationMapHandler }, RoutesFactory.make); }
+    \\const ApplicationPolicy = kernel.Service("application/Policy", http.PolicyHandler);
+    \\const PolicyFactory = struct { fn make(ctx: *kernel.ContextView(.{ApplicationRoutesService})) anyerror!http.PolicyHandler { return http.PolicyHandler.init(http.Handler.from(ApplicationRoutes, ctx.service(ApplicationRoutesService)), .{ .secure_headers = true }); } };
+    \\fn policyLayer() @TypeOf(kernel.Layer.effect(ApplicationPolicy, anyerror, .{ApplicationRoutesService}, PolicyFactory.make)) { return kernel.Layer.effect(ApplicationPolicy, anyerror, .{ApplicationRoutesService}, PolicyFactory.make); }
+    \\const HandlerFactory = struct { fn make(ctx: *kernel.ContextView(.{ApplicationPolicy})) http.Handler { return ctx.service(ApplicationPolicy).asHandler(); } };
+    \\fn handlerLayer() @TypeOf(kernel.Layer.sync(http.HandlerService, .{ApplicationPolicy}, HandlerFactory.make)) { return kernel.Layer.sync(http.HandlerService, .{ApplicationPolicy}, HandlerFactory.make); }
+    \\fn requestHeader(request: zstd.Http.Request, name: []const u8) ?[]const u8 { for (request.headers) |header| if (std.ascii.eqlIgnoreCase(header.name, name)) return header.value; return null; }
     \\
-    \\fn releaseConfigLayer(env: *ConfigLayerEnv) void {
-    \\    const allocator = env.allocator;
-    \\    env.decoded.deinit();
-    \\    env.layered.deinit();
-    \\    allocator.destroy(env);
+    \\fn foundationsLayer(inputs: RuntimeInputs) @TypeOf(secretsLayer().provideMerge(configLayer().provideMerge(runtimeInputsLayer(inputs)))) { return secretsLayer().provideMerge(configLayer().provideMerge(runtimeInputsLayer(inputs))); }
+    \\fn handlerStack(foundations: anytype) @TypeOf(handlerLayer().provideMerge(policyLayer().provideMerge(routesLayer().provideMerge(applicationMapLayer().provideMerge(handlerPartsLayer().provideMerge(foundations)))))) { return handlerLayer().provideMerge(policyLayer().provideMerge(routesLayer().provideMerge(applicationMapLayer().provideMerge(handlerPartsLayer().provideMerge(foundations))))); }
+    \\fn serverStack(foundations: anytype) @TypeOf(http.serverLayer().provideMerge(httpConfigLayer().provideMerge(handlerStack(foundations)))) { return http.serverLayer().provideMerge(httpConfigLayer().provideMerge(handlerStack(foundations))); }
+    \\fn sessionStack(foundations: anytype) @TypeOf(postgres.sessionLayer().provideMerge(sessionConfigLayer().provideMerge(foundations))) { return postgres.sessionLayer().provideMerge(sessionConfigLayer().provideMerge(foundations)); }
+    \\fn poolStack(foundations: anytype) @TypeOf(postgres.poolLayer().provideMerge(poolConfigLayer().provideMerge(foundations))) { return postgres.poolLayer().provideMerge(poolConfigLayer().provideMerge(foundations)); }
+    \\fn exporterStack(foundations: anytype) @TypeOf(otel.exporterLayer().provideMerge(exporterConfigLayer().provideMerge(foundations))) { return otel.exporterLayer().provideMerge(exporterConfigLayer().provideMerge(foundations)); }
+    \\
+    \\pub fn rootLayer(inputs: RuntimeInputs) @TypeOf(kernel.Layer.mergeAll(.{ serverStack(foundationsLayer(inputs)), sessionStack(foundationsLayer(inputs)), poolStack(foundationsLayer(inputs)), exporterStack(foundationsLayer(inputs)), zstd.Application.Lifecycle.managerLayer(), zstd.Application.Lifecycle.signalLayer() })) {
+    \\    const foundations = foundationsLayer(inputs);
+    \\    return kernel.Layer.mergeAll(.{ serverStack(foundations), sessionStack(foundations), poolStack(foundations), exporterStack(foundations), zstd.Application.Lifecycle.managerLayer(), zstd.Application.Lifecycle.signalLayer() });
     \\}
     \\
-    \\fn buildConfigLayer(allocator: std.mem.Allocator, scope: *zstd.fx.Scope, ctx: anytype) anyerror!*ConfigLayerEnv {
-    \\    const inputs = ctx.service(RuntimeInputs);
-    \\    var layered = zstd.Config.LayeredConfig.init(allocator);
-    \\    errdefer layered.deinit();
-    \\    var root = inputs.root;
-    \\    _ = try layered.loadJsonFile(inputs.io, &root, "config.json", 64 * 1024, 1);
-    \\    var decoded = try layered.decodeDetailedAlloc(allocator, config_schema);
-    \\    errdefer decoded.deinit();
-    \\    if (!decoded.ok()) return error.InvalidProductionConfiguration;
-    \\    const config = decoded.value.?;
-    \\    const env = try allocator.create(ConfigLayerEnv);
-    \\    errdefer allocator.destroy(env);
-    \\    env.* = .{
-    \\        .allocator = allocator,
-    \\        .layered = layered,
-    \\        .decoded = decoded,
-    \\        .config = config,
-    \\        .http_config = .{ .io = inputs.io, .options = .{ .host = "0.0.0.0", .port = @intCast(config.port) } },
-    \\        .session_config = .{ .config = .{ .connection_url = config.database_url } },
-    \\        .pool_config = .{ .io = inputs.io, .config = .{ .session = .{ .connection_url = config.database_url } } },
-    \\        .exporter_config = .{ .io = inputs.io, .options = .{ .host = config.otlp_host, .port = @intCast(config.otlp_port) } },
-    \\    };
-    \\    scope.addFinalizerFor(ConfigLayerEnv, env, releaseConfigLayer) catch |err| return err;
-    \\    return env;
-    \\}
+    \\const ReadConfig = kernel.Effect(Config, error{}, .{ApplicationConfig});
+    \\fn readConfig() ReadConfig { return ReadConfig.fromFn(struct { fn run(ctx: *ReadConfig.Context) error{}!Config { return ctx.service(ApplicationConfig).config; } }.run); }
+    \\const migrations = [_]zstd.Sql.Migration{.{ .id = "001_bootstrap", .sql = "create table if not exists zigeffect_service_health (id bigint primary key, checked_at timestamptz not null default now())" }};
+    \\fn configuredMigrations(config: Config) @TypeOf(postgres.applyMigrationsEffect(.{ .dialect = .postgresql }, &migrations)) { return postgres.applyMigrationsEffect(.{ .dialect = if (std.mem.eql(u8, config.migration_dialect, "cockroachdb")) .cockroachdb else .postgresql }, &migrations); }
+    \\fn discardMigrations(report: postgres.MigrationReport) void { var owned = report; owned.deinit(); }
+    \\fn discardServe(_: http.ServeReport) void {}
+    \\fn discardShutdown(_: http.ShutdownReport) void {}
     \\
-    \\fn configLayer() @TypeOf(
-    \\    zstd.fx.LayerWithError(ConfigLayerEnv, anyerror)
-    \\        .fromContextBuilder(buildConfigLayer)
-    \\        .requires(.{RuntimeInputs})
-    \\        .provides(.{ Config, http.ServerLayerConfig, postgres.SessionLayerConfig, postgres.PoolLayerConfig, otel.ExporterLayerConfig }),
+    \\pub fn program() @TypeOf(
+    \\    zstd.Application.Lifecycle.start()
+    \\        .andThen(readConfig().flatMap(configuredMigrations).map(discardMigrations))
+    \\        .andThen(zstd.Application.Lifecycle.ready())
+    \\        .andThen(http.serveOneEffect().map(discardServe))
+    \\        .andThen(zstd.Application.Lifecycle.drain())
+    \\        .andThen(http.shutdownServerEffect(.{}).map(discardShutdown))
+    \\        .andThen(otel.shutdownExporterEffect())
+    \\        .andThen(postgres.closePoolEffect())
+    \\        .andThen(zstd.Application.Lifecycle.stop())
+    \\        .named("application.production"),
     \\) {
-    \\    return zstd.fx.LayerWithError(ConfigLayerEnv, anyerror)
-    \\        .fromContextBuilder(buildConfigLayer)
-    \\        .requires(.{RuntimeInputs})
-    \\        .provides(.{ Config, http.ServerLayerConfig, postgres.SessionLayerConfig, postgres.PoolLayerConfig, otel.ExporterLayerConfig });
+    \\    return zstd.Application.Lifecycle.start()
+    \\        .andThen(readConfig().flatMap(configuredMigrations).map(discardMigrations))
+    \\        .andThen(zstd.Application.Lifecycle.ready())
+    \\        .andThen(http.serveOneEffect().map(discardServe))
+    \\        .andThen(zstd.Application.Lifecycle.drain())
+    \\        .andThen(http.shutdownServerEffect(.{}).map(discardShutdown))
+    \\        .andThen(otel.shutdownExporterEffect())
+    \\        .andThen(postgres.closePoolEffect())
+    \\        .andThen(zstd.Application.Lifecycle.stop())
+    \\        .named("application.production");
     \\}
     \\
-    \\fn ProductionEffect(comptime EffectEnv: type) type {
-    \\    return struct {
-    \\        pub const SuccessType = void;
-    \\        pub const FailureType = anyerror;
-    \\        pub const EnvType = EffectEnv;
-    \\        pub const RequiredServices = .{ Config, zstd.Application.Lifecycle.Manager, postgres.Session, postgres.Pool, otel.Exporter, http.Server };
-    \\        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!zstd.fx.ServiceSet {
-    \\            return zstd.fx.ServiceSet.fromTypes(allocator, RequiredServices);
-    \\        }
-    \\        pub fn run(_: @This(), ctx: *zstd.fx.Context(EffectEnv)) anyerror!void {
-    \\            _ = ctx.service(Config);
-    \\            try ctx.runEffect(zstd.Application.Lifecycle.startEffect(EffectEnv));
-    \\            const migrations = [_]zstd.Sql.Migration{.{ .id = "001_bootstrap", .sql = "create table if not exists zigeffect_service_health (id bigint primary key, checked_at timestamptz not null default now())" }};
-    \\            const config = ctx.service(Config);
-    \\            var migration_report = try ctx.runEffect(postgres.applyMigrationsEffect(EffectEnv, .{ .dialect = if (std.mem.eql(u8, config.migration_dialect, "cockroachdb")) .cockroachdb else .postgresql }, &migrations));
-    \\            defer migration_report.deinit();
-    \\            try ctx.runEffect(zstd.Application.Lifecycle.readyEffect(EffectEnv));
-    \\            _ = try ctx.runEffect(http.serveOneEffect(EffectEnv));
-    \\            try ctx.runEffect(zstd.Application.Lifecycle.drainEffect(EffectEnv));
-    \\            _ = try ctx.runEffect(http.shutdownServerEffect(EffectEnv, .{}));
-    \\            try ctx.runEffect(otel.shutdownExporterEffect(EffectEnv));
-    \\            try ctx.runEffect(postgres.closePoolEffect(EffectEnv));
-    \\            try ctx.runEffect(zstd.Application.Lifecycle.stopEffect(EffectEnv));
-    \\        }
-    \\    };
-    \\}
-    \\
-    \\pub fn run(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir) !void {
-    \\    var graph = try causal_graph.open(allocator, io, root);
-    \\    defer graph.deinit();
-    \\    var graph_backend = graph.storageBackend(allocator, causal_graph.max_events);
-    \\    defer graph_backend.deinit();
-    \\    var causal_store = zstd.fx.CausalStore.init(allocator);
-    \\    defer causal_store.deinit();
-    \\    causal_store.attachBackend(graph_backend.backend());
-    \\    var inputs_provider = zstd.Service.ValueProvider(RuntimeInputs).init(.{ .io = io, .root = root });
-    \\    var health = Health{};
-    \\    var handler_provider = zstd.Service.ValueProvider(http.Handler).init(http.Handler.from(Health, &health));
-    \\    const inputs_layer = inputs_provider.layer();
-    \\    const application_config_layer = configLayer();
-    \\    const lifecycle_layer = zstd.Application.Lifecycle.managerLayer();
-    \\    const handler_layer = handler_provider.layer();
-    \\    const session_layer = postgres.sessionLayer();
-    \\    const pool_layer = postgres.poolLayer();
-    \\    const exporter_layer = otel.exporterLayer();
-    \\    const server_layer = http.serverLayer();
-    \\    const Layers = @TypeOf(.{ inputs_layer, application_config_layer, lifecycle_layer, handler_layer, session_layer, pool_layer, exporter_layer, server_layer });
-    \\    const Env = zstd.fx.LayerGraphEnv(Layers);
-    \\    var app = zstd.fx.layerGraph(allocator, .{ inputs_layer, application_config_layer, lifecycle_layer, handler_layer, session_layer, pool_layer, exporter_layer, server_layer }).withCausalStore(&causal_store);
-    \\    defer app.deinit();
-    \\    try app.run(ProductionEffect(Env){});
-    \\    try graph_backend.flush();
-    \\    if (graph_backend.lastFailure()) |err| return err;
-    \\    if (causal_store.backendFailureCount() != 0) return error.GraphWriteFailed;
+    \\pub fn run(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, environ: std.process.Environ) !void {
+    \\    var application_map_slot = http.ApplicationMapSlot{};
+    \\    const main_layer = rootLayer(.{ .io = io, .root = root, .environ = environ, .application_map = &application_map_slot });
+    \\    var runtime = try zstd.ManagedRuntime(@TypeOf(main_layer)).make(allocator, io, root, main_layer, .{ .graph = causal_graph.options });
+    \\    defer runtime.deinit();
+    \\    try application_map_slot.install(@TypeOf(runtime), &runtime);
+    \\    defer application_map_slot.clear();
+    \\    try runtime.run(program());
+    \\    var application = try runtime.inspect(allocator, .{ .max_recent_events = 64 });
+    \\    defer application.deinit();
+    \\    if (application.services.len < 8 or application.causal.findings.len != 0) return error.InvalidApplicationSnapshot;
+    \\    const agent_map = try runtime.agentMapJsonAlloc(allocator, .{ .max_recent_events = 64 });
+    \\    defer allocator.free(agent_map);
+    \\    if (agent_map.len == 0 or runtime.causalHealth().status != .healthy) return error.MissingApplicationMap;
+    \\    try runtime.shutdown();
     \\}
 ;
 
@@ -918,10 +983,13 @@ pub const readme =
     \\not introduce `EffectEnv`, `LayerGraph`, `ctx.runEffect`, per-endpoint
     \\runtimes, or manual graph/store wiring.
     \\
-    \\The production profile currently isolates HTTP, Postgres, and OTLP behind a
-    \\documented compatibility adapter bridge until those packages publish
-    \\canonical kernel layers. That bridge is migration debt, not a second
-    \\application architecture.
+    \\The production profile composes config, lifecycle and process signals,
+    \\HTTP, Postgres, and OTLP through canonical service tags and memoized scoped
+    \\layers. The process owns one managed runtime and serves its guarded map at
+    \\`/.well-known/zigeffect/application-map`. Provide
+    \\`ZIGEFFECT_SECRET_DATABASE_URL` and `ZIGEFFECT_SECRET_AGENT_MAP_TOKEN`;
+    \\agents authenticate the map request with that token using the HTTP
+    \\`Bearer` scheme.
     \\
     \\## Develop
     \\
@@ -1167,6 +1235,10 @@ pub const skill =
     \\- Emit semantic facts at external, workflow, statechart, artifact, and
     \\  acceptance boundaries. Use typed statecharts for inspectable long-lived
     \\  control flow and durable statecharts for replayable workflows.
+    \\- Compose typed decisions with `zstd.Statechart.Effect.layer`/`step`,
+    \\  journals with `zstd.Workflow.journalLayer`/`append`, and process signals
+    \\  with `zstd.Application.Lifecycle.signalLayer()`. Child requests and jobs
+    \\  use bounded `ctx.runtime()` handles from the one owning runtime.
     \\- Never put credentials, personal data, or raw terminal scrollback in
     \\  manifests, facts, receipts, fixtures, snapshots, or Workbench payloads.
     \\

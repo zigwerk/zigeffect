@@ -19,9 +19,17 @@ pub fn lineStreamAlloc(allocator: std.mem.Allocator, input: []const u8) !fx.Effe
         allocator: std.mem.Allocator,
         parsed: ParsedLines,
         offset: usize = 0,
-        pub fn pull(self: *@This(), _: *fx.Context(Stream.EmptyEnv), output_allocator: std.mem.Allocator, max: usize) anyerror!fx.EffectStream([]const u8, anyerror, Stream.EmptyEnv).Chunk { const count = @min(max, self.parsed.lines.len - self.offset); const output = try output_allocator.alloc([]const u8, count); @memcpy(output, self.parsed.lines[self.offset .. self.offset + count]); self.offset += count; return .{ .allocator = output_allocator, .items = output, .end = self.offset == self.parsed.lines.len }; }
+        pub fn pull(self: *@This(), _: *fx.Context(Stream.EmptyEnv), output_allocator: std.mem.Allocator, max: usize) anyerror!fx.EffectStream([]const u8, anyerror, Stream.EmptyEnv).Chunk {
+            const count = @min(max, self.parsed.lines.len - self.offset);
+            const output = try output_allocator.alloc([]const u8, count);
+            @memcpy(output, self.parsed.lines[self.offset .. self.offset + count]);
+            self.offset += count;
+            return .{ .allocator = output_allocator, .items = output, .end = self.offset == self.parsed.lines.len };
+        }
         pub fn close(_: *@This(), _: fx.StreamCloseReason) void {}
-        pub fn deinit(self: *@This()) void { self.parsed.deinit(self.allocator); }
+        pub fn deinit(self: *@This()) void {
+            self.parsed.deinit(self.allocator);
+        }
     };
     return fx.effectStreamFromOwnedPullerAlloc([]const u8, anyerror, Stream.EmptyEnv, Puller, allocator, .{ .allocator = allocator, .parsed = try parseLinesAlloc(allocator, input) });
 }
@@ -42,6 +50,8 @@ pub fn appendRecordAlloc(
 }
 
 pub const Codec = struct {
+    pub const operations: []const []const u8 = &.{"Jsonl.append"};
+
     pub fn appendAlloc(
         _: Codec,
         allocator: std.mem.Allocator,
@@ -52,38 +62,31 @@ pub const Codec = struct {
     }
 };
 
-pub fn AppendEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = []const u8;
-        pub const FailureType = std.mem.Allocator.Error;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Codec};
+pub const JsonlCodec = fx.kernel.Service("zigeffect/std/JsonlCodec", Codec);
 
-        existing: []const u8,
-        record_json: []const u8,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType![]const u8 {
-            const codec = ctx.service(Codec);
-            const output = codec.appendAlloc(ctx.allocator, self.existing, self.record_json) catch |err| {
-                _ = StdService.recordOperation(ctx, Codec, "append", "failure", "jsonl record");
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, Codec, "append", "success", "jsonl record");
-            return output;
-        }
-    };
+pub fn codecLayer() @TypeOf(fx.kernel.Layer.succeed(JsonlCodec, Codec{})) {
+    return fx.kernel.Layer.succeed(JsonlCodec, .{});
 }
 
-pub fn appendEffect(
-    comptime EffectEnv: type,
-    existing: []const u8,
-    record_json: []const u8,
-) AppendEffect(EffectEnv) {
-    return .{ .existing = existing, .record_json = record_json };
+const AppendInput = struct { existing: []const u8, record_json: []const u8 };
+
+pub fn append(existing: []const u8, record_json: []const u8) fx.kernel.Effect(
+    []const u8,
+    std.mem.Allocator.Error,
+    .{JsonlCodec},
+).Stateful(AppendInput) {
+    const Append = fx.kernel.Effect([]const u8, std.mem.Allocator.Error, .{JsonlCodec});
+    return Append.fromState(AppendInput, .{ .existing = existing, .record_json = record_json }, struct {
+        fn run(input: AppendInput, ctx: *Append.Context) std.mem.Allocator.Error![]const u8 {
+            const operation = StdService.beginOperation(ctx, JsonlCodec.service_key, "Jsonl.append", "bounded record");
+            const output = ctx.service(JsonlCodec).appendAlloc(ctx.allocator(), input.existing, input.record_json) catch |failure| {
+                _ = StdService.completeOperation(ctx, operation, "failure", @errorName(failure));
+                return failure;
+            };
+            _ = StdService.completeOperation(ctx, operation, "success", "jsonl record");
+            return output;
+        }
+    }.run);
 }
 
 pub fn parseLinesAlloc(allocator: std.mem.Allocator, input: []const u8) !ParsedLines {
@@ -126,24 +129,23 @@ test "Jsonl retains trailing partial line" {
     try std.testing.expectEqualStrings("{\"b\"", parsed.trailing);
 }
 
-test "Jsonl appendEffect uses Codec service and records causal fact" {
-    const zstd = @import("../root.zig");
-
-    var codec = Codec{};
-    var provider = zstd.Service.Provider(.{Codec}).init(.{&codec});
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+test "Jsonl.append uses a canonical codec layer and records causal fact" {
+    const root = codecLayer();
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{Codec})
-        .withCausalStore(&store);
-
-    const output = try runtime.run(appendEffect(@TypeOf(provider), "", "{\"status\":\"ok\"}"));
+    const output = try runtime.run(append("", "{\"status\":\"ok\"}"));
     defer std.testing.allocator.free(output);
 
     try std.testing.expectEqualStrings("{\"status\":\"ok\"}\n", output);
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, Codec, "append", "success"));
+    var saw = false;
+    for (snapshot.events) |event| {
+        if (event.kind == .io_completed and std.mem.eql(u8, event.service_key, JsonlCodec.service_key)) saw = true;
+    }
+    try std.testing.expect(saw);
 }

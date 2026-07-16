@@ -27,7 +27,7 @@ Testing v2 upgrades both existing Zig tests and new semantic scenarios:
 Keep small value/type/unit assertions in `std.testing`; the V2 runner migrates
 them without source churn. Use `TestContext` when a user-visible requirement or
 runtime boundary needs evidence an agent can reason about. Generated project
-template v12 configures the runner automatically through the runner module
+template v14 configures the runner automatically through the runner module
 exported by `zigeffect_std`.
 
 After `zig build test`, inspect the suite receipt before terminal output:

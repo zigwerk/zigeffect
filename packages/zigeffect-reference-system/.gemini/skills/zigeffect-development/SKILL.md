@@ -32,6 +32,10 @@ is diagnostic only.
 7. Re-query context and reject stale identities, conflicting paths, expired
    fencing, missing dependency proof, required gaps, or incomplete evidence.
 
+Compose statecharts with `zstd.Statechart.Effect.layer`/`step`, journals with
+`zstd.Workflow.journalLayer`/`append`, lifecycle signals at the root, and every
+API request or worker job with a bounded handle from the one owning runtime.
+
 Run the requirement scenario, coverage/gaps, the project test command, and
 `zigeffect project check --agent --json`. Inspect the Testing v2 suite receipt
 for a complete pass with equal discovered/executed counts and no pending tests,

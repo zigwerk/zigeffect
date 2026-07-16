@@ -9,12 +9,13 @@ Zig 0.16).
 The core `packages/zigeffect` stays **zio-free** and is the deterministic
 reference; this package is the only place the zio dependency lives.
 
-## Status — low-level integration shipped
+## Status — canonical managed runtime integration shipped
 
-The executor and async backend are real and tested, but their public attachment
-point still belongs to the legacy environment-shaped runtime. Canonical
-`kernel.ManagedRuntime` executor selection is a remaining migration boundary;
-new application roots should not adopt `Runtime(Env)` merely to select zio.
+`OwnedBackend` owns the zio runtime, executor state, and async backend. The
+package exports `BackendService`, `backendLayer`, and a canonical
+`ManagedRuntime(RootLayer)` that automatically provides the backend and
+configures the kernel executor/async capabilities. Applications do not select
+zio through an environment-shaped runtime.
 
 What is real and verified here:
 
@@ -31,12 +32,10 @@ What is real and verified here:
 - **D2 — engine fibers as real coroutines.** Two engine fibers, each driven by
   `coordinator.delay`, run as real interleaving zio coroutines and yet remain
   structurally equal to the deterministic *sequential* run.
-- **Compatibility executor adapter.** `ZioFiberExecutor` is a real
-  `FiberExecutor` vtable backed by `zio.spawn` + `JoinHandle`. Existing engine
-  modules attach it through `Runtime(Env).withExecutor` or
-  `FiberRuntime.withExecutor`; canonical managed-runtime integration is still
-  pending. On that compatibility path, `Effect.fork` spawns a real stackful
-  coroutine transparently.
+- **Canonical executor adapter.** `ZioFiberExecutor` is a real
+  `FiberExecutor` vtable backed by `zio.spawn` + `JoinHandle`. The ZIO managed
+  runtime installs it once, and every canonical top-level effect or derived
+  runtime handle uses it transparently.
 - **Z1 / Z2 / Z3 / Z3b** primitives verified — real timer suspension, real
   socket IO via `zio.net`, real cancellation via `zio.Group`, real coordination
   via `zio.Channel`.

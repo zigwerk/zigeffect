@@ -4,9 +4,10 @@ This is the authoritative application-facing guide for the canonical ZigEffect
 kernel. New code uses `kernel.Service`, `kernel.Effect`, `kernel.Layer`, and one
 process-level `zstd.ManagedRuntime`. The I/O-free `kernel.ManagedRuntime` is the
 lower-level interpreter used by framework tests and custom platform adapters.
-The older environment-parameterized `Effect`,
-`LayerGraph`, and `ctx.runEffect` APIs remain only while framework and adapter
-internals are migrated; they are not an alternative application architecture.
+The older environment-parameterized interpreter is quarantined as a
+framework-internal verification surface. It is not part of the standard-library
+application model, adapter contracts, scaffolds, or architecture admission
+gate.
 
 For a larger example, read [Compositional applications](compositional-applications.md).
 
@@ -278,10 +279,11 @@ Application projects additionally use manifest-owned scenarios and
 ## Legacy framework surface
 
 The repository still contains `fx.Effect(..., Env)`, `ServiceEnv`,
-`LayerWithError`, `LayerGraph`, `layerGraph`, and `ctx.runEffect` while older
-runtime modules and adapter packages migrate. They may be documented in a
-roadmap or an internal compatibility note, but must not appear as the recommended
-shape for new applications, packages, services, examples, or scaffolds.
+`LayerWithError`, `LayerGraph`, and `layerGraph` in quarantined engine
+regression domains. Canonical standard-library and adapter packages do not use
+that surface. It may be documented in a historical design or internal
+compatibility note, but must not appear as the recommended shape for new
+applications, packages, services, examples, or scaffolds.
 
 Migration status is tracked in:
 

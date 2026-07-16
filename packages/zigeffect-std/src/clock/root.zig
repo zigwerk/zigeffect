@@ -117,55 +117,6 @@ pub const FakeClock = struct {
     }
 };
 
-pub fn SnapshotEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = Snapshot;
-        pub const FailureType = error{};
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Service};
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(_: @This(), ctx: *fx.Context(EffectEnv)) error{}!Snapshot {
-            const result = ctx.service(Service).snapshot();
-            _ = StdService.recordOperation(ctx, Service, "clock.snapshot", "success", "read wall and monotonic clocks");
-            return result;
-        }
-    };
-}
-
-pub fn SleepEffect(comptime EffectEnv: type) type {
-    return struct {
-        millis: u64,
-
-        pub const SuccessType = void;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Service};
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) anyerror!void {
-            ctx.service(Service).sleepMillis(self.millis) catch |err| {
-                _ = StdService.recordOperation(ctx, Service, "clock.sleep", "failure", @errorName(err));
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, Service, "clock.sleep", "success", "completed requested delay");
-        }
-    };
-}
-
-pub fn snapshotEffect(comptime EffectEnv: type) SnapshotEffect(EffectEnv) {
-    return .{};
-}
-pub fn sleepEffect(comptime EffectEnv: type, millis: u64) SleepEffect(EffectEnv) {
-    return .{ .millis = millis };
-}
-
 /// Reads the active runtime Clock reference. Like Effect's Clock reference,
 /// this is a default service and therefore adds no explicit requirement.
 pub fn currentTimeMillis() fx.kernel.Effect(u64, error{}, .{}) {
@@ -229,16 +180,13 @@ test "Clock service has equivalent deterministic wall monotonic and sleep decisi
     try std.testing.expectEqual(@as(i128, 1_025 * std.time.ns_per_ms), snapshot.monotonic_nanos);
 }
 
-test "Clock snapshot and sleep effects compose through a service layer" {
-    var clock = FakeClock.init(1_000);
-    var provider = StdService.ValueProvider(Service).init(clock.asService());
-    const clock_layer = provider.layer();
-    const Layers = @TypeOf(.{clock_layer});
-    const EnvType = fx.LayerGraphEnv(Layers);
-    var graph = fx.layerGraph(std.testing.allocator, .{clock_layer});
-    defer graph.deinit();
+test "Clock default service effects compose through one ManagedRuntime" {
+    var clock = fx.kernel.Clock.fake(1_000);
+    const root = fx.kernel.Layer.empty();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{});
+    defer runtime.deinit();
 
-    try graph.run(sleepEffect(EnvType, 25));
-    const current = try graph.run(snapshotEffect(EnvType));
-    try std.testing.expectEqual(@as(u64, 1_025), current.wall_millis);
+    try runtime.run(sleep(25).withClock(&clock));
+    const current = try runtime.run(currentTimeMillis().withClock(&clock));
+    try std.testing.expectEqual(@as(u64, 1_025), current);
 }

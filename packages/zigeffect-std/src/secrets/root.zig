@@ -38,9 +38,17 @@ pub const Value = struct {
         if (bytes.len == 0) return error.EmptySecret;
         return .{ .allocator = allocator, .bytes = try allocator.dupe(u8, bytes), .rotation_epoch = epoch };
     }
-    pub fn expose(self: *const Value) []const u8 { return self.bytes; }
-    pub fn display(_: *const Value) []const u8 { return redacted; }
-    pub fn deinit(self: *Value) void { @memset(self.bytes, 0); self.allocator.free(self.bytes); self.* = undefined; }
+    pub fn expose(self: *const Value) []const u8 {
+        return self.bytes;
+    }
+    pub fn display(_: *const Value) []const u8 {
+        return redacted;
+    }
+    pub fn deinit(self: *Value) void {
+        @memset(self.bytes, 0);
+        self.allocator.free(self.bytes);
+        self.* = undefined;
+    }
 };
 
 pub const Access = struct { reference: Reference, epoch: u64, succeeded: bool };
@@ -48,7 +56,9 @@ pub const Access = struct { reference: Reference, epoch: u64, succeeded: bool };
 pub const Audit = struct {
     allocator: std.mem.Allocator,
     accesses: std.ArrayList(Access) = .empty,
-    pub fn init(allocator: std.mem.Allocator) Audit { return .{ .allocator = allocator }; }
+    pub fn init(allocator: std.mem.Allocator) Audit {
+        return .{ .allocator = allocator };
+    }
     pub fn deinit(self: *Audit) void {
         for (self.accesses.items) |access| {
             self.allocator.free(access.reference.provider);
@@ -101,18 +111,31 @@ pub const RotatingMemoryProvider = struct {
     }
     pub fn deinit(self: *RotatingMemoryProvider) void {
         var iterator = self.values.iterator();
-        while (iterator.next()) |entry| { self.allocator.free(entry.key_ptr.*); @memset(entry.value_ptr.bytes, 0); self.allocator.free(entry.value_ptr.bytes); }
+        while (iterator.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            @memset(entry.value_ptr.bytes, 0);
+            self.allocator.free(entry.value_ptr.bytes);
+        }
         self.values.deinit();
         self.allocator.free(self.name);
     }
-    pub fn asProvider(self: *RotatingMemoryProvider) Provider { return Provider.from(RotatingMemoryProvider, self); }
+    pub fn asProvider(self: *RotatingMemoryProvider) Provider {
+        return Provider.from(RotatingMemoryProvider, self);
+    }
     pub fn rotate(self: *RotatingMemoryProvider, key: []const u8, bytes: []const u8) !u64 {
         if (!validReferencePart(key) or bytes.len == 0) return error.InvalidSecretReference;
-        self.lock(); defer self.mutex.unlock();
+        self.lock();
+        defer self.mutex.unlock();
         const next_epoch = if (self.values.get(key)) |stored| stored.epoch + 1 else 1;
-        if (self.values.fetchRemove(key)) |old| { self.allocator.free(old.key); @memset(old.value.bytes, 0); self.allocator.free(old.value.bytes); }
-        const owned_key = try self.allocator.dupe(u8, key); errdefer self.allocator.free(owned_key);
-        const owned_bytes = try self.allocator.dupe(u8, bytes); errdefer self.allocator.free(owned_bytes);
+        if (self.values.fetchRemove(key)) |old| {
+            self.allocator.free(old.key);
+            @memset(old.value.bytes, 0);
+            self.allocator.free(old.value.bytes);
+        }
+        const owned_key = try self.allocator.dupe(u8, key);
+        errdefer self.allocator.free(owned_key);
+        const owned_bytes = try self.allocator.dupe(u8, bytes);
+        errdefer self.allocator.free(owned_bytes);
         try self.values.put(owned_key, .{ .bytes = owned_bytes, .epoch = next_epoch });
         return next_epoch;
     }
@@ -122,7 +145,8 @@ pub const RotatingMemoryProvider = struct {
             if (audit) |target| try target.record(.{ .reference = reference, .epoch = 0, .succeeded = false });
             return error.SecretProviderMismatch;
         }
-        self.lock(); defer self.mutex.unlock();
+        self.lock();
+        defer self.mutex.unlock();
         const stored = self.values.get(reference.key) orelse {
             if (audit) |target| try target.record(.{ .reference = reference, .epoch = 0, .succeeded = false });
             return error.SecretNotFound;
@@ -131,7 +155,9 @@ pub const RotatingMemoryProvider = struct {
         if (audit) |target| try target.record(.{ .reference = reference, .epoch = stored.epoch, .succeeded = true });
         return result;
     }
-    fn lock(self: *RotatingMemoryProvider) void { while (!self.mutex.tryLock()) std.Thread.yield() catch {}; }
+    fn lock(self: *RotatingMemoryProvider) void {
+        while (!self.mutex.tryLock()) std.Thread.yield() catch {};
+    }
 };
 
 pub const EnvironmentProvider = struct {
@@ -142,7 +168,8 @@ pub const EnvironmentProvider = struct {
             if (audit) |target| try target.record(.{ .reference = reference, .epoch = 0, .succeeded = false });
             return error.SecretProviderMismatch;
         }
-        const variable = try std.fmt.allocPrint(allocator, "{s}{s}", .{ self.prefix, reference.key }); defer allocator.free(variable);
+        const variable = try std.fmt.allocPrint(allocator, "{s}{s}", .{ self.prefix, reference.key });
+        defer allocator.free(variable);
         const bytes = std.process.Environ.getAlloc(self.environ, allocator, variable) catch |err| switch (err) {
             error.EnvironmentVariableMissing => {
                 if (audit) |target| try target.record(.{ .reference = reference, .epoch = 0, .succeeded = false });
@@ -150,7 +177,10 @@ pub const EnvironmentProvider = struct {
             },
             else => return err,
         };
-        defer { @memset(bytes, 0); allocator.free(bytes); }
+        defer {
+            @memset(bytes, 0);
+            allocator.free(bytes);
+        }
         const result = try Value.initAlloc(allocator, bytes, 1);
         if (audit) |target| try target.record(.{ .reference = reference, .epoch = 1, .succeeded = true });
         return result;
@@ -166,12 +196,16 @@ pub const FileProvider = struct {
             if (audit) |target| try target.record(.{ .reference = reference, .epoch = 0, .succeeded = false });
             return error.SecretProviderMismatch;
         }
-        const file_name = try std.fmt.allocPrint(allocator, "{s}.secret", .{reference.key}); defer allocator.free(file_name);
+        const file_name = try std.fmt.allocPrint(allocator, "{s}.secret", .{reference.key});
+        defer allocator.free(file_name);
         const bytes = self.dir.readFileAlloc(self.io, file_name, allocator, .limited(self.max_bytes)) catch |err| {
             if (audit) |target| try target.record(.{ .reference = reference, .epoch = 0, .succeeded = false });
             return err;
         };
-        defer { @memset(bytes, 0); allocator.free(bytes); }
+        defer {
+            @memset(bytes, 0);
+            allocator.free(bytes);
+        }
         const trimmed = std.mem.trim(u8, bytes, "\r\n");
         const result = try Value.initAlloc(allocator, trimmed, 1);
         if (audit) |target| try target.record(.{ .reference = reference, .epoch = 1, .succeeded = true });
@@ -218,6 +252,8 @@ pub fn requireSafeBoundary(input: []const u8) !void {
 }
 
 pub const Redactor = struct {
+    pub const operations: []const []const u8 = &.{"Secrets.redact"};
+
     pub fn contains(_: Redactor, input: []const u8) bool {
         return containsSecret(input);
     }
@@ -227,33 +263,29 @@ pub const Redactor = struct {
     }
 };
 
-pub fn RedactEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = []const u8;
-        pub const FailureType = std.mem.Allocator.Error;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Redactor};
+pub const RedactorService = fx.kernel.Service("zigeffect/std/Redactor", Redactor);
 
-        input: []const u8,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType![]const u8 {
-            const redactor = ctx.service(Redactor);
-            const output = redactor.redactAlloc(ctx.allocator, self.input) catch |err| {
-                _ = StdService.recordOperation(ctx, Redactor, "redact", "failure", self.input);
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, Redactor, "redact", "success", self.input);
-            return output;
-        }
-    };
+pub fn redactorLayer() @TypeOf(fx.kernel.Layer.succeed(RedactorService, Redactor{})) {
+    return fx.kernel.Layer.succeed(RedactorService, .{});
 }
 
-pub fn redactEffect(comptime EffectEnv: type, input: []const u8) RedactEffect(EffectEnv) {
-    return .{ .input = input };
+pub fn redact(input: []const u8) fx.kernel.Effect(
+    []const u8,
+    std.mem.Allocator.Error,
+    .{RedactorService},
+).Stateful([]const u8) {
+    const Redact = fx.kernel.Effect([]const u8, std.mem.Allocator.Error, .{RedactorService});
+    return Redact.fromState([]const u8, input, struct {
+        fn run(value: []const u8, ctx: *Redact.Context) std.mem.Allocator.Error![]const u8 {
+            const operation = StdService.beginOperation(ctx, RedactorService.service_key, "Secrets.redact", value);
+            const output = ctx.service(RedactorService).redactAlloc(ctx.allocator(), value) catch |failure| {
+                _ = StdService.completeOperation(ctx, operation, "failure", @errorName(failure));
+                return failure;
+            };
+            _ = StdService.completeOperation(ctx, operation, "success", "redacted output");
+            return output;
+        }
+    }.run);
 }
 
 fn containsInsensitive(haystack: []const u8, needle: []const u8) bool {
@@ -323,7 +355,8 @@ test "secret references rotate audit and zero owned values" {
     var provider = try RotatingMemoryProvider.init(std.testing.allocator, "memory");
     defer provider.deinit();
     try std.testing.expectEqual(@as(u64, 1), try provider.rotate("DATABASE_PASSWORD", "sentinel-secret-one"));
-    var audit = Audit.init(std.testing.allocator); defer audit.deinit();
+    var audit = Audit.init(std.testing.allocator);
+    defer audit.deinit();
     var value = try provider.asProvider().resolveAlloc(std.testing.allocator, .{ .provider = "memory", .key = "DATABASE_PASSWORD" }, &audit);
     try std.testing.expectEqualStrings(redacted, value.display());
     try std.testing.expectEqualStrings("sentinel-secret-one", value.expose());
@@ -341,24 +374,23 @@ test "Secrets does not mistake an embedded sk prefix for a key" {
     try std.testing.expect(containsSecret("key sk-project-key"));
 }
 
-test "Secrets redactEffect uses Redactor service and records causal fact" {
-    const zstd = @import("../root.zig");
-
-    var redactor = Redactor{};
-    var provider = zstd.Service.Provider(.{Redactor}).init(.{&redactor});
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+test "Secrets.redact uses a canonical Redactor layer and records causal fact" {
+    const root = redactorLayer();
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{Redactor})
-        .withCausalStore(&store);
-
-    const output = try runtime.run(redactEffect(@TypeOf(provider), "token=abc123"));
+    const output = try runtime.run(redact("token=abc123"));
     defer std.testing.allocator.free(output);
 
     try std.testing.expectEqualStrings(redacted, output);
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, Redactor, "redact", "success"));
+    var saw = false;
+    for (snapshot.events) |event| {
+        if (event.kind == .io_completed and std.mem.eql(u8, event.service_key, RedactorService.service_key)) saw = true;
+    }
+    try std.testing.expect(saw);
 }

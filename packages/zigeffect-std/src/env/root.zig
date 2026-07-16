@@ -1,5 +1,6 @@
 const std = @import("std");
 const StdService = @import("../service/root.zig");
+const fx = @import("zigeffect");
 
 pub const EnvError = error{
     MissingVariable,
@@ -45,33 +46,34 @@ pub const EnvMap = struct {
     }
 };
 
-pub fn RequireEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = []const u8;
-        pub const FailureType = EnvError;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{EnvMap};
+pub const API = struct {
+    pub const operations: []const []const u8 = &.{"Environment.require"};
+    map: *EnvMap,
 
-        name: []const u8,
+    pub fn require(self: API, name: []const u8) EnvError![]const u8 {
+        return self.map.require(name);
+    }
+};
 
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!@import("zigeffect").ServiceSet {
-            return @import("zigeffect").ServiceSet.fromTypes(allocator, RequiredServices);
-        }
+pub const Environment = fx.kernel.Service("zigeffect/std/Environment", API);
 
-        pub fn run(self: @This(), ctx: *@import("zigeffect").Context(EffectEnv)) EnvError![]const u8 {
-            const env = ctx.service(EnvMap);
-            const value = env.require(self.name) catch |err| {
-                _ = StdService.recordOperation(ctx, EnvMap, "require", "failure", self.name);
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, EnvMap, "require", "success", self.name);
-            return value;
-        }
-    };
+pub fn layer(map: *EnvMap) @TypeOf(fx.kernel.Layer.succeed(Environment, API{ .map = map })) {
+    return fx.kernel.Layer.succeed(Environment, .{ .map = map });
 }
 
-pub fn requireEffect(comptime EffectEnv: type, name: []const u8) RequireEffect(EffectEnv) {
-    return .{ .name = name };
+pub fn require(name: []const u8) fx.kernel.Effect([]const u8, EnvError, .{Environment}).Stateful([]const u8) {
+    const Require = fx.kernel.Effect([]const u8, EnvError, .{Environment});
+    return Require.fromState([]const u8, name, struct {
+        fn run(value: []const u8, ctx: *Require.Context) EnvError![]const u8 {
+            const operation = StdService.beginOperation(ctx, Environment.service_key, "Environment.require", value);
+            const result = ctx.service(Environment).require(value) catch |failure| {
+                _ = StdService.completeOperation(ctx, operation, "failure", @errorName(failure));
+                return failure;
+            };
+            _ = StdService.completeOperation(ctx, operation, "success", value);
+            return result;
+        }
+    }.run);
 }
 
 test "Env require returns value or MissingVariable" {
@@ -84,25 +86,24 @@ test "Env require returns value or MissingVariable" {
     try std.testing.expectError(EnvError.MissingVariable, env.require("MISSING"));
 }
 
-test "Env requireEffect resolves through runtime services and records causal fact" {
-    const zstd = @import("../root.zig");
-
+test "Environment.require resolves through a canonical layer and records causal fact" {
     var env_map = EnvMap.init(std.testing.allocator);
     defer env_map.deinit();
     try env_map.put("MODE", "test");
-
-    var provider = zstd.Service.Provider(.{EnvMap}).init(.{&env_map});
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    const root = layer(&env_map);
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{EnvMap})
-        .withCausalStore(&store);
-
-    try std.testing.expectEqualStrings("test", try runtime.run(requireEffect(@TypeOf(provider), "MODE")));
+    try std.testing.expectEqualStrings("test", try runtime.run(require("MODE")));
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, EnvMap, "require", "success"));
+    var saw = false;
+    for (snapshot.events) |event| {
+        if (event.kind == .io_completed and std.mem.eql(u8, event.service_key, Environment.service_key)) saw = true;
+    }
+    try std.testing.expect(saw);
 }

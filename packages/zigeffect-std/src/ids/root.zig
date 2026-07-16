@@ -17,6 +17,8 @@ pub const capability = Capability.Descriptor{
 };
 
 pub const Service = struct {
+    pub const operations: []const []const u8 = &.{ "Ids.uuidV7", "Ids.ulid" };
+
     pointer: *anyopaque,
     uuid_v7_fn: *const fn (*anyopaque) [36]u8,
     ulid_fn: *const fn (*anyopaque) [26]u8,
@@ -44,6 +46,12 @@ pub const Service = struct {
         return self.ulid_fn(self.pointer);
     }
 };
+
+pub const IdGenerator = fx.kernel.Service("zigeffect/std/IdGenerator", Service);
+
+pub fn layer(provider: *Provider) @TypeOf(fx.kernel.Layer.succeed(IdGenerator, provider.asService())) {
+    return fx.kernel.Layer.succeed(IdGenerator, provider.asService());
+}
 
 pub const Provider = struct {
     clock: Clock.Service,
@@ -115,45 +123,24 @@ pub const Provider = struct {
     }
 };
 
-pub fn UuidV7Effect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = [36]u8;
-        pub const FailureType = error{};
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Service};
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-        pub fn run(_: @This(), ctx: *fx.Context(EffectEnv)) error{}![36]u8 {
-            const result = ctx.service(Service).uuidV7();
-            _ = StdService.recordOperation(ctx, Service, "ids.uuid-v7", "success", "generated UUIDv7");
+pub fn uuidV7() fx.kernel.Effect([36]u8, error{}, .{IdGenerator}) {
+    return fx.kernel.Effect([36]u8, error{}, .{IdGenerator}).fromFn(struct {
+        fn run(ctx: *fx.kernel.ContextView(.{IdGenerator})) error{}![36]u8 {
+            const result = ctx.service(IdGenerator).uuidV7();
+            _ = StdService.recordSemantic(ctx, .span_recorded, IdGenerator.service_key, "Ids.uuidV7", "success", "generated UUIDv7");
             return result;
         }
-    };
+    }.run);
 }
 
-pub fn UlidEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = [26]u8;
-        pub const FailureType = error{};
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Service};
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-        pub fn run(_: @This(), ctx: *fx.Context(EffectEnv)) error{}![26]u8 {
-            const result = ctx.service(Service).ulid();
-            _ = StdService.recordOperation(ctx, Service, "ids.ulid", "success", "generated monotonic ULID");
+pub fn ulid() fx.kernel.Effect([26]u8, error{}, .{IdGenerator}) {
+    return fx.kernel.Effect([26]u8, error{}, .{IdGenerator}).fromFn(struct {
+        fn run(ctx: *fx.kernel.ContextView(.{IdGenerator})) error{}![26]u8 {
+            const result = ctx.service(IdGenerator).ulid();
+            _ = StdService.recordSemantic(ctx, .span_recorded, IdGenerator.service_key, "Ids.ulid", "success", "generated monotonic ULID");
             return result;
         }
-    };
-}
-
-pub fn uuidV7Effect(comptime EffectEnv: type) UuidV7Effect(EffectEnv) {
-    return .{};
-}
-pub fn ulidEffect(comptime EffectEnv: type) UlidEffect(EffectEnv) {
-    return .{};
+    }.run);
 }
 
 fn encodeUlid(bytes: [16]u8) [26]u8 {
@@ -190,18 +177,16 @@ test "UUIDv7 and ULID decisions replay and stay ordered" {
     try std.testing.expectEqual(@as(u8, '7'), versioned[14]);
 }
 
-test "ID effects use the declared ID service through a layer graph" {
+test "ID effects use the declared ID service through ManagedRuntime" {
     var clock = Clock.FakeClock.init(1_700_000_000_000);
     var random = Random.Deterministic.init(7);
     var ids = Provider.init(clock.asService(), random.asService());
-    var service_provider = StdService.ValueProvider(Service).init(ids.asService());
-    const ids_layer = service_provider.layer();
-    const EnvType = fx.LayerGraphEnv(@TypeOf(.{ids_layer}));
-    var graph = fx.layerGraph(std.testing.allocator, .{ids_layer});
-    defer graph.deinit();
+    const root = layer(&ids);
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{});
+    defer runtime.deinit();
 
-    const uuid = try graph.run(uuidV7Effect(EnvType));
-    const ulid_value = try graph.run(ulidEffect(EnvType));
+    const uuid = try runtime.run(uuidV7());
+    const ulid_value = try runtime.run(ulid());
     try std.testing.expectEqual(@as(u8, '7'), uuid[14]);
     try std.testing.expectEqual(@as(usize, 26), ulid_value.len);
 }

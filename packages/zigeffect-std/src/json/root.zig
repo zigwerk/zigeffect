@@ -52,6 +52,8 @@ pub fn objectFromFieldsAlloc(allocator: std.mem.Allocator, fields: []const Field
 }
 
 pub const Codec = struct {
+    pub const operations: []const []const u8 = &.{"Json.object"};
+
     pub fn escapeAlloc(_: Codec, allocator: std.mem.Allocator, value: []const u8) std.mem.Allocator.Error![]const u8 {
         return escapeStringAlloc(allocator, value);
     }
@@ -61,33 +63,29 @@ pub const Codec = struct {
     }
 };
 
-pub fn ObjectEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = []const u8;
-        pub const FailureType = std.mem.Allocator.Error;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Codec};
+pub const JsonCodec = fx.kernel.Service("zigeffect/std/JsonCodec", Codec);
 
-        fields: []const Field,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType![]const u8 {
-            const codec = ctx.service(Codec);
-            const output = codec.objectAlloc(ctx.allocator, self.fields) catch |err| {
-                _ = StdService.recordOperation(ctx, Codec, "object", "failure", "json object");
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, Codec, "object", "success", "json object");
-            return output;
-        }
-    };
+pub fn codecLayer() @TypeOf(fx.kernel.Layer.succeed(JsonCodec, Codec{})) {
+    return fx.kernel.Layer.succeed(JsonCodec, .{});
 }
 
-pub fn objectEffect(comptime EffectEnv: type, fields: []const Field) ObjectEffect(EffectEnv) {
-    return .{ .fields = fields };
+pub fn object(fields: []const Field) fx.kernel.Effect(
+    []const u8,
+    std.mem.Allocator.Error,
+    .{JsonCodec},
+).Stateful([]const Field) {
+    const Object = fx.kernel.Effect([]const u8, std.mem.Allocator.Error, .{JsonCodec});
+    return Object.fromState([]const Field, fields, struct {
+        fn run(value: []const Field, ctx: *Object.Context) std.mem.Allocator.Error![]const u8 {
+            const operation = StdService.beginOperation(ctx, JsonCodec.service_key, "Json.object", "bounded fields");
+            const output = ctx.service(JsonCodec).objectAlloc(ctx.allocator(), value) catch |failure| {
+                _ = StdService.completeOperation(ctx, operation, "failure", @errorName(failure));
+                return failure;
+            };
+            _ = StdService.completeOperation(ctx, operation, "success", "json object");
+            return output;
+        }
+    }.run);
 }
 
 test "Json writes stable redacted object fields" {
@@ -112,27 +110,26 @@ test "Json escapes strings deterministically" {
     try std.testing.expectEqualStrings("line\\n\\\"quoted\\\"\\\\tail", escaped);
 }
 
-test "Json objectEffect uses Codec service and records causal fact" {
-    const zstd = @import("../root.zig");
-
-    var codec = Codec{};
-    var provider = zstd.Service.Provider(.{Codec}).init(.{&codec});
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+test "Json.object uses a canonical codec layer and records causal fact" {
+    const root = codecLayer();
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
-
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{Codec})
-        .withCausalStore(&store);
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
     const fields = [_]Field{
         .{ .name = "status", .value = "ok" },
     };
-    const output = try runtime.run(objectEffect(@TypeOf(provider), fields[0..]));
+    const output = try runtime.run(object(fields[0..]));
     defer std.testing.allocator.free(output);
 
     try std.testing.expectEqualStrings("{\"status\":\"ok\"}", output);
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, Codec, "object", "success"));
+    var saw = false;
+    for (snapshot.events) |event| {
+        if (event.kind == .io_completed and std.mem.eql(u8, event.service_key, JsonCodec.service_key)) saw = true;
+    }
+    try std.testing.expect(saw);
 }

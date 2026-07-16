@@ -79,7 +79,14 @@ pub const ExitCode = enum(i32) {
     defect = 70,
 };
 
-pub const Runner = struct {};
+pub const RunnerApi = struct {
+    pub const operations: []const []const u8 = &.{ "Cli.run", "Cli.runTyped" };
+};
+pub const Runner = fx.kernel.Service("zigeffect/std/CliRunner", RunnerApi);
+
+pub fn runnerLayer() @TypeOf(fx.kernel.Layer.succeed(Runner, RunnerApi{})) {
+    return fx.kernel.Layer.succeed(Runner, .{});
+}
 
 pub const ParsedOption = struct {
     name: []const u8,
@@ -130,21 +137,26 @@ pub const RunSummary = struct {
     }
 };
 
-pub fn Handler(comptime EffectEnv: type, comptime Failure: type) type {
+pub const HandlerContext = struct {
+    allocator: std.mem.Allocator,
+    console: fx.kernel.Console,
+};
+
+pub fn Handler(comptime Failure: type) type {
     return struct {
         path: []const []const u8,
-        run: *const fn (*fx.Context(EffectEnv), ParsedCommand) Failure!void,
+        run: *const fn (*HandlerContext, ParsedCommand) Failure!void,
     };
 }
 
-pub fn Application(comptime EffectEnv: type, comptime Failure: type) type {
+pub fn Application(comptime Failure: type) type {
     return struct {
         const Self = @This();
 
         spec: CommandSpec,
-        handlers: []const Handler(EffectEnv, Failure),
+        handlers: []const Handler(Failure),
 
-        pub fn findHandler(self: Self, parsed: ParsedCommand) ?Handler(EffectEnv, Failure) {
+        pub fn findHandler(self: Self, parsed: ParsedCommand) ?Handler(Failure) {
             for (self.handlers) |handler| {
                 if (commandPathsEqual(handler.path, parsed.path)) return handler;
             }
@@ -218,183 +230,155 @@ pub fn TypedDecodeResult(comptime Args: type) type {
     };
 }
 
-pub fn TypedHandler(comptime EffectEnv: type, comptime Args: type, comptime Failure: type) type {
-    return *const fn (*fx.Context(EffectEnv), Args) Failure!void;
+pub fn TypedHandler(comptime Args: type, comptime Failure: type) type {
+    return *const fn (*HandlerContext, Args) Failure!void;
 }
 
-pub fn TypedApplication(comptime EffectEnv: type, comptime Args: type, comptime Failure: type, comptime Command: type) type {
+pub fn TypedApplication(comptime Args: type, comptime Failure: type, comptime Command: type) type {
     return struct {
         command: Command,
-        handler: TypedHandler(EffectEnv, Args, Failure),
+        handler: TypedHandler(Args, Failure),
     };
 }
 
-pub fn RunTypedEffect(comptime EffectEnv: type, comptime Args: type, comptime HandlerFailure: type, comptime Command: type) type {
-    return struct {
-        pub const SuccessType = RunSummary;
-        pub const FailureType = std.mem.Allocator.Error;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{ Runner, Console.CapturedConsole };
+fn TypedRunInput(comptime Args: type, comptime HandlerFailure: type, comptime Command: type) type {
+    return struct { app: TypedApplication(Args, HandlerFailure, Command), args: []const []const u8 };
+}
 
-        app: TypedApplication(EffectEnv, Args, HandlerFailure, Command),
-        args: []const []const u8,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!RunSummary {
+pub fn runTyped(
+    comptime Args: type,
+    comptime HandlerFailure: type,
+    comptime Command: type,
+    app: TypedApplication(Args, HandlerFailure, Command),
+    args: []const []const u8,
+) fx.kernel.Effect(RunSummary, anyerror, .{Runner}).Stateful(TypedRunInput(Args, HandlerFailure, Command)) {
+    const Run = fx.kernel.Effect(RunSummary, anyerror, .{Runner});
+    const Input = TypedRunInput(Args, HandlerFailure, Command);
+    return Run.fromState(Input, .{ .app = app, .args = args }, struct {
+        fn execute(input: Input, ctx: *Run.Context) anyerror!RunSummary {
             _ = ctx.service(Runner);
-            const console = ctx.service(Console.CapturedConsole);
-            _ = StdService.recordOperation(ctx, Runner, "cli.typed.run", "started", Command.Meta.name);
+            const allocator = ctx.allocator();
+            const console = ctx.console();
+            _ = StdService.recordSemantic(ctx, .span_recorded, Runner.service_key, "Cli.runTyped", "started", Command.Meta.name);
 
-            if (detectBuiltin(self.app.command, self.args)) |builtin| {
+            if (detectBuiltin(input.app.command, input.args)) |builtin| {
                 const payload = switch (builtin) {
-                    .help => try formatTypedHelp(ctx.allocator, self.app.command),
-                    .version => try formatTypedVersion(ctx.allocator, self.app.command),
-                    .completions => try formatTypedCompletions(ctx.allocator, self.app.command),
+                    .help => try formatTypedHelp(allocator, input.app.command),
+                    .version => try formatTypedVersion(allocator, input.app.command),
+                    .completions => try formatTypedCompletions(allocator, input.app.command),
                 };
-                defer ctx.allocator.free(payload);
+                defer allocator.free(payload);
                 try console.writeOut(payload);
-                _ = StdService.recordOperation(ctx, Runner, "cli.typed.run", "success", @tagName(builtin));
-                return buildRunSummary(ctx.allocator, Command.Meta.name, "success", .success, &.{
+                _ = StdService.recordSemantic(ctx, .span_recorded, Runner.service_key, "Cli.runTyped", "success", @tagName(builtin));
+                return buildRunSummary(allocator, Command.Meta.name, "success", .success, &.{
                     .{ .kind = "cli_builtin_completed", .detail = @tagName(builtin) },
                     .{ .kind = "cli_command_completed", .detail = "success" },
                 });
             }
 
-            var parsed = parse(ctx.allocator, self.app.command.toCommandSpec(), self.args) catch |err| {
-                _ = StdService.recordOperation(ctx, Runner, "cli.typed.parse", "failure", @errorName(err));
-                try writeCliError(console, "parse", err);
-                _ = StdService.recordOperation(ctx, Runner, "cli.typed.run", "failure", @errorName(err));
-                return buildRunSummary(ctx.allocator, Command.Meta.name, "failure", exitCodeForError(err), &.{
-                    .{ .kind = "cli_parse_failed", .detail = @errorName(err) },
+            var parsed = parse(allocator, input.app.command.toCommandSpec(), input.args) catch |failure| {
+                try writeCliError(console, "parse", failure);
+                _ = StdService.recordSemantic(ctx, .span_recorded, Runner.service_key, "Cli.runTyped", "failure", @errorName(failure));
+                return buildRunSummary(allocator, Command.Meta.name, "failure", exitCodeForError(failure), &.{
+                    .{ .kind = "cli_parse_failed", .detail = @errorName(failure) },
                     .{ .kind = "cli_command_completed", .detail = "failure" },
                 });
             };
-            defer parsed.deinit(ctx.allocator);
+            defer parsed.deinit(allocator);
 
-            var decoded = try decodeTypedCommandAlloc(ctx.allocator, self.app.command, parsed, null, null);
+            var decoded = try decodeTypedCommandAlloc(allocator, input.app.command, parsed, null, null);
             defer decoded.deinit();
             if (!decoded.ok()) {
-                const issue_json = try decoded.issues.jsonAlloc(ctx.allocator);
-                defer ctx.allocator.free(issue_json);
+                const issue_json = try decoded.issues.jsonAlloc(allocator);
+                defer allocator.free(issue_json);
                 try console.writeErr(issue_json);
                 try console.writeErr("\n");
-                _ = StdService.recordOperation(ctx, Runner, "cli.typed.decode", "failure", Command.Meta.name);
-                _ = StdService.recordOperation(ctx, Runner, "cli.typed.run", "failure", "decode");
-                return buildRunSummary(ctx.allocator, Command.Meta.name, "failure", .usage, &.{
+                _ = StdService.recordSemantic(ctx, .span_recorded, Runner.service_key, "Cli.runTyped", "failure", "decode");
+                return buildRunSummary(allocator, Command.Meta.name, "failure", .usage, &.{
                     .{ .kind = "cli_decode_failed", .detail = issue_json },
                     .{ .kind = "cli_command_completed", .detail = "failure" },
                 });
             }
 
-            _ = StdService.recordOperation(ctx, Runner, "cli.typed.decode", "success", Command.Meta.name);
-            self.app.handler(ctx, decoded.value.?) catch |err| {
-                _ = StdService.recordOperation(ctx, Runner, "cli.typed.handler", "failure", @errorName(err));
-                try writeCliError(console, "handler", err);
-                _ = StdService.recordOperation(ctx, Runner, "cli.typed.run", "failure", @errorName(err));
-                return buildRunSummary(ctx.allocator, Command.Meta.name, "failure", exitCodeForError(err), &.{
+            var handler_context = HandlerContext{ .allocator = allocator, .console = console };
+            input.app.handler(&handler_context, decoded.value.?) catch |failure| {
+                try writeCliError(console, "handler", failure);
+                _ = StdService.recordSemantic(ctx, .span_recorded, Runner.service_key, "Cli.runTyped", "failure", @errorName(failure));
+                return buildRunSummary(allocator, Command.Meta.name, "failure", exitCodeForError(failure), &.{
                     .{ .kind = "cli_decode_completed", .detail = "success" },
-                    .{ .kind = "cli_handler_failed", .detail = @errorName(err) },
+                    .{ .kind = "cli_handler_failed", .detail = @errorName(failure) },
                     .{ .kind = "cli_command_completed", .detail = "failure" },
                 });
             };
 
-            _ = StdService.recordOperation(ctx, Runner, "cli.typed.handler", "success", Command.Meta.name);
-            _ = StdService.recordOperation(ctx, Runner, "cli.typed.run", "success", Command.Meta.name);
-            return buildRunSummary(ctx.allocator, Command.Meta.name, "success", .success, &.{
+            _ = StdService.recordSemantic(ctx, .span_recorded, Runner.service_key, "Cli.runTyped", "success", Command.Meta.name);
+            return buildRunSummary(allocator, Command.Meta.name, "success", .success, &.{
                 .{ .kind = "cli_decode_completed", .detail = "success" },
                 .{ .kind = "cli_handler_completed", .detail = "success" },
                 .{ .kind = "cli_command_completed", .detail = "success" },
             });
         }
-    };
+    }.execute);
 }
 
-pub fn runTypedEffect(
-    comptime EffectEnv: type,
-    comptime Args: type,
+fn RunInput(comptime HandlerFailure: type) type {
+    return struct { app: Application(HandlerFailure), args: []const []const u8 };
+}
+
+pub fn runApplication(
     comptime HandlerFailure: type,
-    comptime Command: type,
-    app: TypedApplication(EffectEnv, Args, HandlerFailure, Command),
+    app: Application(HandlerFailure),
     args: []const []const u8,
-) RunTypedEffect(EffectEnv, Args, HandlerFailure, Command) {
-    return .{ .app = app, .args = args };
-}
-
-pub fn RunEffect(comptime EffectEnv: type, comptime HandlerFailure: type) type {
-    return struct {
-        pub const SuccessType = RunSummary;
-        pub const FailureType = std.mem.Allocator.Error;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{ Runner, Console.CapturedConsole };
-
-        app: Application(EffectEnv, HandlerFailure),
-        args: []const []const u8,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!RunSummary {
+) fx.kernel.Effect(RunSummary, anyerror, .{Runner}).Stateful(RunInput(HandlerFailure)) {
+    const Run = fx.kernel.Effect(RunSummary, anyerror, .{Runner});
+    const Input = RunInput(HandlerFailure);
+    return Run.fromState(Input, .{ .app = app, .args = args }, struct {
+        fn execute(input: Input, ctx: *Run.Context) anyerror!RunSummary {
             _ = ctx.service(Runner);
-            const console = ctx.service(Console.CapturedConsole);
-            _ = StdService.recordOperation(ctx, Runner, "cli.run", "started", self.app.spec.name);
+            const allocator = ctx.allocator();
+            const console = ctx.console();
+            _ = StdService.recordSemantic(ctx, .span_recorded, Runner.service_key, "Cli.run", "started", input.app.spec.name);
 
-            var parsed = parse(ctx.allocator, self.app.spec, self.args) catch |err| {
-                _ = StdService.recordOperation(ctx, Runner, "cli.parse", "failure", @errorName(err));
-                try writeCliError(console, "parse", err);
-                return buildRunSummary(ctx.allocator, self.app.spec.name, "failure", exitCodeForError(err), &.{
-                    .{ .kind = "cli_command_started", .detail = self.app.spec.name },
-                    .{ .kind = "cli_parse_failed", .detail = @errorName(err) },
+            var parsed = parse(allocator, input.app.spec, input.args) catch |failure| {
+                try writeCliError(console, "parse", failure);
+                _ = StdService.recordSemantic(ctx, .span_recorded, Runner.service_key, "Cli.run", "failure", @errorName(failure));
+                return buildRunSummary(allocator, input.app.spec.name, "failure", exitCodeForError(failure), &.{
+                    .{ .kind = "cli_command_started", .detail = input.app.spec.name },
+                    .{ .kind = "cli_parse_failed", .detail = @errorName(failure) },
                 });
             };
-            defer parsed.deinit(ctx.allocator);
+            defer parsed.deinit(allocator);
 
-            const command_text = try formatCommandPathAlloc(ctx.allocator, parsed.path);
-            defer ctx.allocator.free(command_text);
-
-            const handler = self.app.findHandler(parsed) orelse {
-                const err = CliError.UnknownSubcommand;
-                _ = StdService.recordOperation(ctx, Runner, "cli.handler", "failure", @errorName(err));
-                try writeCliError(console, "handler", err);
-                return buildRunSummary(ctx.allocator, command_text, "failure", exitCodeForError(err), &.{
+            const command_text = try formatCommandPathAlloc(allocator, parsed.path);
+            defer allocator.free(command_text);
+            const handler = input.app.findHandler(parsed) orelse {
+                const failure = CliError.UnknownSubcommand;
+                try writeCliError(console, "handler", failure);
+                return buildRunSummary(allocator, command_text, "failure", exitCodeForError(failure), &.{
                     .{ .kind = "cli_command_started", .detail = command_text },
-                    .{ .kind = "cli_handler_missing", .detail = @errorName(err) },
+                    .{ .kind = "cli_handler_missing", .detail = @errorName(failure) },
                 });
             };
 
-            _ = StdService.recordOperation(ctx, Runner, "cli.handler", "started", command_text);
-            handler.run(ctx, parsed) catch |err| {
-                _ = StdService.recordOperation(ctx, Runner, "cli.handler", "failure", @errorName(err));
-                try writeCliError(console, "handler", err);
-                _ = StdService.recordOperation(ctx, Runner, "cli.run", "failure", command_text);
-                return buildRunSummary(ctx.allocator, command_text, "failure", exitCodeForError(err), &.{
+            var handler_context = HandlerContext{ .allocator = allocator, .console = console };
+            handler.run(&handler_context, parsed) catch |failure| {
+                try writeCliError(console, "handler", failure);
+                _ = StdService.recordSemantic(ctx, .span_recorded, Runner.service_key, "Cli.run", "failure", @errorName(failure));
+                return buildRunSummary(allocator, command_text, "failure", exitCodeForError(failure), &.{
                     .{ .kind = "cli_command_started", .detail = command_text },
-                    .{ .kind = "cli_handler_failed", .detail = @errorName(err) },
+                    .{ .kind = "cli_handler_failed", .detail = @errorName(failure) },
                     .{ .kind = "cli_command_completed", .detail = "failure" },
                 });
             };
 
-            _ = StdService.recordOperation(ctx, Runner, "cli.handler", "success", command_text);
-            _ = StdService.recordOperation(ctx, Runner, "cli.run", "success", command_text);
-            return buildRunSummary(ctx.allocator, command_text, "success", .success, &.{
+            _ = StdService.recordSemantic(ctx, .span_recorded, Runner.service_key, "Cli.run", "success", command_text);
+            return buildRunSummary(allocator, command_text, "success", .success, &.{
                 .{ .kind = "cli_command_started", .detail = command_text },
                 .{ .kind = "cli_handler_completed", .detail = "success" },
                 .{ .kind = "cli_command_completed", .detail = "success" },
             });
         }
-    };
-}
-
-pub fn runEffect(
-    comptime EffectEnv: type,
-    comptime HandlerFailure: type,
-    app: Application(EffectEnv, HandlerFailure),
-    args: []const []const u8,
-) RunEffect(EffectEnv, HandlerFailure) {
-    return .{ .app = app, .args = args };
+    }.execute);
 }
 
 pub fn parse(
@@ -806,7 +790,7 @@ fn buildRunSummary(
     };
 }
 
-fn writeCliError(console: *Console.CapturedConsole, phase: []const u8, err: anyerror) std.mem.Allocator.Error!void {
+fn writeCliError(console: fx.kernel.Console, phase: []const u8, err: anyerror) anyerror!void {
     try console.writeErr(phase);
     try console.writeErr(": ");
     try console.writeErr(@errorName(err));
@@ -1516,15 +1500,12 @@ test "Cli formats deterministic completions for active command" {
     try std.testing.expectEqualStrings("", leaf_completions);
 }
 
-test "Cli runEffect executes handler through services and records receipt facts" {
-    const zstd = @import("../root.zig");
-
-    const Provider = zstd.Service.Provider(.{ Runner, zstd.Console.CapturedConsole });
+test "Cli.run executes handler through the managed runtime and records receipt facts" {
     const HandlerFailure = error{Boom};
     const TestHandlers = struct {
-        fn hello(ctx: *zstd.fx.Context(Provider), parsed: ParsedCommand) HandlerFailure!void {
+        fn hello(ctx: *HandlerContext, parsed: ParsedCommand) HandlerFailure!void {
             try std.testing.expectEqualStrings("hello", parsed.command);
-            try ctx.service(zstd.Console.CapturedConsole).writeOut("hello Sean");
+            ctx.console.writeOut("hello Sean") catch return error.Boom;
         }
     };
 
@@ -1536,26 +1517,23 @@ test "Cli runEffect executes handler through services and records receipt facts"
         .subcommands = subcommands[0..],
     };
     const hello_path = [_][]const u8{ "zg", "hello" };
-    const handlers = [_]Handler(Provider, HandlerFailure){
+    const handlers = [_]Handler(HandlerFailure){
         .{ .path = hello_path[0..], .run = TestHandlers.hello },
     };
-    const app = Application(Provider, HandlerFailure){
+    const app = Application(HandlerFailure){
         .spec = command,
         .handlers = handlers[0..],
     };
 
-    var runner = Runner{};
-    var console = zstd.Console.CapturedConsole.init(std.testing.allocator);
+    var console = Console.CapturedConsole.init(std.testing.allocator);
     defer console.deinit();
-    var provider = Provider.init(.{ &runner, &console });
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    const root = runnerLayer();
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(Provider).init(std.testing.allocator, &provider)
-        .provides(.{ Runner, zstd.Console.CapturedConsole })
-        .withCausalStore(&store);
-
-    var summary = try runtime.run(runEffect(Provider, HandlerFailure, app, &.{"hello"}));
+    var summary = try runtime.run(runApplication(HandlerFailure, app, &.{"hello"}).withDefaults(.{ .console = console.asDefault() }));
     defer summary.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(ExitCode.success, summary.exit_code);
@@ -1566,38 +1544,34 @@ test "Cli runEffect executes handler through services and records receipt facts"
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, Runner, "cli.run", "success"));
+    try std.testing.expect(StdService.hasOperation(snapshot, Runner, "Cli.run", "success"));
 }
 
-test "Cli runEffect maps handler errors to exit codes without throwing" {
-    const zstd = @import("../root.zig");
-
-    const Provider = zstd.Service.Provider(.{ Runner, zstd.Console.CapturedConsole });
+test "Cli.run maps handler errors to exit codes without throwing" {
     const HandlerFailure = error{MissingVariable};
     const TestHandlers = struct {
-        fn fail(_: *zstd.fx.Context(Provider), _: ParsedCommand) HandlerFailure!void {
+        fn fail(_: *HandlerContext, _: ParsedCommand) HandlerFailure!void {
             return error.MissingVariable;
         }
     };
 
     const command = CommandSpec{ .name = "zg" };
     const root_path = [_][]const u8{"zg"};
-    const handlers = [_]Handler(Provider, HandlerFailure){
+    const handlers = [_]Handler(HandlerFailure){
         .{ .path = root_path[0..], .run = TestHandlers.fail },
     };
-    const app = Application(Provider, HandlerFailure){
+    const app = Application(HandlerFailure){
         .spec = command,
         .handlers = handlers[0..],
     };
 
-    var runner = Runner{};
-    var console = zstd.Console.CapturedConsole.init(std.testing.allocator);
+    var console = Console.CapturedConsole.init(std.testing.allocator);
     defer console.deinit();
-    var provider = Provider.init(.{ &runner, &console });
-    var runtime = zstd.fx.Runtime(Provider).init(std.testing.allocator, &provider)
-        .provides(.{ Runner, zstd.Console.CapturedConsole });
+    const root = runnerLayer();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{});
+    defer runtime.deinit();
 
-    var summary = try runtime.run(runEffect(Provider, HandlerFailure, app, &.{}));
+    var summary = try runtime.run(runApplication(HandlerFailure, app, &.{}).withDefaults(.{ .console = console.asDefault() }));
     defer summary.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(ExitCode.config, summary.exit_code);
@@ -1606,13 +1580,12 @@ test "Cli runEffect maps handler errors to exit codes without throwing" {
     try std.testing.expect(std.mem.indexOf(u8, summary.receipt_json, "\"status\": \"failure\"") != null);
 }
 
-test "Cli runTypedEffect decodes typed args handles builtins and records causal facts" {
+test "Cli.runTyped decodes typed args handles builtins and records causal facts" {
     const zstd = @import("../root.zig");
-    const Provider = zstd.Service.Provider(.{ Runner, zstd.Console.CapturedConsole });
     const HandlerFailure = error{Boom};
     const TestHandlers = struct {
-        fn serve(ctx: *zstd.fx.Context(Provider), args: TypedServeArgs) HandlerFailure!void {
-            try ctx.service(zstd.Console.CapturedConsole).writeOut(args.workspace);
+        fn serve(ctx: *HandlerContext, args: TypedServeArgs) HandlerFailure!void {
+            ctx.console.writeOut(args.workspace) catch return error.Boom;
         }
     };
 
@@ -1622,22 +1595,20 @@ test "Cli runTypedEffect decodes typed args handles builtins and records causal 
         flag("watch", .{ .long = "watch" }),
         option("mode", zstd.Schema.optional(zstd.Schema.stringEnum(&.{ "local", "ci" })), .{ .long = "mode" }),
     });
-    const app = TypedApplication(Provider, TypedServeArgs, HandlerFailure, @TypeOf(command)){
+    const app = TypedApplication(TypedServeArgs, HandlerFailure, @TypeOf(command)){
         .command = command,
         .handler = TestHandlers.serve,
     };
 
-    var runner = Runner{};
-    var console = zstd.Console.CapturedConsole.init(std.testing.allocator);
+    var console = Console.CapturedConsole.init(std.testing.allocator);
     defer console.deinit();
-    var provider = Provider.init(.{ &runner, &console });
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    const root = runnerLayer();
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
-    var runtime = zstd.fx.Runtime(Provider).init(std.testing.allocator, &provider)
-        .provides(.{ Runner, zstd.Console.CapturedConsole })
-        .withCausalStore(&store);
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
-    var summary = try runtime.run(runTypedEffect(Provider, TypedServeArgs, HandlerFailure, @TypeOf(command), app, &.{ "--workspace", "/repo" }));
+    var summary = try runtime.run(runTyped(TypedServeArgs, HandlerFailure, @TypeOf(command), app, &.{ "--workspace", "/repo" }).withDefaults(.{ .console = console.asDefault() }));
     defer summary.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(ExitCode.success, summary.exit_code);
@@ -1646,39 +1617,27 @@ test "Cli runTypedEffect decodes typed args handles builtins and records causal 
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, Runner, "cli.typed.run", "success"));
+    try std.testing.expect(StdService.hasOperation(snapshot, Runner, "Cli.runTyped", "success"));
 }
 
-test "Cli runEffect participates in runtime dependency validation" {
-    const zstd = @import("../root.zig");
-
-    const Provider = zstd.Service.Provider(.{ Runner, zstd.Console.CapturedConsole });
+test "Cli.run declares its runner dependency at compile time" {
     const HandlerFailure = error{Boom};
     const TestHandlers = struct {
-        fn noop(_: *zstd.fx.Context(Provider), _: ParsedCommand) HandlerFailure!void {}
+        fn noop(_: *HandlerContext, _: ParsedCommand) HandlerFailure!void {}
     };
 
     const command = CommandSpec{ .name = "zg" };
     const root_path = [_][]const u8{"zg"};
-    const handlers = [_]Handler(Provider, HandlerFailure){
+    const handlers = [_]Handler(HandlerFailure){
         .{ .path = root_path[0..], .run = TestHandlers.noop },
     };
-    const app = Application(Provider, HandlerFailure){
+    const app = Application(HandlerFailure){
         .spec = command,
         .handlers = handlers[0..],
     };
 
-    var runner = Runner{};
-    var console = zstd.Console.CapturedConsole.init(std.testing.allocator);
-    defer console.deinit();
-    var provider = Provider.init(.{ &runner, &console });
-    var runtime = zstd.fx.Runtime(Provider).init(std.testing.allocator, &provider)
-        .provides(.{Runner});
-
-    try std.testing.expectError(
-        error.MissingServiceRequirement,
-        runtime.run(runEffect(Provider, HandlerFailure, app, &.{})),
-    );
+    const effect = runApplication(HandlerFailure, app, &.{});
+    try std.testing.expect(effect.RequiredServices[0] == Runner);
 }
 
 test "Cli parse releases staged owned slices on every allocation failure" {

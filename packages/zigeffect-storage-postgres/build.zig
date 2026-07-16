@@ -20,6 +20,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const postgres_dep = b.dependency("zigeffect_postgres_libpq", .{ .target = target, .optimize = optimize });
+    const zstd_dep = b.dependency("zigeffect_std", .{ .target = target, .optimize = optimize });
 
     const module = b.addModule("zigeffect_storage_postgres", .{
         .root_source_file = b.path("src/root.zig"),
@@ -32,7 +33,7 @@ pub fn build(b: *std.Build) void {
     });
     linkLibpq(module, target);
 
-    const runner = b.path("../zigeffect/src/testing/runner.zig");
+    const runner = zstd_dep.module("zigeffect_test_runner").root_source_file.?;
     const tests = addV2Test(b, runner, .{ .name = "zigeffect-storage-postgres-tests", .root_module = module });
     const run_tests = b.addRunArtifact(tests);
     b.step("test", "Run PostgreSQL durable-store tests").dependOn(&run_tests.step);

@@ -123,12 +123,11 @@ GOAWAY handling, keepalive and idempotent retry are automatic within declared
 limits. Transparent retry is allowed only before the commitment tracker observes
 response headers or messages.
 
-The current `Typed.generatedUnaryEffect` and `Typed.generatedStreamingEffect`
-wrappers preserve requirements and ownership but still use the compatibility
-environment surface. The canonical migration will provide a stable generated
-client tag from a scoped persistent-channel or pool layer; outbound call effects
-will require that tag and run unchanged beside SQL, config, workflow, and other
-application effects.
+`Typed.generatedClientLayer` publishes a stable generated client tag from a
+scoped persistent channel, while `generatedUnaryEffect` and
+`generatedStreamingEffect` require that tag. Outbound calls therefore run
+unchanged beside SQL, config, workflow, and other application effects in the
+same managed runtime.
 
 Attach audience-bound Google identity as sensitive authorization metadata for
 private Cloud Run calls. Use client interceptors for metadata, trace context,

@@ -462,13 +462,47 @@ pub const FloatSchema = struct {
     min_value: ?f64 = null,
     max_value: ?f64 = null,
     finite_only: bool = true,
-    pub fn min(self: FloatSchema, value: f64) FloatSchema { var next = self; next.min_value = value; return next; }
-    pub fn max(self: FloatSchema, value: f64) FloatSchema { var next = self; next.max_value = value; return next; }
-    fn validate(self: FloatSchema, value: f64) SchemaError!void { if (self.finite_only and !std.math.isFinite(value)) return error.InvalidValue; if (self.min_value) |minimum| if (value < minimum) return error.InvalidValue; if (self.max_value) |maximum| if (value > maximum) return error.InvalidValue; }
-    pub fn decodeJsonValue(self: FloatSchema, value: std.json.Value) SchemaError!f64 { const result: f64 = switch (value) { .float => |item| item, .integer => |item| @floatFromInt(item), .number_string => |item| std.fmt.parseFloat(f64, item) catch return error.InvalidValue, else => return error.InvalidType }; try self.validate(result); return result; }
-    pub fn decodeDetailedJsonValue(self: FloatSchema, ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!f64 { const result = self.decodeJsonValue(value) catch |err| { try ctx.addIssue(schemaErrorIssueKind(err), "finite number", valueTypeName(value), "expected a bounded floating-point number"); return err; }; return result; }
-    pub fn decodeConfigText(self: FloatSchema, value: []const u8) SchemaError!f64 { const result = std.fmt.parseFloat(f64, value) catch return error.InvalidValue; try self.validate(result); return result; }
-    pub fn appendJsonValue(self: FloatSchema, allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: f64) (SchemaError || std.mem.Allocator.Error)!void { try self.validate(value); try output.print(allocator, "{d}", .{value}); }
+    pub fn min(self: FloatSchema, value: f64) FloatSchema {
+        var next = self;
+        next.min_value = value;
+        return next;
+    }
+    pub fn max(self: FloatSchema, value: f64) FloatSchema {
+        var next = self;
+        next.max_value = value;
+        return next;
+    }
+    fn validate(self: FloatSchema, value: f64) SchemaError!void {
+        if (self.finite_only and !std.math.isFinite(value)) return error.InvalidValue;
+        if (self.min_value) |minimum| if (value < minimum) return error.InvalidValue;
+        if (self.max_value) |maximum| if (value > maximum) return error.InvalidValue;
+    }
+    pub fn decodeJsonValue(self: FloatSchema, value: std.json.Value) SchemaError!f64 {
+        const result: f64 = switch (value) {
+            .float => |item| item,
+            .integer => |item| @floatFromInt(item),
+            .number_string => |item| std.fmt.parseFloat(f64, item) catch return error.InvalidValue,
+            else => return error.InvalidType,
+        };
+        try self.validate(result);
+        return result;
+    }
+    pub fn decodeDetailedJsonValue(self: FloatSchema, ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!f64 {
+        const result = self.decodeJsonValue(value) catch |err| {
+            try ctx.addIssue(schemaErrorIssueKind(err), "finite number", valueTypeName(value), "expected a bounded floating-point number");
+            return err;
+        };
+        return result;
+    }
+    pub fn decodeConfigText(self: FloatSchema, value: []const u8) SchemaError!f64 {
+        const result = std.fmt.parseFloat(f64, value) catch return error.InvalidValue;
+        try self.validate(result);
+        return result;
+    }
+    pub fn appendJsonValue(self: FloatSchema, allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: f64) (SchemaError || std.mem.Allocator.Error)!void {
+        try self.validate(value);
+        try output.print(allocator, "{d}", .{value});
+    }
 };
 
 pub const DecimalSchema = struct {
@@ -478,26 +512,83 @@ pub const DecimalSchema = struct {
     max_scale: usize = 18,
     fn validate(self: DecimalSchema, value: []const u8) SchemaError!void {
         if (value.len == 0 or value.len > self.max_digits + 2) return error.InvalidValue;
-        var digits: usize = 0; var scale: usize = 0; var decimal_seen = false;
-        for (value, 0..) |byte, index| { if (byte == '-' and index == 0) continue; if (byte == '.' and !decimal_seen) { decimal_seen = true; continue; } if (!std.ascii.isDigit(byte)) return error.InvalidValue; digits += 1; if (decimal_seen) scale += 1; }
+        var digits: usize = 0;
+        var scale: usize = 0;
+        var decimal_seen = false;
+        for (value, 0..) |byte, index| {
+            if (byte == '-' and index == 0) continue;
+            if (byte == '.' and !decimal_seen) {
+                decimal_seen = true;
+                continue;
+            }
+            if (!std.ascii.isDigit(byte)) return error.InvalidValue;
+            digits += 1;
+            if (decimal_seen) scale += 1;
+        }
         if (digits == 0 or digits > self.max_digits or scale > self.max_scale) return error.InvalidValue;
     }
-    pub fn decodeJsonValue(self: DecimalSchema, value: std.json.Value) SchemaError![]const u8 { const text = switch (value) { .string, .number_string => |item| item, else => return error.InvalidType }; try self.validate(text); return text; }
-    pub fn decodeDetailedJsonValue(self: DecimalSchema, ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)![]const u8 { return self.decodeJsonValue(value) catch |err| { try ctx.addIssue(schemaErrorIssueKind(err), "decimal string", valueTypeName(value), "decimal precision or scale is invalid"); return err; }; }
-    pub fn decodeConfigText(self: DecimalSchema, value: []const u8) SchemaError![]const u8 { try self.validate(value); return value; }
-    pub fn appendJsonValue(self: DecimalSchema, allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: []const u8) (SchemaError || std.mem.Allocator.Error)!void { try self.validate(value); try appendJsonString(output, allocator, value); }
+    pub fn decodeJsonValue(self: DecimalSchema, value: std.json.Value) SchemaError![]const u8 {
+        const text = switch (value) {
+            .string, .number_string => |item| item,
+            else => return error.InvalidType,
+        };
+        try self.validate(text);
+        return text;
+    }
+    pub fn decodeDetailedJsonValue(self: DecimalSchema, ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)![]const u8 {
+        return self.decodeJsonValue(value) catch |err| {
+            try ctx.addIssue(schemaErrorIssueKind(err), "decimal string", valueTypeName(value), "decimal precision or scale is invalid");
+            return err;
+        };
+    }
+    pub fn decodeConfigText(self: DecimalSchema, value: []const u8) SchemaError![]const u8 {
+        try self.validate(value);
+        return value;
+    }
+    pub fn appendJsonValue(self: DecimalSchema, allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: []const u8) (SchemaError || std.mem.Allocator.Error)!void {
+        try self.validate(value);
+        try appendJsonString(output, allocator, value);
+    }
 };
 
 pub const BytesSchema = struct {
     pub const Output = []const u8;
     pub const generator_kind = "bytes";
     max_bytes: usize = 1024 * 1024,
-    fn validate(self: BytesSchema, encoded: []const u8) SchemaError!void { const decoded = std.base64.standard.Decoder.calcSizeForSlice(encoded) catch return error.InvalidValue; if (decoded > self.max_bytes) return error.InvalidValue; }
-    pub fn decodeJsonValue(self: BytesSchema, value: std.json.Value) SchemaError![]const u8 { const text = switch (value) { .string => |item| item, else => return error.InvalidType }; try self.validate(text); return text; }
-    pub fn decodeDetailedJsonValue(self: BytesSchema, ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)![]const u8 { return self.decodeJsonValue(value) catch |err| { try ctx.addIssue(schemaErrorIssueKind(err), "base64 bytes", valueTypeName(value), "invalid or oversized base64 data"); return err; }; }
-    pub fn decodeConfigText(self: BytesSchema, value: []const u8) SchemaError![]const u8 { try self.validate(value); return value; }
-    pub fn appendJsonValue(self: BytesSchema, allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: []const u8) (SchemaError || std.mem.Allocator.Error)!void { try self.validate(value); try appendJsonString(output, allocator, value); }
-    pub fn decodeBytesAlloc(self: BytesSchema, allocator: std.mem.Allocator, encoded: []const u8) ![]u8 { try self.validate(encoded); const size = try std.base64.standard.Decoder.calcSizeForSlice(encoded); const output = try allocator.alloc(u8, size); errdefer allocator.free(output); try std.base64.standard.Decoder.decode(output, encoded); return output; }
+    fn validate(self: BytesSchema, encoded: []const u8) SchemaError!void {
+        const decoded = std.base64.standard.Decoder.calcSizeForSlice(encoded) catch return error.InvalidValue;
+        if (decoded > self.max_bytes) return error.InvalidValue;
+    }
+    pub fn decodeJsonValue(self: BytesSchema, value: std.json.Value) SchemaError![]const u8 {
+        const text = switch (value) {
+            .string => |item| item,
+            else => return error.InvalidType,
+        };
+        try self.validate(text);
+        return text;
+    }
+    pub fn decodeDetailedJsonValue(self: BytesSchema, ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)![]const u8 {
+        return self.decodeJsonValue(value) catch |err| {
+            try ctx.addIssue(schemaErrorIssueKind(err), "base64 bytes", valueTypeName(value), "invalid or oversized base64 data");
+            return err;
+        };
+    }
+    pub fn decodeConfigText(self: BytesSchema, value: []const u8) SchemaError![]const u8 {
+        try self.validate(value);
+        return value;
+    }
+    pub fn appendJsonValue(self: BytesSchema, allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: []const u8) (SchemaError || std.mem.Allocator.Error)!void {
+        try self.validate(value);
+        try appendJsonString(output, allocator, value);
+    }
+    pub fn decodeBytesAlloc(self: BytesSchema, allocator: std.mem.Allocator, encoded: []const u8) ![]u8 {
+        try self.validate(encoded);
+        const size = try std.base64.standard.Decoder.calcSizeForSlice(encoded);
+        const output = try allocator.alloc(u8, size);
+        errdefer allocator.free(output);
+        try std.base64.standard.Decoder.decode(output, encoded);
+        return output;
+    }
 };
 
 pub const TimeUnit = enum { milliseconds, nanoseconds };
@@ -507,22 +598,91 @@ pub const TimeSchema = struct {
     semantic: enum { timestamp, duration },
     unit: TimeUnit = .milliseconds,
     allow_negative: bool = false,
-    pub fn decodeJsonValue(self: TimeSchema, value: std.json.Value) SchemaError!i64 { const result = switch (value) { .integer => |item| item, else => return error.InvalidType }; if (!self.allow_negative and result < 0) return error.InvalidValue; return result; }
-    pub fn decodeDetailedJsonValue(self: TimeSchema, ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!i64 { return self.decodeJsonValue(value) catch |err| { try ctx.addIssue(schemaErrorIssueKind(err), @tagName(self.semantic), valueTypeName(value), "invalid timestamp or duration"); return err; }; }
-    pub fn decodeConfigText(self: TimeSchema, value: []const u8) SchemaError!i64 { const parsed = std.fmt.parseInt(i64, value, 10) catch return error.InvalidValue; return self.decodeJsonValue(.{ .integer = parsed }); }
-    pub fn appendJsonValue(self: TimeSchema, allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: i64) (SchemaError || std.mem.Allocator.Error)!void { _ = try self.decodeJsonValue(.{ .integer = value }); try output.print(allocator, "{d}", .{value}); }
+    pub fn decodeJsonValue(self: TimeSchema, value: std.json.Value) SchemaError!i64 {
+        const result = switch (value) {
+            .integer => |item| item,
+            else => return error.InvalidType,
+        };
+        if (!self.allow_negative and result < 0) return error.InvalidValue;
+        return result;
+    }
+    pub fn decodeDetailedJsonValue(self: TimeSchema, ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!i64 {
+        return self.decodeJsonValue(value) catch |err| {
+            try ctx.addIssue(schemaErrorIssueKind(err), @tagName(self.semantic), valueTypeName(value), "invalid timestamp or duration");
+            return err;
+        };
+    }
+    pub fn decodeConfigText(self: TimeSchema, value: []const u8) SchemaError!i64 {
+        const parsed = std.fmt.parseInt(i64, value, 10) catch return error.InvalidValue;
+        return self.decodeJsonValue(.{ .integer = parsed });
+    }
+    pub fn appendJsonValue(self: TimeSchema, allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: i64) (SchemaError || std.mem.Allocator.Error)!void {
+        _ = try self.decodeJsonValue(.{ .integer = value });
+        try output.print(allocator, "{d}", .{value});
+    }
 };
 
 pub fn LiteralSchema(comptime literal_value: []const u8) type {
-    return struct { pub const Output = []const u8; pub const generator_kind = "literal"; pub const literal = literal_value; pub fn decodeJsonValue(_: @This(), value: std.json.Value) SchemaError![]const u8 { const text = switch (value) { .string => |item| item, else => return error.InvalidType }; if (!std.mem.eql(u8, text, literal_value)) return error.InvalidValue; return text; } pub fn appendJsonValue(self: @This(), allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: []const u8) (SchemaError || std.mem.Allocator.Error)!void { _ = try self.decodeJsonValue(.{ .string = value }); try appendJsonString(output, allocator, value); } };
+    return struct {
+        pub const Output = []const u8;
+        pub const generator_kind = "literal";
+        pub const literal = literal_value;
+        pub fn decodeJsonValue(_: @This(), value: std.json.Value) SchemaError![]const u8 {
+            const text = switch (value) {
+                .string => |item| item,
+                else => return error.InvalidType,
+            };
+            if (!std.mem.eql(u8, text, literal_value)) return error.InvalidValue;
+            return text;
+        }
+        pub fn appendJsonValue(self: @This(), allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: []const u8) (SchemaError || std.mem.Allocator.Error)!void {
+            _ = try self.decodeJsonValue(.{ .string = value });
+            try appendJsonString(output, allocator, value);
+        }
+    };
 }
 
 pub fn RefinementSchema(comptime Inner: type, comptime predicate: *const fn (Inner.Output) bool, comptime description: []const u8) type {
-    return struct { pub const Output = Inner.Output; pub const generator_kind = "refinement"; inner: Inner, pub fn accepts(_: @This(), value: Output) bool { return predicate(value); } pub fn decodeJsonValue(self: @This(), value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output { const decoded = try self.inner.decodeJsonValue(value); if (!predicate(decoded)) return error.InvalidValue; return decoded; } pub fn decodeDetailedJsonValue(self: @This(), ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output { const decoded = try rootDecodeDetailedJsonValue(self.inner, ctx, value); if (!predicate(decoded)) { try ctx.addIssue(.constraint_failed, description, valueTypeName(value), "refinement predicate rejected value"); return error.InvalidValue; } return decoded; } pub fn appendJsonValue(self: @This(), allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: Output) (SchemaError || std.mem.Allocator.Error)!void { if (!predicate(value)) return error.InvalidValue; try rootAppendJsonValue(allocator, output, self.inner, value); } };
+    return struct {
+        pub const Output = Inner.Output;
+        pub const generator_kind = "refinement";
+        inner: Inner,
+        pub fn accepts(_: @This(), value: Output) bool {
+            return predicate(value);
+        }
+        pub fn decodeJsonValue(self: @This(), value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output {
+            const decoded = try self.inner.decodeJsonValue(value);
+            if (!predicate(decoded)) return error.InvalidValue;
+            return decoded;
+        }
+        pub fn decodeDetailedJsonValue(self: @This(), ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output {
+            const decoded = try rootDecodeDetailedJsonValue(self.inner, ctx, value);
+            if (!predicate(decoded)) {
+                try ctx.addIssue(.constraint_failed, description, valueTypeName(value), "refinement predicate rejected value");
+                return error.InvalidValue;
+            }
+            return decoded;
+        }
+        pub fn appendJsonValue(self: @This(), allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: Output) (SchemaError || std.mem.Allocator.Error)!void {
+            if (!predicate(value)) return error.InvalidValue;
+            try rootAppendJsonValue(allocator, output, self.inner, value);
+        }
+    };
 }
 
 pub fn BrandSchema(comptime Inner: type, comptime brand_name: []const u8) type {
-    return struct { pub const Output = Inner.Output; pub const generator_kind = "brand"; pub const brand = brand_name; inner: Inner, pub fn decodeJsonValue(self: @This(), value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output { return self.inner.decodeJsonValue(value); } pub fn appendJsonValue(self: @This(), allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: Output) (SchemaError || std.mem.Allocator.Error)!void { try rootAppendJsonValue(allocator, output, self.inner, value); } };
+    return struct {
+        pub const Output = Inner.Output;
+        pub const generator_kind = "brand";
+        pub const brand = brand_name;
+        inner: Inner,
+        pub fn decodeJsonValue(self: @This(), value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output {
+            return self.inner.decodeJsonValue(value);
+        }
+        pub fn appendJsonValue(self: @This(), allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: Output) (SchemaError || std.mem.Allocator.Error)!void {
+            try rootAppendJsonValue(allocator, output, self.inner, value);
+        }
+    };
 }
 
 pub fn string() StringSchema {
@@ -537,14 +697,30 @@ pub fn boolean() BooleanSchema {
     return .{};
 }
 
-pub fn float() FloatSchema { return .{}; }
-pub fn decimal() DecimalSchema { return .{}; }
-pub fn bytes() BytesSchema { return .{}; }
-pub fn timestampMillis() TimeSchema { return .{ .semantic = .timestamp }; }
-pub fn durationMillis() TimeSchema { return .{ .semantic = .duration }; }
-pub fn literal(comptime value: []const u8) LiteralSchema(value) { return .{}; }
-pub fn refine(schema: anytype, comptime description: []const u8, comptime predicate: *const fn (@TypeOf(schema).Output) bool) RefinementSchema(@TypeOf(schema), predicate, description) { return .{ .inner = schema }; }
-pub fn brand(schema: anytype, comptime name: []const u8) BrandSchema(@TypeOf(schema), name) { return .{ .inner = schema }; }
+pub fn float() FloatSchema {
+    return .{};
+}
+pub fn decimal() DecimalSchema {
+    return .{};
+}
+pub fn bytes() BytesSchema {
+    return .{};
+}
+pub fn timestampMillis() TimeSchema {
+    return .{ .semantic = .timestamp };
+}
+pub fn durationMillis() TimeSchema {
+    return .{ .semantic = .duration };
+}
+pub fn literal(comptime value: []const u8) LiteralSchema(value) {
+    return .{};
+}
+pub fn refine(schema: anytype, comptime description: []const u8, comptime predicate: *const fn (@TypeOf(schema).Output) bool) RefinementSchema(@TypeOf(schema), predicate, description) {
+    return .{ .inner = schema };
+}
+pub fn brand(schema: anytype, comptime name: []const u8) BrandSchema(@TypeOf(schema), name) {
+    return .{ .inner = schema };
+}
 
 pub fn decodeJsonValue(
     schema: anytype,
@@ -668,12 +844,48 @@ pub fn Tuple2Schema(comptime First: type, comptime Second: type) type {
         pub const generator_kind = "tuple";
         first: First,
         second: Second,
-        pub fn decodeJsonValue(self: @This(), value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output { const items = switch (value) { .array => |array_value| array_value.items, else => return error.InvalidType }; if (items.len != 2) return error.InvalidValue; return .{ .first = try self.first.decodeJsonValue(items[0]), .second = try self.second.decodeJsonValue(items[1]) }; }
-        pub fn decodeDetailedJsonValue(self: @This(), ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output { const items = switch (value) { .array => |array_value| array_value.items, else => { try ctx.addIssue(.invalid_type, "tuple[2]", valueTypeName(value), "expected two-item JSON array"); return error.InvalidType; } }; if (items.len != 2) { try ctx.addIssue(.invalid_value, "tuple[2]", "array", "tuple length must be exactly two"); return error.InvalidValue; } const first_mark = try ctx.pushIndex(0); const first_value = rootDecodeDetailedJsonValue(self.first, ctx, items[0]) catch |err| { ctx.popTo(first_mark); return err; }; ctx.popTo(first_mark); const second_mark = try ctx.pushIndex(1); defer ctx.popTo(second_mark); return .{ .first = first_value, .second = try rootDecodeDetailedJsonValue(self.second, ctx, items[1]) }; }
-        pub fn appendJsonValue(self: @This(), allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: Output) (SchemaError || std.mem.Allocator.Error)!void { try output.append(allocator, '['); try rootAppendJsonValue(allocator, output, self.first, value.first); try output.append(allocator, ','); try rootAppendJsonValue(allocator, output, self.second, value.second); try output.append(allocator, ']'); }
+        pub fn decodeJsonValue(self: @This(), value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output {
+            const items = switch (value) {
+                .array => |array_value| array_value.items,
+                else => return error.InvalidType,
+            };
+            if (items.len != 2) return error.InvalidValue;
+            return .{ .first = try self.first.decodeJsonValue(items[0]), .second = try self.second.decodeJsonValue(items[1]) };
+        }
+        pub fn decodeDetailedJsonValue(self: @This(), ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output {
+            const items = switch (value) {
+                .array => |array_value| array_value.items,
+                else => {
+                    try ctx.addIssue(.invalid_type, "tuple[2]", valueTypeName(value), "expected two-item JSON array");
+                    return error.InvalidType;
+                },
+            };
+            if (items.len != 2) {
+                try ctx.addIssue(.invalid_value, "tuple[2]", "array", "tuple length must be exactly two");
+                return error.InvalidValue;
+            }
+            const first_mark = try ctx.pushIndex(0);
+            const first_value = rootDecodeDetailedJsonValue(self.first, ctx, items[0]) catch |err| {
+                ctx.popTo(first_mark);
+                return err;
+            };
+            ctx.popTo(first_mark);
+            const second_mark = try ctx.pushIndex(1);
+            defer ctx.popTo(second_mark);
+            return .{ .first = first_value, .second = try rootDecodeDetailedJsonValue(self.second, ctx, items[1]) };
+        }
+        pub fn appendJsonValue(self: @This(), allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: Output) (SchemaError || std.mem.Allocator.Error)!void {
+            try output.append(allocator, '[');
+            try rootAppendJsonValue(allocator, output, self.first, value.first);
+            try output.append(allocator, ',');
+            try rootAppendJsonValue(allocator, output, self.second, value.second);
+            try output.append(allocator, ']');
+        }
     };
 }
-pub fn tuple2(first: anytype, second: anytype) Tuple2Schema(@TypeOf(first), @TypeOf(second)) { return .{ .first = first, .second = second }; }
+pub fn tuple2(first: anytype, second: anytype) Tuple2Schema(@TypeOf(first), @TypeOf(second)) {
+    return .{ .first = first, .second = second };
+}
 
 pub fn TaggedUnion2Schema(comptime First: type, comptime Second: type, comptime first_tag: []const u8, comptime second_tag: []const u8) type {
     return struct {
@@ -681,12 +893,47 @@ pub fn TaggedUnion2Schema(comptime First: type, comptime Second: type, comptime 
         pub const generator_kind = "tagged_union";
         first: First,
         second: Second,
-        pub fn decodeJsonValue(self: @This(), value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output { const object = switch (value) { .object => |item| item, else => return error.InvalidType }; const tag = switch (object.get("tag") orelse return error.MissingField) { .string => |item| item, else => return error.InvalidType }; const payload = object.get("value") orelse return error.MissingField; if (std.mem.eql(u8, tag, first_tag)) return .{ .first = try self.first.decodeJsonValue(payload) }; if (std.mem.eql(u8, tag, second_tag)) return .{ .second = try self.second.decodeJsonValue(payload) }; return error.UnknownEnum; }
-        pub fn decodeDetailedJsonValue(self: @This(), ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output { return self.decodeJsonValue(value) catch |err| { try ctx.addIssue(schemaErrorIssueKind(err), "known tagged-union variant", valueTypeName(value), "invalid tagged union discriminator or payload"); return err; }; }
-        pub fn appendJsonValue(self: @This(), allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: Output) (SchemaError || std.mem.Allocator.Error)!void { try output.appendSlice(allocator, "{\"tag\":"); switch (value) { .first => |payload| { try appendJsonString(output, allocator, first_tag); try output.appendSlice(allocator, ",\"value\":"); try rootAppendJsonValue(allocator, output, self.first, payload); }, .second => |payload| { try appendJsonString(output, allocator, second_tag); try output.appendSlice(allocator, ",\"value\":"); try rootAppendJsonValue(allocator, output, self.second, payload); } } try output.append(allocator, '}'); }
+        pub fn decodeJsonValue(self: @This(), value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output {
+            const object = switch (value) {
+                .object => |item| item,
+                else => return error.InvalidType,
+            };
+            const tag = switch (object.get("tag") orelse return error.MissingField) {
+                .string => |item| item,
+                else => return error.InvalidType,
+            };
+            const payload = object.get("value") orelse return error.MissingField;
+            if (std.mem.eql(u8, tag, first_tag)) return .{ .first = try self.first.decodeJsonValue(payload) };
+            if (std.mem.eql(u8, tag, second_tag)) return .{ .second = try self.second.decodeJsonValue(payload) };
+            return error.UnknownEnum;
+        }
+        pub fn decodeDetailedJsonValue(self: @This(), ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output {
+            return self.decodeJsonValue(value) catch |err| {
+                try ctx.addIssue(schemaErrorIssueKind(err), "known tagged-union variant", valueTypeName(value), "invalid tagged union discriminator or payload");
+                return err;
+            };
+        }
+        pub fn appendJsonValue(self: @This(), allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: Output) (SchemaError || std.mem.Allocator.Error)!void {
+            try output.appendSlice(allocator, "{\"tag\":");
+            switch (value) {
+                .first => |payload| {
+                    try appendJsonString(output, allocator, first_tag);
+                    try output.appendSlice(allocator, ",\"value\":");
+                    try rootAppendJsonValue(allocator, output, self.first, payload);
+                },
+                .second => |payload| {
+                    try appendJsonString(output, allocator, second_tag);
+                    try output.appendSlice(allocator, ",\"value\":");
+                    try rootAppendJsonValue(allocator, output, self.second, payload);
+                },
+            }
+            try output.append(allocator, '}');
+        }
     };
 }
-pub fn taggedUnion2(first: anytype, second: anytype, comptime first_tag: []const u8, comptime second_tag: []const u8) TaggedUnion2Schema(@TypeOf(first), @TypeOf(second), first_tag, second_tag) { return .{ .first = first, .second = second }; }
+pub fn taggedUnion2(first: anytype, second: anytype, comptime first_tag: []const u8, comptime second_tag: []const u8) TaggedUnion2Schema(@TypeOf(first), @TypeOf(second), first_tag, second_tag) {
+    return .{ .first = first, .second = second };
+}
 
 pub fn MapSchema(comptime Inner: type) type {
     return struct {
@@ -696,17 +943,80 @@ pub fn MapSchema(comptime Inner: type) type {
         allocator: std.mem.Allocator,
         inner: Inner,
         max_entries: usize = 1024,
-        pub fn decodeJsonValue(self: @This(), value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output { const object = switch (value) { .object => |item| item, else => return error.InvalidType }; if (object.count() > self.max_entries) return error.InvalidValue; const output = try self.allocator.alloc(Entry, object.count()); errdefer self.allocator.free(output); var iterator = object.iterator(); var index: usize = 0; while (iterator.next()) |entry| : (index += 1) output[index] = .{ .key = entry.key_ptr.*, .value = try self.inner.decodeJsonValue(entry.value_ptr.*) }; return output; }
-        pub fn decodeDetailedJsonValue(self: @This(), ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output { const object = switch (value) { .object => |item| item, else => { try ctx.addIssue(.invalid_type, "object map", valueTypeName(value), "expected JSON object map"); return error.InvalidType; } }; if (object.count() > self.max_entries) { try ctx.addIssue(.constraint_failed, "bounded map", "object", "too many map entries"); return error.InvalidValue; } const output = try self.allocator.alloc(Entry, object.count()); errdefer self.allocator.free(output); var iterator = object.iterator(); var index: usize = 0; while (iterator.next()) |entry| : (index += 1) { const mark_path = try ctx.pushField(entry.key_ptr.*); defer ctx.popTo(mark_path); output[index] = .{ .key = entry.key_ptr.*, .value = try rootDecodeDetailedJsonValue(self.inner, ctx, entry.value_ptr.*) }; } return output; }
-        pub fn appendJsonValue(self: @This(), allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: Output) (SchemaError || std.mem.Allocator.Error)!void { if (value.len > self.max_entries) return error.InvalidValue; try output.append(allocator, '{'); for (value, 0..) |entry, index| { if (index != 0) try output.append(allocator, ','); try appendJsonString(output, allocator, entry.key); try output.append(allocator, ':'); try rootAppendJsonValue(allocator, output, self.inner, entry.value); } try output.append(allocator, '}'); }
+        pub fn decodeJsonValue(self: @This(), value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output {
+            const object = switch (value) {
+                .object => |item| item,
+                else => return error.InvalidType,
+            };
+            if (object.count() > self.max_entries) return error.InvalidValue;
+            const output = try self.allocator.alloc(Entry, object.count());
+            errdefer self.allocator.free(output);
+            var iterator = object.iterator();
+            var index: usize = 0;
+            while (iterator.next()) |entry| : (index += 1) output[index] = .{ .key = entry.key_ptr.*, .value = try self.inner.decodeJsonValue(entry.value_ptr.*) };
+            return output;
+        }
+        pub fn decodeDetailedJsonValue(self: @This(), ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output {
+            const object = switch (value) {
+                .object => |item| item,
+                else => {
+                    try ctx.addIssue(.invalid_type, "object map", valueTypeName(value), "expected JSON object map");
+                    return error.InvalidType;
+                },
+            };
+            if (object.count() > self.max_entries) {
+                try ctx.addIssue(.constraint_failed, "bounded map", "object", "too many map entries");
+                return error.InvalidValue;
+            }
+            const output = try self.allocator.alloc(Entry, object.count());
+            errdefer self.allocator.free(output);
+            var iterator = object.iterator();
+            var index: usize = 0;
+            while (iterator.next()) |entry| : (index += 1) {
+                const mark_path = try ctx.pushField(entry.key_ptr.*);
+                defer ctx.popTo(mark_path);
+                output[index] = .{ .key = entry.key_ptr.*, .value = try rootDecodeDetailedJsonValue(self.inner, ctx, entry.value_ptr.*) };
+            }
+            return output;
+        }
+        pub fn appendJsonValue(self: @This(), allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: Output) (SchemaError || std.mem.Allocator.Error)!void {
+            if (value.len > self.max_entries) return error.InvalidValue;
+            try output.append(allocator, '{');
+            for (value, 0..) |entry, index| {
+                if (index != 0) try output.append(allocator, ',');
+                try appendJsonString(output, allocator, entry.key);
+                try output.append(allocator, ':');
+                try rootAppendJsonValue(allocator, output, self.inner, entry.value);
+            }
+            try output.append(allocator, '}');
+        }
     };
 }
-pub fn map(allocator: std.mem.Allocator, inner: anytype) MapSchema(@TypeOf(inner)) { return .{ .allocator = allocator, .inner = inner }; }
+pub fn map(allocator: std.mem.Allocator, inner: anytype) MapSchema(@TypeOf(inner)) {
+    return .{ .allocator = allocator, .inner = inner };
+}
 
 pub fn LazySchema(comptime SchemaType: type, comptime resolve_fn: *const fn () SchemaType) type {
-    return struct { pub const Output = SchemaType.Output; pub const generator_kind = "lazy"; pub fn resolved(_: @This()) SchemaType { return resolve_fn(); } pub fn decodeJsonValue(_: @This(), value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output { return resolve_fn().decodeJsonValue(value); } pub fn decodeDetailedJsonValue(_: @This(), ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output { return rootDecodeDetailedJsonValue(resolve_fn(), ctx, value); } pub fn appendJsonValue(_: @This(), allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: Output) (SchemaError || std.mem.Allocator.Error)!void { return rootAppendJsonValue(allocator, output, resolve_fn(), value); } };
+    return struct {
+        pub const Output = SchemaType.Output;
+        pub const generator_kind = "lazy";
+        pub fn resolved(_: @This()) SchemaType {
+            return resolve_fn();
+        }
+        pub fn decodeJsonValue(_: @This(), value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output {
+            return resolve_fn().decodeJsonValue(value);
+        }
+        pub fn decodeDetailedJsonValue(_: @This(), ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output {
+            return rootDecodeDetailedJsonValue(resolve_fn(), ctx, value);
+        }
+        pub fn appendJsonValue(_: @This(), allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: Output) (SchemaError || std.mem.Allocator.Error)!void {
+            return rootAppendJsonValue(allocator, output, resolve_fn(), value);
+        }
+    };
 }
-pub fn lazy(comptime SchemaType: type, comptime resolve_fn: *const fn () SchemaType) LazySchema(SchemaType, resolve_fn) { return .{}; }
+pub fn lazy(comptime SchemaType: type, comptime resolve_fn: *const fn () SchemaType) LazySchema(SchemaType, resolve_fn) {
+    return .{};
+}
 
 pub fn VersionedSchema(comptime Current: type, comptime Legacy: type, comptime migrate_fn: *const fn (Legacy.Output) SchemaError!Current.Output) type {
     return struct {
@@ -717,34 +1027,63 @@ pub fn VersionedSchema(comptime Current: type, comptime Legacy: type, comptime m
         current_version: i64,
         legacy_version: i64,
         pub fn decodeJsonValue(self: @This(), value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output {
-            const object = switch (value) { .object => |item| item, else => return error.InvalidType };
-            const version = switch (object.get("_version") orelse return error.MissingField) { .integer => |item| item, else => return error.InvalidType };
+            const object = switch (value) {
+                .object => |item| item,
+                else => return error.InvalidType,
+            };
+            const version = switch (object.get("_version") orelse return error.MissingField) {
+                .integer => |item| item,
+                else => return error.InvalidType,
+            };
             const data = object.get("data") orelse return error.MissingField;
             if (version == self.current_version) return self.current.decodeJsonValue(data);
             if (version == self.legacy_version) return migrate_fn(try self.legacy.decodeJsonValue(data));
             return error.InvalidValue;
         }
-        pub fn decodeDetailedJsonValue(self: @This(), ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output { return self.decodeJsonValue(value) catch |err| { try ctx.addIssue(schemaErrorIssueKind(err), "supported schema version", valueTypeName(value), "version is missing unsupported or migration failed"); return err; }; }
-        pub fn appendJsonValue(self: @This(), allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: Output) (SchemaError || std.mem.Allocator.Error)!void { try output.print(allocator, "{{\"_version\":{d},\"data\":", .{self.current_version}); try rootAppendJsonValue(allocator, output, self.current, value); try output.append(allocator, '}'); }
+        pub fn decodeDetailedJsonValue(self: @This(), ctx: *ParseContext, value: std.json.Value) (SchemaError || std.mem.Allocator.Error)!Output {
+            return self.decodeJsonValue(value) catch |err| {
+                try ctx.addIssue(schemaErrorIssueKind(err), "supported schema version", valueTypeName(value), "version is missing unsupported or migration failed");
+                return err;
+            };
+        }
+        pub fn appendJsonValue(self: @This(), allocator: std.mem.Allocator, output: *std.ArrayList(u8), value: Output) (SchemaError || std.mem.Allocator.Error)!void {
+            try output.print(allocator, "{{\"_version\":{d},\"data\":", .{self.current_version});
+            try rootAppendJsonValue(allocator, output, self.current, value);
+            try output.append(allocator, '}');
+        }
     };
 }
-pub fn versioned(current: anytype, legacy: anytype, current_version: i64, legacy_version: i64, comptime migrate_fn: *const fn (@TypeOf(legacy).Output) SchemaError!@TypeOf(current).Output) VersionedSchema(@TypeOf(current), @TypeOf(legacy), migrate_fn) { return .{ .current = current, .legacy = legacy, .current_version = current_version, .legacy_version = legacy_version }; }
+pub fn versioned(current: anytype, legacy: anytype, current_version: i64, legacy_version: i64, comptime migrate_fn: *const fn (@TypeOf(legacy).Output) SchemaError!@TypeOf(current).Output) VersionedSchema(@TypeOf(current), @TypeOf(legacy), migrate_fn) {
+    return .{ .current = current, .legacy = legacy, .current_version = current_version, .legacy_version = legacy_version };
+}
 
 pub const ProjectionTarget = enum { json_schema, openapi, config, sql, cli };
 pub const Projection = struct {
     allocator: std.mem.Allocator,
     document: []const u8,
     losses: []const []const u8,
-    pub fn lossless(self: Projection) bool { return self.losses.len == 0; }
-    pub fn deinit(self: *Projection) void { self.allocator.free(self.document); for (self.losses) |loss| self.allocator.free(loss); self.allocator.free(self.losses); self.* = undefined; }
+    pub fn lossless(self: Projection) bool {
+        return self.losses.len == 0;
+    }
+    pub fn deinit(self: *Projection) void {
+        self.allocator.free(self.document);
+        for (self.losses) |loss| self.allocator.free(loss);
+        self.allocator.free(self.losses);
+        self.* = undefined;
+    }
 };
 
 /// Projects a schema to an agent/tooling contract. Supported primitive kinds
 /// are lossless; semantic wrappers remain explicit and unsupported constructs
 /// produce diagnostics instead of silently weakening validation.
 pub fn projectAlloc(allocator: std.mem.Allocator, schema: anytype, target: ProjectionTarget) !Projection {
-    var losses = std.ArrayList([]const u8).empty; errdefer { for (losses.items) |loss| allocator.free(loss); losses.deinit(allocator); }
-    var output = std.ArrayList(u8).empty; errdefer output.deinit(allocator);
+    var losses = std.ArrayList([]const u8).empty;
+    errdefer {
+        for (losses.items) |loss| allocator.free(loss);
+        losses.deinit(allocator);
+    }
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
     try output.appendSlice(allocator, "{\"schema\":\"zigeffect.schema.projection.v2\",\"target\":");
     try appendJsonString(&output, allocator, @tagName(target));
     try output.appendSlice(allocator, ",\"document\":");
@@ -755,7 +1094,11 @@ pub fn projectAlloc(allocator: std.mem.Allocator, schema: anytype, target: Proje
 }
 
 fn appendProjectionSchema(allocator: std.mem.Allocator, output: *std.ArrayList(u8), schema: anytype, target: ProjectionTarget, losses: *std.ArrayList([]const u8), path: []const u8, depth: usize) !void {
-    if (depth > 32) { try addProjectionLoss(allocator, losses, target, path, "recursive depth exceeds projection bound"); try output.appendSlice(allocator, "{}"); return; }
+    if (depth > 32) {
+        try addProjectionLoss(allocator, losses, target, path, "recursive depth exceeds projection bound");
+        try output.appendSlice(allocator, "{}");
+        return;
+    }
     const S = @TypeOf(schema);
     const kind = S.generator_kind;
     if (comptime std.mem.eql(u8, kind, "string")) {
@@ -763,30 +1106,141 @@ fn appendProjectionSchema(allocator: std.mem.Allocator, output: *std.ArrayList(u
         if (schema.require_non_empty) try output.appendSlice(allocator, ",\"minLength\":1");
         if (schema.min_len) |value| try output.print(allocator, ",\"minLength\":{d}", .{value});
         if (schema.max_len) |value| try output.print(allocator, ",\"maxLength\":{d}", .{value});
-        try output.append(allocator, '}'); return;
+        try output.append(allocator, '}');
+        return;
     }
-    if (comptime std.mem.eql(u8, kind, "integer")) { try output.appendSlice(allocator, "{\"type\":\"integer\""); if (schema.min_value) |value| try output.print(allocator, ",\"minimum\":{d}", .{value}); if (schema.max_value) |value| try output.print(allocator, ",\"maximum\":{d}", .{value}); try output.append(allocator, '}'); return; }
-    if (comptime std.mem.eql(u8, kind, "float")) { try output.appendSlice(allocator, "{\"type\":\"number\""); if (schema.min_value) |value| try output.print(allocator, ",\"minimum\":{d}", .{value}); if (schema.max_value) |value| try output.print(allocator, ",\"maximum\":{d}", .{value}); try output.append(allocator, '}'); return; }
-    if (comptime std.mem.eql(u8, kind, "boolean")) { try output.appendSlice(allocator, "{\"type\":\"boolean\"}"); return; }
-    if (comptime std.mem.eql(u8, kind, "decimal")) { try output.print(allocator, "{{\"type\":\"string\",\"format\":\"decimal\",\"x-max-digits\":{d},\"x-max-scale\":{d}}}", .{ schema.max_digits, schema.max_scale }); return; }
-    if (comptime std.mem.eql(u8, kind, "bytes")) { try output.print(allocator, "{{\"type\":\"string\",\"contentEncoding\":\"base64\",\"x-max-decoded-bytes\":{d}}}", .{schema.max_bytes}); return; }
-    if (comptime std.mem.eql(u8, kind, "time")) { try output.appendSlice(allocator, "{\"type\":\"integer\",\"format\":"); try appendJsonString(output, allocator, @tagName(schema.semantic)); try output.appendSlice(allocator, ",\"x-unit\":"); try appendJsonString(output, allocator, @tagName(schema.unit)); try output.append(allocator, '}'); return; }
-    if (comptime std.mem.eql(u8, kind, "literal")) { try output.appendSlice(allocator, "{\"type\":\"string\",\"const\":"); try appendJsonString(output, allocator, S.literal); try output.append(allocator, '}'); return; }
-    if (comptime std.mem.eql(u8, kind, "enum")) { try output.appendSlice(allocator, "{\"type\":\"string\",\"enum\":["); inline for (S.generator_choices, 0..) |choice, index| { if (index != 0) try output.append(allocator, ','); try appendJsonString(output, allocator, choice); } try output.appendSlice(allocator, "]}"); return; }
-    if (comptime std.mem.eql(u8, kind, "optional")) { try output.appendSlice(allocator, "{\"anyOf\":["); try appendProjectionSchema(allocator, output, schema.inner, target, losses, path, depth + 1); try output.appendSlice(allocator, ",{\"type\":\"null\"}]}"); return; }
-    if (comptime std.mem.eql(u8, kind, "array")) { try output.appendSlice(allocator, "{\"type\":\"array\",\"items\":"); try appendProjectionSchema(allocator, output, schema.inner, target, losses, path, depth + 1); try output.append(allocator, '}'); return; }
-    if (comptime std.mem.eql(u8, kind, "tuple")) { try output.appendSlice(allocator, "{\"type\":\"array\",\"minItems\":2,\"maxItems\":2,\"prefixItems\":["); try appendProjectionSchema(allocator, output, schema.first, target, losses, path, depth + 1); try output.append(allocator, ','); try appendProjectionSchema(allocator, output, schema.second, target, losses, path, depth + 1); try output.appendSlice(allocator, "]}"); return; }
-    if (comptime std.mem.eql(u8, kind, "map")) { try output.appendSlice(allocator, "{\"type\":\"object\",\"additionalProperties\":"); try appendProjectionSchema(allocator, output, schema.inner, target, losses, path, depth + 1); try output.print(allocator, ",\"maxProperties\":{d}}}", .{schema.max_entries}); return; }
+    if (comptime std.mem.eql(u8, kind, "integer")) {
+        try output.appendSlice(allocator, "{\"type\":\"integer\"");
+        if (schema.min_value) |value| try output.print(allocator, ",\"minimum\":{d}", .{value});
+        if (schema.max_value) |value| try output.print(allocator, ",\"maximum\":{d}", .{value});
+        try output.append(allocator, '}');
+        return;
+    }
+    if (comptime std.mem.eql(u8, kind, "float")) {
+        try output.appendSlice(allocator, "{\"type\":\"number\"");
+        if (schema.min_value) |value| try output.print(allocator, ",\"minimum\":{d}", .{value});
+        if (schema.max_value) |value| try output.print(allocator, ",\"maximum\":{d}", .{value});
+        try output.append(allocator, '}');
+        return;
+    }
+    if (comptime std.mem.eql(u8, kind, "boolean")) {
+        try output.appendSlice(allocator, "{\"type\":\"boolean\"}");
+        return;
+    }
+    if (comptime std.mem.eql(u8, kind, "decimal")) {
+        try output.print(allocator, "{{\"type\":\"string\",\"format\":\"decimal\",\"x-max-digits\":{d},\"x-max-scale\":{d}}}", .{ schema.max_digits, schema.max_scale });
+        return;
+    }
+    if (comptime std.mem.eql(u8, kind, "bytes")) {
+        try output.print(allocator, "{{\"type\":\"string\",\"contentEncoding\":\"base64\",\"x-max-decoded-bytes\":{d}}}", .{schema.max_bytes});
+        return;
+    }
+    if (comptime std.mem.eql(u8, kind, "time")) {
+        try output.appendSlice(allocator, "{\"type\":\"integer\",\"format\":");
+        try appendJsonString(output, allocator, @tagName(schema.semantic));
+        try output.appendSlice(allocator, ",\"x-unit\":");
+        try appendJsonString(output, allocator, @tagName(schema.unit));
+        try output.append(allocator, '}');
+        return;
+    }
+    if (comptime std.mem.eql(u8, kind, "literal")) {
+        try output.appendSlice(allocator, "{\"type\":\"string\",\"const\":");
+        try appendJsonString(output, allocator, S.literal);
+        try output.append(allocator, '}');
+        return;
+    }
+    if (comptime std.mem.eql(u8, kind, "enum")) {
+        try output.appendSlice(allocator, "{\"type\":\"string\",\"enum\":[");
+        inline for (S.generator_choices, 0..) |choice, index| {
+            if (index != 0) try output.append(allocator, ',');
+            try appendJsonString(output, allocator, choice);
+        }
+        try output.appendSlice(allocator, "]}");
+        return;
+    }
+    if (comptime std.mem.eql(u8, kind, "optional")) {
+        try output.appendSlice(allocator, "{\"anyOf\":[");
+        try appendProjectionSchema(allocator, output, schema.inner, target, losses, path, depth + 1);
+        try output.appendSlice(allocator, ",{\"type\":\"null\"}]}");
+        return;
+    }
+    if (comptime std.mem.eql(u8, kind, "array")) {
+        try output.appendSlice(allocator, "{\"type\":\"array\",\"items\":");
+        try appendProjectionSchema(allocator, output, schema.inner, target, losses, path, depth + 1);
+        try output.append(allocator, '}');
+        return;
+    }
+    if (comptime std.mem.eql(u8, kind, "tuple")) {
+        try output.appendSlice(allocator, "{\"type\":\"array\",\"minItems\":2,\"maxItems\":2,\"prefixItems\":[");
+        try appendProjectionSchema(allocator, output, schema.first, target, losses, path, depth + 1);
+        try output.append(allocator, ',');
+        try appendProjectionSchema(allocator, output, schema.second, target, losses, path, depth + 1);
+        try output.appendSlice(allocator, "]}");
+        return;
+    }
+    if (comptime std.mem.eql(u8, kind, "map")) {
+        try output.appendSlice(allocator, "{\"type\":\"object\",\"additionalProperties\":");
+        try appendProjectionSchema(allocator, output, schema.inner, target, losses, path, depth + 1);
+        try output.print(allocator, ",\"maxProperties\":{d}}}", .{schema.max_entries});
+        return;
+    }
     if (comptime std.mem.eql(u8, kind, "struct")) {
         try output.appendSlice(allocator, "{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{");
-        inline for (schema.fields, 0..) |field_spec, index| { if (index != 0) try output.append(allocator, ','); const Field = @TypeOf(field_spec); try appendJsonString(output, allocator, Field.Name); try output.append(allocator, ':'); const child_path = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ path, Field.Name }); defer allocator.free(child_path); try appendProjectionSchema(allocator, output, field_spec.schema, target, losses, child_path, depth + 1); }
-        try output.appendSlice(allocator, "},\"required\":["); var first = true; inline for (schema.fields) |field_spec| { const Field = @TypeOf(field_spec); if (!isOptional(Field.Schema.Output) and !hasDefault(Field.Schema)) { if (!first) try output.append(allocator, ','); first = false; try appendJsonString(output, allocator, Field.Name); } } try output.appendSlice(allocator, "]}"); return;
+        inline for (schema.fields, 0..) |field_spec, index| {
+            if (index != 0) try output.append(allocator, ',');
+            const Field = @TypeOf(field_spec);
+            try appendJsonString(output, allocator, Field.Name);
+            try output.append(allocator, ':');
+            const child_path = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ path, Field.Name });
+            defer allocator.free(child_path);
+            try appendProjectionSchema(allocator, output, field_spec.schema, target, losses, child_path, depth + 1);
+        }
+        try output.appendSlice(allocator, "},\"required\":[");
+        var first = true;
+        inline for (schema.fields) |field_spec| {
+            const Field = @TypeOf(field_spec);
+            if (!isOptional(Field.Schema.Output) and !hasDefault(Field.Schema)) {
+                if (!first) try output.append(allocator, ',');
+                first = false;
+                try appendJsonString(output, allocator, Field.Name);
+            }
+        }
+        try output.appendSlice(allocator, "]}");
+        return;
     }
-    if (comptime std.mem.eql(u8, kind, "brand")) { try output.appendSlice(allocator, "{\"allOf\":["); try appendProjectionSchema(allocator, output, schema.inner, target, losses, path, depth + 1); try output.appendSlice(allocator, "],\"x-zigeffect-brand\":"); try appendJsonString(output, allocator, S.brand); try output.append(allocator, '}'); return; }
-    if (comptime std.mem.eql(u8, kind, "refinement")) { try addProjectionLoss(allocator, losses, target, path, "runtime refinement predicate is not portable"); try appendProjectionSchema(allocator, output, schema.inner, target, losses, path, depth + 1); return; }
-    if (comptime std.mem.eql(u8, kind, "tagged_union")) { try output.appendSlice(allocator, "{\"oneOf\":[{\"type\":\"object\",\"properties\":{\"tag\":{\"const\":\"first\"},\"value\":"); try appendProjectionSchema(allocator, output, schema.first, target, losses, path, depth + 1); try output.appendSlice(allocator, "}},{\"type\":\"object\",\"properties\":{\"tag\":{\"const\":\"second\"},\"value\":"); try appendProjectionSchema(allocator, output, schema.second, target, losses, path, depth + 1); try output.appendSlice(allocator, "}}]}"); try addProjectionLoss(allocator, losses, target, path, "tag names are represented by stable projection variants"); return; }
-    if (comptime std.mem.eql(u8, kind, "lazy")) { try appendProjectionSchema(allocator, output, schema.resolved(), target, losses, path, depth + 1); return; }
-    if (comptime std.mem.eql(u8, kind, "versioned")) { try output.appendSlice(allocator, "{\"type\":\"object\",\"properties\":{\"_version\":{\"type\":\"integer\"},\"data\":"); try appendProjectionSchema(allocator, output, schema.current, target, losses, path, depth + 1); try output.appendSlice(allocator, "},\"required\":[\"_version\",\"data\"]}"); try addProjectionLoss(allocator, losses, target, path, "legacy migration function remains runtime-only"); return; }
+    if (comptime std.mem.eql(u8, kind, "brand")) {
+        try output.appendSlice(allocator, "{\"allOf\":[");
+        try appendProjectionSchema(allocator, output, schema.inner, target, losses, path, depth + 1);
+        try output.appendSlice(allocator, "],\"x-zigeffect-brand\":");
+        try appendJsonString(output, allocator, S.brand);
+        try output.append(allocator, '}');
+        return;
+    }
+    if (comptime std.mem.eql(u8, kind, "refinement")) {
+        try addProjectionLoss(allocator, losses, target, path, "runtime refinement predicate is not portable");
+        try appendProjectionSchema(allocator, output, schema.inner, target, losses, path, depth + 1);
+        return;
+    }
+    if (comptime std.mem.eql(u8, kind, "tagged_union")) {
+        try output.appendSlice(allocator, "{\"oneOf\":[{\"type\":\"object\",\"properties\":{\"tag\":{\"const\":\"first\"},\"value\":");
+        try appendProjectionSchema(allocator, output, schema.first, target, losses, path, depth + 1);
+        try output.appendSlice(allocator, "}},{\"type\":\"object\",\"properties\":{\"tag\":{\"const\":\"second\"},\"value\":");
+        try appendProjectionSchema(allocator, output, schema.second, target, losses, path, depth + 1);
+        try output.appendSlice(allocator, "}}]}");
+        try addProjectionLoss(allocator, losses, target, path, "tag names are represented by stable projection variants");
+        return;
+    }
+    if (comptime std.mem.eql(u8, kind, "lazy")) {
+        try appendProjectionSchema(allocator, output, schema.resolved(), target, losses, path, depth + 1);
+        return;
+    }
+    if (comptime std.mem.eql(u8, kind, "versioned")) {
+        try output.appendSlice(allocator, "{\"type\":\"object\",\"properties\":{\"_version\":{\"type\":\"integer\"},\"data\":");
+        try appendProjectionSchema(allocator, output, schema.current, target, losses, path, depth + 1);
+        try output.appendSlice(allocator, "},\"required\":[\"_version\",\"data\"]}");
+        try addProjectionLoss(allocator, losses, target, path, "legacy migration function remains runtime-only");
+        return;
+    }
     try addProjectionLoss(allocator, losses, target, path, "schema construct requires a target-specific adapter");
     try output.appendSlice(allocator, "{}");
 }
@@ -1598,36 +2052,62 @@ fn schemaErrorIssueKind(err: SchemaError) IssueKind {
     };
 }
 
-fn positiveFloat(value: f64) bool { return value > 0; }
-fn migrateInteger(value: i64) SchemaError!i64 { return value + 1; }
+fn positiveFloat(value: f64) bool {
+    return value > 0;
+}
+fn migrateInteger(value: i64) SchemaError!i64 {
+    return value + 1;
+}
 
 test "production schemas cover numbers bytes time tuple map union refinement and versions" {
     try std.testing.expectEqual(@as(f64, 1.5), try float().min(1).decodeJsonValue(.{ .float = 1.5 }));
     try std.testing.expectEqualStrings("123.45", try decimal().decodeJsonValue(.{ .string = "123.45" }));
     const encoded = "aGVsbG8=";
-    const raw = try bytes().decodeBytesAlloc(std.testing.allocator, encoded); defer std.testing.allocator.free(raw); try std.testing.expectEqualStrings("hello", raw);
+    const raw = try bytes().decodeBytesAlloc(std.testing.allocator, encoded);
+    defer std.testing.allocator.free(raw);
+    try std.testing.expectEqualStrings("hello", raw);
     try std.testing.expectEqual(@as(i64, 100), try timestampMillis().decodeJsonValue(.{ .integer = 100 }));
     const tuple_schema = tuple2(string(), integer());
-    const tuple_value = try decodeJsonAlloc(std.testing.allocator, tuple_schema, "[\"item\",2]"); defer freeOwnedDecoded(std.testing.allocator, tuple_value); try std.testing.expectEqualStrings("item", tuple_value.first);
+    const tuple_value = try decodeJsonAlloc(std.testing.allocator, tuple_schema, "[\"item\",2]");
+    defer freeOwnedDecoded(std.testing.allocator, tuple_value);
+    try std.testing.expectEqualStrings("item", tuple_value.first);
     const map_schema = map(std.testing.allocator, integer());
-    const map_value = try decodeJsonAlloc(std.testing.allocator, map_schema, "{\"one\":1,\"two\":2}"); defer freeOwnedDecoded(std.testing.allocator, map_value); try std.testing.expectEqual(@as(usize, 2), map_value.len);
+    const map_value = try decodeJsonAlloc(std.testing.allocator, map_schema, "{\"one\":1,\"two\":2}");
+    defer freeOwnedDecoded(std.testing.allocator, map_value);
+    try std.testing.expectEqual(@as(usize, 2), map_value.len);
     const union_schema = taggedUnion2(string(), integer(), "text", "count");
-    const union_value = try decodeJsonAlloc(std.testing.allocator, union_schema, "{\"tag\":\"text\",\"value\":\"ready\"}"); defer freeOwnedDecoded(std.testing.allocator, union_value); try std.testing.expectEqualStrings("ready", union_value.first);
+    const union_value = try decodeJsonAlloc(std.testing.allocator, union_schema, "{\"tag\":\"text\",\"value\":\"ready\"}");
+    defer freeOwnedDecoded(std.testing.allocator, union_value);
+    try std.testing.expectEqualStrings("ready", union_value.first);
     try std.testing.expectEqual(@as(f64, 2.0), try refine(float(), "positive", positiveFloat).decodeJsonValue(.{ .float = 2.0 }));
     const version_schema = versioned(integer(), integer(), 2, 1, migrateInteger);
-    var version_json = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"_version\":1,\"data\":41}", .{}); defer version_json.deinit();
+    var version_json = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"_version\":1,\"data\":41}", .{});
+    defer version_json.deinit();
     try std.testing.expectEqual(@as(i64, 42), try version_schema.decodeJsonValue(version_json.value));
-    var projection = try projectAlloc(std.testing.allocator, decimal(), .openapi); defer projection.deinit(); try std.testing.expect(projection.lossless());
-    var lossy = try projectAlloc(std.testing.allocator, refine(float(), "positive", positiveFloat), .json_schema); defer lossy.deinit(); try std.testing.expect(!lossy.lossless());
+    var projection = try projectAlloc(std.testing.allocator, decimal(), .openapi);
+    defer projection.deinit();
+    try std.testing.expect(projection.lossless());
+    var lossy = try projectAlloc(std.testing.allocator, refine(float(), "positive", positiveFloat), .json_schema);
+    defer lossy.deinit();
+    try std.testing.expect(!lossy.lossless());
 }
 
 test "production projection matches compatibility snapshot and survives allocation failures" {
     const Input = struct { name: []const u8, age: i64, roles: []const []const u8 };
     const schema_value = structSchema(Input, .{ field("name", string().nonEmpty().maxLen(32)), field("age", integer().min(0)), field("roles", array(std.testing.allocator, stringEnum(&.{ "reader", "writer" }))) });
-    var projection = try projectAlloc(std.testing.allocator, schema_value, .openapi); defer projection.deinit();
-    const snapshot = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/schema/snapshots/production-projection.v2.json", std.testing.allocator, .limited(64 * 1024)); defer std.testing.allocator.free(snapshot);
+    var projection = try projectAlloc(std.testing.allocator, schema_value, .openapi);
+    defer projection.deinit();
+    const snapshot = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/schema/snapshots/production-projection.v2.json", std.testing.allocator, .limited(64 * 1024));
+    defer std.testing.allocator.free(snapshot);
     try std.testing.expectEqualStrings(std.mem.trimEnd(u8, snapshot, "\r\n"), projection.document);
-    const Harness = struct { fn run(allocator: std.mem.Allocator) !void { const Local = struct { name: []const u8, age: i64 }; const local_schema = structSchema(Local, .{ field("name", string().nonEmpty()), field("age", integer().min(0)) }); var result = try projectAlloc(allocator, local_schema, .json_schema); result.deinit(); } };
+    const Harness = struct {
+        fn run(allocator: std.mem.Allocator) !void {
+            const Local = struct { name: []const u8, age: i64 };
+            const local_schema = structSchema(Local, .{ field("name", string().nonEmpty()), field("age", integer().min(0)) });
+            var result = try projectAlloc(allocator, local_schema, .json_schema);
+            result.deinit();
+        }
+    };
     try std.testing.checkAllAllocationFailures(std.testing.allocator, Harness.run, .{});
 }
 

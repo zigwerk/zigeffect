@@ -126,6 +126,183 @@ pub const ZioFiberExecutor = struct {
     }
 };
 
+/// Runtime scheduling and suspension capabilities exposed through the same
+/// service registry as every application dependency. The pointers inside the
+/// vtables remain owned by either `backendLayer` or the canonical
+/// `ManagedRuntime` wrapper for exactly the lifetime of that runtime.
+pub const BackendApi = struct {
+    pub const operations: []const []const u8 = &.{
+        "ZioBackend.execute",
+        "ZioBackend.suspend",
+        "ZioBackend.interrupt",
+    };
+
+    executor: fx.kernel.FiberExecutor,
+    async_backend: fx.kernel.AsyncBackend,
+    capabilities: fx.kernel.BackendCapabilities,
+    owned: ?*OwnedBackend = null,
+};
+
+pub const BackendService = fx.kernel.Service("zigeffect/zio/Backend", BackendApi);
+
+const OwnedBackend = struct {
+    allocator: std.mem.Allocator,
+    runtime: *zio.Runtime,
+    executor_state: ZioFiberExecutor,
+    async_backend_state: ZioAsyncBackendState,
+
+    fn init(allocator: std.mem.Allocator) !*OwnedBackend {
+        const self = try allocator.create(OwnedBackend);
+        errdefer allocator.destroy(self);
+        const runtime = try zio.Runtime.init(allocator, .{});
+        errdefer runtime.deinit();
+        self.* = .{
+            .allocator = allocator,
+            .runtime = runtime,
+            .executor_state = .{ .allocator = allocator },
+            .async_backend_state = ZioAsyncBackendState.init(allocator),
+        };
+        return self;
+    }
+
+    fn api(self: *OwnedBackend, owned: bool) BackendApi {
+        const async_backend = self.async_backend_state.backend();
+        return .{
+            .executor = self.executor_state.executor(),
+            .async_backend = async_backend,
+            .capabilities = async_backend.capabilities,
+            .owned = if (owned) self else null,
+        };
+    }
+
+    fn deinit(self: *OwnedBackend) void {
+        const allocator = self.allocator;
+        self.async_backend_state.deinit();
+        self.runtime.deinit();
+        allocator.destroy(self);
+    }
+};
+
+const BackendLifecycle = struct {
+    fn acquire(ctx: *fx.kernel.ContextView(.{})) anyerror!BackendApi {
+        const owned = try OwnedBackend.init(ctx.allocator());
+        return owned.api(true);
+    }
+
+    fn release(api: *BackendApi) void {
+        if (api.owned) |owned| owned.deinit();
+        api.owned = null;
+    }
+};
+
+/// Standalone scoped backend service for composition and inspection. Normal
+/// applications use this package's `ManagedRuntime`, which installs the same
+/// service automatically and also selects it as the runtime interpreter.
+pub fn backendLayer() @TypeOf(fx.kernel.Layer.scoped(
+    BackendService,
+    anyerror,
+    .{},
+    BackendLifecycle.acquire,
+    BackendLifecycle.release,
+)) {
+    return fx.kernel.Layer.scoped(
+        BackendService,
+        anyerror,
+        .{},
+        BackendLifecycle.acquire,
+        BackendLifecycle.release,
+    );
+}
+
+pub const ManagedRuntimeOptions = fx.kernel.ManagedRuntimeOptions;
+
+/// Canonical managed runtime for production ZIO applications. It owns one zio
+/// runtime, installs its executor and async backend into the ZigEffect kernel,
+/// and provides `BackendService` to the root layer and application map.
+pub fn ManagedRuntime(comptime RootLayer: type) type {
+    const BackendLayer = @TypeOf(fx.kernel.Layer.succeed(BackendService, @as(BackendApi, undefined)));
+    const CombinedLayer = @TypeOf(fx.kernel.Layer.provideMerge(
+        @as(RootLayer, undefined),
+        @as(BackendLayer, undefined),
+    ));
+    const Inner = fx.kernel.ManagedRuntime(CombinedLayer);
+
+    return struct {
+        const Self = @This();
+        pub const OutputServices = CombinedLayer.OutputServices;
+        pub const Handle = Inner.Handle;
+        pub const MakeError = anyerror;
+
+        inner: Inner,
+        owned_backend: ?*OwnedBackend,
+
+        pub fn make(
+            allocator: std.mem.Allocator,
+            root_layer: RootLayer,
+            options: ManagedRuntimeOptions,
+        ) MakeError!Self {
+            const owned = try OwnedBackend.init(allocator);
+            errdefer owned.deinit();
+            const api = owned.api(false);
+            const combined = fx.kernel.Layer.provideMerge(
+                root_layer,
+                fx.kernel.Layer.succeed(BackendService, api),
+            );
+            var configured = options;
+            configured.executor = api.executor;
+            configured.async_backend = api.async_backend;
+            configured.backend = api.capabilities;
+            const inner = try Inner.make(allocator, combined, configured);
+            return .{ .inner = inner, .owned_backend = owned };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.inner.deinit();
+            if (self.owned_backend) |owned| owned.deinit();
+            self.owned_backend = null;
+        }
+
+        pub fn handle(self: *Self) Handle {
+            return self.inner.handle();
+        }
+
+        pub fn run(self: *Self, effect: anytype) @TypeOf(effect).FailureType!@TypeOf(effect).SuccessType {
+            return self.inner.run(effect);
+        }
+
+        pub fn runWithCausalContext(
+            self: *Self,
+            effect: anytype,
+            context: fx.CausalContextV2,
+        ) @TypeOf(effect).FailureType!@TypeOf(effect).SuccessType {
+            return self.inner.runWithCausalContext(effect, context);
+        }
+
+        pub fn inspect(
+            self: *Self,
+            allocator: std.mem.Allocator,
+            options: fx.kernel.InspectOptions,
+        ) std.mem.Allocator.Error!fx.kernel.ApplicationSnapshot {
+            return self.inner.inspect(allocator, options);
+        }
+
+        pub fn inspectJson(
+            self: *Self,
+            allocator: std.mem.Allocator,
+            options: fx.kernel.InspectOptions,
+        ) std.mem.Allocator.Error![]u8 {
+            return self.inner.inspectJson(allocator, options);
+        }
+
+        pub fn exit(self: *Self, effect: anytype) fx.Exit(
+            @TypeOf(effect).SuccessType,
+            @TypeOf(effect).FailureType,
+        ) {
+            return self.inner.exit(effect);
+        }
+    };
+}
+
 /// Z1: a delay that suspends on a REAL zio coroutine timer, emitting the same
 /// causal trace shape as the deterministic `fx.recordDelaySuspensionScenario`.
 /// `zio.sleep` actually parks the coroutine on the event loop (io_uring/epoll/
@@ -1593,4 +1770,30 @@ test "WorkflowScheduler runs on the zio backend: a real timer fires and resumes 
     }
     try std.testing.expect(saw_timer_fired);
     try std.testing.expect(saw_resumed);
+}
+
+test "canonical zio ManagedRuntime provides its backend as a service and executes effects on it" {
+    const root = fx.kernel.Layer.empty();
+    var runtime = try ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{});
+    defer runtime.deinit();
+
+    const Probe = fx.kernel.Effect(bool, error{}, .{BackendService});
+    const probe = Probe.fromFn(struct {
+        fn run(ctx: *Probe.Context) error{}!bool {
+            const backend = ctx.service(BackendService);
+            return ctx.executor() != null and
+                ctx.asyncBackend() != null and
+                ctx.backendCapabilities().real_clock and
+                backend.capabilities.real_clock;
+        }
+    }.run);
+
+    try std.testing.expect(try runtime.run(probe));
+    var application = try runtime.inspect(std.testing.allocator, .{});
+    defer application.deinit();
+    var found = false;
+    for (application.services) |service| {
+        if (std.mem.eql(u8, service.key, BackendService.service_key)) found = true;
+    }
+    try std.testing.expect(found);
 }

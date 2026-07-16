@@ -5,22 +5,19 @@ pub const Sql = zstd.Sql;
 pub const External = zstd.External;
 
 test "Postgres sessions and pools are exposed as scoped ZigEffect layers" {
-    var session_config = zstd.Service.ValueProvider(SessionLayerConfig).init(.{
+    const session = sessionLayer();
+    const pool = poolLayer();
+    try std.testing.expect(zstd.fx.kernel.contains(@TypeOf(session).InputServices, SessionConfigService));
+    try std.testing.expect(zstd.fx.kernel.contains(@TypeOf(pool).InputServices, PoolConfigService));
+    const configured_session = session.provideMerge(sessionConfigLayer(.{
         .config = .{ .connection_url = "postgresql://localhost/composition-contract" },
-    });
-    var pool_config = zstd.Service.ValueProvider(PoolLayerConfig).init(.{
+    }));
+    const configured_pool = pool.provideMerge(poolConfigLayer(.{
         .io = std.testing.io,
         .config = .{ .session = .{ .connection_url = "postgresql://localhost/composition-contract" } },
-    });
-    var graph = zstd.fx.LayerGraph.init(std.testing.allocator);
-    defer graph.deinit();
-    try graph.addLayer("session-config", session_config.layer());
-    try graph.addLayer("pool-config", pool_config.layer());
-    try graph.addLayer("session", sessionLayer());
-    try graph.addLayer("pool", poolLayer());
-    var report = try graph.validate(std.testing.allocator);
-    defer report.deinit();
-    try std.testing.expect(report.isValid());
+    }));
+    try std.testing.expectEqual(@as(usize, 0), @TypeOf(configured_session).InputServices.len);
+    try std.testing.expectEqual(@as(usize, 0), @TypeOf(configured_pool).InputServices.len);
     _ = ApplyMigrationsEffect;
     _ = ClosePoolEffect;
 }
@@ -1042,149 +1039,112 @@ test "libpq migrations have deterministic content checksums and strict identifie
 pub const SessionLayerConfig = struct {
     config: Config,
 };
-
-pub const SessionLayerEnv = struct {
-    allocator: std.mem.Allocator,
+pub const SessionConfigService = zstd.fx.kernel.Service("zigeffect/postgres/SessionConfig", SessionLayerConfig);
+pub const SessionApi = struct {
+    pub const operations: []const []const u8 = &.{ "PostgresSession.query", "PostgresSession.begin", "PostgresSession.commit", "PostgresSession.rollback", "PostgresSession.cancel" };
     session: Session,
+};
+pub const SessionService = zstd.fx.kernel.Service("zigeffect/postgres/Session", SessionApi);
 
-    pub fn service(self: *SessionLayerEnv, comptime Requested: type) *Requested {
-        if (Requested == Session) return &self.session;
-        return zstd.fx.serviceNotFound(SessionLayerEnv, Requested);
+pub fn sessionConfigLayer(config: SessionLayerConfig) @TypeOf(zstd.fx.kernel.Layer.succeed(SessionConfigService, config)) {
+    return zstd.fx.kernel.Layer.succeed(SessionConfigService, config);
+}
+
+const SessionLifecycle = struct {
+    fn acquire(ctx: *zstd.fx.kernel.ContextView(.{SessionConfigService})) anyerror!SessionApi {
+        return .{ .session = try Session.init(ctx.allocator(), ctx.service(SessionConfigService).config) };
+    }
+
+    fn release(api: *SessionApi) void {
+        api.session.deinit();
     }
 };
 
-fn releaseSessionLayer(env: *SessionLayerEnv) void {
-    const allocator = env.allocator;
-    env.session.deinit();
-    allocator.destroy(env);
-}
-
-fn buildSessionLayer(allocator: std.mem.Allocator, scope: *zstd.fx.Scope, ctx: anytype) anyerror!*SessionLayerEnv {
-    const config = ctx.service(SessionLayerConfig);
-    const env = try allocator.create(SessionLayerEnv);
-    errdefer allocator.destroy(env);
-    env.* = .{
-        .allocator = allocator,
-        .session = try Session.init(allocator, config.config),
-    };
-    scope.addFinalizerFor(SessionLayerEnv, env, releaseSessionLayer) catch |err| {
-        releaseSessionLayer(env);
-        return err;
-    };
-    return env;
-}
-
-pub fn sessionLayer() @TypeOf(
-    zstd.fx.LayerWithError(SessionLayerEnv, anyerror)
-        .fromContextBuilder(buildSessionLayer)
-        .requires(.{SessionLayerConfig})
-        .provides(.{Session}),
-) {
-    return zstd.fx.LayerWithError(SessionLayerEnv, anyerror)
-        .fromContextBuilder(buildSessionLayer)
-        .requires(.{SessionLayerConfig})
-        .provides(.{Session});
+pub fn sessionLayer() @TypeOf(zstd.fx.kernel.Layer.scoped(
+    SessionService,
+    anyerror,
+    .{SessionConfigService},
+    SessionLifecycle.acquire,
+    SessionLifecycle.release,
+)) {
+    return zstd.fx.kernel.Layer.scoped(
+        SessionService,
+        anyerror,
+        .{SessionConfigService},
+        SessionLifecycle.acquire,
+        SessionLifecycle.release,
+    );
 }
 
 pub const PoolLayerConfig = struct {
     io: std.Io,
     config: PoolConfig,
 };
-
-pub const PoolLayerEnv = struct {
-    allocator: std.mem.Allocator,
+pub const PoolConfigService = zstd.fx.kernel.Service("zigeffect/postgres/PoolConfig", PoolLayerConfig);
+pub const PoolApi = struct {
+    pub const operations: []const []const u8 = &.{ "PostgresPool.checkout", "PostgresPool.release", "PostgresPool.close", "PostgresPool.snapshot" };
     pool: Pool,
+};
+pub const PoolService = zstd.fx.kernel.Service("zigeffect/postgres/Pool", PoolApi);
 
-    pub fn service(self: *PoolLayerEnv, comptime Requested: type) *Requested {
-        if (Requested == Pool) return &self.pool;
-        return zstd.fx.serviceNotFound(PoolLayerEnv, Requested);
+pub fn poolConfigLayer(config: PoolLayerConfig) @TypeOf(zstd.fx.kernel.Layer.succeed(PoolConfigService, config)) {
+    return zstd.fx.kernel.Layer.succeed(PoolConfigService, config);
+}
+
+const PoolLifecycle = struct {
+    fn acquire(ctx: *zstd.fx.kernel.ContextView(.{PoolConfigService})) anyerror!PoolApi {
+        const config = ctx.service(PoolConfigService);
+        return .{ .pool = try Pool.initAlloc(ctx.allocator(), config.io, config.config) };
+    }
+
+    fn release(api: *PoolApi) void {
+        api.pool.close() catch {};
+        api.pool.deinit();
     }
 };
 
-fn releasePoolLayer(env: *PoolLayerEnv) void {
-    const allocator = env.allocator;
-    env.pool.close() catch {};
-    env.pool.deinit();
-    allocator.destroy(env);
+pub fn poolLayer() @TypeOf(zstd.fx.kernel.Layer.scoped(
+    PoolService,
+    anyerror,
+    .{PoolConfigService},
+    PoolLifecycle.acquire,
+    PoolLifecycle.release,
+)) {
+    return zstd.fx.kernel.Layer.scoped(
+        PoolService,
+        anyerror,
+        .{PoolConfigService},
+        PoolLifecycle.acquire,
+        PoolLifecycle.release,
+    );
 }
 
-fn buildPoolLayer(allocator: std.mem.Allocator, scope: *zstd.fx.Scope, ctx: anytype) anyerror!*PoolLayerEnv {
-    const config = ctx.service(PoolLayerConfig);
-    const env = try allocator.create(PoolLayerEnv);
-    errdefer allocator.destroy(env);
-    env.* = .{
-        .allocator = allocator,
-        .pool = try Pool.initAlloc(allocator, config.io, config.config),
-    };
-    scope.addFinalizerFor(PoolLayerEnv, env, releasePoolLayer) catch |err| {
-        releasePoolLayer(env);
-        return err;
-    };
-    return env;
-}
-
-pub fn poolLayer() @TypeOf(
-    zstd.fx.LayerWithError(PoolLayerEnv, anyerror)
-        .fromContextBuilder(buildPoolLayer)
-        .requires(.{PoolLayerConfig})
-        .provides(.{Pool}),
-) {
-    return zstd.fx.LayerWithError(PoolLayerEnv, anyerror)
-        .fromContextBuilder(buildPoolLayer)
-        .requires(.{PoolLayerConfig})
-        .provides(.{Pool});
-}
-
-pub fn ClosePoolEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Pool};
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!zstd.fx.ServiceSet {
-            return zstd.fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(_: @This(), ctx: *zstd.fx.Context(EffectEnv)) anyerror!void {
-            ctx.service(Pool).close() catch |err| {
-                _ = zstd.Service.recordOperation(ctx, Pool, "postgres.pool.close", "failure", @errorName(err));
+pub const ClosePoolEffect = zstd.fx.kernel.Effect(void, anyerror, .{PoolService});
+pub fn closePoolEffect() ClosePoolEffect {
+    return ClosePoolEffect.fromFn(struct {
+        fn run(ctx: *ClosePoolEffect.Context) anyerror!void {
+            const operation = zstd.Service.beginOperation(ctx, PoolService.service_key, "postgres.pool.close", "closing bounded database pool");
+            ctx.service(PoolService).pool.close() catch |err| {
+                _ = zstd.Service.completeOperation(ctx, operation, "failure", @errorName(err));
                 return err;
             };
-            _ = zstd.Service.recordOperation(ctx, Pool, "postgres.pool.close", "success", "pool stopped accepting leases");
+            _ = zstd.Service.completeOperation(ctx, operation, "success", "pool stopped accepting leases");
         }
-    };
+    }.run);
 }
 
-pub fn closePoolEffect(comptime EffectEnv: type) ClosePoolEffect(EffectEnv) {
-    return .{};
-}
-
-pub fn ApplyMigrationsEffect(comptime EffectEnv: type) type {
-    return struct {
-        options: MigrationOptions,
-        migrations: []const Sql.Migration,
-
-        pub const SuccessType = MigrationReport;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Session};
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!zstd.fx.ServiceSet {
-            return zstd.fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *zstd.fx.Context(EffectEnv)) anyerror!MigrationReport {
-            const report = applyMigrationsAlloc(ctx.allocator, ctx.service(Session), self.options, self.migrations) catch |err| {
-                _ = zstd.Service.recordOperation(ctx, Session, "postgres.migrations.apply", "failure", @errorName(err));
+const MigrationRequest = struct { options: MigrationOptions, migrations: []const Sql.Migration };
+pub const ApplyMigrationsEffect = zstd.fx.kernel.Effect(MigrationReport, anyerror, .{SessionService}).Stateful(MigrationRequest);
+pub fn applyMigrationsEffect(options: MigrationOptions, migrations: []const Sql.Migration) ApplyMigrationsEffect {
+    return ApplyMigrationsEffect.init(.{ .options = options, .migrations = migrations }, struct {
+        fn run(request: MigrationRequest, ctx: *ApplyMigrationsEffect.Context) anyerror!MigrationReport {
+            const operation = zstd.Service.beginOperation(ctx, SessionService.service_key, "postgres.migrations.apply", "applying bounded migration set");
+            const report = applyMigrationsAlloc(ctx.allocator(), &ctx.service(SessionService).session, request.options, request.migrations) catch |err| {
+                _ = zstd.Service.completeOperation(ctx, operation, "failure", @errorName(err));
                 return err;
             };
-            _ = zstd.Service.recordOperation(ctx, Session, "postgres.migrations.apply", "success", "migration set applied");
+            _ = zstd.Service.completeOperation(ctx, operation, "success", "migration set applied");
             return report;
         }
-    };
-}
-
-pub fn applyMigrationsEffect(comptime EffectEnv: type, options: MigrationOptions, migrations: []const Sql.Migration) ApplyMigrationsEffect(EffectEnv) {
-    return .{ .options = options, .migrations = migrations };
+    }.run);
 }

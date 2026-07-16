@@ -56,6 +56,65 @@ pub const Config = struct {
     private_key_path: [:0]const u8,
     minimum_tls_version: enum { tls_1_2, tls_1_3 } = .tls_1_2,
 };
+pub const ConfigService = zstd.fx.kernel.Service("zigeffect/http/tls/openssl/Config", Config);
+
+pub const ProviderApi = struct {
+    pub const operations: []const []const u8 = &.{"TlsProvider.handshake"};
+    provider: Provider,
+};
+pub const ProviderService = zstd.fx.kernel.Service("zigeffect/http/tls/openssl/Provider", ProviderApi);
+
+pub fn configLayer(config: Config) @TypeOf(zstd.fx.kernel.Layer.succeed(ConfigService, config)) {
+    return zstd.fx.kernel.Layer.succeed(ConfigService, config);
+}
+
+const ProviderLifecycle = struct {
+    fn acquire(ctx: *zstd.fx.kernel.ContextView(.{ConfigService})) anyerror!ProviderApi {
+        return .{ .provider = try Provider.init(ctx.service(ConfigService).*) };
+    }
+
+    fn release(api: *ProviderApi) void {
+        api.provider.deinit();
+    }
+};
+
+pub fn providerLayer() @TypeOf(zstd.fx.kernel.Layer.scoped(
+    ProviderService,
+    anyerror,
+    .{ConfigService},
+    ProviderLifecycle.acquire,
+    ProviderLifecycle.release,
+)) {
+    return zstd.fx.kernel.Layer.scoped(
+        ProviderService,
+        anyerror,
+        .{ConfigService},
+        ProviderLifecycle.acquire,
+        ProviderLifecycle.release,
+    );
+}
+
+const HttpProviderFactory = struct {
+    fn make(ctx: *zstd.fx.kernel.ContextView(.{ProviderService})) http.Tls.Provider {
+        return ctx.service(ProviderService).provider.asProvider();
+    }
+};
+
+pub const HttpProviderService = zstd.fx.kernel.Service("zigeffect/http/TlsProvider", http.Tls.Provider);
+
+pub fn httpProviderLayer() @TypeOf(zstd.fx.kernel.Layer.sync(
+    HttpProviderService,
+    .{ProviderService},
+    HttpProviderFactory.make,
+)) {
+    return zstd.fx.kernel.Layer.sync(HttpProviderService, .{ProviderService}, HttpProviderFactory.make);
+}
+
+pub fn configuredProviderLayer(config: Config) @TypeOf(
+    httpProviderLayer().provideMerge(providerLayer().provideMerge(configLayer(config))),
+) {
+    return httpProviderLayer().provideMerge(providerLayer().provideMerge(configLayer(config)));
+}
 
 pub const Provider = struct {
     context: *SSL_CTX,

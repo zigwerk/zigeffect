@@ -250,243 +250,122 @@ pub const Recorder = struct {
     }
 };
 
-pub fn LogEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = std.mem.Allocator.Error;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Recorder};
-
-        level: Level,
-        message: []const u8,
-        fields: []const Field,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!void {
-            const recorder = ctx.service(Recorder);
-            recorder.log(self.level, self.message, self.fields) catch |err| {
-                _ = StdService.recordOperation(ctx, Recorder, "log", "failure", self.message);
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, Recorder, "log", @tagName(self.level), self.message);
-        }
+pub const API = struct {
+    pub const operations: []const []const u8 = &.{
+        "Observability.log",
+        "Observability.increment",
+        "Observability.gauge",
+        "Observability.observe",
+        "Observability.startSpan",
+        "Observability.endSpan",
+        "Observability.workbenchJson",
+        "Observability.otlpJson",
     };
+    recorder: *Recorder,
+};
+
+pub const Observability = fx.kernel.Service("zigeffect/std/Observability", API);
+
+pub fn layer(recorder: *Recorder) @TypeOf(fx.kernel.Layer.succeed(Observability, API{ .recorder = recorder })) {
+    return fx.kernel.Layer.succeed(Observability, .{ .recorder = recorder });
 }
 
-pub fn IncrementEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = std.mem.Allocator.Error;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Recorder};
-
-        name: []const u8,
-        amount: i64,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!void {
-            const recorder = ctx.service(Recorder);
-            recorder.increment(self.name, self.amount) catch |err| {
-                _ = StdService.recordOperation(ctx, Recorder, "increment", "failure", self.name);
-                return err;
+const LogInput = struct { level: Level, message: []const u8, fields: []const Field };
+pub fn log(level: Level, message: []const u8, fields: []const Field) fx.kernel.Effect(void, std.mem.Allocator.Error, .{Observability}).Stateful(LogInput) {
+    const Log = fx.kernel.Effect(void, std.mem.Allocator.Error, .{Observability});
+    return Log.fromState(LogInput, .{ .level = level, .message = message, .fields = fields }, struct {
+        fn run(input: LogInput, ctx: *Log.Context) std.mem.Allocator.Error!void {
+            ctx.service(Observability).recorder.log(input.level, input.message, input.fields) catch |failure| {
+                _ = StdService.recordSemantic(ctx, .log_recorded, Observability.service_key, "Observability.log", "failure", @errorName(failure));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, Recorder, "increment", "success", self.name);
+            _ = StdService.recordSemantic(ctx, .log_recorded, Observability.service_key, "Observability.log", @tagName(input.level), input.message);
         }
-    };
+    }.run);
 }
 
-pub fn GaugeEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = std.mem.Allocator.Error;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Recorder};
-
-        name: []const u8,
-        value: i64,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!void {
-            const recorder = ctx.service(Recorder);
-            recorder.gauge(self.name, self.value) catch |err| {
-                _ = StdService.recordOperation(ctx, Recorder, "gauge", "failure", self.name);
-                return err;
+const MetricInput = struct { name: []const u8, value: i64 };
+fn metric(comptime kind: enum { increment, gauge, observe }, input: MetricInput) fx.kernel.Effect(void, std.mem.Allocator.Error, .{Observability}).Stateful(MetricInput) {
+    const Metric = fx.kernel.Effect(void, std.mem.Allocator.Error, .{Observability});
+    return Metric.fromState(MetricInput, input, struct {
+        fn run(value: MetricInput, ctx: *Metric.Context) std.mem.Allocator.Error!void {
+            const recorder = ctx.service(Observability).recorder;
+            const result = switch (kind) {
+                .increment => recorder.increment(value.name, value.value),
+                .gauge => recorder.gauge(value.name, value.value),
+                .observe => recorder.observe(value.name, value.value),
             };
-            _ = StdService.recordOperation(ctx, Recorder, "gauge", "success", self.name);
-        }
-    };
-}
-
-pub fn ObserveEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = std.mem.Allocator.Error;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Recorder};
-
-        name: []const u8,
-        value: i64,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!void {
-            const recorder = ctx.service(Recorder);
-            recorder.observe(self.name, self.value) catch |err| {
-                _ = StdService.recordOperation(ctx, Recorder, "observe", "failure", self.name);
-                return err;
+            result catch |failure| {
+                _ = StdService.recordSemantic(ctx, .metric_recorded, Observability.service_key, "Observability." ++ @tagName(kind), "failure", @errorName(failure));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, Recorder, "observe", "success", self.name);
+            _ = StdService.recordSemantic(ctx, .metric_recorded, Observability.service_key, "Observability." ++ @tagName(kind), "success", value.name);
         }
-    };
+    }.run);
 }
 
-pub fn StartSpanEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = SpanId;
-        pub const FailureType = std.mem.Allocator.Error;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Recorder};
+pub fn increment(name: []const u8, amount: i64) @TypeOf(metric(.increment, .{ .name = name, .value = amount })) {
+    return metric(.increment, .{ .name = name, .value = amount });
+}
+pub fn gauge(name: []const u8, value: i64) @TypeOf(metric(.gauge, .{ .name = name, .value = value })) {
+    return metric(.gauge, .{ .name = name, .value = value });
+}
+pub fn observe(name: []const u8, value: i64) @TypeOf(metric(.observe, .{ .name = name, .value = value })) {
+    return metric(.observe, .{ .name = name, .value = value });
+}
 
-        name: []const u8,
-        parent_id: ?SpanId,
-        attributes: []const Attribute,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!SpanId {
-            const recorder = ctx.service(Recorder);
-            const span_id = recorder.startSpan(self.name, self.parent_id, self.attributes) catch |err| {
-                _ = StdService.recordOperation(ctx, Recorder, "span.start", "failure", self.name);
-                return err;
+const SpanInput = struct { name: []const u8, parent_id: ?SpanId, attributes: []const Attribute };
+pub fn startSpan(name: []const u8, parent_id: ?SpanId, attributes: []const Attribute) fx.kernel.Effect(SpanId, std.mem.Allocator.Error, .{Observability}).Stateful(SpanInput) {
+    const Start = fx.kernel.Effect(SpanId, std.mem.Allocator.Error, .{Observability});
+    return Start.fromState(SpanInput, .{ .name = name, .parent_id = parent_id, .attributes = attributes }, struct {
+        fn run(input: SpanInput, ctx: *Start.Context) std.mem.Allocator.Error!SpanId {
+            const id = ctx.service(Observability).recorder.startSpan(input.name, input.parent_id, input.attributes) catch |failure| {
+                _ = StdService.recordSemantic(ctx, .span_recorded, Observability.service_key, "Observability.startSpan", "failure", @errorName(failure));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, Recorder, "span.start", "success", self.name);
-            return span_id;
+            _ = StdService.recordSemantic(ctx, .span_recorded, Observability.service_key, "Observability.startSpan", "success", input.name);
+            return id;
         }
-    };
+    }.run);
 }
 
-pub fn EndSpanEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = std.mem.Allocator.Error;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Recorder};
-
-        id: SpanId,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!void {
-            const recorder = ctx.service(Recorder);
-            recorder.endSpan(self.id) catch |err| {
-                _ = StdService.recordOperation(ctx, Recorder, "span.end", "failure", "span");
-                return err;
+pub fn endSpan(id: SpanId) fx.kernel.Effect(void, std.mem.Allocator.Error, .{Observability}).Stateful(SpanId) {
+    const End = fx.kernel.Effect(void, std.mem.Allocator.Error, .{Observability});
+    return End.fromState(SpanId, id, struct {
+        fn run(value: SpanId, ctx: *End.Context) std.mem.Allocator.Error!void {
+            ctx.service(Observability).recorder.endSpan(value) catch |failure| {
+                _ = StdService.recordSemantic(ctx, .span_recorded, Observability.service_key, "Observability.endSpan", "failure", @errorName(failure));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, Recorder, "span.end", "success", "span");
+            _ = StdService.recordSemantic(ctx, .span_recorded, Observability.service_key, "Observability.endSpan", "success", "span ended");
         }
-    };
+    }.run);
 }
 
-pub fn WorkbenchJsonEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = []const u8;
-        pub const FailureType = std.mem.Allocator.Error;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Recorder};
-
-        label: []const u8,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType![]const u8 {
-            const recorder = ctx.service(Recorder);
-            const artifact = recorder.workbenchJsonAlloc(ctx.allocator, self.label) catch |err| {
-                _ = StdService.recordOperation(ctx, Recorder, "workbench.json", "failure", self.label);
-                return err;
+fn artifact(comptime otlp: bool, label: []const u8) fx.kernel.Effect([]const u8, std.mem.Allocator.Error, .{Observability}).Stateful([]const u8) {
+    const Artifact = fx.kernel.Effect([]const u8, std.mem.Allocator.Error, .{Observability});
+    return Artifact.fromState([]const u8, label, struct {
+        fn run(value: []const u8, ctx: *Artifact.Context) std.mem.Allocator.Error![]const u8 {
+            const recorder = ctx.service(Observability).recorder;
+            const output = if (otlp)
+                recorder.otlpJsonAlloc(ctx.allocator(), value)
+            else
+                recorder.workbenchJsonAlloc(ctx.allocator(), value);
+            const result = output catch |failure| {
+                _ = StdService.recordSemantic(ctx, .span_recorded, Observability.service_key, if (otlp) "Observability.otlpJson" else "Observability.workbenchJson", "failure", @errorName(failure));
+                return failure;
             };
-            _ = StdService.recordOperation(ctx, Recorder, "workbench.json", "success", self.label);
-            return artifact;
+            _ = StdService.recordSemantic(ctx, .span_recorded, Observability.service_key, if (otlp) "Observability.otlpJson" else "Observability.workbenchJson", "success", value);
+            return result;
         }
-    };
+    }.run);
 }
 
-pub fn OtlpJsonEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = []const u8;
-        pub const FailureType = std.mem.Allocator.Error;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Recorder};
-
-        service_name: []const u8,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType![]const u8 {
-            const recorder = ctx.service(Recorder);
-            const artifact = recorder.otlpJsonAlloc(ctx.allocator, self.service_name) catch |err| {
-                _ = StdService.recordOperation(ctx, Recorder, "otlp.json", "failure", self.service_name);
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, Recorder, "otlp.json", "success", self.service_name);
-            return artifact;
-        }
-    };
+pub fn workbenchJson(label: []const u8) @TypeOf(artifact(false, label)) {
+    return artifact(false, label);
 }
-
-pub fn logEffect(comptime EffectEnv: type, level: Level, message: []const u8, fields: []const Field) LogEffect(EffectEnv) {
-    return .{ .level = level, .message = message, .fields = fields };
-}
-
-pub fn incrementEffect(comptime EffectEnv: type, name: []const u8, amount: i64) IncrementEffect(EffectEnv) {
-    return .{ .name = name, .amount = amount };
-}
-
-pub fn gaugeEffect(comptime EffectEnv: type, name: []const u8, value: i64) GaugeEffect(EffectEnv) {
-    return .{ .name = name, .value = value };
-}
-
-pub fn observeEffect(comptime EffectEnv: type, name: []const u8, value: i64) ObserveEffect(EffectEnv) {
-    return .{ .name = name, .value = value };
-}
-
-pub fn startSpanEffect(
-    comptime EffectEnv: type,
-    name: []const u8,
-    parent_id: ?SpanId,
-    attributes: []const Attribute,
-) StartSpanEffect(EffectEnv) {
-    return .{ .name = name, .parent_id = parent_id, .attributes = attributes };
-}
-
-pub fn endSpanEffect(comptime EffectEnv: type, id: SpanId) EndSpanEffect(EffectEnv) {
-    return .{ .id = id };
-}
-
-pub fn workbenchJsonEffect(comptime EffectEnv: type, label: []const u8) WorkbenchJsonEffect(EffectEnv) {
-    return .{ .label = label };
-}
-
-pub fn otlpJsonEffect(comptime EffectEnv: type, service_name: []const u8) OtlpJsonEffect(EffectEnv) {
-    return .{ .service_name = service_name };
+pub fn otlpJson(service_name: []const u8) @TypeOf(artifact(true, service_name)) {
+    return artifact(true, service_name);
 }
 
 fn appendJsonFieldName(output: *std.ArrayList(u8), allocator: std.mem.Allocator, name: []const u8) std.mem.Allocator.Error!void {
@@ -602,25 +481,20 @@ fn sortHistograms(histograms: []fx.services.metrics.HistogramSnapshot) std.mem.A
 }
 
 test "Observability effects log metrics spans and causal facts" {
-    const zstd = @import("../root.zig");
-
     var recorder = Recorder.init(std.testing.allocator);
     defer recorder.deinit();
-
-    var provider = zstd.Service.Provider(.{Recorder}).init(.{&recorder});
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    const root = layer(&recorder);
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{Recorder})
-        .withCausalStore(&store);
-
-    try runtime.run(logEffect(@TypeOf(provider), .info, "local compile token=abc123", &.{}));
-    try runtime.run(incrementEffect(@TypeOf(provider), "agent.runs", 1));
-    try runtime.run(gaugeEffect(@TypeOf(provider), "queue.depth", 2));
-    try runtime.run(observeEffect(@TypeOf(provider), "build.ms", 42));
-    const span_id = try runtime.run(startSpanEffect(@TypeOf(provider), "codex build span", null, &.{}));
-    try runtime.run(endSpanEffect(@TypeOf(provider), span_id));
+    try runtime.run(log(.info, "local compile token=abc123", &.{}));
+    try runtime.run(increment("agent.runs", 1));
+    try runtime.run(gauge("queue.depth", 2));
+    try runtime.run(observe("build.ms", 42));
+    const span_id = try runtime.run(startSpan("codex build span", null, &.{}));
+    try runtime.run(endSpan(span_id));
 
     try std.testing.expectEqual(@as(usize, 1), recorder.logger.structured_entries.items.len);
     try std.testing.expectEqual(@as(i64, 1), recorder.metrics.get("agent.runs"));
@@ -630,13 +504,13 @@ test "Observability effects log metrics spans and causal facts" {
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    const log_event_index = StdService.findOperation(snapshot, Recorder, "log", "info");
+    const log_event_index = StdService.findOperation(snapshot, Observability, "Observability.log", "info");
     try std.testing.expect(log_event_index != null);
-    try std.testing.expect(StdService.hasOperation(snapshot, Recorder, "increment", "success"));
-    try std.testing.expect(StdService.hasOperation(snapshot, Recorder, "gauge", "success"));
-    try std.testing.expect(StdService.hasOperation(snapshot, Recorder, "observe", "success"));
-    try std.testing.expect(StdService.hasOperation(snapshot, Recorder, "span.start", "success"));
-    try std.testing.expect(StdService.hasOperation(snapshot, Recorder, "span.end", "success"));
+    try std.testing.expect(StdService.hasOperation(snapshot, Observability, "Observability.increment", "success"));
+    try std.testing.expect(StdService.hasOperation(snapshot, Observability, "Observability.gauge", "success"));
+    try std.testing.expect(StdService.hasOperation(snapshot, Observability, "Observability.observe", "success"));
+    try std.testing.expect(StdService.hasOperation(snapshot, Observability, "Observability.startSpan", "success"));
+    try std.testing.expect(StdService.hasOperation(snapshot, Observability, "Observability.endSpan", "success"));
     try std.testing.expect(std.mem.indexOf(u8, snapshot.events[log_event_index.?].redacted_detail, "abc123") == null);
 }
 

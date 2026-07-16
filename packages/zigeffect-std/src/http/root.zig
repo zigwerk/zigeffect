@@ -100,6 +100,7 @@ pub const Response = struct {
 };
 
 pub const Client = struct {
+    pub const operations: []const []const u8 = &.{"HttpClient.send"};
     ptr: *anyopaque,
     sendFn: *const fn (*anyopaque, std.mem.Allocator, Request, SendOptions) ClientError!Response,
 
@@ -111,7 +112,24 @@ pub const Client = struct {
     ) ClientError!Response {
         return self.sendFn(self.ptr, allocator, request, options);
     }
+
+    pub fn from(comptime T: type, pointer: *T) Client {
+        return .{
+            .ptr = pointer,
+            .sendFn = struct {
+                fn call(raw: *anyopaque, allocator: std.mem.Allocator, request: Request, options: SendOptions) ClientError!Response {
+                    return (@as(*T, @ptrCast(@alignCast(raw)))).sendAllocWithOptions(allocator, request, options);
+                }
+            }.call,
+        };
+    }
 };
+
+pub const HttpClient = fx.kernel.Service("zigeffect/std/HttpClient", Client);
+
+pub fn clientLayer(client: Client) @TypeOf(fx.kernel.Layer.succeed(HttpClient, client)) {
+    return fx.kernel.Layer.succeed(HttpClient, client);
+}
 
 pub const RouteResult = struct {
     response: Response,
@@ -617,142 +635,88 @@ pub fn redactRequestAlloc(allocator: std.mem.Allocator, request: Request) ![]con
     return output.toOwnedSlice(allocator);
 }
 
-pub fn SendEffect(comptime EffectEnv: type, comptime ClientService: type) type {
-    return struct {
-        pub const SuccessType = Response;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{ClientService};
-
-        request: Request,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!Response {
-            const client = ctx.service(ClientService);
-            const detail = redactRequestAlloc(ctx.allocator, self.request) catch |err| {
-                _ = StdService.recordOperation(ctx, ClientService, "http.send", "failure", @errorName(err));
+const SendRequest = struct { request: Request, options: SendOptions = .{} };
+pub const SendEffect = fx.kernel.Effect(Response, ClientError, .{HttpClient}).Stateful(SendRequest);
+pub fn send(request: Request, options: SendOptions) SendEffect {
+    return SendEffect.init(.{ .request = request, .options = options }, struct {
+        fn run(state: SendRequest, ctx: *SendEffect.Context) ClientError!Response {
+            const operation = StdService.beginOperation(ctx, HttpClient.service_key, "http.send", "bounded HTTP request metadata omitted");
+            const response = ctx.service(HttpClient).sendAlloc(ctx.allocator(), state.request, state.options) catch |err| {
+                _ = StdService.completeOperation(ctx, operation, "failure", "bounded HTTP request failed; metadata omitted");
                 return err;
             };
-            defer ctx.allocator.free(detail);
-
-            const response = client.sendAlloc(ctx.allocator, self.request) catch |err| {
-                _ = StdService.recordOperation(ctx, ClientService, "http.send", "failure", detail);
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, ClientService, "http.send", "success", detail);
+            _ = StdService.completeOperation(ctx, operation, "success", "bounded HTTP request completed; metadata omitted");
             return response;
         }
-    };
+    }.run);
 }
 
-pub fn SendClassifiedEffect(comptime EffectEnv: type, comptime ClientService: type) type {
-    return struct {
-        pub const SuccessType = External.Result(Response);
-        pub const FailureType = error{};
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{ClientService};
+pub fn sendEffect(request: Request) SendEffect {
+    return send(request, .{});
+}
 
-        request: Request,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
+pub const SendClassifiedEffect = fx.kernel.Effect(External.Result(Response), error{}, .{HttpClient}).Stateful(SendRequest);
+pub fn sendClassified(request: Request, options: SendOptions) SendClassifiedEffect {
+    return SendClassifiedEffect.init(.{ .request = request, .options = options }, struct {
+        fn run(state: SendRequest, ctx: *SendClassifiedEffect.Context) error{}!External.Result(Response) {
+            const operation = StdService.beginOperation(ctx, HttpClient.service_key, "http.send", "classified bounded HTTP request");
+            const response = ctx.service(HttpClient).sendAlloc(ctx.allocator(), state.request, state.options) catch |err| {
+                const failure = External.Failure.fromError("http-client", "send", err);
+                _ = StdService.completeOperation(ctx, operation, @tagName(failure.class), failure.detail);
+                return .{ .failure = failure };
+            };
+            _ = StdService.completeOperation(ctx, operation, "success", "classified bounded HTTP request completed");
+            return .{ .success = response };
         }
+    }.run);
+}
 
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!SuccessType {
-            const client = ctx.service(ClientService);
-            const result = client.sendClassifiedAlloc(ctx.allocator, self.request);
-            switch (result) {
-                .success => {
-                    _ = StdService.recordOperation(ctx, ClientService, "http.send", "success", "classified");
-                },
-                .failure => |failure| {
-                    _ = StdService.recordOperation(ctx, ClientService, "http.send", @tagName(failure.class), failure.detail);
-                },
+pub fn sendClassifiedEffect(request: Request) SendClassifiedEffect {
+    return sendClassified(request, .{});
+}
+
+pub const MemoryServerApi = struct {
+    pub const operations: []const []const u8 = &.{"MemoryHttpServer.handle"};
+    server: *MemoryServer,
+};
+pub const MemoryServerService = fx.kernel.Service("zigeffect/std/MemoryHttpServer", MemoryServerApi);
+pub fn memoryServerLayer(server: *MemoryServer) @TypeOf(fx.kernel.Layer.succeed(MemoryServerService, MemoryServerApi{ .server = server })) {
+    return fx.kernel.Layer.succeed(MemoryServerService, .{ .server = server });
+}
+pub const HandleEffect = fx.kernel.Effect(Response, std.mem.Allocator.Error, .{MemoryServerService}).Stateful(Request);
+pub fn handleEffect(request: Request) HandleEffect {
+    return HandleEffect.init(request, struct {
+        fn run(value: Request, ctx: *HandleEffect.Context) std.mem.Allocator.Error!Response {
+            return ctx.service(MemoryServerService).server.handleAlloc(ctx.allocator(), value);
+        }
+    }.run);
+}
+
+pub const RouteHandler = struct {
+    pub const operations: []const []const u8 = &.{"HttpRouter.handle"};
+    pointer: *anyopaque,
+    handle_fn: *const fn (*anyopaque, std.mem.Allocator, Request) anyerror!RouteResult,
+
+    pub fn from(comptime T: type, value: *T) RouteHandler {
+        return .{ .pointer = value, .handle_fn = struct {
+            fn call(raw: *anyopaque, allocator: std.mem.Allocator, request: Request) anyerror!RouteResult {
+                return (@as(*T, @ptrCast(@alignCast(raw)))).handleAlloc(allocator, request);
             }
-            return result;
+        }.call };
+    }
+};
+pub const RouterService = fx.kernel.Service("zigeffect/std/HttpRouter", RouteHandler);
+pub fn routerLayer(handler: RouteHandler) @TypeOf(fx.kernel.Layer.succeed(RouterService, handler)) {
+    return fx.kernel.Layer.succeed(RouterService, handler);
+}
+pub const HandleRouteEffect = fx.kernel.Effect(RouteResult, anyerror, .{RouterService}).Stateful(Request);
+pub fn handleRouteEffect(request: Request) HandleRouteEffect {
+    return HandleRouteEffect.init(request, struct {
+        fn run(value: Request, ctx: *HandleRouteEffect.Context) anyerror!RouteResult {
+            const service = ctx.service(RouterService);
+            return service.handle_fn(service.pointer, ctx.allocator(), value);
         }
-    };
-}
-
-pub fn HandleEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = Response;
-        pub const FailureType = std.mem.Allocator.Error;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{MemoryServer};
-
-        request: Request,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!Response {
-            const server = ctx.service(MemoryServer);
-            const detail = redactRequestAlloc(ctx.allocator, self.request) catch |err| {
-                _ = StdService.recordOperation(ctx, MemoryServer, "http.handle", "failure", @errorName(err));
-                return err;
-            };
-            defer ctx.allocator.free(detail);
-
-            const response = server.handleAlloc(ctx.allocator, self.request) catch |err| {
-                _ = StdService.recordOperation(ctx, MemoryServer, "http.handle", "failure", detail);
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, MemoryServer, "http.handle", if (response.status < 400) "success" else "not_found", detail);
-            return response;
-        }
-    };
-}
-
-pub fn sendEffect(comptime EffectEnv: type, comptime ClientService: type, request: Request) SendEffect(EffectEnv, ClientService) {
-    return .{ .request = request };
-}
-
-pub fn sendClassifiedEffect(comptime EffectEnv: type, comptime ClientService: type, request: Request) SendClassifiedEffect(EffectEnv, ClientService) {
-    return .{ .request = request };
-}
-
-pub fn handleEffect(comptime EffectEnv: type, request: Request) HandleEffect(EffectEnv) {
-    return .{ .request = request };
-}
-
-pub fn HandleRouteEffect(comptime EffectEnv: type, comptime RouterType: type) type {
-    return struct {
-        pub const SuccessType = RouteResult;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{RouterType};
-
-        request: Request,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!RouteResult {
-            const local_router = ctx.service(RouterType);
-            const detail = redactRequestAlloc(ctx.allocator, self.request) catch |err| {
-                _ = StdService.recordOperation(ctx, RouterType, "http.route", "failure", @errorName(err));
-                return err;
-            };
-            defer ctx.allocator.free(detail);
-
-            const result = local_router.handleAlloc(ctx.allocator, self.request) catch |err| {
-                _ = StdService.recordOperation(ctx, RouterType, "http.route", "failure", detail);
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, RouterType, "http.route", if (result.response.status < 400) "success" else "failure", detail);
-            return result;
-        }
-    };
-}
-
-pub fn handleRouteEffect(comptime EffectEnv: type, comptime RouterType: type, request: Request) HandleRouteEffect(EffectEnv, RouterType) {
-    return .{ .request = request };
+    }.run);
 }
 
 pub fn cloneResponseAlloc(allocator: std.mem.Allocator, response: Response) std.mem.Allocator.Error!Response {
@@ -1163,18 +1127,15 @@ test "Http redacts database password and API key request bodies" {
 }
 
 test "Http sendEffect uses client services and records redacted causal facts" {
-    const zstd = @import("../root.zig");
-
     var client = FakeClient.init(.{ .status = 202, .body = "accepted" });
-    var provider = zstd.Service.Provider(.{FakeClient}).init(.{&client});
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
-    defer store.deinit();
+    const main_layer = clientLayer(client.client());
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const zstd = @import("../root.zig");
+    var runtime = try zstd.ManagedRuntime(@TypeOf(main_layer)).make(std.testing.allocator, std.testing.io, tmp.dir, main_layer, .{});
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{FakeClient})
-        .withCausalStore(&store);
-
-    var response = try runtime.run(sendEffect(@TypeOf(provider), FakeClient, .{
+    var response = try runtime.run(sendEffect(.{
         .method = "POST",
         .url = "https://example.test/api?token=abc123",
         .headers = &.{.{ .name = "authorization", .value = "Bearer token" }},
@@ -1185,11 +1146,15 @@ test "Http sendEffect uses client services and records redacted causal facts" {
     try std.testing.expectEqual(@as(u16, 202), response.status);
     try std.testing.expectEqualStrings("accepted", response.body);
 
-    var snapshot = try store.snapshot(std.testing.allocator);
+    var snapshot = try runtime.inspect(std.testing.allocator, .{ .max_recent_events = 64 });
     defer snapshot.deinit();
-    const event_index = zstd.Service.findOperation(snapshot, FakeClient, "http.send", "success");
-    try std.testing.expect(event_index != null);
-    try std.testing.expect(std.mem.indexOf(u8, snapshot.events[event_index.?].redacted_detail, "abc123") == null);
+    var found = false;
+    for (snapshot.causal.recent_events) |event| {
+        if (std.mem.eql(u8, event.label, "http.send") and std.mem.eql(u8, event.status, "success")) found = true;
+        try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "abc123") == null);
+    }
+    try std.testing.expect(found);
+    try runtime.shutdown();
 }
 
 test "Http LocalClient exposes live adapter contract without network access" {
@@ -1235,9 +1200,12 @@ test "Http classified clients return backend neutral recovery failures" {
 test "Http classified effect keeps failures in the success channel" {
     var client = FakeClient.init(.{ .status = 204 });
     const zstd = @import("../root.zig");
-    var services = zstd.Service.Provider(.{FakeClient}).init(.{&client});
-    var runtime = zstd.fx.Runtime(@TypeOf(services)).init(std.testing.allocator, &services).provides(.{FakeClient});
-    var result = try runtime.run(sendClassifiedEffect(@TypeOf(services), FakeClient, .{
+    const main_layer = clientLayer(client.client());
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runtime = try zstd.ManagedRuntime(@TypeOf(main_layer)).make(std.testing.allocator, std.testing.io, tmp.dir, main_layer, .{});
+    defer runtime.deinit();
+    var result = try runtime.run(sendClassifiedEffect(.{
         .method = "GET",
         .url = "https://example.invalid/health",
     }));
@@ -1245,6 +1213,7 @@ test "Http classified effect keeps failures in the success channel" {
         .success => |*response| response.deinit(std.testing.allocator),
         .failure => return error.TestUnexpectedFailure,
     }
+    try runtime.shutdown();
 }
 
 test "Http memory server routes requests through effect-native handler" {
@@ -1254,23 +1223,20 @@ test "Http memory server routes requests through effect-native handler" {
     defer server.deinit();
     try server.addRoute("GET", "/health", .{ .status = 200, .body = "ok" });
 
-    var provider = zstd.Service.Provider(.{MemoryServer}).init(.{&server});
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
-    defer store.deinit();
+    const main_layer = memoryServerLayer(&server);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runtime = try zstd.ManagedRuntime(@TypeOf(main_layer)).make(std.testing.allocator, std.testing.io, tmp.dir, main_layer, .{});
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{MemoryServer})
-        .withCausalStore(&store);
-
-    var response = try runtime.run(handleEffect(@TypeOf(provider), .{ .method = "GET", .url = "/health" }));
+    var response = try runtime.run(handleEffect(.{ .method = "GET", .url = "/health" }));
     defer response.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(@as(u16, 200), response.status);
     try std.testing.expectEqualStrings("ok", response.body);
 
-    var snapshot = try store.snapshot(std.testing.allocator);
-    defer snapshot.deinit();
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, MemoryServer, "http.handle", "success"));
+    try std.testing.expect(runtime.graphSummary().records != 0);
+    try runtime.shutdown();
 }
 
 test "Http WebSocketFrame encodes decodes and redacts payloads" {
@@ -1410,16 +1376,13 @@ test "Http typed router effect records causal facts" {
         createProjectHandler,
     );
     var local_router = router(.{endpoint});
-    const RouterType = @TypeOf(local_router);
+    const main_layer = routerLayer(RouteHandler.from(@TypeOf(local_router), &local_router));
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runtime = try zstd.ManagedRuntime(@TypeOf(main_layer)).make(std.testing.allocator, std.testing.io, tmp.dir, main_layer, .{});
+    defer runtime.deinit();
 
-    var provider = zstd.Service.Provider(.{RouterType}).init(.{&local_router});
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
-    defer store.deinit();
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{RouterType})
-        .withCausalStore(&store);
-
-    var result = try runtime.run(handleRouteEffect(@TypeOf(provider), RouterType, .{
+    var result = try runtime.run(handleRouteEffect(.{
         .method = "POST",
         .url = "/projects",
         .body = "{\"name\":\"local\",\"limit\":1}",
@@ -1427,9 +1390,8 @@ test "Http typed router effect records causal facts" {
     defer result.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(@as(u16, 200), result.response.status);
-    var snapshot = try store.snapshot(std.testing.allocator);
-    defer snapshot.deinit();
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, RouterType, "http.route", "success"));
+    try std.testing.expect(runtime.graphSummary().records != 0);
+    try runtime.shutdown();
 }
 
 test "Http request and response body streams own bounded chunked data" {

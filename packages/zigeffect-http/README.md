@@ -14,35 +14,35 @@ must pass its own live conformance gate before promotion.
 zig build test
 ```
 
-`ServerLayerConfig`, `Handler`, and `serverLayer()` are the current lifecycle
-bridge for existing consumers. They own listener lifetime and
+`ServerConfigService`, `HandlerService`, and `serverLayer()` are the canonical
+scoped adapter surface. They own listener lifetime and
 `serveOneEffect`, `drainServerEffect`, and `shutdownServerEffect` emit causal
-operation facts, but the bridge still uses the legacy environment-shaped layer
-kernel. It is not the wiring pattern for new application roots.
-
-The canonical migration will publish stable handler/server tags and a scoped
-`fx.kernel.Layer` consumed by one managed runtime. Direct `Server.init` remains
-the imperative driver API for adapter tests and low-level integrations.
+operation facts. Direct `Server.init` remains the imperative driver API for
+adapter tests and low-level integrations.
 
 ## Guarded application map
 
-`ApplicationMapHandler` exposes the canonical managed runtime's versioned
+`RuntimeApplicationMapHandler` exposes the owning managed runtime's versioned
 application snapshot without rebuilding layers or reconstructing a graph from
-logs. A guard is required at construction time, and both the retained event
-tail and response bytes are bounded:
+logs. Its layered handler is constructed before the runtime, then an
+`ApplicationMapSlot` borrows that exact runtime from startup until drain. A
+guard is required, and both the retained event tail and response bytes are
+bounded:
 
 ```zig
-var map = try http.ApplicationMapHandler(@TypeOf(runtime)).init(
-    &runtime,
-    "/_zigeffect/application",
+var slot = http.ApplicationMapSlot{};
+var map = try http.RuntimeApplicationMapHandler.init(
+    &slot,
+    "/.well-known/zigeffect/application-map",
     http.Guard.from(AgentAccess, &agent_access),
     .{ .max_recent_events = 128, .max_response_bytes = 1024 * 1024 },
 );
-
-const handler = map.asHandler();
+// After ManagedRuntime.make and before serving:
+try slot.install(@TypeOf(runtime), &runtime);
+defer slot.clear();
 ```
 
-The response is `zigeffect.application_snapshot.v1`: services, layers,
-dependency edges, memoization, causal health, findings, fiber state, and a
-bounded recent event tail in one JSON document. Deployments still decide the
-network exposure and authorization policy.
+For durable runtimes the response is the versioned agent map: services, layers,
+dependency edges, memoization, manifest intent, causal health, NenDB summary,
+findings, fiber state, and a bounded recent event tail in one JSON document.
+Deployments still decide the network exposure and authorization policy.

@@ -97,35 +97,6 @@ pub const LiveConsole = struct {
     }
 };
 
-pub fn WriteEffect(comptime EffectEnv: type, comptime operation: []const u8) type {
-    return struct {
-        text: []const u8,
-        pub const SuccessType = void;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Service};
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) anyerror!void {
-            const console = ctx.service(Service);
-            const result = if (std.mem.eql(u8, operation, "console.stdout")) console.writeOut(self.text) else console.writeErr(self.text);
-            result catch |err| {
-                _ = StdService.recordOperation(ctx, Service, operation, "failure", @errorName(err));
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, Service, operation, "success", "wrote redacted console text");
-        }
-    };
-}
-
-pub fn writeOutEffect(comptime EffectEnv: type, text: []const u8) WriteEffect(EffectEnv, "console.stdout") {
-    return .{ .text = text };
-}
-pub fn writeErrEffect(comptime EffectEnv: type, text: []const u8) WriteEffect(EffectEnv, "console.stderr") {
-    return .{ .text = text };
-}
-
 fn WriteDefaultEffect(comptime stderr: bool) type {
     _ = stderr;
     return fx.kernel.Effect(void, ConsoleError, .{}).Stateful([]const u8);
@@ -177,17 +148,16 @@ test "Console captures stdout and stderr" {
     try std.testing.expectEqualStrings("oops", console.stderrText());
 }
 
-test "Console write effects use a captured service layer" {
+test "Console write effects use a captured default-service override" {
     var console = CapturedConsole.init(std.testing.allocator);
     defer console.deinit();
-    var provider = StdService.ValueProvider(Service).init(console.asService());
-    const console_layer = provider.layer();
-    const EnvType = fx.LayerGraphEnv(@TypeOf(.{console_layer}));
-    var graph = fx.layerGraph(std.testing.allocator, .{console_layer});
-    defer graph.deinit();
+    const root = fx.kernel.Layer.empty();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{});
+    defer runtime.deinit();
 
-    try graph.run(writeOutEffect(EnvType, "hello"));
-    try graph.run(writeErrEffect(EnvType, "oops"));
+    const defaults = fx.kernel.DefaultOverrides{ .console = console.asDefault() };
+    try runtime.run(writeOut("hello").withDefaults(defaults));
+    try runtime.run(writeErr("oops").withDefaults(defaults));
     try std.testing.expectEqualStrings("hello", console.stdoutText());
     try std.testing.expectEqualStrings("oops", console.stderrText());
 }

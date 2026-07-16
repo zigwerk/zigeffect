@@ -2,6 +2,69 @@ const std = @import("std");
 pub const zstd = @import("zigeffect_std");
 pub const capability = zstd.Capability.Descriptor{ .id = "zigeffect-s3.object-storage", .kind = .object_storage, .maturity = .production_candidate, .package = "zigeffect-s3", .version = "0.1.0", .features = &.{ "s3-compatible", "sigv4", "put", "get", "head", "delete", "list", "multipart", "sha256" }, .side_effects = .real, .conformance = .{ .schema = "zigeffect.s3-live-conformance", .version = 1, .receipt = "conformance/minio-live.v1.json", .authority = .live_external, .observed_at_ms = 1783777336000, .valid_until_ms = 1791553336000, .content_sha256 = "sha256:6767bb1a464008824bb38d42eb880fbd451ffe2d55ecbb3271cd8d4e2f4edfc2" }, .limitations = &.{ "plain HTTP path-style endpoints only", "multipart coordinator state is process-local", "resumable multipart and versioned buckets are not implemented" } };
 pub const Options = struct { host: []const u8 = "127.0.0.1", port: u16 = 9000, bucket: []const u8, region: []const u8 = "us-east-1", access_key: []const u8, secret_key: []const u8, max_response_bytes: usize = 128 * 1024 * 1024 };
+pub const ClientConfig = struct { io: std.Io, options: Options };
+pub const ClientConfigService = zstd.fx.kernel.Service("zigeffect/s3/ClientConfig", ClientConfig);
+
+pub const ClientApi = struct {
+    pub const operations: []const []const u8 = &.{"S3.objectStorage"};
+    client: Client,
+};
+pub const ClientService = zstd.fx.kernel.Service("zigeffect/s3/Client", ClientApi);
+
+pub fn configLayer(config: ClientConfig) @TypeOf(zstd.fx.kernel.Layer.succeed(ClientConfigService, config)) {
+    return zstd.fx.kernel.Layer.succeed(ClientConfigService, config);
+}
+
+const ClientLifecycle = struct {
+    fn acquire(ctx: *zstd.fx.kernel.ContextView(.{ClientConfigService})) anyerror!ClientApi {
+        const config = ctx.service(ClientConfigService);
+        return .{ .client = try Client.init(ctx.allocator(), config.io, config.options) };
+    }
+
+    fn release(api: *ClientApi) void {
+        api.client.deinit();
+    }
+};
+
+pub fn clientLayer() @TypeOf(zstd.fx.kernel.Layer.scoped(
+    ClientService,
+    anyerror,
+    .{ClientConfigService},
+    ClientLifecycle.acquire,
+    ClientLifecycle.release,
+)) {
+    return zstd.fx.kernel.Layer.scoped(
+        ClientService,
+        anyerror,
+        .{ClientConfigService},
+        ClientLifecycle.acquire,
+        ClientLifecycle.release,
+    );
+}
+
+const ObjectStorageFactory = struct {
+    fn make(ctx: *zstd.fx.kernel.ContextView(.{ClientService})) zstd.ObjectStorage.Service {
+        return ctx.service(ClientService).client.asObjectStorage();
+    }
+};
+
+pub fn objectStorageLayer() @TypeOf(zstd.fx.kernel.Layer.sync(
+    zstd.ObjectStorage.ObjectStorageService,
+    .{ClientService},
+    ObjectStorageFactory.make,
+)) {
+    return zstd.fx.kernel.Layer.sync(
+        zstd.ObjectStorage.ObjectStorageService,
+        .{ClientService},
+        ObjectStorageFactory.make,
+    );
+}
+
+pub fn layer(config: ClientConfig) @TypeOf(
+    objectStorageLayer().provideMerge(clientLayer().provideMerge(configLayer(config))),
+) {
+    return objectStorageLayer().provideMerge(clientLayer().provideMerge(configLayer(config)));
+}
 const Upload = struct { key: []u8, remote_id: []u8, parts: std.ArrayList(UploadedPart) = .empty };
 const UploadedPart = struct { number: u32, etag: []u8 };
 const Response = struct {

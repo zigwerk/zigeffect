@@ -58,10 +58,9 @@ lazy descriptions with:
 - recovery: `mapError` and `catchAll`; and
 - semantic graph structure: `named`.
 
-The older environment-shaped engine retains additional concurrency, race,
-schedule, lifecycle, and traversal operations while those features move behind
-the canonical facade. Their existence does not make its `Env` type the model
-for new applications.
+The older environment-shaped engine is quarantined for framework regression
+coverage. Canonical applications and adapters use the kernel, runtime handles,
+and service layers; an `Env` type is never an application dependency model.
 
 Zig does not need an EffectTS generator equivalent for the first version
 because `try` already gives readable direct-style error flow.
@@ -91,8 +90,8 @@ ZigEffect layers provide the same architectural boundary through:
   embedded NenDB inspection, checked persistence, and disposal. The underlying
   `kernel.ManagedRuntime` remains the I/O-free interpreter.
 
-`LayerGraph` and `layerGraph` describe the compatibility implementation used by
-unmigrated modules. They must not be taught as a parallel application model.
+The old graph interpreter remains framework-internal regression material. The
+architecture gate rejects it from canonical packages and generated apps.
 
 ### Scope
 
@@ -288,16 +287,16 @@ deployment remains outside the local-first boundary.
 
 ## Next concept priorities
 
-1. Complete the standard-library migration so every external capability uses a
-   stable tag, canonical effects, and live/deterministic layers.
-2. Publish canonical HTTP, SQL, OTEL, and native gRPC scoped layers, then delete
-   the generated production compatibility bridge.
+1. Continue deleting quarantined environment-shaped engine internals after
+   their remaining regression suites move to the kernel facade.
+2. Expand authenticated, cross-platform qualification for the canonical HTTP,
+   SQL, OTEL, transport, parser, and native gRPC layers.
 3. Move advanced concurrency, scheduling, resource, and recovery operations
    behind the canonical effect facade without regressing allocation or causal
    budgets.
 4. Complete native gRPC registry/handler/channel/server composition and prove
    child-scope lifetime across full streaming calls.
-5. Migrate Ziac commands, state clients, provider processes, and daemon sessions
-   to one managed runtime per process/session.
+5. Extend Ziac's canonical process roots, statecharts, workflows, and provider
+   services without reintroducing hidden executors or process-state effects.
 6. Gather broader application evidence without promoting local or incomplete
    qualification into general performance or production claims.

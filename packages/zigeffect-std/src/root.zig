@@ -9,6 +9,7 @@ pub const Capability = @import("capability/root.zig");
 pub const SystemCapabilities = @import("system_capabilities.zig");
 pub const Json = @import("json/root.zig");
 pub const Jsonl = @import("jsonl/root.zig");
+pub const Parser = @import("parser/root.zig");
 pub const Stream = @import("stream/root.zig");
 pub const Sink = @import("sink/root.zig");
 pub const Queue = @import("queue/root.zig");
@@ -43,12 +44,16 @@ pub const CausalGraph = @import("causal_graph/root.zig");
 pub const CausalRuntime = @import("runtime/root.zig");
 pub const ManagedRuntime = CausalRuntime.ManagedRuntime;
 pub const Statechart = @import("statechart/root.zig");
+pub const Workflow = @import("workflow/root.zig");
 pub const Project = @import("project/root.zig");
 pub const Safety = @import("safety/root.zig");
 pub const Development = @import("development/root.zig");
 
 test "zigeffect-std re-exports the engine facade" {
-    try std.testing.expect(@hasDecl(fx, "effect"));
+    try std.testing.expect(@hasDecl(fx, "kernel"));
+    try std.testing.expect(@hasDecl(fx.kernel, "Service"));
+    try std.testing.expect(@hasDecl(fx.kernel, "Effect"));
+    try std.testing.expect(@hasDecl(fx.kernel, "Layer"));
 }
 
 test "root exports Observability namespace" {
@@ -71,6 +76,14 @@ test "root exports causal Application namespace" {
     const zstd = @import("root.zig");
     try std.testing.expect(@hasDecl(zstd, "Application"));
     try std.testing.expect(@hasDecl(zstd.Application, "record"));
+}
+
+test "root exports the document parser contract" {
+    const zstd = @import("root.zig");
+    try std.testing.expect(@hasDecl(zstd, "Parser"));
+    try std.testing.expect(@hasDecl(zstd.Parser, "DocumentParser"));
+    try std.testing.expect(@hasDecl(zstd.Parser, "parse"));
+    try std.testing.expect(@hasDecl(zstd.Parser.Result, "validate"));
 }
 
 test "root exports provider conformance scoring" {
@@ -97,8 +110,8 @@ test "root system primitive boundaries expose canonical effects and services" {
     try std.testing.expect(@hasDecl(zstd.FileSystem, "memory"));
     try std.testing.expect(@hasDecl(zstd.Process, "Process"));
     try std.testing.expect(@hasDecl(zstd.Process, "fake"));
-    try std.testing.expect(@hasDecl(zstd.Ids, "Service"));
-    try std.testing.expect(@hasDecl(zstd.Ids, "uuidV7Effect"));
+    try std.testing.expect(@hasDecl(zstd.Ids, "IdGenerator"));
+    try std.testing.expect(@hasDecl(zstd.Ids, "uuidV7"));
 }
 
 test "root exports durable causal graph database" {
@@ -129,6 +142,7 @@ test {
     std.testing.refAllDecls(SystemCapabilities);
     std.testing.refAllDecls(Http);
     std.testing.refAllDecls(Grpc);
+    std.testing.refAllDecls(Parser);
     std.testing.refAllDecls(Sql);
     std.testing.refAllDecls(Clock);
     std.testing.refAllDecls(Randomness);

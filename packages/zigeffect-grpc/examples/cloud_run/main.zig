@@ -139,7 +139,12 @@ pub fn main(init: std.process.Init) !void {
         .provideMerge(foundations);
     const standards = zgrpc.StandardServices.layer().provideMerge(routes);
     const server = zgrpc.nativeServerLayer().provideMerge(standards);
-    const main_layer = zgrpc.nativeChannelzLayer().provideMerge(server);
+    const grpc_layer = zgrpc.nativeChannelzLayer().provideMerge(server);
+    const main_layer = zstd.fx.kernel.Layer.mergeAll(.{
+        grpc_layer,
+        zstd.Application.Lifecycle.managerLayer(),
+        zstd.Application.Lifecycle.signalLayer(),
+    });
     const Runtime = zstd.ManagedRuntime(@TypeOf(main_layer));
     var runtime = try Runtime.make(
         std.heap.smp_allocator,
@@ -150,8 +155,8 @@ pub fn main(init: std.process.Init) !void {
     );
     defer runtime.deinit();
 
-    var signals = try zstd.Application.Lifecycle.SignalRegistration.install();
-    defer signals.deinit();
+    try runtime.run(zstd.Application.Lifecycle.start().named("cloud-run.lifecycle.start"));
+    try runtime.run(zstd.Application.Lifecycle.ready().named("cloud-run.lifecycle.ready"));
     const Serving = ServeContext(Runtime);
     var serving = Serving{ .runtime = &runtime };
     const thread = try std.Thread.spawn(.{}, Serving.run, .{&serving});
@@ -159,11 +164,16 @@ pub fn main(init: std.process.Init) !void {
     while (zstd.Application.Lifecycle.requestedSignal() == .none and !serving.done.load(.acquire)) {
         init.io.sleep(.fromMilliseconds(25), .awake) catch break;
     }
+    try runtime.run(zstd.Application.Lifecycle.drain().named("cloud-run.lifecycle.drain"));
     const shutdown = try runtime.run(zgrpc.shutdownServerEffect(.{
         .deadline_ms = 25_000,
     }).named("cloud-run.grpc.shutdown"));
     thread.join();
     if (serving.result) |err| return err;
     if (shutdown.active_remaining != 0) return error.ShutdownIncomplete;
+    try runtime.run(zstd.Application.Lifecycle.stop().named("cloud-run.lifecycle.stop"));
+    var application = try runtime.inspect(std.heap.smp_allocator, .{ .max_recent_events = 128 });
+    defer application.deinit();
+    if (application.services.len < 12 or application.causal.findings.len != 0) return error.InvalidApplicationSnapshot;
     try runtime.shutdown();
 }

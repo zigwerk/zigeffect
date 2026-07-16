@@ -193,64 +193,6 @@ fn appendJsonString(output: *std.ArrayList(u8), allocator: std.mem.Allocator, va
     try output.appendSlice(allocator, encoded);
 }
 
-pub fn RequireEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = []const u8;
-        pub const FailureType = ConfigError;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{LayeredConfig};
-
-        key: []const u8,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) ConfigError![]const u8 {
-            const config = ctx.service(LayeredConfig);
-            const value = config.require(self.key) catch |err| {
-                _ = StdService.recordOperation(ctx, LayeredConfig, "require", "failure", self.key);
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, LayeredConfig, "require", "success", self.key);
-            return value;
-        }
-    };
-}
-
-pub fn DisplayEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = []const u8;
-        pub const FailureType = ConfigError || std.mem.Allocator.Error;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{LayeredConfig};
-
-        key: []const u8,
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType![]const u8 {
-            const config = ctx.service(LayeredConfig);
-            const value = config.displayValueAlloc(ctx.allocator, self.key) catch |err| {
-                _ = StdService.recordOperation(ctx, LayeredConfig, "display", "failure", self.key);
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, LayeredConfig, "display", "success", self.key);
-            return value;
-        }
-    };
-}
-
-pub fn requireEffect(comptime EffectEnv: type, key: []const u8) RequireEffect(EffectEnv) {
-    return .{ .key = key };
-}
-
-pub fn displayEffect(comptime EffectEnv: type, key: []const u8) DisplayEffect(EffectEnv) {
-    return .{ .key = key };
-}
-
 pub fn getAlloc(key: []const u8) fx.kernel.Effect(
     []u8,
     ConfigError || std.mem.Allocator.Error,
@@ -322,21 +264,15 @@ test "Config precedence provenance and Schema decoding are deterministic" {
     try std.testing.expectEqual(@as(i64, 9090), decoded.value.?.port);
 }
 
-test "Config requireEffect and displayEffect resolve through runtime services" {
-    const zstd = @import("../root.zig");
-
+test "Config.get resolves through the canonical default service" {
     var config = LayeredConfig.init(std.testing.allocator);
     defer config.deinit();
     try config.put("MODE", "local", false);
-    try config.put("DATABASE_URL", "postgres://user:pass@localhost/db", true);
+    const root = fx.kernel.Layer.empty();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{});
+    defer runtime.deinit();
 
-    var provider = zstd.Service.Provider(.{LayeredConfig}).init(.{&config});
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{LayeredConfig});
-
-    try std.testing.expectEqualStrings("local", try runtime.run(requireEffect(@TypeOf(provider), "MODE")));
-
-    const display = try runtime.run(displayEffect(@TypeOf(provider), "DATABASE_URL"));
-    defer std.testing.allocator.free(display);
-    try std.testing.expectEqualStrings("[REDACTED]", display);
+    const value = try runtime.run(getAlloc("MODE").withDefaults(.{ .config_provider = config.asDefault() }));
+    defer std.testing.allocator.free(value);
+    try std.testing.expectEqualStrings("local", value);
 }

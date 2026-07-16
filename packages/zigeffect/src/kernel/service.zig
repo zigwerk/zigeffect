@@ -33,6 +33,7 @@ pub fn assertServiceTag(comptime Tag: type) void {
 }
 
 pub fn contains(comptime services: anytype, comptime Tag: type) bool {
+    @setEvalBranchQuota(1_000_000);
     assertServiceTag(Tag);
     inline for (services) |Candidate| {
         assertServiceTag(Candidate);
@@ -42,6 +43,7 @@ pub fn contains(comptime services: anytype, comptime Tag: type) bool {
 }
 
 pub fn subset(comptime required: anytype, comptime provided: anytype) bool {
+    @setEvalBranchQuota(1_000_000);
     inline for (required) |Tag| {
         if (!contains(provided, Tag)) return false;
     }
@@ -49,6 +51,7 @@ pub fn subset(comptime required: anytype, comptime provided: anytype) bool {
 }
 
 fn unionCount(comptime left: anytype, comptime right: anytype) usize {
+    @setEvalBranchQuota(1_000_000);
     comptime var count = left.len;
     inline for (right) |Tag| {
         if (!contains(left, Tag)) count += 1;
@@ -57,6 +60,7 @@ fn unionCount(comptime left: anytype, comptime right: anytype) usize {
 }
 
 pub fn unionServices(comptime left: anytype, comptime right: anytype) [unionCount(left, right)]type {
+    @setEvalBranchQuota(1_000_000);
     comptime var result: [unionCount(left, right)]type = undefined;
     comptime var index: usize = 0;
     inline for (left) |Tag| {
@@ -73,6 +77,7 @@ pub fn unionServices(comptime left: anytype, comptime right: anytype) [unionCoun
 }
 
 fn differenceCount(comptime left: anytype, comptime removed: anytype) usize {
+    @setEvalBranchQuota(1_000_000);
     comptime var count: usize = 0;
     inline for (left) |Tag| {
         if (!contains(removed, Tag)) count += 1;
@@ -81,6 +86,7 @@ fn differenceCount(comptime left: anytype, comptime removed: anytype) usize {
 }
 
 pub fn difference(comptime left: anytype, comptime removed: anytype) [differenceCount(left, removed)]type {
+    @setEvalBranchQuota(1_000_000);
     comptime var result: [differenceCount(left, removed)]type = undefined;
     comptime var index: usize = 0;
     inline for (left) |Tag| {

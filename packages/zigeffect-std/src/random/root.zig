@@ -79,52 +79,6 @@ pub const Deterministic = struct {
     }
 };
 
-pub fn FillEffect(comptime EffectEnv: type) type {
-    return struct {
-        output: []u8,
-
-        pub const SuccessType = void;
-        pub const FailureType = error{};
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Service};
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) error{}!void {
-            ctx.service(Service).fill(self.output);
-            _ = StdService.recordOperation(ctx, Service, "random.fill", "success", "filled bounded caller-owned bytes");
-        }
-    };
-}
-
-pub fn IntegerEffect(comptime EffectEnv: type, comptime T: type) type {
-    return struct {
-        pub const SuccessType = T;
-        pub const FailureType = error{};
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Service};
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(_: @This(), ctx: *fx.Context(EffectEnv)) error{}!T {
-            const result = ctx.service(Service).integer(T);
-            _ = StdService.recordOperation(ctx, Service, "random.integer", "success", @typeName(T));
-            return result;
-        }
-    };
-}
-
-pub fn fillEffect(comptime EffectEnv: type, output: []u8) FillEffect(EffectEnv) {
-    return .{ .output = output };
-}
-pub fn integerEffect(comptime EffectEnv: type, comptime T: type) IntegerEffect(EffectEnv, T) {
-    return .{};
-}
-
 pub fn fill(output: []u8) fx.kernel.Effect(void, error{}, .{}).Stateful([]u8) {
     return fx.kernel.Effect(void, error{}, .{}).fromState([]u8, output, struct {
         fn run(target: []u8, ctx: *fx.kernel.ContextView(.{})) error{}!void {
@@ -168,21 +122,14 @@ test "deterministic randomness exactly replays a seed" {
     try std.testing.expectEqualSlices(u8, &left, &right);
 }
 
-test "Randomness effects replay through deterministic service layers" {
+test "Randomness effects replay through deterministic default-service overrides" {
     var first = Deterministic.init(42);
     var second = Deterministic.init(42);
-    var first_provider = StdService.ValueProvider(Service).init(first.asService());
-    var second_provider = StdService.ValueProvider(Service).init(second.asService());
-    const first_layer = first_provider.layer();
-    const second_layer = second_provider.layer();
-    const FirstEnv = fx.LayerGraphEnv(@TypeOf(.{first_layer}));
-    const SecondEnv = fx.LayerGraphEnv(@TypeOf(.{second_layer}));
-    var first_graph = fx.layerGraph(std.testing.allocator, .{first_layer});
-    defer first_graph.deinit();
-    var second_graph = fx.layerGraph(std.testing.allocator, .{second_layer});
-    defer second_graph.deinit();
+    const root = fx.kernel.Layer.empty();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{});
+    defer runtime.deinit();
 
-    const left = try first_graph.run(integerEffect(FirstEnv, u64));
-    const right = try second_graph.run(integerEffect(SecondEnv, u64));
+    const left = try runtime.run(integer(u64).withDefaults(.{ .random = first.asDefault() }));
+    const right = try runtime.run(integer(u64).withDefaults(.{ .random = second.asDefault() }));
     try std.testing.expectEqual(left, right);
 }

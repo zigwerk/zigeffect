@@ -125,11 +125,11 @@ pub fn planAlloc(allocator: std.mem.Allocator, seed: u64, profile: Contract.Faul
             try appendIndexed(allocator, &list, limits, &truncated, seed, .allocation_failure, allocation_count);
             try appendSchedules(allocator, &list, limits, &truncated, seed);
             try appendKinds(allocator, &list, limits, &truncated, seed, &.{
-                .timeout,         .cancellation, .interruption, .spawn_failure, .retry_exhaustion,
-                .process_failure, .http_failure, .sql_failure, .storage_failure, .transport_failure,
-                .broker_failure, .cache_failure, .object_storage_failure, .telemetry_failure, .lease_loss,
-                .database_restart, .network_partition, .migration_failure, .redelivery, .journal_crash, .corrupt_artifact,
-                .executor,
+                .timeout,          .cancellation,      .interruption,           .spawn_failure,     .retry_exhaustion,
+                .process_failure,  .http_failure,      .sql_failure,            .storage_failure,   .transport_failure,
+                .broker_failure,   .cache_failure,     .object_storage_failure, .telemetry_failure, .lease_loss,
+                .database_restart, .network_partition, .migration_failure,      .redelivery,        .journal_crash,
+                .corrupt_artifact, .executor,
             });
         },
     }

@@ -3,6 +3,85 @@ pub const zstd = @import("zigeffect_std");
 pub const capability = zstd.Capability.Descriptor{ .id = "zigeffect-redis.cache", .kind = .cache, .maturity = .production_candidate, .package = "zigeffect-redis", .version = "0.1.0", .features = &.{ "redis", "get", "set", "delete", "cas", "ttl", "distributed-lock" }, .side_effects = .real, .conformance = .{ .schema = "zigeffect.redis-live-conformance", .version = 1, .receipt = "conformance/redis-live.v1.json", .authority = .live_external, .observed_at_ms = 1783777336000, .valid_until_ms = 1791553336000, .content_sha256 = "sha256:5c489050fc04a52d2c6ac96c4f3450c777af08e80d2e4298c1a055a025db5f3d" }, .limitations = &.{ "one connection per operation", "TLS and Redis Cluster redirection are not implemented" } };
 pub const broker_capability = zstd.Capability.Descriptor{ .id = "zigeffect-redis.streams-broker", .kind = .broker, .maturity = .production_candidate, .package = "zigeffect-redis", .version = "0.1.0", .features = &.{ "redis-streams", "publish", "consumer-groups", "ack", "nack", "redelivery", "idempotency" }, .side_effects = .real, .conformance = .{ .schema = "zigeffect.redis-live-conformance", .version = 1, .receipt = "conformance/redis-live.v1.json", .authority = .live_external, .observed_at_ms = 1783777336000, .valid_until_ms = 1791553336000, .content_sha256 = "sha256:5c489050fc04a52d2c6ac96c4f3450c777af08e80d2e4298c1a055a025db5f3d" }, .limitations = &.{ "one connection per operation", "TLS and Redis Cluster redirection are not implemented", "stream retention is operator-configured" } };
 pub const Options = struct { host: []const u8 = "127.0.0.1", port: u16 = 6379, namespace: []const u8 = "zigeffect", password: ?[]const u8 = null, max_reply_bytes: usize = 16 * 1024 * 1024 };
+pub const ClientConfig = struct { io: std.Io, options: Options = .{} };
+pub const ClientConfigService = zstd.fx.kernel.Service("zigeffect/redis/ClientConfig", ClientConfig);
+
+pub const ClientApi = struct {
+    pub const operations: []const []const u8 = &.{ "Redis.cache", "Redis.broker" };
+    client: Client,
+};
+pub const ClientService = zstd.fx.kernel.Service("zigeffect/redis/Client", ClientApi);
+
+pub fn configLayer(config: ClientConfig) @TypeOf(zstd.fx.kernel.Layer.succeed(ClientConfigService, config)) {
+    return zstd.fx.kernel.Layer.succeed(ClientConfigService, config);
+}
+
+const ClientLifecycle = struct {
+    fn acquire(ctx: *zstd.fx.kernel.ContextView(.{ClientConfigService})) anyerror!ClientApi {
+        const config = ctx.service(ClientConfigService);
+        return .{ .client = try Client.init(ctx.allocator(), config.io, config.options) };
+    }
+
+    fn release(_: *ClientApi) void {}
+};
+
+pub fn clientLayer() @TypeOf(zstd.fx.kernel.Layer.scoped(
+    ClientService,
+    anyerror,
+    .{ClientConfigService},
+    ClientLifecycle.acquire,
+    ClientLifecycle.release,
+)) {
+    return zstd.fx.kernel.Layer.scoped(
+        ClientService,
+        anyerror,
+        .{ClientConfigService},
+        ClientLifecycle.acquire,
+        ClientLifecycle.release,
+    );
+}
+
+const CacheFactory = struct {
+    fn make(ctx: *zstd.fx.kernel.ContextView(.{ClientService})) zstd.Cache.Service {
+        return ctx.service(ClientService).client.asCache();
+    }
+};
+
+pub fn cacheLayer() @TypeOf(zstd.fx.kernel.Layer.sync(
+    zstd.Cache.CacheService,
+    .{ClientService},
+    CacheFactory.make,
+)) {
+    return zstd.fx.kernel.Layer.sync(zstd.Cache.CacheService, .{ClientService}, CacheFactory.make);
+}
+
+const BrokerFactory = struct {
+    fn make(ctx: *zstd.fx.kernel.ContextView(.{ClientService})) zstd.Broker.Service {
+        return ctx.service(ClientService).client.asBroker();
+    }
+};
+
+pub fn brokerLayer() @TypeOf(zstd.fx.kernel.Layer.sync(
+    zstd.Broker.BrokerService,
+    .{ClientService},
+    BrokerFactory.make,
+)) {
+    return zstd.fx.kernel.Layer.sync(zstd.Broker.BrokerService, .{ClientService}, BrokerFactory.make);
+}
+
+pub fn layer(config: ClientConfig) @TypeOf(
+    brokerLayer().provideMerge(
+        cacheLayer().provideMerge(
+            clientLayer().provideMerge(configLayer(config)),
+        ),
+    ),
+) {
+    return brokerLayer().provideMerge(
+        cacheLayer().provideMerge(
+            clientLayer().provideMerge(configLayer(config)),
+        ),
+    );
+}
 const Resp = union(enum) {
     simple: []u8,
     bulk: ?[]u8,

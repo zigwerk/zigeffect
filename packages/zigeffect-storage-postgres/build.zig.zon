@@ -5,6 +5,7 @@
     .fingerprint = 0x846c29497346a1ab,
     .dependencies = .{
         .zigeffect_postgres_libpq = .{ .path = "../zigeffect-postgres-libpq" },
+        .zigeffect_std = .{ .path = "../zigeffect-std" },
     },
     .paths = .{ "build.zig", "build.zig.zon", "README.md", "conformance", "src", "tests" },
 }

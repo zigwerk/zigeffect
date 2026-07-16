@@ -883,3 +883,59 @@ test "semantic causal facts inherit run fiber and scope lineage through runtime 
     try std.testing.expect(event.scope_id != null);
     try std.testing.expectEqualStrings("test/SemanticBoundary", event.service_key);
 }
+
+const ProbeExecutor = struct {
+    spawned: usize = 0,
+    joined: usize = 0,
+    destroyed: usize = 0,
+
+    fn spawn(raw: ?*anyopaque, job: fx.FiberJob) ?*anyopaque {
+        const self: *ProbeExecutor = @ptrCast(@alignCast(raw.?));
+        self.spawned += 1;
+        job.run(job.context);
+        return @ptrCast(self);
+    }
+
+    fn join(raw: ?*anyopaque, _: *anyopaque) void {
+        const self: *ProbeExecutor = @ptrCast(@alignCast(raw.?));
+        self.joined += 1;
+    }
+
+    fn destroy(raw: ?*anyopaque, _: *anyopaque) void {
+        const self: *ProbeExecutor = @ptrCast(@alignCast(raw.?));
+        self.destroyed += 1;
+    }
+
+    const vtable = fx.FiberExecutor.VTable{
+        .spawn = spawn,
+        .join = join,
+        .destroy = destroy,
+    };
+
+    fn executor(self: *ProbeExecutor) fx.FiberExecutor {
+        return .{ .context = self, .vtable = &vtable };
+    }
+};
+
+test "canonical ManagedRuntime owns and uses its configured executor" {
+    var probe = ProbeExecutor{};
+    const root = kernel.Layer.empty();
+    var runtime = try kernel.ManagedRuntime(@TypeOf(root)).make(
+        std.testing.allocator,
+        root,
+        .{ .executor = probe.executor() },
+    );
+    defer runtime.deinit();
+
+    const Probe = kernel.Effect(bool, error{}, .{});
+    const effect = Probe.fromFn(struct {
+        fn run(ctx: *Probe.Context) error{}!bool {
+            return ctx.executor() != null;
+        }
+    }.run);
+
+    try std.testing.expect(try runtime.run(effect));
+    try std.testing.expectEqual(@as(usize, 1), probe.spawned);
+    try std.testing.expectEqual(@as(usize, 1), probe.joined);
+    try std.testing.expectEqual(@as(usize, 1), probe.destroyed);
+}

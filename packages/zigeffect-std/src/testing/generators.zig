@@ -445,7 +445,8 @@ fn generateValue(allocator: std.mem.Allocator, schema: anytype, seeded: *Seeded)
     }
     if (comptime std.mem.eql(u8, kind, "bytes")) {
         const raw_len = seeded.bounded(@min(schema.max_bytes, 32) + 1);
-        const raw = try allocator.alloc(u8, raw_len); defer allocator.free(raw);
+        const raw = try allocator.alloc(u8, raw_len);
+        defer allocator.free(raw);
         for (raw) |*byte| byte.* = @truncate(seeded.next());
         const encoded = try allocator.alloc(u8, std.base64.standard.Encoder.calcSize(raw.len));
         _ = std.base64.standard.Encoder.encode(encoded, raw);
@@ -470,7 +471,8 @@ fn generateValue(allocator: std.mem.Allocator, schema: anytype, seeded: *Seeded)
         return values;
     }
     if (comptime std.mem.eql(u8, kind, "tuple")) {
-        const first = try generateValue(allocator, schema.first, seeded); errdefer Schema.freeDecoded(allocator, first);
+        const first = try generateValue(allocator, schema.first, seeded);
+        errdefer Schema.freeDecoded(allocator, first);
         return .{ .first = first, .second = try generateValue(allocator, schema.second, seeded) };
     }
     if (comptime std.mem.eql(u8, kind, "tagged_union")) {
@@ -479,10 +481,17 @@ fn generateValue(allocator: std.mem.Allocator, schema: anytype, seeded: *Seeded)
     }
     if (comptime std.mem.eql(u8, kind, "map")) {
         const len = seeded.bounded(@min(schema.max_entries, 4) + 1);
-        const entries = try allocator.alloc(S.Entry, len); errdefer allocator.free(entries);
+        const entries = try allocator.alloc(S.Entry, len);
+        errdefer allocator.free(entries);
         var initialized: usize = 0;
-        errdefer for (entries[0..initialized]) |entry| { allocator.free(entry.key); Schema.freeDecoded(allocator, entry.value); };
-        for (entries, 0..) |*entry, index| { entry.* = .{ .key = try std.fmt.allocPrint(allocator, "key-{d}", .{index}), .value = try generateValue(allocator, schema.inner, seeded) }; initialized += 1; }
+        errdefer for (entries[0..initialized]) |entry| {
+            allocator.free(entry.key);
+            Schema.freeDecoded(allocator, entry.value);
+        };
+        for (entries, 0..) |*entry, index| {
+            entry.* = .{ .key = try std.fmt.allocPrint(allocator, "key-{d}", .{index}), .value = try generateValue(allocator, schema.inner, seeded) };
+            initialized += 1;
+        }
         return entries;
     }
     if (comptime std.mem.eql(u8, kind, "enum")) {
@@ -682,33 +691,56 @@ test "boundary generation and custom shrinking are explicit and deterministic" {
 }
 
 test "production schema constructs generate deterministically and release ownership" {
-    const Positive = struct { fn check(value: i64) bool { return value >= 0; } };
+    const Positive = struct {
+        fn check(value: i64) bool {
+            return value >= 0;
+        }
+    };
     var seeded = try Seeded.init(77);
-    var float_value = try generate(std.testing.allocator, Schema.float().min(-1).max(1), &seeded); defer float_value.deinit();
-    var decimal_value = try generate(std.testing.allocator, Schema.decimal(), &seeded); defer decimal_value.deinit();
-    var bytes_value = try generate(std.testing.allocator, Schema.bytes(), &seeded); defer bytes_value.deinit();
-    var tuple_value = try generate(std.testing.allocator, Schema.tuple2(Schema.literal("fixed"), Schema.refine(Schema.integer().min(0), "positive", Positive.check)), &seeded); defer tuple_value.deinit();
-    var union_value = try generate(std.testing.allocator, Schema.taggedUnion2(Schema.string(), Schema.boolean(), "text", "flag"), &seeded); defer union_value.deinit();
-    var map_value = try generate(std.testing.allocator, Schema.map(std.testing.allocator, Schema.durationMillis()), &seeded); defer map_value.deinit();
+    var float_value = try generate(std.testing.allocator, Schema.float().min(-1).max(1), &seeded);
+    defer float_value.deinit();
+    var decimal_value = try generate(std.testing.allocator, Schema.decimal(), &seeded);
+    defer decimal_value.deinit();
+    var bytes_value = try generate(std.testing.allocator, Schema.bytes(), &seeded);
+    defer bytes_value.deinit();
+    var tuple_value = try generate(std.testing.allocator, Schema.tuple2(Schema.literal("fixed"), Schema.refine(Schema.integer().min(0), "positive", Positive.check)), &seeded);
+    defer tuple_value.deinit();
+    var union_value = try generate(std.testing.allocator, Schema.taggedUnion2(Schema.string(), Schema.boolean(), "text", "flag"), &seeded);
+    defer union_value.deinit();
+    var map_value = try generate(std.testing.allocator, Schema.map(std.testing.allocator, Schema.durationMillis()), &seeded);
+    defer map_value.deinit();
     try std.testing.expect(std.math.isFinite(float_value.value));
     try std.testing.expect(decimal_value.value.len != 0 and bytes_value.value.len % 4 == 0);
     try std.testing.expectEqualStrings("fixed", tuple_value.value.first);
-    _ = union_value.value; _ = map_value.value;
+    _ = union_value.value;
+    _ = map_value.value;
 }
 
 test "production primitive shrinkers minimize floats decimals bytes and time" {
-    const FloatProperty = struct { fn check(_: void, _: f64) !void { return error.Counterexample; } };
+    const FloatProperty = struct {
+        fn check(_: void, _: f64) !void {
+            return error.Counterexample;
+        }
+    };
     var float_result = try shrinkFailureAlloc(std.testing.allocator, Schema.float().min(0).max(100), {}, FloatProperty.check, 80, 16);
     defer float_result.deinit();
     try std.testing.expect(float_result.steps > 0);
     try std.testing.expect(std.mem.indexOf(u8, float_result.path, "float:toward-min") != null);
 
-    const BytesProperty = struct { fn check(_: void, _: []const u8) !void { return error.Counterexample; } };
+    const BytesProperty = struct {
+        fn check(_: void, _: []const u8) !void {
+            return error.Counterexample;
+        }
+    };
     var bytes_result = try shrinkFailureAlloc(std.testing.allocator, Schema.bytes(), {}, BytesProperty.check, "YWJj", 4);
     defer bytes_result.deinit();
     try std.testing.expectEqualStrings("bytes:empty", bytes_result.path);
 
-    const TimeProperty = struct { fn check(_: void, _: i64) !void { return error.Counterexample; } };
+    const TimeProperty = struct {
+        fn check(_: void, _: i64) !void {
+            return error.Counterexample;
+        }
+    };
     var time_result = try shrinkFailureAlloc(std.testing.allocator, Schema.timestampMillis(), {}, TimeProperty.check, 1234, 4);
     defer time_result.deinit();
     try std.testing.expectEqualStrings("time:epoch", time_result.path);

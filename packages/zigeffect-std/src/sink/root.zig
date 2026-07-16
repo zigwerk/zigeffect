@@ -74,32 +74,37 @@ pub fn freeLines(allocator: std.mem.Allocator, lines: []const []const u8) void {
     allocator.free(lines);
 }
 
-pub fn WriteLineEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = SinkError || std.mem.Allocator.Error;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{LineSink};
+pub const API = struct {
+    pub const operations: []const []const u8 = &.{"Sink.writeLine"};
+    sink: *LineSink,
 
-        line: []const u8,
+    pub fn writeLine(self: API, line: []const u8) (SinkError || std.mem.Allocator.Error)!void {
+        return self.sink.writeLine(line);
+    }
+};
 
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
+pub const Sink = fx.kernel.Service("zigeffect/std/Sink", API);
 
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) FailureType!void {
-            const sink = ctx.service(LineSink);
-            sink.writeLine(self.line) catch |err| {
-                _ = StdService.recordOperation(ctx, LineSink, "writeLine", "failure", self.line);
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, LineSink, "writeLine", "success", self.line);
-        }
-    };
+pub fn layer(sink: *LineSink) @TypeOf(fx.kernel.Layer.succeed(Sink, API{ .sink = sink })) {
+    return fx.kernel.Layer.succeed(Sink, .{ .sink = sink });
 }
 
-pub fn writeLineEffect(comptime EffectEnv: type, line: []const u8) WriteLineEffect(EffectEnv) {
-    return .{ .line = line };
+pub fn writeLine(line: []const u8) fx.kernel.Effect(
+    void,
+    SinkError || std.mem.Allocator.Error,
+    .{Sink},
+).Stateful([]const u8) {
+    const Write = fx.kernel.Effect(void, SinkError || std.mem.Allocator.Error, .{Sink});
+    return Write.fromState([]const u8, line, struct {
+        fn run(value: []const u8, ctx: *Write.Context) (SinkError || std.mem.Allocator.Error)!void {
+            const operation = StdService.beginOperation(ctx, Sink.service_key, "Sink.writeLine", value);
+            ctx.service(Sink).writeLine(value) catch |failure| {
+                _ = StdService.completeOperation(ctx, operation, "failure", @errorName(failure));
+                return failure;
+            };
+            _ = StdService.completeOperation(ctx, operation, "success", value);
+        }
+    }.run);
 }
 
 test "Sink memory line sink writes snapshots and redacts JSONL receipts" {
@@ -122,22 +127,22 @@ test "Sink memory line sink writes snapshots and redacts JSONL receipts" {
     try std.testing.expect(std.mem.indexOf(u8, receipt, "[REDACTED]") != null);
 }
 
-test "Sink writeLineEffect records causal facts" {
-    const zstd = @import("../root.zig");
-
+test "Sink.writeLine records causal facts through a canonical layer" {
     var sink = LineSink.init(std.testing.allocator);
     defer sink.deinit();
-    var provider = zstd.Service.Provider(.{LineSink}).init(.{&sink});
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    const root = layer(&sink);
+    var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(root)).make(std.testing.allocator, root, .{ .causal_store = &store });
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{LineSink})
-        .withCausalStore(&store);
-
-    try runtime.run(writeLineEffect(@TypeOf(provider), "line one"));
+    try runtime.run(writeLine("line one"));
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, LineSink, "writeLine", "success"));
+    var saw = false;
+    for (snapshot.events) |event| {
+        if (event.kind == .io_completed and std.mem.eql(u8, event.service_key, Sink.service_key)) saw = true;
+    }
+    try std.testing.expect(saw);
 }

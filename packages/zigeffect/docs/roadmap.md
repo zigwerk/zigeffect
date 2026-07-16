@@ -978,7 +978,7 @@ ReleaseSafe, builds system children independently, executes real application,
 service, API, and worker binaries, and queries each resulting graph through the
 CLI before the full local release proof.
 
-The current compatibility contract is CLI `0.7.0`, template version `10`; see
+The current compatibility contract is CLI `0.7.0`, template version `14`; see
 [Compatibility](compatibility.md).
 
 ## Hardening milestone roadmap

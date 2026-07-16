@@ -11,10 +11,10 @@ composes descriptions; only the process root or a runtime-backed transport
 interprets them. Do not introduce `EffectEnv`, `LayerGraph`, `ctx.runEffect`,
 or per-endpoint runtimes.
 
-The production profile currently isolates HTTP, Postgres, and OTLP behind a
-documented compatibility adapter bridge until those packages publish canonical
-kernel layers. That bridge is migration debt, not a second application
-architecture.
+The production worker composes config, secrets, Postgres/storage, Redis,
+transport, OTLP, lifecycle, process signals, lease ownership, workflow journal,
+and order statechart behavior as canonical layers and effects. Jobs and server
+connections execute through bounded handles from its one managed runtime.
 
 ## Develop
 

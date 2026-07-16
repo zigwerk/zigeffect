@@ -111,8 +111,10 @@ pub const Verifier = struct {
 
 pub fn signAlloc(allocator: std.mem.Allocator, header: Header, claims: Claims, key: []const u8) ![]u8 {
     if (key.len < 32 or !std.mem.eql(u8, header.alg, "HS256") or !std.mem.eql(u8, header.typ, "JWT")) return error.InvalidJwtConfiguration;
-    const header_json = try std.json.Stringify.valueAlloc(allocator, header, .{}); defer allocator.free(header_json);
-    const claims_json = try std.json.Stringify.valueAlloc(allocator, claims, .{}); defer allocator.free(claims_json);
+    const header_json = try std.json.Stringify.valueAlloc(allocator, header, .{});
+    defer allocator.free(header_json);
+    const claims_json = try std.json.Stringify.valueAlloc(allocator, claims, .{});
+    defer allocator.free(claims_json);
     const Encoder = std.base64.url_safe_no_pad.Encoder;
     const header_len = Encoder.calcSize(header_json.len);
     const claims_len = Encoder.calcSize(claims_json.len);
@@ -135,38 +137,55 @@ fn decodeJsonAlloc(comptime T: type, allocator: std.mem.Allocator, encoded: []co
     const length = std.base64.url_safe_no_pad.Decoder.calcSizeForSlice(encoded) catch return error.InvalidJwt;
     if (length > 32 * 1024) return error.InvalidJwt;
     const decoded = try allocator.alloc(u8, length);
-    defer { @memset(decoded, 0); allocator.free(decoded); }
+    defer {
+        @memset(decoded, 0);
+        allocator.free(decoded);
+    }
     std.base64.url_safe_no_pad.Decoder.decode(decoded, encoded) catch return error.InvalidJwt;
     return std.json.parseFromSlice(T, allocator, decoded, .{ .allocate = .alloc_always, .ignore_unknown_fields = false }) catch error.InvalidJwt;
 }
 
 fn cloneContext(allocator: std.mem.Allocator, claims: Claims, epoch: u64, now_ms: u64) !Security.AuthContext {
-    const subject = try allocator.dupe(u8, claims.sub); errdefer allocator.free(subject);
-    const issuer = try allocator.dupe(u8, claims.iss); errdefer allocator.free(issuer);
-    const roles = try allocator.alloc([]const u8, claims.roles.len); errdefer allocator.free(roles);
+    const subject = try allocator.dupe(u8, claims.sub);
+    errdefer allocator.free(subject);
+    const issuer = try allocator.dupe(u8, claims.iss);
+    errdefer allocator.free(issuer);
+    const roles = try allocator.alloc([]const u8, claims.roles.len);
+    errdefer allocator.free(roles);
     var initialized: usize = 0;
     errdefer for (roles[0..initialized]) |role| allocator.free(role);
-    for (claims.roles, 0..) |role, index| { roles[index] = try allocator.dupe(u8, role); initialized += 1; }
+    for (claims.roles, 0..) |role, index| {
+        roles[index] = try allocator.dupe(u8, role);
+        initialized += 1;
+    }
     return .{ .subject = subject, .issuer = issuer, .roles = roles, .authenticated_at_ms = now_ms, .expires_at_ms = claims.exp *| 1000, .credential_epoch = epoch, .allocator = allocator, .owns_fields = true };
 }
 
 test "strict HS256 JWK verifier handles replay expiry algorithm confusion and rotation" {
-    var old_secret = try Security.SecretValue.initAlloc(std.testing.allocator, "0123456789abcdef0123456789abcdef"); defer old_secret.deinit();
-    var new_secret = try Security.SecretValue.initAlloc(std.testing.allocator, "abcdef0123456789abcdef0123456789"); defer new_secret.deinit();
+    var old_secret = try Security.SecretValue.initAlloc(std.testing.allocator, "0123456789abcdef0123456789abcdef");
+    defer old_secret.deinit();
+    var new_secret = try Security.SecretValue.initAlloc(std.testing.allocator, "abcdef0123456789abcdef0123456789");
+    defer new_secret.deinit();
     const keys = [_]Key{
         .{ .kid = "old", .material = &old_secret, .epoch = 1, .expires_at_seconds = 120 },
         .{ .kid = "new", .material = &new_secret, .epoch = 2, .active_from_seconds = 100 },
     };
-    var verifier = try Verifier.init(std.testing.allocator, "https://issuer.test", "orders", &keys); defer verifier.deinit();
+    var verifier = try Verifier.init(std.testing.allocator, "https://issuer.test", "orders", &keys);
+    defer verifier.deinit();
     const claims = Claims{ .sub = "user-1", .iss = "https://issuer.test", .aud = "orders", .iat = 100, .exp = 160, .jti = "jwt-id-0001", .roles = &.{"writer"} };
-    const token = try signAlloc(std.testing.allocator, .{ .kid = "new" }, claims, new_secret.bytes); defer std.testing.allocator.free(token);
-    var context = try verifier.verifyJwtAlloc(std.testing.allocator, token, 110_000); defer context.deinit();
+    const token = try signAlloc(std.testing.allocator, .{ .kid = "new" }, claims, new_secret.bytes);
+    defer std.testing.allocator.free(token);
+    var context = try verifier.verifyJwtAlloc(std.testing.allocator, token, 110_000);
+    defer context.deinit();
     try std.testing.expectEqual(@as(u64, 2), context.credential_epoch);
     try std.testing.expectError(error.JwtReplayDetected, verifier.verifyJwtAlloc(std.testing.allocator, token, 111_000));
-    const wrong_alg = try signAlloc(std.testing.allocator, .{ .alg = "HS256", .kid = "new", .typ = "JWT" }, .{ .sub = "user-1", .iss = "https://issuer.test", .aud = "orders", .iat = 100, .exp = 160, .jti = "jwt-id-0002" }, new_secret.bytes); defer std.testing.allocator.free(wrong_alg);
-    var tampered = try std.testing.allocator.dupe(u8, wrong_alg); defer std.testing.allocator.free(tampered);
+    const wrong_alg = try signAlloc(std.testing.allocator, .{ .alg = "HS256", .kid = "new", .typ = "JWT" }, .{ .sub = "user-1", .iss = "https://issuer.test", .aud = "orders", .iat = 100, .exp = 160, .jti = "jwt-id-0002" }, new_secret.bytes);
+    defer std.testing.allocator.free(wrong_alg);
+    var tampered = try std.testing.allocator.dupe(u8, wrong_alg);
+    defer std.testing.allocator.free(tampered);
     tampered[0] = if (tampered[0] == 'e') 'f' else 'e';
     try std.testing.expectError(error.InvalidJwt, verifier.verifyJwtAlloc(std.testing.allocator, tampered, 110_000));
-    const expired_key_token = try signAlloc(std.testing.allocator, .{ .kid = "old" }, .{ .sub = "user-1", .iss = "https://issuer.test", .aud = "orders", .iat = 100, .exp = 160, .jti = "jwt-id-0003" }, old_secret.bytes); defer std.testing.allocator.free(expired_key_token);
+    const expired_key_token = try signAlloc(std.testing.allocator, .{ .kid = "old" }, .{ .sub = "user-1", .iss = "https://issuer.test", .aud = "orders", .iat = 100, .exp = 160, .jti = "jwt-id-0003" }, old_secret.bytes);
+    defer std.testing.allocator.free(expired_key_token);
     try std.testing.expectError(error.JwtKeyUnavailable, verifier.verifyJwtAlloc(std.testing.allocator, expired_key_token, 130_000));
 }

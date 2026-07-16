@@ -2,24 +2,27 @@ const std = @import("std");
 const zstd = @import("zigeffect_std");
 
 test "OTLP exporter is exposed as a scoped ZigEffect layer" {
-    var config_provider = zstd.Service.ValueProvider(ExporterLayerConfig).init(.{
+    const main_layer = configuredExporterLayer(.{
         .io = std.testing.io,
         .options = .{ .host = "127.0.0.1", .port = 1, .retry_attempts = 0 },
     });
-    const config_layer = config_provider.layer();
-    const live_exporter_layer = exporterLayer();
-    const Layers = @TypeOf(.{ config_layer, live_exporter_layer });
-    const Env = zstd.fx.LayerGraphEnv(Layers);
-    var causal_store = zstd.fx.CausalStore.init(std.testing.allocator);
-    defer causal_store.deinit();
-    var app = zstd.fx.layerGraph(std.testing.allocator, .{ config_layer, live_exporter_layer })
-        .withCausalStore(&causal_store);
-    defer app.deinit();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runtime = try zstd.ManagedRuntime(@TypeOf(main_layer)).make(
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        main_layer,
+        .{},
+    );
+    defer runtime.deinit();
 
-    try app.run(shutdownExporterEffect(Env));
-    var snapshot = try causal_store.snapshot(std.testing.allocator);
+    try runtime.run(shutdownExporterEffect().named("otel.test.shutdown"));
+    var snapshot = try runtime.inspect(std.testing.allocator, .{ .max_recent_events = 32 });
     defer snapshot.deinit();
-    try std.testing.expect(zstd.Service.hasOperation(snapshot, Exporter, "otel.exporter.shutdown", "success"));
+    try std.testing.expectEqual(@as(usize, 2), snapshot.services.len);
+    try std.testing.expect(snapshot.causal.recent_events.len != 0);
+    try runtime.shutdown();
 }
 
 const SSL_METHOD = opaque {};
@@ -1146,97 +1149,76 @@ pub const ExporterLayerConfig = struct {
     io: std.Io,
     options: Options,
 };
+pub const ExporterConfigService = zstd.fx.kernel.Service("zigeffect/otel/ExporterConfig", ExporterLayerConfig);
 
-pub const ExporterLayerEnv = struct {
-    allocator: std.mem.Allocator,
+pub const ExporterApi = struct {
+    pub const operations: []const []const u8 = &.{ "OtelExporter.enqueue", "OtelExporter.flush", "OtelExporter.shutdown", "OtelExporter.snapshot" };
     exporter: Exporter,
+};
+pub const ExporterService = zstd.fx.kernel.Service("zigeffect/otel/Exporter", ExporterApi);
 
-    pub fn service(self: *ExporterLayerEnv, comptime Requested: type) *Requested {
-        if (Requested == Exporter) return &self.exporter;
-        return zstd.fx.serviceNotFound(ExporterLayerEnv, Requested);
+pub fn exporterConfigLayer(config: ExporterLayerConfig) @TypeOf(zstd.fx.kernel.Layer.succeed(ExporterConfigService, config)) {
+    return zstd.fx.kernel.Layer.succeed(ExporterConfigService, config);
+}
+
+const ExporterLifecycle = struct {
+    fn acquire(ctx: *zstd.fx.kernel.ContextView(.{ExporterConfigService})) anyerror!ExporterApi {
+        const config = ctx.service(ExporterConfigService);
+        return .{ .exporter = try Exporter.init(ctx.allocator(), config.io, config.options) };
+    }
+
+    fn release(api: *ExporterApi) void {
+        api.exporter.shutdown() catch {};
+        api.exporter.deinit();
     }
 };
 
-fn releaseExporterLayer(env: *ExporterLayerEnv) void {
-    const allocator = env.allocator;
-    env.exporter.shutdown() catch {};
-    env.exporter.deinit();
-    allocator.destroy(env);
+pub fn exporterLayer() @TypeOf(zstd.fx.kernel.Layer.scoped(
+    ExporterService,
+    anyerror,
+    .{ExporterConfigService},
+    ExporterLifecycle.acquire,
+    ExporterLifecycle.release,
+)) {
+    return zstd.fx.kernel.Layer.scoped(
+        ExporterService,
+        anyerror,
+        .{ExporterConfigService},
+        ExporterLifecycle.acquire,
+        ExporterLifecycle.release,
+    );
 }
 
-fn buildExporterLayer(allocator: std.mem.Allocator, scope: *zstd.fx.Scope, ctx: anytype) anyerror!*ExporterLayerEnv {
-    const config = ctx.service(ExporterLayerConfig);
-    const env = try allocator.create(ExporterLayerEnv);
-    errdefer allocator.destroy(env);
-    env.* = .{
-        .allocator = allocator,
-        .exporter = try Exporter.init(allocator, config.io, config.options),
-    };
-    scope.addFinalizerFor(ExporterLayerEnv, env, releaseExporterLayer) catch |err| {
-        releaseExporterLayer(env);
-        return err;
-    };
-    return env;
-}
-
-pub fn exporterLayer() @TypeOf(
-    zstd.fx.LayerWithError(ExporterLayerEnv, anyerror)
-        .fromContextBuilder(buildExporterLayer)
-        .requires(.{ExporterLayerConfig})
-        .provides(.{Exporter}),
+pub fn configuredExporterLayer(config: ExporterLayerConfig) @TypeOf(
+    exporterLayer().provideMerge(exporterConfigLayer(config)),
 ) {
-    return zstd.fx.LayerWithError(ExporterLayerEnv, anyerror)
-        .fromContextBuilder(buildExporterLayer)
-        .requires(.{ExporterLayerConfig})
-        .provides(.{Exporter});
+    return exporterLayer().provideMerge(exporterConfigLayer(config));
 }
 
-pub fn FlushExporterEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Exporter};
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!zstd.fx.ServiceSet {
-            return zstd.fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(_: @This(), ctx: *zstd.fx.Context(EffectEnv)) anyerror!void {
-            ctx.service(Exporter).flush() catch |err| {
-                _ = zstd.Service.recordOperation(ctx, Exporter, "otel.exporter.flush", "failure", @errorName(err));
+pub const FlushExporterEffect = zstd.fx.kernel.Effect(void, anyerror, .{ExporterService});
+pub fn flushExporterEffect() FlushExporterEffect {
+    return FlushExporterEffect.fromFn(struct {
+        fn run(ctx: *FlushExporterEffect.Context) anyerror!void {
+            const operation = zstd.Service.beginOperation(ctx, ExporterService.service_key, "otel.exporter.flush", "flushing bounded telemetry queue");
+            ctx.service(ExporterService).exporter.flush() catch |err| {
+                _ = zstd.Service.completeOperation(ctx, operation, "failure", @errorName(err));
                 return err;
             };
-            _ = zstd.Service.recordOperation(ctx, Exporter, "otel.exporter.flush", "success", "bounded telemetry queue flushed");
+            _ = zstd.Service.completeOperation(ctx, operation, "success", "bounded telemetry queue flushed");
         }
-    };
+    }.run);
 }
 
-pub fn flushExporterEffect(comptime EffectEnv: type) FlushExporterEffect(EffectEnv) {
-    return .{};
-}
-
-pub fn ShutdownExporterEffect(comptime EffectEnv: type) type {
-    return struct {
-        pub const SuccessType = void;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{Exporter};
-
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!zstd.fx.ServiceSet {
-            return zstd.fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(_: @This(), ctx: *zstd.fx.Context(EffectEnv)) anyerror!void {
-            ctx.service(Exporter).shutdown() catch |err| {
-                _ = zstd.Service.recordOperation(ctx, Exporter, "otel.exporter.shutdown", "failure", @errorName(err));
+pub const ShutdownExporterEffect = zstd.fx.kernel.Effect(void, anyerror, .{ExporterService});
+pub fn shutdownExporterEffect() ShutdownExporterEffect {
+    return ShutdownExporterEffect.fromFn(struct {
+        fn run(ctx: *ShutdownExporterEffect.Context) anyerror!void {
+            const operation = zstd.Service.beginOperation(ctx, ExporterService.service_key, "otel.exporter.shutdown", "shutting down exporter scope");
+            ctx.service(ExporterService).exporter.shutdown() catch |err| {
+                _ = zstd.Service.completeOperation(ctx, operation, "failure", @errorName(err));
                 return err;
             };
-            _ = zstd.Service.recordOperation(ctx, Exporter, "otel.exporter.shutdown", "success", "exporter scope drained");
+            _ = zstd.Service.completeOperation(ctx, operation, "success", "exporter scope drained");
         }
-    };
-}
-
-pub fn shutdownExporterEffect(comptime EffectEnv: type) ShutdownExporterEffect(EffectEnv) {
-    return .{};
+    }.run);
 }

@@ -1,100 +1,17 @@
 const std = @import("std");
 const fx = @import("zigeffect");
 
-pub fn Env(comptime services: anytype) type {
-    return fx.ServiceEnv(services);
-}
-
-pub fn Provider(comptime services: anytype) type {
-    const ServiceEnv = fx.ServiceEnv(services);
-    const ServicePointers = ServiceEnv.ServicePointers;
-
-    return struct {
-        const Self = @This();
-        pub const Services = services;
-
-        services: ServicePointers,
-
-        pub fn init(service_pointers: ServicePointers) Self {
-            return .{ .services = service_pointers };
+/// Resolve a declared canonical service tag as an effect description.
+pub fn access(comptime Tag: type) fx.kernel.Effect(*Tag.API, error{}, .{Tag}) {
+    return fx.kernel.Effect(*Tag.API, error{}, .{Tag}).fromFn(struct {
+        fn run(ctx: *fx.kernel.ContextView(.{Tag})) error{}!*Tag.API {
+            return ctx.service(Tag);
         }
-
-        pub fn service(self: *Self, comptime Requested: type) *Requested {
-            inline for (services, 0..) |Service, index| {
-                if (Requested == Service) return self.services[index];
-            }
-            return fx.serviceNotFound(Self, Requested);
-        }
-
-        pub fn providedServices(self: *const Self, allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            _ = self;
-            return fx.ServiceSet.fromTypes(allocator, services);
-        }
-
-        pub fn layer(self: *Self) @TypeOf(layerFromEnv(Self, self, services)) {
-            return layerFromEnv(Self, self, services);
-        }
-    };
-}
-
-/// Owns one service-interface value and exposes it as a layer environment.
-/// This is the compact composition path for vtable-style std services such as
-/// Clock.Service or Http.Client. The underlying implementation still owns its
-/// own lifetime unless it was acquired by a scoped layer builder.
-pub fn ValueProvider(comptime Service: type) type {
-    return struct {
-        const Self = @This();
-
-        value: Service,
-
-        pub fn init(value: Service) Self {
-            return .{ .value = value };
-        }
-
-        pub fn service(self: *Self, comptime Requested: type) *Requested {
-            if (Requested == Service) return &self.value;
-            return fx.serviceNotFound(Self, Requested);
-        }
-
-        pub fn providedServices(self: *const Self, allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            _ = self;
-            return fx.ServiceSet.fromTypes(allocator, .{Service});
-        }
-
-        pub fn layer(self: *Self) @TypeOf(layerFromEnv(Self, self, .{Service})) {
-            return layerFromEnv(Self, self, .{Service});
-        }
-    };
-}
-
-pub fn layerFromEnv(
-    comptime ProviderEnv: type,
-    env: *ProviderEnv,
-    comptime services: anytype,
-) @TypeOf(fx.Layer(ProviderEnv).fromEnv(env).provides(services)) {
-    return fx.Layer(ProviderEnv).fromEnv(env).provides(services);
-}
-
-pub fn access(comptime Service: type, comptime EffectEnv: type) @TypeOf(
-    fx.Effect(*Service, error{}, EffectEnv)
-        .fromFn(struct {
-            fn run(ctx: *fx.Context(EffectEnv)) error{}!*Service {
-                return ctx.service(Service);
-            }
-        }.run)
-        .requires(.{Service}),
-) {
-    return fx.Effect(*Service, error{}, EffectEnv)
-        .fromFn(struct {
-            fn run(ctx: *fx.Context(EffectEnv)) error{}!*Service {
-                return ctx.service(Service);
-            }
-        }.run)
-        .requires(.{Service});
+    }.run);
 }
 
 pub fn serviceKey(comptime Service: type) []const u8 {
-    return @typeName(Service);
+    return if (@hasDecl(Service, "service_key")) Service.service_key else @typeName(Service);
 }
 
 /// Semantic operation identity returned by `beginOperation`. Completion facts
@@ -200,7 +117,7 @@ pub fn findOperation(
     status: ?[]const u8,
 ) ?usize {
     for (snapshot.events, 0..) |event, index| {
-        if (event.kind != fx.CausalEventKind.span_recorded) continue;
+        if (event.kind != .span_recorded and event.kind != .log_recorded and event.kind != .metric_recorded) continue;
         if (!std.mem.eql(u8, event.service_key, serviceKey(Service))) continue;
         if (!std.mem.eql(u8, event.label, operation)) continue;
         if (status) |expected_status| {
@@ -215,189 +132,38 @@ pub fn hasOperation(snapshot: anytype, comptime Service: type, operation: []cons
     return findOperation(snapshot, Service, operation, status) != null;
 }
 
-const TestConsole = struct {
-    output: []const u8 = "",
-    fn writeOut(self: *TestConsole, text_value: []const u8) void {
-        self.output = text_value;
-    }
-    fn stdoutText(self: TestConsole) []const u8 {
-        return self.output;
-    }
-};
+const GreetingService = fx.kernel.Service("zigeffect-std/test/Greeting", struct {
+    prefix: []const u8,
+});
 
-const TestEnv = struct {
-    mode: ?[]const u8 = null,
-    fn put(self: *TestEnv, name: []const u8, value: []const u8) void {
-        if (std.mem.eql(u8, name, "MODE")) self.mode = value;
-    }
-    fn get(self: TestEnv, name: []const u8) ?[]const u8 {
-        return if (std.mem.eql(u8, name, "MODE")) self.mode else null;
-    }
-};
+test "Service.access resolves a canonical tagged service through ManagedRuntime" {
+    const layer = fx.kernel.Layer.succeed(GreetingService, .{ .prefix = "hello" });
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, layer, .{});
+    defer runtime.deinit();
 
-test "Service.Provider resolves multiple services and exposes metadata" {
-    var console = TestConsole{};
-    var env = TestEnv{};
-
-    const StdProvider = Provider(.{ TestConsole, TestEnv });
-    var provider = StdProvider.init(.{ &console, &env });
-
-    provider.service(TestConsole).writeOut("ready");
-    provider.service(TestEnv).put("MODE", "test");
-
-    try std.testing.expectEqualStrings("ready", console.stdoutText());
-    try std.testing.expectEqualStrings("test", env.get("MODE").?);
-
-    var provided = try provider.providedServices(std.testing.allocator);
-    defer provided.deinit();
-
-    try std.testing.expect(provided.contains(@typeName(TestConsole)));
-    try std.testing.expect(provided.contains(@typeName(TestEnv)));
-}
-
-test "Service.ValueProvider owns an interface value and supplies it through a layer graph" {
-    const Greeting = struct { prefix: []const u8 };
-    var provider = ValueProvider(Greeting).init(.{ .prefix = "hello" });
-    const service_layer = provider.layer();
-    const Layers = @TypeOf(.{service_layer});
-    const EnvType = fx.LayerGraphEnv(Layers);
-    var graph = fx.layerGraph(std.testing.allocator, .{service_layer});
-    defer graph.deinit();
-
-    const resolved = try graph.run(access(Greeting, EnvType));
+    const resolved = try runtime.run(access(GreetingService));
     try std.testing.expectEqualStrings("hello", resolved.prefix);
 }
 
-test "layer graph composition records layer effect service and scope facts automatically" {
-    const Greeting = struct { prefix: []const u8 };
-    const GreetingProvider = Provider(.{Greeting});
-    var greeting = Greeting{ .prefix = "hello" };
-    var provider = GreetingProvider.init(.{&greeting});
-    const service_layer = provider.layer();
-    const Layers = @TypeOf(.{service_layer});
-    const EnvType = fx.LayerGraphEnv(Layers);
+test "Service semantic helpers record through the runtime-owned causal pipeline" {
     var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
-    var graph = fx.layerGraph(std.testing.allocator, .{service_layer}).withCausalStore(&store);
-    defer graph.deinit();
+    const layer = fx.kernel.Layer.succeed(GreetingService, .{ .prefix = "hello" });
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, layer, .{
+        .causal_store = &store,
+    });
+    defer runtime.deinit();
 
-    const resolved = try graph.run(access(Greeting, EnvType));
-    try std.testing.expectEqualStrings("hello", resolved.prefix);
-
-    var snapshot = try store.snapshot(std.testing.allocator);
-    defer snapshot.deinit();
-    var saw_layer = false;
-    var saw_effect = false;
-    var saw_scope = false;
-    var service_parent: ?u64 = null;
-    for (snapshot.events) |event| {
-        if (event.kind == .layer_started) saw_layer = true;
-        if (event.kind == .effect_started) saw_effect = true;
-        if (event.kind == .scope_closed and std.mem.eql(u8, event.status, "success")) saw_scope = true;
-        if (event.kind == .service_required and std.mem.eql(u8, event.service_key, @typeName(Greeting)) and std.mem.eql(u8, event.status, "resolved")) {
-            service_parent = event.parent_id;
+    const Emit = fx.kernel.Effect(void, error{}, .{GreetingService});
+    try runtime.run(Emit.fromFn(struct {
+        fn run(ctx: *Emit.Context) error{}!void {
+            _ = recordRequired(ctx, GreetingService, "read greeting");
+            _ = recordProvided(ctx, GreetingService, "test layer");
+            _ = recordOperation(ctx, GreetingService, "Greeting.read", "success", "bounded metadata");
         }
-    }
-    try std.testing.expect(saw_layer);
-    try std.testing.expect(saw_effect);
-    try std.testing.expect(saw_scope);
-    try std.testing.expect(service_parent != null);
-}
-
-test "Service.layerFromEnv provides services through fx.Layer" {
-    var console = TestConsole{};
-    console.writeOut("layer-output");
-
-    var provider = Provider(.{TestConsole}).init(.{&console});
-    const layer = layerFromEnv(@TypeOf(provider), &provider, .{TestConsole});
-    const ProviderEnv = @TypeOf(provider);
-    const ReadConsole = fx.Effect([]const u8, error{}, ProviderEnv)
-        .fromFn(struct {
-            fn run(ctx: *fx.Context(ProviderEnv)) error{}![]const u8 {
-                return ctx.service(TestConsole).stdoutText();
-            }
-        }.run)
-        .requires(.{TestConsole});
-
-    try std.testing.expectEqualStrings("layer-output", try layer.provide(std.testing.allocator, ReadConsole));
-}
-
-test "Service.access returns an effect that requires and resolves the service" {
-    var console = TestConsole{};
-    console.writeOut("access-output");
-
-    var provider = Provider(.{TestConsole}).init(.{&console});
-    var runtime = fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{TestConsole});
-
-    const AccessConsole = access(TestConsole, @TypeOf(provider));
-    var required = try @TypeOf(AccessConsole).requiredServices(std.testing.allocator);
-    defer required.deinit();
-
-    try std.testing.expect(required.contains(@typeName(TestConsole)));
-    const resolved = try runtime.run(AccessConsole);
-    try std.testing.expectEqualStrings("access-output", resolved.stdoutText());
-}
-
-test "Service.access participates in runtime dependency validation" {
-    var console = TestConsole{};
-
-    var provider = Provider(.{TestConsole}).init(.{&console});
-    var runtime = fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider);
-
-    const AccessConsole = access(TestConsole, @TypeOf(provider));
-    try std.testing.expectError(error.MissingServiceRequirement, runtime.run(AccessConsole));
-}
-
-test "Service records required provided and operation causal facts" {
-    var console = TestConsole{};
-    var provider = Provider(.{TestConsole}).init(.{&console});
-
-    var store = fx.CausalStore.init(std.testing.allocator);
-    defer store.deinit();
-
-    var scope = fx.Scope.init(std.testing.allocator);
-    defer scope.deinit();
-
-    var ctx = fx.Context(@TypeOf(provider)).init(std.testing.allocator, &provider, &scope)
-        .withCausalStore(&store);
-
-    _ = recordRequired(&ctx, TestConsole, "read stdout");
-    _ = recordProvided(&ctx, TestConsole, "fake console");
-    _ = recordOperation(&ctx, TestConsole, "writeOut", "success", "wrote line");
+    }.run));
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-
-    try std.testing.expectEqual(@as(usize, 3), snapshot.events.len);
-    try std.testing.expectEqual(fx.CausalEventKind.service_required, snapshot.events[0].kind);
-    try std.testing.expectEqualStrings(serviceKey(TestConsole), snapshot.events[0].service_key);
-    try std.testing.expectEqual(fx.CausalEventKind.service_provided, snapshot.events[1].kind);
-    try std.testing.expectEqualStrings(serviceKey(TestConsole), snapshot.events[1].service_key);
-    try std.testing.expectEqual(fx.CausalEventKind.span_recorded, snapshot.events[2].kind);
-    try std.testing.expectEqualStrings("writeOut", snapshot.events[2].label);
-    try std.testing.expectEqualStrings("success", snapshot.events[2].status);
-}
-
-test "Service operation details are redacted by the causal store" {
-    var console = TestConsole{};
-    var provider = Provider(.{TestConsole}).init(.{&console});
-
-    var store = fx.CausalStore.init(std.testing.allocator);
-    defer store.deinit();
-
-    var scope = fx.Scope.init(std.testing.allocator);
-    defer scope.deinit();
-
-    var ctx = fx.Context(@TypeOf(provider)).init(std.testing.allocator, &provider, &scope)
-        .withCausalStore(&store);
-
-    _ = recordOperation(&ctx, TestConsole, "writeOut", "success", "token=abc123");
-
-    var snapshot = try store.snapshot(std.testing.allocator);
-    defer snapshot.deinit();
-
-    try std.testing.expectEqual(@as(usize, 1), snapshot.events.len);
-    try std.testing.expect(std.mem.indexOf(u8, snapshot.events[0].redacted_detail, "abc123") == null);
-    try std.testing.expect(std.mem.indexOf(u8, snapshot.events[0].redacted_detail, "redacted") != null);
+    try std.testing.expect(hasOperation(snapshot, GreetingService, "Greeting.read", "success"));
 }

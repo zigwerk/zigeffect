@@ -8,6 +8,9 @@ const defaults_mod = @import("default_services.zig");
 const aspects_mod = @import("aspects.zig");
 const topology_mod = @import("topology.zig");
 const application_mod = @import("application.zig");
+const executor_mod = @import("../runtime/executor.zig");
+const backend_mod = @import("../runtime/backend.zig");
+const async_backend_mod = @import("../runtime/async_backend.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const RuntimeCore = context_mod.RuntimeCore;
@@ -15,6 +18,9 @@ pub const RuntimeContext = context_mod.RuntimeContext;
 pub const RuntimeAspect = context_mod.RuntimeAspect;
 pub const Clock = clock_mod.Clock;
 pub const CausalStore = causal_mod.CausalStore;
+pub const FiberExecutor = executor_mod.FiberExecutor;
+pub const BackendCapabilities = backend_mod.BackendCapabilities;
+pub const AsyncBackend = async_backend_mod.AsyncBackend;
 
 pub const ManagedRuntimeOptions = struct {
     causal_store: ?*CausalStore = null,
@@ -26,6 +32,9 @@ pub const ManagedRuntimeOptions = struct {
     observability: aspects_mod.RuntimeObservability = .{},
     defaults: ?defaults_mod.DefaultServices = null,
     causal_context: causal_mod.CausalContextV2 = .{},
+    backend: BackendCapabilities = backend_mod.deterministicBackend(),
+    async_backend: ?AsyncBackend = null,
+    executor: ?FiberExecutor = null,
 };
 
 pub fn ManagedRuntime(comptime RootLayer: type) type {
@@ -85,6 +94,9 @@ pub fn ManagedRuntime(comptime RootLayer: type) type {
                 .causal_context = options.causal_context,
                 .owned_causal_store = owned_causal_store,
                 .aspects = aspects,
+                .backend = if (options.async_backend) |backend| backend.capabilities else options.backend,
+                .async_backend = options.async_backend,
+                .executor = options.executor,
             };
             errdefer {
                 core.application_scope.deinit();

@@ -71,6 +71,12 @@ Its receipt maps assertion references to durable graph IDs, fresh graph
 status/since queries return a read-only zero baseline, and application-map v2
 joins live topology to validated manifest intent and exact agent commands.
 
+Template version `14` makes production roots compose config, environment
+secrets, process signals, HTTP, Postgres, and OTLP as canonical layers. One
+durable runtime installs the guarded
+`/.well-known/zigeffect/application-map` endpoint; database and map credentials
+are never stored in generated config files.
+
 Template version `5` makes Testing v2 the default compiler-test harness. Every
 generated test artifact obtains `zigeffect_test_runner` transitively from
 `zigeffect_std` and writes a complete suite receipt under
@@ -79,8 +85,8 @@ generated test artifact obtains `zigeffect_test_runner` transitively from
 Template version `9` moved local application, service, library, and generated
 service/layer modules to canonical service tags, fluent effects and layers, one
 named root program, one managed runtime, and runtime-owned application
-inspection. The production profile retains a documented HTTP/Postgres/OTLP
-compatibility bridge until those adapters publish canonical kernel layers.
+inspection. Later template versions completed canonical production adapter
+composition.
 
 ## Install
 

@@ -2,7 +2,7 @@ const std = @import("std");
 const zstd = @import("zigeffect_std");
 
 pub const cli_version = "0.7.0";
-pub const template_version: u32 = 13;
+pub const template_version: u32 = 14;
 pub const template_schema = "zigeffect.scaffold-template.v1";
 pub const compatibility_schema = "zigeffect.compatibility.v1";
 pub const scaffold_state_schema = "zigeffect.scaffold-state.v1";

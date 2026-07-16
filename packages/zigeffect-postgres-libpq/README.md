@@ -9,11 +9,8 @@ system libpq build, target database, credentials, network, and operational
 bounds.
 
 `SessionLayerConfig`, `PoolLayerConfig`, `sessionLayer()`, and `poolLayer()` are
-the current compatibility bridge. Their scope owns connections and pool
-shutdown, while `applyMigrationsEffect` and `closePoolEffect` emit redacted
-causal operation facts. They still use the legacy environment-shaped layer
-kernel and are not a template for new application roots.
-
-The canonical migration will publish stable session/pool tags and scoped
-`fx.kernel.Layer` values. Direct `Session.init` and `Pool.initAlloc` remain
-imperative driver APIs for focused adapter code.
+the canonical adapter surface. Stable session and pool service tags compose as
+scoped `fx.kernel.Layer` values; their scopes own connections and pool shutdown.
+`applyMigrationsEffect` and `closePoolEffect` emit redacted semantic causal
+facts. Direct `Session.init` and `Pool.initAlloc` remain imperative driver APIs
+for focused adapter and conformance code, not application composition roots.

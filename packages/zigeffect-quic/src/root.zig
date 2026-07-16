@@ -17,6 +17,50 @@ pub const ClientConfig = struct {
     skip_cert_verify: bool = false,
     response_body_limit: usize = 1024 * 1024,
 };
+pub const ClientConfigService = zstd.fx.kernel.Service("zigeffect/quic/ClientConfig", ClientConfig);
+pub const ClientApi = struct {
+    pub const operations: []const []const u8 = &.{"QuicHttpClient.send"};
+    client: QuicHttpClient,
+};
+pub const ClientService = zstd.fx.kernel.Service("zigeffect/quic/Client", ClientApi);
+
+pub fn clientConfigLayer(config: ClientConfig) @TypeOf(zstd.fx.kernel.Layer.succeed(ClientConfigService, config)) {
+    return zstd.fx.kernel.Layer.succeed(ClientConfigService, config);
+}
+
+const ClientFactory = struct {
+    fn make(ctx: *zstd.fx.kernel.ContextView(.{ClientConfigService})) ClientApi {
+        return .{ .client = QuicHttpClient.init(ctx.service(ClientConfigService).*) };
+    }
+};
+
+pub fn clientLayer() @TypeOf(zstd.fx.kernel.Layer.sync(
+    ClientService,
+    .{ClientConfigService},
+    ClientFactory.make,
+)) {
+    return zstd.fx.kernel.Layer.sync(ClientService, .{ClientConfigService}, ClientFactory.make);
+}
+
+const HttpClientFactory = struct {
+    fn make(ctx: *zstd.fx.kernel.ContextView(.{ClientService})) zstd.Http.Client {
+        return ctx.service(ClientService).client.asHttpClient();
+    }
+};
+
+pub fn httpClientLayer() @TypeOf(zstd.fx.kernel.Layer.sync(
+    zstd.Http.HttpClient,
+    .{ClientService},
+    HttpClientFactory.make,
+)) {
+    return zstd.fx.kernel.Layer.sync(zstd.Http.HttpClient, .{ClientService}, HttpClientFactory.make);
+}
+
+pub fn configuredClientLayer(config: ClientConfig) @TypeOf(
+    httpClientLayer().provideMerge(clientLayer().provideMerge(clientConfigLayer(config))),
+) {
+    return httpClientLayer().provideMerge(clientLayer().provideMerge(clientConfigLayer(config)));
+}
 
 pub const FakeQuicHttpClient = struct {
     pub const capability = zstd.Capability.Descriptor{
@@ -53,6 +97,16 @@ pub const FakeQuicHttpClient = struct {
         _ = request;
         return zstd.Http.cloneResponseAlloc(allocator, self.response);
     }
+
+    pub fn sendAllocWithOptions(self: *FakeQuicHttpClient, allocator: std.mem.Allocator, request: zstd.Http.Request, options: zstd.Http.SendOptions) zstd.Http.ClientError!zstd.Http.Response {
+        try options.checkActive();
+        if (self.response.body.len > options.response_body_limit) return error.ResponseBodyTooLarge;
+        return self.sendAlloc(allocator, request);
+    }
+
+    pub fn asHttpClient(self: *FakeQuicHttpClient) zstd.Http.Client {
+        return zstd.Http.Client.from(FakeQuicHttpClient, self);
+    }
 };
 
 pub const QuicHttpClient = struct {
@@ -88,6 +142,20 @@ pub const QuicHttpClient = struct {
         try client.run();
 
         return handler.responseAlloc();
+    }
+
+    pub fn sendAllocWithOptions(self: *QuicHttpClient, allocator: std.mem.Allocator, request: zstd.Http.Request, options: zstd.Http.SendOptions) zstd.Http.ClientError!zstd.Http.Response {
+        options.checkActive() catch |err| return err;
+        if (self.config.response_body_limit > options.response_body_limit) self.config.response_body_limit = options.response_body_limit;
+        return self.sendAlloc(allocator, request) catch |err| switch (err) {
+            error.OutOfMemory => error.OutOfMemory,
+            error.ResponseBodyTooLarge => error.ResponseBodyTooLarge,
+            else => error.TransportFailure,
+        };
+    }
+
+    pub fn asHttpClient(self: *QuicHttpClient) zstd.Http.Client {
+        return zstd.Http.Client.from(QuicHttpClient, self);
     }
 };
 
@@ -525,15 +593,13 @@ test "QUIC fake HTTP client works through zstd Http sendEffect with redacted cau
     var client = try FakeQuicHttpClient.initOwned(std.testing.allocator, response);
     defer client.deinit();
 
-    var provider = zstd.Service.Provider(.{FakeQuicHttpClient}).init(.{&client});
-    var store = zstd.fx.CausalStore.init(std.testing.allocator);
-    defer store.deinit();
+    const main_layer = zstd.Http.clientLayer(client.asHttpClient());
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runtime = try zstd.ManagedRuntime(@TypeOf(main_layer)).make(std.testing.allocator, std.testing.io, tmp.dir, main_layer, .{});
+    defer runtime.deinit();
 
-    var runtime = zstd.fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider)
-        .provides(.{FakeQuicHttpClient})
-        .withCausalStore(&store);
-
-    var output = try runtime.run(zstd.Http.sendEffect(@TypeOf(provider), FakeQuicHttpClient, .{
+    var output = try runtime.run(zstd.Http.sendEffect(.{
         .method = "GET",
         .url = "https://localhost/projects?token=abc123",
         .headers = &.{.{ .name = "authorization", .value = "Bearer abc123" }},
@@ -543,11 +609,15 @@ test "QUIC fake HTTP client works through zstd Http sendEffect with redacted cau
     try std.testing.expectEqual(@as(u16, 200), output.status);
     try std.testing.expectEqualStrings("{\"ok\":true}", output.body);
 
-    var snapshot = try store.snapshot(std.testing.allocator);
+    var snapshot = try runtime.inspect(std.testing.allocator, .{ .max_recent_events = 64 });
     defer snapshot.deinit();
-    const event_index = zstd.Service.findOperation(snapshot, FakeQuicHttpClient, "http.send", "success");
-    try std.testing.expect(event_index != null);
-    try std.testing.expect(std.mem.indexOf(u8, snapshot.events[event_index.?].redacted_detail, "abc123") == null);
+    var found = false;
+    for (snapshot.causal.recent_events) |event| {
+        if (std.mem.eql(u8, event.label, "http.send") and std.mem.eql(u8, event.status, "success")) found = true;
+        try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "abc123") == null);
+    }
+    try std.testing.expect(found);
+    try runtime.shutdown();
 }
 
 test "QUIC HTTP receipts redact request metadata" {
