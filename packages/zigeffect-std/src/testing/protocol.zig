@@ -1,10 +1,12 @@
 const std = @import("std");
 const Contract = @import("contract.zig");
 
-pub const control_schema = "zigeffect.test-control.v1";
-pub const control_schema_version: u32 = 1;
-pub const control_path = ".zigeffect/tests/control.json";
+pub const control_schema = "zigeffect.test-control.v2";
+pub const control_schema_version: u32 = 2;
+pub const control_root = ".zigeffect/tests/controls";
+pub const control_path_environment = "ZIGEFFECT_TEST_CONTROL";
 pub const process_receipt_root = ".zigeffect/tests/process-receipts";
+pub const process_run_receipt_root = ".zigeffect/tests/process-runs";
 pub const raw_receipt_root = ".zigeffect/tests/raw-receipts";
 
 const Secrets = @import("../secrets/root.zig");
@@ -30,6 +32,7 @@ pub const Control = struct {
     source_revision: []const u8 = "working-tree",
     command_digest: []const u8 = "",
     manifest_digest: []const u8 = "",
+    process_receipt_path: []const u8 = "",
     required_native_receipt: bool = true,
 
     pub fn validate(self: Control) !void {
@@ -40,6 +43,7 @@ pub const Control = struct {
         try validateIdentifier(self.executor);
         if (self.source_revision.len == 0 or self.source_revision.len > 4096) return error.InvalidControl;
         if (self.command_digest.len > 256 or self.manifest_digest.len > 256) return error.InvalidControl;
+        if (self.process_receipt_path.len > 0) try validateArtifactPath(self.process_receipt_path, process_run_receipt_root);
         if (Secrets.containsSecret(self.source_revision) or Secrets.containsSecret(self.command_digest) or Secrets.containsSecret(self.manifest_digest)) return error.SecretDetected;
     }
 
@@ -71,22 +75,60 @@ pub fn parseControl(allocator: std.mem.Allocator, input: []const u8) !ParsedCont
 }
 
 pub fn writeControl(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, control: Control) !void {
-    const json = try control.jsonAlloc(allocator);
-    defer allocator.free(json);
-    try writeAtomicFile(allocator, io, dir, control_path, json);
+    const path = try controlPathAlloc(allocator, control.scenario.id);
+    defer allocator.free(path);
+    try writeControlAt(allocator, io, dir, path, control);
 }
 
-pub fn readControl(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !ParsedControl {
-    const json = try dir.readFileAlloc(io, control_path, allocator, .limited(1024 * 1024));
+pub fn writeControlAt(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, path: []const u8, control: Control) !void {
+    try validateArtifactPath(path, control_root);
+    const json = try control.jsonAlloc(allocator);
+    defer allocator.free(json);
+    try writeAtomicFile(allocator, io, dir, path, json);
+}
+
+pub fn readControl(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, scenario_id: []const u8) !ParsedControl {
+    const path = try controlPathAlloc(allocator, scenario_id);
+    defer allocator.free(path);
+    return readControlAt(allocator, io, dir, path);
+}
+
+pub fn readControlAt(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, path: []const u8) !ParsedControl {
+    try validateArtifactPath(path, control_root);
+    const json = try dir.readFileAlloc(io, path, allocator, .limited(1024 * 1024));
     defer allocator.free(json);
     return parseControl(allocator, json);
 }
 
-pub fn removeControl(io: std.Io, dir: std.Io.Dir) !void {
-    dir.deleteFile(io, control_path) catch |err| switch (err) {
+pub fn removeControl(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, scenario_id: []const u8) !void {
+    const path = try controlPathAlloc(allocator, scenario_id);
+    defer allocator.free(path);
+    try removeControlAt(io, dir, path);
+}
+
+pub fn removeControlAt(io: std.Io, dir: std.Io.Dir, path: []const u8) !void {
+    try validateArtifactPath(path, control_root);
+    dir.deleteFile(io, path) catch |err| switch (err) {
         error.FileNotFound => {},
         else => return err,
     };
+}
+
+pub fn controlPathAlloc(allocator: std.mem.Allocator, scenario_id: []const u8) ![]u8 {
+    try validateIdentifier(scenario_id);
+    return std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ control_root, scenario_id });
+}
+
+pub fn controlRunPathAlloc(allocator: std.mem.Allocator, scenario_id: []const u8, run_id: []const u8) ![]u8 {
+    try validateIdentifier(scenario_id);
+    try validateIdentifier(run_id);
+    return std.fmt.allocPrint(allocator, "{s}/{s}-{s}.json", .{ control_root, scenario_id, run_id });
+}
+
+pub fn processRunReceiptPathAlloc(allocator: std.mem.Allocator, scenario_id: []const u8, run_id: []const u8) ![]u8 {
+    try validateIdentifier(scenario_id);
+    try validateIdentifier(run_id);
+    return std.fmt.allocPrint(allocator, "{s}/{s}-{s}.json", .{ process_run_receipt_root, scenario_id, run_id });
 }
 
 pub fn publishedReceiptPathAlloc(allocator: std.mem.Allocator, scenario_id: []const u8) ![]u8 {
@@ -108,6 +150,14 @@ pub fn publishReceipt(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir,
     try writeAtomicFile(allocator, io, dir, path, json);
 }
 
+pub fn publishReceiptAt(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, path: []const u8, receipt_value: Contract.TestReceipt) !void {
+    try validateArtifactPath(path, process_run_receipt_root);
+    const json = try receipt_value.jsonAlloc(allocator);
+    defer allocator.free(json);
+    if (Secrets.containsSecret(json)) return error.SecretDetected;
+    try writeAtomicFile(allocator, io, dir, path, json);
+}
+
 pub fn publishRawReceipt(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, receipt_value: Contract.TestReceipt) !void {
     const json = try receipt_value.jsonAlloc(allocator);
     defer allocator.free(json);
@@ -124,6 +174,22 @@ pub fn readPublishedReceipt(allocator: std.mem.Allocator, io: std.Io, dir: std.I
     defer allocator.free(json);
     if (Secrets.containsSecret(json)) return error.SecretDetected;
     return Contract.parseReceipt(allocator, json);
+}
+
+pub fn readPublishedReceiptAt(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, path: []const u8) !Contract.ParsedReceipt {
+    try validateArtifactPath(path, process_run_receipt_root);
+    const json = try dir.readFileAlloc(io, path, allocator, .limited(16 * 1024 * 1024));
+    defer allocator.free(json);
+    if (Secrets.containsSecret(json)) return error.SecretDetected;
+    return Contract.parseReceipt(allocator, json);
+}
+
+pub fn removePublishedReceiptAt(io: std.Io, dir: std.Io.Dir, path: []const u8) !void {
+    try validateArtifactPath(path, process_run_receipt_root);
+    dir.deleteFile(io, path) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => return err,
+    };
 }
 
 pub fn readRawReceipt(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, scenario_id: []const u8) !Contract.ParsedReceipt {
@@ -206,6 +272,15 @@ fn validateIdentifier(value: []const u8) !void {
     }
 }
 
+fn validateArtifactPath(path: []const u8, root: []const u8) !void {
+    if (path.len <= root.len + 6 or path.len > 1024 or !std.mem.startsWith(u8, path, root) or path[root.len] != '/' or
+        std.mem.indexOfScalar(u8, path[root.len + 1 ..], '/') != null or !std.mem.endsWith(u8, path, ".json"))
+    {
+        return error.InvalidIdentifier;
+    }
+    try validateIdentifier(path[root.len + 1 .. path.len - ".json".len]);
+}
+
 fn scenario() Contract.Scenario {
     return .{
         .id = "receipt-protocol",
@@ -261,12 +336,12 @@ test "control round trips and matches only the selected scenario" {
     try std.testing.expect(!parsed.value.matches(different));
 }
 
-test "control and process receipts use fixed atomic project paths" {
+test "control and process receipts use scenario-scoped atomic project paths" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const control = Control{ .scenario = scenario(), .project = "demo", .seed = 42, .source_revision = "sha256:abc" };
     try writeControl(std.testing.allocator, std.testing.io, tmp.dir, control);
-    var parsed_control = try readControl(std.testing.allocator, std.testing.io, tmp.dir);
+    var parsed_control = try readControl(std.testing.allocator, std.testing.io, tmp.dir, "receipt-protocol");
     defer parsed_control.deinit();
     try std.testing.expectEqualStrings("receipt-protocol", parsed_control.value.scenario.id);
 
@@ -278,6 +353,43 @@ test "control and process receipts use fixed atomic project paths" {
 
     try removePublishedReceipt(std.testing.io, tmp.dir, "receipt-protocol");
     try std.testing.expectError(error.FileNotFound, readPublishedReceipt(std.testing.allocator, std.testing.io, tmp.dir, "receipt-protocol"));
+}
+
+test "run-scoped controls and process receipts remain isolated" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const first_control = try controlRunPathAlloc(std.testing.allocator, "receipt-protocol", "run-one");
+    defer std.testing.allocator.free(first_control);
+    const second_control = try controlRunPathAlloc(std.testing.allocator, "receipt-protocol", "run-two");
+    defer std.testing.allocator.free(second_control);
+    const first_receipt = try processRunReceiptPathAlloc(std.testing.allocator, "receipt-protocol", "run-one");
+    defer std.testing.allocator.free(first_receipt);
+    const second_receipt = try processRunReceiptPathAlloc(std.testing.allocator, "receipt-protocol", "run-two");
+    defer std.testing.allocator.free(second_receipt);
+    var first = receipt();
+    first.seed = 41;
+    var second = receipt();
+    second.seed = 42;
+    try writeControlAt(std.testing.allocator, std.testing.io, tmp.dir, first_control, .{
+        .scenario = scenario(),
+        .project = "demo",
+        .seed = 41,
+        .process_receipt_path = first_receipt,
+    });
+    try writeControlAt(std.testing.allocator, std.testing.io, tmp.dir, second_control, .{
+        .scenario = scenario(),
+        .project = "demo",
+        .seed = 42,
+        .process_receipt_path = second_receipt,
+    });
+    try publishReceiptAt(std.testing.allocator, std.testing.io, tmp.dir, first_receipt, first);
+    try publishReceiptAt(std.testing.allocator, std.testing.io, tmp.dir, second_receipt, second);
+    var parsed_first = try readPublishedReceiptAt(std.testing.allocator, std.testing.io, tmp.dir, first_receipt);
+    defer parsed_first.deinit();
+    var parsed_second = try readPublishedReceiptAt(std.testing.allocator, std.testing.io, tmp.dir, second_receipt);
+    defer parsed_second.deinit();
+    try std.testing.expectEqual(@as(u64, 41), parsed_first.value.seed);
+    try std.testing.expectEqual(@as(u64, 42), parsed_second.value.seed);
 }
 
 test "atomic receipt publication advances past an occupied temporary slot" {

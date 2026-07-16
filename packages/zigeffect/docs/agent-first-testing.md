@@ -319,11 +319,14 @@ zigeffect test stress --requirement req-create-order --runs 32 --seed 42 --json
 zigeffect test history --json
 ```
 
-Before each command the CLI atomically writes `.zigeffect/tests/control.json`.
-The test process reads it through `TestContext.initFromProject` and publishes a
-matching native receipt under `.zigeffect/tests/process-receipts/`. Exit zero
-without a valid native receipt is `incomplete`, never passed. The CLI then
-atomically persists per-scenario receipts under
+Before each command the CLI writes a run-scoped control under
+`.zigeffect/tests/controls/` and passes its exact path to the child process.
+`TestContext.initFromProject` reads only that control and publishes the native
+receipt to its run-scoped path under `.zigeffect/tests/process-runs/`. This
+keeps concurrent agents and safety checks in the same project from exchanging
+selection metadata or overwriting authoritative process proof. Exit zero
+without the exact matching native receipt is `incomplete`, never passed. The
+CLI then atomically persists canonical per-scenario receipts under
 `.zigeffect/tests/receipts/` and the aggregate run at
 `.zigeffect/tests/latest.json`; append-only validated history lives at
 `.zigeffect/tests/history.jsonl`. Raw stdout/stderr is persisted only when the

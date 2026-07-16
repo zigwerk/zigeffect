@@ -1149,7 +1149,8 @@ pub const gitignore =
     \\.zigeffect/tests/receipts/
     \\.zigeffect/tests/process-receipts/
     \\.zigeffect/tests/raw-receipts/
-    \\.zigeffect/tests/control.json
+    \\.zigeffect/tests/controls/
+    \\.zigeffect/tests/process-runs/
     \\.zigeffect/tests/history.jsonl
     \\.zigeffect/tests/latest.json
 ;

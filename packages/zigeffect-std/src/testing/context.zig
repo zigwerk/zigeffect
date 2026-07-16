@@ -120,7 +120,15 @@ pub const TestContext = struct {
     }
 
     pub fn initFromProject(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, options: Options) !TestContext {
-        var parsed = Protocol.readControl(allocator, io, dir) catch |err| switch (err) {
+        const environment_path = std.process.Environ.getAlloc(std.testing.environ, allocator, Protocol.control_path_environment) catch |err| switch (err) {
+            error.EnvironmentVariableMissing => null,
+            else => return err,
+        };
+        defer if (environment_path) |path| allocator.free(path);
+        var parsed = (if (environment_path) |path|
+            Protocol.readControlAt(allocator, io, dir, path)
+        else
+            Protocol.readControl(allocator, io, dir, options.scenario.id)) catch |err| switch (err) {
             error.FileNotFound => return init(allocator, options),
             else => return err,
         };
@@ -380,7 +388,12 @@ pub const TestContext = struct {
     pub fn publish(self: *TestContext, io: std.Io, dir: std.Io.Dir, ended_ms: i64) !void {
         const receipt = try self.finish(ended_ms);
         try Protocol.publishRawReceipt(self.allocator, io, dir, receipt);
-        if (self.control != null) try Protocol.publishReceipt(self.allocator, io, dir, receipt);
+        if (self.control) |control| {
+            if (control.value.process_receipt_path.len > 0)
+                try Protocol.publishReceiptAt(self.allocator, io, dir, control.value.process_receipt_path, receipt)
+            else
+                try Protocol.publishReceipt(self.allocator, io, dir, receipt);
+        }
     }
 };
 
@@ -588,7 +601,7 @@ test "uncontrolled package tests cannot overwrite authoritative process evidence
     defer controlled.deinit();
     try controlled.addAssertion(.{ .id = "controlled", .label = "controlled receipt", .status = .passed });
     try controlled.publish(std.testing.io, tmp.dir, 20);
-    try Protocol.removeControl(std.testing.io, tmp.dir);
+    try Protocol.removeControl(std.testing.allocator, std.testing.io, tmp.dir, "context-test");
 
     var local = try TestContext.initFromProject(std.testing.allocator, std.testing.io, tmp.dir, .{
         .project = "demo",

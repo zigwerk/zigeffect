@@ -296,6 +296,16 @@ pub fn runAlloc(
     base_dir: std.Io.Dir,
     args: []const []const u8,
 ) !RunResult {
+    return runAllocWithEnvironment(allocator, io, base_dir, args, null);
+}
+
+pub fn runAllocWithEnvironment(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    base_dir: std.Io.Dir,
+    args: []const []const u8,
+    environment: ?*const std.process.Environ.Map,
+) !RunResult {
     const action = try parseArgs(args);
     switch (action) {
         .help => return .{ .allocator = allocator, .exit_code = 0, .output = try allocator.dupe(u8, helpText()) },
@@ -311,7 +321,7 @@ pub fn runAlloc(
             .pattern => runStatechartPatternAlloc(allocator, options),
             else => runStatechartAlloc(allocator, io, base_dir, options),
         },
-        .@"test" => |options| return runTestAlloc(allocator, io, base_dir, options),
+        .@"test" => |options| return runTestAlloc(allocator, io, base_dir, options, environment),
         .project => |options| return runProjectAlloc(allocator, io, base_dir, options),
         .safety => |options| return runSafetyAlloc(allocator, io, base_dir, options),
         .agent => |options| return runAgentAlloc(allocator, io, base_dir, options),
@@ -1049,6 +1059,7 @@ fn runTestAlloc(
     io: std.Io,
     base_dir: std.Io.Dir,
     options: TestOptions,
+    environment: ?*const std.process.Environ.Map,
 ) !RunResult {
     var project_dir = try openTargetDir(io, base_dir, options.root);
     defer project_dir.close(io);
@@ -1100,8 +1111,8 @@ fn runTestAlloc(
     if (options.operation == .history) return runTestHistoryAlloc(allocator, io, project_dir, parsed.value.name, options);
     if (options.operation == .snapshot) return runTestSnapshotAlloc(allocator, io, project_dir, parsed.value, options);
     if (selected.len == 0) return error.MissingScenario;
-    if (options.operation == .stress) return runTestStressAlloc(allocator, io, project_dir, parsed.value, selected, options);
-    return runSelectedTestsAlloc(allocator, io, project_dir, parsed.value, selected, options);
+    if (options.operation == .stress) return runTestStressAlloc(allocator, io, project_dir, parsed.value, selected, options, environment);
+    return runSelectedTestsAlloc(allocator, io, project_dir, parsed.value, selected, options, environment);
 }
 
 fn selectTestScenariosAlloc(allocator: std.mem.Allocator, manifest: zstd.Project.Manifest, options: TestOptions) ![]zstd.Project.TestScenario {
@@ -1212,7 +1223,10 @@ fn ingestProcessReceiptAlloc(
     const empty_stderr = try allocator.dupe(u8, "");
     errdefer allocator.free(empty_stderr);
 
-    var parsed = zstd.Testing.Protocol.readPublishedReceipt(allocator, io, project_dir, control.scenario.id) catch null;
+    var parsed = if (control.process_receipt_path.len > 0)
+        zstd.Testing.Protocol.readPublishedReceiptAt(allocator, io, project_dir, control.process_receipt_path) catch null
+    else
+        zstd.Testing.Protocol.readPublishedReceipt(allocator, io, project_dir, control.scenario.id) catch null;
     if (parsed) |*native| {
         if (zstd.Testing.Protocol.validatePublishedReceipt(native.value, control)) |_| {
             var receipt = native.value;
@@ -1289,6 +1303,7 @@ fn runSelectedTestsAlloc(
     manifest: zstd.Project.Manifest,
     selected: []const zstd.Project.TestScenario,
     options: TestOptions,
+    environment: ?*const std.process.Environ.Map,
 ) !RunResult {
     var executions = std.ArrayList(OwnedTestExecution).empty;
     defer {
@@ -1311,8 +1326,6 @@ fn runSelectedTestsAlloc(
     const manifest_digest = try zstd.Development.manifestDigestAlloc(allocator, manifest);
     defer allocator.free(manifest_digest);
     try writeAtomicFile(io, project_dir, ".zigeffect/tests/progress.jsonl", "");
-    try zstd.Testing.Protocol.removeControl(io, project_dir);
-    defer zstd.Testing.Protocol.removeControl(io, project_dir) catch {};
     try appendTestProgress(allocator, io, project_dir, manifest, .{
         .state = "run_started",
         .source_revision = source_identity.revision,
@@ -1337,6 +1350,21 @@ fn runSelectedTestsAlloc(
         const fault_index = if (parsed_fault) |fault| fault.index else null;
         const command_digest = try commandDigestAlloc(allocator, scenario_argv.items);
         defer allocator.free(command_digest);
+        var run_hasher = std.crypto.hash.sha2.Sha256.init(.{});
+        const run_nanos = std.Io.Clock.real.now(io).nanoseconds;
+        const run_thread = std.Thread.getCurrentId();
+        run_hasher.update(std.mem.asBytes(&run_nanos));
+        run_hasher.update(std.mem.asBytes(&run_thread));
+        run_hasher.update(scenario.id);
+        run_hasher.update(command_digest);
+        const run_id = std.fmt.bytesToHex(run_hasher.finalResult(), .lower);
+        const control_path = if (environment != null)
+            try zstd.Testing.Protocol.controlRunPathAlloc(allocator, scenario.id, &run_id)
+        else
+            try zstd.Testing.Protocol.controlPathAlloc(allocator, scenario.id);
+        defer allocator.free(control_path);
+        const process_receipt_path = try zstd.Testing.Protocol.processRunReceiptPathAlloc(allocator, scenario.id, &run_id);
+        defer allocator.free(process_receipt_path);
         const control = zstd.Testing.Protocol.Control{
             .project = manifest.name,
             .scenario = contractScenario(scenario),
@@ -1347,9 +1375,17 @@ fn runSelectedTestsAlloc(
             .source_revision = source_identity.revision,
             .command_digest = command_digest,
             .manifest_digest = manifest_digest,
+            .process_receipt_path = process_receipt_path,
         };
         try zstd.Testing.Protocol.removePublishedReceipt(io, project_dir, scenario.id);
-        try zstd.Testing.Protocol.writeControl(allocator, io, project_dir, control);
+        try zstd.Testing.Protocol.removeControlAt(io, project_dir, control_path);
+        try zstd.Testing.Protocol.removePublishedReceiptAt(io, project_dir, process_receipt_path);
+        try zstd.Testing.Protocol.writeControlAt(allocator, io, project_dir, control_path, control);
+        defer zstd.Testing.Protocol.removeControlAt(io, project_dir, control_path) catch {};
+        defer zstd.Testing.Protocol.removePublishedReceiptAt(io, project_dir, process_receipt_path) catch {};
+        var child_environment: ?std.process.Environ.Map = if (environment) |parent| try parent.clone(allocator) else null;
+        defer if (child_environment) |*values| values.deinit();
+        if (child_environment) |*values| try values.put(zstd.Testing.Protocol.control_path_environment, control_path);
         const started_ms = realTimestampMs(io);
         try appendTestProgress(allocator, io, project_dir, manifest, .{
             .state = "scenario_started",
@@ -1362,6 +1398,7 @@ fn runSelectedTestsAlloc(
         const process_result = try std.process.run(allocator, io, .{
             .argv = scenario_argv.items,
             .cwd = .{ .dir = project_dir },
+            .environ_map = if (child_environment) |*values| values else null,
             .stdout_limit = .limited(manifest.safety.limits.max_artifact_bytes),
             .stderr_limit = .limited(manifest.safety.limits.max_artifact_bytes),
         });
@@ -1527,6 +1564,7 @@ fn runTestStressAlloc(
     manifest: zstd.Project.Manifest,
     selected: []const zstd.Project.TestScenario,
     options: TestOptions,
+    environment: ?*const std.process.Environ.Map,
 ) !RunResult {
     var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
@@ -1539,7 +1577,7 @@ fn runTestStressAlloc(
         run_options.operation = .run;
         run_options.seed = seed;
         run_options.json = true;
-        var result = try runSelectedTestsAlloc(allocator, io, project_dir, manifest, selected, run_options);
+        var result = try runSelectedTestsAlloc(allocator, io, project_dir, manifest, selected, run_options, environment);
         defer result.deinit();
         if (result.exit_code != 0) failed_runs += 1;
         if (index != 0) try output.append(allocator, ',');
