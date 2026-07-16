@@ -1,151 +1,244 @@
-# Effect Standard-Library Reference Review
+# Effect Standard-Library Architecture Review
 
 **Reference tree:** `packages/references/effect`
+
 **Pinned revision:** `80b539f8aba68f478c75c35c2b4140c4ffc4fada`
-**Examples tree:** `packages/references/effect-examples` at `91e24b045af2bcdbeb2e78e075825ed20a0038a7`
-**Reviewed version:** Effect `4.0.0-beta.98`
-**Review date:** 2026-07-16
 
-## What Effect Actually Does
+**Reference release:** Effect `4.0.0-beta.98`
 
-### Required services and default references are different types
+**Examples:** `packages/references/effect-examples` at
+`91e24b045af2bcdbeb2e78e075825ed20a0038a7`
 
-`packages/references/effect/packages/effect/src/Context.ts` defines required
-`Context.Service` keys and
-defaulted `Context.Reference` keys. Both are type-safe runtime identities, but
-a missing Service is an error while a Reference resolves a cached default.
+**Reviewed:** 2026-07-16
 
-Clock, Console, and Random use Reference semantics in
-`packages/references/effect/packages/effect/src/internal/effect.ts` and
-`packages/references/effect/packages/effect/src/internal/random.ts`. Ordinary clock, console, and random
-operations consequently do not add a service requirement to every Effect type.
-Overrides are inherited through the fiber context.
+This is a source review, not a name-matching exercise. Effect has 139 stable
+top-level source modules because it is also the missing data and concurrency
+standard library for JavaScript. Zig already supplies many of those pure data
+structures and platform primitives. A module is a useful port only when it
+improves typed composition, resource ownership, deterministic concurrency, or
+runtime observability in ZigEffect.
 
-ZigEffect maps this distinction to:
+## How Effect Builds Its Standard Library
 
-- `fx.kernel.Service` for explicit application capabilities; and
-- `fx.kernel.DefaultServices` plus `DefaultOverrides` for runtime defaults.
+### One stable algebra per module
 
-### Portable service methods are effectful
+`packages/effect/src/index.ts` is a generated namespace facade. Modules such as
+`Context.ts`, `Layer.ts`, `Resource.ts`, `Pool.ts`, `Request.ts`, `Stream.ts`,
+and `Schema.ts` each present one documented algebra. The package export map
+explicitly rejects `internal/*`; callers compose public values rather than
+constructing interpreter nodes themselves.
 
-`packages/references/effect/packages/effect/src/FileSystem.ts` defines a stable
-FileSystem service key and
-an interface whose operations return Effect, Stream, or Sink descriptions.
-`FileSystem.make` accepts a smaller platform implementation and derives safe
-convenience operations. `FileSystem.makeNoop` and `layerNoop` provide focused
-test substitution without changing the program.
+The public/internal boundary is not merely file organization. Public modules
+retain stable models and laws while `src/internal/core.ts`,
+`src/internal/effect.ts`, `src/internal/layer.ts`, and specialized internal
+modules own execution details. ZigEffect's equivalent is:
 
-`packages/references/effect/packages/platform-node/src/NodeFileSystem.ts`
-exports only the Node-backed layer. The portable program continues to depend on
-the FileSystem key, not on Node's implementation type.
+- `zigeffect` for the interpreter and canonical kernel;
+- `zigeffect-std` for portable application contracts and constructors;
+- adapter packages for native implementations; and
+- small application roots that select one root layer and one runtime.
 
-ZigEffect maps this to a stable tag, a driver API beneath the boundary,
-module-level typed effects, and live/deterministic layer constructors. The
-module-level effect is important: directly wrapping an imperative provider
-after application code has selected its concrete environment is not equivalent
-to an effectful service.
+ZigEffect `root.zig` modules should therefore be treated as facades. Private
+implementation state is not an accidental public framework contract merely
+because Zig can import a source path from the monorepo.
 
-### Layers are constructors, not bags of initialized values
+### Stable and evolving surfaces are separated
 
-`packages/references/effect/packages/effect/src/Layer.ts` keeps three types
-visible: outputs, build errors,
-and inputs. `Layer.provide` satisfies construction inputs, `mergeAll` combines
-outputs, scoped layers acquire resources, and memoization shares a layer by
-identity inside one build.
+Effect exports testing separately and exposes AI, CLI, cluster, devtools,
+HTTP, persistence, RPC, SQL, workflow, and worker facilities under explicit
+`unstable/*` paths. This lets the core algebra mature independently of fast
+moving application packages.
 
-ZigEffect's canonical `Layer<Output, Error, Input>` equivalent uses comptime
-service sets, explicit `provide`/`provideMerge`, identity memoization, and
-reverse finalization. A standard-library layer must declare only construction
-dependencies; consumers of the built service require only its stable output
+ZigEffect should retain package boundaries for platform adapters and clearly
+label evolving agent/workflow APIs in their manifests and docs. It should not
+copy the word `unstable` mechanically where ZigEffect already owns a stronger
+versioned contract, causal schema, and conformance gate.
+
+### Services are effect descriptions, not implementation objects
+
+`Context.Service` defines required capabilities. Portable methods return
+`Effect`, `Stream`, or `Sink` descriptions. For example, `FileSystem.ts`
+defines the portable contract and derived operations, while
+`platform-node/src/NodeFileSystem.ts` supplies the Node layer. Programs never
+depend on the Node implementation type.
+
+ZigEffect's canonical mapping is a stable `fx.kernel.Service`, module-level
+typed effects, and live/deterministic scoped layers. Construction dependencies
+belong to the layer. After construction, consumers require only the service
 tag.
 
-### ManagedRuntime is the application bridge
+`fx.kernel.defineService` is the Zig-native counterpart to Effect's concise
+service definition style: the tag, abstract API, acquisition requirements,
+typed startup error, default layer, and optional finalizer are declared once.
 
-`packages/references/effect/packages/effect/src/ManagedRuntime.ts` builds a
-layer lazily, caches its
-context, runs many effects against that context, supervises fibers in its
-scope, and disposes layer resources once.
+### Default references are deliberately ambient
 
-ZigEffect builds eagerly at `ManagedRuntime.make`, which is a deliberate Zig
-choice: startup failure is explicit before a server reports readiness. The
-I/O-free interpreter is `fx.kernel.ManagedRuntime`; canonical processes use
-`zstd.ManagedRuntime`, which also owns the embedded NenDB causal graph and
-checked persistence shutdown. The important invariant is the same—one root
-graph, one owned application scope, many request/job runs, one disposal.
+Effect uses `Context.Reference` for values with cached defaults. Clock,
+Console, Random, ConfigProvider, current metric attributes, and several runtime
+controls use this mechanism so ordinary effects do not acquire noisy service
+requirements.
 
-### Official applications keep executable roots small
+ZigEffect has the same useful semantic split but keeps it closed:
 
-The pinned monorepo template puts schemas and API contracts in
-`packages/domain`, repository and server layers in `packages/server`, clients
-in `packages/cli`, and leaves `server.ts` and `bin.ts` as small composition
-edges. ZigEffect follows the same dependency direction: libraries publish
-tags, effects, schemas, and layers; deployable applications choose
-implementations once and launch one runtime.
+- Clock, ConfigProvider, Console, Random, and Tracer are runtime defaults with
+  inherited run overrides;
+- application capabilities remain explicit tags.
 
-### Observability belongs in the interpreter
+An arbitrary reference registry is not a desirable port. The fixed set is
+faster, easier to inspect, and keeps ambient authority bounded for agents.
 
-Effect's logging, metrics, tracer, and supervision facilities are attached to
-fiber/runtime interpretation and can be configured with layers or references.
-Service business logic does not request four observability dependencies merely
-to become visible.
+### Layers preserve output, error, and input
 
-ZigEffect uses RuntimeAspect fanout. Structural runtime events and semantic
-standard-library/application events both reach custom aspects, logger,
-metrics, tracer, supervisor where applicable, and the runtime-owned causal
-store. Causal recording is an additional first-class interpreter signal, not a
-replacement for OTEL signals.
+Effect's `Layer<ROut, E, RIn>` exposes output services, construction errors,
+and construction inputs. `provide` satisfies inputs, `mergeAll` combines
+outputs, scoped layers own resources, and `MemoMap` shares a layer instance
+within a build.
 
-## Zig-Specific Decisions
+The canonical ZigEffect kernel already provides all of these semantics with
+comptime service sets, explicit `provide`/`provideMerge`, identity
+memoization, reverse finalization, and application-topology evidence. Earlier
+reviews that inspected `zigeffect/src/layer` and concluded memoization was
+missing were looking at the quarantined legacy layer engine, not
+`zigeffect/src/kernel/layer.zig` and its tests.
 
-| Effect technique | ZigEffect decision |
-| --- | --- |
-| TypeScript structural types and class tags | comptime service-tag types with stable string identities |
-| Generator syntax for service access | typed effect constructors and `ContextView(Requirements)` |
-| Promise/async runtime bridges | synchronous typed runner today; RuntimeHandle is the reusable server/job bridge |
-| JavaScript object service implementations | small vtable-shaped driver values below public effects |
-| Lazy managed-runtime build | eager build so native service readiness has a definitive startup result |
-| Fiber-local maps | inherited `DefaultOverrides` and runtime lineage on each run/fiber context |
-| Standard tracing only | tracing plus bounded/redacted causal lineage and an agent-readable application snapshot |
+The Resource/Pool allocation campaign also closed a kernel edge case: when a
+scoped layer acquired successfully but registry publication failed, the layer
+now releases the unpublished value before returning the startup error. A
+dedicated all-allocation-failures kernel test protects that ownership boundary.
 
-ZigEffect does not copy generator, prototype, symbol, Promise, or JavaScript
-module patterns where they add no value in Zig.
+### ManagedRuntime is the process bridge
 
-## Current Migration State
+Effect's `ManagedRuntime` lazily builds and caches a layer context, runs many
+programs against it, supervises its scope, and disposes resources once.
+ZigEffect deliberately builds eagerly: a native server must know whether its
+root layer succeeded before reporting readiness. Canonical `zstd.ManagedRuntime`
+also owns bounded causal recording, embedded NenDB persistence, application
+inspection, and checked shutdown.
 
-| Area | State | Evidence |
+The shared invariant is more important than lazy versus eager construction:
+one root graph, one application scope, many request/job scopes, and one
+disposal edge.
+
+### Observability belongs to interpretation
+
+Effect logging, metrics, tracing, and fiber supervision are runtime facilities
+configured through references and layers. Business logic does not request an
+observability bundle just to become visible.
+
+ZigEffect uses runtime aspects for logger, metrics, tracer, supervisor, and
+causal recording. Structural execution is automatically visible. Portable
+services add redacted semantic facts at boundaries. Causal facts supplement
+OTEL signals; they do not replace them.
+
+### Resource families are scope algebra
+
+Effect's `Resource`, `Pool`, `ScopedRef`, `RcRef`, `RcMap`, and `ScopedCache`
+all build on scopes:
+
+- each acquisition has an owner;
+- replacement or invalidation closes the replaced scope;
+- borrowing registers a finalizer in the borrower's scope; and
+- shutdown unwinds partial and complete acquisition consistently.
+
+This is highly portable to Zig. ZigEffect now exposes:
+
+- `zstd.Resource.Service` for refreshable scoped values whose failed refresh
+  preserves the last successful acquisition; and
+- `zstd.Pool.Service` for bounded scoped pools with preallocation, reuse,
+  invalidation, TTL pruning, per-item concurrency, explicit exhaustion, and
+  complete partial-startup unwind.
+
+Both use only the canonical kernel. Their service operation catalogs appear in
+the application map, semantic facts use stable service keys, and the runtime
+records child scopes and finalizers structurally.
+
+## Capability Matrix
+
+| Effect concept | ZigEffect state | Decision |
 | --- | --- | --- |
-| Canonical service/effect/layer/runtime kernel | landed | `packages/zigeffect/test/kernel_test.zig` |
-| Fluent typed effect/layer composition | landed | inferred service/error unions, named causal programs, fluent layer tests |
-| Default Clock, Console, Random, Config effects | landed | requirement-free canonical architecture test |
-| Semantic RuntimeAspect fanout | landed | custom/built-in aspect tests and causal snapshot |
-| FileSystem oracle | landed | stable tag, memory/local layers, typed effects, operation catalog |
-| Process oracle | landed | stable tag, fake/local layers, typed effect, operation catalog |
-| One-endpoint application map | landed | services, layers, dependencies, operations, recent events, embedded NenDB health, validated manifest intent, exact agent workflow, graph cursor and follow-up queries |
-| Canonical local scaffolds | landed | template schema v11 runtime-owned NenDB application/service roots, composable library layers, and graph-durable Testing v2 assertion IDs |
-| IDs, Env/Secrets, Workspace | pending canonical migration | legacy APIs remain |
-| Queue/PubSub/Sink/Cache/Broker/ObjectStorage | pending canonical migration | legacy APIs remain |
-| gRPC facade and native adapter | landed | generated routes/clients, registries, standard services, scoped native channel/server layers, runtime handles, and Cloud Run root are legacy-free |
-| HTTP/SQL std facades | pending canonical migration | adapter packages exist; facade wiring remains mixed |
-| CLI/Agent/Statechart higher-level programs | pending canonical migration | move after their lower-level services |
-| Legacy provider/runtime deletion | pending | tracked by `effect-native-roadmap.md` |
+| Context Service | canonical parity | retain stable comptime tags |
+| Context Reference | deliberate specialization | retain five bounded runtime defaults |
+| Layer inputs/outputs/errors | canonical parity | retain comptime service sets |
+| Layer memoization | canonical parity | retain identity memoization and topology evidence |
+| ManagedRuntime | extended parity | retain eager startup plus durable causal ownership |
+| Cause / Exit / Scope | canonical core | continue typed failure and finalizer hardening |
+| Ref / Deferred / Queue / Semaphore / Hub | present in runtime | improve suspension semantics with async backend |
+| Resource | ported | `zstd.Resource` |
+| Pool | ported | `zstd.Pool` |
+| RcRef / RcMap | absent | next resource-lifecycle tranche |
+| Lookup Cache / ScopedCache | partial | add after shared in-flight request support |
+| Request / RequestResolver | absent | requires a real interpreter request instruction |
+| Schedule algebra | partial | union/intersection/sequence exist; typed input/output policies remain |
+| Channel / Stream / Sink | partial, legacy ABI quarantined | build a canonical service-set channel executor before expanding operators |
+| FiberMap / FiberSet / FiberHandle | partial supervision equivalents | add only with scoped interruption and causal tests |
+| Schema refinements/transforms/generation | substantial parity | continue formats, representations, and law testing selectively |
+| Property testing / TestClock | implemented and extended | Testing v2 adds causal assertions, virtual worlds, mutation, and proof receipts |
+| Metrics | counters, gauges, simple histograms | add tagged buckets/summaries only with OTLP mapping |
+| Transactional collections | absent | require canonical STM semantics first |
+| Pure JS data modules | Zig std equivalents | do not duplicate without a demonstrated algebraic gap |
 
-The current legacy scan is intentionally visible in the roadmap. A passing
-legacy test proves behavior preservation, not completion of the canonical
-migration.
+## Features That Cannot Be Shallow Ports
 
-## Standard-Library Admission Checklist
+### Request and RequestResolver
 
-A migrated module is complete only when:
+Effect batches logically independent requests because its interpreter sees
+request instructions from multiple fibers, groups them, and invokes a resolver
+once. A Zig helper named `requestAll` would not provide this property. The
+correct ZigEffect tranche needs:
 
-1. application operations are concrete effect descriptions with no environment
-   type parameter;
-2. explicit requirements contain stable service tags, never implementation
-   types;
-3. construction dependencies appear on layers;
-4. live and deterministic implementations run the same program unchanged;
-5. resources belong to application or run scopes with one finalization owner;
-6. semantic facts automatically inherit causal runtime lineage and are
-   redacted before storage/export;
-7. the application snapshot advertises the service and operation catalog; and
-8. Testing v2 evidence is complete with zero pending tests, leaks, and logged
-   errors.
+1. a typed request instruction in the canonical effect algebra;
+2. deterministic fiber collection windows;
+3. resolver batching and completion tables;
+4. shared in-flight cache entries;
+5. interruption and resolver failure semantics; and
+6. causal parentage from each logical request through the physical batch.
+
+### Channel, Stream, and Sink
+
+Effect streams and sinks are built on an effectful Channel executor with
+chunking, suspension, leftovers, scoped finalization, and backpressure. The
+existing ZigEffect effectful pull stream is useful engine work, but its legacy
+environment parameter is not a canonical application surface. The proper port
+must use service-set requirements, the selected async backend, bounded buffers,
+and runtime-owned scopes before adding a broad operator catalog.
+
+### Automatic Resource refresh and waiting pools
+
+Background resource refresh and pool waiting require scoped, interruptible
+fibers rather than an operating-system sleep or spin. Current `Resource`
+refresh is explicit and current `Pool` exhaustion is a typed failure. Those are
+honest synchronous semantics. Async variants will use the runtime suspension
+backend and preserve the same service contracts.
+
+## Zig-Specific Choices
+
+| Effect technique | ZigEffect choice |
+| --- | --- |
+| structural TypeScript service shapes | comptime tag plus concrete API value |
+| generators for service access | typed effect constructors and `ContextView` |
+| `dual` data-first/data-last helpers | normal methods and comptime functions |
+| Promise runtime bridges | native runtime handles and selected executors |
+| JavaScript object implementations | small values/vtables below public effects |
+| lazy runtime startup | eager startup before readiness |
+| arbitrary Context references | fixed default-service set |
+| standard tracing only | OTEL-compatible signals plus bounded causal lineage |
+| implicit garbage-collected ownership | explicit scopes, allocators, and finalizers |
+
+## Admission Checklist
+
+A standard-library module is canonical only when:
+
+1. operations are concrete effect descriptions with stable service tags;
+2. requirements contain tags, never implementation types;
+3. construction dependencies appear only on layers;
+4. live and deterministic layers run the same program unchanged;
+5. resources have one application or run-scope owner;
+6. failure and partial construction unwind every owned allocation;
+7. semantic facts inherit runtime lineage and redact details;
+8. the application map advertises service operations and layer dependencies;
+9. tests run through the Testing v2 server runner; and
+10. suite receipts are complete with zero pending tests, leaks, and logged
+    errors.
+
+The implementation design and remaining interpreter tranches are recorded in
+`docs/superpowers/specs/2026-07-16-effect-standard-library-foundations.md`.

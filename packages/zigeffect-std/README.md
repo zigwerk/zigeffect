@@ -128,6 +128,13 @@ with one import:
 - `Ids` derives UUIDv7 and monotonic ULID values from Clock and Randomness
   through a selectable canonical ID-policy service.
 - `Schedule` provides deterministic retry/polling steppers.
+- `Resource` defines refreshable scoped service values. A successful refresh
+  swaps acquisition scopes and finalizes the replaced value; a failed refresh
+  preserves the last successful value.
+- `Pool` defines bounded scoped resource services with preallocation, reuse,
+  invalidation, TTL pruning, per-item concurrency, explicit exhaustion, and
+  complete partial-startup unwind. Construction dependencies remain layer
+  inputs; consumers require only the pool tag.
 - `Sql` defines SQL query contracts, owned results, Schema-backed
   row decoding, fake databases, transaction receipts, migrations, pool
   leases/stats, migrations, stable database/pool tags, and scoped layers. Live

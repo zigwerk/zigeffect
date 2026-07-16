@@ -231,6 +231,66 @@ catalog output back to the declaration. Bump the definition version whenever
 its fingerprint changes. Use the runtime causal recorder for live decisions
 and a `CausalJournalStore` for durable workflow activity events.
 
+## Refreshable resources and bounded pools
+
+Use `Resource.Service` for an application-scoped value that can be replaced
+without losing the last successful acquisition. Construction requirements are
+layer inputs; consumers require only the resource tag:
+
+```zig
+const Credentials = zstd.Resource.Service(
+    "app/Credentials",
+    CredentialSet,
+    LoadError,
+    .{ConfigSource},
+    loadCredentials,
+    releaseCredentials,
+);
+
+const MainLayer = Credentials.DefaultWithoutDependencies().provide(ConfigLayer);
+var runtime = try zstd.ManagedRuntime(@TypeOf(MainLayer)).make(
+    allocator,
+    io,
+    root,
+    MainLayer,
+    .{},
+);
+defer runtime.deinit();
+
+const current = try runtime.run(zstd.Resource.get(Credentials));
+try runtime.run(zstd.Resource.refresh(Credentials));
+```
+
+Use `Pool.Service` inside adapters or application services that share bounded
+native resources:
+
+```zig
+const DatabasePool = zstd.Pool.Service(
+    "app/DatabasePool",
+    Connection,
+    ConnectError,
+    .{DatabaseConfig},
+    connect,
+    disconnect,
+    .{
+        .min_size = 2,
+        .max_size = 16,
+        .concurrency_per_item = 1,
+        .time_to_live_ms = 60_000,
+    },
+);
+```
+
+`Pool.get(DatabasePool)` registers the borrow in the current run scope. Use the
+item inside the same composed effect; returning its pointer across the runtime
+boundary escapes its borrow scope. Pool exhaustion is an explicit typed
+failure in the synchronous interpreter. It never blocks an operating-system
+thread.
+
+Both service types advertise their operation catalogs in the application map.
+Acquisition scopes and borrow finalizers are recorded structurally by the
+runtime, while refresh/get/invalidate operations emit redacted semantic facts.
+
 ## Architecture status
 
 The examples prove capability behavior and public imports. Migration status is

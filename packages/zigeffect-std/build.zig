@@ -87,6 +87,24 @@ pub fn build(b: *std.Build) void {
     development_runtime_test_step.dependOn(&run_development_runtime_tests.step);
     test_step.dependOn(&run_development_runtime_tests.step);
 
+    const effect_reference_foundations_test_module = b.createModule(.{
+        .root_source_file = b.path("test/effect_reference_foundations_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    effect_reference_foundations_test_module.addImport("zigeffect_std", zigeffect_std);
+    const effect_reference_foundations_tests = addV2Test(b, testing_runner, .{
+        .name = "zigeffect-std-effect-reference-foundations-tests",
+        .root_module = effect_reference_foundations_test_module,
+    });
+    const run_effect_reference_foundations_tests = b.addRunArtifact(effect_reference_foundations_tests);
+    const effect_reference_foundations_test_step = b.step(
+        "effect-reference-foundations-test",
+        "Run Effect-inspired Resource and Pool tests",
+    );
+    effect_reference_foundations_test_step.dependOn(&run_effect_reference_foundations_tests.step);
+    test_step.dependOn(&run_effect_reference_foundations_tests.step);
+
     const statechart_test_module = b.createModule(.{
         .root_source_file = b.path("src/statechart_test_root.zig"),
         .target = target,

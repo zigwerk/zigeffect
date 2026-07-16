@@ -261,11 +261,12 @@ pub fn ScopedLayer(
             try context.declare(self.id, .scoped, Tag, Requirements);
             if (context.begin(self.id, Tag.service_key)) return;
             var services = ContextView(Requirements){ .runtime_context = context.runtime };
-            const value = acquire(&services) catch |failure| {
+            var value = acquire(&services) catch |failure| {
                 context.failed(self.id, Tag.service_key, failure);
                 return failure;
             };
             const pointer = context.runtime.core.registry.putOwned(Tag, value) catch |failure| {
+                release(&value);
                 context.failed(self.id, Tag.service_key, failure);
                 return failure;
             };

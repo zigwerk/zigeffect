@@ -225,6 +225,24 @@ environment-typed constructors, and legacy std examples.
 use canonical tags, effects, fluent/scoped layers, named programs, application
 inspection, process signals, and one ManagedRuntime.
 
+### S8 — Effect standard-library resource foundations
+
+Port the parts of Effect's resource family that directly strengthen native
+composition without requiring new interpreter instructions.
+
+**Current:** complete for `Resource` and `Pool`. Refreshable values use one
+child scope per acquisition, preserve the last successful value on failed
+refresh, and finalize replacements immediately. Generic pools preallocate
+within explicit bounds, register borrows in run scopes, reuse and invalidate
+items safely, prune TTL-expired idle entries above the minimum, recover
+capacity after failed acquisition, and unwind partial startup.
+
+`RcRef`/`RcMap` remain the next resource tranche. RequestResolver batching,
+lookup-cache miss sharing, automatic background refresh, waiting pools, and a
+Channel-based stream algebra remain engine work because they require real
+fiber suspension/interpreter semantics. They are not represented by shallow
+standard-library wrappers.
+
 ## Definition of Done
 
 - no environment-shaped service, effect, layer, or runtime API in canonical std

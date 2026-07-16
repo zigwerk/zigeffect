@@ -77,6 +77,62 @@ test "canonical effects depend on service tags and run unchanged against live an
     try std.testing.expectEqual(@as(u32, 7), try fake_runtime.run(read_number));
 }
 
+const ScopedAllocationCounter = kernel.Service("test/ScopedAllocationCounter", struct {
+    releases: *usize,
+});
+
+const ScopedAllocation = kernel.Service("test/ScopedAllocation", struct {
+    allocator: std.mem.Allocator,
+    bytes: []u8,
+    releases: *usize,
+});
+
+fn acquireScopedAllocation(
+    ctx: *kernel.ContextView(.{ScopedAllocationCounter}),
+) error{OutOfMemory}!ScopedAllocation.API {
+    return .{
+        .allocator = ctx.allocator(),
+        .bytes = try ctx.allocator().alloc(u8, 64),
+        .releases = ctx.service(ScopedAllocationCounter).releases,
+    };
+}
+
+fn releaseScopedAllocation(value: *ScopedAllocation.API) void {
+    value.allocator.free(value.bytes);
+    value.releases.* += 1;
+}
+
+test "scoped layers release an acquisition when registry publication fails" {
+    const Harness = struct {
+        fn run(allocator: std.mem.Allocator) !void {
+            var releases: usize = 0;
+            const dependency = kernel.Layer.succeed(ScopedAllocationCounter, .{ .releases = &releases });
+            const root = kernel.Layer.scoped(
+                ScopedAllocation,
+                error{OutOfMemory},
+                .{ScopedAllocationCounter},
+                acquireScopedAllocation,
+                releaseScopedAllocation,
+            ).provide(dependency);
+
+            // Runtime causal recording is intentionally best-effort. Its
+            // allocator stays stable so the injected failures target kernel
+            // layer construction and registry publication.
+            var causal = fx.CausalStore.init(std.testing.allocator);
+            defer causal.deinit();
+            var runtime = try kernel.ManagedRuntime(@TypeOf(root)).make(
+                allocator,
+                root,
+                .{ .causal_store = &causal },
+            );
+            runtime.deinit();
+            if (releases != 1) return error.ScopedAcquisitionNotReleased;
+        }
+    };
+
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, Harness.run, .{});
+}
+
 const LeftNumber = kernel.Service("test/LeftNumber", struct {
     value: u32,
 });

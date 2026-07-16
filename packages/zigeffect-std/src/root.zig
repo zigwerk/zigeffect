@@ -23,6 +23,8 @@ pub const Schedule = @import("schedule/root.zig");
 pub const Resilience = @import("resilience/root.zig");
 pub const Security = @import("security/root.zig");
 pub const Cache = @import("cache/root.zig");
+pub const Resource = @import("resource/root.zig");
+pub const Pool = @import("pool/root.zig");
 pub const Broker = @import("broker/root.zig");
 pub const Boundary = @import("boundary/root.zig");
 pub const ObjectStorage = @import("object_storage/root.zig");
@@ -155,6 +157,8 @@ test {
     std.testing.refAllDecls(Resilience);
     std.testing.refAllDecls(Security);
     std.testing.refAllDecls(Cache);
+    std.testing.refAllDecls(Resource);
+    std.testing.refAllDecls(Pool);
     std.testing.refAllDecls(Broker);
     std.testing.refAllDecls(ObjectStorage);
     std.testing.refAllDecls(Application.Lifecycle);
