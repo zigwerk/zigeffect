@@ -1,14 +1,32 @@
 # zgraphy
 
 `zgraphy` is a local-first, Zig-native repository knowledge graph. The current
-MVP walks a Zig repository, extracts files, declarations, imports, calls, and
-ZigEffect project intent, then stores the graph and retrieval vectors in one
-embedded NenDB-derived snapshot.
+M2 engine walks mixed-language repositories, preserves every safe file's
+placement, derives application/package/library ownership from Zig, JavaScript,
+Python, Rust, Go, Proto and ZigEffect manifests, deeply extracts Zig plus
+TypeScript/TSX/JavaScript structure and module relationships, and stores graph
+retrieval vectors in an embedded NenDB-derived snapshot.
 
 The roadmap is Zig-first, not Zig-only. TypeScript/JavaScript frontends are an
 early first-class target, with proof-carrying paths through generated
 Connect/Protobuf or HTTP clients and schemas into Zig handlers, services,
 effects, stores, tests, requirements, and runtime causal evidence.
+
+Native source parsing is supplied by the reusable `zigeffect-parser` package
+through the grammar-free `zigeffect-std.Parser` contract. zgraphy consumes its
+bounded TypeScript/TSX/JavaScript facts and adds repository resolution, graph
+identity, retrieval, and freshness rather than owning language runtimes.
+Resolution runs against one immutable discovery inventory and understands
+relative ESM/CommonJS imports, JSONC tsconfig inheritance and aliases, pnpm/npm
+workspaces, package exports and entry fallbacks. Each occurrence is retained as
+a module-reference node with explicit resolved, external, unresolved,
+ambiguous, invalid, or exhausted evidence; dynamic imports remain deferred.
+The next pass resolves explicit named, default, namespace, local-alias, star and
+long-chain barrel exports to source-qualified declarations. Scoped receiver
+evidence connects imported direct calls, namespace members, static class calls,
+local `new` bindings, bare typed parameters, fields and constructor properties
+without repository-wide name fallback. Import aliases, re-exports, class-owned
+methods, calls and instantiations are materialized as inspectable graph edges.
 
 The target engine is self-maintaining after `init`: default agent queries check
 freshness, publish safe incremental generations, prune invalidated facts and
@@ -43,7 +61,16 @@ The installed executable is `zgraphy`.
 zgraphy init .
 zgraphy build .
 zgraphy status
+zgraphy doctor . --json
 zgraphy parity
+zgraphy schema
+zgraphy schema calls_direct --json
+zgraphy contracts --json
+zgraphy contracts provider --json
+zgraphy security --json
+zgraphy security ZG-THR-015 --json
+zgraphy evaluation --json
+zgraphy evaluation agent_task --json
 zgraphy benchmark corpus
 zgraphy benchmark lexical fullstack-orders --json
 zgraphy benchmark zgraphy zig-ambiguity --json
@@ -76,17 +103,46 @@ zgraphy benchmark corpus --json
 zgraphy query "repository indexing" --limit 10 --json
 ```
 
-`init` creates `.zgraphy/config.json` and `.zgraphyignore` without replacing
-existing files. `build` is a bounded full rebuild in the MVP; `ingest` is an
-alias. The complete snapshot is written transactionally to
-`.zgraphy/nendb.jsonl`. Readers reject incomplete footers or incompatible
-schema/embedder metadata.
+`init` creates config-v2 with one opaque persistent repository identity plus
+`.zgraphyignore`, without replacing user configuration. `build` is a bounded
+full rebuild in M1; `ingest` is an alias. It atomically writes the complete
+snapshot, deterministic redacted content/ownership manifest, and graph-health
+baseline under `.zgraphy/`. Readers reject incomplete footers or incompatible
+schema/embedder metadata. `doctor` rebuilds current state in memory and reports
+clean, stale, missing, incompatible, or corrupt evidence without mutating the
+published graph.
+
+`schema` validates and reports the content-addressed semantic contract. Passing
+a relation name resolves its complete family policy, including endpoint roles,
+evidence and ambiguity requirements, affected-query traversal, invalidation,
+and external mappings. This is an additive M0 contract: snapshot v1 remains the
+active storage format and the command reports schema-v2 storage as pending.
+
+`contracts` validates and reports the operational boundary for provider
+authority and lifecycle, shared extractor conformance, staged config-v2,
+independent graph-health dimensions, redacted diagnostics, and rollback-safe
+migration. Section inspection exposes policy without credentials or executable
+provider configuration. The contract grants no process, network, database,
+model, or out-of-repository filesystem authority.
+
+`security` validates and reports the pinned threat catalog. Passing a threat ID
+returns its severity, boundaries, assets, controls, Graphify references,
+fixture evidence, milestone owner, and residual risk. Planned, deferred, and
+absence-guard fixtures remain distinct from runtime-exercised evidence.
+
+`evaluation` exposes the five explicit M0 receipt contracts: extraction,
+retrieval, agent-task, performance, and resource. Retrieval, agent-task, and
+performance remain visibly `schema_only`; they cannot support a measured claim
+until held-out controlled receipts exist.
 
 ## What is indexed
 
-The MVP indexes:
+M1 indexes:
 
-- repository, directory, and Zig file placement;
+- repository, directory, and safe mixed-language file placement;
+- workspace-aware application, package, library, and nested-repository
+  ownership from Zig/ZigEffect, package.json, pyproject, Cargo, Go and Buf
+  manifests;
 - functions, structs, enums, unions, and error sets;
 - explicit `@import` edges and uniquely resolved local file imports;
 - direct calls, including uniquely resolved cross-file call candidates;
@@ -96,9 +152,13 @@ The MVP indexes:
   roots; and
 - a bounded projection of `.zigeffect/graph/causal-graph.jsonl`.
 
-The walker applies fixed cache/dependency exclusions plus `.gitignore` and
-`.zgraphyignore` exclusion rules. File, byte, node, edge, snapshot, and graph
-hop limits are explicit.
+The no-follow walker applies fixed cache/dependency exclusions plus root and
+nested `.gitignore`/`.zgraphyignore` rules with anchored last-match negation.
+Ignored, sensitive, binary, oversized, symlinked, unreadable and unsupported
+inputs remain distinct terminal records with their responsible rule or policy.
+Sensitive names are concealed and their content is never opened or hashed.
+File, byte, depth, entry, node, edge, snapshot, and graph-hop limits are
+explicit.
 
 ## ZigEffect source bridge
 
@@ -125,9 +185,10 @@ On the next `zgraphy build`, the safe causal projection becomes a
 `causal_event` node with an `observed_at` edge to that exact source symbol. Raw
 payloads and terminal output are not imported.
 
-The public package also exports a `RepositoryGraph` service layer and query
-effect so a larger ZigEffect app can compose zgraphy retrieval into its own one
-process-level `zstd.ManagedRuntime`.
+The public package exports a `RepositoryGraph` service/query effect for larger
+applications and an `ApplicationInputs` root layer for its own CLI. Every
+command runs through one process-level `zstd.ManagedRuntime`; its embedded
+NenDB causal graph and application map are runtime-owned.
 
 ## Architecture and evidence
 
@@ -136,6 +197,8 @@ The product design and staged plan are checked in at:
 - [`ROADMAP.md`](ROADMAP.md) — the comprehensive agent-first product roadmap,
   requirement catalogue, complete Graphify capability ledger, semantic model,
   benchmark programme, and release gates;
+- [`docs/superpowers/specs/2026-07-16-zgraphy-m1-universal-discovery.md`](docs/superpowers/specs/2026-07-16-zgraphy-m1-universal-discovery.md);
+- [`docs/superpowers/specs/2026-07-16-zgraphy-m1-operational-baseline.md`](docs/superpowers/specs/2026-07-16-zgraphy-m1-operational-baseline.md);
 - [`../../docs/superpowers/specs/2026-07-16-zgraphy-design.md`](../../docs/superpowers/specs/2026-07-16-zgraphy-design.md)
 - [`../../docs/superpowers/plans/2026-07-16-zgraphy-mvp.md`](../../docs/superpowers/plans/2026-07-16-zgraphy-mvp.md)
 
@@ -144,7 +207,7 @@ extraction reference material. NenDB is pinned under
 `packages/references/nen-db`; zgraphy's reviewed Zig 0.16 adaptation records the
 exact upstream commit in every snapshot and status response.
 
-M0 execution has begun with an embedded, validated parity ledger at
+M0 is complete with an embedded, validated parity ledger at
 `src/graphify-parity.v1.json`. `zgraphy parity --json` reports all 17 reviewed
 Graphify capability families, their roadmap disposition, requirement,
 milestone, reference modules/tests, and intended zgraphy improvement.
@@ -203,12 +266,45 @@ Incremental update, automatic pre-query refresh, watch mode, automatic pruning,
 repair, and garbage collection remain explicitly unsupported. The resource
 receipt contains no performance claim.
 
+The first schema-v2 foundation is now executable as
+`src/semantic-schema.v2.json`, with strict typed validation in
+`src/semantic_schema.zig` and its normative design in
+`docs/schema-v2-rfc.md`. It declares eight semantic record concepts, 37 node
+kinds, independent origin and epistemic-status axes, nine relation families,
+96 canonical relations, every MVP and benchmark compatibility mapping, and
+Graphify provenance projections. The contract is SHA-256 addressed; malformed
+or incomplete registries fail closed. It deliberately does not yet implement
+provider execution, schema-v2 persistence, or automatic refresh.
+
+`src/operational-contracts.v1.json` and
+`docs/operational-contracts-rfc.md` make the next foundation executable. The
+contract distinguishes nine provider kinds and seven authorities, reconciles
+six terminal unit outcomes, qualifies extractors over 13 shared dimensions,
+defines six reproducible config modes and six health statuses across nine
+independent dimensions, and requires validated atomic migration with a retained
+last-good generation. It preserves Graphify's provider/reconciliation and
+diagnostic strengths while preventing repository config, ambient credentials,
+or partial provider output from silently widening authority or canonical truth.
+
+`src/security-baseline.v1.json` and `docs/threat-model.md` cover 20 initial
+threats across repository, filesystem, authority, parser, persistence,
+provider, agent-output, causal, and export boundaries. Validation re-hashes five
+pinned Graphify security files, verifies every exercised local evidence path,
+and rejects broken references or false mitigation claims. High/critical gaps
+remain explicitly owned by M1, M3, M5, M7, M8, M10, or M11.
+
 Testing uses the ZigEffect Testing v2 server runner. The authoritative native
 suite receipt is `.zigeffect/tests/suites/zgraphy-tests.json`; semantic
 requirement receipts and replay commands are under `.zigeffect/tests/`.
 
 ## Current MVP boundary
 
-Only Zig and ZigEffect intent/causal metadata are parsed today. Neural
-embeddings, ANN, tree-sitter grammars for other languages, incremental watch
-mode, visualisation, MCP, and editor installers are intentionally deferred.
+All safe languages receive queryable placement and manifest-derived ownership.
+Zig syntax enters through the compiler-owned AST, while the shared native
+parser supplies exact TypeScript/TSX/JavaScript facts. Zig call resolution and
+TypeScript module and symbol resolution preserve candidates and typed ambiguity
+without name-only cross-file guesses. Export/barrel/default/namespace flow and
+evidence-backed receiver calls are active; Proto/generated-client continuity,
+deeper Zig type/build resolution, neural embeddings, ANN, incremental watch and
+automatic pruning, MCP, editor installers, and visualisation remain later
+slices.

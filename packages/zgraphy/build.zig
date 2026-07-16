@@ -3,20 +3,22 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const zstd_dep = b.dependency("zigeffect_std", .{});
+    const zstd_dep = b.dependency("zigeffect_std", .{ .target = target, .optimize = optimize });
     const zstd = zstd_dep.module("zigeffect_std");
+    const parser_dep = b.dependency("zigeffect_parser", .{ .target = target, .optimize = optimize });
+    const parser = parser_dep.module("zigeffect_parser");
     const benchmark_assets = b.createModule(.{
         .root_source_file = b.path("benchmarks/embedded.zig"),
         .target = target,
         .optimize = optimize,
     });
-
     const zgraphy = b.addModule("zgraphy", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
     zgraphy.addImport("zigeffect_std", zstd);
+    zgraphy.addImport("zigeffect_parser", parser);
     zgraphy.addImport("zgraphy_benchmark_assets", benchmark_assets);
 
     const cli_module = b.createModule(.{

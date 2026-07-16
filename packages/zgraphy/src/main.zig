@@ -3,13 +3,7 @@ const zgraphy = @import("zgraphy");
 const zstd = @import("zigeffect_std");
 const owned = zgraphy.Memory;
 
-const CommandState = struct {
-    io: std.Io,
-    root: std.Io.Dir,
-    args: []const []const u8,
-};
-
-const CommandProgram = zstd.fx.kernel.Effect(void, anyerror, .{}).Stateful(CommandState);
+const CommandProgram = zstd.fx.kernel.Effect(void, anyerror, .{zgraphy.Application.ApplicationInputs});
 
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
@@ -21,25 +15,27 @@ pub fn main(init: std.process.Init) !void {
     var root = try std.Io.Dir.cwd().openDir(init.io, root_path, .{ .iterate = true, .follow_symlinks = false });
     defer root.close(init.io);
     try root.createDirPath(init.io, ".zgraphy");
-    var runtime_root = try root.openDir(init.io, ".zgraphy", .{ .follow_symlinks = false });
-    defer runtime_root.close(init.io);
-    const empty = zstd.fx.kernel.Layer.empty();
-    var runtime = try zstd.ManagedRuntime(@TypeOf(empty)).make(
+    const main_layer = zgraphy.Application.rootLayer(.{ .io = init.io, .root = root, .args = args });
+    var runtime = try zstd.ManagedRuntime(@TypeOf(main_layer)).make(
         init.gpa,
         init.io,
-        runtime_root,
-        empty,
-        .{ .graph = .{ .path = "causal", .max_records = 4096, .max_wal_bytes = 16 * 1024 * 1024 } },
+        root,
+        main_layer,
+        .{ .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 4096, .max_wal_bytes = 16 * 1024 * 1024 } },
     );
     defer runtime.deinit();
-    try runtime.run(commandEffect(.{ .io = init.io, .root = root, .args = args }));
+    try runtime.run(commandEffect());
+    var application = try runtime.inspect(init.gpa, .{ .max_recent_events = 64 });
+    defer application.deinit();
+    if (application.services.len == 0) return error.InvalidApplicationSnapshot;
     if (runtime.causalHealth().status != .healthy) return error.CausalRuntimeUnhealthy;
     try runtime.shutdown();
 }
 
-fn commandEffect(state: CommandState) CommandProgram {
-    return CommandProgram.init(state, struct {
-        fn run(value: CommandState, ctx: *CommandProgram.Context) anyerror!void {
+fn commandEffect() CommandProgram {
+    return CommandProgram.fromFn(struct {
+        fn run(ctx: *CommandProgram.Context) anyerror!void {
+            const value = ctx.service(zgraphy.Application.ApplicationInputs);
             const command = value.args[1];
             dispatch(ctx.allocator(), value.io, value.root, value.args) catch |failure| {
                 _ = ctx.recordCausal(.{
@@ -65,10 +61,15 @@ fn dispatch(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []
     if (std.mem.eql(u8, command, "init")) return runInit(allocator, io, root, hasFlag(args, "--json"));
     if (std.mem.eql(u8, command, "build") or std.mem.eql(u8, command, "ingest")) return runBuild(allocator, io, root, hasFlag(args, "--json"));
     if (std.mem.eql(u8, command, "status")) return runStatus(allocator, io, root, hasFlag(args, "--json"));
+    if (std.mem.eql(u8, command, "doctor")) return runDoctor(allocator, io, root, hasFlag(args, "--json"));
     if (std.mem.eql(u8, command, "query")) return runQuery(allocator, io, root, args);
     if (std.mem.eql(u8, command, "explain")) return runExplain(allocator, io, root, args);
     if (std.mem.eql(u8, command, "path")) return runPath(allocator, io, root, args);
     if (std.mem.eql(u8, command, "parity")) return runParity(allocator, io, hasFlag(args, "--json"));
+    if (std.mem.eql(u8, command, "schema")) return runSemanticSchema(allocator, io, args);
+    if (std.mem.eql(u8, command, "contracts")) return runOperationalContracts(allocator, io, args);
+    if (std.mem.eql(u8, command, "security")) return runSecurityBaseline(allocator, io, args);
+    if (std.mem.eql(u8, command, "evaluation")) return runEvaluationContracts(allocator, io, args);
     if (std.mem.eql(u8, command, "benchmark")) return runBenchmark(allocator, io, root, args);
     return error.InvalidCommand;
 }
@@ -89,15 +90,10 @@ fn runInit(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, json: boo
 fn runBuild(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, json: bool) !void {
     var config = try zgraphy.Project.loadConfig(allocator, io, root);
     defer config.deinit();
-    var built = try zgraphy.Indexer.buildRepository(allocator, io, root, .{
-        .max_files = config.value.max_files,
-        .max_file_bytes = config.value.max_file_bytes,
-        .max_source_bytes = config.value.max_source_bytes,
-        .max_nodes = config.value.max_nodes,
-        .max_edges = config.value.max_edges,
-    });
+    var built = try zgraphy.Indexer.buildRepository(allocator, io, root, zgraphy.Operations.buildOptions(config.value));
     defer built.deinit();
     try zgraphy.Store.save(io, root, config.value.database, &built.graph);
+    try zgraphy.Operations.publish(allocator, io, root, config.value, &built);
     if (json) return writeJson(io, allocator, .{
         .schema = "zgraphy.build.v1",
         .status = "complete",
@@ -110,6 +106,25 @@ fn runBuild(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, json: bo
         built.summary.vectors,
         built.summary.files_indexed,
         config.value.database,
+    });
+}
+
+fn runDoctor(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, json: bool) !void {
+    var config = try zgraphy.Project.loadConfig(allocator, io, root);
+    defer config.deinit();
+    var report = try zgraphy.Operations.doctor(allocator, io, root, config.value);
+    if (json) {
+        const encoded = try zgraphy.Operations.encodeDoctorAlloc(allocator, config.value, &report);
+        defer allocator.free(encoded);
+        try std.Io.File.stdout().writeStreamingAll(io, encoded);
+        return std.Io.File.stdout().writeStreamingAll(io, "\n");
+    }
+    return writeText(io, allocator, "{s}: {d} nodes, {d} edges, {d} vectors, {d} diagnostics\n", .{
+        @tagName(report.status),
+        report.nodes,
+        report.edges,
+        report.vectors,
+        report.diagnostics().len,
     });
 }
 
@@ -152,6 +167,182 @@ fn runParity(allocator: std.mem.Allocator, io: std.Io, json: bool) !void {
         summary.improved_equivalent,
         summary.optional_parity,
         summary.deferred_visual,
+    });
+}
+
+fn runSemanticSchema(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
+    var parsed = try zgraphy.SemanticSchema.parseEmbedded(allocator);
+    defer parsed.deinit();
+    try zgraphy.SemanticSchema.validate(&parsed.value);
+    const digest = zgraphy.SemanticSchema.contractDigest();
+    const digest_hex = std.fmt.bytesToHex(digest, .lower);
+
+    if (positional(args, 0)) |relation_name| {
+        const relation = try zgraphy.SemanticSchema.resolveRelation(&parsed.value, relation_name);
+        if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
+            .schema = "zgraphy.semantic-relation.v2",
+            .schema_version = zgraphy.SemanticSchema.schema_version,
+            .contract_digest = digest_hex,
+            .relation = relation,
+        });
+        return writeText(io, allocator, "{s}: {s} -> {s} ({s}, evidence {s}, reverse traversal {any}, parallel {any})\n", .{
+            relation.name,
+            relation.source_role,
+            relation.target_role,
+            relation.family,
+            @tagName(relation.evidence),
+            relation.reverse_traversal,
+            relation.parallel_instances,
+        });
+    }
+
+    if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
+        .schema = parsed.value.schema,
+        .schema_version = parsed.value.schema_version,
+        .contract_digest = digest_hex,
+        .maturity = parsed.value.maturity,
+        .record_count = parsed.value.records.len,
+        .node_kind_count = parsed.value.node_kinds.len,
+        .origin_count = parsed.value.origins.len,
+        .epistemic_status_count = parsed.value.epistemic_statuses.len,
+        .family_count = parsed.value.families.len,
+        .relation_count = parsed.value.relations.len,
+        .compatibility_mapping_count = parsed.value.compatibility.len,
+        .graphify_provenance_mapping_count = parsed.value.graphify_provenance.len,
+        .migration = parsed.value.migration,
+        .storage_implemented = false,
+    });
+    return writeText(io, allocator, "semantic schema v{d}: {d} records, {d} node kinds, {d} provenance origins, {d} statuses, {d} relation families, {d} relations (storage pending)\n", .{
+        parsed.value.schema_version,
+        parsed.value.records.len,
+        parsed.value.node_kinds.len,
+        parsed.value.origins.len,
+        parsed.value.epistemic_statuses.len,
+        parsed.value.families.len,
+        parsed.value.relations.len,
+    });
+}
+
+fn runOperationalContracts(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
+    var parsed = try zgraphy.OperationalContracts.parseEmbedded(allocator);
+    defer parsed.deinit();
+    try zgraphy.OperationalContracts.validate(&parsed.value);
+    const digest = zgraphy.OperationalContracts.contractDigest();
+    const digest_hex = std.fmt.bytesToHex(digest, .lower);
+
+    if (positional(args, 0)) |section| {
+        if (std.mem.eql(u8, section, "provider")) return writeJson(io, allocator, .{ .contract_digest = digest_hex, .provider = parsed.value.provider });
+        if (std.mem.eql(u8, section, "conformance")) return writeJson(io, allocator, .{ .contract_digest = digest_hex, .conformance = parsed.value.conformance });
+        if (std.mem.eql(u8, section, "config")) return writeJson(io, allocator, .{ .contract_digest = digest_hex, .config = parsed.value.config });
+        if (std.mem.eql(u8, section, "health")) return writeJson(io, allocator, .{ .contract_digest = digest_hex, .health = parsed.value.health });
+        if (std.mem.eql(u8, section, "diagnostic")) return writeJson(io, allocator, .{ .contract_digest = digest_hex, .diagnostic = parsed.value.diagnostic });
+        if (std.mem.eql(u8, section, "migration")) return writeJson(io, allocator, .{ .contract_digest = digest_hex, .migration = parsed.value.migration });
+        return error.UnknownOperationalContract;
+    }
+
+    if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
+        .schema = parsed.value.schema,
+        .schema_version = parsed.value.schema_version,
+        .contract_digest = digest_hex,
+        .maturity = parsed.value.maturity,
+        .provider_kinds = parsed.value.provider.kinds.len,
+        .authorities = parsed.value.provider.authorities.len,
+        .conformance_dimensions = parsed.value.conformance.dimensions.len,
+        .conformance_profiles = parsed.value.conformance.profiles.len,
+        .config_modes = parsed.value.config.modes.len,
+        .health_statuses = parsed.value.health.statuses.len,
+        .health_dimensions = parsed.value.health.dimensions.len,
+        .diagnostic_stages = parsed.value.diagnostic.stages.len,
+        .migration_states = parsed.value.migration.states.len,
+        .runtime_schemas_changed = true,
+        .external_authority_granted = false,
+    });
+    return writeText(io, allocator, "operational contracts v{d}: {d} provider kinds, {d} conformance dimensions, {d} config modes, {d} health dimensions (config v2 identity/bounds active, no external authority)\n", .{
+        parsed.value.schema_version,
+        parsed.value.provider.kinds.len,
+        parsed.value.conformance.dimensions.len,
+        parsed.value.config.modes.len,
+        parsed.value.health.dimensions.len,
+    });
+}
+
+fn runSecurityBaseline(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
+    var parsed = try zgraphy.SecurityBaseline.parseEmbedded(allocator);
+    defer parsed.deinit();
+    try zgraphy.SecurityBaseline.validate(&parsed.value);
+    const digest = zgraphy.SecurityBaseline.catalogDigest();
+    const digest_hex = std.fmt.bytesToHex(digest, .lower);
+
+    if (positional(args, 0)) |threat_id| {
+        const threat = zgraphy.SecurityBaseline.findThreat(&parsed.value, threat_id) orelse return error.UnknownSecurityThreat;
+        return writeJson(io, allocator, .{
+            .schema = "zgraphy.security-threat.v1",
+            .catalog_digest = digest_hex,
+            .threat = threat,
+        });
+    }
+
+    const summary = zgraphy.SecurityBaseline.summarize(&parsed.value);
+    if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
+        .schema = parsed.value.schema,
+        .schema_version = parsed.value.schema_version,
+        .catalog_digest = digest_hex,
+        .graphify_version = parsed.value.graphify.version,
+        .graphify_commit = parsed.value.graphify.commit,
+        .boundaries = parsed.value.boundaries.len,
+        .assets = parsed.value.assets.len,
+        .controls = parsed.value.controls.len,
+        .summary = summary,
+    });
+    return writeText(io, allocator, "security baseline: {d} threats, {d} controls; fixtures {d} exercised, {d} contract, {d} planned, {d} deferred, {d} absent guards\n", .{
+        summary.total,
+        parsed.value.controls.len,
+        summary.exercised,
+        summary.contract_exercised,
+        summary.planned,
+        summary.deferred,
+        summary.not_applicable,
+    });
+}
+
+fn runEvaluationContracts(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
+    var parsed = try zgraphy.EvaluationContracts.parseEmbedded(allocator);
+    defer parsed.deinit();
+    try zgraphy.EvaluationContracts.validate(&parsed.value);
+    const digest = zgraphy.EvaluationContracts.contractDigest();
+    const digest_hex = std.fmt.bytesToHex(digest, .lower);
+
+    if (positional(args, 0)) |kind_name| {
+        const kind = std.meta.stringToEnum(zgraphy.EvaluationContracts.EvaluationKind, kind_name) orelse return error.UnknownEvaluationKind;
+        const definition = zgraphy.EvaluationContracts.findDefinition(&parsed.value, kind) orelse return error.UnknownEvaluationKind;
+        return writeJson(io, allocator, .{
+            .schema = "zgraphy.evaluation-definition.v1",
+            .contract_digest = digest_hex,
+            .definition = definition,
+            .claim_policy = parsed.value.claim_policy,
+        });
+    }
+
+    var active_baselines: usize = 0;
+    var schema_only: usize = 0;
+    for (parsed.value.definitions) |definition| switch (definition.evidence_state) {
+        .active_baseline => active_baselines += 1,
+        .schema_only => schema_only += 1,
+    };
+    if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
+        .schema = parsed.value.schema,
+        .schema_version = parsed.value.schema_version,
+        .contract_digest = digest_hex,
+        .definitions = parsed.value.definitions,
+        .claim_policy = parsed.value.claim_policy,
+        .active_baselines = active_baselines,
+        .schema_only = schema_only,
+    });
+    return writeText(io, allocator, "evaluation contracts: {d} kinds, {d} active baselines, {d} schema-only; claims {s}\n", .{
+        parsed.value.definitions.len,
+        active_baselines,
+        schema_only,
+        @tagName(parsed.value.claim_policy.maturity),
     });
 }
 
@@ -719,7 +910,7 @@ fn numericOption(args: []const []const u8, name: []const u8, default: usize, min
 
 fn selectedRoot(args: []const []const u8) []const u8 {
     if (args.len >= 3 and
-        (std.mem.eql(u8, args[1], "init") or std.mem.eql(u8, args[1], "build") or std.mem.eql(u8, args[1], "ingest")) and
+        (std.mem.eql(u8, args[1], "init") or std.mem.eql(u8, args[1], "build") or std.mem.eql(u8, args[1], "ingest") or std.mem.eql(u8, args[1], "doctor")) and
         !std.mem.startsWith(u8, args[2], "--")) return args[2];
     return ".";
 }
@@ -762,7 +953,12 @@ fn printHelp(io: std.Io) !void {
         \\  zgraphy explain <node-id-or-label> [--json]
         \\  zgraphy path <from> <to> [--max-hops N] [--json]
         \\  zgraphy status [--json]
+        \\  zgraphy doctor [root] [--json]
         \\  zgraphy parity [--json]
+        \\  zgraphy schema [relation] [--json]
+        \\  zgraphy contracts [provider|conformance|config|health|diagnostic|migration] [--json]
+        \\  zgraphy security [ZG-THR-NNN] [--json]
+        \\  zgraphy evaluation [extraction|retrieval|agent_task|performance|resource] [--json]
         \\  zgraphy benchmark corpus [--json]
         \\  zgraphy benchmark lexical <fixture-id> [fixture-root] [--json]
         \\  zgraphy benchmark zgraphy <fixture-id> [fixture-root] [--json]

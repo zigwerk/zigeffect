@@ -47,7 +47,7 @@
       "disposition": "core_parity",
       "milestone": "M2",
       "requirement": "ZG-REQ-006",
-      "status": "planned",
+      "status": "mvp_partial",
       "reference_modules": ["graphify/symbol_resolution.py", "graphify/extractors/resolution.py", "graphify/resolver_registry.py"],
       "reference_tests": ["test_symbol_resolution", "test_js_import_resolution", "test_ts_receiver_member_calls", "test_indirect_dispatch"],
       "improvement": "Retain every viable candidate and typed rejection reason, preferring scope import type build and contract evidence over global name uniqueness."

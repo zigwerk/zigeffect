@@ -1,25 +1,45 @@
 const std = @import("std");
 const model = @import("model.zig");
 const owned = @import("memory.zig");
+const discovery = @import("discovery.zig");
+const ownership = @import("ownership.zig");
+const zig_parser = @import("zig_parser.zig");
+const zig_resolution = @import("zig_resolution.zig");
+const typescript_parser = @import("typescript_parser.zig");
+const typescript_resolution = @import("typescript_resolution.zig");
+const typescript_symbols = @import("typescript_symbols.zig");
 
 pub const max_manifest_bytes: usize = 4 * 1024 * 1024;
 pub const max_causal_bytes: usize = 64 * 1024 * 1024;
 pub const causal_wal_path = ".zigeffect/graph/causal-graph.jsonl";
 
 pub const BuildOptions = struct {
+    repository_id: []const u8 = "repo-0123456789abcdef0123456789abcdef",
+    max_entries: usize = 200_000,
     max_files: usize = 100_000,
     max_file_bytes: usize = 4 * 1024 * 1024,
     max_source_bytes: usize = 512 * 1024 * 1024,
+    max_depth: usize = 128,
+    max_path_bytes: usize = std.fs.max_path_bytes,
     max_nodes: usize = 100_000,
     max_edges: usize = 500_000,
 };
 
 pub const BuildSummary = struct {
     files_discovered: usize = 0,
+    files_placed: usize = 0,
     files_indexed: usize = 0,
     files_skipped: usize = 0,
     source_bytes: usize = 0,
+    discovery_manifest_digest: [32]u8 = @splat(0),
+    discovery: discovery.Summary = .{},
+    ownership_manifest_digest: [32]u8 = @splat(0),
+    ownership: ownership.Summary = .{},
     causal_records: usize = 0,
+    module_resolutions: usize = 0,
+    module_resolution_diagnostics: usize = 0,
+    symbol_resolutions: usize = 0,
+    symbol_resolution_diagnostics: usize = 0,
     nodes: usize = 0,
     edges: usize = 0,
     vectors: usize = 0,
@@ -28,8 +48,12 @@ pub const BuildSummary = struct {
 pub const BuildResult = struct {
     graph: model.RepositoryGraph,
     summary: BuildSummary,
+    discovery_result: discovery.Result,
+    ownership_result: ownership.Result,
 
     pub fn deinit(self: *BuildResult) void {
+        self.ownership_result.deinit();
+        self.discovery_result.deinit();
         self.graph.deinit();
     }
 };
@@ -40,69 +64,121 @@ const Symbol = struct {
     line: u32,
 };
 
+const LocalBinding = struct {
+    id: u64,
+    name: []const u8,
+    enclosing_declaration: []const u8,
+};
+
 pub fn buildRepository(
     allocator: std.mem.Allocator,
     io: std.Io,
     root: std.Io.Dir,
     options: BuildOptions,
 ) !BuildResult {
-    if (options.max_files == 0 or options.max_file_bytes == 0 or options.max_source_bytes == 0) return error.InvalidLimit;
+    if (options.max_entries == 0 or options.max_files == 0 or options.max_file_bytes == 0 or
+        options.max_source_bytes == 0 or options.max_depth == 0 or options.max_path_bytes == 0)
+    {
+        return error.InvalidLimit;
+    }
     var graph = try model.RepositoryGraph.init(allocator, .{
         .max_nodes = options.max_nodes,
         .max_edges = options.max_edges,
     });
     errdefer graph.deinit();
-    const repository_id = try graph.addNode(.{
-        .kind = .repository,
-        .label = ".",
-        .path = ".",
-        .search_text = "repository root",
+    var discovered = try discovery.scan(allocator, io, root, .{
+        .repository_id = options.repository_id,
+        .max_entries = options.max_entries,
+        .max_files = options.max_files,
+        .max_file_bytes = options.max_file_bytes,
+        .max_total_bytes = options.max_source_bytes,
+        .max_depth = options.max_depth,
+        .max_path_bytes = options.max_path_bytes,
     });
-    var ignore_rules = try loadIgnoreRules(allocator, io, root);
-    defer ignore_rules.deinit();
+    errdefer discovered.deinit();
+    try discovery.materialize(&graph, &discovered);
+    var owned_context = try ownership.analyze(allocator, io, root, &discovered, .{
+        .max_manifest_bytes = options.max_file_bytes,
+    });
+    errdefer owned_context.deinit();
+    try ownership.materialize(&graph, &discovered, &owned_context);
 
-    var paths: std.ArrayList([]const u8) = .empty;
-    defer {
-        for (paths.items) |path| allocator.free(path);
-        paths.deinit(allocator);
+    var summary = BuildSummary{
+        .files_discovered = discovered.summary.total,
+        .files_placed = discovered.summary.deeply_indexed + discovered.summary.placed_unsupported + discovered.summary.placed_asset,
+        .files_skipped = discovered.summary.total - (discovered.summary.deeply_indexed + discovered.summary.placed_unsupported + discovered.summary.placed_asset),
+        .discovery_manifest_digest = discovered.manifest_digest,
+        .discovery = discovered.summary,
+        .ownership_manifest_digest = owned_context.manifest_digest,
+        .ownership = owned_context.summary,
+    };
+    var zig_corpus = try zig_resolution.Corpus.init(allocator, .{
+        .max_files = options.max_files,
+        .max_symbols = options.max_nodes,
+        .max_resolutions = options.max_edges,
+        .max_candidates = options.max_edges,
+        .parser = .{ .max_source_bytes = options.max_file_bytes },
+    });
+    defer zig_corpus.deinit();
+    var typescript_corpus = try typescript_resolution.Corpus.init(allocator, .{
+        .max_files = options.max_files,
+        .max_imports = options.max_edges,
+        .max_documents = options.max_files,
+        .max_document_bytes = options.max_file_bytes,
+        .max_total_document_bytes = options.max_source_bytes,
+        .max_candidates = options.max_edges,
+        .max_result_bytes = options.max_source_bytes,
+    });
+    defer typescript_corpus.deinit();
+    var typescript_symbol_corpus = try typescript_symbols.Corpus.init(allocator, .{
+        .max_files = options.max_files,
+        .max_facts = options.max_edges,
+        .max_candidates = options.max_edges,
+        .max_result_bytes = options.max_source_bytes,
+        .parser = .{ .max_source_bytes = options.max_file_bytes },
+    });
+    defer typescript_symbol_corpus.deinit();
+    for (discovered.records) |record| {
+        if (!isPlaced(record.disposition)) continue;
+        try typescript_corpus.addFile(record.relative_path);
     }
-    var walker = try root.walk(allocator);
-    defer walker.deinit();
-    while (try walker.next(io)) |entry| {
-        if (entry.kind != .file or mandatoryExcluded(entry.path) or ignore_rules.matches(entry.path) or !supportedPath(entry.path)) continue;
-        if (paths.items.len >= options.max_files) return error.FileLimitExceeded;
-        try paths.append(allocator, try owned.copy(u8, allocator, entry.path));
+    for (discovered.records) |record| {
+        if (!isPlaced(record.disposition) or !isTypeScriptResolutionDocument(record.relative_path)) continue;
+        const document = try readVerifiedSource(allocator, io, root, record.relative_path, options.max_file_bytes, record.content_digest);
+        defer allocator.free(document);
+        summary.source_bytes = std.math.add(usize, summary.source_bytes, document.len) catch return error.SourceLimitExceeded;
+        if (summary.source_bytes > options.max_source_bytes) return error.SourceLimitExceeded;
+        try typescript_corpus.addDocument(record.relative_path, document);
     }
-    std.mem.sort([]const u8, paths.items, {}, struct {
-        fn lessThan(_: void, left: []const u8, right: []const u8) bool {
-            return std.mem.lessThan(u8, left, right);
-        }
-    }.lessThan);
-
-    var summary = BuildSummary{ .files_discovered = paths.items.len };
-    for (paths.items) |path| {
-        if (std.mem.eql(u8, path, "zigeffect.project.json")) continue;
-        const source = root.readFileAlloc(io, path, allocator, .limited(options.max_file_bytes)) catch {
-            summary.files_skipped += 1;
-            continue;
-        };
+    for (discovered.records) |record| {
+        if (record.disposition != .deeply_indexed or record.classification.language != .zig) continue;
+        const source = try readVerifiedSource(allocator, io, root, record.relative_path, options.max_file_bytes, record.content_digest);
         defer allocator.free(source);
         summary.source_bytes = std.math.add(usize, summary.source_bytes, source.len) catch return error.SourceLimitExceeded;
         if (summary.source_bytes > options.max_source_bytes) return error.SourceLimitExceeded;
-        if (looksBinary(source)) {
-            summary.files_skipped += 1;
-            continue;
-        }
-        try indexZigSource(&graph, path, source);
-        try linkFileHierarchy(&graph, repository_id, path);
+        try zig_corpus.addSource(record.relative_path, source);
+        const parsed = zig_corpus.parsedForPath(record.relative_path) orelse return error.MissingParsedZigSource;
+        try indexParsedZigSource(&graph, record.relative_path, source, parsed);
         summary.files_indexed += 1;
     }
-    for (paths.items) |path| {
-        if (!std.mem.eql(u8, path, "zigeffect.project.json")) continue;
-        const manifest = root.readFileAlloc(io, path, allocator, .limited(@min(options.max_file_bytes, max_manifest_bytes))) catch {
-            summary.files_skipped += 1;
-            continue;
-        };
+    for (discovered.records) |record| {
+        if (record.disposition != .deeply_indexed or
+            (record.classification.language != .typescript and record.classification.language != .javascript)) continue;
+        const source = try readVerifiedSource(allocator, io, root, record.relative_path, options.max_file_bytes, record.content_digest);
+        defer allocator.free(source);
+        summary.source_bytes = std.math.add(usize, summary.source_bytes, source.len) catch return error.SourceLimitExceeded;
+        if (summary.source_bytes > options.max_source_bytes) return error.SourceLimitExceeded;
+        const mode = typeScriptModeForPath(record.relative_path) orelse return error.UnsupportedTypeScriptSourceExtension;
+        var parsed = try typescript_parser.parse(allocator, record.relative_path, source, mode, .{ .max_source_bytes = options.max_file_bytes });
+        defer parsed.deinit();
+        try typescript_corpus.addParsed(&parsed);
+        try indexParsedTypeScriptSource(&graph, record.relative_path, source, &parsed);
+        try typescript_symbol_corpus.addParsedOwned(&parsed);
+        summary.files_indexed += 1;
+    }
+    for (discovered.records) |record| {
+        if (!std.mem.eql(u8, record.relative_path, "zigeffect.project.json")) continue;
+        const manifest = try readVerifiedSource(allocator, io, root, record.relative_path, @min(options.max_file_bytes, max_manifest_bytes), record.content_digest);
         defer allocator.free(manifest);
         summary.source_bytes = std.math.add(usize, summary.source_bytes, manifest.len) catch return error.SourceLimitExceeded;
         if (summary.source_bytes > options.max_source_bytes) return error.SourceLimitExceeded;
@@ -110,7 +186,19 @@ pub fn buildRepository(
         summary.files_indexed += 1;
     }
     try resolveFileImports(&graph);
-    try resolveSymbolCalls(&graph);
+    var resolutions = try zig_corpus.resolve();
+    defer resolutions.deinit();
+    try materializeZigResolutions(&graph, &resolutions);
+    var module_resolutions = try typescript_corpus.resolve();
+    defer module_resolutions.deinit();
+    try materializeTypeScriptResolutions(&graph, &module_resolutions);
+    summary.module_resolutions = module_resolutions.summary.imports;
+    summary.module_resolution_diagnostics = module_resolutions.summary.diagnostics;
+    var symbol_resolutions = try typescript_symbol_corpus.resolve(&module_resolutions);
+    defer symbol_resolutions.deinit();
+    try materializeTypeScriptSymbols(&graph, &symbol_resolutions);
+    summary.symbol_resolutions = symbol_resolutions.summary.facts;
+    summary.symbol_resolution_diagnostics = symbol_resolutions.summary.diagnostics;
     const causal_records = root.readFileAlloc(io, causal_wal_path, allocator, .limited(max_causal_bytes)) catch |failure| switch (failure) {
         error.FileNotFound => null,
         else => return failure,
@@ -122,11 +210,101 @@ pub fn buildRepository(
     summary.nodes = graph.nodeCount();
     summary.edges = graph.edgeCount();
     summary.vectors = graph.vectorCount();
-    return .{ .graph = graph, .summary = summary };
+    return .{
+        .graph = graph,
+        .summary = summary,
+        .discovery_result = discovered,
+        .ownership_result = owned_context,
+    };
+}
+
+fn readVerifiedSource(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    root: std.Io.Dir,
+    path: []const u8,
+    max_bytes: usize,
+    expected_digest: ?[32]u8,
+) ![]u8 {
+    const expected = expected_digest orelse return error.MissingDiscoveryFingerprint;
+    const source = root.readFileAlloc(io, path, allocator, .limited(max_bytes)) catch return error.DiscoveryContentUnavailable;
+    errdefer allocator.free(source);
+    var actual: [32]u8 = @splat(0);
+    std.crypto.hash.sha2.Sha256.hash(source, &actual, .{});
+    if (!std.mem.eql(u8, &expected, &actual)) return error.DiscoveryContentChanged;
+    return source;
 }
 
 pub fn indexZigSource(graph: *model.RepositoryGraph, path: []const u8, source: []const u8) !void {
     try validateSourcePath(path);
+    var parsed = try zig_parser.parse(graph.allocator, path, source, .{});
+    defer parsed.deinit();
+    try indexParsedZigSource(graph, path, source, &parsed);
+}
+
+pub fn indexTypeScriptSource(
+    graph: *model.RepositoryGraph,
+    path: []const u8,
+    source: []const u8,
+    mode: typescript_parser.LanguageMode,
+) !void {
+    try validateSourcePath(path);
+    var parsed = try typescript_parser.parse(graph.allocator, path, source, mode, .{});
+    defer parsed.deinit();
+    try indexParsedTypeScriptSource(graph, path, source, &parsed);
+}
+
+fn indexParsedTypeScriptSource(
+    graph: *model.RepositoryGraph,
+    path: []const u8,
+    source: []const u8,
+    parsed: *const typescript_parser.Result,
+) !void {
+    try typescript_parser.validate(parsed);
+    const file_id = try graph.addNode(.{
+        .kind = .file,
+        .label = std.fs.path.basename(path),
+        .path = path,
+        .line = 1,
+        .search_text = path,
+    });
+    for (parsed.declarations) |declaration_fact| {
+        const scope = if (declaration_fact.enclosing_declaration.len == 0)
+            path
+        else
+            try std.fmt.allocPrint(graph.allocator, "{s}#{s}", .{ path, declaration_fact.enclosing_declaration });
+        defer if (declaration_fact.enclosing_declaration.len > 0) graph.allocator.free(scope);
+        const symbol_id = try graph.addNode(.{
+            .id = model.stableId(.symbol, scope, declaration_fact.name),
+            .kind = .symbol,
+            .label = declaration_fact.name,
+            .path = path,
+            .line = declaration_fact.name_span.start_line,
+            .search_text = source[declaration_fact.span.start_byte..declaration_fact.span.end_byte],
+        });
+        const owner_id = if (declaration_fact.enclosing_declaration.len == 0)
+            file_id
+        else if (findQualifiedTypeScriptSymbol(graph, path, declaration_fact.enclosing_declaration)) |owner|
+            owner.id
+        else
+            file_id;
+        try graph.addEdge(.{
+            .from = owner_id,
+            .to = symbol_id,
+            .relation = .declares,
+            .provenance = .extracted,
+            .source_path = path,
+            .line = declaration_fact.name_span.start_line,
+        });
+    }
+}
+
+fn indexParsedZigSource(
+    graph: *model.RepositoryGraph,
+    path: []const u8,
+    source: []const u8,
+    parsed: *const zig_parser.Result,
+) !void {
     const file_label = std.fs.path.basename(path);
     const file_id = try graph.addNode(.{
         .kind = .file,
@@ -138,93 +316,100 @@ pub fn indexZigSource(graph: *model.RepositoryGraph, path: []const u8, source: [
 
     var symbols: std.ArrayList(Symbol) = .empty;
     defer symbols.deinit(graph.allocator);
-    var line_iterator = std.mem.splitScalar(u8, source, '\n');
-    var line_number: u32 = 1;
-    var in_block_comment = false;
-    while (line_iterator.next()) |raw_line| : (line_number += 1) {
-        const line = stripComments(raw_line, &in_block_comment);
-        if (importTarget(line)) |target| {
-            const external_id = try graph.addNode(.{
-                .kind = .external_module,
-                .label = target,
-                .path = target,
-                .line = line_number,
-                .search_text = target,
-            });
-            try graph.addEdge(.{
-                .from = file_id,
-                .to = external_id,
-                .relation = .imports,
-                .provenance = .extracted,
-                .source_path = path,
-                .line = line_number,
-            });
-        }
-        if (declaration(line)) |decl| {
-            const symbol_id = try graph.addNode(.{
-                .kind = .symbol,
-                .label = decl.name,
-                .path = path,
-                .line = line_number,
-                .search_text = line,
-            });
-            try graph.addEdge(.{
-                .from = file_id,
-                .to = symbol_id,
-                .relation = .declares,
-                .provenance = .extracted,
-                .source_path = path,
-                .line = line_number,
-            });
-            try symbols.append(graph.allocator, .{ .id = symbol_id, .name = graph.findNode(symbol_id).?.label, .line = line_number });
-        }
+    var local_bindings: std.ArrayList(LocalBinding) = .empty;
+    defer local_bindings.deinit(graph.allocator);
+    for (parsed.declarations) |declaration_fact| {
+        const line_number = declaration_fact.name_span.start_line;
+        const search_text = source[declaration_fact.span.start_byte..declaration_fact.span.end_byte];
+        const symbol_id = try graph.addNode(.{
+            .kind = .symbol,
+            .label = declaration_fact.name,
+            .path = path,
+            .line = line_number,
+            .search_text = search_text,
+        });
+        try graph.addEdge(.{
+            .from = file_id,
+            .to = symbol_id,
+            .relation = .declares,
+            .provenance = .extracted,
+            .source_path = path,
+            .line = line_number,
+        });
+        try symbols.append(graph.allocator, .{ .id = symbol_id, .name = graph.findNode(symbol_id).?.label, .line = line_number });
     }
+    for (parsed.bindings) |binding_fact| {
+        if (binding_fact.scope != .local) continue;
+        const owner = findUniqueSymbol(symbols.items, binding_fact.enclosing_declaration) orelse continue;
+        const binding_id = try graph.addNode(.{
+            .kind = .concept,
+            .label = binding_fact.name,
+            .path = path,
+            .line = binding_fact.name_span.start_line,
+            .search_text = source[binding_fact.span.start_byte..binding_fact.span.end_byte],
+        });
+        try graph.addEdge(.{
+            .from = owner,
+            .to = binding_id,
+            .relation = .declares,
+            .provenance = .extracted,
+            .source_path = path,
+            .line = binding_fact.name_span.start_line,
+        });
+        try local_bindings.append(graph.allocator, .{
+            .id = binding_id,
+            .name = graph.findNode(binding_id).?.label,
+            .enclosing_declaration = binding_fact.enclosing_declaration,
+        });
+    }
+    for (parsed.imports) |import_fact| {
+        const external_id = try graph.addNode(.{
+            .kind = .external_module,
+            .label = import_fact.target,
+            .path = import_fact.target,
+            .line = import_fact.span.start_line,
+            .search_text = import_fact.target,
+        });
+        try graph.addEdge(.{
+            .from = file_id,
+            .to = external_id,
+            .relation = .imports,
+            .provenance = .extracted,
+            .source_path = path,
+            .line = import_fact.span.start_line,
+        });
+    }
+    for (parsed.calls) |call_fact| {
+        const caller = findUniqueSymbol(symbols.items, call_fact.enclosing_declaration) orelse continue;
+        const callee = calleeLeaf(call_fact.callee);
+        if (callee.len == 0) continue;
+        const local_target = findUniqueLocalBinding(local_bindings.items, callee, call_fact.enclosing_declaration);
+        const target = local_target orelse findUniqueSymbol(symbols.items, callee) orelse try graph.addNode(.{
+            .kind = .concept,
+            .label = callee,
+            .path = path,
+            .line = call_fact.callee_span.start_line,
+            .search_text = call_fact.callee,
+        });
+        if (target == caller) continue;
+        try graph.addEdge(.{
+            .from = caller,
+            .to = target,
+            .relation = .calls,
+            .provenance = if (local_target != null) .extracted else if (graph.findNode(target).?.kind == .concept) .ambiguous else .inferred,
+            .source_path = path,
+            .line = call_fact.callee_span.start_line,
+        });
+    }
+}
 
-    line_iterator = std.mem.splitScalar(u8, source, '\n');
-    line_number = 1;
-    in_block_comment = false;
-    var current_function: ?u64 = null;
-    var brace_depth: isize = 0;
-    while (line_iterator.next()) |raw_line| : (line_number += 1) {
-        const line = stripComments(raw_line, &in_block_comment);
-        var call_region = line;
-        if (functionName(line)) |name| {
-            brace_depth = 0;
-            if (std.mem.indexOfScalar(u8, line, '{')) |open| {
-                current_function = findUniqueSymbol(symbols.items, name);
-                call_region = line[open + 1 ..];
-            } else {
-                current_function = null;
-            }
-        }
-        if (current_function) |caller| {
-            var calls = CallIterator.init(call_region);
-            while (calls.next()) |callee| {
-                if (isControlWord(callee)) continue;
-                const target = findUniqueSymbol(symbols.items, callee) orelse try graph.addNode(.{
-                    .kind = .concept,
-                    .label = callee,
-                    .path = path,
-                    .line = line_number,
-                    .search_text = callee,
-                });
-                if (target == caller) continue;
-                try graph.addEdge(.{
-                    .from = caller,
-                    .to = target,
-                    .relation = .calls,
-                    .provenance = if (graph.findNode(target).?.kind == .concept) .ambiguous else .inferred,
-                    .source_path = path,
-                    .line = line_number,
-                });
-            }
-        }
-        brace_depth += braceDelta(line);
-        if (current_function != null and brace_depth <= 0 and std.mem.indexOfScalar(u8, line, '}') != null) {
-            current_function = null;
-            brace_depth = 0;
-        }
+fn calleeLeaf(callee: []const u8) []const u8 {
+    const dot = std.mem.lastIndexOfScalar(u8, callee, '.');
+    const leaf = if (dot) |index| callee[index + 1 ..] else callee;
+    if (std.mem.lastIndexOfScalar(u8, leaf, ')')) |close| {
+        if (close + 1 < leaf.len) return leaf[close + 1 ..];
     }
+    return leaf;
 }
 
 pub fn indexZigEffectManifest(graph: *model.RepositoryGraph, json: []const u8) !void {
@@ -507,6 +692,16 @@ fn findUniqueSymbol(symbols: []const Symbol, name: []const u8) ?u64 {
     return found;
 }
 
+fn findUniqueLocalBinding(bindings: []const LocalBinding, name: []const u8, enclosing: []const u8) ?u64 {
+    var found: ?u64 = null;
+    for (bindings) |binding| {
+        if (!std.mem.eql(u8, binding.name, name) or !std.mem.eql(u8, binding.enclosing_declaration, enclosing)) continue;
+        if (found != null) return null;
+        found = binding.id;
+    }
+    return found;
+}
+
 const CallIterator = struct {
     line: []const u8,
     cursor: usize = 0,
@@ -563,6 +758,18 @@ fn valueObject(value: std.json.Value) ?std.json.ObjectMap {
 
 fn findByKindAndLabel(graph: *const model.RepositoryGraph, kind: model.NodeKind, label: []const u8) ?*const model.Node {
     for (graph.nodes.items) |*node| if (node.kind == kind and std.mem.eql(u8, node.label, label)) return node;
+    return null;
+}
+
+fn findByKindPathAndLabel(
+    graph: *const model.RepositoryGraph,
+    kind: model.NodeKind,
+    path: []const u8,
+    label: []const u8,
+) ?*const model.Node {
+    for (graph.nodes.items) |*node| {
+        if (node.kind == kind and std.mem.eql(u8, node.path, path) and std.mem.eql(u8, node.label, label)) return node;
+    }
     return null;
 }
 
@@ -708,30 +915,254 @@ fn resolveFileImports(graph: *model.RepositoryGraph) !void {
     }
 }
 
-fn resolveSymbolCalls(graph: *model.RepositoryGraph) !void {
-    const edges = try owned.copy(model.Edge, graph.allocator, graph.edges.items);
-    defer graph.allocator.free(edges);
-    for (edges) |edge| {
-        if (edge.relation != .calls) continue;
-        const unresolved = graph.findNode(edge.to) orelse continue;
-        if (unresolved.kind != .concept) continue;
-        var resolved: ?u64 = null;
-        for (graph.nodes.items) |candidate| {
-            if (candidate.kind != .symbol or !std.mem.eql(u8, candidate.label, unresolved.label)) continue;
-            if (resolved != null) {
-                resolved = null;
-                break;
+fn materializeZigResolutions(graph: *model.RepositoryGraph, result: *const zig_resolution.Result) !void {
+    try zig_resolution.validate(result);
+    for (result.resolutions) |resolution| {
+        const caller = findByKindPathAndLabel(graph, .symbol, resolution.source_path, resolution.enclosing_declaration) orelse continue;
+        const local_binding = findByKindPathAndLabel(graph, .concept, resolution.source_path, resolution.callee);
+        const is_local_binding = if (local_binding) |binding| graph.hasEdge(caller.id, binding.id, .declares) else false;
+        const candidates = result.candidatesFor(&resolution);
+        if (is_local_binding) {
+            for (candidates) |candidate| {
+                const target = findByKindPathAndLabel(graph, .symbol, candidate.target_path, candidate.target_name) orelse continue;
+                try graph.addEdge(.{
+                    .from = local_binding.?.id,
+                    .to = target.id,
+                    .relation = .dispatches_to,
+                    .provenance = if (resolution.status == .ambiguous) .ambiguous else .inferred,
+                    .source_path = resolution.source_path,
+                    .line = resolution.call_span.start_line,
+                });
             }
-            resolved = candidate.id;
+            continue;
         }
-        const target = resolved orelse continue;
+        if (resolution.status != .resolved or candidates.len != 1) continue;
+        const target = findByKindPathAndLabel(graph, .symbol, candidates[0].target_path, candidates[0].target_name) orelse continue;
+        if (caller.id == target.id) continue;
         try graph.addEdge(.{
-            .from = edge.from,
-            .to = target,
+            .from = caller.id,
+            .to = target.id,
             .relation = .calls,
             .provenance = .inferred,
-            .source_path = edge.source_path,
-            .line = edge.line,
+            .source_path = resolution.source_path,
+            .line = resolution.call_span.start_line,
         });
     }
+}
+
+fn materializeTypeScriptResolutions(graph: *model.RepositoryGraph, result: *const typescript_resolution.Result) !void {
+    try typescript_resolution.validate(result);
+    for (result.resolutions) |resolution| {
+        const importer = findFileByPath(graph, resolution.source_path) orelse return error.MissingTypeScriptImporterNode;
+        const importer_id = importer.id;
+        const identity = try std.fmt.allocPrint(graph.allocator, "{s}@{d}:{s}", .{
+            resolution.specifier,
+            resolution.span.start_byte,
+            @tagName(resolution.import_kind),
+        });
+        defer graph.allocator.free(identity);
+        const search_text = try std.fmt.allocPrint(graph.allocator, "{s} {s} {s}", .{
+            resolution.specifier,
+            @tagName(resolution.import_kind),
+            @tagName(resolution.status),
+        });
+        defer graph.allocator.free(search_text);
+        const reference_id = try graph.addNode(.{
+            .id = model.stableId(.module_reference, resolution.source_path, identity),
+            .kind = .module_reference,
+            .label = resolution.specifier,
+            .path = resolution.source_path,
+            .line = resolution.span.start_line,
+            .search_text = search_text,
+        });
+        try graph.addEdge(.{
+            .from = importer_id,
+            .to = reference_id,
+            .relation = if (resolution.import_kind == .dynamic) .deferred_imports else .imports,
+            .provenance = .extracted,
+            .source_path = resolution.source_path,
+            .line = resolution.span.start_line,
+        });
+        for (result.candidatesFor(&resolution)) |candidate| {
+            const target = findFileByPath(graph, candidate.target_path) orelse return error.MissingTypeScriptResolutionCandidateNode;
+            try graph.addEdge(.{
+                .from = reference_id,
+                .to = target.id,
+                .relation = .resolves_to,
+                .provenance = if (resolution.status == .ambiguous) .ambiguous else .inferred,
+                .source_path = resolution.source_path,
+                .line = resolution.span.start_line,
+            });
+        }
+        if (resolution.status == .external) {
+            const external_path = try std.fmt.allocPrint(graph.allocator, "external/typescript/{s}", .{resolution.specifier});
+            defer graph.allocator.free(external_path);
+            const external_id = try graph.addNode(.{
+                .kind = .external_module,
+                .label = resolution.specifier,
+                .path = external_path,
+                .line = resolution.span.start_line,
+                .search_text = resolution.specifier,
+            });
+            try graph.addEdge(.{
+                .from = reference_id,
+                .to = external_id,
+                .relation = .resolves_to,
+                .provenance = .inferred,
+                .source_path = resolution.source_path,
+                .line = resolution.span.start_line,
+            });
+        }
+    }
+}
+
+fn materializeTypeScriptSymbols(graph: *model.RepositoryGraph, result: *const typescript_symbols.Result) !void {
+    try typescript_symbols.validate(result);
+    for (result.resolutions) |resolution| {
+        const provenance: model.Provenance = if (resolution.status == .ambiguous) .ambiguous else .inferred;
+        const resolved_candidates = result.candidatesFor(&resolution);
+        switch (resolution.kind) {
+            .import_binding => {
+                const alias_id = try addTypeScriptAliasNode(graph, resolution, "import");
+                const file = findFileByPath(graph, resolution.source_path) orelse return error.MissingTypeScriptSymbolSourceFile;
+                try graph.addEdge(.{
+                    .from = file.id,
+                    .to = alias_id,
+                    .relation = .declares,
+                    .provenance = .extracted,
+                    .source_path = resolution.source_path,
+                    .line = resolution.span.start_line,
+                });
+                for (resolved_candidates) |candidate| {
+                    const target_file = findFileByPath(graph, candidate.target_path) orelse continue;
+                    try graph.addEdge(.{
+                        .from = alias_id,
+                        .to = target_file.id,
+                        .relation = .imports_from,
+                        .provenance = provenance,
+                        .source_path = resolution.source_path,
+                        .line = resolution.span.start_line,
+                    });
+                    if (std.mem.eql(u8, candidate.target_name, "*")) continue;
+                    const target = findResolvedTypeScriptSymbol(graph, candidate.target_path, candidate.target_enclosing_declaration, candidate.target_name) orelse continue;
+                    try graph.addEdge(.{
+                        .from = alias_id,
+                        .to = target.id,
+                        .relation = .aliases,
+                        .provenance = provenance,
+                        .source_path = resolution.source_path,
+                        .line = resolution.span.start_line,
+                    });
+                }
+            },
+            .export_binding => {
+                const public_id = try addTypeScriptAliasNode(graph, resolution, "export");
+                const file = findFileByPath(graph, resolution.source_path) orelse return error.MissingTypeScriptSymbolSourceFile;
+                try graph.addEdge(.{
+                    .from = file.id,
+                    .to = public_id,
+                    .relation = .declares,
+                    .provenance = .extracted,
+                    .source_path = resolution.source_path,
+                    .line = resolution.span.start_line,
+                });
+                for (resolved_candidates) |candidate| {
+                    const target = if (std.mem.eql(u8, candidate.target_name, "*"))
+                        findFileByPath(graph, candidate.target_path)
+                    else
+                        findResolvedTypeScriptSymbol(graph, candidate.target_path, candidate.target_enclosing_declaration, candidate.target_name);
+                    const target_node = target orelse continue;
+                    try graph.addEdge(.{
+                        .from = public_id,
+                        .to = target_node.id,
+                        .relation = .re_exports,
+                        .provenance = provenance,
+                        .source_path = resolution.source_path,
+                        .line = resolution.span.start_line,
+                    });
+                    if (!std.mem.eql(u8, candidate.target_name, "*")) try graph.addEdge(.{
+                        .from = public_id,
+                        .to = target_node.id,
+                        .relation = .aliases,
+                        .provenance = provenance,
+                        .source_path = resolution.source_path,
+                        .line = resolution.span.start_line,
+                    });
+                }
+            },
+            .direct_call, .member_call, .constructor_call => {
+                const caller = findQualifiedTypeScriptSymbol(graph, resolution.source_path, resolution.enclosing_declaration) orelse continue;
+                for (resolved_candidates) |candidate| {
+                    if (std.mem.eql(u8, candidate.target_name, "*")) continue;
+                    const target = findResolvedTypeScriptSymbol(graph, candidate.target_path, candidate.target_enclosing_declaration, candidate.target_name) orelse continue;
+                    if (caller.id == target.id) continue;
+                    try graph.addEdge(.{
+                        .from = caller.id,
+                        .to = target.id,
+                        .relation = if (resolution.kind == .constructor_call) .instantiates else .calls,
+                        .provenance = provenance,
+                        .source_path = resolution.source_path,
+                        .line = resolution.span.start_line,
+                    });
+                }
+            },
+        }
+    }
+}
+
+fn addTypeScriptAliasNode(graph: *model.RepositoryGraph, resolution: typescript_symbols.Resolution, category: []const u8) !u64 {
+    const identity = try std.fmt.allocPrint(graph.allocator, "{s}@{d}:{s}", .{ category, resolution.span.start_byte, resolution.subject });
+    defer graph.allocator.free(identity);
+    const scope = try std.fmt.allocPrint(graph.allocator, "{s}#{s}", .{ resolution.source_path, identity });
+    defer graph.allocator.free(scope);
+    const search_text = try std.fmt.allocPrint(graph.allocator, "{s} {s} {s}", .{ resolution.subject, category, @tagName(resolution.status) });
+    defer graph.allocator.free(search_text);
+    return graph.addNode(.{
+        .id = model.stableId(.symbol, scope, resolution.subject),
+        .kind = .symbol,
+        .label = resolution.subject,
+        .path = resolution.source_path,
+        .line = resolution.span.start_line,
+        .search_text = search_text,
+    });
+}
+
+fn findResolvedTypeScriptSymbol(
+    graph: *const model.RepositoryGraph,
+    path: []const u8,
+    enclosing_declaration: []const u8,
+    name: []const u8,
+) ?*const model.Node {
+    if (enclosing_declaration.len == 0) return graph.findNode(model.stableId(.symbol, path, name));
+    var scope_buffer: [std.fs.max_path_bytes + 4096]u8 = @splat(0);
+    const scope = std.fmt.bufPrint(&scope_buffer, "{s}#{s}", .{ path, enclosing_declaration }) catch return null;
+    return graph.findNode(model.stableId(.symbol, scope, name));
+}
+
+fn findQualifiedTypeScriptSymbol(graph: *const model.RepositoryGraph, path: []const u8, qualified_name: []const u8) ?*const model.Node {
+    if (qualified_name.len == 0) return null;
+    const separator = std.mem.lastIndexOfScalar(u8, qualified_name, '.');
+    const owner = if (separator) |index| qualified_name[0..index] else "";
+    const name = if (separator) |index| qualified_name[index + 1 ..] else qualified_name;
+    return findResolvedTypeScriptSymbol(graph, path, owner, name);
+}
+
+fn isPlaced(disposition: discovery.Disposition) bool {
+    return disposition == .deeply_indexed or disposition == .placed_unsupported or disposition == .placed_asset;
+}
+
+fn isTypeScriptResolutionDocument(path: []const u8) bool {
+    const basename = std.fs.path.basename(path);
+    return std.mem.eql(u8, basename, "package.json") or
+        std.mem.eql(u8, basename, "pnpm-workspace.yaml") or
+        std.mem.eql(u8, std.fs.path.extension(path), ".json");
+}
+
+fn typeScriptModeForPath(path: []const u8) ?typescript_parser.LanguageMode {
+    const extension = std.fs.path.extension(path);
+    if (std.mem.eql(u8, extension, ".tsx")) return .tsx;
+    if (std.mem.eql(u8, extension, ".jsx")) return .jsx;
+    if (std.mem.eql(u8, extension, ".ts") or std.mem.eql(u8, extension, ".mts") or std.mem.eql(u8, extension, ".cts")) return .typescript;
+    if (std.mem.eql(u8, extension, ".js") or std.mem.eql(u8, extension, ".mjs") or std.mem.eql(u8, extension, ".cjs")) return .javascript;
+    return null;
 }

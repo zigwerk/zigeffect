@@ -1,0 +1,6 @@
+.git/
+.zgraphy/
+.zigeffect/
+.zig-cache/
+zig-out/
+node_modules/

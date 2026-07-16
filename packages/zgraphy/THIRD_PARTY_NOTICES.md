@@ -13,3 +13,10 @@ under Apache-2.0. The license and detailed source notice are in
 [`Graphify-Labs/graphify`](https://github.com/Graphify-Labs/graphify) is pinned
 as a read-only reference submodule under `packages/references/graphify` and is
 MIT licensed. It is not linked into or imported by the zgraphy executable.
+
+## zigeffect-parser
+
+zgraphy depends on the repository-owned `zigeffect-parser` package for native
+document parsing. That package owns the pinned tree-sitter runtime and
+TypeScript/TSX generated grammars, their licenses, source identities, and
+checksums. zgraphy does not separately vendor or compile those sources.

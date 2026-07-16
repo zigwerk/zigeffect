@@ -9,14 +9,9 @@ fn addV2Test(b: *std.Build, runner: std.Build.LazyPath, options: std.Build.TestO
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const testing_runner = b.path("../zigeffect/src/testing/runner.zig");
-
-    const zigeffect = b.createModule(.{
-        .root_source_file = b.path("../zigeffect/src/zigeffect.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    const testing_runner = b.path("../zigeffect/src/testing/runner.zig");
+    const zigeffect_dependency = b.dependency("zigeffect", .{ .target = target, .optimize = optimize });
+    const zigeffect = zigeffect_dependency.module("zigeffect");
+    const testing_runner = zigeffect_dependency.module("zigeffect_test_runner").root_source_file.?;
 
     const zgroach = b.addModule("zgroach", .{
         .root_source_file = b.path("src/zgroach.zig"),

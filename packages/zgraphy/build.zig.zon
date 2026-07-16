@@ -10,6 +10,9 @@
         .zigeffect_std = .{
             .path = "../zigeffect-std",
         },
+        .zigeffect_parser = .{
+            .path = "../zigeffect-parser",
+        },
     },
     .paths = .{
         ".gitignore",

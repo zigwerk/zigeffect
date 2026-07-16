@@ -1,0 +1,143 @@
+{
+  "schema": "zgraphy.operational-contracts.v1",
+  "schema_version": 1,
+  "maturity": "contract_candidate",
+  "provider": {
+    "schema": "zgraphy.provider-envelope.v1",
+    "kinds": [
+      {"kind":"source_syntax","authority":"repository_read","trust":"observation","expiration_required":false,"reconciliation_required":true},
+      {"kind":"manifest","authority":"repository_read","trust":"observation","expiration_required":false,"reconciliation_required":true},
+      {"kind":"generated_contract","authority":"repository_read","trust":"observation","expiration_required":false,"reconciliation_required":true},
+      {"kind":"compiler_index","authority":"repository_read","trust":"derived","expiration_required":false,"reconciliation_required":true},
+      {"kind":"live_database","authority":"database_read","trust":"observation","expiration_required":true,"reconciliation_required":true},
+      {"kind":"runtime_causal","authority":"repository_read","trust":"observation","expiration_required":true,"reconciliation_required":true},
+      {"kind":"document_converter","authority":"process_execute","trust":"derived","expiration_required":false,"reconciliation_required":true},
+      {"kind":"local_model","authority":"model_local","trust":"hypothesis","expiration_required":false,"reconciliation_required":true},
+      {"kind":"remote_model","authority":"model_remote","trust":"hypothesis","expiration_required":true,"reconciliation_required":true}
+    ],
+    "authorities": [
+      {"id":"repository_read","rank":0,"externally_granted":false,"repository_config_allowed":true,"read_only":true},
+      {"id":"process_execute","rank":10,"externally_granted":true,"repository_config_allowed":false,"read_only":false},
+      {"id":"filesystem_external","rank":20,"externally_granted":true,"repository_config_allowed":false,"read_only":true},
+      {"id":"network_egress","rank":30,"externally_granted":true,"repository_config_allowed":false,"read_only":false},
+      {"id":"database_read","rank":40,"externally_granted":true,"repository_config_allowed":false,"read_only":true},
+      {"id":"model_local","rank":50,"externally_granted":true,"repository_config_allowed":false,"read_only":false},
+      {"id":"model_remote","rank":60,"externally_granted":true,"repository_config_allowed":false,"read_only":false}
+    ],
+    "repository_config_max_authority": "repository_read",
+    "capability_decision_required": ["process_execute","filesystem_external","network_egress","database_read","model_local","model_remote"],
+    "envelope_required_fields": ["provider_kind","implementation","version","authority","capabilities","source_generation","observed_at_ms","expires_at_ms","content_fingerprint","config_fingerprint","scope","redaction","bounds","requested_units","terminal_units"],
+    "prohibited_fields": ["credential","token","secret","connection_string","authorization_header","raw_environment","absolute_path","raw_source_body","raw_stdout","raw_stderr"],
+    "lifecycle_states": ["disabled","available","checking","running","partial","complete","stale","failed","expired"],
+    "lifecycle_transitions": [
+      {"from":"disabled","to":"available"},
+      {"from":"available","to":"checking"},
+      {"from":"checking","to":"running"},
+      {"from":"checking","to":"failed"},
+      {"from":"running","to":"partial"},
+      {"from":"running","to":"complete"},
+      {"from":"running","to":"failed"},
+      {"from":"partial","to":"running"},
+      {"from":"complete","to":"stale"},
+      {"from":"complete","to":"expired"},
+      {"from":"stale","to":"running"},
+      {"from":"stale","to":"expired"},
+      {"from":"failed","to":"running"},
+      {"from":"expired","to":"running"},
+      {"from":"available","to":"disabled"}
+    ],
+    "terminal_unit_states": ["returned","omitted","zero_node","hyperedge_only","failed","content_filtered"],
+    "bounds": [
+      {"name":"max_input_bytes","default_value":4194304,"maximum_value":67108864},
+      {"name":"max_output_bytes","default_value":1048576,"maximum_value":16777216},
+      {"name":"timeout_ms","default_value":30000,"maximum_value":300000},
+      {"name":"memory_bytes","default_value":268435456,"maximum_value":2147483648},
+      {"name":"concurrency","default_value":1,"maximum_value":64},
+      {"name":"retries","default_value":2,"maximum_value":8},
+      {"name":"max_tokens","default_value":0,"maximum_value":1000000},
+      {"name":"max_spend_microunits","default_value":0,"maximum_value":100000000}
+    ],
+    "failure_policy": {
+      "retain_last_complete_generation": true,
+      "required_provider_health": "partial",
+      "optional_provider_health": "degraded",
+      "canonical_overwrite": false,
+      "conflicts_become_contradictions": true
+    }
+  },
+  "conformance": {
+    "schema": "zgraphy.extractor-conformance.v1",
+    "output_schema": "zgraphy.semantic-contract.v2",
+    "dimensions": ["identity","source_span","containment","reference_direction","ambiguity","mutation","incremental_equivalence","resource_bounds","determinism","redaction","authority","unit_reconciliation","interruption_safety"],
+    "profiles": [
+      {"name":"discovery","required_dimensions":["identity","resource_bounds","determinism","redaction","authority","interruption_safety"],"unsupported_must_be_declared":true,"no_canonical_mutation":true},
+      {"name":"structural","required_dimensions":["identity","source_span","containment","mutation","resource_bounds","determinism","redaction","authority","interruption_safety"],"unsupported_must_be_declared":true,"no_canonical_mutation":true},
+      {"name":"resolved","required_dimensions":["identity","source_span","containment","reference_direction","ambiguity","mutation","incremental_equivalence","resource_bounds","determinism","redaction","authority","interruption_safety"],"unsupported_must_be_declared":true,"no_canonical_mutation":true},
+      {"name":"external","required_dimensions":["identity","source_span","containment","reference_direction","ambiguity","mutation","incremental_equivalence","resource_bounds","determinism","redaction","authority","unit_reconciliation","interruption_safety"],"unsupported_must_be_declared":true,"no_canonical_mutation":true},
+      {"name":"semantic_model","required_dimensions":["identity","source_span","containment","reference_direction","ambiguity","mutation","incremental_equivalence","resource_bounds","determinism","redaction","authority","unit_reconciliation","interruption_safety"],"unsupported_must_be_declared":true,"no_canonical_mutation":true}
+    ],
+    "receipt_required_fields": ["schema","provider","provider_version","profile","source_generation","input_fingerprint","config_fingerprint","dimensions","requested_units","terminal_units","unsupported_cases","resource_observations","diagnostics","status"],
+    "partial_is_not_pass": true,
+    "unknown_is_unsupported": true
+  },
+  "config": {
+    "schema": "zgraphy.config.v2",
+    "current_runtime_schema": "zgraphy.config.v2",
+    "active": false,
+    "precedence": ["compiled_defaults","user","repository","environment","cli"],
+    "modes": ["structural","semantic_local","semantic_remote","ci","agent","benchmark"],
+    "field_groups": ["repository","paths","providers","bounds","freshness","retention","analysis","retrieval","models","storage","diagnostics","maturity","linked_repositories","output"],
+    "fingerprint_groups": ["repository","paths","providers","bounds","freshness","analysis","retrieval","models","storage","maturity","linked_repositories","mode"],
+    "default_freshness": "on_query",
+    "authority": {
+      "repository_max": "repository_read",
+      "higher_layer_may_tighten": true,
+      "widening_requires_capability_decision": true,
+      "ambient_credentials_select_provider": false
+    },
+    "migration": {
+      "source_schema": "zgraphy.config.v1",
+      "target_schema": "zgraphy.config.v2",
+      "strategy": "expand_safe_defaults",
+      "in_place": false,
+      "retain_source_for_rollback": true
+    }
+  },
+  "health": {
+    "schema": "zgraphy.graph-health.v1",
+    "statuses": ["healthy","degraded","stale","partial","incompatible","corrupt"],
+    "dimensions": ["generation","freshness","discovery","semantics","providers","storage","indexes","self_manager","resources"],
+    "accounting_fields": ["discovered_units","included_units","indexed_units","ignored_units","excluded_units","unsupported_units","unreadable_units","oversized_units","sensitive_units","unclassified_units","converted_units","uncovered_units","facts","relationships","parse_errors","unresolved_references","ambiguity_sets","dangling_candidates","contradictions","invalidated_claims","stale_provider_observations","dropped_evidence","invalidated","retained","pruned","orphan_swept","repaired","rebuilt","compacted","garbage_collected","truncations","retries","timeouts","allocation_failures","process_exits"],
+    "independent_dimensions": true,
+    "query_declares_dependencies": true,
+    "repair_fields": ["diagnostic_code","repair_hint","repair_command","source_ref","generation"],
+    "unknown_dimension_is_unsafe": true
+  },
+  "diagnostic": {
+    "schema": "zgraphy.diagnostic.v1",
+    "severities": ["info","warning","error","fatal"],
+    "stages": ["discovery","extraction","resolution","derivation","indexing","pruning","validation","publication","query","provider","migration","storage"],
+    "required_fields": ["code","severity","stage","status","redacted_detail","source_ref","provider_ref","generation","repair_hint","replay_command","observed_at_ms"],
+    "prohibited_fields": ["credential","token","secret","connection_string","authorization_header","raw_environment","absolute_path","raw_source_body","raw_stdout","raw_stderr"],
+    "max_code_bytes": 96,
+    "max_detail_bytes": 4096,
+    "max_repair_bytes": 2048,
+    "stdout_result_only": true,
+    "stream": "stderr"
+  },
+  "migration": {
+    "schema": "zgraphy.migration-receipt.v1",
+    "source_schema": "zgraphy.nendb.snapshot.v1",
+    "target_schema": "zgraphy.nendb.snapshot.v2",
+    "strategy": "rebuild_generation",
+    "states": ["planned","candidate_created","copying","validating","validated","publishing","published","rolling_back","rolled_back","failed"],
+    "receipt_required_fields": ["schema","source_schema","target_schema","source_fingerprint","target_fingerprint","strategy","state","candidate_generation","previous_good_generation","record_accounting","validated_invariants","diagnostics","started_at_ms","ended_at_ms","published","rollback_retained"],
+    "publish_requires": ["endpoints","evidence","participants","memberships","proof_paths","indexes","vectors","health"],
+    "publish_requires_validation": true,
+    "atomic_publish": true,
+    "in_place": false,
+    "retain_previous_good": true,
+    "failed_candidate_replaces_active": false,
+    "cleanup_owned_only": true
+  }
+}

@@ -1,0 +1,13 @@
+{
+  // These aliases retain this config's base directory when inherited.
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@exact": ["packages/exact/src/exact.ts"],
+      "@shared/*": ["packages/shared/src/*"],
+      "@fallback/*": ["missing/*", "packages/shared/src/*"],
+      "@legacy/": ["packages/shared/src/"],
+      "@override": ["packages/shared/src/client.ts"],
+    },
+  },
+}

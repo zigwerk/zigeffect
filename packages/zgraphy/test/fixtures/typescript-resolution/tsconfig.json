@@ -1,0 +1,9 @@
+{
+  "extends": ["./tsconfig.base.json", "./configs/tsconfig.shared.json"],
+  "compilerOptions": {
+    "paths": {
+      "@child/*": ["packages/shared/src/*"],
+    },
+  },
+}
+

@@ -45,6 +45,9 @@ Terminal output is a bounded diagnostic artifact, never acceptance proof.
   before publishing; a temporary graph cannot support CLI proof.
 - Use deterministic providers in tests and semantic facts at external,
   workflow, statechart, artifact, and acceptance boundaries.
+- Compose statecharts with `zstd.Statechart.Effect.layer`/`step`, journals with
+  `zstd.Workflow.journalLayer`/`append`, and child commands with bounded
+  `ctx.runtime()` handles from the one owning runtime.
 - Never persist credentials, personal data, raw payloads, or terminal
   scrollback in causal or proof artifacts.
 

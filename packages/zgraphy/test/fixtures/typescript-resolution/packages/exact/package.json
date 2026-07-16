@@ -1,0 +1,6 @@
+{
+  "name": "@acme/exact",
+  "version": "1.0.0",
+  "exports": "./src/exact.ts"
+}
+

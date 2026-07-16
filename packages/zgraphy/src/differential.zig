@@ -9,7 +9,7 @@ const parity = @import("parity.zig");
 pub const schema = "zgraphy.differential-receipt.v1";
 pub const schema_version: u32 = 1;
 pub const adapter_version = "graphify-json-v1";
-pub const zgraphy_adapter_version = "zgraphy-native-v1";
+pub const zgraphy_adapter_version = "zgraphy-native-v2";
 pub const zgraphy_version = "0.1.0";
 pub const lexical_adapter_version = "lexical-token-v1";
 pub const max_graph_bytes: usize = 64 * 1024 * 1024;
@@ -317,6 +317,9 @@ pub fn projectZgraphy(
     const relation_seen = try owned.slice(bool, allocator, gold.relations.len);
     defer allocator.free(relation_seen);
     @memset(relation_seen, false);
+    const fact_seen = try owned.slice(bool, allocator, gold.facts.len);
+    defer allocator.free(fact_seen);
+    @memset(fact_seen, false);
     const node_mappings = try owned.slice(?usize, allocator, graph.nodes.items.len);
     defer allocator.free(node_mappings);
     @memset(node_mappings, null);
@@ -387,6 +390,10 @@ pub fn projectZgraphy(
         if (provenance == expected.provenance) provenance_matches += 1 else provenance_mismatches += 1;
     }
 
+    for (gold.facts, 0..) |fact, index| {
+        if (supportsZgraphyFact(graph, node_mappings, gold, &fact)) fact_seen[index] = true;
+    }
+
     var missing_entities: std.ArrayList([]const u8) = .empty;
     defer missing_entities.deinit(allocator);
     var missing_relations: std.ArrayList([]const u8) = .empty;
@@ -400,13 +407,14 @@ pub fn projectZgraphy(
 
     for (gold.entities, entity_seen) |entity, seen| if (!seen) try missing_entities.append(allocator, entity.id);
     for (gold.relations, relation_seen) |relation, seen| if (!seen) try missing_relations.append(allocator, relation.id);
-    for (gold.facts) |fact| try missing_facts.append(allocator, fact.id);
+    for (gold.facts, fact_seen) |fact, seen| if (!seen) try missing_facts.append(allocator, fact.id);
     for (gold.hyperedges) |hyperedge| try missing_hyperedges.append(allocator, hyperedge.id);
     for (gold.supernodes) |supernode| try missing_supernodes.append(allocator, supernode.id);
 
     const projected_unique_entities = countTrue(entity_seen);
     const matched_entities = projected_unique_entities;
     const matched_relations = countTrue(relation_seen);
+    const matched_facts = countTrue(fact_seen);
     const unexpected_nodes = graph.nodes.items.len - mapped_input_nodes;
     const unexpected_relations = graph.edges.items.len - mapped_input_relations;
 
@@ -457,7 +465,7 @@ pub fn projectZgraphy(
         },
         .entities = score(gold.entities.len, matched_entities, unexpected_nodes),
         .relations = score(gold.relations.len, matched_relations, unexpected_relations),
-        .facts = score(gold.facts.len, 0, 0),
+        .facts = score(gold.facts.len, matched_facts, 0),
         .hyperedges = score(gold.hyperedges.len, 0, 0),
         .supernodes = score(gold.supernodes.len, 0, 0),
         .missing_entity_ids = missing_entity_ids,
@@ -766,8 +774,45 @@ fn canonicalZgraphyRelation(relation: model.Relation) ?benchmark.RelationKind {
         .calls => .calls,
         .covers => .covers,
         .references => .references,
+        .dispatches_to => .selects_candidate,
         else => null,
     };
+}
+
+fn supportsZgraphyFact(
+    graph: *const model.RepositoryGraph,
+    node_mappings: []const ?usize,
+    gold: *const benchmark.CanonicalIr,
+    fact: *const benchmark.Fact,
+) bool {
+    if (!std.mem.eql(u8, fact.predicate, "call_resolution") or !std.mem.eql(u8, fact.value, "ambiguous") or
+        fact.provenance != .ambiguous or fact.alternatives.len < 2) return false;
+    const subject_mapping = findEntityIndex(gold, fact.subject) orelse return false;
+    for (graph.nodes.items, 0..) |subject, subject_index| {
+        if (node_mappings[subject_index] == null or node_mappings[subject_index].? != subject_mapping) continue;
+        var mapped_candidates: usize = 0;
+        var all_expected = true;
+        for (fact.alternatives) |alternative| {
+            const alternative_mapping = findEntityIndex(gold, alternative) orelse return false;
+            var found = false;
+            for (graph.edges.items) |edge| {
+                if (edge.from != subject.id or edge.relation != .dispatches_to or edge.provenance != .ambiguous) continue;
+                const mapped = mapZgraphyEndpoint(graph, node_mappings, edge.to) orelse continue;
+                if (mapped == alternative_mapping) found = true;
+            }
+            if (!found) {
+                all_expected = false;
+                break;
+            }
+        }
+        if (!all_expected) continue;
+        for (graph.edges.items) |edge| {
+            if (edge.from != subject.id or edge.relation != .dispatches_to or edge.provenance != .ambiguous) continue;
+            if (mapZgraphyEndpoint(graph, node_mappings, edge.to) != null) mapped_candidates += 1;
+        }
+        if (mapped_candidates == fact.alternatives.len) return true;
+    }
+    return false;
 }
 
 fn canonicalProvenance(confidence: []const u8) ?benchmark.Provenance {

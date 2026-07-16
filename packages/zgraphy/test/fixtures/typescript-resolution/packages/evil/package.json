@@ -1,0 +1,6 @@
+{
+  "name": "@acme/evil",
+  "version": "1.0.0",
+  "exports": "../outside.ts"
+}
+

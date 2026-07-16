@@ -1,12 +1,30 @@
 # zgraphy agent-first roadmap
 
-Status: proposed product roadmap
+Status: active implementation; M0 and M1 complete, M2 active
 
 Last updated: 2026-07-16
 
 Reference baseline: Graphify commit `cb96bdaa0c367bec8d5c5aee5d7c9ebb727e9780`
 
-Execution status: M0 active. Seven requirement-backed slices are delivered.
+Execution status: M0 comparative truth and M1 universal init/workspace graph
+are implemented, and M2 has advanced through 20 requirement-backed controlled
+scenarios. M1 now has
+opaque persistent repository identity, config-v1 migration to config-v2,
+bounded no-follow universal discovery, nested ignore precedence, typed terminal
+outcomes, safe mixed-language placement, six manifest adapter families, nested
+repository boundaries, deepest explicit ownership, deterministic redacted
+content/health publication, effective-config authority, and read-only doctor
+freshness diagnostics. Deep parser-backed Zig and TypeScript contract semantics
+begin in M2.1 with a Zig 0.16 compiler-AST boundary that emits exact structural
+spans, rejects malformed partial facts, removes comment/string false positives,
+and now feeds the compatibility graph indexer without changing stable IDs.
+M2.2 adds compiler-AST import and local-binding facts, normalized exact import
+targets, function-level scope resolution, deterministic source-qualified call
+candidate sets, explicit resolved/ambiguous/unresolved outcomes, and graph
+`dispatches_to` evidence. The Zig ambiguity fixture now retains both function-
+value candidates and projects all canonical entities, relations, and the
+ambiguity fact; block/type/build-aware resolution remains later M2 work.
+
 `zgraphy parity` validates and exposes the embedded
 `src/graphify-parity.v1.json` ledger for all 17 reviewed Graphify capability
 families. `zgraphy benchmark corpus` validates the engine-neutral canonical IR
@@ -24,7 +42,16 @@ has paired process supervision, retained integer samples, full-build versus
 clean-build mutation fingerprints, snapshot reload checks, and explicit graph
 health accounting. Its current baseline proves clean full-rebuild pruning but
 records failed rename identity and semantic invalidation targets plus
-unsupported incremental/pre-query automation. M0 is not yet complete.
+unsupported incremental/pre-query automation. The schema-v2 ontology and
+operational contracts are now embedded, content-addressed, strictly validated,
+and inspectable through the CLI. Snapshot v1 remains readable while the M1
+identity-and-bounds subset of config-v2 is active; broader provider authority,
+conformance, advanced health dimensions, diagnostics, and rollback-safe
+generation migration remain contract-only. A content-addressed threat
+catalog now binds the pinned Graphify security references and assigns all 20
+initial threats to controls, honest fixture evidence states, residual risk, and
+milestone owners. The evaluation contract and exit scenario close the final M0
+receipt-schema and evidence audit without promoting schema-only capabilities.
 
 ## Executive outcome
 
@@ -161,24 +188,25 @@ by the north star.
 
 The current implementation still has important limitations:
 
-- Zig extraction is a bounded source scanner, not a complete AST and semantic
-  resolution pipeline.
+- Zig extraction uses the compiler AST and a bounded evidence-preserving
+  resolver, but is not yet a complete type/build/comptime semantic pipeline.
 - Symbol identity is not yet rich enough for overloads, scopes, members,
   aliases, re-exports, generics, generated code, or cross-repository symbols.
 - The schema has a small set of node and edge kinds and no first-class facts,
   source spans, evidence records, hyperedges, or materialised supernodes.
-- Cross-file call resolution is primarily name-based and must become
-  import-aware, type-aware, scope-aware, and explicitly ambiguity-preserving.
+- Supported static Zig imports and function-value calls are exact and
+  ambiguity-preserving; nested block, member/type, package/build, and generated
+  identities still need deeper resolution.
 - Builds are full snapshots; deletions, renames, branch changes, and one-file
   updates are not incremental graph transactions.
 - Keyword scoring scans every node, vectors are exact fixed-width feature
   hashes, and graph reranking is only one-hop.
-- There is no curated semantic evaluation corpus or differential Graphify
-  adapter yet.
+- The curated differential corpus exists, but its held-out Zig, TypeScript,
+  Proto, supernode, retrieval, and mutation coverage must keep expanding.
 - Query output ranks nodes but does not yet return a complete proof-carrying
   evidence packet.
-- Non-Zig languages, build systems, protocol schemas, and repository federation
-  are deferred.
+- Non-Zig languages, deep build semantics, protocol identities, and repository
+  federation currently have placement/ownership only or remain deferred.
 - Visualisation is intentionally absent.
 
 ## Graphify leverage strategy
@@ -1885,6 +1913,8 @@ Language breadth will arrive in waves behind one extractor conformance suite.
 
 ### Wave A: deep Zig and the TypeScript contract spine
 
+- Establish `zigeffect-parser` as the shared bounded document parser package
+  and expose its fakeable causal service contract through `zigeffect-std`.
 - Replace the source scanner with tree-sitter Zig or an equivalently robust
   native parser boundary.
 - Cover declarations, nested scopes, methods, fields, error sets, unions,
@@ -2441,6 +2471,40 @@ inconsistent expected counts, malformed identities, non-weighted aggregates,
 and non-empty claim sets. Its baseline intentionally excludes resource and
 freshness dimensions until the next gate.
 
+Delivered schema slice: `zgraphy.semantic-contract.v2` is embedded,
+content-addressed, and strictly validated. It declares all eight semantic
+record concepts, both provenance axes, nine immutable relation-family policies,
+all 96 initial relations in this roadmap, complete MVP and canonical benchmark
+compatibility registries, Graphify provenance projections, and a
+rebuild-generation migration policy that retains snapshot v1 for rollback.
+`zgraphy schema [relation] --json` exposes bounded summaries and fully resolved
+relation policy while explicitly reporting that schema-v2 persistence is not
+implemented.
+
+Delivered operational slice: `zgraphy.operational-contracts.v1` defines nine
+provider kinds, authority separation, lifecycle and terminal-unit
+reconciliation, 13 shared extractor conformance dimensions, future config-v2
+precedence/modes, independent graph-health dimensions, redacted diagnostics,
+and rollback-safe candidate-generation migration. `zgraphy contracts [section]
+--json` exposes the policy while granting no external authority and preserving
+every active v1 runtime schema.
+
+Delivered security slice: `zgraphy.security-baseline.v1` binds five exact
+Graphify security references, 9 trust boundaries, 9 protected asset classes,
+24 controls, 20 threats, and 20 adversarial fixture identities. Its validator
+checks local reference digests and exercised evidence paths, rejects broken
+cross-references and false promotion, and leaves 7 planned plus 3 deferred
+runtime fixtures visibly unearned. `zgraphy security [ZG-THR-NNN] --json`
+exposes compact catalog and residual-risk evidence.
+
+Delivered evaluation slice: `zgraphy.evaluation-contracts.v1` makes
+extraction, retrieval, agent-task, performance, and resource evidence five
+explicit claim-gated receipt contracts. Existing extraction/resource evidence
+remains an active baseline; retrieval, fixed-agent task, and correctness-bound
+performance remain `schema_only` and therefore ineligible for measured claims.
+The M0 exit scenario validates every embedded baseline and contract while
+preserving the documented M1/M3 deficits.
+
 Exit evidence:
 
 - repeated runs on one machine produce identical canonical facts;
@@ -2452,6 +2516,11 @@ Exit evidence:
 - relation direction, participant roles, evidence, affected policy, and
   compatibility mappings validate; and
 - the schema RFC explains migration and invalidation before storage changes.
+
+The required `m0-evaluation-contracts-exit` Testing v2 scenario binds these
+checks to current source. M0 completion does not promote rename continuity,
+fact-level invalidation, incremental refresh, or planned/deferred adversarial
+runtime fixtures; those remain explicit M1/M3 and later gates.
 
 ### M1 — Universal init and workspace graph
 
@@ -2497,6 +2566,9 @@ semantics, and cross-file regression fixtures.
 
 Deliverables:
 
+- a reusable `zigeffect-std.Parser` service contract and optional
+  `zigeffect-parser` native provider package, with zgraphy as its first graph
+  consumer rather than owner of parser runtimes;
 - robust parser boundary with exact byte and line/column spans;
 - typed declaration, scope, import, alias, member, call, test, comptime, and
   documentation facts;
@@ -2515,6 +2587,33 @@ Deliverables:
   end-to-end feature supernode recipes;
 - source-aware graph queries for Zig placement and impact; and
 - differential benchmarks against Graphify's Zig and TypeScript support.
+
+Delivered M2 kernel slices:
+
+- compiler-AST Zig declarations, bindings, imports, calls, exact spans and
+  deterministic scope/import candidate resolution;
+- the grammar-free `zigeffect-std.Parser` contract plus reusable
+  `zigeffect-parser` native TypeScript/TSX/JavaScript provider;
+- immutable-inventory TypeScript module resolution for extension precedence,
+  ESM source substitution, dynamic imports, CommonJS, JSONC tsconfig aliases
+  and inheritance, pnpm/npm workspaces, conditional/wildcard package exports,
+  entry fallbacks, package containment and duplicate-name ambiguity;
+- source-qualified module-reference nodes, deferred dynamic edges, explicit
+  candidate edges and namespaced externals in repository builds; and
+- a pinned Graphify 0.9.17 overlap ledger that preserves valid shared edges
+  while recording zgraphy's expanded duplicate candidates and rejection of
+  Graphify's package-escape and phantom-relative edges;
+- structural-facts v2 exports and lexical receiver-type bindings in the shared
+  parser contract, including bounded static CommonJS export identities;
+- deterministic named/default/namespace/local-alias/star export closure,
+  eighteen-hop barrels and cycle-side-branch continuation through exact module
+  candidates, with no repository-wide symbol-name fallback;
+- direct, namespace, static-class, local-new, constructor-property, field and
+  bare-typed receiver call resolution to exact class-owned declarations; and
+- graph materialization for import aliases, imports-from, aliases, re-exports,
+  class/method ownership, calls and instantiations, plus a pinned Graphify
+  symbol-overlap ledger with nine shared positive and three shared negative
+  facts.
 
 Exit evidence:
 

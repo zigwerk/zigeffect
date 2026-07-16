@@ -78,6 +78,9 @@ text is a bounded diagnostic artifact, not proof that a requirement passed.
 - Emit semantic facts at external, workflow, statechart, artifact, and
   acceptance boundaries. Use typed statecharts for inspectable long-lived
   control flow and durable statecharts for replayable workflows.
+- Compose definitions with `zstd.Statechart.Effect.layer`/`step`, journals
+  with `zstd.Workflow.journalLayer`/`append`, and each child command with a
+  bounded `ctx.runtime()` handle from the one owning runtime.
 - Never put credentials, personal data, or raw terminal scrollback in
   manifests, facts, receipts, fixtures, snapshots, or Workbench payloads.
 

@@ -15,6 +15,13 @@ pub const NodeKind = enum(u8) {
     test_scenario,
     causal_event,
     concept,
+    workspace,
+    package,
+    application,
+    library,
+    build_target,
+    api_surface,
+    module_reference,
 };
 
 pub const Relation = enum(u16) {
@@ -31,6 +38,17 @@ pub const Relation = enum(u16) {
     causal_parent,
     observed_at,
     references,
+    owned_by,
+    member_of,
+    part_of_target,
+    defines,
+    dispatches_to,
+    deferred_imports,
+    resolves_to,
+    imports_from,
+    re_exports,
+    aliases,
+    instantiates,
 };
 
 pub const Provenance = enum(u8) {
