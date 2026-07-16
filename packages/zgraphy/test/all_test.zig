@@ -811,16 +811,19 @@ test "zgraphy M0 resource and freshness receipts are bounded reproducible and cl
     try assertions.boolean(.{
         .id = "zgraphy.m0.resource-quantiles",
         .label = "resource receipts recompute bounded integer quantiles from complete measured samples",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 700, .column = 1 },
         .repair_hint = "reject incomplete or mixed resource samples and derive quantiles from the retained observations",
     }, graphify_resources.elapsed_ns.p50 == 130 and native_resources.elapsed_ns.p50 == 70 and resources.claims.len == 0);
     try assertions.boolean(.{
         .id = "zgraphy.m0.full-rebuild-prunes",
         .label = "a full rebuild removes deleted identities and republishes a complete clean equivalent snapshot",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 700, .column = 1 },
         .repair_hint = "replace the complete snapshot transactionally and reject stale nodes dangling endpoints or unowned vectors",
     }, deleted_health.clean() and loaded_deleted.findNode(zgraphy.stableId(.symbol, "src/catalog.zig", "feature")) == null);
     try assertions.boolean(.{
         .id = "zgraphy.m0.freshness-honesty",
         .label = "the M0 freshness receipt does not claim incremental or automatic pre-query refresh support",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 700, .column = 1 },
         .repair_hint = "keep unsupported capabilities explicit until an exercised updater path matches a clean build",
     }, freshness.capabilities.incremental_update == .unsupported and freshness.capabilities.pre_query_refresh == .unsupported and !freshness.freshness_gate_passed and freshness.claims.len == 0);
     try assertions.noFindings(.{ .id = "zgraphy.m0.resource-freshness-no-findings", .label = "resource and freshness validation has no causal findings" });
