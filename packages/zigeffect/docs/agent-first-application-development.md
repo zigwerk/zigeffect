@@ -12,8 +12,25 @@ The short version is:
 > and use the compiler, safety plane, causal graph, and Workbench as a continuous
 > feedback system. I do not have to build from source code and logs alone.
 
+The canonical first command is now a single proof-carrying orientation query:
+
+```sh
+zigeffect agent context --task <requirement-or-task-id> \
+  --budget 65536 --changed <path> --json
+```
+
+It derives status from exact native receipts and returns the current source and
+manifest identities, affected scenarios, graph cursor, authority, proof
+references, and bounded follow-up queries. See
+[`proof-carrying-development-plane.md`](proof-carrying-development-plane.md)
+for the artifact and coordination contracts.
+
 Examples in this document come from the real CLI and causal dogfood artifact.
 Long JSON examples are shortened only where they are marked “abridged.”
+
+For the concrete service, fluent effect/layer, ManagedRuntime, and single
+application-inspection endpoint shape used by generated projects, read
+[`compositional-applications.md`](compositional-applications.md).
 
 ## The roles of Codex and ZigEffect
 
@@ -100,7 +117,7 @@ A typical conversation looks like this:
 
 > **Codex — investigation update:** The check compiled, but the causal receipt
 > reports `service_required Config status=missing`. The failure belongs to the
-> layer graph, not the order handler. I am adding the missing provider and
+> root layer topology, not the order handler. I am providing the missing layer
 > rerunning the same acceptance command.
 
 > **Codex — handoff:** Both requirements are satisfied. Debug, ReleaseSafe,
@@ -415,31 +432,57 @@ that can pass while the feature is broken.
 
 ### 5. Implement through typed boundaries
 
-I keep application functions direct-style and expose dependencies through the
-effect type:
+I expose application work as canonical effects and compose live or fake
+implementations once through one managed runtime:
 
 ```zig
-const CreateOrderEnv = zstd.fx.ServiceEnv(.{
-    OrderRepository,
-    zstd.Observability.Recorder,
-});
+const kernel = zstd.fx.kernel;
 
-fn createOrder(
-    ctx: *zstd.fx.Context(CreateOrderEnv),
-    input: CreateOrderInput,
-) CreateOrderError!Order {
-    const repository = ctx.service(OrderRepository);
-    const observability = ctx.service(zstd.Observability.Recorder);
+const OrderRepository = kernel.Service("orders/Repository", RepositoryApi);
+const Observability = kernel.Service("orders/Observability", ObservabilityApi);
 
-    const order = try repository.createIdempotent(input);
-    try observability.increment("orders.created", 1);
-    return order;
+const CreateOrderBase = kernel.Effect(
+    Order,
+    CreateOrderError,
+    .{ OrderRepository, Observability },
+);
+const CreateOrder = CreateOrderBase.Stateful(CreateOrderInput);
+
+fn createOrder(input: CreateOrderInput) CreateOrder {
+    return CreateOrder.init(input, struct {
+        fn run(value: CreateOrderInput, ctx: *CreateOrder.Context) CreateOrderError!Order {
+            const order = try ctx.service(OrderRepository).createIdempotent(value);
+            try ctx.service(Observability).orderCreated(order.id);
+            return order;
+        }
+    }.run);
 }
+
+const RepositoryLive = kernel.Layer.succeed(OrderRepository, repository_live);
+const ObservabilityLive = kernel.Layer.succeed(Observability, observability_live);
+const MainLayer = RepositoryLive.merge(ObservabilityLive);
+
+var runtime = try zstd.ManagedRuntime(@TypeOf(MainLayer)).make(
+    allocator,
+    io,
+    root,
+    MainLayer,
+    .{ .observability = production_observability },
+);
+defer runtime.deinit();
+
+const order = try runtime.run(
+    createOrder(input).named("orders.create"),
+);
+try runtime.shutdown();
 ```
 
 Config, Schema, HTTP, SQL, external process, artifact, dependency, and acceptance
 boundaries emit stable semantic application facts. Those facts let the agent
-compare business intent across executor-specific IDs and scheduling order.
+compare business intent across executor-specific IDs and scheduling order. The
+runtime itself automatically records layer startup, nested effects, resolved
+services, request scopes, resources, exits and finalizers, so those structural
+facts require no application instrumentation.
 
 ### 6. Run the governed checks
 
@@ -472,7 +515,7 @@ events: 1
 
 This tells me the failure is a missing `Config` provider in run `1`. It is not
 evidence that the HTTP parser, order schema, or SQL implementation is wrong. I
-inspect the layer graph and provider construction first.
+inspect the root layer topology and service construction first.
 
 Now suppose the run completes but leaves work pending:
 
@@ -760,8 +803,11 @@ keeping product decisions and completion evidence visible.
 - validated project manifests, requirements, acceptance checks, fixed commands,
   agent status/next/evidence/handoff protocols;
 - generated Codex and Claude project skills;
-- Effect, services, layers, scopes, concurrency, workflows, local clustering,
-  standard-library boundaries, and adapters;
+- the canonical service/effect/layer/managed-runtime kernel, runtime defaults,
+  aspects, application inspection, scopes, concurrency, workflows, and local
+  clustering;
+- canonical FileSystem/Process standard-library oracles plus broader
+  compatibility facades and adapters whose remaining migration is documented;
 - causal artifacts, typed queries, bounded machine responses, semantic diffs,
   and a live/static Workbench;
 - AST source policy, compiler capture, tracked allocation, OOM tests, schedule

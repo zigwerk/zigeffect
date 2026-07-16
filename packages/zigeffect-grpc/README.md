@@ -89,12 +89,38 @@ Zig bindings are generated under `src/generated`; Protobuf-ES v2 bindings are
 generated in `packages/zigeffect-grpc-web/src/gen`. The Solid package provides
 a Connect-Web transport and `@tanstack/solid-query` option helpers.
 
-Conventional two-argument typed unary handlers return a response that may
-borrow request-scoped decoded storage; the binding encodes it before releasing
-the request and does not deinitialize it separately. Allocator-aware generated
-handlers return an owned response, transferring that response to the binding.
-Use the allocator-aware form whenever a handler constructs owned strings,
-messages, maps, or repeated fields.
+## Application composition status
+
+Native gRPC now uses the same canonical composition model as a generated
+ZigEffect application:
+
+- `Typed.generatedRoutesLayer` registers generated unary and streaming effects
+  from an implementation service tag;
+- `Typed.generatedClientLayer` supplies a generated client capability;
+- `persistentChannelLayer`, `channelPoolLayer`, and `nativeServerLayer` acquire
+  resources with canonical scoped layers;
+- `StandardServices.layer` owns health and reflection registration; and
+- one `zstd.ManagedRuntime` owns the process scope, runtime aspects, and durable
+  embedded NenDB graph.
+
+Generated method effects carry service requirements directly. The route layer
+derives a requirements-limited runtime handle once, then runs every unary RPC
+and complete streaming lifetime in a fresh child scope. Unary response encoding
+occurs inside that scope, before handler finalizers run.
+
+Channel, pool, and native-server layers automatically derive a recording-only
+causal capability from their owning runtime. Resolve, connect, attempt,
+handler, status, drain, and shutdown facts therefore enter the same graph as
+the handler effects without an opt-in recorder path. Incoming `x-request-id`
+and W3C `traceparent` values become bounded numeric correlation keys; their raw
+header values, credentials, metadata, and payloads are not retained.
+
+Manual `init`/`deinit` remains the driver API for focused adapter work.
+`Typed.GeneratedDriverBinding` is the explicitly low-level generated adapter;
+application code should use `Typed.generatedRoutesLayer`.
+
+See [`docs/effect-native-roadmap.md`](docs/effect-native-roadmap.md) for the
+completed composition gates and remaining platform qualification work.
 
 ## Performance
 
@@ -115,8 +141,10 @@ boundary.
 ## Cloud Run
 
 The example in `examples/cloud_run` binds `0.0.0.0:$PORT`, serves h2c behind
-Cloud Run's TLS termination, installs health, reflection, and Channelz, and
-drains on SIGTERM.
+Cloud Run's TLS termination, installs generated routes plus health,
+reflection, and Channelz before readiness, and drains on SIGTERM. It is the
+canonical one-root-layer, one-managed-runtime composition example. Every
+handler and transport boundary writes to that runtime's application graph.
 Build its multi-architecture image from the repository root and deploy with
 Cloud Run end-to-end HTTP/2 enabled (`--use-http2`).
 

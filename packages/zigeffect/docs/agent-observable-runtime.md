@@ -1,10 +1,16 @@
-# Agent-Observable Causal Runtime
+# Agent-observable causal runtime
 
-Date: 2026-06-05
+**Original design:** 2026-06-05; **contract review:** 2026-07-15
 
-This document defines the long-term `zigeffect` direction for an
-agent-observable Effect runtime: a Zig-native runtime that exposes effect
-execution as a structured causal graph rather than as unstructured logs.
+This document is the detailed causal architecture and delivery record. For the
+current application API, start with [Usage](usage.md) and
+[Compositional applications](compositional-applications.md). Every canonical
+managed runtime now owns a bounded causal store by default; examples that
+manually attach a store describe lower-level adapters, tests, or historical
+delivery stages rather than the application composition model.
+
+The runtime exposes effect execution as a structured causal graph rather than
+as unstructured logs.
 
 The goal is not to make an LLM execute arbitrary runtime magic. The goal is to
 make effectful Zig programs understandable to agents and humans through the
@@ -101,6 +107,16 @@ can query snapshot, lineage, cause, resources, fibers, requirements, retries,
 and findings. Future work is about production adapters, durable histories,
 replay, workbench UI, and policy-controlled remediation rather than inventing
 the core event shape.
+
+`CausalContextV2` now supplies exact runtime, graph-session, project,
+requirement, scenario, agent, durable-task, work-packet, change-set, source, and
+W3C trace/span correlation with bounded typed links. Managed-runtime handles
+and fibers propagate it automatically. NenDB, JSONL, and OTLP spans, logs,
+metrics, and links are projections of that same event context. Exact path
+queries and Testing v2 path/counterfactual assertions make causal relationships
+executable proof rather than a manual event-array search. The development
+workflow is documented in
+[Proof-carrying development plane](proof-carrying-development-plane.md).
 
 The production-hardening direction is tracked separately in
 [roadmap.md](roadmap.md). It stays record-only and never assumes zigeffect can
@@ -961,22 +977,23 @@ The concrete NenDB storage contract is `CausalNendbStorageBackendState`. It
 maps stored causal events into deterministic `CausalNendbWrite` values: one
 event node plus an optional `causal_parent` edge. The backend calls an injected
 `CausalNendbGraphWriter` before appending local history, so writer failures are
-observable and fail closed. This branch does not add a direct upstream NenDB
-dependency; a future wrapper can adapt `nendb.EmbeddedDB.addNode`, `addEdge`,
-and `flush` once the upstream package can be pinned cleanly. Its focused gate is
-`zig build causal-nendb-storage-backend`.
+observable and fail closed. The core stays I/O-independent; the standard
+library supplies the embedded NenDB writer. Its focused core gate is `zig build
+causal-nendb-storage-backend`.
 
 The application-facing concrete durable implementation is
-`zstd.CausalGraph.LocalDatabase` in `zigeffect-std`. It implements the injected
-writer as an append-only JSONL graph WAL, remaps process-local event ids to
-restart-safe durable ids, rebuilds bounded indexes on open, stores each node and
-optional parent edge in one committed row, and exposes bounded read snapshots
-for summary, event, and child queries. Generated executable scaffolds attach it
-before the first fact and propagate `CausalNendbStorageBackendState.lastFailure`
-after flushing, while the deterministic store still retains its in-memory fact
-if an adapter fails. The installed CLI resolves the database only from
-`zigeffect.project.json`; system graph queries also resolve a validated
-component id. No upstream NenDB package is installed by this implementation.
+`zstd.CausalGraph.LocalDatabase` in `zigeffect-std`. It contains the reviewed
+Zig 0.16 port of NenDB's allocator-owned struct-of-arrays node/edge topology
+and an append-only JSONL property WAL. It remaps process-local event ids to
+restart-safe durable ids, rebuilds the embedded topology and bounded indexes on
+open, stores each node and optional parent edge in one committed row, and
+exposes summary, ordered-since, event, and child queries. The canonical
+`zstd.ManagedRuntime` constructs, attaches, flushes, checks, and releases this
+graph automatically; generated applications do not wire causal objects. The
+installed CLI resolves the database only from `zigeffect.project.json`; system
+queries also require a validated component id. Upstream source is pinned under
+`packages/references/nen-db`, and runtime health reports the exact revision. No
+daemon or Docker image is required.
 
 The same adapter exposes `CausalNendbRetentionPolicy` and
 `CausalNendbRetentionReport` for record-only retention evaluation. The report

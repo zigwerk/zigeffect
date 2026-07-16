@@ -55,6 +55,34 @@ test "CausalStore.record is safe under concurrent OS threads (every event record
     try std.testing.expectEqual(@as(u64, THREADS * OPS_PER_THREAD), max_id);
 }
 
+test "CausalStore.inspect is a consistent live read while another thread records" {
+    const allocator = std.testing.allocator;
+    var store = fx.CausalStore.initBounded(allocator, 256);
+    defer store.deinit();
+    var worker = StoreWorker{ .store = &store };
+    const thread = try std.Thread.spawn(.{}, StoreWorker.run, .{&worker});
+
+    var index: usize = 0;
+    while (index < 200) : (index += 1) {
+        var inspection = try store.inspect(allocator, .{ .max_recent_events = 16 });
+        defer inspection.deinit();
+        try std.testing.expect(inspection.retained_events <= 256);
+        try std.testing.expect(inspection.recent_events.len <= 16);
+        if (inspection.recent_events.len > 0) {
+            try std.testing.expect(inspection.oldest_retained_event_id != null);
+            try std.testing.expect(inspection.latest_retained_event_id != null);
+            try std.testing.expect(inspection.oldest_retained_event_id.? <= inspection.latest_retained_event_id.?);
+        }
+    }
+    thread.join();
+
+    var final = try store.inspect(allocator, .{ .max_recent_events = 16 });
+    defer final.deinit();
+    try std.testing.expectEqual(@as(usize, 256), final.retained_events);
+    try std.testing.expectEqual(@as(usize, 16), final.recent_events.len);
+    try std.testing.expectEqual(@as(u64, OPS_PER_THREAD - 256), final.dropped_events);
+}
+
 // ── Ref.update under concurrent read-modify-write ──
 
 fn incr(x: u64) u64 {

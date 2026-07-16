@@ -11,6 +11,7 @@ pub const FaultKind = Contract.FaultKind;
 pub const TestStatus = Contract.TestStatus;
 pub const AssertionStatus = Contract.AssertionStatus;
 pub const AssertionResult = Contract.AssertionResult;
+pub const CausalEventIdSpace = Contract.CausalEventIdSpace;
 pub const Completeness = Contract.Completeness;
 pub const MinimalCase = Contract.MinimalCase;
 pub const MemorySummary = Contract.MemorySummary;
@@ -24,7 +25,9 @@ pub const EvidenceKind = Contract.EvidenceKind;
 pub const EvidenceSummary = Contract.EvidenceSummary;
 pub const NamedEvidence = Contract.NamedEvidence;
 pub const TestReceipt = Contract.TestReceipt;
+pub const ParsedReceipt = Contract.ParsedReceipt;
 pub const TestRunReceipt = Contract.TestRunReceipt;
+pub const ParsedRunReceipt = Contract.ParsedRunReceipt;
 pub const parseReceipt = Contract.parseReceipt;
 pub const parseRunReceipt = Contract.parseRunReceipt;
 
@@ -93,6 +96,9 @@ test "Testing exports agent-first scenario and receipt contracts" {
     try std.testing.expectEqualStrings("zigeffect.test-suite-receipt.v2", SuiteReceipt.schema);
     try std.testing.expect(@hasDecl(TestContext, "finishAlloc"));
     try std.testing.expect(@hasDecl(AssertionRecorder, "equal"));
+    try std.testing.expect(@hasDecl(AssertionRecorder, "applicationService"));
+    try std.testing.expect(@hasDecl(AssertionRecorder, "applicationDependency"));
+    try std.testing.expect(@hasDecl(AssertionRecorder, "applicationHealthy"));
     try std.testing.expect(@hasDecl(FaultMatrix, "standard"));
     try std.testing.expect(@hasDecl(Generators, "generate"));
     try std.testing.expect(@hasDecl(Snapshot, "compareAlloc"));

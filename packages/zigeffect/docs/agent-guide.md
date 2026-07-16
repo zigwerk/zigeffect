@@ -1,1231 +1,248 @@
-# zigeffect Guide For Agents
+# ZigEffect guide for coding agents
 
-Use this guide when building with `zigeffect`.
+ZigEffect gives agents two things ordinary source-and-log workflows lack:
 
-## Rules
+1. a typed application architecture whose services, failures, dependencies,
+   resources, and entry points are statically visible; and
+2. bounded machine-readable evidence that connects requirements, tests,
+   runtime events, failures, and repair hints.
 
-- Keep app logic as normal Zig functions: `fn run(ctx) Error!A`.
-- Use `Effect.fromFn` to make direct-style functions composable.
-- Use `Effect.requires(.{ ... })` for production effects that depend on
-  services.
-- Use `Effect.succeed`, `Effect.fail`, and `Effect.sync` for small reusable
-  helpers instead of writing tiny wrapper functions.
-- Use `mapError`, `catchAll`, `orElse`, and `tapError` for recovery boundaries.
-- Use `onExit` when logic needs the structured `Exit`; use `ensuring` when an
-  effect-local finalizer must run on success and failure.
-- Use `Layer.fromBuilder` for dependencies that need allocation, startup, or
-  teardown.
-- Use `LayerWithError` when dependency startup can fail with app-specific
-  errors.
-- Use `Layer.provides(.{ ... })`, `Layer.requires(.{ ... })`, and `LayerGraph`
-  to validate production dependency boundaries before startup.
-- Use `fx.layerGraph` when production startup should build heterogeneous
-  declared layers automatically and reuse the started dependencies across runs.
-- Use `Layer.provide` for tests or tools that should run a program directly from
-  a layer. Use `Layer.merge` when a module needs multiple dependency groups.
-- Use Zig error sets for typed errors. Do not hide failures in strings or status
-  booleans.
-- Include `OutOfMemory` when code allocates or registers scoped resources.
-- Include `MissingScope` when code registers scoped resources or uses
-  `acquireRelease`.
-- Use `acquireRelease` for any resource that must be closed, destroyed, or
-  returned to a pool.
-- Use fallible finalizers when cleanup can fail, then inspect `Runtime.exit` or
-  `Scope.firstFinalizerFailure`.
-- Use exit-aware finalizers when cleanup behavior depends on success versus
-  typed failure.
-- Prefer `Runtime.run` or `TestEnv.run` so cleanup is engine-managed.
-- Only close scopes manually in low-level scope tests or special runtime code.
-- Use `fx.serviceNotFound(Env, Service)` as the final branch of every custom
-  environment `service` method.
-- Use `fx.formatExit` or `fx.formatCause` for CLI/test reports instead of
-  inventing one-off error strings.
-- Use `fx.validateLayerRequirements` and `fx.formatDependencyReport` before
-  running large application graphs.
-- Use `Schedule.repeat` for successful polling/repetition and `Schedule.backoff`
-  or `Schedule.jitteredBackoff` for retry loops.
-- Use `Schedule.once`, `recurs`, `spaced`, `duration`, and `fibonacci` when
-  those names make the retry/repeat policy easier to scan.
-- Use `fx.Clock` as the clock service; do not reach directly for OS time inside
-  effectful code.
-- Add tests before implementation.
-- Update usage docs when adding public API.
-- Prefer small service structs over global state.
+This is an operating guide, not a second API tutorial. Start with
+[Compositional applications](compositional-applications.md) and use
+[Agent-first testing](agent-first-testing.md) for the complete Testing v2
+contract.
 
-## App Shape
+## Choose the operating mode
 
-```zig
-const AppError = error{ MissingScope, OutOfMemory, MissingConfig, InvalidInput };
+### Application repository
 
-fn app(ctx: *fx.Context(AppEnv)) AppError!AppResult {
-    const logger = ctx.service(fx.Logger);
-    try logger.info("running");
-    return .{};
-}
+When `zigeffect.project.json` exists at the current root, it is executable
+intent. It owns requirements, acceptance checks, components, commands,
+scenarios, safety policy, and side-effect authority.
 
-const App = fx.Effect(AppResult, AppError, AppEnv).fromFn(app);
+Begin with:
+
+```sh
+zigeffect compatibility --json
+zigeffect project validate --json
+zigeffect agent status --json
+zigeffect agent next --json
+zigeffect test list --json
 ```
 
-## Recovery Shape
+Map the request to a requirement, acceptance check, component, fixed command,
+and deterministic scenario before changing behavior.
+
+### Framework repository
+
+When changing ZigEffect itself and no application manifest exists at the root,
+do not invent one. Read the affected package facade and `build.zig`, use its
+native Zig gates, and keep generated templates and public contract snapshots in
+sync.
+
+## Canonical application rules
+
+- Import application capabilities through `zigeffect_std` and framework
+  primitives through its `fx.kernel` facade.
+- Define capabilities with `kernel.Service`.
+- Return lazy `kernel.Effect` values from operations.
+- Select live, local, or fake implementations with `kernel.Layer`.
+- Compose one root layer and create one process-level `zstd.ManagedRuntime`.
+- Give each endpoint, job, workflow, or command a stable semantic name.
+- Interpret effects only at the managed runtime or a runtime-backed transport.
+- Use scoped layers for sockets, pools, exporters, processes, files, channels,
+  and other acquired resources.
+
+New application code must not use `EffectEnv`, `ServiceEnv`, provider tuples,
+`LayerGraphEnv`, `layerGraph`, or `ctx.runEffect`. `runIn` is an internal
+interpreter protocol, not an application API.
+
+## Application shape
 
 ```zig
-fn recover(err: AppError, ctx: *fx.Context(AppEnv)) AppError!AppResult {
-    _ = err;
-    const logger = ctx.service(fx.Logger);
-    try logger.warn("recovering");
-    return .{};
-}
+const zstd = @import("zigeffect_std");
+const kernel = zstd.fx.kernel;
 
-const Program = App
-    .tapError(logFailure)
-    .catchAll(AppError, recover);
+const Repository = kernel.Service("orders/Repository", RepositoryApi);
+const Load = kernel.Effect(Order, error{NotFound}, .{Repository});
+
+const program = load(order_id)
+    .flatMap(enrich)
+    .tap(audit)
+    .named("orders.load");
+
+const MainLayer = RepositoryLive.merge(AuditLive);
+var runtime = try zstd.ManagedRuntime(@TypeOf(MainLayer)).make(
+    allocator,
+    io,
+    root,
+    MainLayer,
+    .{ .observability = observability },
+);
+defer runtime.deinit();
+
+const order = try runtime.run(program);
+try runtime.shutdown();
 ```
 
-For production modules, attach requirements:
+The program is unchanged when a test supplies fake layers. Its type reveals the
+combined services and typed failures before execution.
+
+## Work from a failing scenario
+
+Use focused `std.testing` assertions for local invariants. Use
+`zstd.Testing.TestContext` when the acceptance contract needs semantic evidence,
+fault injection, causal assertions, replay, or a native receipt.
 
 ```zig
-const Program = App
-    .requires(.{ fx.Logger, fx.Config });
-```
-
-Custom environments should make missing services obvious:
-
-```zig
-const AppEnv = struct {
-    logger: fx.Logger,
-
-    pub fn service(self: *AppEnv, comptime Service: type) *Service {
-        if (Service == fx.Logger) return &self.logger;
-        return fx.serviceNotFound(AppEnv, Service);
-    }
+const scenario = zstd.Testing.Scenario{
+    .id = "create-order",
+    .label = "an accepted order is durable",
+    .requirement = "req-orders",
+    .acceptance_check = "check-order-durable",
+    .component = "orders",
+    .command = "test",
 };
-```
 
-## Layer Shape
+var context = try zstd.Testing.TestContext.initFromProject(
+    std.testing.allocator,
+    std.testing.io,
+    std.Io.Dir.cwd(),
+    .{
+        .project = "orders",
+        .suite = "acceptance",
+        .scenario = scenario,
+        .seed = 42,
+    },
+);
+defer context.deinit();
 
-```zig
-fn buildEnv(allocator: std.mem.Allocator, scope: *fx.Scope) std.mem.Allocator.Error!*AppEnv {
-    const env = try allocator.create(AppEnv);
-    env.* = .{ .logger = fx.Logger.init(allocator) };
-
-    scope.addFinalizerFor(AppEnv, env, releaseEnv) catch |err| {
-        releaseEnv(env);
-        return err;
-    };
-
-    return env;
-}
-
-fn releaseEnv(env: *AppEnv) void {
-    const allocator = env.logger.allocator;
-    env.logger.deinit();
-    allocator.destroy(env);
-}
-
-const AppLayer = fx.Layer(AppEnv).fromBuilder(buildEnv);
-```
-
-Use `Layer.fromEnv` only when the caller already owns the environment lifetime.
-
-Use `Layer.provide` to run from a layer:
-
-```zig
-const result = try AppLayer
-    .provides(.{fx.Logger})
-    .provide(allocator, App);
-```
-
-Use metadata validation before app startup:
-
-```zig
-var graph = fx.LayerGraph.init(allocator);
-defer graph.deinit();
-
-try graph.addLayer("app", AppLayer.provides(.{fx.Logger}));
-try graph.addLayer("program", AppLayer.requires(.{fx.Logger}));
-
-var report = try graph.validate(allocator);
-defer report.deinit();
-
-if (!report.isValid()) return error.InvalidDependencyGraph;
-```
-
-Use executable graph startup when callers should not hand-write a merged
-environment:
-
-```zig
-var graph = fx.layerGraph(allocator, .{
-    AppLayer.requires(.{ fx.Logger }).provides(.{AppService}),
-    LoggerLayer.provides(.{fx.Logger}),
+const assertions = zstd.Testing.AssertionRecorder.init(&context);
+try assertions.boolean(.{
+    .id = "order-durable",
+    .label = "the order is durable",
+    .repair_hint = "make the write and idempotency key atomic",
+}, true);
+try assertions.noPendingFibers(.{
+    .id = "fibers-clean",
+    .label = "no work escaped its scope",
 });
-defer graph.deinit();
-
-const GraphEnv = @TypeOf(graph).EnvType;
-const Program = fx.Effect(AppResult, AppError, GraphEnv)
-    .fromFn(app)
-    .requires(.{ AppService, fx.Logger });
-
-const result = try graph.run(Program);
-```
-
-## Resource Shape
-
-```zig
-const ResourceError = error{ MissingScope, OutOfMemory };
-
-fn acquire(ctx: *fx.Context(AppEnv)) ResourceError!*Resource {
-    const resource = try ctx.allocator.create(Resource);
-    resource.* = .{ .allocator = ctx.allocator };
-    return resource;
-}
-
-fn release(resource: *Resource) void {
-    resource.allocator.destroy(resource);
-}
-
-const OpenResource = fx.acquireRelease(Resource, ResourceError, AppEnv, acquire, release);
-```
-
-Run `OpenResource` through the runtime. The runtime opens a scope and closes it
-in reverse registration order even when the program fails.
-
-```zig
-_ = try env.run(OpenResource);
-```
-
-If a resource effect returns `error.MissingScope`, the program was run against a
-context without an active `Scope`. Run it through `Runtime.run`, `TestEnv.run`,
-or construct a context with a scope.
-
-For fallible cleanup:
-
-```zig
-try scope.addFinalizerFallibleFor(Resource, resource, releaseMayFail);
-```
-
-For exit-aware cleanup:
-
-```zig
-fn releaseWithExit(resource: *Resource, exit: fx.FinalizerExit) void {
-    switch (exit) {
-        .success => resource.releaseCleanly(),
-        .failure => resource.releaseAfterFailure(),
-        else => resource.releaseCleanly(),
-    }
-}
-
-try ctx.addFinalizerExitFor(Resource, resource, releaseWithExit);
-```
-
-Prefer `Runtime.exit` when a caller needs to inspect cleanup failures as
-structured causes.
-
-## Diagnostic Reports
-
-```zig
-const exit = env.exit(Program);
-const report = try fx.formatExit(std.testing.allocator, "program name", exit);
-defer std.testing.allocator.free(report);
-```
-
-Use stable program labels like `"compile schema"` or `"load config"` so humans
-and agents can connect the report back to the failing workflow.
-
-## Causal Runtime Direction
-
-The long-term agent workflow is documented in
-`docs/agent-observable-runtime.md`. The first causal runtime APIs are now
-available through `fx.CausalStore`, graph/runtime `.withCausalStore`, query
-helpers, and causal report/JSON/DOT formatters. Agents should use them with
-this discipline:
-
-- Prefer structured `Exit`, `Cause`, dependency, observability, and test reports
-  over ad hoc log scraping.
-- Preserve stable labels for effects, layers, resources, schedules, and test
-  workflows.
-- Keep typed Zig errors visible instead of converting them into strings.
-- Add service requirements and provider declarations so future causal queries
-  can explain where dependencies came from.
-- Use scopes and `acquireRelease` for owned resources so resource lineage can be
-  observed later.
-- Use tracing spans and trace context where a workflow crosses service or fiber
-  boundaries.
-- Attach a `CausalStore` to runtime, fiber runtime, or layer graph paths when a
-  test or example needs agent-readable evidence.
-- Record app-level log, metric, span, config, or assertion facts with
-  `ctx.recordCausal` until those services have automatic adapters.
-
-The shortest useful query loop is:
-
-```text
-run effect -> inspect causal snapshot -> query lineage -> inspect cause
--> propose test or code fix
-```
-
-Attach and report with the public API:
-
-```zig
-var store = fx.CausalStore.init(allocator);
-defer store.deinit();
-
-var runtime = env.runtime().withCausalStore(&store);
-const exit = runtime.exit(Program);
-_ = exit;
-
-const report = try fx.formatCausalCiReport(allocator, "program name", &store);
-defer allocator.free(report);
-```
-
-For broader diagnosis, use:
-
-```text
-inspect failing run -> query cause -> query lineage -> inspect requirements
--> inspect resources -> inspect fibers -> inspect retries -> propose fix
-```
-
-The runnable example is
-[`../examples/causal_readiness.zig`](../examples/causal_readiness.zig). It
-starts a graph with config, logger, metrics, tracing, and a database-like
-service, runs a readiness effect through a causal store, preserves
-`error.MissingConfig` as a typed app failure, and prints `formatCausalReport`
-plus `formatCausalJson`.
-
-Use `formatCausalCiReport` when an agent or CI job needs a compact artifact:
-it includes event counts, finding counts, citation ids, and recommended next
-queries while avoiding raw `redacted_detail` payloads.
-
-## Causal Dogfood Harness
-
-Run the local dogfood harness before changing causal runtime behavior:
-
-```sh
-cd packages/zigeffect
-zig build causal-test
-```
-
-The harness writes:
-
-- `.zig-cache/causal-artifacts/zigeffect-causal-dogfood.txt`
-- `.zig-cache/causal-artifacts/zigeffect-causal-dogfood.json`
-- `.zig-cache/causal-artifacts/zigeffect-causal-dogfood.dot`
-
-Use the text report for finding summaries and next-query suggestions. Use the
-JSON artifact when citing event ids in a fix proposal. Use the DOT artifact
-when checking graph shape.
-
-Before configuring local or CI retention, print the manifest:
-
-```sh
-zig build causal-artifacts
-```
-
-It lists the upload globs and known dogfood, scenario, and dev-loop artifacts.
-Retain `.zig-cache/causal-artifacts/*.txt`, `.json`, and `.dot`; do not upload
-the rest of `.zig-cache`. Treat JSON artifacts as the agent-readable source for
-`causal-query`, compare, and advice tooling.
-
-The first CI harness for this lane is
-`.github/workflows/zigeffect-causal.yml`. On pull requests it captures exact
-base-commit dogfood and package-test baseline JSON files, then prints the
-manifest, runs `causal-test`, runs examples, runs `zig build test --summary
-none`, and uploads only causal artifacts if the job fails. On failure it also
-runs `zig build causal-ci-handoff`, which writes
-`.zig-cache/causal-artifacts/zigeffect-causal-ci-verdict.json`,
-`.zig-cache/causal-artifacts/zigeffect-causal-ci-handoff.txt`, and generated
-`*-advice.txt` reports for existing JSON artifacts. Read the verdict JSON first
-for aggregate action counts and the next recommended inspection step. When a
-head artifact has a matching baseline, handoff also writes a `*-ci-compare.txt`
-report and the advice report marks actions as `status=persisting` or
-`status=new`.
-
-Use [operations.md](operations.md) as the first-read operating contract for
-handoffs. It defines which artifacts may be shared, which file to read first,
-when `applied=true` may be recorded, and which production behaviors are still
-out of scope.
-
-Causal JSON artifacts are self-identifying:
-
-```json
-{
-  "schema": "zigeffect.causal.v1",
-  "schema_version": 1,
-  "event_taxonomy_version": 1,
-  "retention": {
-    "max_events": null,
-    "dropped_events": 0,
-    "oldest_retained_event_id": null
-  },
-  "sampling": {
-    "log_every_n": null,
-    "metric_every_n": null,
-    "span_every_n": null,
-    "sampled_events": 0
-  },
-  "truncation": {
-    "max_event_string_bytes": null,
-    "truncated_fields": 0
-  },
-  "backend": {
-    "kind": null,
-    "failed_writes": 0
-  },
-  "events": []
-}
-```
-
-The query, compare, and development-loop tools still accept older artifacts
-that only contain `events`.
-
-Before changing any causal artifact schema, run
-`zig build causal-schema-governance` and update the registry, docs, and
-compatibility tests with the schema change. Do not infer schema compatibility
-from string search alone; test fixtures intentionally include fake schema names
-that are not official artifact families.
-
-For longer-running local or CI probes, use a bounded store:
-
-```zig
-var store = fx.CausalStore.initBounded(allocator, 256);
-defer store.deinit();
-```
-
-Queries only see retained events. If `dropped_events` is nonzero, cite the
-retention metadata in the fix summary and avoid claiming the trace is complete.
-
-For noisy probes, a causal store may also use opt-in deterministic sampling for
-logs, metrics, and spans. If `sampled_events` is nonzero, cite that
-observability evidence may be incomplete. Structural runtime evidence remains
-unsampled unless it is later truncated by retention.
-
-For long-running probes with potentially large labels, statuses, type names, or
-details, configure `max_event_string_bytes` as well as `max_events`:
-
-```zig
-var store = fx.CausalStore.initWithOptions(allocator, .{
-    .max_events = 256,
-    .max_event_string_bytes = 512,
-});
-defer store.deinit();
-```
-
-Truncation is opt-in. Redaction runs before truncation, and attached backends
-receive the bounded strings. If `truncated_fields` is nonzero, cite the
-truncation metadata and avoid claims that depend on complete event payload
-text.
-
-Backend adapters are sinks, not the source of truth. If `failed_writes` is
-nonzero, the deterministic in-memory causal trace is still usable, but backend
-durability or export evidence may be incomplete. Future backend adapter branches
-must run `zig build causal-backend-conformance` before claiming adapter
-compatibility.
-
-For incremental analysis, prefer JSONL rows from
-`CausalJsonLinesBackendState` when you need to tail or split events. Treat each
-row as an event fact, not as a complete store report. If sink failures are
-nonzero, use the in-memory or full JSON artifact as the authoritative trace and
-describe the JSONL stream as incomplete. Run `zig build causal-jsonl-backend`
-for the focused adapter gate.
-
-Use `CausalDotBackendState` when a local or CI harness wants graph output as
-events are recorded. DOT backend output is an artifact builder: call `finish()`
-before writing the buffer to a `.dot` file. Treat DOT as visual evidence for
-humans and graph tools; use the full causal JSON artifact for agent queries,
-schema metadata, retention, sampling, and truncation summaries. Run
-`zig build causal-dot-backend` for the focused adapter gate.
-
-Use `CausalOtelBackendState` when you need to inspect the runtime-to-OTel
-mapping directly. Treat records as best-effort adapter sink output, not as the
-source of truth. A record with complete `trace_id` and `span_id` is a
-`span_event`; missing or incomplete context is a `log_record`. Cite the full
-causal JSON artifact for retention, sampling, truncation, and backend-failure
-metadata. Run `zig build causal-otel-backend` for the focused adapter gate.
-
-Use `CausalGraphHistoryBackendState` when store retention may have dropped
-ancestor or child events that an agent still needs for local cause and lineage
-queries. Treat it as adapter sink history, not durable truth. If
-`failedEventCount()` or `backendFailureCount()` is nonzero, cite the graph
-history as incomplete and fall back to retained store or JSON artifact
-evidence.
-
-Use `CausalNendbStorageBackendState` when the work is specifically about the
-NenDB storage adapter contract. It translates stored events into deterministic
-NenDB-shaped event nodes and parent edges through `CausalNendbGraphWriter`.
-Treat the writer output as sink evidence: if `failedEventCount()` or
-`backendFailureCount()` is nonzero, cite the storage graph as incomplete and
-fall back to retained store, graph-history, JSONL, or full JSON evidence. Run
-`zig build causal-nendb-storage-backend` for the focused adapter gate.
-
-Use `CausalAsyncStreamBackendState` when an agent needs incremental events from
-a running local command but does not need durable history. `peekSnapshot`
-returns a copy of the queued stream without mutating it; `drain` returns queued
-events in order and clears the stream; `clear` discards queued events; `flush`
-calls the optional sink flush hook. Treat the async stream as incomplete if
-backend failures or dropped stream events are nonzero. Run
-`zig build causal-async-stream-backend` for the focused adapter gate.
-
-`event_taxonomy_version` identifies the event-kind role semantics. Version `1`
-keeps sampleable observability disjoint from finding evidence: logs, metrics,
-and spans may be sampled; service, scope, resource, fiber, schedule, and
-assertion evidence must not be sampled.
-
-App semantic references are first-class event fields in the same causal
-artifact: `artifact_id`, `domain_entity_ref`, `data_subject_ref`, and
-`schema_ref`. Use them for stable references that agents can query, not for
-raw app data. JSON, JSONL, NenDB projection, OTel adapter records, and the
-workbench parser preserve these fields after store redaction and bounds.
-
-If a query, compare, development-loop query report, or advice report warns that
-the artifact schema is newer than supported, keep using event citations but
-assume future root or event fields may have been ignored. If it warns that the
-taxonomy is newer than supported, avoid strong claims about event-kind role
-semantics until the tool is updated. If it warns about an unknown event kind,
-the event id and raw fields are still usable, but query/advice/finding
-interpretation may be incomplete for that kind.
-
-Causal events also redact common secret and key-bound personal-data text before
-storage: password-like fields, API keys, token keys, authorization and proxy
-authorization headers, cookies, URL credentials, secret query parameters,
-JSON-ish quoted keys, config-ish maps, SQL-ish key/value diagnostics, and
-personal-data keys such as email, phone, IP address, SSN, address, and date of
-birth become `<redacted>`. Treat this as a deterministic safety backstop. Do not
-intentionally put secrets, prompts, request bodies, credentials, or personal
-data into labels, statuses, type names, or details; app-facing adapters should
-emit compact semantic diagnostics instead of raw payloads.
-
-Use the non-failing probe when you want evidence:
-
-```sh
-zig build causal-test
-```
-
-Use the failure-gated check when causal findings should fail the development
-loop:
-
-```sh
-zig build causal-check
-```
-
-The check still writes artifacts before failing, so inspect the JSON with
-`causal-query` instead of rerunning blindly.
-
-Inspect the registered scenario and invariant catalog before changing runtime
-behavior:
-
-```sh
-zig build causal-catalog
-```
-
-Inspect the causal coverage matrix before proposing a new scenario or invariant:
-
-```sh
-zig build causal-test-matrix
-```
-
-If a failure belongs to a partial domain, first decide whether an existing
-scenario or invariant should be tightened. Add a new scenario only when the
-failure teaches a reusable runtime rule that should produce CI artifacts for
-agents.
-
-Use the real command capture fixture to prove that non-fixture command failures
-leave scenario-specific artifacts:
-
-```sh
-zig build causal-capture-missing-service
-```
-
-Use the controlled package-test failure fixture to prove the package failure
-artifact lane while keeping the real package gate green:
-
-```sh
-zig build causal-package-failure-fixture
-```
-
-This command runs an intentionally failing Zig test through the causal command
-harness. It exits zero because the failure is expected and writes
-`package-tests-failure-fixture` artifacts for query-based inspection.
-
-Use the normal package-test gate while changing `zigeffect` internals:
-
-```sh
-zig build test
-```
-
-When package tests are green, the command exits zero. When they fail, it writes
-`package-tests` causal artifacts before exiting nonzero. Use `zig build
-test-raw` only when you need the unwrapped Zig test binary. `zig build
-causal-dev-test` is an explicit alias for the same causal package-test harness.
-
-Use the causal development loop when making runtime changes:
-
-```sh
-zig build causal-dev-loop -- baseline
-```
-
-Make the patch, then run:
-
-```sh
-zig build causal-dev-loop -- after
-```
-
-When the change touches a known subsystem, target its scenario:
-
-```sh
-zig build causal-dev-loop -- baseline causal-scoped-fiber
-zig build causal-dev-loop -- after causal-scoped-fiber
-```
-
-The baseline phase stores the before artifact and runs package tests. The after
-phase stores the after artifact, writes the compare report, writes an executed
-query report, writes deterministic advice, writes a local verdict JSON, reruns
-package tests, and prints the report paths. Expected failure scenarios, such as
-`missing-service-compile-fail`, are treated as successful evidence when the
-expected failure is observed. Read the `*-verdict.json` artifact first for
-aggregate action counts and `next_action`, then inspect `*-advice.txt`,
-`*-queries.txt`, and `*-compare.txt` for detailed event evidence before
-proposing the next fix.
-
-Use `zig build causal-snapshot -- capture <name> [scenario]` after the causal
-JSON artifact already exists. It writes
-`zigeffect.causal.snapshot-manifest.v1` JSON/text metadata that names the
-artifact, records event counts and finding posture, and prints stable next
-query commands. Snapshot manifests do not embed events and do not make replay
-feasible yet; keep citing the underlying causal JSON event ids.
-The `manifest` command can also name retained audit-chain JSON artifacts; in
-that case it records audit-chain metadata and emits audit-chain comparison
-hints instead of event-run query commands.
-
-Compare named snapshots with
-`zig build causal-snapshot -- compare <left> <right>`. Use names such as
-`baseline` and `after` when manifests were written to the default artifact
-directory, or pass explicit manifest JSON paths when reviewing uploaded CI
-artifacts. Treat the report as a state-level summary; query the underlying
-causal JSON paths for event-level evidence.
-
-Compare retained audit-chain governance snapshots with
-`zig build causal-snapshot -- audit-chain-compare <left> <right>` when both
-snapshot manifests point at `zigeffect.causal.audit-chain.v1` artifacts. The
-report emits `zigeffect.causal.audit-chain-snapshot-compare.v1`, summarizes
-approval/applied posture and evidence-classification deltas, and blocks
-`applied=true` chains without separate reviewed application evidence. Do not
-feed audit-chain governance JSON to `causal-query`; it is not a core event-run
-artifact.
-
-Use `zig build causal-snapshot -- replay-feasibility <snapshot>` when an agent
-needs to know whether a named state can be replayed. Today the answer must
-remain `feasible: false`; the report is useful because it explains which event
-categories are observations, which details are redacted or truncated, and what
-future replay work would need.
-
-Use `zig build causal-snapshot -- replay-scenario <snapshot> <scenario>` only
-when the snapshot names an existing causal JSON artifact and `<scenario>` is a
-registered slug from `zig build causal-catalog`. This command reruns the
-registered scenario command, writes replay-specific causal artifacts, compares
-the baseline artifact with the replay artifact, and prints
-`zigeffect.causal.deterministic-replay.v1`. It is evidence for a scenario rerun
-and compare, not evidence that zigeffect can execute arbitrary event logs. A
-clean-cache walkthrough that reliably writes the baseline artifact is:
-
-```sh
-zig build causal-run -- missing-service-compile-fail
-zig build causal-snapshot -- capture missing-service-baseline missing-service-compile-fail
-zig build causal-snapshot -- fork-proposal missing-service-baseline missing-service-compile-fail missing-service-fork
-zig build causal-snapshot -- replay-scenario missing-service-baseline missing-service-compile-fail
-```
-
-Use `zig build causal-snapshot -- fork-proposal <snapshot> <scenario> <fork>`
-before treating a replay as a forked diagnostic path. It writes
-`zigeffect.causal.scenario-fork-proposal.v1` JSON/text artifacts with
-`approved=false` and `executed=false`. The proposal is review evidence only: it
-does not execute commands, fork runtime memory, replay arbitrary event logs,
-mutate source, or update the scenario registry.
-
-Use the read-only causal workbench when a saved artifact would be faster to
-inspect visually than through raw JSON:
-
-```sh
-zig build causal-test
-zig build causal-workbench -- .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json
-```
-
-The workbench is a SolidJS app hosted by `zig-webui`. It reads exactly one
-artifact through a bounded Zig bridge and renders timeline, findings,
-relationships, query commands, metadata, event inspector, and Visual Graph
-views. It is local and read-only: no
-source edits, registry edits, policy decisions, approval decisions, or
-remediation writes happen through the UI. Use copied `causal-query` commands as
-explicit follow-up evidence, not as implied approval.
-
-For app remediation artifacts, open the audit, policy decision, human review,
-patch proposal, or application readiness JSON directly in the same workbench.
-The Chain tab renders app incidents, policy gates, gate results, proposal
-citations, readiness checks, verification commands, guardrails, and source
-artifact paths. Copy the shown commands for follow-up inspection; do not treat
-the workbench as approval to edit source, change config, run migrations, or
-apply rollback actions.
-
-For app-facing request and job traces, use the M7 adapter rather than inventing
-new app log schemas. Start with a bounded store, record semantic app lifecycle
-facts, export normal causal JSON, then inspect the artifact through the same
-workbench and `causal-query` flow:
-
-```zig
-var store = fx.CausalStore.initWithOptions(allocator, fx.defaultRequestCausalStoreOptions());
-var trace = try fx.CausalAppTrace.startRequest(&store, .{
-    .method = "GET",
-    .route = "/api/projects/:id",
-    .runtime = "worker",
-});
-try trace.recordServiceResolution("ProjectService", "satisfied");
-_ = try trace.recordDataRead("load project", .{
-    .data_subject_ref = "tenant:acme",
-    .domain_entity_ref = "project:123",
-    .schema_ref = "Project.v1",
-}, "success");
-_ = try trace.recordResponseSent("GET /api/projects/:id", .{
-    .data_subject_ref = "tenant:acme",
-    .artifact_id = "response:project:error",
-    .schema_ref = "ErrorResponse.v1",
-}, "500");
-try trace.recordConfigFailure("readiness.region", "MissingConfig");
-try trace.complete(.failure);
-const json = try fx.formatCausalJson(allocator, &store);
-```
-
-The semantic helper methods are `recordFunctionBoundary`, `recordDataRead`,
-`recordDataTransformed`, `recordDataWritten`, `recordServiceCall`,
-`recordDomainAction`, `recordPolicyDecision`, `recordArtifactEmitted`, and
-`recordResponseSent`. They emit `span_recorded` events with stable
-`zigeffect.app.*` type names and typed refs. Use `CausalAppSemanticRefs` to pass
-refs and `cause_event_id` when a semantic app event is caused by an earlier
-event.
-
-Keep labels semantic and bounded: route templates, service names, job names,
-config keys, and requirement names are useful; raw URLs, headers, cookies,
-bodies, rows, and user identifiers are not. The store still redacts and bounds
-event strings before retention and JSON export.
-
-When an artifact carries app semantic refs, ask for data lineage with:
-
-```sh
-zig build causal-query -- --agent --file <artifact.json> trace_data <data_subject_ref>
-```
-
-Agent mode returns matching events, semantic refs, `reads`, `writes`,
-`transforms`, and `emits` relationships, policy metadata, confidence, and next
-query hints. If retention, sampling, or truncation metadata says the slice is
-incomplete, cite that limitation in the fix summary.
-
-Use `examples/causal_app_request.zig` as the first app request reference. It
-models a Worker-compatible request path that returns the HTTP response shape and
-owned causal JSON without file writes, process APIs, or Bun dependencies.
-Compile and test it with `zig build causal-app-request-example`.
-
-When an app artifact is clearly app-owned, prefer app incident categories over
-generic assertion labels. `deriveCausalAppIncidents` classifies missing config,
-missing requirements, failed responses, retry exhaustion, resource leaks,
-finalizer failures, and unresolved fibers. `causal-advice` mirrors that with
-app actions like `fix-app-config`, `wire-app-requirement`, and
-`inspect-app-response-failure`; `causal-diagnosis` maps those actions to app
-subsystems and fix categories.
-
-To record app remediation evidence before proposing source, config, migration,
-or operational changes, run:
-
-```sh
-zig build causal-app-remediation-audit -- local --artifact <causal-json> --target <app-target>
-```
-
-The command writes `*-app-remediation-audit.json` and
-`*-app-remediation-audit.txt` with `approval_status=pending`, `applied=false`,
-`mutation_authority=none`, app incident event ids, query commands, advisory
-policy gates, and claim guardrails. Treat this as the app review boundary; it
-does not approve, apply, patch, edit config, or run migrations.
-
-Then evaluate the app policy gates:
-
-```sh
-zig build causal-app-policy-decision -- local --audit <app-remediation-audit-json>
-```
-
-The command writes `*-app-policy-decision.json` and
-`*-app-policy-decision.txt` with schema
-`zigeffect.causal.app-policy-decision.v1`. `source-only` and `config-only`
-gates can approve proposal drafting; `migration-required`,
-`operational-human-required`, and `rollback-required` require human review.
-Every app policy decision remains advisory with `mutation_authority=none` and
-`applied=false`.
-
-When the app policy decision is `needs-human-review`, do not retry app patch
-proposal directly. Produce or request a matching app human-review artifact with
-the migration, runbook, and rollback citations required by the policy gates:
-
-```sh
-zig build causal-app-human-review -- local --policy <app-policy-decision-json> --reviewer <actor> --decision approve --reason <reason> --migration <path> --runbook <path> --rollback <path>
-```
-
-The command writes `*-app-human-review.json` and `*-app-human-review.txt` with
-schema `zigeffect.causal.app-human-review.v1`. Even an approved review only
-authorizes draft proposal creation; it keeps `mutation_authority=none` and
-`applied=false`.
-
-When the app policy decision is `approve`, or when it is
-`needs-human-review` and a matching approved app human-review artifact exists,
-draft the app patch proposal:
-
-```sh
-zig build causal-app-patch-proposal -- local --policy <app-policy-decision-json> --review <app-human-review-json> --summary <summary> --change <description> --file <path> --config <key>
-```
-
-The command writes `*-app-patch-proposal.json` and
-`*-app-patch-proposal.txt` with schema
-`zigeffect.causal.app-patch-proposal.v1`. It remains a draft review artifact:
-`proposal_status=draft`, `approval_status=pending`, `approved=false`,
-`applied=false`, and `mutation_authority=none`. Use repeated `--file`,
-`--config`, `--migration`, `--runbook`, and `--rollback` flags to cite paths or
-binding names. Never place secret values in config citations.
-
-Before attempting the real app change, record app application readiness:
-
-```sh
-zig build causal-app-application-readiness -- local --proposal <app-patch-proposal-json> approve --reason <reason> --verified <command>
-```
-
-The command writes `*-app-application-readiness.json` and
-`*-app-application-readiness.txt` with schema
-`zigeffect.causal.app-application-readiness.v1`. It re-checks draft proposal
-state, policy gates, source/config/migration/runbook/rollback citations,
-high-risk human-review links, and recorded verification commands.
-`readiness_status=ready` and `ready_for_application=true` mean the proposal is
-ready to attempt, not applied. It keeps `applied=false` and
-`mutation_authority=none`; only a later guarded app application artifact may
-record `applied=true`.
-
-After the real reviewed source, config, migration, operation, or rollback
-change has been applied outside zigeffect, record the app application boundary:
-
-```sh
-zig build causal-app-apply -- --from-readiness <app-application-readiness-json> plan --reason <reason>
-zig build causal-app-apply -- --from-readiness <app-application-readiness-json> record-applied --reason <reason> --verified-command <command> --source-change <path> --before <evidence> --after <evidence>
-```
-
-Agents must treat app readiness as permission to attempt application, not proof
-of application. Capture before and after app evidence, run the required
-post-application verification, and use `record-applied` only after every
-required evidence category is recorded. `causal-app-apply` writes
-`zigeffect.causal.app-application.v1` artifacts; it records application state
-but does not mutate source, config, migrations, operations, rollback plans, or
-external systems.
-
-For normal core-runtime development, prefer the coordinated session command:
-
-```sh
-zig build causal-dev-session -- start
-# edit source
-zig build causal-dev-session -- assess
-zig build causal-dev-session -- status
-```
-
-When the change touches a known subsystem, pass the scenario slug through the
-whole session:
-
-```sh
-zig build causal-dev-session -- start causal-scoped-fiber
-# edit source
-zig build causal-dev-session -- assess causal-scoped-fiber
-zig build causal-dev-session -- status causal-scoped-fiber
-```
-
-The session coordinator writes `*-dev-session.json` and `*-dev-session.txt`.
-`start` captures the baseline. `assess` runs the after phase, local agent
-handoff, diagnosis, remediation plan, and remediation audit, then stops before
-review. It does not approve, apply, or edit source. Use
-`causal-remediation-decision` only after review.
-
-To turn the verdict into a deterministic local agent handoff, run:
-
-```sh
-zig build causal-dev-agent -- local
-zig build causal-dev-agent -- local causal-scoped-fiber
-```
-
-The command reads the existing verdict artifact, prints the recommended
-inspection order, and gives exact advice, query, and compare commands. It does
-not rerun the loop or apply fixes.
-
-To synthesize the verdict, advice, query, and compare reports into a patch-ready
-local diagnosis, run:
-
-```sh
-zig build causal-diagnosis -- local
-zig build causal-diagnosis -- local causal-scoped-fiber
-```
-
-The command writes `*-diagnosis.txt`, cites event ids from advice, summarizes
-compare posture, and suggests patch categories without editing source.
-
-To convert the diagnosis into a bounded, reviewable engineering plan, run:
-
-```sh
-zig build causal-remediation-plan -- local
-zig build causal-remediation-plan -- local causal-scoped-fiber
-```
-
-The command writes `*-remediation-plan.md` with evidence ids, remediation
-posture, proposed patch strategy, verification commands, and claim guardrails.
-It does not edit source or execute remediation.
-
-To record the remediation proposal before any approval or patch application,
-run:
-
-```sh
-zig build causal-remediation-audit -- local
-zig build causal-remediation-audit -- local causal-scoped-fiber
-```
-
-The command writes `*-remediation-audit.json` and `*-remediation-audit.txt`
-with `approval_status=pending`, `applied=false`, source artifact paths, evidence
-event ids, verification commands, and claim guardrails. Treat this audit record
-as the review boundary before source edits or future policy-controlled
-remediation.
-
-To record a review decision for that audit without applying source changes, run:
-
-```sh
-zig build causal-remediation-decision -- local approve --by local-reviewer --policy manual-review
-zig build causal-remediation-decision -- local reject causal-scoped-fiber --reason "clear verdict"
-```
-
-The command writes `*-remediation-decision.json` and
-`*-remediation-decision.txt` with `approval_status=approved` or
-`approval_status=rejected`, `applied=false`, the source audit path, copied event
-ids, verification commands, claim guardrails, and decision guardrails. Approval
-is permission for a future patch workflow only; it does not edit source or mark
-anything applied.
-
-To record the intended file-level patch without applying it, run:
-
-```sh
-zig build causal-patch-proposal -- local draft --summary "scope cleanup ordering" --file packages/zigeffect/src/core/scope.zig --change "tighten finalizer ordering evidence"
-zig build causal-patch-proposal -- local approved causal-scoped-fiber --summary "scoped fiber evidence" --file packages/zigeffect/src/runtime/fiber.zig --change "record scoped fiber interruption evidence"
-```
-
-Draft proposals read pending audits and write `proposal_status=draft`,
-`approval_status=pending`, `approved=false`, and `applied=false`. Approved
-proposals require an approved remediation decision and write
-`proposal_status=approved`, `approval_status=approved`, `approved=true`, and
-`applied=false`. The command writes `*-patch-proposal.json` and
-`*-patch-proposal.txt`; it never edits source or runs verification.
-
-After a patch attempt and after-phase evidence exist, compare the full local
-audit chain:
-
-```sh
-zig build causal-audit-chain -- local
-zig build causal-audit-chain -- local causal-scoped-fiber
-```
-
-The command writes `*-audit-chain.json` and `*-audit-chain.txt` with schema
-`zigeffect.causal.audit-chain.v1`. It reads the session, audit, optional
-decision, patch proposal, before/after causal artifacts, and compare report. It
-classifies proposal evidence ids as `disappeared`, `persisting`, `appeared`, or
-`missing`, then assigns `assessment=improved|unchanged|regressed|inconclusive`.
-Use this report before claiming a remediation worked. Persisting or missing
-event ids mean the cited evidence is not resolved; appeared ids mean the patch
-may have introduced new evidence. The command does not approve, apply, edit
-source, or run verification.
-When comparing two retained audit-chain reports, wrap them in snapshot
-manifests and use
-`zig build causal-snapshot -- audit-chain-compare <left> <right>` rather than
-event-run queries.
-
-After the audit chain exists, ask whether the evidence should become scenario
-coverage:
-
-```sh
-zig build causal-scenario-proposal -- local
-zig build causal-scenario-proposal -- local causal-scoped-fiber
-```
-
-The command writes `*-scenario-proposal.json` and
-`*-scenario-proposal.txt` with schema
-`zigeffect.causal.scenario-proposal.v1`. It reads the verdict, diagnosis,
-remediation plan, and audit chain, then recommends `add-scenario`,
-`refine-scenario`, or `none`. Treat it as a review prompt for scenario or
-invariant coverage. It is read-only and does not edit `tools/causal_run.zig`.
-
-To turn that proposal into a reviewable registry patch draft, run:
-
-```sh
-zig build causal-scenario-registry-patch -- --from-proposal .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-scenario-proposal.json
-zig build causal-scenario-registry-patch -- --from-proposal .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-scenario-proposal.json
-```
-
-The command writes `*-registry-patch.json`, `*-registry-patch.txt`, and
-`*-registry-patch.zig` with schema `zigeffect.causal.registry-patch.v1`. Review
-the `.zig` snippet before manually applying anything to `tools/causal_run.zig`.
-The generated argv is temporary until the reviewer replaces it with the
-smallest reproducing command.
-
-Before treating a registry patch as applicable, run the readiness gate:
-
-```sh
-zig build causal-registry-application-readiness -- --from-registry-patch .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-patch.json approve --reason "reviewed registry patch draft" --verified-command "zig build causal-run learned-dogfood-service-resolution" --verified-command "zig build examples"
-zig build causal-registry-application-readiness -- --from-registry-patch .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-causal-scoped-fiber-registry-patch.json approve --reason "no registry patch applies"
-```
-
-The command writes `*-registry-application-readiness.json` and
-`*-registry-application-readiness.txt` with schema
-`zigeffect.causal.registry-application-readiness.v1`. It records the reviewer,
-policy, decision, reason, verified commands, readiness checks, and
-`readiness_status=applicable|blocked|not-applicable`. It verifies reviewer
-approval, current registry state, generated argv replacement, invariant
-catalog consistency, scenario docs, and required verification commands. It
-never edits source or the scenario registry, and every report keeps
-`applied=false`.
-
-After readiness, record the application boundary:
-
-```sh
-zig build causal-registry-apply -- --from-readiness .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-application-readiness.json plan --reason "prepare manual registry application"
-zig build causal-registry-apply -- --from-readiness .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-registry-application-readiness.json record-applied --reason "registry and docs updated" --verified-command "zig build causal-run learned-dogfood-service-resolution" --verified-command "zig build examples" --verified-command "zig build test --summary none"
-```
-
-The command writes `*-registry-application.json` and
-`*-registry-application.txt` with schema
-`zigeffect.causal.registry-application.v1`. Use `plan` before manual source
-application; it keeps `applied=false`. Use `record-applied` only after the
-reviewed registry/docs update exists in source and after the verification
-commands have been run; it sets `applied=true` only when source-state and
-verification checks pass. The command records application state but does not
-silently mutate source.
-
-After the audit, proposal, audit-chain, and optional registry application
-artifacts exist, record the advisory policy decision:
-
-```sh
-zig build causal-policy-decision -- local
-zig build causal-policy-decision -- local causal-scoped-fiber
-```
-
-The command writes `*-policy-decision.json` and `*-policy-decision.txt` with
-schema `zigeffect.causal.policy-decision.v1`. The default
-`local-causal-self-improvement-v1` policy evaluates deterministic local
-evidence and emits `approve`, `reject`, or `needs-human-review`. It never
-applies source changes; every report keeps `applied=false` and
-`mutation_authority=none`.
-
-Generate advice directly from any saved causal JSON artifact:
-
-```sh
-zig build causal-advice -- --file .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json
-zig build causal-advice -- --before .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-before.json --file .zig-cache/causal-artifacts/zigeffect-causal-dev-loop-after.json
-```
-
-Advice is deterministic and non-mutating. It names event ids, why the event is
-actionable, and exact `causal-query` commands. Single-artifact advice uses
-`status=observed`. Before-aware advice uses `status=persisting` for evidence
-that existed in the baseline and `status=new` for after-only evidence.
-
-Run a specific scenario from the catalog when your change touches its owner:
-
-```sh
-zig build causal-run -- causal-scoped-fiber
-```
-
-Follow the report's next-query hints with:
-
-```sh
-zig build causal-query -- cause 3
-zig build causal-query -- lineage 2
-zig build causal-query -- resources 1
-zig build causal-query -- fibers pending
-zig build causal-query -- requirements 1
-zig build causal-query -- retries 1
-```
-
-Use `zig build causal-query -- --file <path> <query> [argument]` when querying
-an artifact from CI or a non-default harness run.
-
-Use `--agent` when another tool or agent needs a bounded machine-readable graph
-slice instead of human text:
-
-```sh
-zig build causal-query -- --agent --file .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json explain_event 3
-zig build causal-query -- --agent --limit 16 --file .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json summarize_run 1
-zig build causal-query -- --agent --file .zig-cache/causal-artifacts/zigeffect-causal-dogfood.json find_failures 1
-zig build causal-query -- --agent --file .zig-cache/causal-artifacts/before.json --compare-file .zig-cache/causal-artifacts/after.json compare_runs 1:2
-```
-
-Agent-query responses use `zigeffect.causal.agent-query.v1` and include selected
-events, derived runtime relationships, `bounded`/`truncated` flags, a compact
-confidence signal, policy metadata, compatibility warnings, limitations, and
-next-query hints. The `compare_runs <left_run_id>:<right_run_id>` query compares
-bounded run slices inside one artifact or across `--compare-file` artifacts.
-This is the compact agent surface; the SolidJS `zig-webui` workbench remains the
-richer human surface.
-
-For the real missing-service compile-fail artifact:
-
-```sh
-zig build causal-query -- --file .zig-cache/causal-artifacts/zigeffect-causal-missing-service-compile-fail.json cause 3
-```
-
-Compare before and after artifacts after a runtime fix:
-
-```sh
-zig build causal-compare -- .zig-cache/causal-artifacts/before.json .zig-cache/causal-artifacts/after.json
-```
-
-Use the compare report to cite event deltas, finding deltas, added events,
-removed events, and changed events in the patch summary.
-
-This is the Phase 0 self-improving feedback lane: agents use `zigeffect`'s own
-causal runtime as evidence while improving `zigeffect`, then rerun the harness
-and package tests to compare behavior.
-
-For the concise recovery workflow and root Bun commands, see
-`packages/zigeffect/docs/causal-dev-harness.md`.
-
-For the consolidated self-improving engine boundary, including the engine-AI
-and app-AI split, see
-`packages/zigeffect/docs/self-improving-ai-engine.md`.
-
-Use `zig build causal-artifacts` at the start of CI wiring or branch handoff to
-make the artifact retention contract explicit before uploading or attaching
-causal evidence.
-
-When debugging a CI failure, start with the uploaded
-`zigeffect-causal-ci-verdict.json` report. It gives the aggregate status, action
-counts, and `next_action`. Then read `zigeffect-causal-ci-handoff.txt`; it names
-the JSON artifacts that were present, points at generated `*-advice.txt`
-reports, and prints exact `causal-query` commands for each one. On pull
-requests it also names any base-commit baseline JSON artifact and generated
-`*-ci-compare.txt` report, so new evidence can be separated from findings that
-already existed on the base commit.
-
-When a bug teaches a new runtime rule, run
-`zig build causal-scenario-proposal -- local [scenario]` after the audit chain.
-Then run `zig build causal-scenario-registry-patch -- --from-proposal <path>`
-to generate review-only JSON/text/Zig patch drafts. Then run the readiness gate
-and inspect the report before claiming the draft is applicable:
-
-```sh
-zig build causal-registry-application-readiness -- --from-registry-patch <registry-patch.json> approve|reject --reason <reason>
-```
-
-Then preserve the application boundary:
-
-```sh
-zig build causal-registry-apply -- --from-readiness <readiness.json> plan|record-applied --reason <reason>
-```
-
-Use these artifacts to review whether a catalog entry in `tools/causal_run.zig`
-and documentation in `docs/causal-scenarios.md` should be added before claiming
-the invariant is covered.
-
-Backend adapters are sinks, not the source of truth. Keep tests and local agent
-queries against the in-memory `CausalStore`; use `store.attachBackend` for
-JSONL, DOT, OpenTelemetry, embedded graph, NenDB storage, or bounded async
-adapters. Do not put NenDB or OpenTelemetry inside the deterministic core.
-
-Future causal findings should be treated as evidence pointers, not conclusions.
-An agent should cite event ids, explain whether an edge is causal or merely
-correlated by trace context, and then propose a source, config, test, or runtime
-policy change.
-
-When a report contains findings, use this workflow:
-
-```text
-start with finding -> cite event id -> query lineage -> query cause
--> inspect scope/resource/fiber/retry evidence -> propose code or config fix
-```
-
-The most useful first scenario fixtures are:
-
-- `../examples/causal_missing_config.zig`: missing config during layer startup
-- `../examples/causal_cleanup_failure.zig`: cleanup failure after a typed
-  program failure
-- `../examples/causal_scoped_fiber.zig`: parent scope interrupting a child fiber
-- `../examples/causal_retry_exhaustion.zig`: retry exhaustion masking the first
-  typed failure
-- app incident with trace context linking domain effect, service provider,
-  resource scope, and schedule decisions
-
-The intended result is that agents can improve `zigeffect` itself and apps built
-with `zigeffect` from typed runtime evidence, not from guesses assembled from
-stdout.
-
-## Schedule Shape
-
-```zig
-var retry = fx.Schedule.jitteredBackoff(.{
-    .max_retries = 5,
-    .base_delay_ms = 25,
-    .factor = 2,
-    .max_delay_ms = 1_000,
-    .jitter_ms = 50,
-    .seed = 1,
+try assertions.noFindings(.{
+    .id = "causal-clean",
+    .label = "runtime invariants remain clean",
 });
 
-const result = try Program.retry(&ctx, &retry);
+try context.publish(std.testing.io, std.Io.Dir.cwd(), 1);
 ```
 
-For successful repetition:
+Add the failing scenario first, implement the smallest responsible boundary,
+and iterate with:
 
-```zig
-var repeat = fx.Schedule.repeat(.{ .max_repeats = 2, .delay_ms = 10 });
-const final = try Program.repeat(&ctx, &repeat);
+```sh
+zigeffect graph status --json
+zigeffect test affected --changed <path> --json
+zigeffect graph since <baseline-event-id> --limit 256 --json
 ```
 
-For common retry names:
+Retain `newest_durable_event_id` before editing, state the expected service and
+boundary delta, and compare it with the ordered graph delta after the focused
+test.
+
+## Read evidence before terminal scrollback
+
+After a test command, read `.zigeffect/tests/latest.json` or the package suite
+receipt first. Require:
+
+- `complete: true` and `status: "passed"`;
+- equal discovered and executed counts;
+- zero failed and pending tests;
+- zero leaks and logged errors; and
+- no unsupported or truncated required evidence.
+
+On failure:
+
+1. inspect the first failed assertion, source reference, repair hint, causal
+   event IDs, and `causal_event_id_space`;
+2. query the event and its children when the IDs are `graph_durable`; never
+   treat `runtime_local` IDs as persistent graph cursors;
+3. replay with the exact recorded seed and bounds; and
+4. repair the narrowest responsible service, layer, resource, or operation.
+
+```sh
+zigeffect graph event <event-id> --json
+zigeffect graph children <event-id> --json
+zigeffect test replay <scenario-id> --json
+```
+
+Do not update a snapshot merely to turn a failure green. Compare it, explain the
+semantic change, and apply only an intentional result.
+
+## Map the application from one runtime
+
+Every canonical managed runtime can produce a bounded application snapshot:
 
 ```zig
-var once = fx.Schedule.once();
-var recurs = fx.Schedule.recurs(3);
-var spaced = fx.Schedule.spaced(.{ .max_retries = 3, .delay_ms = 25 });
-var fibonacci = fx.Schedule.fibonacci(.{
-    .max_retries = 5,
-    .base_delay_ms = 25,
-    .max_delay_ms = 1_000,
+const json = try runtime.agentMapJsonAlloc(allocator, .{
+    .max_recent_events = 128,
 });
+defer allocator.free(json);
 ```
 
-## Testing Pattern
+It includes services, operations, layers, dependency edges, memoized reuse,
+causal health, findings, fibers, recent events, embedded NenDB provenance, and
+durable follow-up queries. Prefer an authenticated
+`zigeffect-http.ApplicationMapHandler` for live agent access. An inspection
+endpoint is read-only evidence; it grants no source, deployment, or remediation
+authority.
 
-```zig
-test "program records telemetry" {
-    var env = try fx.TestEnv.init(std.testing.allocator);
-    defer env.deinit();
+## Semantic causal facts
 
-    _ = try env.run(Program);
+The runtime records structural facts automatically. Add application facts at
+boundaries where domain meaning would otherwise be lost:
 
-    try env.expectLog("running");
-    try env.expectMetric("program.count", 1);
-}
+- config loads and schema decoding;
+- CLI and API requests;
+- HTTP, gRPC, SQL, process, and storage operations;
+- external calls and retry decisions;
+- artifacts and component dependencies;
+- workflow and statechart transitions; and
+- acceptance evaluation.
+
+Use stable labels, causal parents, and domain references. Redact secrets and
+personal data before recording. Keep payloads and recent-event windows bounded.
+
+## Side-effect authority
+
+Evidence is not authority. Causal tools may inspect, compare, diagnose, and
+propose. They do not implicitly authorize source mutation, network access,
+provider calls, deployment, or remediation.
+
+Use deterministic fakes by default. Real effects require an explicit manifest
+command, capability, safety policy, and user or project authority.
+
+## Handoff gates
+
+For an application project, finish with:
+
+```sh
+zigeffect project validate --json
+zigeffect test run --requirement <requirement-id> --json
+zigeffect test coverage --requirement <requirement-id> --json
+zigeffect test gaps --requirement <requirement-id> --json
+zigeffect project test --json
+zigeffect project check --agent --json
 ```
 
-## Design Review Checklist
+For framework work, run the affected package-native tests and inspect every
+Testing v2 receipt. State failed, skipped, unsupported, or unrun gates plainly.
 
-Before adding a public API, check:
+## Specialized guides
 
-- Does this still read like Zig?
-- Can a user write the body with `try` instead of a combinator chain?
-- Are errors statically typed?
-- Does cleanup happen through `Runtime`/`Scope` instead of manual calls?
-- If cleanup can fail, is it registered as a fallible finalizer?
-- Does dependency startup happen through a `Layer` when ownership is not already
-  clear?
-- Do production effects declare service requirements?
-- Do production layers/runtimes declare provided services?
-- Is the layer graph validated before app startup?
-- Can recovery be expressed with `catchAll`/`orElse` instead of scattered
-  conditionals?
-- Does cleanup that needs the program outcome use `onExit`, `ensuring`, or
-  exit-aware scope finalizers?
-- Does repeated/retried work use `Schedule` instead of a hand-rolled loop?
-- Do missing services use `fx.serviceNotFound`?
-- Do runtime reports use `formatExit`/`formatCause` when shown to users?
-- Can `TestEnv` make the behavior deterministic?
-- Can an LLM infer the correct usage from the README and tests?
-
-If any answer is no, improve the API or docs before moving on.
+- [Agent-first application development](agent-first-application-development.md)
+- [Agent-first testing](agent-first-testing.md)
+- [Agent-observable runtime](agent-observable-runtime.md)
+- [Causal scenarios](causal-scenarios.md)
+- [Causal development harness](causal-dev-harness.md)
+- [Operations and governed remediation](operations.md)
+- [Agent safety plane](agent-safety-plane.md)
+- [Local agentic development](local-agentic-development.md)

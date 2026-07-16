@@ -1,7 +1,6 @@
 const std = @import("std");
 const Capability = @import("../capability/root.zig");
 const Secrets = @import("../secrets/root.zig");
-const StdService = @import("../service/root.zig");
 const External = @import("../external/root.zig");
 const fx = @import("zigeffect");
 
@@ -887,6 +886,29 @@ pub const Client = struct {
     }
 };
 
+/// Portable gRPC client capability. Native channels, pools, in-process
+/// registries, and deterministic fakes all provide this same service.
+pub const ClientApi = struct {
+    pub const operations: []const []const u8 = &.{"GrpcClient.call"};
+
+    client: Client,
+
+    pub fn invokeAlloc(
+        self: ClientApi,
+        allocator: std.mem.Allocator,
+        request: UnaryRequest,
+        options: CallOptions,
+    ) anyerror!UnaryResponse {
+        return self.client.invokeAlloc(allocator, request, options);
+    }
+};
+
+pub const GrpcClient = fx.kernel.Service("zigeffect/std/GrpcClient", ClientApi);
+
+pub fn clientLayer(client: Client) @TypeOf(fx.kernel.Layer.succeed(GrpcClient, .{ .client = client })) {
+    return fx.kernel.Layer.succeed(GrpcClient, .{ .client = client });
+}
+
 pub const FakeClient = struct {
     pub const capability = Capability.Builtin.fake_grpc_client;
 
@@ -1107,34 +1129,58 @@ pub fn receipt(request: UnaryRequest, response: UnaryResponse) CallReceipt {
     };
 }
 
-pub fn InvokeEffect(comptime EffectEnv: type, comptime ClientService: type) type {
-    return struct {
-        request: UnaryRequest,
-        options: CallOptions,
+const CallState = struct {
+    request: UnaryRequest,
+    options: CallOptions,
+};
 
-        pub const SuccessType = UnaryResponse;
-        pub const FailureType = anyerror;
-        pub const EnvType = EffectEnv;
-        pub const RequiredServices = .{ClientService};
+pub const CallError = error{
+    OutOfMemory,
+    CallFailed,
+};
 
-        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
-            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
-        }
-
-        pub fn run(self: @This(), ctx: *fx.Context(EffectEnv)) anyerror!UnaryResponse {
-            const client = ctx.service(ClientService);
-            const response = client.invokeAlloc(ctx.allocator, self.request, self.options) catch |err| {
-                _ = StdService.recordOperation(ctx, ClientService, "grpc.call", "failure", "bounded gRPC call failed; payload and metadata omitted");
-                return err;
-            };
-            _ = StdService.recordOperation(ctx, ClientService, "grpc.call", "success", "bounded gRPC call succeeded; payload and metadata omitted");
-            return response;
-        }
-    };
+fn callError(err: anyerror) CallError {
+    return if (err == error.OutOfMemory) error.OutOfMemory else error.CallFailed;
 }
 
-pub fn invokeEffect(comptime EffectEnv: type, comptime ClientService: type, request: UnaryRequest, options: CallOptions) InvokeEffect(EffectEnv, ClientService) {
-    return .{ .request = request, .options = options };
+pub const CallEffect = fx.kernel.Effect(UnaryResponse, CallError, .{GrpcClient}).Stateful(CallState);
+
+/// Describe one bounded unary call. The selected channel/pool/fake is supplied
+/// exclusively by the GrpcClient layer when a process runtime is built.
+pub fn call(request: UnaryRequest, options: CallOptions) CallEffect {
+    return CallEffect.init(.{ .request = request, .options = options }, struct {
+        fn run(state: CallState, ctx: *fx.kernel.ContextView(.{GrpcClient})) CallError!UnaryResponse {
+            const started = ctx.recordCausal(.{
+                .kind = .io_wait_started,
+                .service_key = GrpcClient.service_key,
+                .label = "grpc.call",
+                .status = "running",
+                .redacted_detail = "bounded gRPC call started; payload, metadata, and credentials omitted",
+            });
+            const response = ctx.service(GrpcClient).invokeAlloc(ctx.allocator(), state.request, state.options) catch |err| {
+                _ = ctx.recordCausal(.{
+                    .kind = .io_completed,
+                    .parent_id = started,
+                    .cause_event_id = started,
+                    .service_key = GrpcClient.service_key,
+                    .label = "grpc.call",
+                    .type_name = @errorName(err),
+                    .status = "failure",
+                    .redacted_detail = "bounded gRPC call failed; payload, metadata, and credentials omitted",
+                });
+                return callError(err);
+            };
+            _ = ctx.recordCausal(.{
+                .kind = .io_completed,
+                .parent_id = started,
+                .service_key = GrpcClient.service_key,
+                .label = "grpc.call",
+                .status = "success",
+                .redacted_detail = "bounded gRPC call succeeded; payload, metadata, and credentials omitted",
+            });
+            return response;
+        }
+    }.run);
 }
 
 pub const StreamingRequest = struct {
@@ -1656,31 +1702,44 @@ test "gRPC exact registry routing and in-process client preserve status" {
     }, .{}));
 }
 
-test "gRPC invokeEffect resolves a client service and records a redacted causal fact" {
+test "gRPC call is a canonical service effect with deterministic layer substitution and causal evidence" {
     var fake = try FakeClient.initOwned(std.testing.allocator, .{
         .payload = "accepted",
         .status = .ok(),
     });
     defer fake.deinit();
-    var provider = StdService.Provider(.{FakeClient}).init(.{&fake});
+    const layer = clientLayer(fake.client());
     var store = fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
-    var runtime = fx.Runtime(@TypeOf(provider)).init(std.testing.allocator, &provider).provides(.{FakeClient}).withCausalStore(&store);
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, layer, .{ .causal_store = &store });
+    defer runtime.deinit();
 
-    var response = try runtime.run(invokeEffect(@TypeOf(provider), FakeClient, .{
+    const program = call(.{
         .authority = "api.example.test",
         .service = "orders.v1.Orders",
         .method = "Create",
         .payload = "token=sentinel-secret-for-tests",
         .timeout_millis = 1000,
-    }, .{}));
+    }, .{}).named("grpc.orders.create");
+    try std.testing.expect(fx.kernel.contains(@TypeOf(program).RequiredServices, GrpcClient));
+    try std.testing.expect(!@hasDecl(@TypeOf(program), "EnvType"));
+
+    var response = try runtime.run(program);
     defer response.deinit();
     try std.testing.expectEqualStrings("accepted", response.payload);
 
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    const index = StdService.findOperation(snapshot, FakeClient, "grpc.call", "success").?;
-    try std.testing.expect(std.mem.indexOf(u8, snapshot.events[index].redacted_detail, "sentinel-secret") == null);
+    var found = false;
+    for (snapshot.events) |event| {
+        if (event.kind != .io_completed or
+            !std.mem.eql(u8, event.service_key, GrpcClient.service_key) or
+            !std.mem.eql(u8, event.label, "grpc.call")) continue;
+        found = true;
+        try std.testing.expectEqualStrings("success", event.status);
+        try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "sentinel-secret") == null);
+    }
+    try std.testing.expect(found);
 }
 
 test "gRPC request headers preserve canonical pseudo-header order and hide binary bytes" {

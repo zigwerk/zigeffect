@@ -2,6 +2,7 @@ const std = @import("std");
 const zstd = @import("zigeffect_std");
 const Incremental = @import("incremental.zig");
 
+const fx = zstd.fx;
 pub const Grpc = zstd.Grpc;
 
 pub fn encodeAlloc(allocator: std.mem.Allocator, message: anytype) ![]u8 {
@@ -264,6 +265,13 @@ fn successType(comptime ReturnType: type) type {
     };
 }
 
+fn failureType(comptime ReturnType: type) type {
+    return switch (@typeInfo(ReturnType)) {
+        .error_union => |result| result.error_set,
+        else => error{},
+    };
+}
+
 fn shapeForField(comptime FieldType: type) Grpc.CallShape {
     const function = methodFunction(FieldType);
     return switch (function.params.len) {
@@ -280,11 +288,16 @@ fn shapeForField(comptime FieldType: type) Grpc.CallShape {
 }
 
 pub fn Method(comptime Service: type) type {
+    @setEvalBranchQuota(10_000);
     return std.meta.FieldEnum(Service);
 }
 
 pub fn methodShape(comptime Service: type, comptime method: Method(Service)) Grpc.CallShape {
     return shapeForField(serviceFieldType(Service, method));
+}
+
+pub fn serviceFullName(comptime Service: type) []const u8 {
+    return if (Service.package.len == 0) Service.service_name else Service.package ++ "." ++ Service.service_name;
 }
 
 pub fn RequestType(comptime Service: type, comptime method: Method(Service)) type {
@@ -319,6 +332,8 @@ pub fn UnaryResponse(comptime Message: type) type {
 
 pub fn GeneratedClient(comptime Service: type) type {
     return struct {
+        pub const operations: []const []const u8 = &.{"GeneratedGrpcClient.call"};
+
         authority: []const u8,
         unary_client: Grpc.Client,
         streaming_client: StreamingClient,
@@ -398,7 +413,159 @@ pub fn GeneratedClient(comptime Service: type) type {
     };
 }
 
-pub fn GeneratedServer(comptime Service: type, comptime Implementation: type) type {
+pub fn GeneratedClientService(comptime Service: type) type {
+    return fx.kernel.Service("zigeffect/grpc/client/" ++ serviceFullName(Service), GeneratedClient(Service));
+}
+
+pub fn generatedClientLayer(
+    comptime Service: type,
+    client: GeneratedClient(Service),
+) @TypeOf(fx.kernel.Layer.succeed(GeneratedClientService(Service), client)) {
+    return fx.kernel.Layer.succeed(GeneratedClientService(Service), client);
+}
+
+pub const GeneratedCallError = error{
+    OutOfMemory,
+    CallFailed,
+};
+
+fn generatedCallError(err: anyerror) GeneratedCallError {
+    return if (err == error.OutOfMemory) error.OutOfMemory else error.CallFailed;
+}
+
+/// A generated unary RPC represented as a canonical typed ZigEffect value.
+/// The concrete client is resolved from its stable service tag.
+pub fn GeneratedUnaryCallEffect(
+    comptime Service: type,
+    comptime method: Method(Service),
+) type {
+    if (comptime methodShape(Service, method) != .unary) {
+        @compileError("GeneratedUnaryCallEffect requires a unary generated method");
+    }
+    const ClientService = GeneratedClientService(Service);
+    const State = struct {
+        request: RequestType(Service, method),
+        options: GeneratedCallOptions,
+    };
+    return fx.kernel.Effect(
+        UnaryResponse(ResponseType(Service, method)),
+        GeneratedCallError,
+        .{ClientService},
+    ).Stateful(State);
+}
+
+pub fn generatedUnaryEffect(
+    comptime Service: type,
+    comptime method: Method(Service),
+    request: RequestType(Service, method),
+    options: GeneratedCallOptions,
+) GeneratedUnaryCallEffect(Service, method) {
+    const ClientService = GeneratedClientService(Service);
+    const State = GeneratedUnaryCallEffect(Service, method).StateType;
+    return GeneratedUnaryCallEffect(Service, method).init(.{ .request = request, .options = options }, struct {
+        fn run(state: State, ctx: *fx.kernel.ContextView(.{ClientService})) GeneratedCallError!UnaryResponse(ResponseType(Service, method)) {
+            const operation = "grpc.client." ++ @tagName(method);
+            const started = ctx.recordCausal(.{
+                .kind = .io_wait_started,
+                .service_key = ClientService.service_key,
+                .label = operation,
+                .status = "running",
+                .redacted_detail = "generated gRPC client call started; request, response, metadata, and credentials omitted",
+            });
+            const response = ctx.service(ClientService).unaryAlloc(ctx.allocator(), method, state.request, state.options) catch |err| {
+                _ = ctx.recordCausal(.{
+                    .kind = .io_completed,
+                    .parent_id = started,
+                    .cause_event_id = started,
+                    .service_key = ClientService.service_key,
+                    .label = operation,
+                    .type_name = @errorName(err),
+                    .status = "failure",
+                    .redacted_detail = "generated gRPC client call failed; request, response, metadata, and credentials omitted",
+                });
+                return generatedCallError(err);
+            };
+            _ = ctx.recordCausal(.{
+                .kind = .io_completed,
+                .parent_id = started,
+                .service_key = ClientService.service_key,
+                .label = operation,
+                .status = if (response.wire.status.isOk()) "success" else "failure",
+                .redacted_detail = "generated gRPC client call completed; request, response, metadata, and credentials omitted",
+            });
+            return response;
+        }
+    }.run);
+}
+
+/// A generated streaming RPC represented as a typed ZigEffect value.
+pub fn GeneratedStreamingCallEffect(
+    comptime Service: type,
+    comptime method: Method(Service),
+) type {
+    if (comptime methodShape(Service, method) == .unary) {
+        @compileError("GeneratedStreamingCallEffect requires a streaming generated method");
+    }
+    const ClientService = GeneratedClientService(Service);
+    const State = struct {
+        requests: []const RequestType(Service, method),
+        options: GeneratedCallOptions,
+    };
+    return fx.kernel.Effect(
+        StreamingResponse(ResponseType(Service, method)),
+        GeneratedCallError,
+        .{ClientService},
+    ).Stateful(State);
+}
+
+pub fn generatedStreamingEffect(
+    comptime Service: type,
+    comptime method: Method(Service),
+    requests: []const RequestType(Service, method),
+    options: GeneratedCallOptions,
+) GeneratedStreamingCallEffect(Service, method) {
+    const ClientService = GeneratedClientService(Service);
+    const State = GeneratedStreamingCallEffect(Service, method).StateType;
+    return GeneratedStreamingCallEffect(Service, method).init(.{ .requests = requests, .options = options }, struct {
+        fn run(state: State, ctx: *fx.kernel.ContextView(.{ClientService})) GeneratedCallError!StreamingResponse(ResponseType(Service, method)) {
+            const operation = "grpc.client." ++ @tagName(method);
+            const started = ctx.recordCausal(.{
+                .kind = .io_wait_started,
+                .service_key = ClientService.service_key,
+                .label = operation,
+                .status = "running",
+                .redacted_detail = "generated streaming gRPC client call started; messages, metadata, and credentials omitted",
+            });
+            const response = ctx.service(ClientService).streamingAlloc(ctx.allocator(), method, state.requests, state.options) catch |err| {
+                _ = ctx.recordCausal(.{
+                    .kind = .io_completed,
+                    .parent_id = started,
+                    .cause_event_id = started,
+                    .service_key = ClientService.service_key,
+                    .label = operation,
+                    .type_name = @errorName(err),
+                    .status = "failure",
+                    .redacted_detail = "generated streaming gRPC client call failed; messages, metadata, and credentials omitted",
+                });
+                return generatedCallError(err);
+            };
+            _ = ctx.recordCausal(.{
+                .kind = .io_completed,
+                .parent_id = started,
+                .service_key = ClientService.service_key,
+                .label = operation,
+                .status = if (response.wire.status.isOk()) "success" else "failure",
+                .redacted_detail = "generated streaming gRPC client call completed; messages, metadata, and credentials omitted",
+            });
+            return response;
+        }
+    }.run);
+}
+
+/// Low-level allocation/registry adapter for transport conformance tests.
+/// Applications should use `generatedRoutesLayer`, which executes handlers on
+/// the consuming application's managed runtime and causal graph.
+pub fn GeneratedDriverBinding(comptime Service: type, comptime Implementation: type) type {
     return struct {
         allocator: std.mem.Allocator,
         implementation: *Implementation,
@@ -468,6 +635,591 @@ pub fn GeneratedServer(comptime Service: type, comptime Implementation: type) ty
             return .{ .code = .unimplemented, .message = "generated method not registered" };
         }
     };
+}
+
+pub const UnaryRegistry = fx.kernel.Service("zigeffect/grpc/UnaryRegistry", Grpc.Registry);
+pub const StreamingRegistry = fx.kernel.Service("zigeffect/grpc/StreamingRegistry", Grpc.StreamingRegistry);
+pub const IncrementalRegistry = fx.kernel.Service("zigeffect/grpc/IncrementalRegistry", Incremental.Registry);
+
+const UnaryRegistryLifecycle = struct {
+    fn acquire(ctx: *fx.kernel.ContextView(.{})) error{}!Grpc.Registry {
+        return Grpc.Registry.init(ctx.allocator());
+    }
+
+    fn release(registry: *Grpc.Registry) void {
+        registry.deinit();
+    }
+};
+
+pub fn unaryRegistryLayer() @TypeOf(fx.kernel.Layer.scoped(
+    UnaryRegistry,
+    error{},
+    .{},
+    UnaryRegistryLifecycle.acquire,
+    UnaryRegistryLifecycle.release,
+)) {
+    return fx.kernel.Layer.scoped(
+        UnaryRegistry,
+        error{},
+        .{},
+        UnaryRegistryLifecycle.acquire,
+        UnaryRegistryLifecycle.release,
+    );
+}
+
+const StreamingRegistryLifecycle = struct {
+    fn acquire(ctx: *fx.kernel.ContextView(.{})) error{}!Grpc.StreamingRegistry {
+        return Grpc.StreamingRegistry.init(ctx.allocator());
+    }
+
+    fn release(registry: *Grpc.StreamingRegistry) void {
+        registry.deinit();
+    }
+};
+
+pub fn streamingRegistryLayer() @TypeOf(fx.kernel.Layer.scoped(
+    StreamingRegistry,
+    error{},
+    .{},
+    StreamingRegistryLifecycle.acquire,
+    StreamingRegistryLifecycle.release,
+)) {
+    return fx.kernel.Layer.scoped(
+        StreamingRegistry,
+        error{},
+        .{},
+        StreamingRegistryLifecycle.acquire,
+        StreamingRegistryLifecycle.release,
+    );
+}
+
+const IncrementalRegistryLifecycle = struct {
+    fn acquire(ctx: *fx.kernel.ContextView(.{})) error{}!Incremental.Registry {
+        return Incremental.Registry.init(ctx.allocator());
+    }
+
+    fn release(registry: *Incremental.Registry) void {
+        registry.deinit();
+    }
+};
+
+pub fn incrementalRegistryLayer() @TypeOf(fx.kernel.Layer.scoped(
+    IncrementalRegistry,
+    error{},
+    .{},
+    IncrementalRegistryLifecycle.acquire,
+    IncrementalRegistryLifecycle.release,
+)) {
+    return fx.kernel.Layer.scoped(
+        IncrementalRegistry,
+        error{},
+        .{},
+        IncrementalRegistryLifecycle.acquire,
+        IncrementalRegistryLifecycle.release,
+    );
+}
+
+pub fn InvokeRegisteredEffect() type {
+    const State = struct {
+        request: Grpc.UnaryRequest,
+        options: Grpc.CallOptions,
+    };
+    return fx.kernel.Effect(Grpc.UnaryResponse, anyerror, .{UnaryRegistry}).Stateful(State);
+}
+
+/// Invoke an in-process generated route through the same service boundary used
+/// by native transports. The registry belongs to the application layer graph;
+/// this effect never constructs a private runtime or causal store.
+pub fn invokeRegistered(request: Grpc.UnaryRequest, options: Grpc.CallOptions) InvokeRegisteredEffect() {
+    const State = InvokeRegisteredEffect().StateType;
+    return InvokeRegisteredEffect().init(.{ .request = request, .options = options }, struct {
+        fn run(state: State, ctx: *fx.kernel.ContextView(.{UnaryRegistry})) anyerror!Grpc.UnaryResponse {
+            const started = ctx.recordCausal(.{
+                .kind = .io_wait_started,
+                .service_key = UnaryRegistry.service_key,
+                .label = "grpc.server.invoke",
+                .status = "running",
+                .redacted_detail = "generated gRPC route invocation started; request, response, metadata, and credentials omitted",
+            });
+            const response = ctx.service(UnaryRegistry).invokeAlloc(ctx.allocator(), state.request, state.options) catch |err| {
+                _ = ctx.recordCausal(.{
+                    .kind = .io_completed,
+                    .parent_id = started,
+                    .cause_event_id = started,
+                    .service_key = UnaryRegistry.service_key,
+                    .label = "grpc.server.invoke",
+                    .type_name = @errorName(err),
+                    .status = "failure",
+                    .redacted_detail = "generated gRPC route invocation failed; request, response, metadata, and credentials omitted",
+                });
+                return err;
+            };
+            _ = ctx.recordCausal(.{
+                .kind = .io_completed,
+                .parent_id = started,
+                .service_key = UnaryRegistry.service_key,
+                .label = "grpc.server.invoke",
+                .status = if (response.status.isOk()) "success" else "failure",
+                .redacted_detail = "generated gRPC route invocation completed; request, response, metadata, and credentials omitted",
+            });
+            return response;
+        }
+    }.run);
+}
+
+fn MethodRequirements(comptime Implementation: type, comptime method_name: []const u8) type {
+    const declaration = method_name ++ "Requirements";
+    return struct {
+        pub const services = if (@hasDecl(Implementation, declaration))
+            @field(Implementation, declaration)
+        else if (@hasDecl(Implementation, "RequiredServices"))
+            Implementation.RequiredServices
+        else
+            .{};
+    };
+}
+
+const CausalCorrelation = struct {
+    boundary_id: ?u64 = null,
+    trace_id: ?u64 = null,
+    span_id: ?u64 = null,
+    context: fx.CausalContextV2 = .{},
+};
+
+pub const GeneratedHandlerError = error{
+    OutOfMemory,
+    HandlerFailed,
+    ResponseEncodingFailed,
+};
+
+fn generatedHandlerError(err: anyerror) GeneratedHandlerError {
+    return if (err == error.OutOfMemory) error.OutOfMemory else error.HandlerFailed;
+}
+
+fn generatedEncodingError(err: anyerror) GeneratedHandlerError {
+    return if (err == error.OutOfMemory) error.OutOfMemory else error.ResponseEncodingFailed;
+}
+
+fn validTraceparent(value: []const u8) bool {
+    _ = fx.parseTraceParent(value) catch return false;
+    return true;
+}
+
+fn causalCorrelation(metadata: []const Grpc.Metadata) CausalCorrelation {
+    var request_id: []const u8 = "";
+    var traceparent: []const u8 = "";
+    for (metadata) |entry| {
+        if ((std.mem.eql(u8, entry.name, "x-request-id") or std.mem.eql(u8, entry.name, "request-id")) and entry.value.len <= 128) {
+            request_id = entry.value;
+        } else if (std.mem.eql(u8, entry.name, "traceparent")) {
+            traceparent = entry.value;
+        }
+    }
+    const trace_parent = fx.parseTraceParent(traceparent) catch null;
+    return .{
+        .boundary_id = if (request_id.len == 0) null else std.hash.Wyhash.hash(0, request_id),
+        .trace_id = if (trace_parent) |trace| trace.trace_id_low else null,
+        .span_id = if (trace_parent) |trace| trace.parent_id else null,
+        .context = if (trace_parent) |trace| trace.context() else .{},
+    };
+}
+
+pub fn GeneratedUnaryHandlerEffect(
+    comptime Service: type,
+    comptime ImplementationService: type,
+    comptime method: Method(Service),
+) type {
+    if (comptime methodShape(Service, method) != .unary) {
+        @compileError("GeneratedUnaryHandlerEffect requires a unary method");
+    }
+    const Implementation = ImplementationService.API;
+    const Requirements = MethodRequirements(Implementation, @tagName(method)).services;
+    const Request = RequestType(Service, method);
+    const State = struct {
+        implementation: *Implementation,
+        request: Request,
+        correlation: CausalCorrelation,
+    };
+    return fx.kernel.Effect(Grpc.UnaryResponse, GeneratedHandlerError, Requirements).Stateful(State);
+}
+
+fn generatedUnaryHandlerEffect(
+    comptime Service: type,
+    comptime ImplementationService: type,
+    comptime method: Method(Service),
+    implementation: *ImplementationService.API,
+    request: RequestType(Service, method),
+    correlation: CausalCorrelation,
+) GeneratedUnaryHandlerEffect(Service, ImplementationService, method) {
+    const Implementation = ImplementationService.API;
+    const Requirements = MethodRequirements(Implementation, @tagName(method)).services;
+    const Response = ResponseType(Service, method);
+    const State = GeneratedUnaryHandlerEffect(Service, ImplementationService, method).StateType;
+    const implementation_method = @field(Implementation, @tagName(method));
+    const implementation_info = @typeInfo(@TypeOf(implementation_method)).@"fn";
+    return GeneratedUnaryHandlerEffect(Service, ImplementationService, method).init(.{
+        .implementation = implementation,
+        .request = request,
+        .correlation = correlation,
+    }, struct {
+        fn run(state: State, ctx: *fx.kernel.ContextView(Requirements)) GeneratedHandlerError!Grpc.UnaryResponse {
+            const operation = "grpc.server." ++ @tagName(method);
+            const started = ctx.recordCausal(.{
+                .kind = .io_wait_started,
+                .service_key = ImplementationService.service_key,
+                .boundary_id = state.correlation.boundary_id,
+                .trace_id = state.correlation.trace_id,
+                .span_id = state.correlation.span_id,
+                .context = state.correlation.context,
+                .label = operation,
+                .status = "running",
+                .redacted_detail = "generated gRPC handler started; request, response, metadata, and credentials omitted",
+            });
+            const response = if (comptime implementation_info.params.len == 3)
+                @call(.auto, implementation_method, .{ state.implementation, ctx, state.request })
+            else if (comptime implementation_info.params.len == 4)
+                @call(.auto, implementation_method, .{ state.implementation, ctx, ctx.allocator(), state.request })
+            else
+                @compileError("generated unary effect handler must accept (self, context, request) or (self, context, allocator, request)");
+            var value = response catch |err| {
+                _ = ctx.recordCausal(.{
+                    .kind = .io_completed,
+                    .parent_id = started,
+                    .cause_event_id = started,
+                    .service_key = ImplementationService.service_key,
+                    .boundary_id = state.correlation.boundary_id,
+                    .trace_id = state.correlation.trace_id,
+                    .span_id = state.correlation.span_id,
+                    .context = state.correlation.context,
+                    .label = operation,
+                    .type_name = @errorName(err),
+                    .status = "failure",
+                    .redacted_detail = "generated gRPC handler failed; request, response, metadata, and credentials omitted",
+                });
+                return generatedHandlerError(err);
+            };
+            defer if (comptime implementation_info.params.len == 4)
+                deinitMessage(Response, ctx.allocator(), &value);
+            const bytes = encodeAlloc(ctx.allocator(), value) catch |err| {
+                _ = ctx.recordCausal(.{
+                    .kind = .io_completed,
+                    .parent_id = started,
+                    .cause_event_id = started,
+                    .service_key = ImplementationService.service_key,
+                    .boundary_id = state.correlation.boundary_id,
+                    .trace_id = state.correlation.trace_id,
+                    .span_id = state.correlation.span_id,
+                    .context = state.correlation.context,
+                    .label = operation,
+                    .type_name = @errorName(err),
+                    .status = "failure",
+                    .redacted_detail = "generated gRPC response encoding failed; response omitted",
+                });
+                return generatedEncodingError(err);
+            };
+            errdefer ctx.allocator().free(bytes);
+            const wire = Grpc.UnaryResponse.initOwnedAlloc(ctx.allocator(), bytes, .ok()) catch |err|
+                return generatedEncodingError(err);
+            _ = ctx.recordCausal(.{
+                .kind = .io_completed,
+                .parent_id = started,
+                .service_key = ImplementationService.service_key,
+                .boundary_id = state.correlation.boundary_id,
+                .trace_id = state.correlation.trace_id,
+                .span_id = state.correlation.span_id,
+                .context = state.correlation.context,
+                .label = operation,
+                .status = "success",
+                .redacted_detail = "generated gRPC handler completed; request, response, metadata, and credentials omitted",
+            });
+            return wire;
+        }
+    }.run);
+}
+
+pub fn GeneratedStreamingHandlerEffect(
+    comptime Service: type,
+    comptime ImplementationService: type,
+    comptime method: Method(Service),
+) type {
+    if (comptime methodShape(Service, method) == .unary) {
+        @compileError("GeneratedStreamingHandlerEffect requires a streaming method");
+    }
+    const Implementation = ImplementationService.API;
+    const Requirements = MethodRequirements(Implementation, @tagName(method)).services;
+    const Request = RequestType(Service, method);
+    const Response = ResponseType(Service, method);
+    const State = struct {
+        implementation: *Implementation,
+        stream: *Stream(Request, Response),
+        correlation: CausalCorrelation,
+    };
+    return fx.kernel.Effect(Grpc.Status, GeneratedHandlerError, Requirements).Stateful(State);
+}
+
+fn generatedStreamingHandlerEffect(
+    comptime Service: type,
+    comptime ImplementationService: type,
+    comptime method: Method(Service),
+    implementation: *ImplementationService.API,
+    stream: *Stream(RequestType(Service, method), ResponseType(Service, method)),
+    correlation: CausalCorrelation,
+) GeneratedStreamingHandlerEffect(Service, ImplementationService, method) {
+    const Implementation = ImplementationService.API;
+    const Requirements = MethodRequirements(Implementation, @tagName(method)).services;
+    const State = GeneratedStreamingHandlerEffect(Service, ImplementationService, method).StateType;
+    const implementation_method = @field(Implementation, @tagName(method));
+    const implementation_info = @typeInfo(@TypeOf(implementation_method)).@"fn";
+    return GeneratedStreamingHandlerEffect(Service, ImplementationService, method).init(.{
+        .implementation = implementation,
+        .stream = stream,
+        .correlation = correlation,
+    }, struct {
+        fn run(state: State, ctx: *fx.kernel.ContextView(Requirements)) GeneratedHandlerError!Grpc.Status {
+            if (comptime implementation_info.params.len != 3) {
+                @compileError("generated streaming effect handler must accept (self, context, stream)");
+            }
+            const operation = "grpc.server." ++ @tagName(method);
+            const started = ctx.recordCausal(.{
+                .kind = .io_wait_started,
+                .service_key = ImplementationService.service_key,
+                .boundary_id = state.correlation.boundary_id,
+                .trace_id = state.correlation.trace_id,
+                .span_id = state.correlation.span_id,
+                .context = state.correlation.context,
+                .label = operation,
+                .status = "running",
+                .redacted_detail = "generated streaming gRPC handler started; messages, metadata, and credentials omitted",
+            });
+            const status = @call(.auto, implementation_method, .{ state.implementation, ctx, state.stream }) catch |err| {
+                _ = ctx.recordCausal(.{
+                    .kind = .io_completed,
+                    .parent_id = started,
+                    .cause_event_id = started,
+                    .service_key = ImplementationService.service_key,
+                    .boundary_id = state.correlation.boundary_id,
+                    .trace_id = state.correlation.trace_id,
+                    .span_id = state.correlation.span_id,
+                    .context = state.correlation.context,
+                    .label = operation,
+                    .type_name = @errorName(err),
+                    .status = "failure",
+                    .redacted_detail = "generated streaming gRPC handler failed; messages and metadata omitted",
+                });
+                return generatedHandlerError(err);
+            };
+            _ = ctx.recordCausal(.{
+                .kind = .io_completed,
+                .parent_id = started,
+                .service_key = ImplementationService.service_key,
+                .boundary_id = state.correlation.boundary_id,
+                .trace_id = state.correlation.trace_id,
+                .span_id = state.correlation.span_id,
+                .context = state.correlation.context,
+                .label = operation,
+                .status = if (status.isOk()) "success" else "failure",
+                .redacted_detail = "generated streaming gRPC handler completed; messages and metadata omitted",
+            });
+            return status;
+        }
+    }.run);
+}
+
+fn generatedRouteRequirementsUpperBound(comptime Service: type, comptime ImplementationService: type) usize {
+    @setEvalBranchQuota(100_000);
+    const Implementation = ImplementationService.API;
+    comptime var total: usize = 3;
+    inline for (std.meta.fields(Service)) |field| {
+        total += MethodRequirements(Implementation, field.name).services.len;
+    }
+    return total;
+}
+
+fn generatedRouteRequirementCount(comptime Service: type, comptime ImplementationService: type) usize {
+    @setEvalBranchQuota(100_000);
+    const Implementation = ImplementationService.API;
+    comptime var seen: [generatedRouteRequirementsUpperBound(Service, ImplementationService)]type = undefined;
+    comptime var count: usize = 0;
+    inline for (.{ ImplementationService, UnaryRegistry, IncrementalRegistry }) |Tag| {
+        if (!fx.kernel.contains(seen[0..count], Tag)) {
+            seen[count] = Tag;
+            count += 1;
+        }
+    }
+    inline for (std.meta.fields(Service)) |field| {
+        inline for (MethodRequirements(Implementation, field.name).services) |Tag| {
+            if (!fx.kernel.contains(seen[0..count], Tag)) {
+                seen[count] = Tag;
+                count += 1;
+            }
+        }
+    }
+    return count;
+}
+
+pub fn GeneratedRoutesRequirements(
+    comptime Service: type,
+    comptime ImplementationService: type,
+) [generatedRouteRequirementCount(Service, ImplementationService)]type {
+    @setEvalBranchQuota(100_000);
+    const Implementation = ImplementationService.API;
+    comptime var result: [generatedRouteRequirementCount(Service, ImplementationService)]type = undefined;
+    comptime var count: usize = 0;
+    inline for (.{ ImplementationService, UnaryRegistry, IncrementalRegistry }) |Tag| {
+        if (!fx.kernel.contains(result[0..count], Tag)) {
+            result[count] = Tag;
+            count += 1;
+        }
+    }
+    inline for (std.meta.fields(Service)) |field| {
+        inline for (MethodRequirements(Implementation, field.name).services) |Tag| {
+            if (!fx.kernel.contains(result[0..count], Tag)) {
+                result[count] = Tag;
+                count += 1;
+            }
+        }
+    }
+    return result;
+}
+
+pub fn GeneratedServerAdapter(comptime Service: type, comptime ImplementationService: type) type {
+    const Implementation = ImplementationService.API;
+    const Requirements = GeneratedRoutesRequirements(Service, ImplementationService);
+    return struct {
+        const Self = @This();
+
+        allocator: std.mem.Allocator,
+        runtime: fx.kernel.RuntimeHandle(Requirements),
+        implementation: *Implementation,
+
+        fn init(
+            allocator: std.mem.Allocator,
+            runtime: fx.kernel.RuntimeHandle(Requirements),
+            implementation: *Implementation,
+        ) Self {
+            return .{ .allocator = allocator, .runtime = runtime, .implementation = implementation };
+        }
+
+        fn registerAll(self: *Self, unary: *Grpc.Registry, incremental: *Incremental.Registry) !void {
+            inline for (std.meta.fields(Service)) |field| {
+                const shape = comptime shapeForField(field.type);
+                if (shape == .unary) {
+                    try unary.register(.{
+                        .service = serviceFullName(Service),
+                        .method = field.name,
+                        .handler = Grpc.UnaryHandler.from(Self, self),
+                    });
+                } else {
+                    try incremental.register(
+                        serviceFullName(Service),
+                        field.name,
+                        shape,
+                        Incremental.Handler.from(Self, self),
+                    );
+                }
+            }
+        }
+
+        pub fn invoke(self: *Self, allocator: std.mem.Allocator, request: Grpc.UnaryRequest) anyerror!Grpc.UnaryResponse {
+            inline for (std.meta.fields(Service)) |field| {
+                if (comptime shapeForField(field.type) == .unary) {
+                    if (std.mem.eql(u8, request.method, field.name)) {
+                        const method: Method(Service) = @field(Method(Service), field.name);
+                        const Request = RequestType(Service, method);
+                        var decoded = try decodeAlloc(Request, allocator, request.payload);
+                        defer deinitMessage(Request, allocator, &decoded);
+                        return self.runtime.run(generatedUnaryHandlerEffect(
+                            Service,
+                            ImplementationService,
+                            method,
+                            self.implementation,
+                            decoded,
+                            causalCorrelation(request.metadata),
+                        ).named("grpc.server." ++ field.name));
+                    }
+                }
+            }
+            return Grpc.UnaryResponse.initAlloc(allocator, "", .{
+                .code = .unimplemented,
+                .message = "generated method not registered",
+            });
+        }
+
+        pub fn runIncremental(self: *Self, call: *Incremental.Call) anyerror!Grpc.Status {
+            inline for (std.meta.fields(Service)) |field| {
+                if (comptime shapeForField(field.type) != .unary) {
+                    if (std.mem.eql(u8, call.context.method, field.name)) {
+                        const method: Method(Service) = @field(Method(Service), field.name);
+                        var stream = Stream(RequestType(Service, method), ResponseType(Service, method)){
+                            .allocator = self.allocator,
+                            .call = call,
+                        };
+                        return self.runtime.run(generatedStreamingHandlerEffect(
+                            Service,
+                            ImplementationService,
+                            method,
+                            self.implementation,
+                            &stream,
+                            causalCorrelation(call.context.metadata),
+                        ).named("grpc.server." ++ field.name));
+                    }
+                }
+            }
+            return .{ .code = .unimplemented, .message = "generated method not registered" };
+        }
+    };
+}
+
+pub fn GeneratedRoutes(comptime Service: type, comptime ImplementationService: type) type {
+    return struct {
+        pub const operations: []const []const u8 = &.{ "GeneratedRoutes.invoke", "GeneratedRoutes.stream" };
+        adapter: *GeneratedServerAdapter(Service, ImplementationService),
+    };
+}
+
+pub fn GeneratedRoutesService(comptime Service: type, comptime ImplementationService: type) type {
+    return fx.kernel.Service(
+        "zigeffect/grpc/routes/" ++ serviceFullName(Service) ++ "/" ++ ImplementationService.service_key,
+        GeneratedRoutes(Service, ImplementationService),
+    );
+}
+
+fn GeneratedRoutesLifecycle(comptime Service: type, comptime ImplementationService: type) type {
+    const Requirements = GeneratedRoutesRequirements(Service, ImplementationService);
+    const Routes = GeneratedRoutes(Service, ImplementationService);
+    const Adapter = GeneratedServerAdapter(Service, ImplementationService);
+    return struct {
+        fn acquire(ctx: *fx.kernel.ContextView(Requirements)) anyerror!Routes {
+            const adapter = try ctx.allocator().create(Adapter);
+            errdefer ctx.allocator().destroy(adapter);
+            adapter.* = Adapter.init(ctx.allocator(), ctx.runtime(), ctx.service(ImplementationService));
+            try adapter.registerAll(ctx.service(UnaryRegistry), ctx.service(IncrementalRegistry));
+            return .{ .adapter = adapter };
+        }
+
+        fn release(routes: *Routes) void {
+            routes.adapter.allocator.destroy(routes.adapter);
+        }
+    };
+}
+
+pub fn generatedRoutesLayer(
+    comptime Service: type,
+    comptime ImplementationService: type,
+) @TypeOf(fx.kernel.Layer.scoped(
+    GeneratedRoutesService(Service, ImplementationService),
+    anyerror,
+    GeneratedRoutesRequirements(Service, ImplementationService),
+    GeneratedRoutesLifecycle(Service, ImplementationService).acquire,
+    GeneratedRoutesLifecycle(Service, ImplementationService).release,
+)) {
+    return fx.kernel.Layer.scoped(
+        GeneratedRoutesService(Service, ImplementationService),
+        anyerror,
+        GeneratedRoutesRequirements(Service, ImplementationService),
+        GeneratedRoutesLifecycle(Service, ImplementationService).acquire,
+        GeneratedRoutesLifecycle(Service, ImplementationService).release,
+    );
 }
 
 test "typed unary binding decodes the request and owns its response" {
@@ -714,7 +1466,7 @@ test "generated service facade derives typed clients and registers every RPC sha
         }
     };
     var implementation = Implementation{};
-    var binding = GeneratedServer(Service, Implementation).init(std.testing.allocator, &implementation);
+    var binding = GeneratedDriverBinding(Service, Implementation).init(std.testing.allocator, &implementation);
     var unary_registry = Grpc.Registry.init(std.testing.allocator);
     defer unary_registry.deinit();
     var incremental_registry = Incremental.Registry.init(std.testing.allocator);
@@ -736,4 +1488,190 @@ test "generated service facade derives typed clients and registers every RPC sha
     try std.testing.expectEqual(Grpc.CallShape.client_streaming, incremental_registry.find("example.v1.Everything", "ClientStream").?.shape);
     try std.testing.expectEqual(Grpc.CallShape.server_streaming, incremental_registry.find("example.v1.Everything", "ServerStream").?.shape);
     try std.testing.expectEqual(Grpc.CallShape.bidirectional_streaming, incremental_registry.find("example.v1.Everything", "BidiStream").?.shape);
+}
+
+test "generated server uses canonical requirements layers runtime child scope and durable causal graph" {
+    const State = struct {
+        var finalized: bool = false;
+        var encoded_before_finalize: bool = false;
+
+        fn reset() void {
+            finalized = false;
+            encoded_before_finalize = false;
+        }
+
+        fn release(_: ?*anyopaque) void {
+            finalized = true;
+        }
+    };
+    const Message = struct {
+        value: u8 = 0,
+
+        pub fn encode(self: @This(), writer: *std.Io.Writer, _: std.mem.Allocator) !void {
+            State.encoded_before_finalize = !State.finalized;
+            try writer.writeByte(self.value);
+        }
+
+        pub fn decode(reader: *std.Io.Reader, _: std.mem.Allocator) !@This() {
+            return .{ .value = try reader.takeByte() };
+        }
+
+        pub fn deinit(_: *@This(), _: std.mem.Allocator) void {}
+    };
+    const Service = struct {
+        pub const package = "example.v1";
+        pub const service_name = "Layered";
+        Increment: *const fn (*void, Message) error{}!Message,
+    };
+    const CounterApi = struct {
+        pub const operations: []const []const u8 = &.{"Counter.increment"};
+        amount: u8,
+    };
+    const Counter = fx.kernel.Service("test/grpc/Counter", CounterApi);
+
+    State.reset();
+    const Implementation = struct {
+        pub const RequiredServices = .{Counter};
+
+        fn Increment(_: *@This(), ctx: *fx.kernel.ContextView(RequiredServices), request: Message) !Message {
+            const counter_service = ctx.service(Counter);
+            try ctx.scope().addFinalizer(null, State.release);
+            return .{ .value = request.value + counter_service.amount };
+        }
+    };
+    const ImplementationService = fx.kernel.Service("test/grpc/LayeredImplementation", Implementation);
+    const HandlerEffect = GeneratedUnaryHandlerEffect(Service, ImplementationService, .Increment);
+    try std.testing.expect(HandlerEffect.FailureType == GeneratedHandlerError);
+    try std.testing.expect(fx.kernel.contains(HandlerEffect.RequiredServices, Counter));
+    const dependencies = fx.kernel.Layer.mergeAll(.{
+        fx.kernel.Layer.succeed(Counter, .{ .amount = 2 }),
+        fx.kernel.Layer.succeed(ImplementationService, .{}),
+        unaryRegistryLayer(),
+        incrementalRegistryLayer(),
+    });
+    const routes = generatedRoutesLayer(Service, ImplementationService).provideMerge(dependencies);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runtime = try zstd.ManagedRuntime(@TypeOf(routes)).make(
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        routes,
+        .{},
+    );
+    defer runtime.deinit();
+
+    const payload = try encodeAlloc(std.testing.allocator, Message{ .value = 40 });
+    defer std.testing.allocator.free(payload);
+    State.reset();
+    const invoke_program = invokeRegistered(.{
+        .authority = "local",
+        .service = "example.v1.Layered",
+        .method = "Increment",
+        .payload = payload,
+        .metadata = &.{
+            .{ .name = "x-request-id", .value = "layered-42" },
+            .{ .name = "traceparent", .value = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" },
+        },
+        .timeout_millis = 1_000,
+    }, .{}).named("grpc.test.invoke");
+    try std.testing.expect(fx.kernel.contains(@TypeOf(invoke_program).RequiredServices, UnaryRegistry));
+    try std.testing.expect(!@hasDecl(@TypeOf(invoke_program), "EnvType"));
+    var response = try runtime.run(invoke_program);
+    defer response.deinit();
+    var decoded = try decodeAlloc(Message, std.testing.allocator, response.payload);
+    defer decoded.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(u8, 42), decoded.value);
+    try std.testing.expect(State.encoded_before_finalize);
+    try std.testing.expect(State.finalized);
+
+    var snapshot = try runtime.inspect(std.testing.allocator, .{ .max_recent_events = 512 });
+    defer snapshot.deinit();
+    var handler_operation_id: ?u64 = null;
+    var saw_boundary_correlation = false;
+    var service_parent_id: ?u64 = null;
+    var saw_request_scope = false;
+    for (snapshot.causal.recent_events) |event| {
+        if (event.kind == .io_wait_started and std.mem.eql(u8, event.label, "grpc.server.Increment")) {
+            handler_operation_id = event.id;
+            saw_boundary_correlation = event.boundary_id == std.hash.Wyhash.hash(0, "layered-42") and
+                event.trace_id == @as(u64, 0xa3ce929d0e0e4736) and
+                event.span_id == @as(u64, 0x00f067aa0ba902b7) and
+                event.context.trace_id_high == @as(u64, 0x4bf92f3577b34da6) and
+                event.context.trace_id_low == @as(u64, 0xa3ce929d0e0e4736);
+        }
+        if (event.kind == .service_required and std.mem.eql(u8, event.service_key, Counter.service_key) and std.mem.eql(u8, event.status, "resolved")) {
+            service_parent_id = event.parent_id;
+        }
+        if (event.kind == .scope_closed and std.mem.eql(u8, event.status, "success")) saw_request_scope = true;
+    }
+    try std.testing.expect(handler_operation_id != null);
+    try std.testing.expect(saw_boundary_correlation);
+    try std.testing.expect(service_parent_id != null);
+    try std.testing.expect(saw_request_scope);
+    try std.testing.expect(runtime.graphSummary().records > 0);
+    try runtime.shutdown();
+}
+
+test "generated client call is a layered effect with automatic causal lineage" {
+    const Message = struct {
+        value: u8 = 0,
+
+        pub fn encode(self: @This(), writer: *std.Io.Writer, _: std.mem.Allocator) !void {
+            try writer.writeByte(self.value);
+        }
+
+        pub fn decode(reader: *std.Io.Reader, _: std.mem.Allocator) !@This() {
+            return .{ .value = try reader.takeByte() };
+        }
+
+        pub fn deinit(_: *@This(), _: std.mem.Allocator) void {}
+    };
+    const Service = struct {
+        pub const package = "example.v1";
+        pub const service_name = "ClientEffect";
+        Increment: *const fn (*void, Message) error{}!Message,
+    };
+    const Wire = struct {
+        fn unary(_: *anyopaque, allocator: std.mem.Allocator, request: Grpc.UnaryRequest, _: Grpc.CallOptions) anyerror!Grpc.UnaryResponse {
+            return Grpc.UnaryResponse.initAlloc(allocator, &.{request.payload[0] + 1}, .ok());
+        }
+
+        fn streaming(_: *anyopaque, allocator: std.mem.Allocator, _: Grpc.StreamingRequest, _: Grpc.CallOptions) anyerror!Grpc.StreamingResponse {
+            return Grpc.StreamingResponse.initAlloc(allocator, &.{}, .ok());
+        }
+    };
+    const ClientService = GeneratedClientService(Service);
+
+    var marker: u8 = 0;
+    const client = GeneratedClient(Service).init(
+        "local",
+        .{ .ptr = &marker, .invoke_fn = Wire.unary },
+        .{ .pointer = &marker, .invoke_fn = Wire.streaming },
+    );
+    const layer = generatedClientLayer(Service, client);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runtime = try zstd.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, std.testing.io, tmp.dir, layer, .{});
+    defer runtime.deinit();
+
+    const program = generatedUnaryEffect(Service, .Increment, .{ .value = 41 }, .{}).named("grpc.client.increment");
+    try std.testing.expect(fx.kernel.contains(@TypeOf(program).RequiredServices, ClientService));
+    try std.testing.expect(!@hasDecl(@TypeOf(program), "EnvType"));
+    var response = try runtime.run(program);
+    defer response.deinit();
+    try std.testing.expectEqual(@as(u8, 42), response.value.?.value);
+
+    var snapshot = try runtime.inspect(std.testing.allocator, .{ .max_recent_events = 256 });
+    defer snapshot.deinit();
+    var saw_service = false;
+    var saw_call = false;
+    for (snapshot.causal.recent_events) |event| {
+        if (event.kind == .service_required and std.mem.eql(u8, event.service_key, ClientService.service_key)) saw_service = true;
+        if (event.kind == .io_completed and std.mem.eql(u8, event.service_key, ClientService.service_key) and std.mem.eql(u8, event.label, "grpc.client.Increment")) saw_call = true;
+    }
+    try std.testing.expect(saw_service);
+    try std.testing.expect(saw_call);
+    try runtime.shutdown();
 }

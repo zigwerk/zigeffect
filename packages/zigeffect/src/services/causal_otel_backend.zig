@@ -106,7 +106,8 @@ pub const CausalOtelBackendState = struct {
 };
 
 pub fn classifyCausalOtelSignal(event: causal.CausalEvent) CausalOtelSignal {
-    if (event.trace_id != null and event.span_id != null) return .span_event;
+    if ((event.trace_id != null or event.context.trace_id_low != null) and
+        (event.span_id != null or event.context.span_id != null)) return .span_event;
     return .log_record;
 }
 
@@ -114,6 +115,13 @@ pub fn formatCausalOtelTraceId(trace_id: u64) [32]u8 {
     var output: [32]u8 = undefined;
     @memcpy(output[0..16], "0000000000000000");
     _ = std.fmt.bufPrint(output[16..], "{x:0>16}", .{trace_id}) catch unreachable;
+    return output;
+}
+
+pub fn formatCausalOtelTraceId128(high: u64, low: u64) [32]u8 {
+    var output: [32]u8 = undefined;
+    _ = std.fmt.bufPrint(output[0..16], "{x:0>16}", .{high}) catch unreachable;
+    _ = std.fmt.bufPrint(output[16..32], "{x:0>16}", .{low}) catch unreachable;
     return output;
 }
 
@@ -220,6 +228,30 @@ pub fn mapCausalEventToOtelRecord(allocator: Allocator, event: causal.CausalEven
     try appendOptionalStringAttribute(allocator, &attributes, "zigeffect.causal.schema_ref", event.schema_ref);
     try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.trace_id", event.trace_id);
     try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.span_id", event.span_id);
+    try appendU64Attribute(allocator, &attributes, "zigeffect.causal.context_schema_version", event.context.schema_version);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.runtime_instance_id", event.context.runtime_instance_id);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.graph_session_id", event.context.graph_session_id);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.workspace_id", event.context.workspace_id);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.project_id", event.context.project_id);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.component_id", event.context.component_id);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.requirement_id", event.context.requirement_id);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.acceptance_check_id", event.context.acceptance_check_id);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.scenario_id", event.context.scenario_id);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.agent_id", event.context.agent_id);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.agent_attempt", event.context.agent_attempt);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.development_task_id", event.context.development_task_id);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.work_packet_id", event.context.work_packet_id);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.change_set_id", event.context.change_set_id);
+    try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.source_revision_id", event.context.source_revision_id);
+    try appendU64Attribute(allocator, &attributes, "zigeffect.causal.link_count", event.activeLinks().len);
+    for (event.activeLinks(), 0..) |link, index| {
+        const kind_key = try std.fmt.allocPrint(allocator, "zigeffect.causal.link.{d}.kind", .{index});
+        defer allocator.free(kind_key);
+        try appendStringAttribute(allocator, &attributes, kind_key, @tagName(link.kind));
+        const event_key = try std.fmt.allocPrint(allocator, "zigeffect.causal.link.{d}.event_id", .{index});
+        defer allocator.free(event_key);
+        try appendU64Attribute(allocator, &attributes, event_key, link.event_id);
+    }
     try appendOptionalStringAttribute(allocator, &attributes, "zigeffect.causal.label", event.label);
     try appendOptionalStringAttribute(allocator, &attributes, "zigeffect.causal.type_name", event.type_name);
     try appendOptionalStringAttribute(allocator, &attributes, "zigeffect.causal.status", event.status);
@@ -228,10 +260,15 @@ pub fn mapCausalEventToOtelRecord(allocator: Allocator, event: causal.CausalEven
     return .{
         .signal = signal,
         .name = name,
-        .trace_id = event.trace_id,
-        .span_id = event.span_id,
-        .trace_id_hex = if (event.trace_id) |trace_id| formatCausalOtelTraceId(trace_id) else null,
-        .span_id_hex = if (event.span_id) |span_id| formatCausalOtelSpanId(span_id) else null,
+        .trace_id = event.trace_id orelse event.context.trace_id_low,
+        .span_id = event.span_id orelse event.context.span_id,
+        .trace_id_hex = if (event.context.trace_id_low) |low|
+            formatCausalOtelTraceId128(event.context.trace_id_high orelse 0, low)
+        else if (event.trace_id) |trace_id|
+            formatCausalOtelTraceId(trace_id)
+        else
+            null,
+        .span_id_hex = if (event.context.span_id orelse event.span_id) |span_id| formatCausalOtelSpanId(span_id) else null,
         .attributes = try attributes.toOwnedSlice(allocator),
     };
 }

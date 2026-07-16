@@ -1,163 +1,178 @@
-# zigeffect Errors
+# Errors and diagnostics
 
-`zigeffect` keeps errors Zig-native, then adds diagnostics around the places
-where users usually need help: missing services, missing scopes, and readable
-runtime reports.
+ZigEffect keeps expected failures in Zig error sets and adds focused diagnostics
+at composition boundaries. Applications should preserve structured failure
+information until the boundary that owns recovery, translation, or reporting.
 
-## Missing Services
-
-Every environment owns a typed `service` method. End it with
-`fx.serviceNotFound`:
+## Typed effect failures
 
 ```zig
-pub fn service(self: *Env, comptime Service: type) *Service {
-    if (Service == fx.Logger) return &self.logger;
-    if (Service == fx.Config) return &self.config;
-    return fx.serviceNotFound(Env, Service);
+const Load = kernel.Effect(Order, error{
+    NotFound,
+    RepositoryUnavailable,
+}, .{Repository});
+```
+
+The effect type states its complete expected failure channel. Compose recovery
+where responsibility is clear:
+
+```zig
+const program = load(order_id)
+    .catchAll(recoverLoad)
+    .named("orders.load");
+```
+
+Use `mapError` to translate one domain boundary into another. A mapper must
+return an error set, and `catchAll` recovery must preserve the original success
+type; invalid shapes fail at compile time with a ZigEffect-owned diagnostic.
+
+## Undeclared service access
+
+An operation may resolve only the tags listed in its effect requirements:
+
+```zig
+const Load = kernel.Effect(Order, error{NotFound}, .{Repository});
+
+fn run(ctx: *Load.Context) error{NotFound}!Order {
+    return ctx.service(Repository).load();
 }
 ```
 
-If an effect asks for a service the environment does not provide, Zig stops at
-compile time with a message that names the requested service, the environment,
-and the branch to add.
+Accessing an absent tag fails compilation with:
 
-The compile-fail fixture at `test/compile_fail/missing_service.zig` verifies this
-diagnostic by compiling a bad environment and checking for the
-`zigeffect service not found` report.
+```text
+zigeffect undeclared service requirement
 
-## Missing Declared Requirements
+service: <stable-service-key>
 
-Production effects can declare service requirements:
-
-```zig
-const Program = LoadConfig.requires(.{ fx.Logger, fx.Config });
+Add the service tag to Effect(..., Requirements).
 ```
 
-Layers and runtimes can declare providers:
+This is verified by `test/compile_fail/kernel_undeclared_service.zig`.
 
-```zig
-const layer = AppLayer.provides(.{ fx.Logger });
+## Unsatisfied root-layer inputs
+
+Layer types expose `InputServices`. A managed runtime refuses to compile when
+the root still has construction inputs:
+
+```text
+zigeffect ManagedRuntime root layer has unsatisfied inputs; wire them explicitly with Layer.provide
 ```
 
-If `Layer.provide` or `Runtime.run` sees a required service that is not declared
-as provided, it returns `error.MissingServiceRequirement` before running the
-effect. Generate a rich report with:
+Fix the topology rather than manually creating a context:
 
 ```zig
-var report = try fx.validateLayerRequirements(allocator, layer, Program);
-defer report.deinit();
-
-const text = try fx.formatDependencyReport(allocator, "load config", report);
-defer allocator.free(text);
+const RepositoryLive = kernel.Layer.sync(
+    Repository,
+    .{Config},
+    makeRepository,
+).provide(ConfigLive);
 ```
 
-`LayerGraph` reports missing layer requirements and duplicate service providers
-before app startup. Executable `fx.layerGraph` runs the same validation before
-building any layer. Invalid executable graphs return
-`error.MissingServiceRequirement` or `error.DuplicateServiceProvider`; typed
-startup errors from member layers are preserved.
+Use `provideMerge` only when the dependency should remain externally visible.
 
-## Missing Scopes
+## Runtime-handle requirements
 
-Scoped finalizers require an active `Scope`. Prefer:
+Transports and dispatchers may derive a runtime handle limited to an available
+service set. Running an effect that needs a service outside that set fails at
+compile time:
+
+```text
+zigeffect RuntimeHandle cannot run effect: the handle does not contain every required service
+```
+
+Ordinary application operations should compose effects instead of requesting a
+runtime handle.
+
+## Registry failures
+
+The managed runtime may report:
+
+- `error.DuplicateService` when two built layers own the same stable tag;
+- `error.MissingService` when corrupted or invalid internal wiring reaches the
+  registry; and
+- `error.ServiceTypeMismatch` when a stable key is reused with a different API
+  type.
+
+Treat duplicate keys as an architecture error. Prefer one explicit layer owner
+and dependency provision over last-writer-wins replacement.
+
+## Startup and acquisition failures
+
+Fallible and scoped layers preserve their declared startup error set:
 
 ```zig
-const result = try env.run(Program);
+const DatabaseLive = kernel.Layer.scoped(
+    Database,
+    error{ConnectFailed, AuthenticationFailed},
+    .{Config},
+    connectDatabase,
+    closeDatabase,
+).provide(ConfigLive);
 ```
 
-or:
+If startup fails after earlier layers have acquired resources, the root scope
+closes those resources in reverse order. A failed root is never returned as a
+partially usable runtime.
 
-```zig
-var runtime = fx.Runtime(Env).init(allocator, &env);
-const result = try runtime.run(Program);
-```
+## Exit and cause
 
-If code registers a finalizer without a scope, `Context.addFinalizerFor` returns
-`error.MissingScope`. `acquireRelease` releases the acquired resource
-immediately before returning that error, so failed registration does not leak the
-resource.
+Use a throwing `run` when the caller simply propagates typed failure. Use the
+runtime's exit API when the caller must inspect the complete termination shape.
 
-## Runtime Reports
+`Exit` distinguishes success from structured failure. `Cause` and `CauseTree`
+can retain:
 
-Effects return typed Zig errors. Reports are for people:
+- expected typed failures;
+- defects;
+- interruption;
+- finalizer failures;
+- sequential or parallel relationships; and
+- annotations and causal references.
 
-```zig
-const exit = env.exit(Program);
-const report = try fx.formatExit(allocator, "compile schema", exit);
-defer allocator.free(report);
-```
+Do not convert this structure into an arbitrary message inside a domain
+service. Format it at CLI, protocol, test-receipt, or operator boundaries.
 
-A failed report includes:
+## Cleanup failures
 
-- program label
-- status
-- error name, defect message, or interrupted fiber id
-- next-action hint
+A finalizer may fail independently of the operation that caused scope closure.
+ZigEffect preserves both failures rather than hiding one. Resource owners should
+make finalizers idempotent and bounded, and tests should exercise acquisition
+failure, operation failure, interruption, and disposal.
 
-Use `formatCause` when working directly with `Cause`.
+## Config, schema, and protocol errors
 
-## Recovery
+External inputs should use typed boundary errors that carry safe location and
+repair information:
 
-Use recovery combinators at boundaries:
+- config paths or descriptor names, never secret values;
+- schema issue paths and expected shapes;
+- gRPC/HTTP status and bounded public details;
+- SQLSTATE and outcome category, never connection credentials; and
+- process exit status with bounded, redacted output.
 
-```zig
-const Program = LoadConfig
-    .tapError(logFailure)
-    .mapError(AppError, toAppError)
-    .catchAll(AppError, recover)
-    .orElse(FallbackProgram);
-```
+Semantic causal facts may reference the boundary and error category. They must
+not retain credentials, personal data, unbounded payloads, or raw terminal
+scrollback.
 
-`mapError` changes the error set, `catchAll` recovers with a function, `orElse`
-runs a fallback effect, and `tapError` observes failures without swallowing
-them.
+## Testing failures
 
-## Cleanup Failures
+Testing v2 separates process termination from test completeness. Exit zero is
+not a pass unless the receipt reports:
 
-Scopes can record fallible finalizers:
+- `complete: true`;
+- equal discovered and executed counts;
+- zero failed and pending tests;
+- zero leaks and logged errors; and
+- no unsupported or truncated required evidence.
 
-```zig
-try scope.addFinalizerFallibleFor(Resource, resource, releaseMayFail);
-scope.close();
-```
+Use the receipt's exact replay command and assertion causal IDs before reading
+unstructured terminal output.
 
-Use `scope.firstFinalizerFailure()` or `scope.hasFinalizerFailure("CloseFailed")`
-in low-level tests. Use `Runtime.exit` when application code needs cleanup
-failures surfaced as `Cause.finalizer_failure`.
+## Legacy diagnostic surface
 
-When cleanup behavior depends on why the program ended, register an exit-aware
-finalizer:
-
-```zig
-fn closeWithStatus(resource: *Resource, exit: fx.FinalizerExit) void {
-    switch (exit) {
-        .success => resource.closeCleanly(),
-        .failure => resource.closeAfterFailure(),
-        else => resource.closeCleanly(),
-    }
-}
-
-try ctx.addFinalizerExitFor(Resource, resource, closeWithStatus);
-```
-
-`Runtime.run`, `Runtime.exit`, and `Layer.provide` close scopes with the effect
-outcome. Manual `scope.close()` is treated as a successful close; use
-`scope.closeWithExit(...)` in low-level tests or custom runtimes when the
-outcome matters.
-
-## Error Set Shape
-
-Keep error sets honest and local:
-
-```zig
-const AppError = error{
-    MissingScope,
-    OutOfMemory,
-    MissingConfig,
-    InvalidInput,
-};
-```
-
-Include `MissingScope` for resource registration paths. Include `OutOfMemory`
-when allocating, logging, tracing, metrics, config, files, or scoped finalizer
-registration can allocate.
+The repository still contains environment mismatch, static provider tuple,
+`LayerGraph`, and `serviceNotFound` diagnostics for unmigrated modules. They are
+compatibility diagnostics, not patterns to copy into new application code. New
+work should produce diagnostics in terms of canonical service tags, effect
+requirements, layer inputs, and managed runtime boundaries.

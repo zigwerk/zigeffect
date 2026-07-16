@@ -846,6 +846,30 @@ fn cancellationTask(io: std.Io, cancellation: Grpc.Cancellation) std.Io.Cancelab
     }
 }
 
+fn callHasCompleteResponse(call: *const ClientCall) bool {
+    return call.closed.load(.acquire) or call.response_complete.load(.acquire);
+}
+
+fn receiveCallUntilComplete(
+    call: *ClientCall,
+    session: *c.nghttp2_session,
+    io: std.Io,
+    wire: Wire,
+    buffer: []u8,
+    deadline: std.Io.Clock.Timestamp,
+    cancellation: ?Grpc.Cancellation,
+) !void {
+    while (!callHasCompleteResponse(call)) {
+        _ = receiveSessionTimed(session, io, wire, buffer, deadline, cancellation) catch |err| switch (err) {
+            // A peer may close the connection immediately after the complete
+            // grpc-status trailers. The semantic response is complete even if
+            // nghttp2 has not delivered its local stream-close callback yet.
+            error.ConnectionClosed => if (callHasCompleteResponse(call)) break else return err,
+            else => return err,
+        };
+    }
+}
+
 fn nv(name: []const u8, value: []const u8) c.nghttp2_nv {
     return .{
         .name = @ptrCast(@constCast(name.ptr)),
@@ -1480,7 +1504,7 @@ pub const NativeClient = struct {
             .raw = .fromMilliseconds(@intCast(request.timeout_millis)),
             .clock = .awake,
         });
-        while (!call.closed.load(.acquire)) _ = try receiveSessionTimed(session, self.io, wire, buffer, deadline, call_options.cancellation);
+        try receiveCallUntilComplete(&call, session, self.io, wire, buffer, deadline, call_options.cancellation);
         if (call.stream_error != c.NGHTTP2_NO_ERROR) return error.Http2StreamFailed;
 
         return unaryResponseFromCallAlloc(allocator, &call);
@@ -1538,7 +1562,15 @@ pub const NativeClient = struct {
                 closed += 1;
             };
             if (closed == calls.len) break;
-            _ = try receiveSessionTimed(session, self.io, wire, buffer, deadline, call_options.cancellation);
+            _ = receiveSessionTimed(session, self.io, wire, buffer, deadline, call_options.cancellation) catch |err| switch (err) {
+                error.ConnectionClosed => {
+                    var complete = true;
+                    for (calls) |*call| complete = complete and callHasCompleteResponse(call);
+                    if (complete) break;
+                    return err;
+                },
+                else => return err,
+            };
         }
 
         const responses = try allocator.alloc(Grpc.UnaryResponse, calls.len);
@@ -1588,7 +1620,7 @@ pub const NativeClient = struct {
         const buffer = try allocator.alloc(u8, self.options.limits.max_wire_read_bytes);
         defer allocator.free(buffer);
         const deadline = std.Io.Clock.Timestamp.fromNow(self.io, .{ .raw = .fromMilliseconds(@intCast(request.timeout_millis)), .clock = .awake });
-        while (!call.closed.load(.acquire)) _ = try receiveSessionTimed(session, self.io, wire, buffer, deadline, call_options.cancellation);
+        try receiveCallUntilComplete(&call, session, self.io, wire, buffer, deadline, call_options.cancellation);
         if (call.stream_error != c.NGHTTP2_NO_ERROR) return error.Http2StreamFailed;
         return streamingResponseFromCallAlloc(allocator, &call);
     }
@@ -4821,10 +4853,10 @@ fn beginMiddleware(connection: *ServerConnection, stream: *ServerStream, route: 
     const result = Middleware.runBefore(connection.interceptors, &context);
     if (connection.causal) |facts| {
         if (result.status) |status| {
-            facts.emit(.status, @tagName(status.code), context.service, context.method);
+            facts.emitCall(.status, @tagName(status.code), &context);
         } else {
-            facts.emit(.handler, "started", context.service, context.method);
-            if (shape != .unary) facts.emit(.stream, "started", context.service, context.method);
+            facts.emitCall(.handler, "started", &context);
+            if (shape != .unary) facts.emitCall(.stream, "started", &context);
         }
     }
     if (result.status) |status| if (connection.call_counters) |counters| counters.finish(status.code);
@@ -4847,9 +4879,9 @@ fn finishMiddleware(connection: *ServerConnection, run: *const MiddlewareRun, co
     });
     if (connection.call_counters) |counters| counters.finish(code);
     if (connection.causal) |facts| {
-        facts.emit(.handler, if (code == .ok) "succeeded" else "failed", run.context.service, run.context.method);
-        facts.emit(.status, @tagName(code), run.context.service, run.context.method);
-        if (run.context.shape != .unary) facts.emit(.stream, if (code == .ok) "completed" else "failed", run.context.service, run.context.method);
+        facts.emitCall(.handler, if (code == .ok) "succeeded" else "failed", &run.context);
+        facts.emitCall(.status, @tagName(code), &run.context);
+        if (run.context.shape != .unary) facts.emitCall(.stream, if (code == .ok) "completed" else "failed", &run.context);
     }
 }
 
@@ -7911,13 +7943,13 @@ test "persistent incremental client streams bidirectionally with capacity-one ba
     defer client_causal_store.deinit();
     var server_causal_store = zstd.fx.CausalStore.init(std.testing.allocator);
     defer server_causal_store.deinit();
-    var client_causal = Middleware.CausalFacts{ .store = &client_causal_store, .service_key = "incremental-client" };
-    var server_causal = Middleware.CausalFacts{ .store = &server_causal_store, .service_key = "incremental-server" };
+    var client_causal = Middleware.CausalFacts{ .recorder = .fromStore(&client_causal_store), .service_key = "incremental-client" };
+    var server_causal = Middleware.CausalFacts{ .recorder = .fromStore(&server_causal_store), .service_key = "incremental-server" };
     var unary = Grpc.Registry.init(std.testing.allocator);
     defer unary.deinit();
     var incremental = Incremental.Registry.init(std.testing.allocator);
     defer incremental.deinit();
-    var binding = Typed.GeneratedServer(Service, Echo).init(std.heap.page_allocator, &echo);
+    var binding = Typed.GeneratedDriverBinding(Service, Echo).init(std.heap.page_allocator, &echo);
     try binding.registerAll(&unary, &incremental);
     var maybe_server: ?NativeServer = null;
     var port: u16 = 29_600;
@@ -8381,4 +8413,618 @@ fn fuzzNativeBoundaries(_: void, smith: *std.testing.Smith) !void {
         var message = message_value;
         message.deinit(std.testing.allocator);
     } else |_| {}
+}
+
+/// Application configuration for a scope-owned persistent client channel.
+/// Borrowed option strings and credential providers must be supplied by layers
+/// whose lifetime encloses this layer.
+pub const PersistentChannelConfig = struct {
+    io: std.Io,
+    options: ClientOptions = .{},
+};
+pub const PersistentChannelConfigService = zstd.fx.kernel.Service(
+    "zigeffect/grpc/PersistentChannelConfig",
+    PersistentChannelConfig,
+);
+
+pub const PersistentChannelApi = struct {
+    pub const operations: []const []const u8 = &.{ "PersistentChannel.client", "PersistentChannel.snapshot" };
+    allocator: std.mem.Allocator,
+    causal: *RuntimeCausalBoundary,
+    channel: PersistentChannel,
+};
+
+const RuntimeCausalBoundary = struct {
+    facts: Middleware.CausalFacts,
+};
+
+pub const PersistentChannelService = zstd.fx.kernel.Service(
+    "zigeffect/grpc/PersistentChannel",
+    PersistentChannelApi,
+);
+
+pub fn persistentChannelConfigLayer(config: PersistentChannelConfig) @TypeOf(
+    zstd.fx.kernel.Layer.succeed(PersistentChannelConfigService, config),
+) {
+    return zstd.fx.kernel.Layer.succeed(PersistentChannelConfigService, config);
+}
+
+const PersistentChannelLifecycle = struct {
+    fn acquire(
+        ctx: *zstd.fx.kernel.ContextView(.{PersistentChannelConfigService}),
+    ) anyerror!PersistentChannelApi {
+        const config = ctx.service(PersistentChannelConfigService);
+        const causal = try ctx.allocator().create(RuntimeCausalBoundary);
+        errdefer ctx.allocator().destroy(causal);
+        causal.* = .{ .facts = .{
+            .recorder = ctx.causalRecorder(),
+            .service_key = PersistentChannelService.service_key,
+        } };
+        var options = config.options;
+        options.causal = &causal.facts;
+        return .{
+            .allocator = ctx.allocator(),
+            .causal = causal,
+            .channel = try PersistentChannel.init(ctx.allocator(), config.io, options),
+        };
+    }
+
+    fn release(api: *PersistentChannelApi) void {
+        api.channel.deinit();
+        api.allocator.destroy(api.causal);
+    }
+};
+
+pub fn persistentChannelLayer() @TypeOf(zstd.fx.kernel.Layer.scoped(
+    PersistentChannelService,
+    anyerror,
+    .{PersistentChannelConfigService},
+    PersistentChannelLifecycle.acquire,
+    PersistentChannelLifecycle.release,
+)) {
+    return zstd.fx.kernel.Layer.scoped(
+        PersistentChannelService,
+        anyerror,
+        .{PersistentChannelConfigService},
+        PersistentChannelLifecycle.acquire,
+        PersistentChannelLifecycle.release,
+    );
+}
+
+const PersistentGrpcClientFactory = struct {
+    fn make(ctx: *zstd.fx.kernel.ContextView(.{PersistentChannelService})) Grpc.ClientApi {
+        return .{ .client = ctx.service(PersistentChannelService).channel.client() };
+    }
+};
+
+pub fn persistentGrpcClientLayer() @TypeOf(zstd.fx.kernel.Layer.sync(
+    Grpc.GrpcClient,
+    .{PersistentChannelService},
+    PersistentGrpcClientFactory.make,
+)) {
+    return zstd.fx.kernel.Layer.sync(
+        Grpc.GrpcClient,
+        .{PersistentChannelService},
+        PersistentGrpcClientFactory.make,
+    );
+}
+
+pub const ChannelPoolConfig = struct {
+    io: std.Io,
+    options: ChannelPoolOptions = .{},
+};
+pub const ChannelPoolConfigService = zstd.fx.kernel.Service(
+    "zigeffect/grpc/ChannelPoolConfig",
+    ChannelPoolConfig,
+);
+
+pub const ChannelPoolApi = struct {
+    pub const operations: []const []const u8 = &.{ "ChannelPool.client", "ChannelPool.snapshot" };
+    allocator: std.mem.Allocator,
+    causal: *RuntimeCausalBoundary,
+    pool: ChannelPool,
+};
+
+pub const ChannelPoolService = zstd.fx.kernel.Service(
+    "zigeffect/grpc/ChannelPool",
+    ChannelPoolApi,
+);
+
+pub fn channelPoolConfigLayer(config: ChannelPoolConfig) @TypeOf(
+    zstd.fx.kernel.Layer.succeed(ChannelPoolConfigService, config),
+) {
+    return zstd.fx.kernel.Layer.succeed(ChannelPoolConfigService, config);
+}
+
+const ChannelPoolLifecycle = struct {
+    fn acquire(ctx: *zstd.fx.kernel.ContextView(.{ChannelPoolConfigService})) anyerror!ChannelPoolApi {
+        const config = ctx.service(ChannelPoolConfigService);
+        const causal = try ctx.allocator().create(RuntimeCausalBoundary);
+        errdefer ctx.allocator().destroy(causal);
+        causal.* = .{ .facts = .{
+            .recorder = ctx.causalRecorder(),
+            .service_key = ChannelPoolService.service_key,
+        } };
+        var options = config.options;
+        options.client.causal = &causal.facts;
+        return .{
+            .allocator = ctx.allocator(),
+            .causal = causal,
+            .pool = try ChannelPool.init(ctx.allocator(), config.io, options),
+        };
+    }
+
+    fn release(api: *ChannelPoolApi) void {
+        api.pool.deinit();
+        api.allocator.destroy(api.causal);
+    }
+};
+
+pub fn channelPoolLayer() @TypeOf(zstd.fx.kernel.Layer.scoped(
+    ChannelPoolService,
+    anyerror,
+    .{ChannelPoolConfigService},
+    ChannelPoolLifecycle.acquire,
+    ChannelPoolLifecycle.release,
+)) {
+    return zstd.fx.kernel.Layer.scoped(
+        ChannelPoolService,
+        anyerror,
+        .{ChannelPoolConfigService},
+        ChannelPoolLifecycle.acquire,
+        ChannelPoolLifecycle.release,
+    );
+}
+
+const PooledGrpcClientFactory = struct {
+    fn make(ctx: *zstd.fx.kernel.ContextView(.{ChannelPoolService})) Grpc.ClientApi {
+        return .{ .client = ctx.service(ChannelPoolService).pool.client() };
+    }
+};
+
+pub fn pooledGrpcClientLayer() @TypeOf(zstd.fx.kernel.Layer.sync(
+    Grpc.GrpcClient,
+    .{ChannelPoolService},
+    PooledGrpcClientFactory.make,
+)) {
+    return zstd.fx.kernel.Layer.sync(
+        Grpc.GrpcClient,
+        .{ChannelPoolService},
+        PooledGrpcClientFactory.make,
+    );
+}
+
+/// Application configuration for a scope-owned native server. Registries are
+/// separate services so generated handlers can be assembled before the
+/// listener is reported ready.
+pub const NativeServerConfig = struct {
+    io: std.Io,
+    options: ServerOptions = .{},
+};
+pub const NativeServerConfigService = zstd.fx.kernel.Service(
+    "zigeffect/grpc/NativeServerConfig",
+    NativeServerConfig,
+);
+
+pub const NativeServerApi = struct {
+    pub const operations: []const []const u8 = &.{
+        "NativeServer.ready",
+        "NativeServer.serve",
+        "NativeServer.drain",
+        "NativeServer.shutdown",
+    };
+    allocator: std.mem.Allocator,
+    causal: *RuntimeCausalBoundary,
+    server: NativeServer,
+};
+
+pub const NativeServerService = zstd.fx.kernel.Service(
+    "zigeffect/grpc/NativeServer",
+    NativeServerApi,
+);
+
+pub fn nativeServerConfigLayer(config: NativeServerConfig) @TypeOf(
+    zstd.fx.kernel.Layer.succeed(NativeServerConfigService, config),
+) {
+    return zstd.fx.kernel.Layer.succeed(NativeServerConfigService, config);
+}
+
+const NativeServerLifecycle = struct {
+    const Requirements = .{
+        NativeServerConfigService,
+        Typed.UnaryRegistry,
+        Typed.StreamingRegistry,
+        Typed.IncrementalRegistry,
+    };
+
+    fn acquire(ctx: *zstd.fx.kernel.ContextView(Requirements)) anyerror!NativeServerApi {
+        const config = ctx.service(NativeServerConfigService);
+        const causal = try ctx.allocator().create(RuntimeCausalBoundary);
+        errdefer ctx.allocator().destroy(causal);
+        causal.* = .{ .facts = .{
+            .recorder = ctx.causalRecorder(),
+            .service_key = NativeServerService.service_key,
+        } };
+        var options = config.options;
+        options.causal = &causal.facts;
+        var server = try NativeServer.initStreaming(
+            ctx.allocator(),
+            config.io,
+            options,
+            ctx.service(Typed.UnaryRegistry),
+            ctx.service(Typed.StreamingRegistry),
+        );
+        errdefer server.deinit();
+        try server.installIncremental(ctx.service(Typed.IncrementalRegistry));
+        return .{ .allocator = ctx.allocator(), .causal = causal, .server = server };
+    }
+
+    fn release(api: *NativeServerApi) void {
+        api.server.deinit();
+        api.allocator.destroy(api.causal);
+    }
+};
+
+pub fn nativeServerLayer() @TypeOf(zstd.fx.kernel.Layer.scoped(
+    NativeServerService,
+    anyerror,
+    NativeServerLifecycle.Requirements,
+    NativeServerLifecycle.acquire,
+    NativeServerLifecycle.release,
+)) {
+    return zstd.fx.kernel.Layer.scoped(
+        NativeServerService,
+        anyerror,
+        NativeServerLifecycle.Requirements,
+        NativeServerLifecycle.acquire,
+        NativeServerLifecycle.release,
+    );
+}
+
+pub const NativeChannelzConfig = struct {
+    server_ref: Channelz.Ref = .{ .id = 1, .name = "zigeffect-grpc-server" },
+    listener_ref: Channelz.Ref = .{ .id = 2, .name = "zigeffect-grpc-listener" },
+    listener_name: []const u8 = "listener",
+};
+
+pub const NativeChannelzConfigService = zstd.fx.kernel.Service(
+    "zigeffect/grpc/NativeChannelzConfig",
+    NativeChannelzConfig,
+);
+
+const NativeChannelzState = struct {
+    registry: Channelz.Registry,
+    listen_socket_refs: [1]Channelz.Ref,
+    server_source: NativeServerChannelz,
+    listener_source: NativeServerSocketChannelz,
+    service: Channelz.Service,
+};
+
+pub const NativeChannelzApi = struct {
+    pub const operations: []const []const u8 = &.{
+        "Channelz.GetServers",
+        "Channelz.GetServer",
+        "Channelz.GetServerSockets",
+        "Channelz.GetSocket",
+    };
+    allocator: std.mem.Allocator,
+    state: *NativeChannelzState,
+};
+
+pub const NativeChannelzService = zstd.fx.kernel.Service(
+    "zigeffect/grpc/NativeChannelz",
+    NativeChannelzApi,
+);
+
+pub fn nativeChannelzConfigLayer(config: NativeChannelzConfig) @TypeOf(
+    zstd.fx.kernel.Layer.succeed(NativeChannelzConfigService, config),
+) {
+    return zstd.fx.kernel.Layer.succeed(NativeChannelzConfigService, config);
+}
+
+const NativeChannelzLifecycle = struct {
+    const Requirements = .{
+        NativeChannelzConfigService,
+        NativeServerService,
+        Typed.UnaryRegistry,
+    };
+
+    fn acquire(ctx: *zstd.fx.kernel.ContextView(Requirements)) anyerror!NativeChannelzApi {
+        const allocator = ctx.allocator();
+        const config = ctx.service(NativeChannelzConfigService);
+        const server = &ctx.service(NativeServerService).server;
+        const state = try allocator.create(NativeChannelzState);
+        errdefer allocator.destroy(state);
+        state.registry = Channelz.Registry.init(allocator);
+        errdefer state.registry.deinit();
+        state.listen_socket_refs = .{config.listener_ref};
+        state.server_source = .{
+            .server = server,
+            .ref = config.server_ref,
+            .listen_socket_refs = &state.listen_socket_refs,
+        };
+        state.listener_source = .{
+            .server = server,
+            .server_id = config.server_ref.id,
+            .ref = config.listener_ref,
+            .name = config.listener_name,
+        };
+        try state.registry.registerServer(Channelz.ServerSource.from(NativeServerChannelz, &state.server_source));
+        try state.registry.registerSocket(Channelz.SocketSource.from(NativeServerSocketChannelz, &state.listener_source));
+        state.service = .{ .registry = &state.registry };
+        try state.service.install(ctx.service(Typed.UnaryRegistry));
+        return .{ .allocator = allocator, .state = state };
+    }
+
+    fn release(api: *NativeChannelzApi) void {
+        api.state.registry.deinit();
+        api.allocator.destroy(api.state);
+    }
+};
+
+pub fn nativeChannelzLayer() @TypeOf(zstd.fx.kernel.Layer.scoped(
+    NativeChannelzService,
+    anyerror,
+    NativeChannelzLifecycle.Requirements,
+    NativeChannelzLifecycle.acquire,
+    NativeChannelzLifecycle.release,
+)) {
+    return zstd.fx.kernel.Layer.scoped(
+        NativeChannelzService,
+        anyerror,
+        NativeChannelzLifecycle.Requirements,
+        NativeChannelzLifecycle.acquire,
+        NativeChannelzLifecycle.release,
+    );
+}
+
+pub const ChannelSnapshotEffect = zstd.fx.kernel.Effect(
+    ChannelSnapshot,
+    error{},
+    .{PersistentChannelService},
+);
+
+pub fn channelSnapshotEffect() ChannelSnapshotEffect {
+    return ChannelSnapshotEffect.fromFn(struct {
+        fn run(ctx: *zstd.fx.kernel.ContextView(.{PersistentChannelService})) error{}!ChannelSnapshot {
+            const result = ctx.service(PersistentChannelService).channel.snapshot();
+            _ = ctx.recordCausal(.{
+                .kind = .io_completed,
+                .service_key = PersistentChannelService.service_key,
+                .label = "grpc.channel.snapshot",
+                .status = "success",
+                .redacted_detail = "read bounded persistent channel state; credentials and payloads omitted",
+            });
+            return result;
+        }
+    }.run);
+}
+
+pub const ServerReadyEffect = zstd.fx.kernel.Effect(bool, error{}, .{NativeServerService});
+
+pub fn serverReadyEffect() ServerReadyEffect {
+    return ServerReadyEffect.fromFn(struct {
+        fn run(ctx: *zstd.fx.kernel.ContextView(.{NativeServerService})) error{}!bool {
+            const ready = ctx.service(NativeServerService).server.ready();
+            _ = ctx.recordCausal(.{
+                .kind = .io_completed,
+                .service_key = NativeServerService.service_key,
+                .label = "grpc.server.ready",
+                .status = if (ready) "ready" else "not-ready",
+                .redacted_detail = "read native server readiness",
+            });
+            return ready;
+        }
+    }.run);
+}
+
+pub const DrainServerEffect = zstd.fx.kernel.Effect(void, error{}, .{NativeServerService});
+
+pub fn drainServerEffect() DrainServerEffect {
+    return DrainServerEffect.fromFn(struct {
+        fn run(ctx: *zstd.fx.kernel.ContextView(.{NativeServerService})) error{}!void {
+            ctx.service(NativeServerService).server.drain();
+            _ = ctx.recordCausal(.{
+                .kind = .io_completed,
+                .service_key = NativeServerService.service_key,
+                .label = "grpc.server.drain",
+                .status = "success",
+                .redacted_detail = "stopped accepting new connections",
+            });
+        }
+    }.run);
+}
+
+pub const ServeEffect = zstd.fx.kernel.Effect(SupervisorReport, anyerror, .{NativeServerService});
+
+pub fn serveEffect() ServeEffect {
+    return ServeEffect.fromFn(struct {
+        fn run(ctx: *zstd.fx.kernel.ContextView(.{NativeServerService})) anyerror!SupervisorReport {
+            const started = ctx.recordCausal(.{
+                .kind = .io_wait_started,
+                .service_key = NativeServerService.service_key,
+                .label = "grpc.server.serve",
+                .status = "running",
+                .redacted_detail = "native gRPC supervisor started",
+            });
+            const result = ctx.service(NativeServerService).server.serve() catch |err| {
+                _ = ctx.recordCausal(.{
+                    .kind = .io_completed,
+                    .parent_id = started,
+                    .cause_event_id = started,
+                    .service_key = NativeServerService.service_key,
+                    .label = "grpc.server.serve",
+                    .type_name = @errorName(err),
+                    .status = "failure",
+                    .redacted_detail = "native gRPC supervisor failed",
+                });
+                return err;
+            };
+            _ = ctx.recordCausal(.{
+                .kind = .io_completed,
+                .parent_id = started,
+                .service_key = NativeServerService.service_key,
+                .label = "grpc.server.serve",
+                .status = "success",
+                .redacted_detail = "native gRPC supervisor stopped",
+            });
+            return result;
+        }
+    }.run);
+}
+
+pub fn ShutdownServerEffect() type {
+    return zstd.fx.kernel.Effect(
+        ShutdownReport,
+        anyerror,
+        .{NativeServerService},
+    ).Stateful(ShutdownOptions);
+}
+
+pub fn shutdownServerEffect(options: ShutdownOptions) ShutdownServerEffect() {
+    const State = ShutdownServerEffect().StateType;
+    return ShutdownServerEffect().init(options, struct {
+        fn run(state: State, ctx: *zstd.fx.kernel.ContextView(.{NativeServerService})) anyerror!ShutdownReport {
+            const started = ctx.recordCausal(.{
+                .kind = .io_wait_started,
+                .service_key = NativeServerService.service_key,
+                .label = "grpc.server.shutdown",
+                .status = "running",
+                .redacted_detail = "bounded native gRPC shutdown started",
+            });
+            const result = ctx.service(NativeServerService).server.shutdown(state) catch |err| {
+                _ = ctx.recordCausal(.{
+                    .kind = .io_completed,
+                    .parent_id = started,
+                    .cause_event_id = started,
+                    .service_key = NativeServerService.service_key,
+                    .label = "grpc.server.shutdown",
+                    .type_name = @errorName(err),
+                    .status = "failure",
+                    .redacted_detail = "bounded native gRPC shutdown failed",
+                });
+                return err;
+            };
+            _ = ctx.recordCausal(.{
+                .kind = .io_completed,
+                .parent_id = started,
+                .service_key = NativeServerService.service_key,
+                .label = "grpc.server.shutdown",
+                .status = if (result.forced) "forced" else "success",
+                .redacted_detail = "bounded native gRPC shutdown completed",
+            });
+            return result;
+        }
+    }.run);
+}
+
+test "persistent channel layer owns the channel and exposes the std gRPC client service" {
+    const config = persistentChannelConfigLayer(.{
+        .io = std.testing.io,
+        .options = .{ .keepalive_interval_millis = null },
+    });
+    const resources = persistentGrpcClientLayer()
+        .provideMerge(persistentChannelLayer())
+        .provideMerge(config);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runtime = try zstd.ManagedRuntime(@TypeOf(resources)).make(
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        resources,
+        .{},
+    );
+    defer runtime.deinit();
+
+    const snapshot_value = try runtime.run(channelSnapshotEffect().named("grpc.channel.snapshot.test"));
+    try std.testing.expect(!snapshot_value.connected);
+    var application = try runtime.inspect(std.testing.allocator, .{});
+    defer application.deinit();
+    var saw_client = false;
+    for (application.services) |service| {
+        if (std.mem.eql(u8, service.key, Grpc.GrpcClient.service_key)) saw_client = true;
+    }
+    try std.testing.expect(saw_client);
+    try std.testing.expect(runtime.graphSummary().records > 0);
+    try runtime.shutdown();
+}
+
+test "channel pool layer owns all channels and exposes one load-balanced client service" {
+    const config = channelPoolConfigLayer(.{
+        .io = std.testing.io,
+        .options = .{ .size = 2, .client = .{ .keepalive_interval_millis = null } },
+    });
+    const resources = pooledGrpcClientLayer()
+        .provideMerge(channelPoolLayer())
+        .provideMerge(config);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runtime = try zstd.ManagedRuntime(@TypeOf(resources)).make(
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        resources,
+        .{},
+    );
+    defer runtime.deinit();
+
+    var application = try runtime.inspect(std.testing.allocator, .{});
+    defer application.deinit();
+    var saw_pool = false;
+    var saw_client = false;
+    for (application.services) |service| {
+        if (std.mem.eql(u8, service.key, ChannelPoolService.service_key)) saw_pool = true;
+        if (std.mem.eql(u8, service.key, Grpc.GrpcClient.service_key)) saw_client = true;
+    }
+    try std.testing.expect(saw_pool);
+    try std.testing.expect(saw_client);
+    try runtime.shutdown();
+}
+
+test "native server layer owns listener lifecycle and serves lifecycle effects" {
+    const dependencies = zstd.fx.kernel.Layer.mergeAll(.{
+        nativeServerConfigLayer(.{
+            .io = std.testing.io,
+            .options = .{ .host = "127.0.0.1", .port = 0 },
+        }),
+        Typed.unaryRegistryLayer(),
+        Typed.streamingRegistryLayer(),
+        Typed.incrementalRegistryLayer(),
+        nativeChannelzConfigLayer(.{}),
+    });
+    const server = nativeServerLayer().provideMerge(dependencies);
+    const resources = nativeChannelzLayer().provideMerge(server);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runtime = try zstd.ManagedRuntime(@TypeOf(resources)).make(
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        resources,
+        .{},
+    );
+    defer runtime.deinit();
+
+    try std.testing.expect(try runtime.run(serverReadyEffect()));
+    try runtime.run(drainServerEffect());
+    try std.testing.expect(!(try runtime.run(serverReadyEffect())));
+    var application = try runtime.inspect(std.testing.allocator, .{ .max_recent_events = 256 });
+    defer application.deinit();
+    var saw_automatic_boundary_fact = false;
+    var saw_channelz_layer = false;
+    for (application.services) |service| {
+        if (std.mem.eql(u8, service.key, NativeChannelzService.service_key)) saw_channelz_layer = true;
+    }
+    for (application.causal.recent_events) |event| {
+        if (std.mem.eql(u8, event.type_name, "GrpcBoundaryFact") and
+            std.mem.eql(u8, event.service_key, NativeServerService.service_key))
+        {
+            saw_automatic_boundary_fact = true;
+        }
+    }
+    try std.testing.expect(saw_channelz_layer);
+    try std.testing.expect(saw_automatic_boundary_fact);
+    try std.testing.expect(runtime.graphSummary().records > 0);
+    try runtime.shutdown();
 }

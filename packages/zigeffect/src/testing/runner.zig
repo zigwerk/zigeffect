@@ -2,7 +2,10 @@
 //!
 //! The Zig server protocol behavior intentionally tracks Zig's default runner.
 //! ZigEffect adds fail-closed, atomic suite receipts without changing the test
-//! functions or their use of `std.testing`.
+//! functions or their use of `std.testing`. Focused selection is performed at
+//! compile time through a package's `-Dtest-filter=<text>` build option, so the
+//! receipt still has equal discovered/executed counts and no artificial
+//! pending tests.
 const builtin = @import("builtin");
 
 const std = @import("std");

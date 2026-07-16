@@ -49,17 +49,30 @@ place.
 
 Generated applications and services include typed Config/Schema and CLI
 boundaries, local HTTP and SQL fakes, an effect-native service and layer, causal
-evidence, a durable Zig-native causal graph, workbench attachment metadata,
+evidence, an embedded durable NenDB causal graph, workbench attachment metadata,
 deterministic tests, the project manifest, and matching Codex/Claude skills.
 Libraries and packages expose a
 tested effect-native public facade. Systems contain two independently buildable
 services and a shared package.
 
+Template-v12 local application/service projects use canonical service tags,
+fluent effects and layers, one named root program, and one
+`zstd.ManagedRuntime`. The runtime automatically owns the memory recorder,
+embedded NenDB topology, crash-safe property WAL, application map, and checked
+shutdown. Libraries and generated service/layer modules export effects and
+default layers without hiding their own runtime. Tests replace layers without
+changing the program or its causal shape.
+
+The production profile still composes config, lifecycle, HTTP, Postgres, and
+OTLP through their legacy scoped-layer adapters. It remains a migration surface
+until those packages publish canonical kernel layers; it must not be treated as
+the reference architecture for new application code.
+
 Every generated manifest defaults to `agent_safe_v1` and declares source-policy,
 Debug, ReleaseSafe, allocation/leak, causal, schedule, and executor-equivalence
-gates plus explicit optional sanitizer/stack-protection/fuzz capabilities. Dependency paths are explicit relative paths so
-the generated project stays portable and does not persist machine-specific
-absolute locations.
+gates plus explicit optional sanitizer/stack-protection/fuzz capabilities.
+Dependency paths are explicit relative paths so the generated project stays
+portable and does not persist machine-specific absolute locations.
 
 Every scaffold also commits `.zigeffect/compatibility.json` and a SHA-256
 `.zigeffect/scaffold-state.json`. Inspect or upgrade the local contract with:
@@ -99,21 +112,29 @@ and dev output is bounded and redacted, with receipts persisted under
 `.zigeffect/receipts`. Dev also writes `.zigeffect/workbench.json` for local
 attachment.
 
-Applications and services attach `zstd.CausalGraph.LocalDatabase` before their
-first generated application fact and flush a bounded graph WAL under the
-manifest's `.zigeffect/graph` artifact path. Query it without accepting an
-arbitrary database path:
+Each generated application or service creates one `zstd.ManagedRuntime`; graph
+creation, attachment, recording, and flushing are runtime responsibilities.
+The embedded NenDB graph and bounded property WAL live under the manifest's
+`.zigeffect/graph` artifact path. Query them without accepting an arbitrary
+database path:
 
 ```sh
 zigeffect graph status --root ./my-app --json
+zigeffect graph since <baseline-event-id> --limit 256 --root ./my-app --json
 zigeffect graph event <durable-event-id> --root ./my-app --json
 zigeffect graph children <durable-event-id> --root ./my-app --json
+zigeffect graph path <from-event-id> <to-event-id> --limit 128 --root ./my-app --json
 zigeffect graph status --root ./my-system --component api-service --json
 ```
 
+The first `graph status` and `graph since 0` are valid read-only empty
+baselines; they do not create a WAL. Testing v2 receipts declare
+`causal_event_id_space`. Assertion IDs can be passed to `graph event` only when
+that value is `graph_durable`.
+
 System services use independent graph roots and require `--component` for root
-CLI queries. The embedded WAL implements the existing NenDB-compatible writer
-contract, but the CLI does not install the upstream NenDB package.
+CLI queries. The runtime reports the exact pinned upstream NenDB revision used
+by the reviewed Zig 0.16 port. No daemon or Docker image is installed.
 
 The agent check joins AST-based governed-construct policy with bounded raw Zig
 compiler artifacts and writes a source-revision/toolchain-linked safety receipt.
@@ -155,13 +176,26 @@ zigeffect agent requirements --root ./my-system --jsonl
 zigeffect agent checks --root ./my-system --jsonl
 zigeffect agent evidence --root ./my-system --jsonl
 zigeffect agent next --root ./my-system --json
+zigeffect agent context --task <requirement-or-task-id> --budget 65536 \
+  --changed src/orders.zig --root ./my-system --json
 zigeffect agent handoff --provider codex --session local-42 --root ./my-system
 ```
 
 The versioned provider-neutral protocol maps requirements to tasks, acceptance
-state, bounded artifact/causal evidence, and next actions. Handoffs reject
+state, bounded artifact/causal evidence, and next actions. `agent context` is
+the canonical first call: it derives state from exact source-, manifest-,
+command-, and native-receipt identities and reports any budget omission
+explicitly. Handoffs reject
 secret-shaped values and persist to `.zigeffect/handoffs/latest.json`. Codex,
 Claude Code, local tools, and the workbench consume the same contract.
+
+Focused scenario execution writes bounded progress to
+`.zigeffect/tests/progress.jsonl`, stable native evidence to
+`.zigeffect/tests/process-receipts/<scenario>.json`, and content-addressed proof
+handoffs to `.zigeffect/handoffs/tests/`. A command exit code or a manually
+edited manifest status is never acceptance proof. Ordinary package-native runs
+write `.zigeffect/tests/raw-receipts/` and cannot overwrite stable controlled
+evidence.
 
 Generated applications and services emit `zstd.Application` facts for config,
 Schema, CLI, HTTP, SQL, external calls, artifacts, component dependencies, and

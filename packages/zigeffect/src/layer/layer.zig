@@ -272,7 +272,8 @@ pub fn EffectLayer(comptime Env: type, comptime StartupError: type, comptime Eff
             effect_ctx.span_id = ctx.span_id;
             effect_ctx.causal_store = ctx.causal_store;
             effect_ctx.causal_run_id = ctx.causal_run_id;
-            return self.effect.run(&effect_ctx);
+            effect_ctx.causal_parent_id = ctx.causal_parent_id;
+            return effect_ctx.runEffect(self.effect);
         }
     };
 }

@@ -139,6 +139,10 @@ pub const TestScenario = struct {
     command: []const u8,
     source_roots: []const []const u8 = &.{},
     tags: []const []const u8 = &.{},
+    /// Optional compile-time Zig test selector. Projects expose this through
+    /// `-Dtest-filter`; the CLI appends it only for this scenario so affected
+    /// execution does not run the package's entire native suite.
+    native_test_filter: ?[]const u8 = null,
     default_seed: u64 = 1,
     fault_profile: TestFaultProfile = .standard,
     required: bool = true,
@@ -341,7 +345,9 @@ pub const SafetyPolicy = struct {
             if (!audited) return error.UnauditedSafetyAllowance;
             for (self.allowances[0..index]) |previous| {
                 if (std.mem.eql(u8, previous.id, allowance.id) or
-                    (std.mem.eql(u8, previous.path, allowance.path) and previous.construct == allowance.construct))
+                    (std.mem.eql(u8, previous.path, allowance.path) and
+                        previous.construct == allowance.construct and
+                        std.mem.eql(u8, previous.fingerprint, allowance.fingerprint)))
                 {
                     return error.DuplicateSafetyAllowance;
                 }
@@ -479,6 +485,12 @@ pub const Manifest = struct {
             for (scenario.tags, 0..) |tag, tag_index| {
                 try validateIdentifier(tag);
                 for (scenario.tags[0..tag_index]) |previous| if (std.mem.eql(u8, previous, tag)) return error.InvalidTestScenario;
+            }
+            if (scenario.native_test_filter) |filter| {
+                if (filter.len == 0 or filter.len > 4096) return error.InvalidTestScenario;
+                try ensureSafe(filter);
+                const scenario_command = self.command(scenario.command).?;
+                if (scenario_command.argv.len < 2 or !std.mem.eql(u8, scenario_command.argv[0], "zig") or !std.mem.eql(u8, scenario_command.argv[1], "build")) return error.InvalidTestScenario;
             }
             for (self.test_scenarios[0..index]) |previous| if (std.mem.eql(u8, previous.id, scenario.id)) return error.DuplicateTestScenario;
         }
@@ -1368,6 +1380,47 @@ test "Project safety policy rejects duplicates stale shapes and secrets" {
         .gates = &.{ .{ .kind = .source_policy }, .{ .kind = .source_policy } },
     };
     try std.testing.expectError(error.DuplicateSafetyGate, duplicate_gate.validate());
+
+    var reviewed_occurrences = manifest;
+    reviewed_occurrences.safety = .{
+        .profile = .agent_safe_v1,
+        .safe_roots = &.{"src"},
+        .audited_roots = &.{"adapters"},
+        .allowances = &.{
+            .{
+                .id = "native-entry-one",
+                .path = "adapters/native.zig",
+                .construct = .pointer_cast,
+                .fingerprint = "sha256:0123456789abcdef",
+                .justification = "first independently reviewed pointer conversion",
+                .required_check = "check-safe",
+            },
+            .{
+                .id = "native-entry-two",
+                .path = "adapters/native.zig",
+                .construct = .pointer_cast,
+                .fingerprint = "sha256:fedcba9876543210",
+                .justification = "second independently reviewed pointer conversion",
+                .required_check = "check-safe",
+            },
+        },
+        .gates = &.{.{ .kind = .source_policy }},
+    };
+    try reviewed_occurrences.validate();
+
+    var duplicate_occurrence = reviewed_occurrences;
+    duplicate_occurrence.safety.allowances = &.{
+        reviewed_occurrences.safety.allowances[0],
+        .{
+            .id = "native-entry-copy",
+            .path = "adapters/native.zig",
+            .construct = .pointer_cast,
+            .fingerprint = "sha256:0123456789abcdef",
+            .justification = "the same occurrence must not be approved twice",
+            .required_check = "check-safe",
+        },
+    };
+    try std.testing.expectError(error.DuplicateSafetyAllowance, duplicate_occurrence.validate());
 
     var malformed_fingerprint = manifest;
     malformed_fingerprint.safety = .{

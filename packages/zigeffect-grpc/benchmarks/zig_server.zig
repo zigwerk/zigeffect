@@ -159,7 +159,7 @@ pub fn main(init: std.process.Init) !void {
     defer unary.deinit();
     var incremental = zgrpc.Incremental.Registry.init(allocator);
     defer incremental.deinit();
-    var generated = zgrpc.Typed.GeneratedServer(Service, ConformanceService).init(allocator, &service);
+    var generated = zgrpc.Typed.GeneratedDriverBinding(Service, ConformanceService).init(allocator, &service);
     try generated.registerAll(&unary, &incremental);
     var stats = StatsHandler{ .counter = &counter };
     try unary.register(.{

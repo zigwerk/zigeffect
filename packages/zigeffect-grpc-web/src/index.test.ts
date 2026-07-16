@@ -3,9 +3,11 @@ import {
   connectStreamingQueryOptions,
   connectUnaryMutationOptions,
   connectUnaryQueryOptions,
+  createCausalContextInterceptor,
   createZigEffectConnectTransport,
   openConnectSubscription,
 } from "./index";
+import type { Interceptor } from "@connectrpc/connect";
 
 test("Solid Query options use stable contract-derived keys and cancellation", async () => {
   let observedSignal: AbortSignal | undefined;
@@ -32,6 +34,32 @@ test("Solid Query options use stable contract-derived keys and cancellation", as
 test("Connect transport normalizes its base URL", () => {
   const transport = createZigEffectConnectTransport({ baseUrl: "https://api.example.com/" });
   expect(transport).toBeDefined();
+});
+
+test("causal context is installed automatically with bounded request and W3C trace identifiers", async () => {
+  const interceptor = createCausalContextInterceptor({
+    requestId: () => "request-42",
+    traceparent: () => "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+  });
+  let observed: Headers | undefined;
+  const next = (async (request: { header: Headers }) => {
+    observed = request.header;
+    return {};
+  }) as unknown as Parameters<Interceptor>[0];
+  const invoke = interceptor(next);
+  await invoke({ header: new Headers() } as never);
+  expect(observed?.get("x-request-id")).toBe("request-42");
+  expect(observed?.get("traceparent")).toBe("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+});
+
+test("causal context rejects unsafe correlation values before transport", async () => {
+  const interceptor = createCausalContextInterceptor({
+    requestId: () => "unsafe\r\nheader",
+    traceparent: () => "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+  });
+  const next = (async () => ({})) as unknown as Parameters<Interceptor>[0];
+  const invoke = interceptor(next);
+  expect(invoke({ header: new Headers() } as never)).rejects.toThrow("causal request ID");
 });
 
 test("Solid mutation and bounded streaming helpers preserve keys and abort signals", async () => {

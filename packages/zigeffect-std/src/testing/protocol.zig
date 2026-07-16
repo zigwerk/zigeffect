@@ -5,6 +5,7 @@ pub const control_schema = "zigeffect.test-control.v1";
 pub const control_schema_version: u32 = 1;
 pub const control_path = ".zigeffect/tests/control.json";
 pub const process_receipt_root = ".zigeffect/tests/process-receipts";
+pub const raw_receipt_root = ".zigeffect/tests/raw-receipts";
 
 const Secrets = @import("../secrets/root.zig");
 
@@ -28,6 +29,7 @@ pub const Control = struct {
     executor: []const u8 = "deterministic",
     source_revision: []const u8 = "working-tree",
     command_digest: []const u8 = "",
+    manifest_digest: []const u8 = "",
     required_native_receipt: bool = true,
 
     pub fn validate(self: Control) !void {
@@ -37,8 +39,8 @@ pub const Control = struct {
         if (self.seed == 0) return error.InvalidControl;
         try validateIdentifier(self.executor);
         if (self.source_revision.len == 0 or self.source_revision.len > 4096) return error.InvalidControl;
-        if (self.command_digest.len > 256) return error.InvalidControl;
-        if (Secrets.containsSecret(self.source_revision) or Secrets.containsSecret(self.command_digest)) return error.SecretDetected;
+        if (self.command_digest.len > 256 or self.manifest_digest.len > 256) return error.InvalidControl;
+        if (Secrets.containsSecret(self.source_revision) or Secrets.containsSecret(self.command_digest) or Secrets.containsSecret(self.manifest_digest)) return error.SecretDetected;
     }
 
     pub fn matches(self: Control, selected: Contract.Scenario) bool {
@@ -80,9 +82,21 @@ pub fn readControl(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !P
     return parseControl(allocator, json);
 }
 
+pub fn removeControl(io: std.Io, dir: std.Io.Dir) !void {
+    dir.deleteFile(io, control_path) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => return err,
+    };
+}
+
 pub fn publishedReceiptPathAlloc(allocator: std.mem.Allocator, scenario_id: []const u8) ![]u8 {
     try validateIdentifier(scenario_id);
     return std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ process_receipt_root, scenario_id });
+}
+
+pub fn rawReceiptPathAlloc(allocator: std.mem.Allocator, scenario_id: []const u8) ![]u8 {
+    try validateIdentifier(scenario_id);
+    return std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ raw_receipt_root, scenario_id });
 }
 
 pub fn publishReceipt(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, receipt_value: Contract.TestReceipt) !void {
@@ -94,8 +108,26 @@ pub fn publishReceipt(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir,
     try writeAtomicFile(allocator, io, dir, path, json);
 }
 
+pub fn publishRawReceipt(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, receipt_value: Contract.TestReceipt) !void {
+    const json = try receipt_value.jsonAlloc(allocator);
+    defer allocator.free(json);
+    if (Secrets.containsSecret(json)) return error.SecretDetected;
+    const path = try rawReceiptPathAlloc(allocator, receipt_value.scenario.id);
+    defer allocator.free(path);
+    try writeAtomicFile(allocator, io, dir, path, json);
+}
+
 pub fn readPublishedReceipt(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, scenario_id: []const u8) !Contract.ParsedReceipt {
     const path = try publishedReceiptPathAlloc(allocator, scenario_id);
+    defer allocator.free(path);
+    const json = try dir.readFileAlloc(io, path, allocator, .limited(16 * 1024 * 1024));
+    defer allocator.free(json);
+    if (Secrets.containsSecret(json)) return error.SecretDetected;
+    return Contract.parseReceipt(allocator, json);
+}
+
+pub fn readRawReceipt(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, scenario_id: []const u8) !Contract.ParsedReceipt {
+    const path = try rawReceiptPathAlloc(allocator, scenario_id);
     defer allocator.free(path);
     const json = try dir.readFileAlloc(io, path, allocator, .limited(16 * 1024 * 1024));
     defer allocator.free(json);
@@ -127,6 +159,7 @@ pub fn validatePublishedReceipt(receipt_value: Contract.TestReceipt, control: Co
     }
     if (control.required_native_receipt and !receipt_value.execution.native_receipt) return error.ReceiptSelectionMismatch;
     if (control.command_digest.len != 0 and !std.mem.eql(u8, receipt_value.execution.command_digest, control.command_digest)) return error.ReceiptSelectionMismatch;
+    if (control.manifest_digest.len != 0 and !std.mem.eql(u8, receipt_value.execution.manifest_digest, control.manifest_digest)) return error.ReceiptSelectionMismatch;
     if (!std.mem.eql(u32, receipt_value.schedule_choices, control.schedule_choices)) return error.ReceiptSelectionMismatch;
 }
 

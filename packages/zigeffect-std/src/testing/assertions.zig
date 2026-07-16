@@ -4,7 +4,7 @@ const Secrets = @import("../secrets/root.zig");
 const Contract = @import("contract.zig");
 const Context = @import("context.zig");
 
-pub const AssertionError = error{AssertionFailed};
+pub const AssertionError = error{ AssertionFailed, InvalidPathLimit };
 
 pub const EventPattern = struct {
     kind: fx.CausalEventKind,
@@ -118,6 +118,98 @@ pub const Recorder = struct {
         try self.record(metadata, matched == expected.len, expected_text, actual_text, "ordered causal subsequence", ids.items);
     }
 
+    /// Prove that a matched source event is an ancestor of a matched target
+    /// event. The complete bounded path is attached to the assertion so
+    /// Testing v2 can translate it to durable NenDB IDs during publication.
+    pub fn eventPath(
+        self: Recorder,
+        metadata: Metadata,
+        from: EventPattern,
+        to: EventPattern,
+        max_events: usize,
+    ) !void {
+        if (max_events < 2 or max_events > 256) return error.InvalidPathLimit;
+        var snapshot = try self.context.causal_store.snapshot(self.context.allocator);
+        defer snapshot.deinit();
+
+        for (snapshot.events) |source| {
+            if (!eventMatches(source, from)) continue;
+            for (snapshot.events) |target| {
+                if (!eventMatches(target, to)) continue;
+                var reverse = std.ArrayList(u64).empty;
+                defer reverse.deinit(self.context.allocator);
+                var cursor: ?u64 = target.id;
+                while (cursor) |event_id| {
+                    if (reverse.items.len >= max_events) break;
+                    try reverse.append(self.context.allocator, event_id);
+                    if (event_id == source.id) {
+                        std.mem.reverse(u64, reverse.items);
+                        const expected = try std.fmt.allocPrint(self.context.allocator, "{s} -> {s}", .{ @tagName(from.kind), @tagName(to.kind) });
+                        defer self.context.allocator.free(expected);
+                        const actual = try std.fmt.allocPrint(self.context.allocator, "causal path with {d} events", .{reverse.items.len});
+                        defer self.context.allocator.free(actual);
+                        try self.record(metadata, true, expected, actual, "bounded causal parent path", reverse.items);
+                        return;
+                    }
+                    cursor = parentId(snapshot.events, event_id);
+                }
+            }
+        }
+
+        const expected = try std.fmt.allocPrint(self.context.allocator, "{s} -> {s}", .{ @tagName(from.kind), @tagName(to.kind) });
+        defer self.context.allocator.free(expected);
+        try self.record(metadata, false, expected, "missing", "causal parent path not found within bound", &.{});
+    }
+
+    /// Executable counterfactual graph contract: prove a bounded causal path
+    /// from a precondition to an outcome and require the declared action to be
+    /// on that exact path. The attached IDs are the proof, not a textual claim.
+    pub fn counterfactual(
+        self: Recorder,
+        metadata: Metadata,
+        before: EventPattern,
+        action: EventPattern,
+        after: EventPattern,
+        max_events: usize,
+    ) !void {
+        if (max_events < 3 or max_events > 256) return error.InvalidPathLimit;
+        var snapshot = try self.context.causal_store.snapshot(self.context.allocator);
+        defer snapshot.deinit();
+
+        for (snapshot.events) |source| {
+            if (!eventMatches(source, before)) continue;
+            for (snapshot.events) |target| {
+                if (!eventMatches(target, after)) continue;
+                var reverse = std.ArrayList(u64).empty;
+                defer reverse.deinit(self.context.allocator);
+                var cursor: ?u64 = target.id;
+                while (cursor) |event_id| {
+                    if (reverse.items.len >= max_events) break;
+                    try reverse.append(self.context.allocator, event_id);
+                    if (event_id == source.id) {
+                        std.mem.reverse(u64, reverse.items);
+                        var action_found = false;
+                        for (reverse.items) |path_id| for (snapshot.events) |candidate| {
+                            if (candidate.id == path_id and eventMatches(candidate, action)) action_found = true;
+                        };
+                        if (!action_found) break;
+                        const expected = try std.fmt.allocPrint(self.context.allocator, "{s} -> {s} -> {s}", .{ @tagName(before.kind), @tagName(action.kind), @tagName(after.kind) });
+                        defer self.context.allocator.free(expected);
+                        const actual = try std.fmt.allocPrint(self.context.allocator, "counterfactual proof with {d} causal events", .{reverse.items.len});
+                        defer self.context.allocator.free(actual);
+                        try self.record(metadata, true, expected, actual, "bounded executable counterfactual graph contract", reverse.items);
+                        return;
+                    }
+                    cursor = parentId(snapshot.events, event_id);
+                }
+            }
+        }
+
+        const expected = try std.fmt.allocPrint(self.context.allocator, "{s} -> {s} -> {s}", .{ @tagName(before.kind), @tagName(action.kind), @tagName(after.kind) });
+        defer self.context.allocator.free(expected);
+        try self.record(metadata, false, expected, "missing", "counterfactual action is not on a bounded causal path from precondition to outcome", &.{});
+    }
+
     pub fn finding(self: Recorder, metadata: Metadata, expected: fx.CausalFindingKind) !void {
         var findings = try self.context.causal_store.findings(self.context.allocator);
         defer findings.deinit();
@@ -145,6 +237,135 @@ pub const Recorder = struct {
         const actual = try std.fmt.allocPrint(self.context.allocator, "{d} pending fibers", .{pending});
         defer self.context.allocator.free(actual);
         try self.record(metadata, pending == 0, "0 pending fibers", actual, "collapsed causal fiber lifecycle", &.{});
+    }
+
+    pub fn applicationService(
+        self: Recorder,
+        metadata: Metadata,
+        snapshot: *const fx.kernel.ApplicationSnapshot,
+        service_key: []const u8,
+        exposed: bool,
+    ) !void {
+        var matched = false;
+        for (snapshot.services) |service| {
+            if (std.mem.eql(u8, service.key, service_key) and service.exposed == exposed) {
+                matched = true;
+                break;
+            }
+        }
+        const expected = try std.fmt.allocPrint(self.context.allocator, "service={s} exposed={}", .{ service_key, exposed });
+        defer self.context.allocator.free(expected);
+        try self.record(
+            metadata,
+            matched,
+            expected,
+            if (matched) expected else "service missing or exposure differs",
+            "managed runtime application service topology",
+            &.{},
+        );
+    }
+
+    pub fn applicationDependency(
+        self: Recorder,
+        metadata: Metadata,
+        snapshot: *const fx.kernel.ApplicationSnapshot,
+        service_key: []const u8,
+        provider_service_key: []const u8,
+        consumer_service_key: []const u8,
+    ) !void {
+        var matched = false;
+        for (snapshot.edges) |edge| {
+            if (!std.mem.eql(u8, edge.service_key, service_key)) continue;
+            var provider_matches = false;
+            var consumer_matches = false;
+            for (snapshot.layers) |layer| {
+                if (layer.id == edge.provider_layer_id and std.mem.eql(u8, layer.provided_service_key, provider_service_key)) provider_matches = true;
+                if (layer.id == edge.consumer_layer_id and std.mem.eql(u8, layer.provided_service_key, consumer_service_key)) consumer_matches = true;
+            }
+            if (provider_matches and consumer_matches) {
+                matched = true;
+                break;
+            }
+        }
+        const expected = try std.fmt.allocPrint(
+            self.context.allocator,
+            "{s} -[{s}]-> {s}",
+            .{ provider_service_key, service_key, consumer_service_key },
+        );
+        defer self.context.allocator.free(expected);
+        try self.record(
+            metadata,
+            matched,
+            expected,
+            if (matched) expected else "dependency edge missing",
+            "managed runtime application dependency topology",
+            &.{},
+        );
+    }
+
+    pub fn applicationOperation(
+        self: Recorder,
+        metadata: Metadata,
+        snapshot: *const fx.kernel.ApplicationSnapshot,
+        service_key: []const u8,
+        operation: []const u8,
+    ) !void {
+        var matched = false;
+        for (snapshot.services) |service| {
+            if (!std.mem.eql(u8, service.key, service_key)) continue;
+            for (service.operations) |candidate| {
+                if (std.mem.eql(u8, candidate, operation)) {
+                    matched = true;
+                    break;
+                }
+            }
+            break;
+        }
+        const expected = try std.fmt.allocPrint(
+            self.context.allocator,
+            "service={s} operation={s}",
+            .{ service_key, operation },
+        );
+        defer self.context.allocator.free(expected);
+        try self.record(
+            metadata,
+            matched,
+            expected,
+            if (matched) expected else "service operation missing",
+            "managed runtime application operation catalog",
+            &.{},
+        );
+    }
+
+    pub fn applicationHealthy(
+        self: Recorder,
+        metadata: Metadata,
+        snapshot: *const fx.kernel.ApplicationSnapshot,
+    ) !void {
+        const pending = snapshot.causal.unresolvedFiberCount();
+        const healthy = snapshot.causal.findings.len == 0 and
+            pending == 0 and
+            snapshot.causal.backend_failures == 0;
+        const actual = try std.fmt.allocPrint(
+            self.context.allocator,
+            "findings={d} pending_fibers={d} backend_failures={d} dropped={d} truncated={d}",
+            .{
+                snapshot.causal.findings.len,
+                pending,
+                snapshot.causal.backend_failures,
+                snapshot.causal.dropped_events,
+                snapshot.causal.truncated_fields,
+            },
+        );
+        defer self.context.allocator.free(actual);
+        try self.record(
+            metadata,
+            healthy,
+            "findings=0 pending_fibers=0 backend_failures=0",
+            actual,
+            "managed runtime application causal health",
+            &.{},
+        );
     }
 
     fn record(
@@ -190,6 +411,11 @@ fn eventMatches(event: fx.CausalEvent, pattern: EventPattern) bool {
     if (pattern.status) |value| if (!std.mem.eql(u8, event.status, value)) return false;
     if (pattern.detail_contains) |value| if (std.mem.indexOf(u8, event.redacted_detail, value) == null) return false;
     return true;
+}
+
+fn parentId(events: []const fx.CausalEvent, event_id: u64) ?u64 {
+    for (events) |event| if (event.id == event_id) return event.parent_id;
+    return null;
 }
 
 fn itemWithoutOwnedStrings(event: fx.CausalEvent) fx.CausalEvent {
@@ -277,6 +503,23 @@ test "semantic JSON ignores object key order and secret assertion redacts receip
     try std.testing.expect(std.mem.indexOf(u8, json, "sentinel-secret") == null);
 }
 
+test "counterfactual assertions carry the exact before action after causal proof" {
+    var ctx = try Context.TestContext.init(std.testing.allocator, .{ .project = "demo", .suite = "unit", .scenario = scenario() });
+    defer ctx.deinit();
+    const before_id = try ctx.causal_store.record(.{ .kind = .statechart_event_recorded, .label = "unhealthy", .status = "observed" });
+    const action_id = try ctx.causal_store.record(.{ .kind = .activity_completed, .label = "repair", .status = "success", .parent_id = before_id });
+    _ = try ctx.causal_store.record(.{ .kind = .statechart_event_recorded, .label = "healthy", .status = "observed", .parent_id = action_id });
+    const assertions = Recorder.init(&ctx);
+    try assertions.counterfactual(
+        .{ .id = "repair-proof", .label = "repair causes health" },
+        .{ .kind = .statechart_event_recorded, .label = "unhealthy" },
+        .{ .kind = .activity_completed, .label = "repair" },
+        .{ .kind = .statechart_event_recorded, .label = "healthy" },
+        8,
+    );
+    try std.testing.expectEqual(@as(usize, 3), ctx.assertions.items[0].causal_event_ids.len);
+}
+
 test "causal matchers cite event ids and ordered subsequences" {
     var ctx = try Context.TestContext.init(std.testing.allocator, .{ .project = "demo", .suite = "unit", .scenario = scenario() });
     defer ctx.deinit();
@@ -287,4 +530,33 @@ test "causal matchers cite event ids and ordered subsequences" {
     try assertions.eventSequence(.{ .id = "sequence", .label = "run lifecycle" }, &.{ .run_started, .run_completed });
     try assertions.noFindings(.{ .id = "findings", .label = "no findings" });
     try std.testing.expectEqual(@as(usize, 1), ctx.assertions.items[0].causal_event_ids.len);
+}
+
+const AssertionApplicationService = fx.kernel.Service("testing/AssertionApplicationService", struct {
+    value: u32,
+});
+
+test "application topology assertions reuse the managed runtime snapshot contract" {
+    var ctx = try Context.TestContext.init(std.testing.allocator, .{ .project = "demo", .suite = "unit", .scenario = scenario() });
+    defer ctx.deinit();
+
+    const layer = fx.kernel.Layer.succeed(AssertionApplicationService, .{ .value = 1 });
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, layer, .{});
+    defer runtime.deinit();
+    var snapshot = try runtime.inspect(std.testing.allocator, .{});
+    defer snapshot.deinit();
+
+    const assertions = Recorder.init(&ctx);
+    try assertions.applicationService(
+        .{ .id = "application-service", .label = "application service is mapped" },
+        &snapshot,
+        AssertionApplicationService.service_key,
+        true,
+    );
+    try assertions.applicationHealthy(
+        .{ .id = "application-health", .label = "application runtime is healthy" },
+        &snapshot,
+    );
+    const receipt = try ctx.finish(1);
+    try std.testing.expectEqual(Contract.TestStatus.passed, receipt.status);
 }

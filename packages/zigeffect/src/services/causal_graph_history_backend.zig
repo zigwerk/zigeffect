@@ -157,6 +157,7 @@ fn cloneSlice(allocator: Allocator, value: []const u8) Allocator.Error![]const u
 
 fn cloneEvent(allocator: Allocator, event: causal.CausalEvent) Allocator.Error!causal.CausalEvent {
     var owned = event;
+    owned._owned_text = &.{};
     owned.label = try cloneSlice(allocator, event.label);
     errdefer if (owned.label.len > 0) allocator.free(owned.label);
     owned.type_name = try cloneSlice(allocator, event.type_name);

@@ -83,10 +83,11 @@ pub const CausalBoundary = enum {
 };
 
 /// Writes secret-free native gRPC lifecycle facts into ZigEffect's causal
-/// store. Dynamic values are restricted to bounded service and method labels;
-/// payloads, metadata, authorities, and credentials are never recorded.
+/// application runtime. Dynamic values are restricted to bounded service and
+/// method labels; payloads, metadata, authorities, and credentials are never
+/// recorded.
 pub const CausalFacts = struct {
-    store: *zstd.fx.CausalStore,
+    recorder: zstd.CausalRuntime.CausalRecorder,
     service_key: []const u8 = "zigeffect-grpc",
     dropped: std.atomic.Value(usize) = .init(0),
 
@@ -97,6 +98,35 @@ pub const CausalFacts = struct {
         service: []const u8,
         method: []const u8,
     ) void {
+        self.emitCorrelated(boundary, status, service, method, null, null);
+    }
+
+    pub fn emitCall(
+        self: *CausalFacts,
+        boundary: CausalBoundary,
+        status: []const u8,
+        context: *const CallContext,
+    ) void {
+        const trace_parent = zstd.fx.parseTraceParent(context.traceparent) catch null;
+        self.emitCorrelated(
+            boundary,
+            status,
+            context.service,
+            context.method,
+            if (context.request_id.len == 0) null else std.hash.Wyhash.hash(0, context.request_id),
+            trace_parent,
+        );
+    }
+
+    fn emitCorrelated(
+        self: *CausalFacts,
+        boundary: CausalBoundary,
+        status: []const u8,
+        service: []const u8,
+        method: []const u8,
+        boundary_id: ?u64,
+        trace_parent: ?zstd.fx.TraceParent,
+    ) void {
         const safe_service = boundedRpcAttribute(service);
         const safe_method = boundedRpcAttribute(method);
         var detail_buffer: [600]u8 = undefined;
@@ -105,9 +135,13 @@ pub const CausalFacts = struct {
             "service={s} method={s}",
             .{ safe_service, safe_method },
         ) catch "service=other method=other";
-        _ = self.store.record(.{
+        _ = self.recorder.record(.{
             .kind = .external_signal_received,
             .service_key = self.service_key,
+            .boundary_id = boundary_id,
+            .trace_id = if (trace_parent) |trace| trace.trace_id_low else null,
+            .span_id = if (trace_parent) |trace| trace.parent_id else null,
+            .context = if (trace_parent) |trace| trace.context() else .{},
             .label = @tagName(boundary),
             .type_name = "GrpcBoundaryFact",
             .status = status,
@@ -126,13 +160,13 @@ pub const CausalFacts = struct {
     }
 
     pub fn before(self: *CausalFacts, context: *CallContext) ?Grpc.Status {
-        self.emit(.handler, "started", context.service, context.method);
+        self.emitCall(.handler, "started", context);
         return null;
     }
 
     pub fn after(self: *CausalFacts, context: *const CallContext, outcome: Outcome) void {
-        self.emit(.handler, if (outcome.code == .ok) "succeeded" else "failed", context.service, context.method);
-        self.emit(.status, @tagName(outcome.code), context.service, context.method);
+        self.emitCall(.handler, if (outcome.code == .ok) "succeeded" else "failed", context);
+        self.emitCall(.status, @tagName(outcome.code), context);
     }
 
     pub fn beforeClient(self: *CausalFacts, context: *ClientCallContext) ?Grpc.Status {
@@ -835,13 +869,8 @@ pub const Telemetry = struct {
 };
 
 pub fn validTraceparent(value: []const u8) bool {
-    if (value.len != 55 or value[2] != '-' or value[35] != '-' or value[52] != '-') return false;
-    for (value, 0..) |byte, index| {
-        if (index == 2 or index == 35 or index == 52) continue;
-        if (!std.ascii.isHex(byte)) return false;
-    }
-    return !std.mem.eql(u8, value[3..35], "00000000000000000000000000000000") and
-        !std.mem.eql(u8, value[36..52], "0000000000000000");
+    _ = zstd.fx.parseTraceParent(value) catch return false;
+    return true;
 }
 
 pub fn validTracestate(value: []const u8) bool {
@@ -885,7 +914,7 @@ test "W3C trace context extensions are bounded and syntactically validated" {
 test "causal facts cover every production RPC boundary without payloads" {
     var store = zstd.fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
-    var facts = CausalFacts{ .store = &store, .service_key = "orders-api" };
+    var facts = CausalFacts{ .recorder = .fromStore(&store), .service_key = "orders-api" };
     inline for (std.meta.tags(CausalBoundary)) |boundary| {
         facts.emit(boundary, "succeeded", "orders.v1.Orders", "List");
     }
@@ -897,6 +926,55 @@ test "causal facts cover every production RPC boundary without payloads" {
         try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "authorization") == null);
         try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "payload") == null);
     }
+}
+
+test "causal RPC facts correlate request and W3C trace context without retaining headers" {
+    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+    var facts = CausalFacts{ .recorder = .fromStore(&store), .service_key = "orders-api" };
+    const context = CallContext{
+        .protocol = .connect,
+        .authority = "api.example.test",
+        .service = "orders.v1.Orders",
+        .method = "List",
+        .shape = .unary,
+        .request_id = "request-42",
+        .traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    };
+    facts.emitCall(.handler, "started", &context);
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 1), snapshot.events.len);
+    try std.testing.expectEqual(std.hash.Wyhash.hash(0, context.request_id), snapshot.events[0].boundary_id.?);
+    try std.testing.expectEqual(@as(u64, 0xa3ce929d0e0e4736), snapshot.events[0].trace_id.?);
+    try std.testing.expectEqual(@as(u64, 0x00f067aa0ba902b7), snapshot.events[0].span_id.?);
+    try std.testing.expectEqual(@as(?u64, 0x4bf92f3577b34da6), snapshot.events[0].context.trace_id_high);
+    try std.testing.expectEqual(@as(?u64, 0xa3ce929d0e0e4736), snapshot.events[0].context.trace_id_low);
+    try std.testing.expect(std.mem.indexOf(u8, snapshot.events[0].redacted_detail, context.request_id) == null);
+    try std.testing.expect(std.mem.indexOf(u8, snapshot.events[0].redacted_detail, context.traceparent) == null);
+}
+
+test "gRPC boundary facts persist through the canonical application runtime" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const layer = zstd.fx.kernel.Layer.empty();
+    var runtime = try zstd.ManagedRuntime(@TypeOf(layer)).make(
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        layer,
+        .{},
+    );
+    defer runtime.deinit();
+
+    var facts = CausalFacts{ .recorder = runtime.causalRecorder(), .service_key = "orders-api" };
+    facts.emit(.handler, "succeeded", "orders.v1.Orders", "List");
+    const summary = runtime.graphSummary();
+    try std.testing.expect(summary.records > 0);
+    const record = try runtime.graphRecordJsonAlloc(std.testing.allocator, summary.newest_durable_event_id.?);
+    defer std.testing.allocator.free(record);
+    try std.testing.expect(std.mem.indexOf(u8, record, "GrpcBoundaryFact") != null);
+    try runtime.shutdown();
 }
 
 test "bearer policy never exposes credentials in telemetry" {

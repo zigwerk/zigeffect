@@ -9,7 +9,12 @@ Zig 0.16).
 The core `packages/zigeffect` stays **zio-free** and is the deterministic
 reference; this package is the only place the zio dependency lives.
 
-## Status — deep integration shipped (D1 + D2 productized)
+## Status — low-level integration shipped
+
+The executor and async backend are real and tested, but their public attachment
+point still belongs to the legacy environment-shaped runtime. Canonical
+`kernel.ManagedRuntime` executor selection is a remaining migration boundary;
+new application roots should not adopt `Runtime(Env)` merely to select zio.
 
 What is real and verified here:
 
@@ -26,10 +31,12 @@ What is real and verified here:
 - **D2 — engine fibers as real coroutines.** Two engine fibers, each driven by
   `coordinator.delay`, run as real interleaving zio coroutines and yet remain
   structurally equal to the deterministic *sequential* run.
-- **Productized executor.** `ZioFiberExecutor` is a `FiberExecutor` vtable
-  backed by `zio.spawn` + `JoinHandle`. Attach it via
-  `Runtime(Env).withExecutor` or `FiberRuntime.withExecutor`, and an ordinary
-  `Effect.fork` spawns a real stackful coroutine transparently.
+- **Compatibility executor adapter.** `ZioFiberExecutor` is a real
+  `FiberExecutor` vtable backed by `zio.spawn` + `JoinHandle`. Existing engine
+  modules attach it through `Runtime(Env).withExecutor` or
+  `FiberRuntime.withExecutor`; canonical managed-runtime integration is still
+  pending. On that compatibility path, `Effect.fork` spawns a real stackful
+  coroutine transparently.
 - **Z1 / Z2 / Z3 / Z3b** primitives verified — real timer suspension, real
   socket IO via `zio.net`, real cancellation via `zio.Group`, real coordination
   via `zio.Channel`.

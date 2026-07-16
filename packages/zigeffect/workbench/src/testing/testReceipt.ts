@@ -3,6 +3,7 @@ export const TEST_RUN_SCHEMA = "zigeffect.test-run.v1" as const;
 
 export type TestStatus = "passed" | "failed" | "incomplete" | "unsupported" | "skipped" | "canceled";
 export type AssertionStatus = "passed" | "failed" | "skipped";
+export type CausalEventIdSpace = "runtime_local" | "graph_durable";
 export type EvidenceKind = "model" | "schedule" | "differential" | "virtual_world" | "mutation" | "performance" | "sandbox";
 
 export type CoverageTarget = { id: string; label: string; dimension: string; required: boolean; repair_hint: string; next_command: string };
@@ -44,6 +45,8 @@ export type TestReceipt = {
   fault_kind: string;
   fault_index: number | null;
   schedule_choices: number[];
+  causal_event_id_space: CausalEventIdSpace;
+  causal_graph_session_id: number | null;
   assertions: TestAssertion[];
   minimal_case: null | { kind: string; input: string; seed: number; case_index: number; shrink_steps: number; shrink_path: string; schedule_choices: number[]; artifact: string };
   memory: Record<string, number>;
@@ -107,6 +110,7 @@ function optionalObject(value: unknown, label: string): Record<string, unknown> 
 
 const statuses = new Set<TestStatus>(["passed", "failed", "incomplete", "unsupported", "skipped", "canceled"]);
 const assertionStatuses = new Set<AssertionStatus>(["passed", "failed", "skipped"]);
+const causalEventIdSpaces = new Set<CausalEventIdSpace>(["runtime_local", "graph_durable"]);
 
 function parseStatus(value: unknown, label: string): TestStatus {
   const status = string(value, label) as TestStatus;
@@ -136,6 +140,10 @@ export function parseTestReceipt(input: unknown, label = "test receipt"): TestRe
     return { kind: string(item.kind, "minimal kind"), input: string(item.input, "minimal input"), seed: number(item.seed, "minimal seed"), case_index: number(item.case_index, "case index"), shrink_steps: number(item.shrink_steps, "shrink steps"), shrink_path: item.shrink_path === undefined ? "" : string(item.shrink_path, "shrink path"), schedule_choices: numbers(item.schedule_choices, "schedule choices"), artifact: string(item.artifact, "minimal artifact") };
   })();
   const execution = optionalObject(root.execution, `${label}.execution`);
+  const causalEventIdSpace = (root.causal_event_id_space === undefined ? "runtime_local" : string(root.causal_event_id_space, "causal event id space")) as CausalEventIdSpace;
+  if (!causalEventIdSpaces.has(causalEventIdSpace)) throw new Error("causal event id space is invalid");
+  const causalGraphSessionId = root.causal_graph_session_id === undefined || root.causal_graph_session_id === null ? null : number(root.causal_graph_session_id, "causal graph session id");
+  if ((causalEventIdSpace === "graph_durable") !== (causalGraphSessionId !== null) || causalGraphSessionId === 0) throw new Error("durable causal IDs require a graph session");
   const coverageTargets = (root.coverage_targets === undefined ? [] : array(root.coverage_targets, "coverage targets")).map((raw, index) => {
     const item = object(raw, `coverage targets[${index}]`);
     return { id: string(item.id, "coverage id"), label: string(item.label, "coverage label"), dimension: string(item.dimension, "coverage dimension"), required: boolean(item.required, "coverage required"), repair_hint: string(item.repair_hint, "coverage repair hint"), next_command: string(item.next_command, "coverage next command") };
@@ -160,7 +168,7 @@ export function parseTestReceipt(input: unknown, label = "test receipt"): TestRe
     execution: { tool_version: execution.tool_version === undefined ? "" : string(execution.tool_version, "tool version"), target: execution.target === undefined ? "" : string(execution.target, "execution target"), optimize: execution.optimize === undefined ? "" : string(execution.optimize, "execution optimize"), command_digest: execution.command_digest === undefined ? "" : string(execution.command_digest, "command digest"), worktree_dirty: execution.worktree_dirty === undefined ? false : boolean(execution.worktree_dirty, "worktree dirty"), native_receipt: execution.native_receipt === undefined ? false : boolean(execution.native_receipt, "native receipt") },
     coverage_targets: coverageTargets, coverage_hits: coverageHits,
     coverage: { targets: coverageRaw.targets === undefined ? coverageTargets.length : number(coverageRaw.targets, "coverage targets count"), hits: coverageRaw.hits === undefined ? coverageHits.length : number(coverageRaw.hits, "coverage hits count"), required_gaps: coverageRaw.required_gaps === undefined ? 0 : number(coverageRaw.required_gaps, "required gaps"), advisory_gaps: coverageRaw.advisory_gaps === undefined ? 0 : number(coverageRaw.advisory_gaps, "advisory gaps"), truncated: coverageRaw.truncated === undefined ? false : boolean(coverageRaw.truncated, "coverage truncated") }, evidence,
-    fault_kind: string(root.fault_kind, "fault kind"), fault_index: root.fault_index === null ? null : number(root.fault_index, "fault index"), schedule_choices: numbers(root.schedule_choices, "schedule choices"), assertions, minimal_case: minimal, memory: numericRecord(root.memory, "memory"), causal: numericRecord(root.causal, "causal"), completeness: numericRecord(root.completeness, "completeness"), replay_command: string(root.replay_command, "replay command"), limitations: strings(root.limitations, "limitations"), detail: string(root.detail, "detail"),
+    fault_kind: string(root.fault_kind, "fault kind"), fault_index: root.fault_index === null ? null : number(root.fault_index, "fault index"), schedule_choices: numbers(root.schedule_choices, "schedule choices"), causal_event_id_space: causalEventIdSpace, causal_graph_session_id: causalGraphSessionId, assertions, minimal_case: minimal, memory: numericRecord(root.memory, "memory"), causal: numericRecord(root.causal, "causal"), completeness: numericRecord(root.completeness, "completeness"), replay_command: string(root.replay_command, "replay command"), limitations: strings(root.limitations, "limitations"), detail: string(root.detail, "detail"),
   };
 }
 

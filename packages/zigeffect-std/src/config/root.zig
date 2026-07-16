@@ -4,7 +4,8 @@ const StdService = @import("../service/root.zig");
 const Schema = @import("../schema/root.zig");
 const fx = @import("zigeffect");
 
-pub const ConfigError = error{MissingValue};
+pub const service_key = "zigeffect/default/ConfigProvider";
+pub const ConfigError = error{ MissingValue, ProviderFailure };
 
 pub const Entry = struct {
     key: []const u8,
@@ -89,6 +90,15 @@ pub const LayeredConfig = struct {
         return stored.value;
     }
 
+    pub fn getAlloc(self: *LayeredConfig, allocator: std.mem.Allocator, key: []const u8) anyerror![]u8 {
+        const value = self.get(key) orelse return error.MissingConfig;
+        return allocator.dupe(u8, value);
+    }
+
+    pub fn asDefault(self: *LayeredConfig) fx.kernel.ConfigProvider {
+        return fx.kernel.ConfigProvider.from(LayeredConfig, self);
+    }
+
     pub fn require(self: LayeredConfig, key: []const u8) ConfigError![]const u8 {
         return self.get(key) orelse ConfigError.MissingValue;
     }
@@ -117,7 +127,10 @@ pub const LayeredConfig = struct {
         defer self.allocator.free(content);
         var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, content, .{});
         defer parsed.deinit();
-        const object = switch (parsed.value) { .object => |value| value, else => return error.InvalidConfigDocument };
+        const object = switch (parsed.value) {
+            .object => |value| value,
+            else => return error.InvalidConfigDocument,
+        };
         var loaded: usize = 0;
         var iterator = object.iterator();
         while (iterator.next()) |entry| {
@@ -168,7 +181,10 @@ pub const LayeredConfig = struct {
 fn validJsonScalar(allocator: std.mem.Allocator, value: []const u8) bool {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, value, .{}) catch return false;
     defer parsed.deinit();
-    return switch (parsed.value) { .string, .array, .object => false, else => true };
+    return switch (parsed.value) {
+        .string, .array, .object => false,
+        else => true,
+    };
 }
 
 fn appendJsonString(output: *std.ArrayList(u8), allocator: std.mem.Allocator, value: []const u8) !void {
@@ -233,6 +249,46 @@ pub fn requireEffect(comptime EffectEnv: type, key: []const u8) RequireEffect(Ef
 
 pub fn displayEffect(comptime EffectEnv: type, key: []const u8) DisplayEffect(EffectEnv) {
     return .{ .key = key };
+}
+
+pub fn getAlloc(key: []const u8) fx.kernel.Effect(
+    []u8,
+    ConfigError || std.mem.Allocator.Error,
+    .{},
+).Stateful([]const u8) {
+    const ConfigEffect = fx.kernel.Effect(
+        []u8,
+        ConfigError || std.mem.Allocator.Error,
+        .{},
+    );
+    return ConfigEffect.fromState([]const u8, key, struct {
+        fn run(name: []const u8, ctx: *fx.kernel.ContextView(.{})) (ConfigError || std.mem.Allocator.Error)![]u8 {
+            const value = ctx.configProvider().getAlloc(ctx.allocator(), name) catch |failure| {
+                _ = StdService.recordSemantic(
+                    ctx,
+                    .span_recorded,
+                    service_key,
+                    "Config.get",
+                    "failure",
+                    name,
+                );
+                return switch (failure) {
+                    error.OutOfMemory => error.OutOfMemory,
+                    error.MissingConfig, error.MissingValue => error.MissingValue,
+                    else => error.ProviderFailure,
+                };
+            };
+            _ = StdService.recordSemantic(
+                ctx,
+                .span_recorded,
+                service_key,
+                "Config.get",
+                "success",
+                name,
+            );
+            return value;
+        }
+    }.run);
 }
 
 test "Config resolves layered values and redacts sensitive keys" {

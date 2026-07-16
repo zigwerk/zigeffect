@@ -6,6 +6,51 @@ export interface ConnectTransportOptions {
   credentials?: RequestCredentials;
   interceptors?: readonly Interceptor[];
   fetch?: typeof globalThis.fetch;
+  causalContext?: CausalContextOptions;
+}
+
+export interface CausalContextOptions {
+  requestId?: () => string;
+  traceparent?: () => string;
+}
+
+function randomHex(bytes: number) {
+  const value = new Uint8Array(bytes);
+  globalThis.crypto.getRandomValues(value);
+  return Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function defaultTraceparent() {
+  return `00-${randomHex(16)}-${randomHex(8)}-01`;
+}
+
+function validRequestId(value: string) {
+  return /^[A-Za-z0-9._:-]{1,128}$/.test(value);
+}
+
+function validTraceparent(value: string) {
+  return /^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/.test(value) &&
+    value.slice(3, 35) !== "0".repeat(32) &&
+    value.slice(36, 52) !== "0".repeat(16);
+}
+
+/**
+ * Adds bounded cross-boundary identifiers understood by the native runtime.
+ * Values become numeric correlation keys in causal records; payloads, browser
+ * state, credentials, and the header strings themselves are never retained.
+ */
+export function createCausalContextInterceptor(options: CausalContextOptions = {}): Interceptor {
+  const requestId = options.requestId ?? (() => globalThis.crypto.randomUUID());
+  const traceparent = options.traceparent ?? defaultTraceparent;
+  return (next) => async (request) => {
+    const nextRequestId = requestId();
+    const nextTraceparent = traceparent();
+    if (!validRequestId(nextRequestId)) throw new Error("causal request ID must be 1-128 safe ASCII characters");
+    if (!validTraceparent(nextTraceparent)) throw new Error("causal traceparent must be a valid non-zero W3C trace context");
+    request.header.set("x-request-id", nextRequestId);
+    request.header.set("traceparent", nextTraceparent);
+    return next(request);
+  };
 }
 
 export function createZigEffectConnectTransport(options: ConnectTransportOptions) {
@@ -14,7 +59,10 @@ export function createZigEffectConnectTransport(options: ConnectTransportOptions
     baseFetch(input, { ...init, credentials: options.credentials ?? "include" })) as unknown as typeof globalThis.fetch;
   return createConnectTransport({
     baseUrl: options.baseUrl.replace(/\/$/, ""),
-    interceptors: options.interceptors ? [...options.interceptors] : undefined,
+    interceptors: [
+      createCausalContextInterceptor(options.causalContext),
+      ...(options.interceptors ?? []),
+    ],
     fetch: credentialedFetch,
     useBinaryFormat: true,
   });

@@ -4,7 +4,92 @@ const Capability = @import("../capability/root.zig");
 const StdService = @import("../service/root.zig");
 const fx = @import("zigeffect");
 
-pub const FileSystemError = error{FileNotFound};
+pub const FileSystemError = error{
+    FileNotFound,
+    AccessDenied,
+    InvalidPath,
+    IoFailure,
+    OutOfMemory,
+};
+
+pub const API = struct {
+    pub const operations: []const []const u8 = &.{
+        "FileSystem.writeFile",
+        "FileSystem.readFile",
+        "FileSystem.exists",
+        "FileSystem.remove",
+    };
+
+    state: *anyopaque,
+    write_file_fn: *const fn (*anyopaque, []const u8, []const u8) FileSystemError!void,
+    read_file_alloc_fn: *const fn (*anyopaque, std.mem.Allocator, []const u8) FileSystemError![]const u8,
+    exists_fn: *const fn (*anyopaque, []const u8) FileSystemError!bool,
+    remove_fn: *const fn (*anyopaque, []const u8) FileSystemError!void,
+
+    pub fn from(comptime Implementation: type, implementation: *Implementation) API {
+        return .{
+            .state = implementation,
+            .write_file_fn = struct {
+                fn call(raw: *anyopaque, path: []const u8, content: []const u8) FileSystemError!void {
+                    const typed: *Implementation = @ptrCast(@alignCast(raw));
+                    typed.writeFile(path, content) catch |failure| return mapFileSystemError(failure);
+                }
+            }.call,
+            .read_file_alloc_fn = struct {
+                fn call(raw: *anyopaque, allocator: std.mem.Allocator, path: []const u8) FileSystemError![]const u8 {
+                    const typed: *Implementation = @ptrCast(@alignCast(raw));
+                    return typed.readFileAlloc(allocator, path) catch |failure| return mapFileSystemError(failure);
+                }
+            }.call,
+            .exists_fn = struct {
+                fn call(raw: *anyopaque, path: []const u8) FileSystemError!bool {
+                    const typed: *Implementation = @ptrCast(@alignCast(raw));
+                    return callExists(typed, path) catch |failure| return mapFileSystemError(failure);
+                }
+            }.call,
+            .remove_fn = struct {
+                fn call(raw: *anyopaque, path: []const u8) FileSystemError!void {
+                    const typed: *Implementation = @ptrCast(@alignCast(raw));
+                    callDelete(typed, path) catch |failure| return mapFileSystemError(failure);
+                }
+            }.call,
+        };
+    }
+
+    pub fn writeFile(self: API, path: []const u8, content: []const u8) FileSystemError!void {
+        return self.write_file_fn(self.state, path, content);
+    }
+
+    pub fn readFileAlloc(self: API, allocator: std.mem.Allocator, path: []const u8) FileSystemError![]const u8 {
+        return self.read_file_alloc_fn(self.state, allocator, path);
+    }
+
+    pub fn exists(self: API, path: []const u8) FileSystemError!bool {
+        return self.exists_fn(self.state, path);
+    }
+
+    pub fn remove(self: API, path: []const u8) FileSystemError!void {
+        return self.remove_fn(self.state, path);
+    }
+};
+
+/// Stable portable service tag. Applications require this tag, never a
+/// MemoryFileSystem, LocalFileSystem, or other concrete driver type.
+pub const FileSystem = fx.kernel.Service("zigeffect/std/FileSystem", API);
+
+pub fn layer(comptime Implementation: type, implementation: *Implementation) @TypeOf(
+    fx.kernel.Layer.succeed(FileSystem, API.from(Implementation, implementation)),
+) {
+    return fx.kernel.Layer.succeed(FileSystem, API.from(Implementation, implementation));
+}
+
+pub fn memory(implementation: *MemoryFileSystem) @TypeOf(layer(MemoryFileSystem, implementation)) {
+    return layer(MemoryFileSystem, implementation);
+}
+
+pub fn local(implementation: *LocalFileSystem) @TypeOf(layer(LocalFileSystem, implementation)) {
+    return layer(LocalFileSystem, implementation);
+}
 
 pub const MemoryFileSystem = struct {
     pub const capability = Capability.Builtin.memory_filesystem;
@@ -33,14 +118,15 @@ pub const MemoryFileSystem = struct {
         path: []const u8,
         content: []const u8,
     ) std.mem.Allocator.Error!void {
+        const owned_path = try self.allocator.dupe(u8, path);
+        errdefer self.allocator.free(owned_path);
+        const owned_content = try self.allocator.dupe(u8, content);
+        errdefer self.allocator.free(owned_content);
         if (self.files.fetchRemove(path)) |old| {
             self.allocator.free(old.key);
             self.allocator.free(old.value);
         }
-        try self.files.put(
-            try self.allocator.dupe(u8, path),
-            try self.allocator.dupe(u8, content),
-        );
+        try self.files.put(owned_path, owned_content);
     }
 
     pub fn readFile(self: MemoryFileSystem, path: []const u8) ?[]const u8 {
@@ -262,6 +348,82 @@ pub fn existsEffect(
     return .{ .path = path };
 }
 
+const WriteInput = struct { path: []const u8, content: []const u8 };
+
+pub fn writeFile(path: []const u8, content: []const u8) fx.kernel.Effect(
+    void,
+    FileSystemError,
+    .{FileSystem},
+).Stateful(WriteInput) {
+    const Write = fx.kernel.Effect(void, FileSystemError, .{FileSystem});
+    return Write.fromState(WriteInput, .{ .path = path, .content = content }, struct {
+        fn run(input: WriteInput, ctx: *fx.kernel.ContextView(.{FileSystem})) FileSystemError!void {
+            const operation = StdService.beginOperation(ctx, FileSystem.service_key, "FileSystem.writeFile", input.path);
+            ctx.service(FileSystem).writeFile(input.path, input.content) catch |failure| {
+                _ = StdService.completeOperation(ctx, operation, "failure", @errorName(failure));
+                return failure;
+            };
+            _ = StdService.completeOperation(ctx, operation, "success", input.path);
+        }
+    }.run);
+}
+
+pub fn readFileAlloc(path: []const u8) fx.kernel.Effect(
+    []const u8,
+    FileSystemError,
+    .{FileSystem},
+).Stateful([]const u8) {
+    const Read = fx.kernel.Effect([]const u8, FileSystemError, .{FileSystem});
+    return Read.fromState([]const u8, path, struct {
+        fn run(value: []const u8, ctx: *fx.kernel.ContextView(.{FileSystem})) FileSystemError![]const u8 {
+            const operation = StdService.beginOperation(ctx, FileSystem.service_key, "FileSystem.readFile", value);
+            const content = ctx.service(FileSystem).readFileAlloc(ctx.allocator(), value) catch |failure| {
+                _ = StdService.completeOperation(ctx, operation, "failure", @errorName(failure));
+                return failure;
+            };
+            _ = StdService.completeOperation(ctx, operation, "success", value);
+            return content;
+        }
+    }.run);
+}
+
+pub fn exists(path: []const u8) fx.kernel.Effect(
+    bool,
+    FileSystemError,
+    .{FileSystem},
+).Stateful([]const u8) {
+    const Exists = fx.kernel.Effect(bool, FileSystemError, .{FileSystem});
+    return Exists.fromState([]const u8, path, struct {
+        fn run(value: []const u8, ctx: *fx.kernel.ContextView(.{FileSystem})) FileSystemError!bool {
+            const operation = StdService.beginOperation(ctx, FileSystem.service_key, "FileSystem.exists", value);
+            const present = ctx.service(FileSystem).exists(value) catch |failure| {
+                _ = StdService.completeOperation(ctx, operation, "failure", @errorName(failure));
+                return failure;
+            };
+            _ = StdService.completeOperation(ctx, operation, if (present) "present" else "missing", value);
+            return present;
+        }
+    }.run);
+}
+
+pub fn remove(path: []const u8) fx.kernel.Effect(
+    void,
+    FileSystemError,
+    .{FileSystem},
+).Stateful([]const u8) {
+    const Remove = fx.kernel.Effect(void, FileSystemError, .{FileSystem});
+    return Remove.fromState([]const u8, path, struct {
+        fn run(value: []const u8, ctx: *fx.kernel.ContextView(.{FileSystem})) FileSystemError!void {
+            const operation = StdService.beginOperation(ctx, FileSystem.service_key, "FileSystem.remove", value);
+            ctx.service(FileSystem).remove(value) catch |failure| {
+                _ = StdService.completeOperation(ctx, operation, "failure", @errorName(failure));
+                return failure;
+            };
+            _ = StdService.completeOperation(ctx, operation, "success", value);
+        }
+    }.run);
+}
+
 pub fn freePathList(allocator: std.mem.Allocator, paths: []const []const u8) void {
     for (paths) |path| allocator.free(path);
     allocator.free(paths);
@@ -289,6 +451,16 @@ fn callDelete(fs: anytype, path: []const u8) anyerror!void {
         .error_union => try result,
         else => {},
     }
+}
+
+fn mapFileSystemError(failure: anyerror) FileSystemError {
+    return switch (failure) {
+        error.OutOfMemory => error.OutOfMemory,
+        error.FileNotFound => error.FileNotFound,
+        error.AccessDenied, error.PermissionDenied => error.AccessDenied,
+        error.BadPathName, error.InvalidUtf8, error.NameTooLong => error.InvalidPath,
+        else => error.IoFailure,
+    };
 }
 
 test "FileSystem writes reads exists and deletes memory files" {

@@ -1,26 +1,29 @@
-# zigeffect Public API Review
+# ZigEffect public API review
 
-Date: 2026-06-10
+**Original durable/cluster review:** 2026-06-10;
+**canonical-kernel addendum:** 2026-07-15
 
 Milestone: 45 - Public API Review And Stabilization
 
 ## Result
 
-The public package surface is stable enough for the durable workflow and local
-cluster roadmap work completed so far. The preferred import remains:
+The preferred import remains:
 
 ```zig
 const fx = @import("zigeffect");
 ```
 
-The stable shape is namespace-first. Durable workflow APIs live under
-`fx.workflow`, cluster APIs live under `fx.cluster`, storage metadata lives
-under `fx.storage`, and deterministic performance reports live under
-`fx.performance`. Top-level aliases remain curated compatibility conveniences
-for core runtime types and the most commonly used cluster, storage, and
-performance values.
+The stable shape is namespace-first. New application composition lives under
+`fx.kernel`; durable workflow APIs live under `fx.workflow`, cluster APIs under
+`fx.cluster`, storage metadata under `fx.storage`, and deterministic performance
+reports under `fx.performance`. Environment-shaped top-level Effect/Layer/
+Runtime aliases remain compatibility conveniences for unmigrated framework
+domains, not the application architecture.
 
-The review found no open naming or ownership issues. The focused build gate is:
+The durable workflow and cluster ownership review found no open issues in its
+recorded scope. Canonical migration status for the standard library and adapters
+is tracked separately and is not implied by that result. The focused build gate
+is:
 
 ```bash
 cd packages/zigeffect
@@ -35,11 +38,12 @@ The root facade exports these package domains:
 
 | Namespace | Contract |
 | --- | --- |
+| `fx.kernel` | canonical service tags, effects, layers, managed runtime, defaults, aspects, topology, and application inspection. |
 | `fx.core` | `Cause`, `Exit`, `Scope`, and typed execution context. |
 | `fx.dependency` | service-set metadata, validation, and reports. |
-| `fx.effect` | direct-style effect wrappers, resources, and schedules. |
+| `fx.effect` | legacy environment-shaped effect wrappers plus shared resources and schedules; application composition uses `fx.kernel`. |
 | `fx.runtime` | runtime, fibers, coordination, backends, and supervision. |
-| `fx.layer` | dependency layers and executable layer graphs. |
+| `fx.layer` | legacy dependency layers and executable layer graphs for unmigrated modules. |
 | `fx.services` | logger, config, clock, metrics, tracing, ids, and causal services. |
 | `fx.testing` | deterministic `TestEnv` and assertion helpers. |
 | `fx.traits` | codec, equality, hashing, ordering, show, and redaction contracts. |
@@ -58,7 +62,7 @@ The workflow namespace is the stable entry point for durable workflow code:
 | Area | Stable names |
 | --- | --- |
 | Definitions | `Workflow`, `WorkflowMetadata`, `Activity`, `ActivityMetadata`. |
-| Journal | `WorkflowEvent`, `WorkflowEventKind`, `WorkflowEventMigrationRegistry`, `JournalStore`, `JournalAppend`, `JournalEventBatch`, `InMemoryJournalStore`, `FileJournalStore`. |
+| Journal | `WorkflowEvent`, `WorkflowEventKind`, `WorkflowEventMigrationRegistry`, `JournalStore`, `JournalAppend`, `JournalEventBatch`, `InMemoryJournalStore`, `FileJournalStore`, `CausalJournalStore`, `latestCausalId`. |
 | Replay | `WorkflowReplayState`, `WorkflowStatus`, `ReplayError`. |
 | Engine | `WorkflowEngine`, `WorkflowExecution`, `WorkflowResult`, `WorkflowBackendRequirement`. |
 | Context | `WorkflowContext`, `WorkflowContextOptions`, `WorkflowContextError`. |

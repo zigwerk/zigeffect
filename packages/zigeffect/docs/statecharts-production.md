@@ -81,6 +81,13 @@ workflows. Command completion and failure can return typed events to the same
 machine. Stable command ids and journal receipts prevent a recovered dispatcher
 from re-running a receipted command.
 
+When a workflow activity produces the next statechart event, use
+`CausalJournalStore.latestCausalId()` as the parent passed to
+`recordDecisionCausal`. The resulting activity-to-decision edge makes the
+combined execution directly traversable instead of leaving two streams that
+must be correlated by timestamp. Both records share the workflow execution and
+statechart instance scope.
+
 State invocations declare typed start and optional stop reducers. Those reducers
 emit commands, so actor creation and remote service calls remain outside the
 transaction. Child workflows started with `WorkflowEngine.executeChild` record

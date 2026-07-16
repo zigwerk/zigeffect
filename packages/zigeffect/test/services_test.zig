@@ -1,5 +1,46 @@
 const std = @import("std");
 const fx = @import("zigeffect");
+
+const CountingAllocator = struct {
+    child: std.mem.Allocator,
+    live_allocations: usize = 0,
+    allocation_calls: usize = 0,
+
+    fn allocator(self: *CountingAllocator) std.mem.Allocator {
+        return .{ .ptr = self, .vtable = &vtable };
+    }
+
+    const vtable: std.mem.Allocator.VTable = .{
+        .alloc = alloc,
+        .resize = resize,
+        .remap = remap,
+        .free = free,
+    };
+
+    fn alloc(raw: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+        const self: *CountingAllocator = @ptrCast(@alignCast(raw));
+        const pointer = self.child.rawAlloc(len, alignment, ret_addr) orelse return null;
+        self.live_allocations += 1;
+        self.allocation_calls += 1;
+        return pointer;
+    }
+
+    fn resize(raw: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+        const self: *CountingAllocator = @ptrCast(@alignCast(raw));
+        return self.child.rawResize(memory, alignment, new_len, ret_addr);
+    }
+
+    fn remap(raw: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+        const self: *CountingAllocator = @ptrCast(@alignCast(raw));
+        return self.child.rawRemap(memory, alignment, new_len, ret_addr);
+    }
+
+    fn free(raw: *anyopaque, memory: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
+        const self: *CountingAllocator = @ptrCast(@alignCast(raw));
+        self.child.rawFree(memory, alignment, ret_addr);
+        self.live_allocations -= 1;
+    }
+};
 const fixtures = @import("support/fixtures.zig");
 
 test "context resolves services and test environment captures state" {
@@ -365,6 +406,41 @@ test "causal store records events snapshots and lineage deterministically" {
     try std.testing.expectEqual(child, lineage.events[1].id);
 }
 
+test "causal store retains every event text field in one backing allocation" {
+    var counting = CountingAllocator{ .child = std.testing.allocator };
+    {
+        var store = fx.CausalStore.init(counting.allocator());
+        defer store.deinit();
+
+        _ = try store.record(.{
+            .kind = .workflow_event_recorded,
+            .label = "orders.load",
+            .type_name = "Orders.Load",
+            .layer_name = "OrdersLive",
+            .service_key = "application/Orders",
+            .artifact_id = "artifact-1",
+            .domain_entity_ref = "order-42",
+            .data_subject_ref = "subject-7",
+            .schema_ref = "orders.v1",
+            .status = "success",
+            .redacted_detail = "attempt=1",
+        });
+
+        // One ArrayList allocation and one packed text allocation. Previously
+        // this retained one allocation for every non-empty text field.
+        try std.testing.expectEqual(@as(usize, 2), counting.live_allocations);
+        try std.testing.expect(counting.allocation_calls <= 4);
+
+        var snapshot = try store.snapshot(std.testing.allocator);
+        defer snapshot.deinit();
+        const json = try std.json.Stringify.valueAlloc(std.testing.allocator, snapshot.events[0], .{});
+        defer std.testing.allocator.free(json);
+        try std.testing.expect(std.mem.indexOf(u8, json, "\"_owned_text\"") == null);
+        try std.testing.expect(std.mem.indexOf(u8, json, "\"label\":\"orders.load\"") != null);
+    }
+    try std.testing.expectEqual(@as(usize, 0), counting.live_allocations);
+}
+
 test "causal store stamps its default service key onto events without one" {
     var store = fx.CausalStore.initForService(std.testing.allocator, "billing");
     defer store.deinit();
@@ -450,7 +526,8 @@ test "causal report and backend kinds preserve adapter strategy" {
     try std.testing.expectEqual(fx.CausalBackendKind.opentelemetry, fx.CausalBackendKind.opentelemetry);
     try std.testing.expectEqual(fx.CausalBackendKind.nendb_graph, fx.CausalBackendKind.nendb_graph);
     try std.testing.expectEqual(fx.CausalBackendKind.async_stream, fx.CausalBackendKind.async_stream);
-    try std.testing.expectEqual(@as(usize, 6), std.meta.fields(fx.CausalBackendKind).len);
+    try std.testing.expectEqual(fx.CausalBackendKind.fanout, fx.CausalBackendKind.fanout);
+    try std.testing.expectEqual(@as(usize, 7), std.meta.fields(fx.CausalBackendKind).len);
 }
 
 const FakeCausalBackendState = struct {
@@ -502,6 +579,27 @@ test "causal store forwards stored events to attached backend" {
     try std.testing.expectEqualStrings("backend-run", backend_state.labels[0]);
     try std.testing.expectEqualStrings("backend-run", backend_state.labels[1]);
     try std.testing.expectEqual(@as(usize, 2), store.events.items.len);
+}
+
+test "causal store backend replacement returns the previous backend" {
+    var first_state = FakeCausalBackendState{};
+    var second_state = FakeCausalBackendState{};
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    try std.testing.expectEqual(@as(?fx.CausalBackend, null), store.replaceBackend(fakeCausalBackend(&first_state)));
+    const previous = store.replaceBackend(fakeCausalBackend(&second_state));
+    try std.testing.expect(previous != null);
+    try std.testing.expectEqual(fx.CausalBackendKind.memory, previous.?.kind);
+
+    _ = try store.record(.{ .kind = .run_started, .label = "replacement" });
+    try std.testing.expectEqual(@as(usize, 0), first_state.count);
+    try std.testing.expectEqual(@as(usize, 1), second_state.count);
+
+    _ = store.replaceBackend(previous);
+    _ = try store.record(.{ .kind = .run_completed, .label = "restored" });
+    try std.testing.expectEqual(@as(usize, 1), first_state.count);
+    try std.testing.expectEqual(@as(usize, 1), second_state.count);
 }
 
 test "bounded causal store can retain zero events while forwarding backend events" {

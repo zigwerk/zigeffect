@@ -1,8 +1,16 @@
 const std = @import("std");
 
+var test_filter_declared = false;
+var configured_test_filter: ?[]const u8 = null;
+
 fn addV2Test(b: *std.Build, runner: std.Build.LazyPath, options: std.Build.TestOptions) *std.Build.Step.Compile {
     var configured = options;
     configured.test_runner = .{ .path = runner, .mode = .server };
+    if (!test_filter_declared) {
+        configured_test_filter = b.option([]const u8, "test-filter", "Compile only native tests whose names contain this text");
+        test_filter_declared = true;
+    }
+    if (configured_test_filter) |filter| configured.filters = &.{filter};
     return b.addTest(configured);
 }
 
@@ -33,6 +41,51 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run zigeffect-std tests");
     test_step.dependOn(&run_tests.step);
+
+    const canonical_test_module = b.createModule(.{
+        .root_source_file = b.path("test/canonical_architecture_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    canonical_test_module.addImport("zigeffect_std", zigeffect_std);
+    const canonical_tests = addV2Test(b, testing_runner, .{
+        .name = "zigeffect-std-canonical-architecture-tests",
+        .root_module = canonical_test_module,
+    });
+    const run_canonical_tests = b.addRunArtifact(canonical_tests);
+    const canonical_test_step = b.step("canonical-architecture-test", "Run canonical standard-library architecture tests");
+    canonical_test_step.dependOn(&run_canonical_tests.step);
+    test_step.dependOn(&run_canonical_tests.step);
+
+    const durable_runtime_test_module = b.createModule(.{
+        .root_source_file = b.path("test/durable_runtime_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    durable_runtime_test_module.addImport("zigeffect_std", zigeffect_std);
+    const durable_runtime_tests = addV2Test(b, testing_runner, .{
+        .name = "zigeffect-std-durable-runtime-tests",
+        .root_module = durable_runtime_test_module,
+    });
+    const run_durable_runtime_tests = b.addRunArtifact(durable_runtime_tests);
+    const durable_runtime_test_step = b.step("durable-runtime-test", "Run durable causal application runtime tests");
+    durable_runtime_test_step.dependOn(&run_durable_runtime_tests.step);
+    test_step.dependOn(&run_durable_runtime_tests.step);
+
+    const development_runtime_test_module = b.createModule(.{
+        .root_source_file = b.path("test/development_runtime_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    development_runtime_test_module.addImport("zigeffect_std", zigeffect_std);
+    const development_runtime_tests = addV2Test(b, testing_runner, .{
+        .name = "zigeffect-std-development-runtime-tests",
+        .root_module = development_runtime_test_module,
+    });
+    const run_development_runtime_tests = b.addRunArtifact(development_runtime_tests);
+    const development_runtime_test_step = b.step("development-runtime-test", "Run proof-carrying development runtime tests");
+    development_runtime_test_step.dependOn(&run_development_runtime_tests.step);
+    test_step.dependOn(&run_development_runtime_tests.step);
 
     const statechart_test_module = b.createModule(.{
         .root_source_file = b.path("src/statechart_test_root.zig"),

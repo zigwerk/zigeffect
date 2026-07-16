@@ -1,6 +1,6 @@
-# zigeffect EffectTS Parity
+# Effect concepts in ZigEffect
 
-Date: 2026-06-24
+**Reviewed:** 2026-07-15
 
 This document tracks what “style parity” means for `zigeffect`. EffectTS is a
 large production ecosystem. `zigeffect` is not trying to clone it API-for-API;
@@ -39,65 +39,60 @@ Official Effect docs show a mature system with:
 - deterministic test clocks for time-based effects:
   https://effect.website/docs/testing/testclock/
 
-## Current Parity Choices
+The checked-in Effect repository under `packages/references/effect` is research
+material, not a runtime dependency. ZigEffect adopts concepts only where they
+fit Zig's compile-time types, explicit allocators, native error sets, ownership,
+and performance model.
+
+## Current architectural choices
 
 ### Effect
 
-EffectTS has a broad set of constructors, combinators, and generator syntax.
-`zigeffect` keeps the core as `fn(ctx) Error!A`, then wraps it with
-`Effect.fromFn`. The current parity target is direct-style execution plus enough
-edge combinators to compose stdlib services:
+Effect has a broad constructor, combinator, and generator surface. Canonical
+ZigEffect operations are direct Zig functions wrapped by
+`kernel.Effect(Success, Failure, .{Services})`. Application programs compose
+lazy descriptions with:
 
-- constructors: `succeed`, `fail`, `sync`
-- transformation: `map`, `flatMap`, `tap`, `as`, `replace`, `asVoid`, `andThen`
-- pairing / gather: `zip`, `zipWith`, `fx.all` (sequential, homogeneous slice)
-- conditional: `when`, `unless`
-- traversal: `fx.forEachAlloc`, `fx.forEachDiscard`
-- **parallel**: `forEachPar`, `zipPar` (run on any `FiberExecutor`)
-- **racing**: `raceFirst`, `raceAll`, `race` (prefer-success), `both` (fail-fast)
-- recovery: `mapError`, `catchAll`, `orElse`, `tapError`
-- lifecycle observation: `onExit`, `ensuring`
-- scheduling: `retry`, `repeat`
+- transformation: `map`, `flatMap`, `tap`, and `andThen`;
+- pairing: `zip`;
+- recovery: `mapError` and `catchAll`; and
+- semantic graph structure: `named`.
+
+The older environment-shaped engine retains additional concurrency, race,
+schedule, lifecycle, and traversal operations while those features move behind
+the canonical facade. Their existence does not make its `Env` type the model
+for new applications.
 
 Zig does not need an EffectTS generator equivalent for the first version
 because `try` already gives readable direct-style error flow.
 
 ### Context
 
-EffectTS uses service tags. `zigeffect` uses a Zig environment struct with a
-typed `service` method. Missing services route through
-`fx.serviceNotFound(Env, Service)` so compile errors name the requested service,
-environment, and fix pattern.
+Effect uses service tags. ZigEffect uses
+`kernel.Service("stable/key", ServiceApi)`. The effect's required tag tuple is
+its dependency contract, and its context rejects undeclared service access at
+compile time. A runtime registry holds concrete implementations selected by
+layers.
 
-Production paths can now add metadata through `Effect.requires`, layer/runtime
-`provides`, `ServiceSet`, `DependencyReport`, `validateRequirements`,
-`requirementsSatisfiedBy`, and `LayerGraph`. This gives preflight dependency
-validation without replacing Zig's compile-time service lookup.
+The former environment structs, service tuples, `ServiceSet`, and `LayerGraph`
+metadata remain internal migration surfaces. New application code does not
+manually construct them.
 
 ### Layer
 
-EffectTS layers can model complex dependency graphs. `zigeffect` currently
-supports:
+Effect layers model dependency construction and resource ownership. Canonical
+ZigEffect layers provide the same architectural boundary through:
 
-- `Layer.fromEnv`
-- `Layer.fromBuilder`
-- `Layer.fromContextBuilder`
-- `Layer.fromEffect`
-- `Layer.buildContext`
-- `Layer.provide`
-- `Layer.merge`
-- `LayerWithError`
-- `LayerGraph`
-- `layerGraph`
+- `kernel.Layer.succeed`, `sync`, `effect`, and `scoped`;
+- typed output services, startup failures, and construction inputs;
+- fluent `provide`, `provideMerge`, and `merge`;
+- root-build dependency topology and identity memoization; and
+- one process-level `zstd.ManagedRuntime` for build, repeated execution,
+  embedded NenDB inspection, checked persistence, and disposal. The underlying
+  `kernel.ManagedRuntime` remains the I/O-free interpreter.
 
-This supports checked production startup in small and medium graphs. Explicit
-`Layer.merge` remains available, while `layerGraph` accepts heterogeneous layer
-tuples, validates declared providers and requirements, derives startup order,
-passes already-started services into context builders, and memoizes the built
-environments until graph deinit. Graph-started environments can also be handed
-to regular and fiber runtimes through `graph.runtime()` and
-`graph.fiberRuntime()`. Effects that only need a subset of graph services can
-use `ServiceEnv(.{ ... })` with `graph.runNarrowed` or `graph.exitNarrowed`.
+`LayerGraph` and `layerGraph` describe the compatibility implementation used by
+unmigrated modules. They must not be taught as a parallel application model.
 
 ### Scope
 
@@ -264,8 +259,11 @@ and useful names:
 - Tracing has span ids, trace ids, parent relationships, attributes,
   runtime-carried trace context, and deterministic span lifecycle checks.
 
-These should be built as stdlib services on top of the core rather than by
-expanding the core runtime too early.
+Default config/console/random/clock/tracing behavior and observability fanout
+belong to the kernel interpreter. Portable semantic helpers and adapter
+configuration belong in the standard library; applications should not request
+logger, metrics, tracer, supervisor, and causal-store services merely to become
+observable.
 
 ### Agent-Observable Diagnostics
 
@@ -273,8 +271,8 @@ EffectTS has mature runtime diagnostics through fibers, causes, scopes,
 tracing, and structured services. `zigeffect` now has a Zig-native deterministic
 diagnostic surface for the same family of questions:
 
-- opt-in `CausalStore` attachment for runtimes, fiber runtimes, layer graphs,
-  and contexts
+- a bounded causal store owned by every canonical managed runtime, with an
+  optional configured backend
 - causal events for runs, exits, scopes, resources, fibers, layers, services,
   schedules, and app-recorded observability facts
 - queries for snapshot, lineage, cause, resources, fibers, requirements,
@@ -288,24 +286,18 @@ real coroutine/thread-pool executors, durable workflow and local cluster
 substrates, plus production-shaped adapters and agent tools. Hosted multi-node
 deployment remains outside the local-first boundary.
 
-## Next Parity Priorities
+## Next concept priorities
 
-Done since the 2026-06-05 baseline (struck from the list): coroutine lowering +
-task groups on the async backend (zio coroutines + thread-pool executor); OTLP/
-JSON + the live-attach collector; policy-controlled remediation (the closed loop
-with retry/interrupt/replace-provider/replay executors, gate-off by default).
-
-Remaining:
-
-1. Deterministic replay/forking for selected effect inputs.
-2. Compile-time assertions for common effect composition mistakes.
-3. Real deployment wiring around the delivered loopback/remote socket
-   transports: TLS handshakes, health-checked pools, and separate-process
-   lineage. This is deferred behind local application-development work.
-4. Recursive schedule programs and richer test fixtures/golden output, as real
-   stdlib code demands them.
-5. Broader real-project adoption of the delivered M88-M95 agentic application
-   platform. Project contracts, compile-tested scaffolds, instrumented project
-   workflows, semantic application facts, workbench development UX, provider
-   conformance, conflict-safe local upgrades, and distribution gates now ship;
-   the next evidence should come from using them on additional Zig codebases.
+1. Complete the standard-library migration so every external capability uses a
+   stable tag, canonical effects, and live/deterministic layers.
+2. Publish canonical HTTP, SQL, OTEL, and native gRPC scoped layers, then delete
+   the generated production compatibility bridge.
+3. Move advanced concurrency, scheduling, resource, and recovery operations
+   behind the canonical effect facade without regressing allocation or causal
+   budgets.
+4. Complete native gRPC registry/handler/channel/server composition and prove
+   child-scope lifetime across full streaming calls.
+5. Migrate Ziac commands, state clients, provider processes, and daemon sessions
+   to one managed runtime per process/session.
+6. Gather broader application evidence without promoting local or incomplete
+   qualification into general performance or production claims.

@@ -1,5 +1,6 @@
 const std = @import("std");
 const causal = @import("../services/causal.zig");
+const identity_mod = @import("runtime_identity.zig");
 
 pub const ResourceError = error{
     ForeignHandle,
@@ -93,7 +94,7 @@ pub fn ResourceTable(comptime T: type) type {
                     .scope_id = self.causal_scope_id,
                     .resource_id = slot.resource_id,
                     .source_ref_id = source_ref_id,
-                    .type_name = @typeName(T),
+                    .type_name = identity_mod.boundedTypeName(T),
                     .status = "success",
                 }) catch |err| {
                     self.releaseSlotValue(slot);
@@ -169,7 +170,7 @@ pub fn ResourceTable(comptime T: type) type {
                     .resource_id = resource_id,
                     .parent_id = acquired_event_id,
                     .source_ref_id = source_ref_id,
-                    .type_name = @typeName(T),
+                    .type_name = identity_mod.boundedTypeName(T),
                     .status = "success",
                 });
             }

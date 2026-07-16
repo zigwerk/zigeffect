@@ -1,0 +1,40 @@
+{
+  "schema": "zigeffect.effectful-package-policy.v1",
+  "schema_version": 1,
+  "canonical_paths": [
+    "packages/zigeffect-grpc/src",
+    "packages/zigeffect-grpc/examples",
+    "packages/zigeffect-std/src/grpc",
+    "packages/zigeffect-std/examples/grpc_unary.zig"
+  ],
+  "forbidden_regex": [
+    "EffectEnv",
+    "LayerGraphEnv",
+    "LayerWithError",
+    "layerGraph\\(",
+    "Service\\.(Provider|ValueProvider)",
+    "ValueProvider",
+    "GeneratedEffectServer",
+    "invokeEffect"
+  ],
+  "required_contracts": [
+    { "path": "packages/zigeffect-grpc/src/typed.zig", "symbol": "pub fn generatedRoutesLayer" },
+    { "path": "packages/zigeffect-grpc/src/typed.zig", "symbol": "pub fn generatedClientLayer" },
+    { "path": "packages/zigeffect-grpc/src/root.zig", "symbol": "ctx.causalRecorder()" },
+    { "path": "packages/zigeffect-grpc/examples/cloud_run/main.zig", "symbol": "zstd.ManagedRuntime" },
+    { "path": "packages/zigeffect-grpc/examples/cloud_run/main.zig", "symbol": "generatedRoutesLayer" },
+    { "path": "packages/zigeffect-grpc-web/src/index.ts", "symbol": "createCausalContextInterceptor" },
+    { "path": "packages/zigeffect-cli/src/templates.zig", "symbol": "zstd.ManagedRuntime" }
+  ],
+  "ratchets": [
+    { "path": "packages/zigeffect-std/src", "maximum": 321 },
+    { "path": "packages/zigeffect-http/src", "maximum": 18 },
+    { "path": "packages/zigeffect-otel/src", "maximum": 13 },
+    { "path": "packages/zigeffect-postgres-libpq/src", "maximum": 14 },
+    { "path": "packages/zigeffect-redis/src", "maximum": 0 },
+    { "path": "packages/zigeffect-s3/src", "maximum": 0 },
+    { "path": "packages/zigeffect-quic/src", "maximum": 1 },
+    { "path": "packages/zigeffect-storage-postgres/src", "maximum": 0 },
+    { "path": "packages/ziac/src", "maximum": 17 }
+  ]
+}

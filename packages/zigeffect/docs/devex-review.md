@@ -1,106 +1,100 @@
-# zigeffect Devex Review
+# ZigEffect developer-experience review
 
-Date: 2026-06-04
+**Reviewed:** 2026-07-15
 
-## Current Direction
+**Status:** canonical application kernel and local scaffolds landed; adapter and
+standard-library migration remains in progress.
 
-`zigeffect` should feel like sturdy Zig with Effect-style structure around it.
-The library should make large Zig tools easier to compose, test, observe, and
-release without hiding allocators, error sets, or resource lifetimes.
+This document records the current developer-experience boundary. Older reviews
+that treated `ServiceEnv`, `LayerGraph`, or environment-parameterized effects as
+the target architecture are superseded.
 
-## What Is Working
+## Product standard
 
-- Direct-style functions keep implementation code readable.
-- Constructors and recovery helpers reduce tiny wrapper boilerplate without
-  hiding Zig errors.
-- `onExit` and `ensuring` give lifecycle observation and effect-local cleanup
-  without forcing app code into callback-heavy style.
-- `Context` gives typed service access without global state.
-- `Runtime`, `Scope`, and `acquireRelease` make cleanup explicit and automatic.
-- `Layer.fromBuilder` gives dependency construction a scoped teardown path.
-- `Layer.merge` and `Layer.provide` make dependency composition possible without
-  manual context setup in every test or tool.
-- `Effect.requires`, `Layer.provides`, `Runtime.provides`, `LayerGraph`, and
-  `layerGraph` give production code a preflight dependency gate before startup.
-- `LayerWithError` preserves typed startup failures from dependency builders.
-- `layerGraph` builds heterogeneous declared layers in dependency order and
-  memoizes the started environments until graph deinit.
-- `DependencyReport` gives missing and duplicate service diagnostics that CLIs,
-  tests, and agents can print.
-- Fallible finalizers are recorded and surfaced through `Runtime.exit`.
-- Exit-aware finalizers let cleanup react to success, typed failure, defect,
-  interruption, or cause summaries.
-- `Clock` is now a service abstraction with fake and system modes.
-- Zig error sets provide typed errors without a custom error hierarchy.
-- `serviceNotFound` gives missing services a package-owned compile-time
-  diagnostic instead of vague one-off environment messages.
-- `formatExit` and `formatCause` turn structured runtime results into readable
-  reports for tests, CLIs, and agents.
-- Missing finalizer scopes now return `error.MissingScope`, and
-  `acquireRelease` releases immediately if registration fails.
-- `TestEnv` gives agents deterministic logs, files, metrics, traces, config, and
-  time.
-- Composition helpers and `Schedule` retry/repeat policies are available but do
-  not dominate the API.
-- Effect-style schedule names (`once`, `recurs`, `spaced`, `duration`, and
-  `fibonacci`) make common retry/repeat policy intent easier to scan.
+ZigEffect should feel like sturdy Zig with Effect-style composition:
 
-## Ergonomic Risks
+- service requirements and typed failures are visible at compile time;
+- business operations return lazy descriptions;
+- layers select implementations and own resources;
+- one managed runtime builds and memoizes the application graph;
+- logging, metrics, tracing, supervision, and causal evidence are runtime
+  aspects rather than parameters threaded through every function;
+- deterministic tests replace layers without rewriting programs; and
+- one bounded inspection surface can map the running application for people and
+  agents.
 
-- `Effect` composition wrappers are repetitive internally. Future work should
-  consider reducing duplication without making the public API harder to read.
-- `acquireRelease` currently requires pointer resources with stable lifetimes.
-  That is clear, but value resources may need a separate helper later.
-- Composition errors are still mostly Zig's native function-pointer and error-set
-  messages. Future work should add small compile-time assertions where the
-  package can name the likely fix.
-- `Runtime.run` creates a fresh scope per run. Shared long-lived scopes may need
-  an explicit API once real app runtimes need them.
-- Dependency-injected layer builders are still deferred. Layer builders receive
-  `(Allocator, *Scope)`, while declared requirements drive validation and build
-  order.
-- Recursive causes use pointer links for nested formatting. Runtime-generated
-  causes currently surface finalizer failures directly rather than returning
-  pointer-backed sequential trees.
-- Logger levels are currently collapsed into plain messages. A real app logger
-  should preserve level metadata.
-- Test services are useful but still bundled. Larger apps may need custom
-  environments with only the services they use.
-- Runtime-generated nested causes are still deliberately conservative. Cleanup
-  failures from `Runtime.exit` surface as direct finalizer-failure causes rather
-  than stack-unsafe sequential cause trees.
+Explicit allocators, native error sets, ownership, bounded storage, and direct
+Zig control flow remain non-negotiable.
 
-## EffectTS Maturity Notes
+## Landed
 
-EffectTS is much broader than this package: it has mature service tags, layers,
-structured causes, schedules, test clocks, logging, tracing, metrics, config,
-and a large stdlib surface. The current `zigeffect` target is core style parity:
-the same predictable architecture shape, implemented in Zig with explicit
-allocators, native error sets, direct-style `try`, and scoped cleanup.
+- `kernel.Service` provides stable typed capability tags.
+- `kernel.Effect` records success, typed failure, and required services.
+- `map`, `flatMap`, `tap`, `andThen`, `zip`, `catchAll`, `mapError`, and
+  `named` compose lazily and infer service/error unions.
+- `kernel.Layer` exposes construction inputs, outputs, startup errors, scoped
+  acquisition, fluent provision, merge, and identity memoization.
+- `zstd.ManagedRuntime` is the single application root builder, interpreter,
+  inspector, embedded NenDB owner, checked persistence boundary, and disposer.
+  `kernel.ManagedRuntime` remains its I/O-free lower-level interpreter.
+- Runtime defaults cover config, console, random, and tracing with per-run
+  overrides.
+- Runtime aspects fan out causal, logging, metrics, tracing, and supervisor
+  observations.
+- Application snapshots describe layers, services, operations, dependency
+  edges, memoized reuse, findings, fibers, and recent causal evidence.
+- Retained causal event text is redacted, bounded, and packed into one owned
+  allocation per event.
+- Local application and service scaffolds teach the canonical process runtime;
+  libraries export effects and default layers without a hidden runtime.
 
-See `effectts-parity.md` for the researched comparison and the next parity
-priorities.
+## Remaining migration debt
 
-## Next Priority
+- Some standard-library modules still expose provider and environment-shaped
+  compatibility APIs.
+- HTTP, Postgres, OTEL, and parts of gRPC still publish legacy scoped-layer
+  adapters rather than canonical kernel layers.
+- The generated production profile therefore contains a documented adapter
+  bridge and is not the reference architecture for new application code.
+- Older engine domains still use `Effect(..., Env)`, `LayerGraph`, and
+  `ctx.runEffect` internally.
 
-1. Add typed config descriptors and env/file providers.
-2. Add level-aware structured logger entries.
-3. Add metrics snapshots with counters, gauges, and histograms.
-4. Add tracing span ids and nested span trees.
-5. Add compile-time assertions for common composition mistakes, especially
-   mismatched environments and resource error sets.
-6. Add dependency-injected layer builders that can consume previously-started
-   graph services.
-7. Add a small module/app pattern that bundles layer, effects, tests, and docs
-   for large predictable software.
-8. Add richer `Exit`/`Cause` assertions and defect helpers.
+Migration status is authoritative in:
 
-## Standard For Future Work
+- [Standard-library migration](../../zigeffect-std/docs/effect-native-roadmap.md)
+- [Native gRPC migration](../../zigeffect-grpc/docs/effect-native-roadmap.md)
+- [Ziac composition migration](../../ziac/docs/zigeffect-composition-roadmap.md)
 
-Every public API addition should include:
+## Developer-experience rules
 
-- failing test first
-- usage docs
-- agent guidance if the API can be misused
-- focused `bun run zigeffect:test`
-- combined `bun run zig:test`
+1. New APIs must make the canonical path shorter than the compatibility path.
+2. Application code must never construct a runtime inside a domain operation.
+3. A transport may interpret child programs through a bounded runtime handle;
+   ordinary services may not.
+4. Default services and observability must not pollute ordinary requirement
+   sets.
+5. Every external resource has one acquisition owner and one finalizer.
+6. Graphs show semantic operations and real runtime boundaries, not pure
+   combinator noise.
+7. Compile-time diagnostics should name the missing service, invalid effect
+   return, or incompatible layer boundary and suggest the repair.
+8. Generated projects are compile-tested in Debug and ReleaseSafe.
+9. Testing v2 receipts are the source of truth for discovered/executed counts,
+   leaks, logged errors, and replay.
+10. Capability maturity follows checked-in evidence; a workflow definition or
+    local experiment is never promoted into a production claim.
+
+## Acceptance bar for public API changes
+
+- a failing focused test precedes behavior changes;
+- the public facade and generated templates stay synchronized;
+- examples use only public imports;
+- application docs use the canonical kernel unless explicitly describing
+  migration debt;
+- package-native tests emit complete Testing v2 receipts;
+- public API, performance/resource, sanitizer, and downstream gates run in
+  proportion to the change; and
+- unsupported, skipped, or unrun evidence is stated plainly.
+
+The validated architecture and implementation plan live in the repository
+design records under `docs/superpowers/specs/` and `docs/superpowers/plans/`.

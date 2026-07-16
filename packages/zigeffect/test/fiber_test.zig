@@ -107,6 +107,7 @@ test "fiber runtime emits causal events when forked and joined" {
         .init(std.testing.allocator, &env.services)
         .withClock(&env.services.clock)
         .withTraceContext(303, 404)
+        .withCausalContext(.{ .development_task_id = 707, .agent_id = 808 })
         .withCausalStore(&store)
         .provides(.{ fx.Logger, fx.Config, fx.Metrics, fx.Tracing, fx.MemoryFileSystem, fx.Clock });
     defer runtime.deinit();
@@ -127,19 +128,25 @@ test "fiber runtime emits causal events when forked and joined" {
         .fiber_forked,
         .scope_opened,
         .fiber_started,
+        .effect_started,
+        .effect_completed,
         .scope_closed,
         .fiber_joined,
     });
     try std.testing.expectEqual(fiber.id, snapshot.events[0].fiber_id.?);
     try std.testing.expectEqual(fiber.id, snapshot.events[2].fiber_id.?);
-    try std.testing.expectEqual(fiber.id, snapshot.events[4].fiber_id.?);
-    try std.testing.expectEqual(snapshot.events[0].run_id.?, snapshot.events[4].run_id.?);
+    try std.testing.expectEqual(fiber.id, snapshot.events[6].fiber_id.?);
+    try std.testing.expectEqual(snapshot.events[0].run_id.?, snapshot.events[6].run_id.?);
     try std.testing.expectEqual(snapshot.events[0].scope_id.?, snapshot.events[1].scope_id.?);
     try std.testing.expectEqual(snapshot.events[0].scope_id.?, snapshot.events[2].scope_id.?);
-    try std.testing.expectEqual(snapshot.events[0].scope_id.?, snapshot.events[4].scope_id.?);
+    try std.testing.expectEqual(snapshot.events[0].scope_id.?, snapshot.events[6].scope_id.?);
     try std.testing.expectEqual(@as(?u64, 303), snapshot.events[0].trace_id);
     try std.testing.expectEqual(@as(?u64, 404), snapshot.events[2].span_id);
-    try std.testing.expectEqualStrings("success", snapshot.events[4].status);
+    try std.testing.expectEqual(@as(?u64, 707), snapshot.events[0].context.development_task_id);
+    try std.testing.expectEqual(@as(?u64, 707), snapshot.events[2].context.development_task_id);
+    try std.testing.expectEqual(@as(?u64, 808), snapshot.events[6].context.agent_id);
+    try std.testing.expectEqual(@as(?u64, 303), snapshot.events[1].context.trace_id_low);
+    try std.testing.expectEqualStrings("success", snapshot.events[6].status);
 
     const second_exit = runtime.join(fiber);
     switch (second_exit) {

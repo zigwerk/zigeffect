@@ -4,6 +4,8 @@ comptime {
     _ = @import("public_api_stability_test.zig");
     _ = @import("dependency_test.zig");
     _ = @import("effect_test.zig");
+    _ = @import("kernel_test.zig");
+    _ = @import("canonical_reference_server_test.zig");
     _ = @import("effect_ergonomics_test.zig");
     _ = @import("effect_structured_concurrency_test.zig");
     _ = @import("race_test.zig");
@@ -55,6 +57,7 @@ comptime {
     _ = @import("causal_dot_backend_test.zig");
     _ = @import("causal_otel_backend_test.zig");
     _ = @import("causal_otlp_json_test.zig");
+    _ = @import("causal_context_v2_test.zig");
     _ = @import("causal_graph_history_backend_test.zig");
     _ = @import("causal_nendb_storage_backend_test.zig");
     _ = @import("causal_async_stream_backend_test.zig");

@@ -34,3 +34,15 @@ test("test run parser surfaces incomplete evidence without treating it as passed
   expect(run.status).toBe("incomplete");
   expect(testRunIsComplete(run)).toBe(false);
 });
+
+test("test run parser distinguishes durable graph IDs from runtime-local IDs", () => {
+  const durable = structuredClone(sample) as any;
+  durable.receipts[0].causal_event_id_space = "graph_durable";
+  durable.receipts[0].causal_graph_session_id = 9;
+  const run = parseTestRunReceipt(durable);
+  expect(run.receipts[0]?.causal_event_id_space).toBe("graph_durable");
+  expect(run.receipts[0]?.causal_graph_session_id).toBe(9);
+
+  durable.receipts[0].causal_graph_session_id = null;
+  expect(() => parseTestRunReceipt(durable)).toThrow("durable causal IDs require a graph session");
+});

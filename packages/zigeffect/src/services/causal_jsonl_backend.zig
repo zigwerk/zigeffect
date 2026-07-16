@@ -144,6 +144,14 @@ pub fn formatCausalJsonLine(allocator: Allocator, event: causal.CausalEvent) All
     try appendOptionalJsonU64(&output, allocator, event.trace_id);
     try output.appendSlice(allocator, ",\"span_id\":");
     try appendOptionalJsonU64(&output, allocator, event.span_id);
+    try output.appendSlice(allocator, ",\"context\":");
+    const context_json = try std.json.Stringify.valueAlloc(allocator, event.context, .{});
+    defer allocator.free(context_json);
+    try output.appendSlice(allocator, context_json);
+    try output.appendSlice(allocator, ",\"links\":");
+    const links_json = try std.json.Stringify.valueAlloc(allocator, event.activeLinks(), .{});
+    defer allocator.free(links_json);
+    try output.appendSlice(allocator, links_json);
     try output.appendSlice(allocator, ",\"label\":");
     try appendJsonString(&output, allocator, event.label);
     try output.appendSlice(allocator, ",\"type_name\":");

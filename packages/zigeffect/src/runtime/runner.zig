@@ -2,6 +2,7 @@ const context_mod = @import("../core/context.zig");
 const scope_mod = @import("../core/scope.zig");
 const result = @import("../core/result.zig");
 const dep_contracts = @import("../dependency/contracts.zig");
+const identity_mod = @import("../core/runtime_identity.zig");
 
 pub const Context = context_mod.Context;
 pub const Scope = scope_mod.Scope;
@@ -66,7 +67,7 @@ fn recordRunStarted(
     return ctx.recordCausal(.{
         .kind = .run_started,
         .label = api,
-        .type_name = @typeName(@TypeOf(effect)),
+        .type_name = identity_mod.boundedTypeName(@TypeOf(effect)),
     });
 }
 
@@ -128,8 +129,11 @@ pub fn runManagedScope(
 
     const started = recordRunStarted(api, ctx, effect);
     attachManagedCausalScope(ctx, scope, started);
+    const previous_parent = ctx.causal_parent_id;
+    ctx.causal_parent_id = started orelse previous_parent;
+    defer ctx.causal_parent_id = previous_parent;
 
-    const value = effect.run(ctx) catch |err| {
+    const value = ctx.runEffect(effect) catch |err| {
         scope.closeWithExit(.{ .failure = @errorName(err) });
         recordExit(ctx, started, Exit(@TypeOf(effect).SuccessType, @TypeOf(effect).FailureType){ .failure = err });
         recordRunCompleted(api, ctx, started, "failure", @errorName(err));
@@ -150,8 +154,12 @@ pub fn runCallerOwnedScope(
     assertEffectEnvironment(api, Env, effect);
 
     const started = recordRunStarted(api, ctx, effect);
+    if (ctx.scope) |scope| attachManagedCausalScope(ctx, scope, started);
+    const previous_parent = ctx.causal_parent_id;
+    ctx.causal_parent_id = started orelse previous_parent;
+    defer ctx.causal_parent_id = previous_parent;
 
-    const value = effect.run(ctx) catch |err| {
+    const value = ctx.runEffect(effect) catch |err| {
         recordExit(ctx, started, Exit(@TypeOf(effect).SuccessType, @TypeOf(effect).FailureType){ .failure = err });
         recordRunCompleted(api, ctx, started, "failure", @errorName(err));
         return err;
@@ -172,7 +180,10 @@ pub fn exitManagedScope(
 
     const started = recordRunStarted(api, ctx, effect);
     attachManagedCausalScope(ctx, scope, started);
-    const base_exit = effect.exit(ctx);
+    const previous_parent = ctx.causal_parent_id;
+    ctx.causal_parent_id = started orelse previous_parent;
+    defer ctx.causal_parent_id = previous_parent;
+    const base_exit = ctx.exitEffect(effect);
     scope.closeWithExit(finalizerExitFromExit(base_exit));
 
     if (scope.firstFinalizerFailure()) |failure| {
@@ -196,7 +207,11 @@ pub fn exitCallerOwnedScope(
     assertEffectEnvironment(api, Env, effect);
 
     const started = recordRunStarted(api, ctx, effect);
-    const base_exit = effect.exit(ctx);
+    if (ctx.scope) |scope| attachManagedCausalScope(ctx, scope, started);
+    const previous_parent = ctx.causal_parent_id;
+    ctx.causal_parent_id = started orelse previous_parent;
+    defer ctx.causal_parent_id = previous_parent;
+    const base_exit = ctx.exitEffect(effect);
     recordExit(ctx, started, base_exit);
     recordRunCompletedFromExit(api, ctx, started, base_exit);
     return base_exit;

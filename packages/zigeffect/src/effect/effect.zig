@@ -173,7 +173,7 @@ pub fn Effect(comptime Success: type, comptime Failure: type, comptime Env: type
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(Success, Failure) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
 
@@ -358,11 +358,11 @@ pub fn RequiredEffect(comptime Parent: type, comptime Services: anytype, comptim
         }
 
         pub fn run(self: Self, ctx: *Context(Env)) Parent.FailureType!Parent.SuccessType {
-            return self.parent.run(ctx);
+            return ctx.runEffect(self.parent);
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(Parent.SuccessType, Parent.FailureType) {
-            return self.parent.exit(ctx);
+            return ctx.exitEffect(self.parent);
         }
 
         pub fn retry(self: Self, ctx: *Context(Env), schedule: *Schedule) Parent.FailureType!Parent.SuccessType {
@@ -427,13 +427,13 @@ pub fn OnExitEffect(comptime Parent: type, comptime Env: type) type {
         action: *const fn (Exit(Parent.SuccessType, Parent.FailureType), *Context(Env)) Parent.FailureType!void,
 
         pub fn run(self: Self, ctx: *Context(Env)) Parent.FailureType!Parent.SuccessType {
-            const parent_exit = self.parent.exit(ctx);
+            const parent_exit = ctx.exitEffect(self.parent);
             try self.action(parent_exit, ctx);
             return exitToResult(Parent.SuccessType, Parent.FailureType, parent_exit);
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(Parent.SuccessType, Parent.FailureType) {
-            const parent_exit = self.parent.exit(ctx);
+            const parent_exit = ctx.exitEffect(self.parent);
             self.action(parent_exit, ctx) catch |err| return .{ .failure = err };
             return parent_exit;
         }
@@ -496,13 +496,13 @@ pub fn EnsuringEffect(comptime Parent: type, comptime Env: type) type {
         finalizer: *const fn (*Context(Env)) Parent.FailureType!void,
 
         pub fn run(self: Self, ctx: *Context(Env)) Parent.FailureType!Parent.SuccessType {
-            const parent_exit = self.parent.exit(ctx);
+            const parent_exit = ctx.exitEffect(self.parent);
             try self.finalizer(ctx);
             return exitToResult(Parent.SuccessType, Parent.FailureType, parent_exit);
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(Parent.SuccessType, Parent.FailureType) {
-            const parent_exit = self.parent.exit(ctx);
+            const parent_exit = ctx.exitEffect(self.parent);
             self.finalizer(ctx) catch |err| return .{ .cause = .{ .finalizer_failure = @errorName(err) } };
             return parent_exit;
         }
@@ -570,11 +570,11 @@ pub fn MapEffect(
         mapper: *const fn (Parent.SuccessType) Success,
 
         pub fn run(self: Self, ctx: *Context(Env)) Failure!Success {
-            return self.mapper(try self.parent.run(ctx));
+            return self.mapper(try ctx.runEffect(self.parent));
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(Success, Failure) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
 
@@ -668,11 +668,11 @@ pub fn FlatMapEffect(
         binder: *const fn (Parent.SuccessType, *Context(Env)) Failure!Success,
 
         pub fn run(self: Self, ctx: *Context(Env)) Failure!Success {
-            return self.binder(try self.parent.run(ctx), ctx);
+            return self.binder(try ctx.runEffect(self.parent), ctx);
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(Success, Failure) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
 
@@ -761,13 +761,13 @@ pub fn TapEffect(comptime Parent: type, comptime Failure: type, comptime Env: ty
         action: *const fn (Parent.SuccessType, *Context(Env)) Failure!void,
 
         pub fn run(self: Self, ctx: *Context(Env)) Failure!Parent.SuccessType {
-            const value = try self.parent.run(ctx);
+            const value = try ctx.runEffect(self.parent);
             try self.action(value, ctx);
             return value;
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(Parent.SuccessType, Failure) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
 
@@ -856,11 +856,11 @@ pub fn MapErrorEffect(comptime Parent: type, comptime Failure: type, comptime En
         mapper: *const fn (Parent.FailureType) Failure,
 
         pub fn run(self: Self, ctx: *Context(Env)) Failure!Parent.SuccessType {
-            return self.parent.run(ctx) catch |err| return self.mapper(err);
+            return ctx.runEffect(self.parent) catch |err| return self.mapper(err);
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(Parent.SuccessType, Failure) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
 
@@ -922,11 +922,11 @@ pub fn CatchAllEffect(comptime Parent: type, comptime Failure: type, comptime En
         handler: *const fn (Parent.FailureType, *Context(Env)) Failure!Parent.SuccessType,
 
         pub fn run(self: Self, ctx: *Context(Env)) Failure!Parent.SuccessType {
-            return self.parent.run(ctx) catch |err| self.handler(err, ctx);
+            return ctx.runEffect(self.parent) catch |err| self.handler(err, ctx);
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(Parent.SuccessType, Failure) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
 
@@ -988,14 +988,14 @@ pub fn OrElseEffect(comptime Parent: type, comptime Fallback: type, comptime Env
         fallback: Fallback,
 
         pub fn run(self: Self, ctx: *Context(Env)) Fallback.FailureType!Parent.SuccessType {
-            return self.parent.run(ctx) catch {
-                const value: Parent.SuccessType = try self.fallback.run(ctx);
+            return ctx.runEffect(self.parent) catch {
+                const value: Parent.SuccessType = try ctx.runEffect(self.fallback);
                 return value;
             };
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(Parent.SuccessType, Fallback.FailureType) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
 
@@ -1049,14 +1049,14 @@ pub fn TapErrorEffect(comptime Parent: type, comptime Failure: type, comptime En
         action: *const fn (Parent.FailureType, *Context(Env)) Failure!void,
 
         pub fn run(self: Self, ctx: *Context(Env)) Failure!Parent.SuccessType {
-            return self.parent.run(ctx) catch |err| {
+            return ctx.runEffect(self.parent) catch |err| {
                 try self.action(err, ctx);
                 return err;
             };
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(Parent.SuccessType, Failure) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
 
@@ -1103,7 +1103,7 @@ pub fn retryEffect(effect: anytype, ctx: *Context(@TypeOf(effect).EnvType), sche
     var attempt: usize = 0;
 
     while (true) {
-        return effect.run(ctx) catch |err| {
+        return ctx.runEffect(effect) catch |err| {
             const decision = schedule.decision(attempt);
             if (decision.delay_ms) |delay_ms| {
                 recordScheduleDecision(ctx, schedule, decision.attempt, delay_ms, "retry");
@@ -1122,7 +1122,7 @@ pub fn retryEffect(effect: anytype, ctx: *Context(@TypeOf(effect).EnvType), sche
 
 pub fn repeatEffect(effect: anytype, ctx: *Context(@TypeOf(effect).EnvType), schedule: *Schedule) @TypeOf(effect).FailureType!@TypeOf(effect).SuccessType {
     var repetition: usize = 0;
-    var value = try effect.run(ctx);
+    var value = try ctx.runEffect(effect);
 
     while (true) {
         const decision = schedule.decision(repetition);
@@ -1135,7 +1135,7 @@ pub fn repeatEffect(effect: anytype, ctx: *Context(@TypeOf(effect).EnvType), sch
             clock.sleep(delay_ms);
         }
         repetition += 1;
-        value = try effect.run(ctx);
+        value = try ctx.runEffect(effect);
     }
 
     return value;

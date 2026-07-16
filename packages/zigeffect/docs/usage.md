@@ -1,1207 +1,299 @@
-# zigeffect Usage
+# ZigEffect usage
 
-`zigeffect` is built around direct-style Zig. Write normal functions, use `try`,
-and make resources explicit.
+This is the authoritative application-facing guide for the canonical ZigEffect
+kernel. New code uses `kernel.Service`, `kernel.Effect`, `kernel.Layer`, and one
+process-level `zstd.ManagedRuntime`. The I/O-free `kernel.ManagedRuntime` is the
+lower-level interpreter used by framework tests and custom platform adapters.
+The older environment-parameterized `Effect`,
+`LayerGraph`, and `ctx.runEffect` APIs remain only while framework and adapter
+internals are migrated; they are not an alternative application architecture.
 
-## Minimal Program
+For a larger example, read [Compositional applications](compositional-applications.md).
+
+## Mental model
+
+| Concept | Purpose |
+| --- | --- |
+| Service | A stable tag and abstract API contract |
+| Effect | A lazy description with success, typed failure, and required services |
+| Layer | A resource-safe implementation of one or more services |
+| Managed runtime | The single process root that builds layers and interprets effects |
+| Runtime inspection | A bounded map of services, layers, operations, fibers, and causal evidence |
+
+Application modules describe programs. Layers select implementations. Only a
+runtime or runtime-backed transport interprets a program.
+
+## Complete minimal application
 
 ```zig
 const std = @import("std");
-const fx = @import("zigeffect");
+const zstd = @import("zigeffect_std");
+const kernel = zstd.fx.kernel;
 
-const AppError = error{ OutOfMemory, MissingConfig };
-
-fn program(ctx: *fx.Context(fx.TestServices)) AppError![]const u8 {
-    const config = ctx.service(fx.Config);
-    const logger = ctx.service(fx.Logger);
-
-    const name = try config.require("app.name");
-    try logger.info("app started");
-
-    return name;
-}
-
-const Program = fx.Effect([]const u8, AppError, fx.TestServices).fromFn(program);
-```
-
-Use constructors for simple stdlib helpers and tests:
-
-```zig
-const Ready = fx.Effect(bool, AppError, fx.TestServices).succeed(true);
-const Failed = fx.Effect(bool, AppError, fx.TestServices).fail(error.InvalidInput);
-const Count = fx.Effect(u32, AppError, fx.TestServices).sync(currentCount);
-```
-
-Run it in tests:
-
-```zig
-var env = try fx.TestEnv.init(std.testing.allocator);
-defer env.deinit();
-
-try env.services.config.set("app.name", "zgroach");
-
-const name = try env.run(Program);
-
-try std.testing.expectEqualStrings("zgroach", name);
-try env.expectLog("app started");
-```
-
-## Typed Errors
-
-Errors are Zig error sets. Keep them local and explicit:
-
-```zig
-const CompileError = error{
-    OutOfMemory,
-    MissingConfig,
-    EmptySource,
-    InvalidSyntax,
-};
-```
-
-Include `OutOfMemory` when the program allocates or registers scoped finalizers.
-Include `MissingScope` when using `acquireRelease`, `acquireReleaseValue`, or
-direct scoped finalizer registration. Let Zig prove that a function only throws
-errors listed in the error set.
-
-## Services
-
-Services live on an environment struct. The environment owns a `service` method:
-
-```zig
-const Env = struct {
-    logger: fx.Logger,
-    config: fx.Config,
-
-    pub fn service(self: *Env, comptime Service: type) *Service {
-        if (Service == fx.Logger) return &self.logger;
-        if (Service == fx.Config) return &self.config;
-        return fx.serviceNotFound(Env, Service);
-    }
-};
-```
-
-Call services from a program through `ctx.service(Service)`.
-
-If the program asks for a service that the environment does not provide,
-`serviceNotFound` emits a compile-time diagnostic naming the requested service,
-the environment type, and the branch to add.
-
-For production paths, declare service requirements on the effect and declared
-providers on the layer/runtime:
-
-```zig
-const Program = fx.Effect(Result, AppError, AppEnv)
-    .fromFn(program)
-    .requires(.{ fx.Logger, fx.Config });
-
-const layer = fx.Layer(AppEnv)
-    .fromEnv(&env)
-    .provides(.{ fx.Logger, fx.Config });
-
-const result = try layer.provide(allocator, Program);
-```
-
-If `Program` requires a service the layer does not declare, `Layer.provide`
-returns `error.MissingServiceRequirement` before building or running the effect.
-Use `validateLayerRequirements` when you need a rich report:
-
-```zig
-var report = try fx.validateLayerRequirements(allocator, layer, Program);
-defer report.deinit();
-
-if (!report.isValid()) {
-    const text = try fx.formatDependencyReport(allocator, "app startup", report);
-    defer allocator.free(text);
-    std.debug.print("{s}\n", .{text});
-}
-```
-
-Use `requirementsSatisfiedBy` for a boolean preflight check when both sides have
-declared metadata:
-
-```zig
-if (!try fx.requirementsSatisfiedBy(allocator, layer, Program)) {
-    return error.InvalidDependencyGraph;
-}
-```
-
-When both sides are compile-time known wrapper types, use the static helper:
-
-```zig
-comptime {
-    fx.assertStaticRequirementsSatisfied(@TypeOf(layer), @TypeOf(Program));
-}
-```
-
-## Typed Config
-
-`Config` still supports direct string reads, and typed descriptors can parse the
-same provider values:
-
-```zig
-try config.set("http.port", "8080");
-try config.set("feature.enabled", "true");
-
-const port = try config.read(fx.Config.int("http.port"));
-const enabled = try config.read(fx.Config.boolean("feature.enabled"));
-const region = try config.read(fx.Config.string("region").withDefault("local"));
-```
-
-Load a whole typed struct from descriptors when startup code wants one config
-value object:
-
-```zig
-const AppConfig = struct {
-    name: []const u8,
-    port: i64,
-    enabled: bool,
-};
-
-const schema = fx.Config.schema(AppConfig, .{
-    .name = fx.Config.string("app.name"),
-    .port = fx.Config.int("http.port"),
-    .enabled = fx.Config.boolean("feature.enabled").withDefault(false),
+const Greeting = kernel.Service("application/Greeting", struct {
+    prefix: []const u8,
 });
 
-const app = try config.readSchema(schema);
+const GreetBase = kernel.Effect([]const u8, error{}, .{Greeting});
+const Greet = GreetBase.Stateful([]const u8);
+
+fn greet(name: []const u8) Greet {
+    return Greet.init(name, struct {
+        fn run(value: []const u8, ctx: *Greet.Context) error{}![]const u8 {
+            _ = ctx.service(Greeting).prefix;
+            return value;
+        }
+    }.run);
+}
+
+pub fn main(init: std.process.Init) !void {
+    const MainLayer = kernel.Layer.succeed(Greeting, .{ .prefix = "hello" });
+    var runtime = try zstd.ManagedRuntime(@TypeOf(MainLayer)).make(
+        init.gpa,
+        init.io,
+        std.Io.Dir.cwd(),
+        MainLayer,
+        .{},
+    );
+    defer runtime.deinit();
+
+    _ = try runtime.run(greet("Zig").named("application.greet"));
+    try runtime.shutdown();
+}
 ```
 
-Use `secret()` when formatting diagnostics for sensitive keys:
+The service requirement appears in `GreetBase`. A different layer can replace
+the implementation without changing the operation or any composed program.
+
+## Define services around capabilities
+
+A service tag contains a globally stable key and the implementation API:
 
 ```zig
-const password = fx.Config.string("database.password").secret();
-const report = try fx.services.config.formatConfigError(
-    allocator,
-    password,
-    error.MissingConfig,
-);
-defer allocator.free(report);
-```
-
-Load provider data from explicit entries or dotenv/file text supplied by the
-caller:
-
-```zig
-const entries = [_]fx.ConfigEntry{
-    .{ .key = "http.port", .value = "8080" },
-    .{ .key = "feature.enabled", .value = "true" },
-};
-try config.loadEntries(&entries);
-
-try config.loadDotEnv(
-    \\database.dsn = postgres://local
-    \\feature.enabled = false
-);
-```
-
-Use `ConfigEnv` when config should participate in normal layer graph startup:
-
-```zig
-var configEnv = fx.ConfigEnv.init(allocator);
-defer configEnv.deinit();
-try configEnv.config.loadDotEnv(dotenvText);
-
-const configLayer = fx.Layer(fx.ConfigEnv)
-    .fromEnv(&configEnv)
-    .provides(.{fx.Config});
-```
-
-For a compile-checked startup example that combines config, logger, a database
-layer, graph startup validation, narrowed app execution, and fake test layers,
-see [`../examples/readiness.zig`](../examples/readiness.zig).
-
-## Observability
-
-Logger keeps plain messages for simple assertions and also records structured
-entries:
-
-```zig
-try logger.logFields(.info, "request handled", &.{
-    .{ .key = "route", .value = "/health" },
-});
-
-try logger.logWithContext(
-    .info,
-    "request handled",
-    &.{.{ .key = "status", .value = "200" }},
-    .{ .timestamp_ms = 1234, .trace_id = trace_id, .span_id = span_id },
-);
-```
-
-Runtimes can carry trace metadata into effect contexts:
-
-```zig
-var runtime = fx.Runtime(AppEnv)
-    .init(allocator, &env)
-    .withTraceContext(trace_id, span_id);
-
-try runtime.run(Program);
-```
-
-Inside `Program`, read `ctx.trace_id` and `ctx.span_id` when service calls need
-to attach the active trace context. `FiberRuntime` and `LayerGraphRuntime`
-propagate the same metadata into the contexts they create.
-
-Metrics supports counters, gauges, histograms, and deterministic snapshots:
-
-```zig
-try metrics.increment("requests.total", 1);
-try metrics.observe("request.ms", 25);
-
-var snapshot = try metrics.snapshot(allocator);
-defer snapshot.deinit();
-```
-
-Tracing supports plain events plus span ids and parent relationships:
-
-```zig
-const root = try tracing.startSpanWithAttributes("compile", null, &.{
-    .{ .key = "component", .value = "compiler" },
-});
-const child = try tracing.startSpan("parse", root);
-try tracing.endSpan(child);
-```
-
-Root spans allocate trace ids. Child spans inherit their parent's trace id.
-
-Format captured observability state for CLI diagnostics, test snapshots, or
-agent-readable reports:
-
-```zig
-const report = try fx.formatObservabilityReport(
-    allocator,
-    "health check",
-    logger,
-    metrics,
-    tracing,
-);
-defer allocator.free(report);
-```
-
-## Layers
-
-Use `Layer.fromEnv` when a test or app already owns the environment:
-
-```zig
-const layer = fx.Layer(Env).fromEnv(&env);
-var ctx = layer.context(allocator, &scope);
-```
-
-Use `Layer.fromBuilder` when dependencies need construction and scoped cleanup:
-
-```zig
-fn buildEnv(allocator: std.mem.Allocator, scope: *fx.Scope) std.mem.Allocator.Error!*Env {
-    const env = try allocator.create(Env);
-    env.* = .{ .logger = fx.Logger.init(allocator) };
-
-    scope.addFinalizerFor(Env, env, releaseEnv) catch |err| {
-        releaseEnv(env);
-        return err;
+const Repository = kernel.Service("orders/Repository", struct {
+    pub const operations: []const []const u8 = &.{
+        "Repository.find",
+        "Repository.save",
     };
 
-    return env;
-}
-
-fn releaseEnv(env: *Env) void {
-    const allocator = env.logger.allocator;
-    env.logger.deinit();
-    allocator.destroy(env);
-}
-
-const layer = fx.Layer(Env).fromBuilder(buildEnv);
-var ctx = try layer.buildContext(allocator, &scope);
-```
-
-Use `LayerWithError` when startup can fail with application errors:
-
-```zig
-const StartupError = error{ConnectionFailed};
-
-fn buildEnv(allocator: std.mem.Allocator, scope: *fx.Scope)
-    (std.mem.Allocator.Error || StartupError)!*Env
-{
-    _ = scope;
-    const env = try allocator.create(Env);
-    errdefer allocator.destroy(env);
-    return error.ConnectionFailed;
-}
-
-const layer = fx.LayerWithError(Env, StartupError).fromBuilder(buildEnv);
-```
-
-Use `fromContextBuilder` when a layer needs services that were built by earlier
-layers in a graph:
-
-```zig
-const StartupError = error{ConnectionFailed};
-
-const Database = struct {
-    dsn: []const u8,
-};
-
-const DatabaseEnv = struct {
-    allocator: std.mem.Allocator,
-    database: Database,
-
-    pub fn service(self: *DatabaseEnv, comptime Service: type) *Service {
-        if (Service == Database) return &self.database;
-        return fx.serviceNotFound(DatabaseEnv, Service);
-    }
-};
-
-fn releaseDatabase(env: *DatabaseEnv) void {
-    env.allocator.destroy(env);
-}
-
-fn buildDatabase(
-    allocator: std.mem.Allocator,
-    scope: *fx.Scope,
-    ctx: anytype,
-) (std.mem.Allocator.Error || StartupError)!*DatabaseEnv {
-    const config = ctx.service(fx.Config);
-    const logger = ctx.service(fx.Logger);
-
-    try logger.info("database layer starting");
-    const dsn = config.require("database.dsn") catch return error.ConnectionFailed;
-
-    const env = try allocator.create(DatabaseEnv);
-    errdefer allocator.destroy(env);
-    env.* = .{
-        .allocator = allocator,
-        .database = .{ .dsn = dsn },
-    };
-    try scope.addFinalizerFor(DatabaseEnv, env, releaseDatabase);
-    return env;
-}
-
-const databaseLayer = fx.LayerWithError(DatabaseEnv, StartupError)
-    .fromContextBuilder(buildDatabase)
-    .requires(.{ fx.Config, fx.Logger })
-    .provides(.{Database});
-```
-
-Use `fromEffect` when startup is easier to express as an effect over a narrowed
-service environment:
-
-```zig
-const StartupEnv = fx.ServiceEnv(.{ fx.Config, fx.Logger });
-
-const BuildDatabase = fx.Effect(*DatabaseEnv, std.mem.Allocator.Error || StartupError, StartupEnv)
-    .fromFn(buildDatabaseEffect)
-    .requires(.{ fx.Config, fx.Logger });
-
-const databaseLayer = fx.LayerWithError(DatabaseEnv, StartupError)
-    .fromEffect(BuildDatabase)
-    .provides(.{Database});
-```
-
-The builder receives the graph startup context, not a per-run context. Services
-come from already-started dependency layers, and finalizers registered into the
-provided `scope` live until `graph.deinit()`. If a later builder fails,
-`layerGraph` closes already-started dependencies before returning the startup
-error.
-
-Use `ServiceEnv` when an app effect should depend on a narrow service slice
-instead of the whole generated graph environment:
-
-```zig
-const DatabaseOnly = fx.ServiceEnv(.{Database});
-
-const Program = fx.Effect([]const u8, AppError, DatabaseOnly)
-    .fromFn(loadFromDatabase)
-    .requires(.{Database});
-
-const value = try graph.runNarrowed(.{Database}, Program);
-```
-
-`runNarrowed` and `exitNarrowed` build a normal per-run scope, project the
-requested service pointers from the graph context, and keep startup resources
-owned by `graph.deinit()`.
-
-The scope owns teardown. Close the scope manually only in low-level tests; app
-runtime paths should normally use `Runtime.run` or `TestEnv.run`.
-For deeper ownership rules, see [Resource Ownership](resource-ownership.md).
-
-Run a program directly from a layer:
-
-```zig
-const result = try layer.provide(allocator, Program);
-```
-
-Merge layers by explicitly combining their environments:
-
-```zig
-const merged = loggerLayer.merge(ConfigEnv, AppEnv, configLayer, combineAppEnv);
-const result = try merged.provide(allocator, AppProgram);
-```
-
-Validate larger app graphs before startup with metadata:
-
-```zig
-var graph = fx.LayerGraph.init(allocator);
-defer graph.deinit();
-
-try graph.addLayer("logger", loggerLayer.provides(.{fx.Logger}));
-try graph.addLayer("config", configLayer.provides(.{fx.Config}));
-try graph.addLayer("app", appLayer.requires(.{ fx.Logger, fx.Config }));
-
-var report = try graph.validate(allocator);
-defer report.deinit();
-```
-
-Executable graph runtimes can format the same report directly:
-
-```zig
-var graph = fx.layerGraph(allocator, .{ loggerLayer, appLayer });
-defer graph.deinit();
-
-const report = try graph.report("app startup");
-defer allocator.free(report);
-```
-
-Duplicate providers are invalid unless the later graph layer explicitly replaces
-the service:
-
-```zig
-const baseConfig = fx.Layer(BaseConfigEnv)
-    .fromEnv(&base)
-    .provides(.{fx.Config});
-
-const overrideConfig = fx.Layer(OverrideConfigEnv)
-    .fromEnv(&override)
-    .provides(.{fx.Config})
-    .replaces(.{fx.Config});
-```
-
-Replacement is graph-local metadata. Validation accepts the duplicate only for
-services named in `.replaces`, and generated graph environments resolve that
-service to the latest provider.
-
-Build and memoize a heterogeneous graph when callers should not hand-write a
-merged environment:
-
-```zig
-var graph = fx.layerGraph(allocator, .{
-    appLayer.requires(.{ fx.Logger, fx.Config }).provides(.{AppService}),
-    loggerLayer.provides(.{fx.Logger}),
-    configLayer.provides(.{fx.Config}),
+    first_id: u64,
 });
-defer graph.deinit();
-
-const AppEnv = @TypeOf(graph).EnvType;
-const Program = fx.Effect(Result, AppError, AppEnv)
-    .fromFn(program)
-    .requires(.{ AppService, fx.Logger });
-
-const result = try graph.run(Program);
 ```
 
-`graph.start()` validates duplicates and missing requirements, builds layers in
-dependency order, and reuses the same started environments for later `run`
-calls. `graph.deinit()` closes the startup scope and releases layer resources.
+Use domain-oriented tags rather than implementation names. Put public operation
+names in `operations` when they should appear in the application snapshot.
 
-Use `graph.runtime()` when a graph-started environment should run through the
-regular runtime API:
+An effect may access only its declared tags. Attempting to resolve another
+service produces a compile-time diagnostic.
 
-```zig
-var runtime = try graph.runtime();
-const result = try runtime.run(Program);
-```
-
-Use `graph.fiberRuntime()` when the same graph-started environment should run
-through deterministic fibers:
+## Describe operations as effects
 
 ```zig
-var fiber_runtime = try graph.fiberRuntime();
-defer fiber_runtime.deinit();
+const FindBase = kernel.Effect(Order, error{NotFound}, .{Repository});
+const Find = FindBase.Stateful(u64);
 
-const fiber = try fiber_runtime.fork(Program);
-const exit = fiber_runtime.join(fiber);
-```
-
-Both adapters validate effect requirements against the graph's declared
-providers. Runtime and fiber scopes are per-run or parent/child scopes; graph
-startup resources remain owned by the graph startup scope and are released only
-when `graph.deinit()` closes that scope.
-
-## Scoped Resources
-
-Use `acquireRelease` for resources that must always be released. Include
-`MissingScope` because registering a finalizer requires an active runtime scope.
-
-```zig
-const ResourceError = error{ MissingScope, OutOfMemory };
-
-const Handle = struct {
-    allocator: std.mem.Allocator,
-};
-
-fn acquireHandle(ctx: *fx.Context(fx.TestServices)) ResourceError!*Handle {
-    const handle = try ctx.allocator.create(Handle);
-    handle.* = .{ .allocator = ctx.allocator };
-    return handle;
+fn find(id: u64) Find {
+    return Find.init(id, struct {
+        fn run(value: u64, ctx: *Find.Context) error{NotFound}!Order {
+            const repository = ctx.service(Repository);
+            if (value < repository.first_id) return error.NotFound;
+            return .{ .id = value };
+        }
+    }.run);
 }
+```
 
-fn releaseHandle(handle: *Handle) void {
-    handle.allocator.destroy(handle);
-}
+Use `fromFn` for stateless operations and `Stateful`/`fromState` when an
+operation captures input. The returned value is inert until a runtime runs it.
 
-const OpenHandle = fx.acquireRelease(
-    Handle,
-    ResourceError,
-    fx.TestServices,
-    acquireHandle,
-    releaseHandle,
+## Compose programs fluently
+
+```zig
+const program = find(order_id)
+    .flatMap(loadCustomer)
+    .tap(auditCustomer)
+    .map(toResponse)
+    .mapError(toPublicError)
+    .named("orders.customer-view");
+```
+
+The canonical combinators are:
+
+- `map` transforms a success value;
+- `flatMap` selects the next effect from a success value;
+- `tap` runs an effect while retaining the original success value;
+- `andThen` sequences two effects and returns the second result;
+- `zip` runs two effects and returns `{ left, right }`;
+- `catchAll` recovers from the complete typed failure channel;
+- `mapError` transforms the typed failure channel; and
+- `named` creates a stable semantic causal parent.
+
+Composition infers the combined service and error sets. Pure combinators do not
+allocate and do not add meaningless implementation nodes to the causal graph.
+
+## Build layers once
+
+```zig
+const ConfigLive = kernel.Layer.succeed(Config, .{ .first_id = 100 });
+const RepositoryLive = kernel.Layer.sync(
+    Repository,
+    .{Config},
+    makeRepository,
+).provide(ConfigLive);
+const AuditLive = kernel.Layer.sync(
+    Audit,
+    .{Config},
+    makeAudit,
+).provide(ConfigLive);
+
+const MainLayer = RepositoryLive.merge(AuditLive);
+```
+
+Layer constructors cover constant, synchronous, fallible, effectful, and scoped
+service acquisition. Their types expose output services, startup failures, and
+unsatisfied construction inputs.
+
+- `provide` satisfies and hides a construction dependency;
+- `provideMerge` satisfies it and also exposes it to the runtime; and
+- `merge` combines independent outputs.
+
+Reusing the same layer value shares it by identity during a root build. A
+scoped layer registers its finalizer before it is made available:
+
+```zig
+const DatabaseLive = kernel.Layer.scoped(
+    Database,
+    error{ConnectFailed},
+    .{Config},
+    connectDatabase,
+    closeDatabase,
+).provide(ConfigLive);
+```
+
+Finalizers run in reverse acquisition order during runtime disposal, including
+after partial startup failure.
+
+## Create one managed runtime
+
+```zig
+var runtime = try zstd.ManagedRuntime(@TypeOf(MainLayer)).make(
+    allocator,
+    io,
+    root,
+    MainLayer,
+    .{ .observability = production_observability },
 );
-```
-
-Run scoped resources through the runtime:
-
-```zig
-const handle = try env.run(OpenHandle);
-```
-
-The runtime creates a scope, runs the effect, and closes the scope automatically
-on success or failure. Manual scope closing is reserved for low-level tests and
-advanced cases.
-
-Use `Runtime.withScope` when an application lifecycle should own resources
-across multiple runs:
-
-```zig
-var appScope = fx.Scope.init(allocator);
-defer appScope.deinit();
-
-var runtime = fx.Runtime(AppEnv)
-    .init(allocator, &env)
-    .withScope(&appScope);
-
-_ = try runtime.run(OpenHandle);
-
-appScope.close();
-```
-
-Shared runtime scopes are explicit: the runtime does not close the scope after
-each run, and `Runtime.exit` does not include finalizer failures until the
-caller closes the shared scope. If a shared scope is already closed, resource
-registration returns `error.MissingScope` and `acquireRelease` immediately
-releases the acquired handle.
-
-If you run `OpenHandle` against a context without a scope, the effect returns
-`error.MissingScope` and immediately releases the acquired handle.
-
-Use `acquireReleaseValue` for small handle-like values where copying the value
-into a finalizer box is acceptable:
-
-```zig
-const Permit = struct {
-    id: u32,
-};
-
-fn acquirePermit(ctx: *fx.Context(AppEnv)) ResourceError!Permit {
-    _ = ctx;
-    return .{ .id = 1 };
-}
-
-fn releasePermit(permit: Permit) void {
-    _ = permit;
-}
-
-const OpenPermit = fx.acquireReleaseValue(
-    Permit,
-    ResourceError,
-    AppEnv,
-    acquirePermit,
-    releasePermit,
-);
-```
-
-The returned value is a copy. The scope owns a boxed copy for cleanup and closes
-resources in reverse acquisition order. Use this helper only for values where
-that copy-based cleanup model is safe; use pointer `acquireRelease` when a
-resource needs identity or unique mutable ownership.
-
-Fallible cleanup can be recorded by the scope:
-
-```zig
-try scope.addFinalizerFallibleFor(Handle, handle, closeHandle);
-scope.close();
-
-if (scope.firstFinalizerFailure()) |name| {
-    std.debug.print("cleanup failed: {s}\n", .{name});
-}
-```
-
-Exit-aware cleanup receives the outcome that closed the scope:
-
-```zig
-fn closeWithStatus(handle: *Handle, exit: fx.FinalizerExit) void {
-    switch (exit) {
-        .success => handle.closeCleanly(),
-        .failure => handle.closeAfterFailure(),
-        else => handle.closeCleanly(),
-    }
-}
-
-try ctx.addFinalizerExitFor(Handle, handle, closeWithStatus);
-```
-
-For a custom environment:
-
-```zig
-var runtime = fx.Runtime(AppEnv).init(allocator, &env);
-const result = try runtime.run(Program);
-```
-
-## Fibers
-
-Use `FiberRuntime` when a program needs Effect-style child work with structured
-exits and scoped leases:
-
-```zig
-var runtime = fx.FiberRuntime(fx.TestServices)
-    .init(std.testing.allocator, &env.services)
-    .withClock(&env.services.clock)
-    .provides(.{ fx.Logger, fx.Config, fx.Metrics, fx.Tracing, fx.MemoryFileSystem, fx.Clock });
 defer runtime.deinit();
 
-const fiber = try runtime.fork(Program);
-const exit = runtime.join(fiber);
+const get_result = try runtime.run(getProgram(request));
+const post_result = try runtime.run(postProgram(request));
+try runtime.shutdown();
 ```
 
-The core runtime is deterministic. `fork` creates a pending child and `join`
-runs that child to completion if it has not already completed or been
-interrupted. This gives tests and tooling stable fiber ids, typed exits,
-interruption causes, and child scope cleanup without depending on a platform
-event loop.
+Do not rebuild or re-provide the root layer for every endpoint. HTTP, gRPC,
+queue, and workflow adapters derive a bounded `RuntimeHandle` and interpret each
+request or job in a fresh child scope.
 
-Use `forkScoped` to lease a child to an active parent scope:
+Application code never calls `runIn`; it is an interpreter protocol. A service
+may request `ctx.runtime()` only when it is itself a transport or dispatcher
+that must interpret a child program.
 
-```zig
-var ctx = env.context();
-const fiber = try runtime.forkScoped(&ctx, Program);
-```
+## Defaults and observability
 
-Use `forkInScope` when a layer builder or low-level owner already has the
-parent scope:
+Every application runtime installs default clock, config, console, random, and
+tracing services and owns an embedded durable NenDB causal graph. Overrides are
+runtime configuration, not service parameters threaded through business
+functions.
 
-```zig
-const fiber = try runtime.forkInScope(startup_scope, Program);
-```
+Runtime observability is an aspect fanout for causal storage, logging, metrics,
+tracing, and supervision. Structural events are emitted automatically for:
 
-If the parent scope closes before the child is joined, the runtime interrupts
-the child and closes the child scope with `FinalizerExit.interrupted`.
+- layer construction and memoization;
+- service provision and resolution;
+- run, scope, fiber, resource, and finalizer lifecycle; and
+- typed completion and failure.
 
-Use `LocalAsyncBackendState` when a local runtime, workflow scheduler, or
-cluster transport wait needs backend-owned suspension, timer wakeups, typed
-network/file waits, or cancellation wakeups:
+Domain operations should add stable, redacted semantic facts at external
+boundaries. They should not pass a causal store, logger, registry, or tracer
+through every service merely to be observable.
 
-```zig
-var async_state = fx.LocalAsyncBackendState.init(allocator, .{ .now_ms = 1_000 });
-defer async_state.deinit();
-const backend = async_state.backend();
-var runtime = fx.Runtime(AppEnv).init(allocator, &env).withAsyncBackend(backend);
-```
-
-Direct-style effects stay synchronous unless they explicitly use
-`ctx.suspendRuntime`, `ctx.registerIoWait`, or return
-`RuntimeDecision.suspended`.
-
-The current backend is explicit and deterministic:
+## Inspect a running application
 
 ```zig
-const backend = fx.deterministicBackend();
-try std.testing.expect(!backend.can_suspend);
-```
-
-`Runtime.backendCapabilities()` and `FiberRuntime.backendCapabilities()` expose
-the same capability contract. Async backend additions should preserve `Scope`,
-`Exit`, `Cause`, and service lookup contracts.
-
-Use the encoded in-process cluster transports to test byte-protocol
-compatibility while still landing in local `MessageStorage`. These adapters do
-not cross an operating-system process or network boundary and cannot satisfy a
-production cluster-transport capability requirement:
-
-```zig
-var transport_state = try fx.EncodedInProcessHttpClusterTransport.init(allocator, message_storage, .{
-    .shard_count = 32,
-    .auth = .{ .mode = .bearer_token, .credential = "runner-token" },
-    .limits = .{
-        .max_envelope_bytes = 1024 * 1024,
-        .max_chunk_bytes = 64 * 1024,
-        .max_in_flight = 512,
-    },
+const json = try runtime.agentMapJsonAlloc(allocator, .{
+    .max_recent_events = 128,
 });
-defer transport_state.deinit();
-
-var response = try transport_state.asClusterTransport().send(allocator, .{
-    .kind = .request,
-    .address = fx.entityAddress("counter", "alice"),
-    .payload_type_name = "text",
-    .payload = "get",
-    .redacted_detail = "read counter",
-    .auth = .{ .mode = .bearer_token, .credential = "runner-token" },
-    .trace_id = 42,
-    .policy = .{ .timeout_ms = 1_000, .max_retries = 2 },
-});
-defer response.deinit(allocator);
-```
-
-`EncodedInProcessSocketClusterTransport` uses the same auth, limit, retry, and
-lifecycle metrics contract with deterministic `ZIGFX/1` socket frames. The old
-`ProductionHttpClusterTransport` and `ProductionSocketClusterTransport` names
-remain deprecated source-compatibility aliases only.
-`chunkedClusterTransportRequest` can attach chunk metadata before sending a
-large payload while keeping the durable payload bytes intact.
-
-Use a future `zigeffect-transport` production adapter, backed by separate
-processes and authenticated TLS sockets, for real runner-to-runner ingress.
-
-## Real Cluster Control Plane
-
-Use `RealClusterController` when shared durable runner/message storage should
-be the authority for runner membership, shard placement, and recovery:
-
-```zig
-var registry = fx.LocalRunnerRegistry.init(allocator);
-defer registry.deinit();
-
-var controller = try fx.RealClusterController.init(allocator, .{
-    .runner_storage = runner_storage,
-    .message_storage = message_storage,
-    .registry = &registry,
-    .options = .{
-        .shard_count = 32,
-        .lease_ttl_ms = 5_000,
-    },
-});
-
-const runner_a = fx.runnerAddress("machine-a", "runner-a");
-const runner_b = fx.runnerAddress("machine-b", "runner-b");
-_ = try controller.admitRunner(.{ .address = runner_a, .name = "runner-a", .started_at_ms = 1_000 });
-_ = try controller.admitRunner(.{ .address = runner_b, .name = "runner-b", .started_at_ms = 1_000 });
-_ = try controller.recordHeartbeat(.{ .address = runner_a, .sequence = 1, .observed_at_ms = 1_010 });
-_ = try controller.recordHeartbeat(.{ .address = runner_b, .sequence = 1, .observed_at_ms = 1_010 });
-
-var placement = try controller.placementPlan(allocator, 1_050);
-defer placement.deinit();
-var rebalance = try controller.rebalancePlan(allocator, placement);
-defer rebalance.deinit();
-_ = try controller.applyRebalancePlan(rebalance, 1_100);
-```
-
-After a controller-driven rebalance, drain, or recovery, each local runner
-should resync its in-memory ownership cache before ticking:
-
-```zig
-_ = try local_runner.syncOwnedShards();
-```
-
-Graceful drain and node-down recovery mutate durable lease storage, then the
-surviving runner can process queued messages from reassigned shards:
-
-```zig
-const drain = try controller.drainRunner(runner_a, 1_200);
-_ = drain;
-
-const recovery = try controller.recoverNodeDown(runner_a, runner_b, 2_000);
-_ = recovery;
-```
-
-Split-brain reports compare local runner lease snapshots with durable storage
-owner/epoch facts:
-
-```zig
-var owned = try local_runner.lease_manager.ownedLeases(allocator);
-defer owned.deinit();
-
-var split_brain = try controller.detectSplitBrain(allocator, &.{owned});
-defer split_brain.deinit();
-```
-
-Inspection reports combine membership, durable leases, mailbox lag,
-backpressure, recent rebalance actions, and failure counters:
-
-```zig
-var report = try controller.inspectCluster(allocator, 2_100);
-defer report.deinit();
-
-const json = try fx.formatClusterInspectionJson(allocator, report);
 defer allocator.free(json);
 ```
 
-For file-backed stores, use the local CLI:
-
-```bash
-zig build cluster-inspect -- --storage-dir .zig-cache/local-cluster --shard-count 32 --format json --runner machine-a:runner-a:runner-a:1000:1010
-```
-
-`--runner` flags seed the in-memory inspection registry while durable leases and
-mailbox lag are read from the storage directory.
-
-## Production Shard Lease Guards
-
-Cluster-owned durable writes should validate a storage-backed fence immediately
-before mutation. Use `LocalShardLeaseManager.fenceForShard` to derive the
-current token, then use `ShardLeaseWriteGuard` or the higher-level runtime and
-workflow APIs:
-
-```zig
-const fence = try lease_manager.fenceForShard(shard_id);
-const guard = fx.ShardLeaseWriteGuard.init(
-    lease_manager.storage,
-    fence,
-    .message_submit,
-);
-
-var submitted = try fx.guardMessageSubmit(message_storage, .{
-    .guard = guard,
-    .request = .{
-        .shard_id = shard_id,
-        .envelope = envelope,
-        .now_ms = now_ms,
-    },
-});
-defer submitted.deinit(allocator);
-```
-
-Successful guarded writes stamp `lease_epoch` on message/mailbox envelopes and
-append `lease_epoch=<epoch>` to workflow journal details. `ClusterRuntime` and
-`ClusterWorkflowEntityHandler` already use these guards for shard-owned message,
-queue, timer, and journal mutation paths.
-
-Use `auditOwnedLeases` to inspect local ownership against durable storage:
-
-```zig
-var audit = try lease_manager.auditOwnedLeases(allocator, now_ms);
-defer audit.deinit();
-
-if (audit.stale_owner != 0 or audit.stale_epoch != 0 or audit.expired != 0) {
-    // Drain or reacquire according to the runner policy.
-}
-```
-
-Use `forceReleaseStaleShard` only after the stored lease has expired past the
-configured clock-skew tolerance. Health-inspector recovery by owner still uses
-`recoverDeadRunner`.
-
-Core coordination primitives are deterministic:
-
-```zig
-var deferred = fx.Deferred(u32, AppError).init();
-try deferred.completeSuccess(1);
-const deferred_exit = try deferred.awaitExit();
-
-var queue = fx.Queue(u32).bounded(allocator, 16);
-defer queue.deinit();
-try queue.offer(1);
-const value = try queue.take();
-queue.shutdown();
-try std.testing.expectError(error.QueueShutdown, queue.take());
-
-var semaphore = fx.Semaphore.init(4);
-try semaphore.acquire(1);
-try semaphore.release(1);
-
-var scope = fx.Scope.init(allocator);
-defer scope.deinit();
-try semaphore.acquireScoped(&scope, 2);
-scope.close();
-```
-
-A shut down queue rejects new offers but still lets callers drain already
-buffered items. `Semaphore.acquireScoped` releases permits through the supplied
-scope, which is useful when a permit should be tied to a runtime, graph, or
-fiber lifetime.
-
-Deterministic coordination never suspends. Inspect wait states before deciding
-whether an operation would proceed, fail immediately, or suspend in a future
-backend:
-
-```zig
-try std.testing.expectEqual(fx.DeferredAwaitState.pending, deferred.awaitState());
-try std.testing.expectEqual(fx.QueueOfferState.backpressured, queue.offerState());
-try std.testing.expectEqual(fx.QueueTakeState.empty, queue.takeState());
-try std.testing.expectEqual(fx.SemaphoreAcquireState.unavailable, semaphore.acquireState(8));
-```
-
-## Composition
-
-Prefer direct-style function bodies. Use composition at boundaries:
-
-```zig
-const Program = fx.Effect(u32, AppError, fx.TestServices)
-    .fromFn(loadCount)
-    .map(u64, widenCount)
-    .tap(recordTelemetry);
-```
-
-If a chain gets hard to read, move the logic back into a named direct-style
-function.
-
-## Recovery
-
-Keep errors typed while composing recovery:
-
-```zig
-const Program = LoadConfig
-    .tapError(logConfigFailure)
-    .mapError(AppError, configToAppError)
-    .catchAll(AppError, recoverWithDefaults)
-    .orElse(FallbackProgram);
-```
-
-Use direct-style recovery functions:
-
-```zig
-fn recoverWithDefaults(err: ConfigError, ctx: *fx.Context(AppEnv)) AppError!Config {
-    _ = err;
-    const logger = ctx.service(fx.Logger);
-    try logger.warn("using default config");
-    return Config.defaults();
-}
-```
-
-Use `onExit` when an observer needs to know whether the effect succeeded or
-failed:
-
-```zig
-fn recordExit(exit: fx.Exit(Config, AppError), ctx: *fx.Context(AppEnv)) AppError!void {
-    const logger = ctx.service(fx.Logger);
-    switch (exit) {
-        .success => try logger.info("config loaded"),
-        .failure => |err| {
-            _ = err;
-            try logger.warn("config failed");
-        },
-        else => try logger.warn("config ended without a typed result"),
-    }
-}
-
-const Observed = LoadConfig.onExit(recordExit);
-```
-
-Use `ensuring` for an effect-local finalizer that must run on both success and
-failure:
-
-```zig
-fn flushTelemetry(ctx: *fx.Context(AppEnv)) AppError!void {
-    const logger = ctx.service(fx.Logger);
-    try logger.info("telemetry flushed");
-}
-
-const Program = LoadConfig.ensuring(flushTelemetry);
-```
-
-## Runtime Reports
-
-Use `formatExit` when a CLI, test, or agent workflow needs a readable report:
-
-```zig
-const exit = env.exit(Program);
-const report = try fx.formatExit(allocator, "compile schema", exit);
-defer allocator.free(report);
-
-std.debug.print("{s}\n", .{report});
-```
-
-The report keeps the typed Zig error intact in `Exit`, but prints the program
-label, status, error name, and a next-action hint.
-
-## Schedules
-
-Retry uses `Schedule`:
-
-```zig
-var retry = fx.Schedule.exponential(.{
-    .max_retries = 3,
-    .base_delay_ms = 50,
-    .max_delay_ms = 1_000,
-});
-
-const result = try Program.retry(&ctx, &retry);
-```
-
-Common schedule names are available for Effect-style readability:
-
-```zig
-var once = fx.Schedule.once();
-var recurs = fx.Schedule.recurs(3);
-var spaced = fx.Schedule.spaced(.{ .max_retries = 3, .delay_ms = 50 });
-var every = fx.Schedule.duration(.{ .max_retries = 3, .duration_ms = 50 });
-var fibonacci = fx.Schedule.fibonacci(.{
-    .max_retries = 5,
-    .base_delay_ms = 25,
-    .max_delay_ms = 1_000,
-});
-```
-
-Repeat reruns successful programs and returns the last success:
-
-```zig
-var repeat = fx.Schedule.repeat(.{
-    .max_repeats = 2,
-    .delay_ms = 10,
-});
-
-const final = try Program.repeat(&ctx, &repeat);
-```
-
-Use `backoff` or `jitteredBackoff` for retry paths that should spread load:
-
-```zig
-var schedule = fx.Schedule.jitteredBackoff(.{
-    .max_retries = 5,
-    .base_delay_ms = 25,
-    .factor = 2,
-    .max_delay_ms = 1_000,
-    .jitter_ms = 50,
-    .seed = 1,
-});
-```
-
-Use `timeout` when a fixed-delay retry policy must stop before exceeding an
-elapsed delay budget, and `reset` when a runtime/test needs to know when idle
-time should reset retry state:
-
-```zig
-var timeout = fx.Schedule.timeout(.{
-    .max_retries = 5,
-    .delay_ms = 100,
-    .timeout_ms = 250,
-});
-
-var reset = fx.Schedule.reset(.{
-    .max_retries = 3,
-    .delay_ms = 50,
-    .reset_after_ms = 1_000,
-});
-
-const next_attempt = reset.resetAttempt(attempt, idle_ms);
-```
-
-Inspect schedule decisions in tests:
-
-```zig
-const decision = schedule.decision(2);
-try std.testing.expect(decision.continues);
-try std.testing.expectEqual(@as(?u64, 100), decision.delay_ms);
-```
-
-Compose two schedules at a decision point when a boundary needs simple algebra:
-
-```zig
-var retry_a = fx.Schedule.recurs(3);
-var retry_b = fx.Schedule.spaced(.{ .max_retries = 2, .delay_ms = 50 });
-
-const earlier = retry_a.unionNextDelay(&retry_b, attempt);
-const later_when_both_continue = retry_a.intersectionNextDelay(&retry_b, attempt);
-```
-
-`unionNextDelay` continues while either schedule continues and chooses the
-earlier available delay. `intersectionNextDelay` continues only while both
-schedules continue and chooses the later delay.
-
-Use `ScheduleProgram` when composition should be an owned recursive program:
-
-```zig
-var program = fx.ScheduleProgram.init(allocator);
-defer program.deinit();
-
-const fast = try program.schedule(fx.Schedule.fixed(.{
-    .max_retries = 3,
-    .delay_ms = 10,
-}));
-const slow = try program.schedule(fx.Schedule.fixed(.{
-    .max_retries = 2,
-    .delay_ms = 25,
-}));
-
-const either = try program.unionWith(fast, slow);
-const both = try program.intersectionWith(fast, slow);
-_ = try program.sequence(either, both);
-
-const delay = program.nextDelay(attempt);
-```
-
-`sequence` runs the first child until it is exhausted, then runs the second
-child with attempts reset to zero.
-
-`TestEnv` wires the fake clock into the context, so retry sleeps are deterministic
-in tests.
-
-For runtime-managed cleanup plus retries, put the retry in a direct-style
-program or use the low-level context form when you need to share the retry scope.
-
-## Clock
-
-`Clock` is a service. `TestEnv` uses a fake clock, so schedules are
-deterministic:
-
-```zig
-var ctx = env.context();
-const clock = ctx.service(fx.Clock);
-
-clock.sleep(25);
-try std.testing.expectEqual(@as(u64, 25), clock.nowMs());
-```
-
-Use `fx.Clock.system()` for a wall-clock service in real environments.
-
-## Test Loop
-
-Use this loop for new behavior:
-
-1. Write the failing Zig test.
-2. Run `bun run zigeffect:test`.
-3. Implement the smallest API that makes the test pass.
-4. Run `bun run zig:test`.
-5. Update docs if the public API changed.
-
-Useful deterministic assertions live on `TestEnv` and `fx.testing`:
-
-```zig
-try env.expectStructuredLog(.info, "request handled");
-try env.expectHistogram("request.ms", 2, 35, 10, 25);
-try env.expectSpanEnded(span_id);
-try env.expectSpanParent(child_span, root_span);
-try env.putFixture("report", "expected output");
-try env.expectGolden("report", actual_output);
-
-try fx.testing.expectDependencyReportMissing(&report, @typeName(fx.Config));
-try fx.testing.expectCauseFinalizerFailure(cause, "CloseFailed");
-try fx.testing.expectScheduleDelay(&schedule, 0, 25);
-try fx.testing.expectFiberStatus(fiber, .done);
-try fx.testing.expectQueueLen(&queue, 0);
-try fx.testing.expectQueueShutdown(&queue, true);
-```
-
-When an agent-facing harness needs a readable failure body, format assertion
-reports explicitly:
-
-```zig
-const log_report = try env.formatLogAssertionReport("request handled");
-defer allocator.free(log_report);
-
-const schedule_report = try fx.testing.formatScheduleDelayAssertionReport(
-    allocator,
-    attempt,
-    25,
-    schedule.nextDelay(attempt),
-);
-defer allocator.free(schedule_report);
-```
-
-Use `TestEnv` service layers when tests need normal layer graph wiring with
-fake services:
-
-```zig
-var graph = fx.layerGraph(allocator, .{
-    env.loggerLayer(),
-    env.configLayer(),
-});
-
-const logger_and_config = env.serviceLayer(.{ fx.Logger, fx.Config });
-```
+The versioned agent map contains the validated project manifest and exact agent
+workflow alongside the layer topology, services, advertised operations,
+dependency edges, memoized reuse, causal health, findings, unresolved fibers,
+a bounded recent-event tail, the embedded NenDB summary, and durable follow-up
+query contracts. Expose it only through an
+authenticated, bounded diagnostics route such as
+`zigeffect-http.ApplicationMapHandler`.
+
+Capture `newest_durable_event_id` with `zigeffect graph status --json` before a
+focused change and inspect the ordered causal delta afterward with `zigeffect
+graph since <id> --limit 256 --json`. See [NenDB-backed agent
+development](nendb-agent-development.md).
+
+## Typed failures and structured causes
+
+Zig error sets are the typed effect failure channel. Use `catchAll` or
+`mapError` when the program owns recovery or translation. Use runtime `exit`
+APIs when the caller must inspect success, typed failure, interruption, defect,
+or finalizer failure without immediately returning it.
+
+`Exit`, `Cause`, and `CauseTree` retain structure. Do not flatten failures into
+log strings before the application boundary. See [Errors](errors.md).
+
+## Resources, fibers, and durable work
+
+Managed-runtime resources live for the runtime lifetime. Each run has a child
+scope; forked fibers are supervised beneath it. Use scoped acquisition for
+files, sockets, channels, pools, exporters, and child processes. Never return a
+borrowed value whose owner ends before the consumer.
+
+For specialized runtime features, continue with:
+
+- [Resource ownership](resource-ownership.md)
+- [Statecharts in production](statecharts-production.md)
+- [Migration to durable runtime](migration-to-durable-runtime.md)
+- [gRPC, Connect, and Cloud Run](grpc-cloud-run.md)
+
+## Deterministic testing
+
+Use ordinary `std.testing` for focused unit assertions and Testing v2 for
+semantic acceptance evidence. First-party and generated test artifacts use the
+`zigeffect_test_runner` in server mode and produce suite receipts under
+`.zigeffect/tests/suites/`.
+
+After `zig build test`, require a complete passing receipt with equal discovered
+and executed counts, zero pending tests, zero leaks, and zero logged errors.
+Application projects additionally use manifest-owned scenarios and
+`zstd.Testing.TestContext`. See [Agent-first testing](agent-first-testing.md).
+
+## Legacy framework surface
+
+The repository still contains `fx.Effect(..., Env)`, `ServiceEnv`,
+`LayerWithError`, `LayerGraph`, `layerGraph`, and `ctx.runEffect` while older
+runtime modules and adapter packages migrate. They may be documented in a
+roadmap or an internal compatibility note, but must not appear as the recommended
+shape for new applications, packages, services, examples, or scaffolds.
+
+Migration status is tracked in:
+
+- [Standard-library canonical migration](../../zigeffect-std/docs/effect-native-roadmap.md)
+- [Native gRPC canonical migration](../../zigeffect-grpc/docs/effect-native-roadmap.md)
+- [Ziac canonical composition migration](../../ziac/docs/zigeffect-composition-roadmap.md)
+
+## Reading order
+
+1. [Compositional applications](compositional-applications.md)
+2. [Module pattern](module-pattern.md)
+3. [Architecture](architecture.md)
+4. [Agent-observable runtime](agent-observable-runtime.md)
+5. [Agent-first application development](agent-first-application-development.md)
+6. [Agent-first testing](agent-first-testing.md)

@@ -100,8 +100,10 @@ Both paths use the same evidence discipline:
 - Reports and policies are evidence records, not authority.
 - Redaction, bounded memory, artifact truncation, and sampling limits are part
   of the runtime contract.
-- NenDB is the durable storage direction, but the live self-improving loop does
-  not write NenDB records today.
+- Canonical application runs automatically write their redacted causal stream
+  to the embedded NenDB graph. Application agents capture `graph status` before
+  a change and inspect `graph since` afterward; the older core-only harness
+  continues to use standalone JSON artifacts.
 - Cockroach scope is intentionally excluded from this loop.
 
 ## Ready Checklist
@@ -119,7 +121,6 @@ Before assigning an agent to a self-improvement task:
 
 These are deliberately not ready as autonomous behavior:
 
-- live upstream NenDB writes from the self-improving loop;
 - durable cross-session learning memory;
 - production telemetry ingestion;
 - app source/config/migration mutation;

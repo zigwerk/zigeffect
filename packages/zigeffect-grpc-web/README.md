@@ -24,4 +24,11 @@ const result = createQuery(() => connectUnaryQueryOptions({
 }));
 ```
 
+`createZigEffectConnectTransport` automatically installs bounded
+`x-request-id` and W3C `traceparent` headers. The native server hashes these
+into causal boundary keys shared by transport and generated handler facts; raw
+header values and application payloads are not stored. Supply deterministic
+factories in tests with `causalContext`, or use
+`createCausalContextInterceptor` when composing a custom Connect transport.
+
 Do not use the React-only Connect Query provider/hooks in Solid applications.

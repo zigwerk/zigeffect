@@ -40,9 +40,12 @@ pub const Grpc = @import("grpc/root.zig");
 pub const Agent = @import("agent/root.zig");
 pub const Application = @import("application/root.zig");
 pub const CausalGraph = @import("causal_graph/root.zig");
+pub const CausalRuntime = @import("runtime/root.zig");
+pub const ManagedRuntime = CausalRuntime.ManagedRuntime;
 pub const Statechart = @import("statechart/root.zig");
 pub const Project = @import("project/root.zig");
 pub const Safety = @import("safety/root.zig");
+pub const Development = @import("development/root.zig");
 
 test "zigeffect-std re-exports the engine facade" {
     try std.testing.expect(@hasDecl(fx, "effect"));
@@ -58,7 +61,10 @@ test "root exports the repository-owned gRPC namespace" {
     const zstd = @import("root.zig");
     try std.testing.expect(@hasDecl(zstd, "Grpc"));
     try std.testing.expect(@hasDecl(zstd.Grpc, "frameMessageAlloc"));
-    try std.testing.expect(@hasDecl(zstd.Grpc, "invokeEffect"));
+    try std.testing.expect(@hasDecl(zstd.Grpc, "GrpcClient"));
+    try std.testing.expect(@hasDecl(zstd.Grpc, "clientLayer"));
+    try std.testing.expect(@hasDecl(zstd.Grpc, "CallError"));
+    try std.testing.expect(@hasDecl(zstd.Grpc, "call"));
 }
 
 test "root exports causal Application namespace" {
@@ -80,10 +86,27 @@ test "root exports capability maturity and resolution" {
     try std.testing.expect(@hasDecl(zstd.Capability, "resolve"));
 }
 
+test "root system primitive boundaries expose canonical effects and services" {
+    const zstd = @import("root.zig");
+    try std.testing.expect(@hasDecl(zstd.Clock, "currentTimeMillis"));
+    try std.testing.expect(@hasDecl(zstd.Clock, "sleep"));
+    try std.testing.expect(@hasDecl(zstd.Randomness, "integer"));
+    try std.testing.expect(@hasDecl(zstd.Config, "getAlloc"));
+    try std.testing.expect(@hasDecl(zstd.Console, "writeOut"));
+    try std.testing.expect(@hasDecl(zstd.FileSystem, "FileSystem"));
+    try std.testing.expect(@hasDecl(zstd.FileSystem, "memory"));
+    try std.testing.expect(@hasDecl(zstd.Process, "Process"));
+    try std.testing.expect(@hasDecl(zstd.Process, "fake"));
+    try std.testing.expect(@hasDecl(zstd.Ids, "Service"));
+    try std.testing.expect(@hasDecl(zstd.Ids, "uuidV7Effect"));
+}
+
 test "root exports durable causal graph database" {
     const zstd = @import("root.zig");
     try std.testing.expect(@hasDecl(zstd.CausalGraph, "LocalDatabase"));
     try std.testing.expect(@hasDecl(zstd.CausalGraph, "Snapshot"));
+    try std.testing.expect(@hasDecl(zstd, "ManagedRuntime"));
+    try std.testing.expect(@hasDecl(zstd.CausalRuntime, "agent_map_schema"));
 }
 
 test "root exports statechart artifact catalog queries" {
@@ -97,9 +120,11 @@ test {
     std.testing.refAllDecls(Testing);
     std.testing.refAllDecls(Application);
     std.testing.refAllDecls(CausalGraph);
+    std.testing.refAllDecls(CausalRuntime);
     std.testing.refAllDecls(Statechart);
     std.testing.refAllDecls(Project);
     std.testing.refAllDecls(Safety);
+    std.testing.refAllDecls(Development);
     std.testing.refAllDecls(Capability);
     std.testing.refAllDecls(SystemCapabilities);
     std.testing.refAllDecls(Http);

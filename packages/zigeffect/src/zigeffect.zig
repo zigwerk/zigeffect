@@ -1,5 +1,9 @@
 const std = @import("std");
 
+/// Canonical service/effect/layer/runtime kernel. This namespace is the
+/// migration boundary while the environment-coupled engine is retired.
+pub const kernel = @import("kernel/root.zig");
+
 pub const Allocator = std.mem.Allocator;
 
 pub const traits = @import("traits/root.zig");
@@ -288,6 +292,12 @@ pub const services = struct {
     pub const formatObservabilityReport = observability.formatObservabilityReport;
     pub const CausalEventKind = causal.CausalEventKind;
     pub const CausalEvent = causal.CausalEvent;
+    pub const CausalContextV2 = causal.CausalContextV2;
+    pub const TraceParent = causal.TraceParent;
+    pub const parseTraceParent = causal.parseTraceParent;
+    pub const CausalLink = causal.CausalLink;
+    pub const CausalLinkKind = causal.CausalLinkKind;
+    pub const stableCausalContextId = causal.stableCausalContextId;
     pub const CausalSnapshot = causal.CausalSnapshot;
     pub const CausalLineage = causal.CausalLineage;
     pub const CausalFiberState = causal.CausalFiberState;
@@ -503,6 +513,7 @@ pub const services = struct {
     pub const deriveCausalAppIncidents = causal_app_runtime.deriveCausalAppIncidents;
     pub const CausalBackendKind = causal_backend.CausalBackendKind;
     pub const CausalBackend = causal_backend.CausalBackend;
+    pub const CausalFanoutBackendState = causal_backend.CausalFanoutBackendState;
 };
 
 pub const testing = struct {
@@ -1157,6 +1168,13 @@ pub const IdGenerator = services.id_generator.IdGenerator;
 pub const formatObservabilityReport = services.observability.formatObservabilityReport;
 pub const CausalEventKind = services.causal.CausalEventKind;
 pub const CausalEvent = services.causal.CausalEvent;
+pub const CausalContextV2 = services.causal.CausalContextV2;
+pub const TraceParent = services.causal.TraceParent;
+pub const parseTraceParent = services.causal.parseTraceParent;
+pub const CausalLink = services.causal.CausalLink;
+pub const CausalLinkKind = services.causal.CausalLinkKind;
+pub const max_causal_links = services.causal.max_causal_links;
+pub const stableCausalContextId = services.causal.stableCausalContextId;
 pub const CausalSnapshot = services.causal.CausalSnapshot;
 pub const CausalLineage = services.causal.CausalLineage;
 pub const CausalFiberState = services.causal.CausalFiberState;
@@ -1202,6 +1220,7 @@ pub const causal_hub_backend = services.causal_hub_backend;
 pub const CausalHubBackendState = services.causal_hub_backend.CausalHubBackendState;
 pub const causal_otlp_json = services.causal_otlp_json;
 pub const formatOtlpLogs = services.causal_otlp_json.formatOtlpLogs;
+pub const formatOtlpSignals = services.causal_otlp_json.formatOtlpSignals;
 pub const PolicyEngine = services.policy_engine.PolicyEngine;
 pub const RemediationKind = services.policy_engine.RemediationKind;
 pub const RemediationRequest = services.policy_engine.RemediationRequest;
@@ -1220,6 +1239,8 @@ pub const CausalFinding = services.causal.CausalFinding;
 pub const CausalFindings = services.causal.CausalFindings;
 pub const CausalStore = services.causal.CausalStore;
 pub const CausalStoreOptions = services.causal.CausalStoreOptions;
+pub const CausalInspectOptions = services.causal.CausalInspectOptions;
+pub const CausalInspection = services.causal.CausalInspection;
 pub const SourceRef = services.source_ref.SourceRef;
 pub const SourceRefInput = services.source_ref.SourceRefInput;
 pub const resolveEventSource = services.source_ref.resolveEventSource;
@@ -1319,6 +1340,7 @@ pub const defaultJobCausalStoreOptions = services.causal_app_runtime.defaultJobC
 pub const deriveCausalAppIncidents = services.causal_app_runtime.deriveCausalAppIncidents;
 pub const CausalBackendKind = services.causal_backend.CausalBackendKind;
 pub const CausalBackend = services.causal_backend.CausalBackend;
+pub const CausalFanoutBackendState = services.causal_backend.CausalFanoutBackendState;
 pub const TestFixtureRegistry = testing.test_env.TestFixtureRegistry;
 pub const TestServices = testing.test_env.TestServices;
 pub const TestEnv = testing.test_env.TestEnv;

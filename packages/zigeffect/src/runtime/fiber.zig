@@ -22,6 +22,7 @@ pub const exitWithFinalizerFailure = result.exitWithFinalizerFailure;
 pub const Clock = clock_mod.Clock;
 pub const CausalStore = causal_mod.CausalStore;
 pub const CausalEvent = causal_mod.CausalEvent;
+pub const CausalContextV2 = causal_mod.CausalContextV2;
 pub const BackendCapabilities = backend_mod.BackendCapabilities;
 pub const deterministicBackend = backend_mod.deterministicBackend;
 pub const AsyncBackend = async_backend_mod.AsyncBackend;
@@ -75,6 +76,7 @@ fn FiberState(comptime Success: type, comptime Failure: type, comptime Env: type
         causal_forked_event_id: ?u64 = null,
         causal_trace_id: ?u64 = null,
         causal_span_id: ?u64 = null,
+        causal_context: CausalContextV2 = .{},
         causal_joined_recorded: bool = false,
         // Set when this fiber was spawned onto a FiberExecutor at fork time. The
         // executor is stored so the handle is self-describing: both join and
@@ -166,6 +168,9 @@ fn FiberState(comptime Success: type, comptime Failure: type, comptime Env: type
             owned.scope_id = owned.scope_id orelse self.scope.causal_scope_id;
             owned.trace_id = owned.trace_id orelse self.causal_trace_id;
             owned.span_id = owned.span_id orelse self.causal_span_id;
+            owned.context = CausalContextV2.merge(self.causal_context, owned.context);
+            owned.context.trace_id_low = owned.context.trace_id_low orelse owned.trace_id;
+            owned.context.span_id = owned.context.span_id orelse owned.span_id;
             return store.record(owned) catch null;
         }
 
@@ -175,16 +180,19 @@ fn FiberState(comptime Success: type, comptime Failure: type, comptime Env: type
             run_id: u64,
             trace_id: ?u64,
             span_id: ?u64,
+            causal_context: CausalContextV2,
         ) void {
             self.causal_store = store;
             self.causal_run_id = run_id;
             self.causal_trace_id = trace_id;
             self.causal_span_id = span_id;
+            self.causal_context = causal_context;
             self.scope.causal_scope_id = self.scope.causal_scope_id orelse store.nextScopeId();
             self.causal_forked_event_id = self.recordCausal(.{
                 .kind = .fiber_forked,
                 .status = "pending",
             });
+            self.scope.setCausalContext(causal_context);
             self.scope.attachCausal(store, run_id, self.causal_forked_event_id, trace_id, span_id);
         }
 
@@ -318,6 +326,7 @@ pub fn FiberRuntime(comptime Env: type) type {
         span_id: ?u64 = null,
         causal_store: ?*CausalStore = null,
         causal_run_id: ?u64 = null,
+        causal_context: CausalContextV2 = .{},
         backend: BackendCapabilities = deterministicBackend(),
         async_backend: ?AsyncBackend = null,
         provided_builder: ServiceSetBuilder = emptyServiceSet,
@@ -351,6 +360,16 @@ pub fn FiberRuntime(comptime Env: type) type {
             var runtime = self;
             runtime.trace_id = trace_id;
             runtime.span_id = span_id;
+            runtime.causal_context.trace_id_low = trace_id;
+            runtime.causal_context.span_id = span_id;
+            return runtime;
+        }
+
+        pub fn withCausalContext(self: Self, child_context: CausalContextV2) Self {
+            var runtime = self;
+            runtime.causal_context = CausalContextV2.merge(self.causal_context, child_context);
+            runtime.trace_id = runtime.trace_id orelse runtime.causal_context.trace_id_low;
+            runtime.span_id = runtime.span_id orelse runtime.causal_context.span_id;
             return runtime;
         }
 
@@ -423,6 +442,7 @@ pub fn FiberRuntime(comptime Env: type) type {
             ctx.span_id = self.span_id;
             ctx.causal_store = self.causal_store;
             ctx.causal_run_id = self.ensureCausalRunId();
+            ctx.causal_context = self.causal_context;
             ctx.async_backend = self.async_backend;
             ctx.executor = self.executor;
             return ctx;
@@ -444,7 +464,7 @@ pub fn FiberRuntime(comptime Env: type) type {
             const Runner = struct {
                 fn run(state: *State, ctx: *Context(Env)) void {
                     const task: *Task = @ptrCast(@alignCast(state.task.?));
-                    const value = task.effect.run(ctx) catch |err| {
+                    const value = ctx.runEffect(task.effect) catch |err| {
                         state.completeFailure(err);
                         return;
                     };
@@ -484,7 +504,7 @@ pub fn FiberRuntime(comptime Env: type) type {
 
             if (self.causal_store) |store| {
                 if (self.ensureCausalRunId()) |run_id| {
-                    state.attachCausal(store, run_id, self.trace_id, self.span_id);
+                    state.attachCausal(store, run_id, self.trace_id, self.span_id, self.causal_context);
                 }
             }
 

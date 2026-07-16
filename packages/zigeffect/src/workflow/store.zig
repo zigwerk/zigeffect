@@ -538,6 +538,14 @@ pub const CausalJournalStore = struct {
         };
     }
 
+    /// The most recent durable workflow event mirrored into the causal store.
+    /// Statechart interpreters use this as the parent of the decision produced
+    /// from that activity result, joining both execution models into one graph.
+    pub fn latestCausalId(self: *const CausalJournalStore) ?u64 {
+        if (self.sequence_ids.items.len == 0) return null;
+        return self.sequence_ids.items[self.sequence_ids.items.len - 1].causal_id;
+    }
+
     fn appendAdapter(context: *anyopaque, request: JournalAppend) JournalStoreAppendError!JournalSequence {
         const self: *CausalJournalStore = @ptrCast(@alignCast(context));
         const sequence = try self.inner.append(request);

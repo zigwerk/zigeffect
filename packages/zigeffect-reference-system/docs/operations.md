@@ -5,6 +5,11 @@ Postgres or CockroachDB, Redis Streams, S3-compatible storage, authenticated TLS
 transport, and an OTLP collector. The immutable regression budgets are in
 `operations/budgets.v1.json`; alert and dashboard contracts sit beside it.
 
+Operational maturity is separate from composition maturity. The generated
+production root still isolates HTTP, Postgres, and OTLP behind a compatibility
+adapter bridge; operators must not interpret successful topology receipts as
+proof that this wiring is the canonical application model.
+
 ## Release and health contract
 
 `GET /health/live` proves that the API process can serve. `GET /health/ready`

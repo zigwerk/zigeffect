@@ -65,3 +65,35 @@ test "causal backend conformance counts backend failures without perturbing stor
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\": \"json_lines\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"failed_writes\": 2") != null);
 }
+
+test "causal backend fanout delivers one runtime stream to history live and telemetry adapters" {
+    var history = conformance.CaptureBackendState.init(std.testing.allocator);
+    defer history.deinit();
+    var telemetry = conformance.CaptureBackendState.init(std.testing.allocator);
+    defer telemetry.deinit();
+    var failing = conformance.FailingBackendState{};
+
+    const backends = [_]fx.CausalBackend{
+        history.backend(.nendb_graph),
+        failing.backend(.async_stream),
+        telemetry.backend(.opentelemetry),
+    };
+    var fanout = fx.CausalFanoutBackendState.init(&backends);
+
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+    store.attachBackend(fanout.backend());
+
+    _ = try store.record(.{ .kind = .run_started, .label = "fanout" });
+    _ = try store.record(.{ .kind = .run_completed, .label = "fanout", .status = "success" });
+
+    try std.testing.expectEqual(fx.CausalBackendKind.fanout, store.attachedBackendKind().?);
+    try std.testing.expectEqual(@as(usize, 2), history.events.items.len);
+    try std.testing.expectEqual(@as(usize, 2), telemetry.events.items.len);
+    try std.testing.expectEqual(@as(u64, 6), fanout.attemptedWriteCount());
+    try std.testing.expectEqual(@as(u64, 4), fanout.successfulWriteCount());
+    try std.testing.expectEqual(@as(u64, 2), fanout.failedWriteCount());
+    // A failed exporter is visible but never perturbs the originating effect or
+    // prevents the remaining exporters from receiving the event.
+    try std.testing.expectEqual(@as(u64, 2), store.backendFailureCount());
+}

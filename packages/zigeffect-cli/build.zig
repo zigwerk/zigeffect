@@ -1,8 +1,16 @@
 const std = @import("std");
 
+var test_filter_declared = false;
+var configured_test_filter: ?[]const u8 = null;
+
 fn addV2Test(b: *std.Build, runner: std.Build.LazyPath, options: std.Build.TestOptions) *std.Build.Step.Compile {
     var configured = options;
     configured.test_runner = .{ .path = runner, .mode = .server };
+    if (!test_filter_declared) {
+        configured_test_filter = b.option([]const u8, "test-filter", "Compile only native tests whose names contain this text");
+        test_filter_declared = true;
+    }
+    if (configured_test_filter) |filter| configured.filters = &.{filter};
     return b.addTest(configured);
 }
 

@@ -3,6 +3,34 @@ const fx = @import("zigeffect");
 const causal = @import("support/causal_assertions.zig");
 const fixtures = @import("support/fixtures.zig");
 
+fn resolveLogger(ctx: *fx.Context(fx.TestServices)) fixtures.TestError!void {
+    _ = ctx.service(fx.Logger);
+}
+
+fn runNestedLoggerEffect(ctx: *fx.Context(fx.TestServices)) fixtures.TestError!void {
+    const child = fx.Effect(void, fixtures.TestError, fx.TestServices)
+        .fromFn(resolveLogger)
+        .requires(.{fx.Logger});
+    try ctx.runEffect(child);
+}
+
+fn hasAncestor(snapshot: fx.CausalSnapshot, event_id: u64, ancestor_id: u64) bool {
+    var current = event_id;
+    var remaining = snapshot.events.len;
+    while (remaining > 0) : (remaining -= 1) {
+        var parent: ?u64 = null;
+        for (snapshot.events) |event| {
+            if (event.id == current) {
+                parent = event.parent_id;
+                break;
+            }
+        }
+        current = parent orelse return false;
+        if (current == ancestor_id) return true;
+    }
+    return false;
+}
+
 test "runtime suspension names durable wait boundary" {
     const suspension = fx.Suspension{
         .kind = .timer,
@@ -204,6 +232,97 @@ test "runtime exit preserves program failure plus cleanup failure" {
     try std.testing.expect(fixtures.tracked_resource_released);
 }
 
+test "runtime automatically parents nested effects and resolved services" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+
+    var runtime = env.runtime().withCausalStore(&store);
+    const program = fx.Effect(void, fixtures.TestError, fx.TestServices)
+        .fromFn(runNestedLoggerEffect)
+        .requires(.{fx.Logger});
+
+    try runtime.run(program);
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+
+    const run_started = try causal.expectEvent(snapshot, .{
+        .kind = .run_started,
+        .label = "Runtime.run",
+    });
+    const root_effect = blk: {
+        for (snapshot.events) |event| {
+            if (event.kind == .effect_started) break :blk event;
+        }
+        return error.ExpectedRootEffectMissing;
+    };
+    try std.testing.expect(root_effect.type_name.len <= 160);
+    const child_effect = blk: {
+        var seen_root = false;
+        for (snapshot.events) |event| {
+            if (event.kind != .effect_started) continue;
+            if (!seen_root) {
+                seen_root = true;
+                continue;
+            }
+            break :blk event;
+        }
+        return error.ExpectedNestedEffectMissing;
+    };
+    const service = try causal.expectEvent(snapshot, .{
+        .kind = .service_required,
+        .type_name = @typeName(fx.Logger),
+        .status = "resolved",
+    });
+
+    try std.testing.expectEqual(run_started.id, root_effect.parent_id.?);
+    try std.testing.expectEqual(root_effect.id, child_effect.parent_id.?);
+    try std.testing.expect(service.parent_id.? != root_effect.id);
+    try std.testing.expect(hasAncestor(snapshot, service.id, child_effect.id));
+}
+
+test "caller-owned runtime scope keeps causal lineage until transport closes it" {
+    var env = try fx.TestEnv.init(std.testing.allocator);
+    defer env.deinit();
+
+    var store = fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+    var request_scope = fx.Scope.init(std.testing.allocator);
+    defer request_scope.deinit();
+
+    var runtime = env.runtime()
+        .withScope(&request_scope)
+        .withCausalStore(&store);
+    const program = fx.acquireRelease(
+        fixtures.TrackedResource,
+        fixtures.TestError,
+        fx.TestServices,
+        fixtures.acquireTracked,
+        fixtures.releaseTracked,
+    );
+
+    _ = try runtime.run(program);
+    try std.testing.expect(!fixtures.tracked_resource_released);
+    request_scope.closeWithExit(.success);
+    try std.testing.expect(fixtures.tracked_resource_released);
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    const started = try causal.expectEvent(snapshot, .{ .kind = .run_started });
+    const opened = try causal.expectEvent(snapshot, .{ .kind = .scope_opened });
+    const acquired = try causal.expectEvent(snapshot, .{ .kind = .resource_acquired });
+    const released = try causal.expectEvent(snapshot, .{ .kind = .resource_finalized });
+    const closed = try causal.expectEvent(snapshot, .{ .kind = .scope_closed });
+
+    try std.testing.expectEqual(started.id, opened.parent_id.?);
+    try std.testing.expectEqual(opened.id, acquired.parent_id.?);
+    try std.testing.expectEqual(acquired.id, released.parent_id.?);
+    try std.testing.expectEqual(opened.id, closed.parent_id.?);
+}
+
 test "runtime emits causal run and exit events when store is attached" {
     var env = try fx.TestEnv.init(std.testing.allocator);
     defer env.deinit();
@@ -222,17 +341,21 @@ test "runtime emits causal run and exit events when store is attached" {
     try causal.expectEventSequence(snapshot, &.{
         .run_started,
         .scope_opened,
+        .effect_started,
+        .effect_completed,
         .scope_closed,
         .exit_recorded,
         .run_completed,
     });
     try std.testing.expectEqualStrings("Runtime.run", snapshot.events[0].label);
-    try std.testing.expectEqualStrings("success", snapshot.events[3].status);
-    try std.testing.expectEqual(snapshot.events[0].run_id.?, snapshot.events[3].run_id.?);
+    try std.testing.expectEqualStrings("success", snapshot.events[5].status);
+    try std.testing.expectEqual(snapshot.events[0].run_id.?, snapshot.events[5].run_id.?);
     try std.testing.expectEqual(snapshot.events[0].id, snapshot.events[1].parent_id.?);
-    try std.testing.expectEqual(snapshot.events[1].id, snapshot.events[2].parent_id.?);
-    try std.testing.expectEqual(snapshot.events[0].id, snapshot.events[3].parent_id.?);
-    try std.testing.expectEqual(snapshot.events[0].id, snapshot.events[4].parent_id.?);
+    try std.testing.expectEqual(snapshot.events[0].id, snapshot.events[2].parent_id.?);
+    try std.testing.expectEqual(snapshot.events[2].id, snapshot.events[3].parent_id.?);
+    try std.testing.expectEqual(snapshot.events[1].id, snapshot.events[4].parent_id.?);
+    try std.testing.expectEqual(snapshot.events[0].id, snapshot.events[5].parent_id.?);
+    try std.testing.expectEqual(snapshot.events[0].id, snapshot.events[6].parent_id.?);
 }
 
 test "runtime causal events preserve failure and trace context" {
@@ -255,16 +378,18 @@ test "runtime causal events preserve failure and trace context" {
     try causal.expectEventSequence(snapshot, &.{
         .run_started,
         .scope_opened,
+        .effect_started,
+        .effect_completed,
         .scope_closed,
         .exit_recorded,
         .run_completed,
     });
-    try std.testing.expectEqualStrings("failure", snapshot.events[3].status);
-    try std.testing.expectEqualStrings("Boom", snapshot.events[3].type_name);
+    try std.testing.expectEqualStrings("failure", snapshot.events[5].status);
+    try std.testing.expectEqualStrings("Boom", snapshot.events[5].type_name);
     try std.testing.expectEqual(@as(?u64, 101), snapshot.events[0].trace_id);
     try std.testing.expectEqual(@as(?u64, 202), snapshot.events[0].span_id);
-    try std.testing.expectEqual(@as(?u64, 101), snapshot.events[3].trace_id);
-    try std.testing.expectEqual(@as(?u64, 202), snapshot.events[3].span_id);
+    try std.testing.expectEqual(@as(?u64, 101), snapshot.events[5].trace_id);
+    try std.testing.expectEqual(@as(?u64, 202), snapshot.events[5].span_id);
 }
 
 test "runtime exit emits causal cause event when store is attached" {
@@ -289,12 +414,14 @@ test "runtime exit emits causal cause event when store is attached" {
     try causal.expectEventSequence(snapshot, &.{
         .run_started,
         .scope_opened,
+        .effect_started,
+        .effect_completed,
         .scope_closed,
         .exit_recorded,
         .run_completed,
     });
-    try std.testing.expectEqualStrings("failure", snapshot.events[3].status);
-    try std.testing.expectEqualStrings("Boom", snapshot.events[3].type_name);
+    try std.testing.expectEqualStrings("failure", snapshot.events[5].status);
+    try std.testing.expectEqualStrings("Boom", snapshot.events[5].type_name);
 }
 
 test "shared scope runtime emits causal run events without closing caller scope" {
@@ -318,12 +445,16 @@ test "shared scope runtime emits causal run events without closing caller scope"
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    try std.testing.expectEqual(@as(usize, 3), snapshot.events.len);
-    try std.testing.expectEqual(fx.CausalEventKind.run_started, snapshot.events[0].kind);
-    try std.testing.expectEqual(fx.CausalEventKind.exit_recorded, snapshot.events[1].kind);
-    try std.testing.expectEqual(fx.CausalEventKind.run_completed, snapshot.events[2].kind);
+    try causal.expectEventSequence(snapshot, &.{
+        .run_started,
+        .scope_opened,
+        .effect_started,
+        .effect_completed,
+        .exit_recorded,
+        .run_completed,
+    });
     try std.testing.expectEqualStrings("Runtime.run", snapshot.events[0].label);
-    try std.testing.expectEqualStrings("success", snapshot.events[1].status);
+    try std.testing.expectEqualStrings("success", snapshot.events[4].status);
 }
 
 test "shared scope runtime exit emits causal events without closing caller scope" {
@@ -351,13 +482,17 @@ test "shared scope runtime exit emits causal events without closing caller scope
     var snapshot = try store.snapshot(std.testing.allocator);
     defer snapshot.deinit();
 
-    try std.testing.expectEqual(@as(usize, 3), snapshot.events.len);
-    try std.testing.expectEqual(fx.CausalEventKind.run_started, snapshot.events[0].kind);
-    try std.testing.expectEqual(fx.CausalEventKind.exit_recorded, snapshot.events[1].kind);
-    try std.testing.expectEqual(fx.CausalEventKind.run_completed, snapshot.events[2].kind);
+    try causal.expectEventSequence(snapshot, &.{
+        .run_started,
+        .scope_opened,
+        .effect_started,
+        .effect_completed,
+        .exit_recorded,
+        .run_completed,
+    });
     try std.testing.expectEqualStrings("Runtime.exit", snapshot.events[0].label);
-    try std.testing.expectEqualStrings("failure", snapshot.events[1].status);
-    try std.testing.expectEqualStrings("Boom", snapshot.events[1].type_name);
+    try std.testing.expectEqualStrings("failure", snapshot.events[4].status);
+    try std.testing.expectEqualStrings("Boom", snapshot.events[4].type_name);
 }
 
 test "runtime causal events show resource acquisition and finalization" {
@@ -384,7 +519,11 @@ test "runtime causal events show resource acquisition and finalization" {
     try causal.expectEventSequence(snapshot, &.{
         .run_started,
         .scope_opened,
+        .effect_started,
+        .effect_started,
         .resource_acquired,
+        .effect_completed,
+        .effect_completed,
         // H7a — scope_closed is now recorded BEFORE finalizers run so the
         // close event id is available when finalizer-triggered events
         // (e.g. a child fiber's interrupt) need it as their cause.
@@ -393,15 +532,14 @@ test "runtime causal events show resource acquisition and finalization" {
         .exit_recorded,
         .run_completed,
     });
-    try std.testing.expectEqualStrings(@typeName(fixtures.TrackedResource), snapshot.events[2].type_name);
     try std.testing.expectEqualStrings(@typeName(fixtures.TrackedResource), snapshot.events[4].type_name);
-    try std.testing.expectEqualStrings("success", snapshot.events[4].status);
-    try std.testing.expect(snapshot.events[2].resource_id != null);
-    try std.testing.expectEqual(snapshot.events[2].resource_id, snapshot.events[4].resource_id);
-    // resource_finalized (now at index 4) has resource_acquired (index 2) as parent.
-    try std.testing.expectEqual(snapshot.events[2].id, snapshot.events[4].parent_id.?);
-    try std.testing.expectEqual(snapshot.events[1].scope_id.?, snapshot.events[2].scope_id.?);
+    try std.testing.expectEqualStrings(@typeName(fixtures.TrackedResource), snapshot.events[8].type_name);
+    try std.testing.expectEqualStrings("success", snapshot.events[8].status);
+    try std.testing.expect(snapshot.events[4].resource_id != null);
+    try std.testing.expectEqual(snapshot.events[4].resource_id, snapshot.events[8].resource_id);
+    try std.testing.expectEqual(snapshot.events[4].id, snapshot.events[8].parent_id.?);
     try std.testing.expectEqual(snapshot.events[1].scope_id.?, snapshot.events[4].scope_id.?);
+    try std.testing.expectEqual(snapshot.events[1].scope_id.?, snapshot.events[8].scope_id.?);
 }
 
 test "runtime causal events record finalizer failure evidence" {
@@ -431,20 +569,24 @@ test "runtime causal events record finalizer failure evidence" {
     try causal.expectEventSequence(snapshot, &.{
         .run_started,
         .scope_opened,
+        .effect_started,
+        .effect_started,
         .resource_acquired,
+        .effect_completed,
+        .effect_completed,
         // H7a — scope_closed is now recorded BEFORE finalizers run.
         .scope_closed,
         .resource_finalized,
         .exit_recorded,
         .run_completed,
     });
-    try std.testing.expectEqualStrings(@typeName(fixtures.TrackedResource), snapshot.events[2].type_name);
     try std.testing.expectEqualStrings(@typeName(fixtures.TrackedResource), snapshot.events[4].type_name);
-    try std.testing.expectEqualStrings("failure", snapshot.events[4].status);
-    try std.testing.expectEqualStrings("CloseFailed", snapshot.events[4].redacted_detail);
-    try std.testing.expect(snapshot.events[2].resource_id != null);
-    try std.testing.expectEqual(snapshot.events[2].resource_id, snapshot.events[4].resource_id);
-    try std.testing.expectEqual(snapshot.events[2].id, snapshot.events[4].parent_id.?);
-    try std.testing.expectEqual(snapshot.events[2].id, snapshot.events[4].cause_event_id.?);
-    try std.testing.expectEqualStrings("cause", snapshot.events[5].status);
+    try std.testing.expectEqualStrings(@typeName(fixtures.TrackedResource), snapshot.events[8].type_name);
+    try std.testing.expectEqualStrings("failure", snapshot.events[8].status);
+    try std.testing.expectEqualStrings("CloseFailed", snapshot.events[8].redacted_detail);
+    try std.testing.expect(snapshot.events[4].resource_id != null);
+    try std.testing.expectEqual(snapshot.events[4].resource_id, snapshot.events[8].resource_id);
+    try std.testing.expectEqual(snapshot.events[4].id, snapshot.events[8].parent_id.?);
+    try std.testing.expectEqual(snapshot.events[4].id, snapshot.events[8].cause_event_id.?);
+    try std.testing.expectEqualStrings("cause", snapshot.events[9].status);
 }

@@ -5,6 +5,35 @@ pub const Http = zstd.Http;
 pub const WebSocket = @import("websocket.zig");
 pub const Tls = @import("tls.zig");
 
+test "HTTP server is exposed as a scoped ZigEffect layer" {
+    const Health = struct {
+        fn handleAlloc(_: *@This(), allocator: std.mem.Allocator, _: Http.Request) !Http.Response {
+            return Http.cloneResponseAlloc(allocator, .{ .status = 200, .body = "ok" });
+        }
+    };
+    var health = Health{};
+    var config_provider = zstd.Service.ValueProvider(ServerLayerConfig).init(.{
+        .io = std.testing.io,
+        .options = .{ .port = 0 },
+    });
+    var handler_provider = zstd.Service.ValueProvider(Handler).init(Handler.from(Health, &health));
+    const config_layer = config_provider.layer();
+    const handler_layer = handler_provider.layer();
+    const live_server_layer = serverLayer();
+    const Layers = @TypeOf(.{ config_layer, handler_layer, live_server_layer });
+    const Env = zstd.fx.LayerGraphEnv(Layers);
+    var causal_store = zstd.fx.CausalStore.init(std.testing.allocator);
+    defer causal_store.deinit();
+    var app = zstd.fx.layerGraph(std.testing.allocator, .{ config_layer, handler_layer, live_server_layer })
+        .withCausalStore(&causal_store);
+    defer app.deinit();
+
+    try app.run(drainServerEffect(Env));
+    var snapshot = try causal_store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expect(zstd.Service.hasOperation(snapshot, Server, "http.server.drain", "success"));
+}
+
 test {
     _ = WebSocket;
     _ = Tls;
@@ -107,6 +136,78 @@ pub const Guard = struct {
         return self.check_fn(self.pointer, request);
     }
 };
+
+pub const ApplicationMapOptions = struct {
+    max_recent_events: usize = 128,
+    max_response_bytes: usize = 1024 * 1024,
+};
+
+/// A guarded HTTP adapter for the canonical runtime's single-query agent map.
+/// Durable application runtimes include their NenDB graph and causal health;
+/// the lower-level kernel runtime retains its in-memory snapshot fallback.
+/// The guard is mandatory: callers cannot accidentally construct a public,
+/// unauthenticated topology endpoint.
+pub fn ApplicationMapHandler(comptime RuntimeType: type) type {
+    return struct {
+        const Self = @This();
+
+        runtime: *RuntimeType,
+        path: []const u8,
+        guard: Guard,
+        options: ApplicationMapOptions,
+
+        pub fn init(
+            runtime: *RuntimeType,
+            path: []const u8,
+            guard: Guard,
+            options: ApplicationMapOptions,
+        ) !Self {
+            if (path.len == 0 or path[0] != '/' or containsLineBreak(path)) return error.InvalidApplicationMapPath;
+            if (options.max_recent_events == 0 or options.max_response_bytes == 0) return error.InvalidApplicationMapBounds;
+            return .{
+                .runtime = runtime,
+                .path = path,
+                .guard = guard,
+                .options = options,
+            };
+        }
+
+        pub fn asHandler(self: *Self) Handler {
+            return Handler.from(Self, self);
+        }
+
+        pub fn handleAlloc(self: *Self, allocator: std.mem.Allocator, request: Http.Request) !Http.Response {
+            if (!std.mem.eql(u8, request.url, self.path)) {
+                return Http.cloneResponseAlloc(allocator, .{ .status = 404, .body = "not found" });
+            }
+            if (!std.mem.eql(u8, request.method, "GET")) {
+                return Http.cloneResponseAlloc(allocator, .{ .status = 405, .body = "method not allowed" });
+            }
+            if (self.guard.check(request)) |failure| {
+                return Http.cloneResponseAlloc(allocator, .{
+                    .status = statusForFailure(failure.class),
+                    .body = @tagName(failure.class),
+                });
+            }
+
+            const json = if (comptime @hasDecl(RuntimeType, "agentMapJsonAlloc"))
+                try self.runtime.agentMapJsonAlloc(allocator, .{
+                    .max_recent_events = self.options.max_recent_events,
+                })
+            else
+                try self.runtime.inspectJson(allocator, .{
+                    .max_recent_events = self.options.max_recent_events,
+                });
+            defer allocator.free(json);
+            if (json.len > self.options.max_response_bytes) return error.ApplicationMapResponseTooLarge;
+            return Http.cloneResponseAlloc(allocator, .{
+                .status = 200,
+                .headers = &.{.{ .name = "content-type", .value = "application/json" }},
+                .body = json,
+            });
+        }
+    };
+}
 
 pub const MiddlewareOptions = struct {
     request_id_prefix: []const u8 = "req",
@@ -861,11 +962,7 @@ fn requestHeader(request: Http.Request, name: []const u8) ?[]const u8 {
 }
 
 fn validTraceparent(value: []const u8) bool {
-    if (value.len != 55 or value[2] != '-' or value[35] != '-' or value[52] != '-') return false;
-    for (value, 0..) |byte, index| {
-        if (index == 2 or index == 35 or index == 52) continue;
-        if (!std.ascii.isHex(byte)) return false;
-    }
+    _ = zstd.fx.parseTraceParent(value) catch return false;
     return true;
 }
 
@@ -1808,6 +1905,59 @@ test "HTTP policy guards map classified authorization and capacity failures" {
     try std.testing.expectEqual(@as(u16, 429), limited.status);
 }
 
+test "guarded application map handler exposes one bounded managed runtime snapshot" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const MapService = zstd.fx.kernel.Service("http-test/MapService", struct { value: u32 });
+    const Access = struct {
+        allowed: bool,
+
+        fn check(self: *@This(), _: Http.Request) ?zstd.External.Failure {
+            if (self.allowed) return null;
+            return .init("application-map", "inspect", .unauthorized, "denied", "policy");
+        }
+    };
+
+    const layer = zstd.fx.kernel.Layer.succeed(MapService, .{ .value = 1 });
+    var runtime = try zstd.ManagedRuntime(@TypeOf(layer)).make(
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        layer,
+        .{},
+    );
+    defer runtime.deinit();
+
+    var access = Access{ .allowed = true };
+    var map = try ApplicationMapHandler(@TypeOf(runtime)).init(
+        &runtime,
+        "/_zigeffect/application",
+        Guard.from(Access, &access),
+        .{ .max_recent_events = 16, .max_response_bytes = 128 * 1024 },
+    );
+    var response = try map.handleAlloc(std.testing.allocator, .{
+        .method = "GET",
+        .url = "/_zigeffect/application",
+    });
+    defer response.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u16, 200), response.status);
+    try std.testing.expectEqualStrings("application/json", response.header("content-type").?);
+    try std.testing.expect(std.mem.indexOf(u8, response.body, MapService.service_key) != null);
+    try std.testing.expect(std.mem.indexOf(u8, response.body, "nendb_embedded") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response.body, zstd.CausalRuntime.agent_map_schema) != null);
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, response.body, .{});
+    defer parsed.deinit();
+
+    access.allowed = false;
+    var denied = try map.handleAlloc(std.testing.allocator, .{
+        .method = "GET",
+        .url = "/_zigeffect/application",
+    });
+    defer denied.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u16, 401), denied.status);
+}
+
 test "HTTP policy middleware survives every allocation failure" {
     const Inner = struct {
         fn handleAlloc(_: *@This(), allocator: std.mem.Allocator, _: Http.Request) !Http.Response {
@@ -1831,4 +1981,134 @@ test "HTTP policy middleware survives every allocation failure" {
         }
     };
     try std.testing.checkAllAllocationFailures(std.testing.allocator, Harness.run, .{});
+}
+
+/// Application configuration for a scope-owned HTTP server. The handler is a
+/// separate service so application and test layers can replace it independently.
+pub const ServerLayerConfig = struct {
+    io: std.Io,
+    options: ServerOptions,
+};
+
+pub const ServerLayerEnv = struct {
+    allocator: std.mem.Allocator,
+    server: Server,
+
+    pub fn service(self: *ServerLayerEnv, comptime Requested: type) *Requested {
+        if (Requested == Server) return &self.server;
+        return zstd.fx.serviceNotFound(ServerLayerEnv, Requested);
+    }
+};
+
+fn releaseServerLayer(env: *ServerLayerEnv) void {
+    const allocator = env.allocator;
+    env.server.drain() catch {};
+    env.server.deinit();
+    allocator.destroy(env);
+}
+
+fn buildServerLayer(allocator: std.mem.Allocator, scope: *zstd.fx.Scope, ctx: anytype) anyerror!*ServerLayerEnv {
+    const config = ctx.service(ServerLayerConfig);
+    const handler = ctx.service(Handler);
+    const env = try allocator.create(ServerLayerEnv);
+    errdefer allocator.destroy(env);
+    env.allocator = allocator;
+    env.server = try Server.init(allocator, config.io, config.options, handler.*);
+    errdefer env.server.deinit();
+    scope.addFinalizerFor(ServerLayerEnv, env, releaseServerLayer) catch |err| {
+        releaseServerLayer(env);
+        return err;
+    };
+    return env;
+}
+
+pub fn serverLayer() @TypeOf(
+    zstd.fx.LayerWithError(ServerLayerEnv, anyerror)
+        .fromContextBuilder(buildServerLayer)
+        .requires(.{ ServerLayerConfig, Handler })
+        .provides(.{Server}),
+) {
+    return zstd.fx.LayerWithError(ServerLayerEnv, anyerror)
+        .fromContextBuilder(buildServerLayer)
+        .requires(.{ ServerLayerConfig, Handler })
+        .provides(.{Server});
+}
+
+pub fn ServeOneEffect(comptime EffectEnv: type) type {
+    return struct {
+        pub const SuccessType = ServeReport;
+        pub const FailureType = anyerror;
+        pub const EnvType = EffectEnv;
+        pub const RequiredServices = .{Server};
+
+        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!zstd.fx.ServiceSet {
+            return zstd.fx.ServiceSet.fromTypes(allocator, RequiredServices);
+        }
+
+        pub fn run(_: @This(), ctx: *zstd.fx.Context(EffectEnv)) anyerror!ServeReport {
+            const report = ctx.service(Server).serveOne(ctx.allocator) catch |err| {
+                _ = zstd.Service.recordOperation(ctx, Server, "http.server.serve-one", "failure", @errorName(err));
+                return err;
+            };
+            _ = zstd.Service.recordOperation(ctx, Server, "http.server.serve-one", "success", "served one bounded connection");
+            return report;
+        }
+    };
+}
+
+pub fn serveOneEffect(comptime EffectEnv: type) ServeOneEffect(EffectEnv) {
+    return .{};
+}
+
+pub fn DrainServerEffect(comptime EffectEnv: type) type {
+    return struct {
+        pub const SuccessType = void;
+        pub const FailureType = anyerror;
+        pub const EnvType = EffectEnv;
+        pub const RequiredServices = .{Server};
+
+        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!zstd.fx.ServiceSet {
+            return zstd.fx.ServiceSet.fromTypes(allocator, RequiredServices);
+        }
+
+        pub fn run(_: @This(), ctx: *zstd.fx.Context(EffectEnv)) anyerror!void {
+            ctx.service(Server).drain() catch |err| {
+                _ = zstd.Service.recordOperation(ctx, Server, "http.server.drain", "failure", @errorName(err));
+                return err;
+            };
+            _ = zstd.Service.recordOperation(ctx, Server, "http.server.drain", "success", "listener stopped accepting connections");
+        }
+    };
+}
+
+pub fn drainServerEffect(comptime EffectEnv: type) DrainServerEffect(EffectEnv) {
+    return .{};
+}
+
+pub fn ShutdownServerEffect(comptime EffectEnv: type) type {
+    return struct {
+        options: ShutdownOptions = .{},
+
+        pub const SuccessType = ShutdownReport;
+        pub const FailureType = anyerror;
+        pub const EnvType = EffectEnv;
+        pub const RequiredServices = .{Server};
+
+        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!zstd.fx.ServiceSet {
+            return zstd.fx.ServiceSet.fromTypes(allocator, RequiredServices);
+        }
+
+        pub fn run(self: @This(), ctx: *zstd.fx.Context(EffectEnv)) anyerror!ShutdownReport {
+            const report = ctx.service(Server).shutdown(self.options) catch |err| {
+                _ = zstd.Service.recordOperation(ctx, Server, "http.server.shutdown", "failure", @errorName(err));
+                return err;
+            };
+            _ = zstd.Service.recordOperation(ctx, Server, "http.server.shutdown", "success", "server scope drained");
+            return report;
+        }
+    };
+}
+
+pub fn shutdownServerEffect(comptime EffectEnv: type, options: ShutdownOptions) ShutdownServerEffect(EffectEnv) {
+    return .{ .options = options };
 }

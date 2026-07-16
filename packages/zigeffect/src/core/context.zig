@@ -5,6 +5,7 @@ const clock_mod = @import("../services/clock.zig");
 const causal_mod = @import("../services/causal.zig");
 const async_backend_mod = @import("../runtime/async_backend.zig");
 const executor_mod = @import("../runtime/executor.zig");
+const identity_mod = @import("runtime_identity.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const Scope = scope_mod.Scope;
@@ -14,6 +15,7 @@ pub const FinalizerExit = result.FinalizerExit;
 pub const Clock = clock_mod.Clock;
 pub const CausalStore = causal_mod.CausalStore;
 pub const CausalEvent = causal_mod.CausalEvent;
+pub const CausalContextV2 = causal_mod.CausalContextV2;
 pub const AsyncBackend = async_backend_mod.AsyncBackend;
 pub const AsyncBackendError = async_backend_mod.AsyncBackendError;
 pub const Suspension = async_backend_mod.Suspension;
@@ -51,6 +53,11 @@ pub fn Context(comptime Env: type) type {
         span_id: ?u64 = null,
         causal_store: ?*CausalStore = null,
         causal_run_id: ?u64 = null,
+        causal_context: CausalContextV2 = .{},
+        /// Parent for structural facts emitted while the current effect runs.
+        /// Runtime roots and `runEffect` update it as a stack so service access,
+        /// nested effects and domain facts form one causal tree automatically.
+        causal_parent_id: ?u64 = null,
         async_backend: ?AsyncBackend = null,
         /// Pluggable execution strategy for forked work originating inside an
         /// effect (set by `Runtime(Env).withExecutor` / `FiberRuntime.withExecutor`).
@@ -74,12 +81,27 @@ pub fn Context(comptime Env: type) type {
         }
 
         pub fn service(self: *Self, comptime Service: type) *Service {
-            return self.env.service(Service);
+            const resolved = self.env.service(Service);
+            _ = self.recordCausal(.{
+                .kind = .service_required,
+                .parent_id = self.causal_parent_id,
+                .label = "Context.service",
+                .service_key = identity_mod.boundedTypeName(Service),
+                .type_name = identity_mod.boundedTypeName(Service),
+                .status = "resolved",
+            });
+            return resolved;
         }
 
         pub fn withCausalStore(self: Self, store: *CausalStore) Self {
             var ctx = self;
             ctx.causal_store = store;
+            return ctx;
+        }
+
+        pub fn withCausalContext(self: Self, context: CausalContextV2) Self {
+            var ctx = self;
+            ctx.causal_context = CausalContextV2.merge(self.causal_context, context);
             return ctx;
         }
 
@@ -100,7 +122,55 @@ pub fn Context(comptime Env: type) type {
             }
             owned.trace_id = owned.trace_id orelse self.trace_id;
             owned.span_id = owned.span_id orelse self.span_id;
+            owned.context = CausalContextV2.merge(self.causal_context, owned.context);
+            owned.context.trace_id_low = owned.context.trace_id_low orelse owned.trace_id;
+            owned.context.span_id = owned.context.span_id orelse owned.span_id;
             return store.record(owned) catch null;
+        }
+
+        /// Executes an effect-like value inside the current context while
+        /// preserving nested causal lineage. Runtime roots and effect
+        /// combinators use this instead of invoking child `run` methods
+        /// directly.
+        pub fn runEffect(
+            self: *Self,
+            effect: anytype,
+        ) @TypeOf(effect).FailureType!@TypeOf(effect).SuccessType {
+            const previous_parent = self.causal_parent_id;
+            const started = self.recordCausal(.{
+                .kind = .effect_started,
+                .parent_id = previous_parent,
+                .type_name = identity_mod.boundedTypeName(@TypeOf(effect)),
+                .status = "running",
+            });
+            self.causal_parent_id = started orelse previous_parent;
+            defer self.causal_parent_id = previous_parent;
+
+            const value = effect.run(self) catch |err| {
+                _ = self.recordCausal(.{
+                    .kind = .effect_completed,
+                    .parent_id = started orelse previous_parent,
+                    .type_name = identity_mod.boundedTypeName(@TypeOf(effect)),
+                    .status = "failure",
+                    .redacted_detail = @errorName(err),
+                });
+                return err;
+            };
+            _ = self.recordCausal(.{
+                .kind = .effect_completed,
+                .parent_id = started orelse previous_parent,
+                .type_name = identity_mod.boundedTypeName(@TypeOf(effect)),
+                .status = "success",
+            });
+            return value;
+        }
+
+        pub fn exitEffect(
+            self: *Self,
+            effect: anytype,
+        ) result.Exit(@TypeOf(effect).SuccessType, @TypeOf(effect).FailureType) {
+            const value = self.runEffect(effect) catch |err| return .{ .failure = err };
+            return .{ .success = value };
         }
 
         pub fn requireAsyncBackend(self: *const Self) AsyncBackendError!AsyncBackend {

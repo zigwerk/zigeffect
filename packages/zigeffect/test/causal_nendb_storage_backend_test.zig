@@ -181,6 +181,32 @@ test "nendb storage backend writes conformance events and keeps queryable histor
     try std.testing.expectEqual(ids.retained_log, logs.events[0].id);
 }
 
+test "nendb storage backend can stream to a durable writer without duplicating history" {
+    var fake = FakeNendbWriter.init(std.testing.allocator);
+    defer fake.deinit();
+    var backend_state = fx.CausalNendbStorageBackendState.init(
+        std.testing.allocator,
+        fake.writer(),
+        .{ .max_events = 2, .retain_history = false },
+    );
+    defer backend_state.deinit();
+
+    var store = fx.CausalStore.init(std.testing.allocator);
+    store.attachBackend(backend_state.backend());
+    defer store.deinit();
+
+    _ = try store.record(.{ .kind = .run_started, .label = "one" });
+    _ = try store.record(.{ .kind = .run_completed, .label = "two" });
+    try std.testing.expectEqual(@as(usize, 2), fake.writes.items.len);
+    try std.testing.expectEqual(@as(u64, 2), backend_state.writtenEventCount());
+    try std.testing.expectEqual(@as(usize, 0), backend_state.eventCount());
+    const backend = backend_state.backend();
+    try std.testing.expectError(error.CausalNendbStorageBackendFull, backend.record(backend.state, .{
+        .id = 3,
+        .kind = .run_started,
+    }));
+}
+
 test "nendb storage backend filters by run scope and fiber" {
     var fake = FakeNendbWriter.init(std.testing.allocator);
     defer fake.deinit();

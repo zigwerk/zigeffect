@@ -1,6 +1,7 @@
 const std = @import("std");
 const Project = @import("../project/root.zig");
 const Secrets = @import("../secrets/root.zig");
+const Nendb = @import("../vendor/nendb/root.zig");
 const fx = @import("zigeffect");
 
 pub const record_schema = "zigeffect.causal.local-graph-record.v1";
@@ -9,8 +10,14 @@ pub const summary_schema = "zigeffect.causal.local-graph-summary.v1";
 pub const summary_schema_version: u32 = 1;
 pub const children_schema = "zigeffect.causal.local-graph-children.v1";
 pub const children_schema_version: u32 = 1;
+pub const records_since_schema = "zigeffect.causal.local-graph-records-since.v1";
+pub const records_since_schema_version: u32 = 1;
+pub const path_schema = "zigeffect.causal.local-graph-path.v1";
+pub const path_schema_version: u32 = 1;
 pub const default_path = ".zigeffect/graph";
 pub const default_wal_name = "causal-graph.jsonl";
+pub const default_max_records: usize = 65_536;
+pub const max_records: usize = Nendb.max_nodes;
 
 pub const DatabaseError = error{
     InvalidGraphOptions,
@@ -24,14 +31,39 @@ pub const DatabaseError = error{
     MissingParentEvent,
     SecretDetected,
     EventNotFound,
+    PathNotFound,
+    InvalidPathLimit,
     SessionIdOverflow,
     DurableEventIdOverflow,
+};
+
+pub const Path = struct {
+    allocator: std.mem.Allocator,
+    from_event_id: u64,
+    to_event_id: u64,
+    event_ids: []u64,
+
+    pub fn deinit(self: *Path) void {
+        self.allocator.free(self.event_ids);
+        self.* = undefined;
+    }
+
+    pub fn jsonAlloc(self: Path, allocator: std.mem.Allocator) ![]u8 {
+        return std.json.Stringify.valueAlloc(allocator, .{
+            .schema = path_schema,
+            .schema_version = path_schema_version,
+            .from_event_id = self.from_event_id,
+            .to_event_id = self.to_event_id,
+            .length = self.event_ids.len,
+            .event_ids = self.event_ids,
+        }, .{});
+    }
 };
 
 pub const Options = struct {
     path: []const u8 = default_path,
     wal_name: []const u8 = default_wal_name,
-    max_records: usize = 100_000,
+    max_records: usize = default_max_records,
     max_wal_bytes: usize = 64 * 1024 * 1024,
     max_record_bytes: usize = 512 * 1024,
     sync_on_write: bool = true,
@@ -42,6 +74,7 @@ pub const Options = struct {
         try Project.validateRelativePath(self.wal_name, false);
         if (std.mem.indexOfScalar(u8, self.wal_name, '/') != null or
             self.max_records == 0 or
+            self.max_records > max_records or
             self.max_wal_bytes == 0 or
             self.max_record_bytes == 0 or
             self.max_record_bytes > self.max_wal_bytes)
@@ -144,16 +177,36 @@ pub const Summary = struct {
     newest_durable_event_id: ?u64,
     wal_bytes: usize,
     trailing_partial_bytes: usize,
+    engine: []const u8 = "nendb_embedded",
+    engine_version: []const u8 = Nendb.upstream_version,
+    engine_upstream_commit: []const u8 = Nendb.upstream_commit,
+    engine_nodes: usize,
+    engine_edges: usize,
+};
+
+pub const EngineStats = struct {
+    engine: []const u8 = "nendb_embedded",
+    version: []const u8 = Nendb.upstream_version,
+    upstream_commit: []const u8 = Nendb.upstream_commit,
+    nodes: usize,
+    edges: usize,
+    node_capacity: usize = Nendb.max_nodes,
+    edge_capacity: usize = Nendb.max_edges,
 };
 
 const ScanResult = struct {
+    const NodeIdentity = struct { session_id: u64, source_event_id: u64 };
+
     entries: std.ArrayList(IndexEntry) = .empty,
+    seen_nodes: std.AutoHashMapUnmanaged(u64, NodeIdentity) = .empty,
     last_complete_offset: usize = 0,
     edge_count: usize = 0,
     max_session_id: u64 = 0,
     max_durable_event_id: u64 = 0,
+    last_source_event_id: u64 = 0,
 
     fn deinit(self: *ScanResult, allocator: std.mem.Allocator) void {
+        self.seen_nodes.deinit(allocator);
         self.entries.deinit(allocator);
         self.* = undefined;
     }
@@ -162,12 +215,16 @@ const ScanResult = struct {
 pub const LocalDatabase = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
+    mutex: fx.SpinLock = .{},
+    nendb: *Nendb.GraphData,
     graph_dir: std.Io.Dir,
     wal_file: std.Io.File,
     options: Options,
     owned_path: []u8,
     owned_wal_name: []u8,
     entries: std.ArrayList(IndexEntry) = .empty,
+    durable_entry_index: std.AutoHashMapUnmanaged(u64, usize) = .empty,
+    current_source_index: std.AutoHashMapUnmanaged(u64, u64) = .empty,
     edge_count: usize = 0,
     session_id: u64,
     node_base: u64,
@@ -194,10 +251,15 @@ pub const LocalDatabase = struct {
         errdefer allocator.free(owned_path);
         const owned_wal_name = try allocator.dupe(u8, options.wal_name);
         errdefer allocator.free(owned_wal_name);
+        const nendb = try allocator.create(Nendb.GraphData);
+        errdefer allocator.destroy(nendb);
+        nendb.* = try Nendb.GraphData.initCapacity(allocator, options.max_records, options.max_records);
+        errdefer nendb.deinit();
 
         var self = LocalDatabase{
             .allocator = allocator,
             .io = io,
+            .nendb = nendb,
             .graph_dir = graph_dir,
             .wal_file = wal_file,
             .options = options,
@@ -209,6 +271,8 @@ pub const LocalDatabase = struct {
         self.options.path = self.owned_path;
         self.options.wal_name = self.owned_wal_name;
         self.loadExisting() catch |err| {
+            self.current_source_index.deinit(allocator);
+            self.durable_entry_index.deinit(allocator);
             self.entries.deinit(allocator);
             return err;
         };
@@ -216,7 +280,11 @@ pub const LocalDatabase = struct {
     }
 
     pub fn deinit(self: *LocalDatabase) void {
+        self.current_source_index.deinit(self.allocator);
+        self.durable_entry_index.deinit(self.allocator);
         self.entries.deinit(self.allocator);
+        self.nendb.deinit();
+        self.allocator.destroy(self.nendb);
         self.wal_file.close(self.io);
         self.graph_dir.close(self.io);
         self.allocator.free(self.owned_wal_name);
@@ -233,46 +301,105 @@ pub const LocalDatabase = struct {
         allocator: std.mem.Allocator,
         max_events: ?usize,
     ) fx.CausalNendbStorageBackendState {
-        return fx.CausalNendbStorageBackendState.init(allocator, self.writer(), .{ .max_events = max_events });
+        return fx.CausalNendbStorageBackendState.init(allocator, self.writer(), .{
+            .max_events = max_events,
+            .retain_history = false,
+        });
     }
 
     pub fn flush(self: *LocalDatabase) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         try self.wal_file.sync(self.io);
     }
 
-    pub fn recordCount(self: *const LocalDatabase) usize {
-        return self.entries.items.len;
+    pub fn recordCount(self: *LocalDatabase) usize {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.nendb.node_count;
     }
 
-    pub fn edgeCount(self: *const LocalDatabase) usize {
-        return self.edge_count;
+    pub fn edgeCount(self: *LocalDatabase) usize {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.nendb.edge_count;
     }
 
-    pub fn currentSessionId(self: *const LocalDatabase) u64 {
+    pub fn currentSessionId(self: *LocalDatabase) u64 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         return self.session_id;
     }
 
-    pub fn recoveredPartialBytes(self: *const LocalDatabase) usize {
+    pub fn recoveredPartialBytes(self: *LocalDatabase) usize {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         return self.recovered_partial_bytes;
     }
 
-    pub fn durableId(self: *const LocalDatabase, source_event_id: u64) ?u64 {
-        for (self.entries.items) |entry| {
-            if (entry.session_id == self.session_id and entry.source_event_id == source_event_id) return entry.durable_event_id;
+    pub fn durableId(self: *LocalDatabase, source_event_id: u64) ?u64 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.durableIdUnlocked(source_event_id);
+    }
+
+    fn durableIdUnlocked(self: *const LocalDatabase, source_event_id: u64) ?u64 {
+        return self.current_source_index.get(source_event_id);
+    }
+
+    pub fn contains(self: *LocalDatabase, durable_event_id: u64) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.nendb.findNodeById(durable_event_id) != null;
+    }
+
+    pub fn childrenAlloc(self: *LocalDatabase, allocator: std.mem.Allocator, durable_event_id: u64) ![]u64 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        if (self.nendb.findNodeById(durable_event_id) == null) return error.EventNotFound;
+        var count: usize = 0;
+        for (self.nendb.edge_from[0..self.nendb.edge_count]) |from| {
+            if (from == durable_event_id) count += 1;
         }
-        return null;
+        const children = try allocator.alloc(u64, count);
+        var index: usize = 0;
+        for (self.nendb.edge_from[0..self.nendb.edge_count], self.nendb.edge_to[0..self.nendb.edge_count]) |from, to| {
+            if (from != durable_event_id) continue;
+            children[index] = to;
+            index += 1;
+        }
+        return children;
     }
 
-    pub fn contains(self: *const LocalDatabase, durable_event_id: u64) bool {
-        return findEntry(self.entries.items, durable_event_id) != null;
+    pub fn pathAlloc(
+        self: *LocalDatabase,
+        allocator: std.mem.Allocator,
+        from_event_id: u64,
+        to_event_id: u64,
+        max_events: usize,
+    ) !Path {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return pathFromEntriesAlloc(allocator, self.entries.items, from_event_id, to_event_id, max_events);
     }
 
-    pub fn childrenAlloc(self: *const LocalDatabase, allocator: std.mem.Allocator, durable_event_id: u64) ![]u64 {
-        return childrenFromEntriesAlloc(allocator, self.entries.items, durable_event_id);
+    pub fn pathJsonAlloc(
+        self: *LocalDatabase,
+        allocator: std.mem.Allocator,
+        from_event_id: u64,
+        to_event_id: u64,
+        max_events: usize,
+    ) ![]u8 {
+        var path = try self.pathAlloc(allocator, from_event_id, to_event_id, max_events);
+        defer path.deinit();
+        return path.jsonAlloc(allocator);
     }
 
-    pub fn recordJsonAlloc(self: *const LocalDatabase, allocator: std.mem.Allocator, durable_event_id: u64) ![]u8 {
-        const entry = findEntry(self.entries.items, durable_event_id) orelse return error.EventNotFound;
+    pub fn recordJsonAlloc(self: *LocalDatabase, allocator: std.mem.Allocator, durable_event_id: u64) ![]u8 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        const entry_index = self.durable_entry_index.get(durable_event_id) orelse return error.EventNotFound;
+        const entry = self.entries.items[entry_index];
         const output = try allocator.alloc(u8, entry.length);
         errdefer allocator.free(output);
         const read = try self.wal_file.readPositionalAll(self.io, output, entry.offset);
@@ -280,9 +407,58 @@ pub const LocalDatabase = struct {
         return output;
     }
 
-    pub fn summary(self: *const LocalDatabase) Summary {
+    /// Return a bounded, ordered delta after a durable event ID. Passing zero
+    /// starts at the oldest retained event and is useful for initial discovery.
+    pub fn recordsAfterJsonAlloc(
+        self: *LocalDatabase,
+        allocator: std.mem.Allocator,
+        after_durable_event_id: u64,
+        limit: usize,
+    ) ![]u8 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        const range = try recordsAfterRange(self.entries.items, after_durable_event_id, limit);
+        const next_json = if (range.next_event_id) |id|
+            try std.fmt.allocPrint(allocator, "{d}", .{id})
+        else
+            try allocator.dupe(u8, "null");
+        defer allocator.free(next_json);
+        var output: std.ArrayList(u8) = .empty;
+        errdefer output.deinit(allocator);
+        const header = try std.fmt.allocPrint(
+            allocator,
+            "{{\"schema\":\"{s}\",\"schema_version\":{d},\"after_event_id\":{d},\"next_event_id\":{s},\"truncated\":{s},\"records\":[",
+            .{
+                records_since_schema,
+                records_since_schema_version,
+                after_durable_event_id,
+                next_json,
+                if (range.truncated) "true" else "false",
+            },
+        );
+        defer allocator.free(header);
+        try output.appendSlice(allocator, header);
+        for (self.entries.items[range.start..range.end], 0..) |entry, index| {
+            if (index != 0) try output.append(allocator, ',');
+            const row = try allocator.alloc(u8, entry.length);
+            defer allocator.free(row);
+            const read = try self.wal_file.readPositionalAll(self.io, row, entry.offset);
+            if (read != entry.length) return error.CorruptGraph;
+            try output.appendSlice(allocator, row);
+        }
+        try output.appendSlice(allocator, "]}");
+        return output.toOwnedSlice(allocator);
+    }
+
+    pub fn summary(self: *LocalDatabase) Summary {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.summaryUnlocked();
+    }
+
+    fn summaryUnlocked(self: *const LocalDatabase) Summary {
         const wal_bytes = self.wal_file.length(self.io) catch 0;
-        return summaryFromEntries(
+        var result = summaryFromEntries(
             self.options.path,
             self.options.wal_name,
             self.entries.items,
@@ -290,10 +466,25 @@ pub const LocalDatabase = struct {
             @intCast(wal_bytes),
             self.recovered_partial_bytes,
         );
+        result.engine_nodes = self.nendb.node_count;
+        result.engine_edges = self.nendb.edge_count;
+        return result;
     }
 
-    pub fn summaryJsonAlloc(self: *const LocalDatabase, allocator: std.mem.Allocator) ![]u8 {
+    pub fn summaryJsonAlloc(self: *LocalDatabase, allocator: std.mem.Allocator) ![]u8 {
         return std.json.Stringify.valueAlloc(allocator, self.summary(), .{});
+    }
+
+    pub fn engineStats(self: *LocalDatabase) EngineStats {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        const stats = self.nendb.getStats();
+        return .{
+            .nodes = stats.node_count,
+            .edges = stats.edge_count,
+            .node_capacity = stats.node_capacity,
+            .edge_capacity = stats.edge_capacity,
+        };
     }
 
     fn loadExisting(self: *LocalDatabase) !void {
@@ -313,19 +504,40 @@ pub const LocalDatabase = struct {
             try self.wal_file.setLength(self.io, scan.last_complete_offset);
             try self.wal_file.sync(self.io);
         }
+        try self.rebuildNendb(content[0..scan.last_complete_offset]);
         self.entries = scan.entries;
         scan.entries = .empty;
+        try self.durable_entry_index.ensureUnusedCapacity(self.allocator, @intCast(self.entries.items.len));
+        for (self.entries.items, 0..) |entry, index| {
+            self.durable_entry_index.putAssumeCapacityNoClobber(entry.durable_event_id, index);
+        }
         self.edge_count = scan.edge_count;
         self.node_base = scan.max_durable_event_id;
         self.session_id = std.math.add(u64, scan.max_session_id, 1) catch return error.SessionIdOverflow;
         if (self.session_id == 0) return error.SessionIdOverflow;
     }
 
+    fn rebuildNendb(self: *LocalDatabase, content: []const u8) !void {
+        var line_start: usize = 0;
+        while (std.mem.indexOfScalarPos(u8, content, line_start, '\n')) |newline| {
+            const line = content[line_start..newline];
+            var parsed = std.json.parseFromSlice(PersistedRecord, self.allocator, line, .{ .allocate = .alloc_always }) catch return error.CorruptGraph;
+            defer parsed.deinit();
+            _ = self.nendb.addNode(parsed.value.node.id, parsed.value.node.kind) catch return error.CorruptGraph;
+            if (parsed.value.parent_edge) |edge| {
+                _ = self.nendb.addEdge(edge.from, edge.to, edge.label_id) catch return error.CorruptGraph;
+            }
+            line_start = newline + 1;
+        }
+    }
+
     fn appendWrite(self: *LocalDatabase, write: fx.CausalNendbWrite) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         if (self.entries.items.len >= self.options.max_records) return error.GraphDatabaseFull;
         try ensureSafe(write.node.label);
         try ensureSafe(write.node.properties);
-        if (write.node.id == 0 or self.durableId(write.node.id) != null) return error.DuplicateSourceEvent;
+        if (write.node.id == 0 or self.durableIdUnlocked(write.node.id) != null) return error.DuplicateSourceEvent;
         if (self.entries.items.len != 0) {
             const newest = self.entries.items[self.entries.items.len - 1];
             if (newest.session_id == self.session_id and write.node.id <= newest.source_event_id) {
@@ -339,7 +551,7 @@ pub const LocalDatabase = struct {
         if (write.parent_edge) |edge| {
             try ensureSafe(edge.label);
             try ensureSafe(edge.properties);
-            const durable_parent = self.durableId(edge.from) orelse return error.MissingParentEvent;
+            const durable_parent = self.durableIdUnlocked(edge.from) orelse return error.MissingParentEvent;
             persisted_edge = .{
                 .from = durable_parent,
                 .to = durable_id,
@@ -368,10 +580,22 @@ pub const LocalDatabase = struct {
         defer self.allocator.free(row);
         if (row.len > self.options.max_record_bytes) return error.GraphRecordTooLarge;
         try self.entries.ensureUnusedCapacity(self.allocator, 1);
+        try self.durable_entry_index.ensureUnusedCapacity(self.allocator, 1);
+        try self.current_source_index.ensureUnusedCapacity(self.allocator, 1);
         const offset_u64 = try self.wal_file.length(self.io);
         const required = std.math.add(u64, offset_u64, @as(u64, @intCast(row.len + 1))) catch return error.GraphDatabaseFull;
         if (required > self.options.max_wal_bytes) return error.GraphDatabaseFull;
         const offset: usize = @intCast(offset_u64);
+
+        const node_index = try self.nendb.addNode(durable_id, write.node.kind);
+        var edge_index: ?u32 = null;
+        errdefer {
+            if (edge_index) |index| self.nendb.rollbackLastEdge(index);
+            self.nendb.rollbackLastNode(node_index);
+        }
+        if (persisted_edge) |edge| {
+            edge_index = try self.nendb.addEdge(edge.from, edge.to, edge.label_id);
+        }
 
         self.wal_file.writePositionalAll(self.io, row, offset_u64) catch |err| {
             self.wal_file.setLength(self.io, offset_u64) catch {};
@@ -386,6 +610,9 @@ pub const LocalDatabase = struct {
             return err;
         };
 
+        const entry_index = self.entries.items.len;
+        self.durable_entry_index.putAssumeCapacityNoClobber(durable_id, entry_index);
+        self.current_source_index.putAssumeCapacityNoClobber(write.node.id, durable_id);
         self.entries.appendAssumeCapacity(.{
             .sequence = sequence,
             .session_id = self.session_id,
@@ -407,6 +634,28 @@ pub const Snapshot = struct {
     entries: []IndexEntry,
     edge_count: usize,
     last_complete_offset: usize,
+
+    /// Construct a read-only zero cursor for a project that has not executed
+    /// yet. This deliberately allocates no graph directory or WAL.
+    pub fn empty(allocator: std.mem.Allocator, options: Options) !Snapshot {
+        try options.validate();
+        const path = try allocator.dupe(u8, options.path);
+        errdefer allocator.free(path);
+        const wal_name = try allocator.dupe(u8, options.wal_name);
+        errdefer allocator.free(wal_name);
+        const content = try allocator.alloc(u8, 0);
+        errdefer allocator.free(content);
+        const entries = try allocator.alloc(IndexEntry, 0);
+        return .{
+            .allocator = allocator,
+            .path = path,
+            .wal_name = wal_name,
+            .content = content,
+            .entries = entries,
+            .edge_count = 0,
+            .last_complete_offset = 0,
+        };
+    }
 
     pub fn open(
         allocator: std.mem.Allocator,
@@ -465,10 +714,91 @@ pub const Snapshot = struct {
         return allocator.dupe(u8, self.content[entry.offset .. entry.offset + entry.length]);
     }
 
+    pub fn recordsAfterJsonAlloc(
+        self: *const Snapshot,
+        allocator: std.mem.Allocator,
+        after_durable_event_id: u64,
+        limit: usize,
+    ) ![]u8 {
+        const range = try recordsAfterRange(self.entries, after_durable_event_id, limit);
+        return recordsAfterJsonFromContentAlloc(
+            allocator,
+            self.content,
+            self.entries,
+            range,
+            after_durable_event_id,
+        );
+    }
+
     pub fn childrenAlloc(self: *const Snapshot, allocator: std.mem.Allocator, durable_event_id: u64) ![]u64 {
         return childrenFromEntriesAlloc(allocator, self.entries, durable_event_id);
     }
+
+    pub fn pathAlloc(
+        self: *const Snapshot,
+        allocator: std.mem.Allocator,
+        from_event_id: u64,
+        to_event_id: u64,
+        max_events: usize,
+    ) !Path {
+        return pathFromEntriesAlloc(allocator, self.entries, from_event_id, to_event_id, max_events);
+    }
+
+    pub fn pathJsonAlloc(
+        self: *const Snapshot,
+        allocator: std.mem.Allocator,
+        from_event_id: u64,
+        to_event_id: u64,
+        max_events: usize,
+    ) ![]u8 {
+        var path = try self.pathAlloc(allocator, from_event_id, to_event_id, max_events);
+        defer path.deinit();
+        return path.jsonAlloc(allocator);
+    }
 };
+
+fn pathFromEntriesAlloc(
+    allocator: std.mem.Allocator,
+    entries: []const IndexEntry,
+    from_event_id: u64,
+    to_event_id: u64,
+    max_events: usize,
+) !Path {
+    if (from_event_id == 0 or to_event_id == 0) return error.EventNotFound;
+    if (max_events < 1 or max_events > 4096) return error.InvalidPathLimit;
+    var from_found = false;
+    var to_found = false;
+    for (entries) |entry| {
+        from_found = from_found or entry.durable_event_id == from_event_id;
+        to_found = to_found or entry.durable_event_id == to_event_id;
+    }
+    if (!from_found or !to_found) return error.EventNotFound;
+
+    var reverse = std.ArrayList(u64).empty;
+    errdefer reverse.deinit(allocator);
+    var cursor: ?u64 = to_event_id;
+    while (cursor) |event_id| {
+        if (reverse.items.len >= max_events) return error.PathNotFound;
+        try reverse.append(allocator, event_id);
+        if (event_id == from_event_id) {
+            std.mem.reverse(u64, reverse.items);
+            return .{
+                .allocator = allocator,
+                .from_event_id = from_event_id,
+                .to_event_id = to_event_id,
+                .event_ids = try reverse.toOwnedSlice(allocator),
+            };
+        }
+        var parent: ?u64 = null;
+        for (entries) |entry| {
+            if (entry.durable_event_id != event_id) continue;
+            parent = entry.durable_parent_id;
+            break;
+        }
+        cursor = parent;
+    }
+    return error.PathNotFound;
+}
 
 pub fn childrenJsonAlloc(allocator: std.mem.Allocator, durable_event_id: u64, children: []const u64) ![]u8 {
     return std.json.Stringify.valueAlloc(allocator, .{
@@ -512,18 +842,17 @@ fn scanContent(allocator: std.mem.Allocator, content: []const u8, options: Optio
         const expected_sequence = @as(u64, @intCast(result.entries.items.len)) + 1;
         if (parsed.value.sequence != expected_sequence or
             parsed.value.session_id < result.max_session_id or
-            parsed.value.node.id <= result.max_durable_event_id or
-            findEntry(result.entries.items, parsed.value.node.id) != null)
+            parsed.value.node.id <= result.max_durable_event_id)
         {
             return error.CorruptGraph;
         }
-        for (result.entries.items) |entry| {
-            if (entry.session_id == parsed.value.session_id and entry.source_event_id == parsed.value.node.source_event_id) {
-                return error.CorruptGraph;
-            }
+        if (parsed.value.session_id == result.max_session_id and
+            parsed.value.node.source_event_id <= result.last_source_event_id)
+        {
+            return error.CorruptGraph;
         }
         const durable_parent = if (parsed.value.parent_edge) |edge| parent: {
-            const parent_entry = findEntry(result.entries.items, edge.from) orelse return error.CorruptGraph;
+            const parent_entry = result.seen_nodes.get(edge.from) orelse return error.CorruptGraph;
             if (parent_entry.session_id != parsed.value.session_id or parent_entry.source_event_id != edge.source_from) {
                 return error.CorruptGraph;
             }
@@ -539,7 +868,13 @@ fn scanContent(allocator: std.mem.Allocator, content: []const u8, options: Optio
             .offset = line_start,
             .length = line.len,
         });
+        try result.seen_nodes.put(allocator, parsed.value.node.id, .{
+            .session_id = parsed.value.session_id,
+            .source_event_id = parsed.value.node.source_event_id,
+        });
+        if (parsed.value.session_id != result.max_session_id) result.last_source_event_id = 0;
         result.max_session_id = @max(result.max_session_id, parsed.value.session_id);
+        result.last_source_event_id = parsed.value.node.source_event_id;
         result.max_durable_event_id = parsed.value.node.id;
         line_start = newline + 1;
         result.last_complete_offset = line_start;
@@ -566,14 +901,89 @@ fn summaryFromEntries(
         .newest_durable_event_id = if (entries.len == 0) null else entries[entries.len - 1].durable_event_id,
         .wal_bytes = wal_bytes,
         .trailing_partial_bytes = partial_bytes,
+        .engine_nodes = entries.len,
+        .engine_edges = edge_count,
     };
 }
 
 fn findEntry(entries: []const IndexEntry, durable_event_id: u64) ?IndexEntry {
-    for (entries) |entry| {
-        if (entry.durable_event_id == durable_event_id) return entry;
+    var low: usize = 0;
+    var high: usize = entries.len;
+    while (low < high) {
+        const middle = low + (high - low) / 2;
+        const candidate = entries[middle];
+        if (candidate.durable_event_id < durable_event_id) {
+            low = middle + 1;
+        } else if (candidate.durable_event_id > durable_event_id) {
+            high = middle;
+        } else {
+            return candidate;
+        }
     }
     return null;
+}
+
+const RecordRange = struct {
+    start: usize,
+    end: usize,
+    next_event_id: ?u64,
+    truncated: bool,
+};
+
+fn recordsAfterRange(entries: []const IndexEntry, after_durable_event_id: u64, limit: usize) !RecordRange {
+    if (limit == 0) return error.InvalidGraphOptions;
+    const start = if (after_durable_event_id == 0) @as(usize, 0) else start: {
+        var low: usize = 0;
+        var high: usize = entries.len;
+        while (low < high) {
+            const middle = low + (high - low) / 2;
+            const candidate = entries[middle].durable_event_id;
+            if (candidate < after_durable_event_id) {
+                low = middle + 1;
+            } else if (candidate > after_durable_event_id) {
+                high = middle;
+            } else {
+                break :start middle + 1;
+            }
+        }
+        return error.EventNotFound;
+    };
+    const end = @min(entries.len, start +| limit);
+    return .{
+        .start = start,
+        .end = end,
+        .next_event_id = if (end == start) null else entries[end - 1].durable_event_id,
+        .truncated = end < entries.len,
+    };
+}
+
+fn recordsAfterJsonFromContentAlloc(
+    allocator: std.mem.Allocator,
+    content: []const u8,
+    entries: []const IndexEntry,
+    range: RecordRange,
+    after_durable_event_id: u64,
+) ![]u8 {
+    const next_json = if (range.next_event_id) |id|
+        try std.fmt.allocPrint(allocator, "{d}", .{id})
+    else
+        try allocator.dupe(u8, "null");
+    defer allocator.free(next_json);
+    var output: std.ArrayList(u8) = .empty;
+    errdefer output.deinit(allocator);
+    const header = try std.fmt.allocPrint(
+        allocator,
+        "{{\"schema\":\"{s}\",\"schema_version\":{d},\"after_event_id\":{d},\"next_event_id\":{s},\"truncated\":{s},\"records\":[",
+        .{ records_since_schema, records_since_schema_version, after_durable_event_id, next_json, if (range.truncated) "true" else "false" },
+    );
+    defer allocator.free(header);
+    try output.appendSlice(allocator, header);
+    for (entries[range.start..range.end], 0..) |entry, index| {
+        if (index != 0) try output.append(allocator, ',');
+        try output.appendSlice(allocator, content[entry.offset .. entry.offset + entry.length]);
+    }
+    try output.appendSlice(allocator, "]}");
+    return output.toOwnedSlice(allocator);
 }
 
 fn childrenFromEntriesAlloc(allocator: std.mem.Allocator, entries: []const IndexEntry, durable_event_id: u64) ![]u64 {

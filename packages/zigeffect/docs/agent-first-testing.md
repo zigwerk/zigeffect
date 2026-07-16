@@ -27,7 +27,7 @@ Testing v2 upgrades both existing Zig tests and new semantic scenarios:
 Keep small value/type/unit assertions in `std.testing`; the V2 runner migrates
 them without source churn. Use `TestContext` when a user-visible requirement or
 runtime boundary needs evidence an agent can reason about. Generated project
-template v5 configures the runner automatically through the runner module
+template v12 configures the runner automatically through the runner module
 exported by `zigeffect_std`.
 
 After `zig build test`, inspect the suite receipt before terminal output:
@@ -39,6 +39,18 @@ jq '{status, complete, counts, execution}' \
 
 Require `status == "passed"`, `complete == true`, discovered equal to executed,
 and zero pending tests, failures, leaks, and logged errors.
+
+For manifest-owned scenarios, `native_test_filter` selects one real Zig test at
+compile time. The CLI accepts only the fixed manifest command plus its generated
+filter and writes stable native evidence to
+`.zigeffect/tests/process-receipts/<scenario>.json`. Acceptance reconciliation
+also requires the current content-addressed source revision, manifest digest,
+command digest, tool version, target, optimization mode, native execution, and
+complete capture. The automatic proof handoff is written to
+`.zigeffect/handoffs/tests/<scenario>.json`; `.zigeffect/tests/latest.json` is a
+run view, not the stable proof location. Uncontrolled package-native semantic
+receipts go to `.zigeffect/tests/raw-receipts/` and cannot overwrite the stable
+CLI-controlled process receipt.
 
 ## The evidence loop
 
@@ -148,6 +160,7 @@ shape includes:
 - pass/fail/skip status;
 - source reference;
 - causal event IDs;
+- the causal ID space and, for durable IDs, graph session;
 - bounded expected and actual summaries;
 - diagnostic detail and a repair hint.
 
@@ -325,7 +338,9 @@ The decision order is deliberately mechanical:
 2. Require the selected scenario count and status counters to agree.
 3. Treat `failed`, `incomplete`, and unsupported required evidence as unpassed.
 4. Inspect the first failed assertion and its source reference.
-5. Query the cited causal event IDs and their cause/children.
+5. Check `causal_event_id_space`. Query cited IDs and their cause/children only
+   when it is `graph_durable`; `runtime_local` IDs address the bounded in-memory
+   execution and are not valid graph cursors.
 6. Copy the exact replay command.
 7. Repair the smallest responsible boundary.
 8. Close every required semantic gap.

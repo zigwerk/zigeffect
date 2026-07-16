@@ -4,6 +4,15 @@ const Capability = @import("../capability/root.zig");
 const StdService = @import("../service/root.zig");
 const fx = @import("zigeffect");
 
+pub const ProcessError = error{
+    OutOfMemory,
+    InvalidCommand,
+    CommandNotFound,
+    AccessDenied,
+    OutputLimitExceeded,
+    SpawnFailed,
+};
+
 pub const EnvVar = struct {
     name: []const u8,
     value: []const u8,
@@ -130,6 +139,46 @@ pub const LocalRunner = struct {
     }
 };
 
+pub const API = struct {
+    pub const operations: []const []const u8 = &.{"Process.run"};
+
+    state: *anyopaque,
+    run_output_alloc_fn: *const fn (*anyopaque, std.mem.Allocator, Command) ProcessError!RunOutput,
+
+    pub fn from(comptime Implementation: type, implementation: *Implementation) API {
+        return .{
+            .state = implementation,
+            .run_output_alloc_fn = struct {
+                fn call(raw: *anyopaque, allocator: std.mem.Allocator, command: Command) ProcessError!RunOutput {
+                    const typed: *Implementation = @ptrCast(@alignCast(raw));
+                    if (command.argv.len == 0) return error.InvalidCommand;
+                    return typed.runOutputAlloc(allocator, command) catch |failure| return mapProcessError(failure);
+                }
+            }.call,
+        };
+    }
+
+    pub fn runOutputAlloc(self: API, allocator: std.mem.Allocator, command: Command) ProcessError!RunOutput {
+        return self.run_output_alloc_fn(self.state, allocator, command);
+    }
+};
+
+pub const Process = fx.kernel.Service("zigeffect/std/Process", API);
+
+pub fn layer(comptime Implementation: type, implementation: *Implementation) @TypeOf(
+    fx.kernel.Layer.succeed(Process, API.from(Implementation, implementation)),
+) {
+    return fx.kernel.Layer.succeed(Process, API.from(Implementation, implementation));
+}
+
+pub fn fake(implementation: *FakeRunner) @TypeOf(layer(FakeRunner, implementation)) {
+    return layer(FakeRunner, implementation);
+}
+
+pub fn local(implementation: *LocalRunner) @TypeOf(layer(LocalRunner, implementation)) {
+    return layer(LocalRunner, implementation);
+}
+
 pub fn RunEffect(comptime EffectEnv: type, comptime Runner: type) type {
     return struct {
         pub const SuccessType = RunOutput;
@@ -168,6 +217,28 @@ pub fn runEffect(
     return .{ .command = command };
 }
 
+pub fn run(command: Command) fx.kernel.Effect(
+    RunOutput,
+    ProcessError,
+    .{Process},
+).Stateful(Command) {
+    const Run = fx.kernel.Effect(RunOutput, ProcessError, .{Process});
+    return Run.fromState(Command, command, struct {
+        fn execute(value: Command, ctx: *fx.kernel.ContextView(.{Process})) ProcessError!RunOutput {
+            const owned_detail = formatCommandAlloc(ctx.allocator(), value) catch null;
+            defer if (owned_detail) |detail| ctx.allocator().free(detail);
+            const detail = owned_detail orelse "command allocation failed";
+            const operation = StdService.beginOperation(ctx, Process.service_key, "Process.run", detail);
+            const output = ctx.service(Process).runOutputAlloc(ctx.allocator(), value) catch |failure| {
+                _ = StdService.completeOperation(ctx, operation, "failure", @errorName(failure));
+                return failure;
+            };
+            _ = StdService.completeOperation(ctx, operation, output.receipt.status, output.receipt.command);
+            return output;
+        }
+    }.execute);
+}
+
 fn formatCommandAlloc(allocator: std.mem.Allocator, command: Command) ![]const u8 {
     var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
@@ -197,6 +268,16 @@ fn exitCodeFromTerm(term: std.process.Child.Term) i32 {
         .signal => |signal| 128 + @as(i32, @intCast(@intFromEnum(signal))),
         .stopped => |signal| 128 + @as(i32, @intCast(@intFromEnum(signal))),
         .unknown => |code| @intCast(code),
+    };
+}
+
+fn mapProcessError(failure: anyerror) ProcessError {
+    return switch (failure) {
+        error.OutOfMemory => error.OutOfMemory,
+        error.FileNotFound => error.CommandNotFound,
+        error.AccessDenied, error.PermissionDenied => error.AccessDenied,
+        error.StreamTooLong => error.OutputLimitExceeded,
+        else => error.SpawnFailed,
     };
 }
 

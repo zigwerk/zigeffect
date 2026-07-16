@@ -181,6 +181,101 @@ pub const Services = struct {
     }
 };
 
+pub const InitialHealth = struct {
+    service: []const u8,
+    status: Grpc.HealthStatus = .serving,
+};
+
+/// Configuration for the canonical health/reflection layer. Borrowed names
+/// and descriptor bytes must outlive the managed runtime that owns the layer.
+pub const Config = struct {
+    descriptor_set: []const u8 = embedded_descriptor_set,
+    service_names: []const []const u8,
+    initial_health: []const InitialHealth = &.{.{ .service = "", .status = .serving }},
+};
+
+pub const ConfigService = zstd.fx.kernel.Service(
+    "zigeffect/grpc/StandardServicesConfig",
+    Config,
+);
+
+pub const Api = struct {
+    pub const operations: []const []const u8 = &.{
+        "StandardServices.health.check",
+        "StandardServices.health.set",
+        "StandardServices.reflection.list",
+    };
+
+    allocator: std.mem.Allocator,
+    health: *Grpc.HealthRegistry,
+    services: *Services,
+
+    pub fn setHealth(self: *Api, service: []const u8, status: Grpc.HealthStatus) !void {
+        try self.health.set(service, status);
+    }
+};
+
+pub const Service = zstd.fx.kernel.Service("zigeffect/grpc/StandardServices", Api);
+
+pub fn configLayer(config: Config) @TypeOf(zstd.fx.kernel.Layer.succeed(ConfigService, config)) {
+    return zstd.fx.kernel.Layer.succeed(ConfigService, config);
+}
+
+const Lifecycle = struct {
+    const Requirements = .{
+        ConfigService,
+        Typed.UnaryRegistry,
+        Typed.StreamingRegistry,
+        Typed.IncrementalRegistry,
+    };
+
+    fn acquire(ctx: *zstd.fx.kernel.ContextView(Requirements)) anyerror!Api {
+        const allocator = ctx.allocator();
+        const config = ctx.service(ConfigService);
+        const health = try allocator.create(Grpc.HealthRegistry);
+        errdefer allocator.destroy(health);
+        health.* = Grpc.HealthRegistry.init(allocator);
+        errdefer health.deinit();
+        for (config.initial_health) |entry| try health.set(entry.service, entry.status);
+
+        const services = try allocator.create(Services);
+        errdefer allocator.destroy(services);
+        services.* = .{
+            .health = health,
+            .descriptor_set = config.descriptor_set,
+            .service_names = config.service_names,
+        };
+        try services.install(
+            ctx.service(Typed.UnaryRegistry),
+            ctx.service(Typed.StreamingRegistry),
+        );
+        try services.installIncremental(ctx.service(Typed.IncrementalRegistry));
+        return .{ .allocator = allocator, .health = health, .services = services };
+    }
+
+    fn release(api: *Api) void {
+        api.allocator.destroy(api.services);
+        api.health.deinit();
+        api.allocator.destroy(api.health);
+    }
+};
+
+pub fn layer() @TypeOf(zstd.fx.kernel.Layer.scoped(
+    Service,
+    anyerror,
+    Lifecycle.Requirements,
+    Lifecycle.acquire,
+    Lifecycle.release,
+)) {
+    return zstd.fx.kernel.Layer.scoped(
+        Service,
+        anyerror,
+        Lifecycle.Requirements,
+        Lifecycle.acquire,
+        Lifecycle.release,
+    );
+}
+
 fn healthRevisionTask(subscription: *Grpc.HealthSubscription) anyerror!u64 {
     return subscription.receive();
 }
@@ -190,7 +285,12 @@ fn healthDeadlineTask(io: std.Io, deadline: std.Io.Clock.Timestamp) std.Io.Cance
 }
 
 fn healthCancellationTask(call: *Incremental.Call) std.Io.Cancelable!void {
-    while (!call.isCancelled()) call.sleep(1) catch return error.Canceled;
+    while (!call.isCancelled()) {
+        call.sleep(1) catch |err| switch (err) {
+            error.CallCancelled => return,
+            else => return error.Canceled,
+        };
+    }
 }
 
 fn deinitReflectionContainer(allocator: std.mem.Allocator, response: *reflection_proto.ServerReflectionResponse) void {
@@ -476,6 +576,61 @@ fn appendExtensionNumbers(numbers: *std.ArrayList(i32), allocator: std.mem.Alloc
     try appendDescriptorFiles(&files, allocator, descriptor_set);
     for (files.items) |file| _ = try fileHasExtension(file, type_name, null, numbers, allocator);
     std.mem.sort(i32, numbers.items, {}, std.sort.asc(i32));
+}
+
+test "standard health and reflection services are acquired as one scoped layer" {
+    const names = [_][]const u8{
+        "orders.v1.Orders",
+        "grpc.health.v1.Health",
+        "grpc.reflection.v1.ServerReflection",
+        "grpc.reflection.v1alpha.ServerReflection",
+    };
+    const dependencies = zstd.fx.kernel.Layer.mergeAll(.{
+        configLayer(.{
+            .service_names = &names,
+            .initial_health = &.{
+                .{ .service = "", .status = .serving },
+                .{ .service = "orders.v1.Orders", .status = .serving },
+            },
+        }),
+        Typed.unaryRegistryLayer(),
+        Typed.streamingRegistryLayer(),
+        Typed.incrementalRegistryLayer(),
+    });
+    const resources = layer().provideMerge(dependencies);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runtime = try zstd.ManagedRuntime(@TypeOf(resources)).make(
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        resources,
+        .{},
+    );
+    defer runtime.deinit();
+
+    const health_request = try Typed.encodeAlloc(
+        std.testing.allocator,
+        health_proto.HealthCheckRequest{ .service = "orders.v1.Orders" },
+    );
+    defer std.testing.allocator.free(health_request);
+    var health_response = try runtime.run(Typed.invokeRegistered(.{
+        .authority = "local",
+        .service = "grpc.health.v1.Health",
+        .method = "Check",
+        .payload = health_request,
+        .timeout_millis = 1_000,
+    }, .{}).named("grpc.health.check"));
+    defer health_response.deinit();
+    var decoded = try Typed.decodeAlloc(
+        health_proto.HealthCheckResponse,
+        std.testing.allocator,
+        health_response.payload,
+    );
+    defer decoded.deinit(std.testing.allocator);
+    try std.testing.expectEqual(health_proto.HealthCheckResponse.ServingStatus.SERVING, decoded.status);
+    try std.testing.expect(runtime.graphSummary().records > 0);
+    try runtime.shutdown();
 }
 
 test "health and reflection services use generated standard contracts" {

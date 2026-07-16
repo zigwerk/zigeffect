@@ -42,3 +42,12 @@ runtime and generator at revision `2b7103e1f71a02cb19bb464820ab6fa7376e5a17`.
 The package is licensed under the MIT License. Its copyright and permission
 notice are retained by the pinned package source distributed through Zig's
 package manager.
+
+## NenDB
+
+The embedded causal graph includes a Zig 0.16 port of the data-oriented graph
+layout from [Nen-Co/nen-db](https://github.com/Nen-Co/nen-db), commit
+`c990ef87d74e4dd7e77d3d8d1aafea2d57d12af7`. NenDB is licensed under the
+Apache License 2.0. The complete license is included at
+`src/vendor/nendb/LICENSE` and port details are recorded in
+`src/vendor/nendb/UPSTREAM.md`.

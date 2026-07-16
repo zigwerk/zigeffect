@@ -11,6 +11,7 @@ const dep_validation = @import("../dependency/validation.zig");
 const runtime_mod = @import("../runtime/runtime.zig");
 const fiber_mod = @import("../runtime/fiber.zig");
 const runner_mod = @import("../runtime/runner.zig");
+const identity_mod = @import("../core/runtime_identity.zig");
 
 pub const Allocator = dep_services.Allocator;
 pub const Context = context_mod.Context;
@@ -180,7 +181,7 @@ fn layerProvidesService(comptime LayerType: type, comptime Service: type) bool {
 
 fn layerGraphNodeName(comptime LayerType: type) []const u8 {
     if (@hasDecl(LayerType, "Name")) return LayerType.Name;
-    return @typeName(LayerType.EnvType);
+    return identity_mod.boundedTypeName(LayerType.EnvType);
 }
 
 fn graphDependencyError(report: *const DependencyReport) ?DependencyError {
@@ -462,7 +463,10 @@ pub fn LayerGraphRuntime(comptime Layers: type) type {
                                 .label = layer_name,
                                 .status = "starting",
                             });
+                            const previous_parent = startup_ctx.causal_parent_id;
+                            startup_ctx.causal_parent_id = started orelse previous_parent;
                             @field(envs, field.name) = layer.buildWithContext(self.allocator, &self.startup_scope, &startup_ctx) catch |err| {
+                                startup_ctx.causal_parent_id = previous_parent;
                                 _ = self.recordCausal(.{
                                     .kind = .exit_recorded,
                                     .parent_id = started,
@@ -473,6 +477,7 @@ pub fn LayerGraphRuntime(comptime Layers: type) type {
                                 });
                                 return err;
                             };
+                            startup_ctx.causal_parent_id = previous_parent;
 
                             var layer_provided = try layer.providedServices(self.allocator);
                             defer layer_provided.deinit();

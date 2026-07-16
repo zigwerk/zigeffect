@@ -40,6 +40,21 @@ pub const CausalStoreOptions = struct {
     service_key: []const u8 = "",
 };
 
+/// Narrow, copyable capability for boundary adapters that must emit semantic
+/// facts after their layer has been acquired. It exposes recording only—not
+/// store ownership, snapshots, retention controls, or backend lifecycle.
+pub const CausalRecorder = struct {
+    store: *CausalStore,
+
+    pub fn fromStore(store: *CausalStore) CausalRecorder {
+        return .{ .store = store };
+    }
+
+    pub fn record(self: CausalRecorder, event: CausalEvent) Allocator.Error!u64 {
+        return self.store.record(event);
+    }
+};
+
 pub const CausalEventKind = enum {
     run_started,
     run_completed,
@@ -222,6 +237,137 @@ pub fn isCausalSampleableEvent(kind: CausalEventKind) bool {
     return causalEventTaxonomy(kind).sampleable;
 }
 
+pub const causal_context_schema_version: u8 = 2;
+pub const max_causal_links: usize = 4;
+
+pub const TraceParent = struct {
+    trace_id_high: u64,
+    trace_id_low: u64,
+    parent_id: u64,
+    flags: u8,
+
+    pub fn context(self: TraceParent) CausalContextV2 {
+        return .{
+            .trace_id_high = self.trace_id_high,
+            .trace_id_low = self.trace_id_low,
+            .span_id = self.parent_id,
+        };
+    }
+
+    pub fn format(self: TraceParent) [55]u8 {
+        var output: [55]u8 = undefined;
+        _ = std.fmt.bufPrint(&output, "00-{x:0>16}{x:0>16}-{x:0>16}-{x:0>2}", .{ self.trace_id_high, self.trace_id_low, self.parent_id, self.flags }) catch unreachable;
+        return output;
+    }
+};
+
+pub fn parseTraceParent(value: []const u8) !TraceParent {
+    if (value.len != 55 or value[2] != '-' or value[35] != '-' or value[52] != '-' or std.mem.eql(u8, value[0..2], "ff")) return error.InvalidTraceParent;
+    for (value, 0..) |byte, index| {
+        if (index == 2 or index == 35 or index == 52) continue;
+        if (!std.ascii.isHex(byte)) return error.InvalidTraceParent;
+    }
+    const parsed = TraceParent{
+        .trace_id_high = std.fmt.parseInt(u64, value[3..19], 16) catch return error.InvalidTraceParent,
+        .trace_id_low = std.fmt.parseInt(u64, value[19..35], 16) catch return error.InvalidTraceParent,
+        .parent_id = std.fmt.parseInt(u64, value[36..52], 16) catch return error.InvalidTraceParent,
+        .flags = std.fmt.parseInt(u8, value[53..55], 16) catch return error.InvalidTraceParent,
+    };
+    if ((parsed.trace_id_high == 0 and parsed.trace_id_low == 0) or parsed.parent_id == 0) return error.InvalidTraceParent;
+    return parsed;
+}
+
+/// Allocation-free correlation shared by runtime execution, development
+/// coordination, embedded graph persistence, and telemetry projections. Zero
+/// optionals mean "not supplied"; child contexts inherit missing values from
+/// their parent/runtime context.
+pub const CausalContextV2 = struct {
+    schema_version: u8 = causal_context_schema_version,
+    runtime_instance_id: ?u64 = null,
+    graph_session_id: ?u64 = null,
+    workspace_id: ?u64 = null,
+    project_id: ?u64 = null,
+    component_id: ?u64 = null,
+    requirement_id: ?u64 = null,
+    acceptance_check_id: ?u64 = null,
+    scenario_id: ?u64 = null,
+    agent_id: ?u64 = null,
+    agent_attempt: ?u64 = null,
+    development_task_id: ?u64 = null,
+    work_packet_id: ?u64 = null,
+    change_set_id: ?u64 = null,
+    source_revision_id: ?u64 = null,
+    /// The two halves of a W3C-compatible 128-bit trace identifier.
+    trace_id_high: ?u64 = null,
+    trace_id_low: ?u64 = null,
+    span_id: ?u64 = null,
+
+    pub fn merge(parent: CausalContextV2, child: CausalContextV2) CausalContextV2 {
+        return .{
+            .runtime_instance_id = child.runtime_instance_id orelse parent.runtime_instance_id,
+            .graph_session_id = child.graph_session_id orelse parent.graph_session_id,
+            .workspace_id = child.workspace_id orelse parent.workspace_id,
+            .project_id = child.project_id orelse parent.project_id,
+            .component_id = child.component_id orelse parent.component_id,
+            .requirement_id = child.requirement_id orelse parent.requirement_id,
+            .acceptance_check_id = child.acceptance_check_id orelse parent.acceptance_check_id,
+            .scenario_id = child.scenario_id orelse parent.scenario_id,
+            .agent_id = child.agent_id orelse parent.agent_id,
+            .agent_attempt = child.agent_attempt orelse parent.agent_attempt,
+            .development_task_id = child.development_task_id orelse parent.development_task_id,
+            .work_packet_id = child.work_packet_id orelse parent.work_packet_id,
+            .change_set_id = child.change_set_id orelse parent.change_set_id,
+            .source_revision_id = child.source_revision_id orelse parent.source_revision_id,
+            .trace_id_high = child.trace_id_high orelse parent.trace_id_high,
+            .trace_id_low = child.trace_id_low orelse parent.trace_id_low,
+            .span_id = child.span_id orelse parent.span_id,
+        };
+    }
+
+    pub fn empty(self: CausalContextV2) bool {
+        return self.runtime_instance_id == null and self.graph_session_id == null and
+            self.workspace_id == null and self.project_id == null and self.component_id == null and
+            self.requirement_id == null and self.acceptance_check_id == null and self.scenario_id == null and
+            self.agent_id == null and self.agent_attempt == null and
+            self.development_task_id == null and self.work_packet_id == null and
+            self.change_set_id == null and self.source_revision_id == null and self.trace_id_high == null and
+            self.trace_id_low == null and self.span_id == null;
+    }
+};
+
+/// Stable non-secret identity projection for bounded causal context fields.
+/// The original text remains in manifests/receipts; runtime events carry only
+/// this deterministic identifier.
+pub fn stableCausalContextId(value: []const u8) u64 {
+    var hash: u64 = 14695981039346656037;
+    for (value) |byte| {
+        hash ^= byte;
+        hash *%= 1099511628211;
+    }
+    return if (hash == 0) 1 else hash;
+}
+
+pub const CausalLinkKind = enum {
+    parent,
+    cause,
+    proof,
+    lease,
+    change,
+    federated,
+};
+
+pub const CausalLink = struct {
+    kind: CausalLinkKind,
+    event_id: u64,
+    graph_session_id: ?u64 = null,
+};
+
+pub const CausalLinkError = error{
+    InvalidCausalLink,
+    DuplicateCausalLink,
+    TooManyCausalLinks,
+};
+
 pub const CausalEvent = struct {
     id: u64 = 0,
     kind: CausalEventKind,
@@ -247,10 +393,100 @@ pub const CausalEvent = struct {
     schema_ref: []const u8 = "",
     trace_id: ?u64 = null,
     span_id: ?u64 = null,
+    context: CausalContextV2 = .{},
+    links: [max_causal_links]CausalLink = [_]CausalLink{.{ .kind = .parent, .event_id = 0 }} ** max_causal_links,
+    link_count: u8 = 0,
     label: []const u8 = "",
     type_name: []const u8 = "",
     status: []const u8 = "",
     redacted_detail: []const u8 = "",
+    /// Internal ownership backing for events retained or cloned by the core
+    /// causal store. It is not part of the causal schema; public formatters
+    /// serialize the named event fields above. Copies made by other backends
+    /// must reset this field before taking independent ownership.
+    _owned_text: []u8 = &.{},
+
+    const Wire = struct {
+        id: u64,
+        kind: CausalEventKind,
+        run_id: ?u64,
+        parent_id: ?u64,
+        fiber_id: ?u64,
+        scope_id: ?u64,
+        layer_id: ?u64,
+        layer_name: []const u8,
+        service_key: []const u8,
+        resource_id: ?u64,
+        cause_event_id: ?u64,
+        schedule_id: ?u64,
+        source_ref_id: ?u64,
+        boundary_id: ?u64,
+        artifact_id: []const u8,
+        domain_entity_ref: []const u8,
+        data_subject_ref: []const u8,
+        schema_ref: []const u8,
+        trace_id: ?u64,
+        span_id: ?u64,
+        context: CausalContextV2,
+        links: []const CausalLink,
+        label: []const u8,
+        type_name: []const u8,
+        status: []const u8,
+        redacted_detail: []const u8,
+    };
+
+    /// Keep internal text ownership out of generic JSON serialization. The
+    /// causal JSONL and artifact formatters remain the authoritative versioned
+    /// wire schemas; this method makes ad-hoc diagnostics safe as well.
+    pub fn jsonStringify(self: CausalEvent, writer: anytype) !void {
+        try writer.write(Wire{
+            .id = self.id,
+            .kind = self.kind,
+            .run_id = self.run_id,
+            .parent_id = self.parent_id,
+            .fiber_id = self.fiber_id,
+            .scope_id = self.scope_id,
+            .layer_id = self.layer_id,
+            .layer_name = self.layer_name,
+            .service_key = self.service_key,
+            .resource_id = self.resource_id,
+            .cause_event_id = self.cause_event_id,
+            .schedule_id = self.schedule_id,
+            .source_ref_id = self.source_ref_id,
+            .boundary_id = self.boundary_id,
+            .artifact_id = self.artifact_id,
+            .domain_entity_ref = self.domain_entity_ref,
+            .data_subject_ref = self.data_subject_ref,
+            .schema_ref = self.schema_ref,
+            .trace_id = self.trace_id,
+            .span_id = self.span_id,
+            .context = self.context,
+            .links = self.activeLinks(),
+            .label = self.label,
+            .type_name = self.type_name,
+            .status = self.status,
+            .redacted_detail = self.redacted_detail,
+        });
+    }
+
+    pub fn activeLinks(self: *const CausalEvent) []const CausalLink {
+        const count = @min(@as(usize, self.link_count), max_causal_links);
+        return self.links[0..count];
+    }
+
+    pub fn addLink(self: *CausalEvent, link: CausalLink) CausalLinkError!void {
+        if (link.event_id == 0 or link.graph_session_id == 0) return error.InvalidCausalLink;
+        for (self.activeLinks()) |existing| {
+            if (existing.kind == link.kind and existing.event_id == link.event_id and
+                existing.graph_session_id == link.graph_session_id)
+            {
+                return error.DuplicateCausalLink;
+            }
+        }
+        if (self.link_count >= max_causal_links) return error.TooManyCausalLinks;
+        self.links[self.link_count] = link;
+        self.link_count += 1;
+    }
 };
 
 const sensitive_detail_keys = [_][]const u8{
@@ -594,62 +830,91 @@ fn cloneSlice(allocator: Allocator, value: []const u8) Allocator.Error![]const u
     return allocator.dupe(u8, value);
 }
 
+fn packEventText(allocator: Allocator, event: *CausalEvent) Allocator.Error!void {
+    const fields = .{
+        &event.label,
+        &event.type_name,
+        &event.layer_name,
+        &event.service_key,
+        &event.artifact_id,
+        &event.domain_entity_ref,
+        &event.data_subject_ref,
+        &event.schema_ref,
+        &event.status,
+        &event.redacted_detail,
+    };
+
+    var total_bytes: usize = 0;
+    inline for (fields) |field| total_bytes += field.*.len;
+    if (total_bytes == 0) {
+        event._owned_text = &.{};
+        return;
+    }
+
+    const storage = try allocator.alloc(u8, total_bytes);
+    var offset: usize = 0;
+    inline for (fields) |field| {
+        const previous = field.*;
+        const next = storage[offset .. offset + previous.len];
+        @memcpy(next, previous);
+        field.* = next;
+        offset += previous.len;
+    }
+    event._owned_text = storage;
+}
+
 fn cloneEventForStore(
     allocator: Allocator,
     event: CausalEvent,
     max_event_string_bytes: ?usize,
     truncated_field_count: *u64,
 ) Allocator.Error!CausalEvent {
+    var scratch_arena = std.heap.ArenaAllocator.init(allocator);
+    defer scratch_arena.deinit();
+    const scratch = scratch_arena.allocator();
+
     var owned = event;
-    owned.label = try redactAndBoundCausalText(allocator, event.label, max_event_string_bytes, truncated_field_count);
-    errdefer if (owned.label.len > 0) allocator.free(owned.label);
-    owned.type_name = try redactAndBoundCausalText(allocator, event.type_name, max_event_string_bytes, truncated_field_count);
-    errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
-    owned.layer_name = try redactAndBoundCausalText(allocator, event.layer_name, max_event_string_bytes, truncated_field_count);
-    errdefer if (owned.layer_name.len > 0) allocator.free(owned.layer_name);
-    owned.service_key = try redactAndBoundCausalText(allocator, event.service_key, max_event_string_bytes, truncated_field_count);
-    errdefer if (owned.service_key.len > 0) allocator.free(owned.service_key);
-    owned.artifact_id = try redactAndBoundCausalText(allocator, event.artifact_id, max_event_string_bytes, truncated_field_count);
-    errdefer if (owned.artifact_id.len > 0) allocator.free(owned.artifact_id);
-    owned.domain_entity_ref = try redactAndBoundCausalText(allocator, event.domain_entity_ref, max_event_string_bytes, truncated_field_count);
-    errdefer if (owned.domain_entity_ref.len > 0) allocator.free(owned.domain_entity_ref);
-    owned.data_subject_ref = try redactAndBoundCausalText(allocator, event.data_subject_ref, max_event_string_bytes, truncated_field_count);
-    errdefer if (owned.data_subject_ref.len > 0) allocator.free(owned.data_subject_ref);
-    owned.schema_ref = try redactAndBoundCausalText(allocator, event.schema_ref, max_event_string_bytes, truncated_field_count);
-    errdefer if (owned.schema_ref.len > 0) allocator.free(owned.schema_ref);
-    owned.status = try redactAndBoundCausalText(allocator, event.status, max_event_string_bytes, truncated_field_count);
-    errdefer if (owned.status.len > 0) allocator.free(owned.status);
-    owned.redacted_detail = try redactAndBoundCausalText(allocator, event.redacted_detail, max_event_string_bytes, truncated_field_count);
-    errdefer if (owned.redacted_detail.len > 0) allocator.free(owned.redacted_detail);
+    owned._owned_text = &.{};
+    owned.label = try redactAndBoundCausalText(scratch, event.label, max_event_string_bytes, truncated_field_count);
+    owned.type_name = try redactAndBoundCausalText(scratch, event.type_name, max_event_string_bytes, truncated_field_count);
+    owned.layer_name = try redactAndBoundCausalText(scratch, event.layer_name, max_event_string_bytes, truncated_field_count);
+    owned.service_key = try redactAndBoundCausalText(scratch, event.service_key, max_event_string_bytes, truncated_field_count);
+    owned.artifact_id = try redactAndBoundCausalText(scratch, event.artifact_id, max_event_string_bytes, truncated_field_count);
+    owned.domain_entity_ref = try redactAndBoundCausalText(scratch, event.domain_entity_ref, max_event_string_bytes, truncated_field_count);
+    owned.data_subject_ref = try redactAndBoundCausalText(scratch, event.data_subject_ref, max_event_string_bytes, truncated_field_count);
+    owned.schema_ref = try redactAndBoundCausalText(scratch, event.schema_ref, max_event_string_bytes, truncated_field_count);
+    owned.status = try redactAndBoundCausalText(scratch, event.status, max_event_string_bytes, truncated_field_count);
+    owned.redacted_detail = try redactAndBoundCausalText(scratch, event.redacted_detail, max_event_string_bytes, truncated_field_count);
+    try packEventText(allocator, &owned);
     return owned;
 }
 
 fn cloneEvent(allocator: Allocator, event: CausalEvent) Allocator.Error!CausalEvent {
+    var scratch_arena = std.heap.ArenaAllocator.init(allocator);
+    defer scratch_arena.deinit();
+    const scratch = scratch_arena.allocator();
+
     var owned = event;
-    owned.label = try redactCausalText(allocator, event.label);
-    errdefer if (owned.label.len > 0) allocator.free(owned.label);
-    owned.type_name = try redactCausalText(allocator, event.type_name);
-    errdefer if (owned.type_name.len > 0) allocator.free(owned.type_name);
-    owned.layer_name = try redactCausalText(allocator, event.layer_name);
-    errdefer if (owned.layer_name.len > 0) allocator.free(owned.layer_name);
-    owned.service_key = try redactCausalText(allocator, event.service_key);
-    errdefer if (owned.service_key.len > 0) allocator.free(owned.service_key);
-    owned.artifact_id = try redactCausalText(allocator, event.artifact_id);
-    errdefer if (owned.artifact_id.len > 0) allocator.free(owned.artifact_id);
-    owned.domain_entity_ref = try redactCausalText(allocator, event.domain_entity_ref);
-    errdefer if (owned.domain_entity_ref.len > 0) allocator.free(owned.domain_entity_ref);
-    owned.data_subject_ref = try redactCausalText(allocator, event.data_subject_ref);
-    errdefer if (owned.data_subject_ref.len > 0) allocator.free(owned.data_subject_ref);
-    owned.schema_ref = try redactCausalText(allocator, event.schema_ref);
-    errdefer if (owned.schema_ref.len > 0) allocator.free(owned.schema_ref);
-    owned.status = try redactCausalText(allocator, event.status);
-    errdefer if (owned.status.len > 0) allocator.free(owned.status);
-    owned.redacted_detail = try redactCausalText(allocator, event.redacted_detail);
-    errdefer if (owned.redacted_detail.len > 0) allocator.free(owned.redacted_detail);
+    owned._owned_text = &.{};
+    owned.label = try redactCausalText(scratch, event.label);
+    owned.type_name = try redactCausalText(scratch, event.type_name);
+    owned.layer_name = try redactCausalText(scratch, event.layer_name);
+    owned.service_key = try redactCausalText(scratch, event.service_key);
+    owned.artifact_id = try redactCausalText(scratch, event.artifact_id);
+    owned.domain_entity_ref = try redactCausalText(scratch, event.domain_entity_ref);
+    owned.data_subject_ref = try redactCausalText(scratch, event.data_subject_ref);
+    owned.schema_ref = try redactCausalText(scratch, event.schema_ref);
+    owned.status = try redactCausalText(scratch, event.status);
+    owned.redacted_detail = try redactCausalText(scratch, event.redacted_detail);
+    try packEventText(allocator, &owned);
     return owned;
 }
 
 fn deinitEventStrings(allocator: Allocator, event: CausalEvent) void {
+    if (event._owned_text.len > 0) {
+        allocator.free(event._owned_text);
+        return;
+    }
     if (event.label.len > 0) allocator.free(event.label);
     if (event.type_name.len > 0) allocator.free(event.type_name);
     if (event.layer_name.len > 0) allocator.free(event.layer_name);
@@ -776,15 +1041,55 @@ pub const CausalFindings = struct {
     }
 };
 
+pub const CausalInspectOptions = struct {
+    max_recent_events: usize = 128,
+};
+
+/// A single, internally consistent live view of the causal runtime. Unlike the
+/// specialized historical queries, this is captured while holding the store's
+/// lock and is therefore safe for an application introspection endpoint while
+/// other fibers are still recording events.
+pub const CausalInspection = struct {
+    allocator: Allocator,
+    retained_events: usize,
+    dropped_events: u64,
+    sampled_events: u64,
+    truncated_fields: u64,
+    backend_failures: u64,
+    backend_kind: ?causal_backend.CausalBackendKind,
+    oldest_retained_event_id: ?u64,
+    latest_retained_event_id: ?u64,
+    recent_events: []CausalEvent,
+    findings: []CausalFinding,
+    fiber_states: []CausalFiberState,
+
+    pub fn deinit(self: *CausalInspection) void {
+        for (self.recent_events) |event| deinitEventStrings(self.allocator, event);
+        self.allocator.free(self.recent_events);
+        for (self.findings) |finding| deinitFindingStrings(self.allocator, finding);
+        self.allocator.free(self.findings);
+        self.allocator.free(self.fiber_states);
+        self.* = undefined;
+    }
+
+    pub fn unresolvedFiberCount(self: *const CausalInspection) usize {
+        var count: usize = 0;
+        for (self.fiber_states) |fiber| if (!fiber.resolved) {
+            count += 1;
+        };
+        return count;
+    }
+};
+
 pub const CausalStore = struct {
     allocator: Allocator,
     // Guards the WRITE path: `record` and the `next*` id generators. This makes
     // concurrent recording from multiple OS threads / executors safe (the
-    // multi-executor zio + parallel-primitive case). READS (`snapshot` /
-    // `findings`) are NOT locked — they require a quiescent barrier (no
-    // concurrent writers), which is the normal usage: fork/spawn fibers, join
-    // them all, THEN snapshot. The mutex is uncontended (≈ a few ns) in the
-    // single-threaded case, so it costs nothing there.
+    // multi-executor zio + parallel-primitive case). Live inspection and
+    // counter accessors take the same lock. Historical queries (`snapshot`,
+    // `findings`, lineage filters) still require a quiescent barrier: join
+    // fibers before running deterministic assertions. The mutex is uncontended
+    // in the ordinary single-threaded case.
     mutex: sync.SpinLock = .{},
     next_event_id: u64 = 1,
     next_run_id_value: u64 = 1,
@@ -839,31 +1144,61 @@ pub const CausalStore = struct {
     }
 
     pub fn attachBackend(self: *CausalStore, backend: CausalBackend) void {
+        _ = self.replaceBackend(backend);
+    }
+
+    /// Atomically replace the export backend and return the previous value.
+    /// Managed adapters use this to borrow a caller-owned store without leaving
+    /// a dangling backend pointer when their own scoped backend is released.
+    /// Callers must still perform the swap at a quiescent lifecycle boundary.
+    pub fn replaceBackend(self: *CausalStore, backend: ?CausalBackend) ?CausalBackend {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        const previous = self.backend;
         self.backend = backend;
+        return previous;
     }
 
     pub fn backendFailureCount(self: *const CausalStore) u64 {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         return self.backend_failure_count;
     }
 
     pub fn attachedBackendKind(self: *const CausalStore) ?causal_backend.CausalBackendKind {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         if (self.backend) |backend| return backend.kind;
         return null;
     }
 
     pub fn droppedEventCount(self: *const CausalStore) u64 {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         return self.dropped_event_count;
     }
 
     pub fn sampledEventCount(self: *const CausalStore) u64 {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         return self.sampled_event_count;
     }
 
     pub fn truncatedFieldCount(self: *const CausalStore) u64 {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         return self.truncated_field_count;
     }
 
     pub fn oldestRetainedEventId(self: *const CausalStore) ?u64 {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         if (self.events.items.len == 0) return null;
         return self.events.items[0].id;
     }
@@ -974,6 +1309,50 @@ pub const CausalStore = struct {
         }
 
         return .{ .allocator = allocator, .events = events };
+    }
+
+    pub fn inspect(
+        self: *CausalStore,
+        allocator: Allocator,
+        options: CausalInspectOptions,
+    ) Allocator.Error!CausalInspection {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const retained_events = self.events.items.len;
+        const recent_count = @min(options.max_recent_events, retained_events);
+        const first_recent = retained_events - recent_count;
+        const recent_events = try allocator.alloc(CausalEvent, recent_count);
+        errdefer allocator.free(recent_events);
+
+        var initialized_events: usize = 0;
+        errdefer for (recent_events[0..initialized_events]) |event| {
+            deinitEventStrings(allocator, event);
+        };
+        for (self.events.items[first_recent..], 0..) |event, index| {
+            recent_events[index] = try cloneEvent(allocator, event);
+            initialized_events += 1;
+        }
+
+        var finding_set = try self.findings(allocator);
+        errdefer finding_set.deinit();
+        var fiber_set = try self.fiberStates(allocator);
+        errdefer fiber_set.deinit();
+
+        return .{
+            .allocator = allocator,
+            .retained_events = retained_events,
+            .dropped_events = self.dropped_event_count,
+            .sampled_events = self.sampled_event_count,
+            .truncated_fields = self.truncated_field_count,
+            .backend_failures = self.backend_failure_count,
+            .backend_kind = if (self.backend) |backend| backend.kind else null,
+            .oldest_retained_event_id = if (retained_events == 0) null else self.events.items[0].id,
+            .latest_retained_event_id = if (retained_events == 0) null else self.events.items[retained_events - 1].id,
+            .recent_events = recent_events,
+            .findings = finding_set.items,
+            .fiber_states = fiber_set.items,
+        };
     }
 
     pub fn lineage(self: *const CausalStore, allocator: Allocator, event_id: u64) Allocator.Error!CausalLineage {
@@ -1099,7 +1478,7 @@ pub const CausalStore = struct {
 
         for (self.events.items) |event| {
             switch (event.kind) {
-                .resource_acquired => if (!self.hasFinalizedResource(event)) {
+                .resource_acquired => if (!self.hasFinalizedResource(event) and !self.resourceBelongsToOpenScope(event)) {
                     try appendFinding(allocator, &output, .resource_acquired_without_finalization, event);
                 },
                 .scope_closed => try self.appendPendingFiberFindings(allocator, &output, event),
@@ -1198,6 +1577,23 @@ pub const CausalStore = struct {
             return true;
         }
         return false;
+    }
+
+    /// An acquired resource in a scope that is observably still open is live,
+    /// not leaked. Historical artifacts that did not record `scope_opened`
+    /// retain the previous fail-closed behavior and are still treated as leaks.
+    fn resourceBelongsToOpenScope(self: *const CausalStore, acquired: CausalEvent) bool {
+        const scope_id = acquired.scope_id orelse return false;
+        var opened = false;
+        for (self.events.items) |event| {
+            if (event.scope_id != scope_id) continue;
+            switch (event.kind) {
+                .scope_opened => opened = true,
+                .scope_closed => if (event.id >= acquired.id) return false,
+                else => {},
+            }
+        }
+        return opened;
     }
 
     fn fiberCompletedAfter(self: *const CausalStore, fiber_id: u64, closed_event_id: u64) bool {

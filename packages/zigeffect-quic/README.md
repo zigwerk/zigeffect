@@ -46,10 +46,8 @@ through `zstd.Http.sendEffect`.
 
 ## WebTransport
 
-M18 adds receipt helpers and deterministic message capture for WebTransport
-streams/datagrams.
-
-M19 adds the local dev-session bridge:
+The package includes receipt helpers and deterministic message capture for
+WebTransport streams and datagrams. Its local development-session bridge:
 
 - `bridgeLocalDevSessionJsonlAlloc` wraps `zstd.Agent.Session` JSONL as
   redacted `zigeffect.webtransport.local-dev-frame.v1` JSONL.

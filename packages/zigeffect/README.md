@@ -6,31 +6,53 @@ center: the engine records execution as a structured, queryable causal event
 graph so LLM agents and humans can debug by asking the runtime precise questions
 instead of reconstructing behavior from logs.
 
-The center of the API is still normal Zig:
+The canonical application API is normal Zig with service requirements visible
+in the effect type:
 
 ```zig
-fn program(ctx: *fx.Context(fx.TestServices)) AppError!Result {
-    const logger = ctx.service(fx.Logger);
-    try logger.info("running");
-    return .{};
-}
+const zstd = @import("zigeffect_std");
+const fx = zstd.fx;
+const kernel = fx.kernel;
+const Orders = kernel.Service("application/Orders", OrdersApi);
+const Find = kernel.Effect(Order, error{NotFound}, .{Orders});
+
+const program = find(order_id)
+    .flatMap(loadCustomer)
+    .tap(auditCustomer)
+    .named("orders.customer-view");
+
+const MainLayer = OrdersLive.merge(AuditLive);
+var runtime = try zstd.ManagedRuntime(@TypeOf(MainLayer)).make(
+    allocator,
+    io,
+    root,
+    MainLayer,
+    .{ .observability = production_observability },
+);
+defer runtime.deinit();
+
+const result = try runtime.run(program);
+try runtime.shutdown();
 ```
 
-Wrap direct-style functions when you want composition, retry, scoped resources,
-or test environments:
-
-```zig
-const Program = fx.Effect(Result, AppError, fx.TestServices).fromFn(program);
-const result = try Program
-    .map(Other, mapResult)
-    .tap(recordTelemetry)
-    .retry(&ctx, &schedule);
-```
+`map`, `flatMap`, `tap`, `andThen`, `zip`, `catchAll`, and `mapError`
+statically infer combined services and typed failures. Layers expose fluent
+`provide`, `provideMerge`, and `merge`; one managed runtime builds the graph,
+runs every endpoint/job, and disposes resources once. Application code does not
+call the interpreter protocol directly. See
+[compositional applications](docs/compositional-applications.md).
 
 ## The engine
 
-- **`Effect`**: `fromFn`, `succeed`, `fail`, `sync`, `run`, `exit`, `retry`,
+- **Canonical `kernel.Service` / `kernel.Effect` / `kernel.Layer` plus
+  application `zstd.ManagedRuntime`**: stable capability tags, inferred service and error
+  composition, typed construction inputs and outputs, scoped builders, explicit
+  provision, identity memoization, reusable runs, application inspection, and
+  one disposal.
+- **Legacy low-level `Effect`**: `fromFn`, `succeed`, `fail`, `sync`, `run`, `exit`, `retry`,
   `repeat`, `map`, `flatMap`, `tap`, `onExit`, `ensuring`, and recovery helpers.
+  This environment-parameterized surface remains for unmigrated engine domains;
+  new applications use `kernel.Effect`.
 - **`Runtime` / `FiberRuntime` / `Fiber`**: engine-managed scopes with automatic
   cleanup, and fork/join/interrupt with scoped leases. The core stays
   deterministic and dependency-free, but the same `FiberExecutor` vtable runs on
@@ -52,9 +74,6 @@ const result = try Program
   with auto-propagation across `fork`.
 - **`Context`**, **`acquireRelease`**, **`Scope`**: typed service access and
   scoped, reverse-order, exit-aware finalization.
-- **`Layer` / `layerGraph`**: dependency environments, scoped builders, typed
-  startup errors, executable heterogeneous graph startup with dependency
-  ordering, memoization, and readable dependency diagnostics.
 - **`Exit` / `Cause` / `CauseTree`**: structured result shapes with
   allocator-owned recursive cause reports.
 - **`Schedule`**: `once`, `recurs`, `spaced`, `duration`, fixed, exponential,
@@ -79,8 +98,11 @@ See [docs/usage.md](docs/usage.md), [docs/architecture.md](docs/architecture.md)
 
 ## The agent-observable causal runtime
 
-Attach a `CausalStore` to a runtime, fiber runtime, layer graph, or context, and
-the engine emits compact structural events — run start/end, scope open/close,
+Every low-level `kernel.ManagedRuntime` owns a bounded `CausalStore` by default.
+Every canonical application `zstd.ManagedRuntime` additionally owns an
+embedded durable NenDB graph and checked persistence shutdown. Applications do
+not construct, attach, or flush causal stores or graph backends. The engine
+emits compact structural events — run start/end, scope open/close,
 fiber fork/join/interrupt, service resolution, resource acquire/finalize, retry
 decisions, exits — into one causal event graph keyed by `run_id`, `parent_id`,
 `fiber_id`, `scope_id`, `cause_event_id`, and friends. Agents then query
@@ -89,8 +111,9 @@ decisions, exits — into one causal event graph keyed by `run_id`, `parent_id`,
 
 Causal JSON artifacts use the `zigeffect.causal.v1` schema and disclose retention
 (`max_events`, `dropped_events`), sampling (`sampled_events`), and truncation
-(`truncated_fields`) so agents know when evidence is incomplete. Event strings are
-defensively redacted before storage. The event taxonomy classifies each kind as
+(`truncated_fields`) so agents know when evidence is incomplete. Event strings
+are defensively redacted before storage and packed into one owned text
+allocation per retained event. The event taxonomy classifies each kind as
 structural, finding-evidence, or sampleable — and **finding evidence is never
 sampleable**.
 
@@ -190,11 +213,13 @@ nonzero, fall back to the in-memory trace): JSON Lines, DOT, OpenTelemetry-shape
 records, scan-based graph history, a NenDB node/edge write-contract, and a bounded
 async stream. Each has a focused gate (`zig build causal-*-backend`).
 
-For generated local applications, `zigeffect-std` implements that writer
-contract as `zstd.CausalGraph.LocalDatabase`, a bounded restart-safe Zig graph
-WAL at `.zigeffect/graph/causal-graph.jsonl`. The `zigeffect` CLI scaffolds the
-attachment and exposes manifest-scoped status, event, and child queries. It does
-not install or claim the upstream NenDB package.
+For applications, `zigeffect-std` implements that writer contract as
+`zstd.CausalGraph.LocalDatabase`: an embedded Zig 0.16 port of NenDB's
+data-oriented topology backed by a bounded restart-safe property WAL at
+`.zigeffect/graph/causal-graph.jsonl`. The `zigeffect` CLI exposes
+manifest-scoped status, ordered-since, event, and child queries. The exact
+upstream NenDB commit is pinned under `packages/references/nen-db` and reported
+by runtime health; no server or Docker image is required.
 
 ## Schema governance and budgets
 
@@ -232,7 +257,7 @@ schedules, structural shrinking, differential executors, distributed virtual
 faults, mutation analysis, performance budgets, and side-effect authority. See
 [docs/agent-first-testing.md](docs/agent-first-testing.md).
 
-Every first-party and template-v5 `b.addTest` artifact also uses the
+Every first-party and template-v11 `b.addTest` artifact also uses the
 `zigeffect_test_runner` server runner. It preserves idiomatic `std.testing`
 tests while atomically emitting complete suite receipts under
 `.zigeffect/tests/suites/`; missing executions, failures, leaks, and logged
@@ -255,19 +280,39 @@ record-only clone tools; see [docs/roadmap.md](docs/roadmap.md).
 
 ## Docs
 
-- [Usage](docs/usage.md) · [Architecture](docs/architecture.md) ·
-  [Errors](docs/errors.md) · [Resource Ownership](docs/resource-ownership.md)
-- [Data](docs/data.md) · [Pattern Matching](docs/pattern-matching.md) ·
-  [Module Pattern](docs/module-pattern.md) · [EffectTS Parity](docs/effectts-parity.md)
-- [Agent-Observable Causal Runtime](docs/agent-observable-runtime.md) ·
-  [How Codex Builds Applications](docs/agent-first-application-development.md) ·
-  [Agent Guide](docs/agent-guide.md) · [Causal Scenarios](docs/causal-scenarios.md) ·
-  [Causal Dev Harness](docs/causal-dev-harness.md) ·
-  [Local Agentic Development](docs/local-agentic-development.md) ·
-  [Agent Safety Plane](docs/agent-safety-plane.md)
-- [Operations](docs/operations.md) · [Schema Governance](docs/schema-governance.md) ·
-  [Performance Budget](docs/performance-budget.md) ·
-  [Self-Improving AI Engine](docs/self-improving-ai-engine.md)
-- [Agent-first testing](docs/agent-first-testing.md) · [Roadmap](docs/roadmap.md) · [Tool Roadmap](docs/tool-roadmap.md) ·
-  [Devex Review](docs/devex-review.md) ·
-  [Migration to Durable Runtime](docs/migration-to-durable-runtime.md)
+The [documentation index](docs/README.md) separates tutorials, operational
+guides, references, and migration records.
+
+Start here:
+
+1. [Usage](docs/usage.md)
+2. [Compositional applications](docs/compositional-applications.md)
+3. [Module pattern](docs/module-pattern.md)
+4. [Architecture](docs/architecture.md)
+
+Build and test applications:
+
+- [How Codex builds applications](docs/agent-first-application-development.md)
+- [Agent guide](docs/agent-guide.md)
+- [Agent-first testing](docs/agent-first-testing.md)
+- [Errors](docs/errors.md) and [resource ownership](docs/resource-ownership.md)
+- [gRPC, Connect, and Cloud Run](docs/grpc-cloud-run.md)
+
+Operate and debug the runtime:
+
+- [Agent-observable causal runtime](docs/agent-observable-runtime.md)
+- [Causal scenarios](docs/causal-scenarios.md)
+- [Causal development harness](docs/causal-dev-harness.md)
+- [Local agentic development](docs/local-agentic-development.md)
+- [Agent safety plane](docs/agent-safety-plane.md)
+- [Operations](docs/operations.md)
+
+Reference and status:
+
+- [Data](docs/data.md) and [pattern matching](docs/pattern-matching.md)
+- [Schema governance](docs/schema-governance.md)
+- [Performance budget](docs/performance-budget.md)
+- [Effect concepts](docs/effectts-parity.md)
+- [Developer-experience review](docs/devex-review.md)
+- [Roadmap](docs/roadmap.md) and [tool roadmap](docs/tool-roadmap.md)
+- [Migration to durable runtime](docs/migration-to-durable-runtime.md)

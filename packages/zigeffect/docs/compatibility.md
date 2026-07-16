@@ -1,4 +1,4 @@
-# zigeffect Local Compatibility
+# ZigEffect local compatibility
 
 This contract covers local development with the checked-in packages. It does
 not require a hosted service.
@@ -6,9 +6,9 @@ not require a hosted service.
 | Surface | Supported contract |
 |---|---|
 | Zig | `>= 0.16.0`, `< 0.17.0` |
-| zigeffect CLI | `0.5.0` |
+| zigeffect CLI | `0.7.0` |
 | project manifest | `zigeffect.project.v1` |
-| scaffold template | `zigeffect.scaffold-template.v1`, version `5` |
+| scaffold template | `zigeffect.scaffold-template.v1`, version `10` |
 | core API | `0.1.x` |
 | zigeffect-std API | `0.1.x` |
 | local causal graph | `zigeffect.causal.local-graph-record.v1` under the manifest-owned graph path |
@@ -48,24 +48,39 @@ The five generated project kinds are pinned by
 changes must intentionally update the versioned SHA-256 snapshot and continue
 to pass real Debug and ReleaseSafe generated-project builds.
 
-Template version `2` adds `causal_graph` to executable component capabilities
-and `.zigeffect/graph` to manifest artifact paths. Applications and services
-open `zstd.CausalGraph.LocalDatabase` before their first generated fact and
-write a bounded restart-safe WAL. Existing version-1 manifests remain parseable
-because the new artifact field has a default. System graph inspection requires
-a manifest component id:
+Template version `2` added `causal_graph` to executable component capabilities
+and `.zigeffect/graph` to manifest artifact paths. Existing version-1 manifests
+remain parseable because the artifact field has a default. System graph
+inspection requires a manifest component id:
 
 ```sh
 zigeffect graph status --root ./system --component api-service --json
 ```
 
-This local adapter uses the core's NenDB-compatible writer contract. It is not
-a compatibility claim for the upstream NenDB package.
+Template version `10` makes `zstd.ManagedRuntime` the canonical application and
+service root. It automatically owns the memory recorder, an embedded Zig 0.16
+port of NenDB's data-oriented topology, the crash-safe property WAL, agent map,
+and checked shutdown. Generated libraries export effects and default layers
+instead of creating hidden runtimes. `zigeffect graph since <id> --limit <n>
+--json` provides bounded before/after evidence. NenDB requires no daemon or
+Docker image; exact upstream provenance is reported in runtime health.
+
+Template version `11` makes the generated acceptance scenario execute the real
+root layer through that managed runtime using the `TestContext` causal store.
+Its receipt maps assertion references to durable graph IDs, fresh graph
+status/since queries return a read-only zero baseline, and application-map v2
+joins live topology to validated manifest intent and exact agent commands.
 
 Template version `5` makes Testing v2 the default compiler-test harness. Every
 generated test artifact obtains `zigeffect_test_runner` transitively from
 `zigeffect_std` and writes a complete suite receipt under
 `.zigeffect/tests/suites/`; no extra application dependency is required.
+
+Template version `9` moved local application, service, library, and generated
+service/layer modules to canonical service tags, fluent effects and layers, one
+named root program, one managed runtime, and runtime-owned application
+inspection. The production profile retains a documented HTTP/Postgres/OTLP
+compatibility bridge until those adapters publish canonical kernel layers.
 
 ## Install
 

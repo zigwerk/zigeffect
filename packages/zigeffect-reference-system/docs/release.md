@@ -6,6 +6,13 @@ The reference system is versioned with semantic versions and requires Zig
 and its SHA-256 digest are the release authority; package names or documentation
 alone are not.
 
+This system currently uses the generated production compatibility bridge for
+HTTP, Postgres, and OTLP. Its receipts qualify the recorded platform behavior;
+they do not qualify that legacy wiring as the canonical ZigEffect application
+architecture. Composition promotion additionally requires those adapters to
+publish canonical kernel layers and the reference system to use one
+`fx.kernel.ManagedRuntime` root.
+
 Supported evidence matrix:
 
 | Target | Unit and ReleaseSafe | Live adapters | Process topology |

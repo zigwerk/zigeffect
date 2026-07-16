@@ -87,9 +87,16 @@ test "every scaffold builds in Debug and ReleaseSafe and system children build i
             try std.testing.expectEqual(@as(u8, 0), validated.exit_code);
         }
 
+        if (std.mem.eql(u8, case.name, "generated-application")) {
+            try exerciseFreshAgentBaseline(tmp.dir, target_path, target_dir);
+        }
+
         try runBuild(target_path, "Debug");
         try runBuild(target_path, "ReleaseSafe");
         if ((case.kind == .application or case.kind == .service) and case.profile == .@"local-fake") {
+            if (std.mem.eql(u8, case.name, "generated-application")) {
+                try exerciseAgentWorkflow(tmp.dir, target_path, target_dir);
+            }
             try runProject(target_path);
             var graph = try cli.runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{
                 "graph", "status", "--root", target_path, "--json",
@@ -108,21 +115,21 @@ test "every scaffold builds in Debug and ReleaseSafe and system children build i
             }
             if (case.profile == .@"local-fake") {
                 for ([_]struct { path: []const u8, id: []const u8 }{
-                .{ .path = "services/api", .id = "api-service" },
-                .{ .path = "services/worker", .id = "worker-service" },
+                    .{ .path = "services/api", .id = "api-service" },
+                    .{ .path = "services/worker", .id = "worker-service" },
                 }) |service| {
-                const service_path = try std.fs.path.join(std.testing.allocator, &.{ target_path, service.path });
-                defer std.testing.allocator.free(service_path);
-                try runProject(service_path);
-                var graph = try cli.runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{
-                    "graph", "status", "--root", target_path, "--component", service.id, "--json",
-                });
-                defer graph.deinit();
-                try std.testing.expectEqual(@as(u8, 0), graph.exit_code);
-                try std.testing.expect(std.mem.indexOf(u8, graph.output, "\"records\":") != null);
-                const wal_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/.zigeffect/graph/causal-graph.jsonl", .{service.path});
-                defer std.testing.allocator.free(wal_path);
-                try target_dir.access(std.testing.io, wal_path, .{});
+                    const service_path = try std.fs.path.join(std.testing.allocator, &.{ target_path, service.path });
+                    defer std.testing.allocator.free(service_path);
+                    try runProject(service_path);
+                    var graph = try cli.runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{
+                        "graph", "status", "--root", target_path, "--component", service.id, "--json",
+                    });
+                    defer graph.deinit();
+                    try std.testing.expectEqual(@as(u8, 0), graph.exit_code);
+                    try std.testing.expect(std.mem.indexOf(u8, graph.output, "\"records\":") != null);
+                    const wal_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/.zigeffect/graph/causal-graph.jsonl", .{service.path});
+                    defer std.testing.allocator.free(wal_path);
+                    try target_dir.access(std.testing.io, wal_path, .{});
                 }
             }
             if (case.profile == .@"local-fake") {
@@ -130,16 +137,16 @@ test "every scaffold builds in Debug and ReleaseSafe and system children build i
                 defer std.testing.allocator.free(added_path);
                 try runBuild(added_path, "Debug");
 
-            var checked = try cli.runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{
-                "project", "check", "--root", target_path, "--json",
-            });
-            defer checked.deinit();
-            try std.testing.expectEqual(@as(u8, 0), checked.exit_code);
-            try target_dir.access(std.testing.io, ".zigeffect/receipts/check.json", .{});
+                var checked = try cli.runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{
+                    "project", "check", "--root", target_path, "--json",
+                });
+                defer checked.deinit();
+                try std.testing.expectEqual(@as(u8, 0), checked.exit_code);
+                try target_dir.access(std.testing.io, ".zigeffect/receipts/check.json", .{});
 
                 var handoff = try cli.runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{
-                "agent", "handoff", "--provider", "codex", "--session", "integration-session", "--root", target_path,
-            });
+                    "agent", "handoff", "--provider", "codex", "--session", "integration-session", "--root", target_path,
+                });
                 defer handoff.deinit();
                 try std.testing.expectEqual(@as(u8, 0), handoff.exit_code);
                 try std.testing.expect(std.mem.indexOf(u8, handoff.output, "zigeffect.agent-handoff.v1") != null);
@@ -147,6 +154,113 @@ test "every scaffold builds in Debug and ReleaseSafe and system children build i
             }
         }
     }
+}
+
+fn exerciseFreshAgentBaseline(base_dir: std.Io.Dir, target_path: []const u8, target_dir: std.Io.Dir) !void {
+    var validated = try cli.runAlloc(std.testing.allocator, std.testing.io, base_dir, &.{
+        "project", "validate", "--root", target_path, "--json",
+    });
+    defer validated.deinit();
+    try std.testing.expectEqual(@as(u8, 0), validated.exit_code);
+
+    var status = try cli.runAlloc(std.testing.allocator, std.testing.io, base_dir, &.{
+        "agent", "status", "--root", target_path, "--json",
+    });
+    defer status.deinit();
+    try std.testing.expectEqual(@as(u8, 0), status.exit_code);
+
+    var next = try cli.runAlloc(std.testing.allocator, std.testing.io, base_dir, &.{
+        "agent", "next", "--root", target_path, "--json",
+    });
+    defer next.deinit();
+    try std.testing.expectEqual(@as(u8, 0), next.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, next.output, "req-bootstrap") != null);
+
+    var scenarios = try cli.runAlloc(std.testing.allocator, std.testing.io, base_dir, &.{
+        "test", "list", "--root", target_path, "--json",
+    });
+    defer scenarios.deinit();
+    try std.testing.expectEqual(@as(u8, 0), scenarios.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, scenarios.output, "bootstrap-boundaries") != null);
+
+    var affected = try cli.runAlloc(std.testing.allocator, std.testing.io, base_dir, &.{
+        "test", "affected", "--changed", "src/app.zig", "--root", target_path, "--json",
+    });
+    defer affected.deinit();
+    try std.testing.expectEqual(@as(u8, 0), affected.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, affected.output, "bootstrap-boundaries") != null);
+
+    var graph = try cli.runAlloc(std.testing.allocator, std.testing.io, base_dir, &.{
+        "graph", "status", "--root", target_path, "--json",
+    });
+    defer graph.deinit();
+    try std.testing.expectEqual(@as(u8, 0), graph.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, graph.output, "\"records\":0") != null);
+    try std.testing.expectError(error.FileNotFound, target_dir.access(std.testing.io, ".zigeffect/graph/causal-graph.jsonl", .{}));
+}
+
+fn exerciseAgentWorkflow(base_dir: std.Io.Dir, target_path: []const u8, target_dir: std.Io.Dir) !void {
+    var run = try cli.runAlloc(std.testing.allocator, std.testing.io, base_dir, &.{
+        "test", "run", "--scenario", "bootstrap-boundaries", "--root", target_path, "--json",
+    });
+    defer run.deinit();
+    if (run.exit_code != 0) std.debug.print("generated agent test run failed:\n{s}\n", .{run.output});
+    try std.testing.expectEqual(@as(u8, 0), run.exit_code);
+    var receipt = try cli.zstd.Testing.parseRunReceipt(std.testing.allocator, run.output);
+    defer receipt.deinit();
+    try std.testing.expectEqual(@as(usize, 1), receipt.value.discovered);
+    try std.testing.expectEqual(@as(usize, 1), receipt.value.selected);
+    try std.testing.expectEqual(@as(usize, 1), receipt.value.passed);
+    try std.testing.expectEqual(@as(usize, 1), receipt.value.receipts.len);
+    const scenario = receipt.value.receipts[0];
+    try std.testing.expectEqual(cli.zstd.Testing.TestStatus.passed, scenario.status);
+    try std.testing.expect(scenario.causal.events > 0);
+    try std.testing.expectEqual(cli.zstd.Testing.CausalEventIdSpace.graph_durable, scenario.causal_event_id_space);
+    try std.testing.expect(scenario.causal_graph_session_id != null);
+    var causal_id: ?u64 = null;
+    for (scenario.assertions) |assertion| {
+        if (!std.mem.eql(u8, assertion.id, "greeting-causal")) continue;
+        try std.testing.expectEqual(@as(usize, 1), assertion.causal_event_ids.len);
+        causal_id = assertion.causal_event_ids[0];
+    }
+    try std.testing.expect(causal_id != null);
+
+    const causal_id_text = try std.fmt.allocPrint(std.testing.allocator, "{d}", .{causal_id.?});
+    defer std.testing.allocator.free(causal_id_text);
+    var event = try cli.runAlloc(std.testing.allocator, std.testing.io, base_dir, &.{
+        "graph", "event", causal_id_text, "--root", target_path, "--json",
+    });
+    defer event.deinit();
+    try std.testing.expectEqual(@as(u8, 0), event.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, event.output, "Greeting.greet") != null);
+
+    var delta = try cli.runAlloc(std.testing.allocator, std.testing.io, base_dir, &.{
+        "graph", "since", "0", "--limit", "256", "--root", target_path, "--json",
+    });
+    defer delta.deinit();
+    try std.testing.expectEqual(@as(u8, 0), delta.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, delta.output, "Greeting.greet") != null);
+    try std.testing.expect(std.mem.indexOf(u8, delta.output, "source_event_id") != null);
+
+    var coverage = try cli.runAlloc(std.testing.allocator, std.testing.io, base_dir, &.{
+        "test", "coverage", "--requirement", "req-bootstrap", "--root", target_path, "--json",
+    });
+    defer coverage.deinit();
+    try std.testing.expectEqual(@as(u8, 0), coverage.exit_code);
+
+    var gaps = try cli.runAlloc(std.testing.allocator, std.testing.io, base_dir, &.{
+        "test", "gaps", "--requirement", "req-bootstrap", "--root", target_path, "--json",
+    });
+    defer gaps.deinit();
+    try std.testing.expectEqual(@as(u8, 0), gaps.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, gaps.output, "\"required_gaps\":0") != null);
+
+    var handoff = try cli.runAlloc(std.testing.allocator, std.testing.io, base_dir, &.{
+        "agent", "handoff", "--provider", "codex", "--session", "generated-agent-workflow", "--root", target_path, "--json",
+    });
+    defer handoff.deinit();
+    try std.testing.expectEqual(@as(u8, 0), handoff.exit_code);
+    try target_dir.access(std.testing.io, ".zigeffect/handoffs/latest.json", .{});
 }
 
 fn installGeneratedPatternMatrix(target_dir: std.Io.Dir) !void {
@@ -236,7 +350,10 @@ fn runBuild(cwd: []const u8, optimize: []const u8) !void {
     });
     defer std.testing.allocator.free(compile.stdout);
     defer std.testing.allocator.free(compile.stderr);
-    const compiled = switch (compile.term) { .exited => |code| code == 0, else => false };
+    const compiled = switch (compile.term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
     if (!compiled) {
         std.debug.print("generated executable failed in {s} ({s})\nstdout:\n{s}\nstderr:\n{s}\n", .{ cwd, optimize, compile.stdout, compile.stderr });
         return error.GeneratedProjectBuildFailed;

@@ -20,15 +20,15 @@ fn loadArtifact(event: *webui.Event) void {
 
 fn scanEstate(event: *webui.Event) void {
     const executable = estate_scan_executable orelse {
-        event.returnValue("{\"schema\":\"ziac.estate-scan-error.v1\",\"code\":\"host_not_configured\"}");
+        event.returnString("{\"schema\":\"ziac.estate-scan-error.v1\",\"code\":\"host_not_configured\"}");
         return;
     };
     const connection_id = estate_connection_id orelse {
-        event.returnValue("{\"schema\":\"ziac.estate-scan-error.v1\",\"code\":\"host_not_configured\"}");
+        event.returnString("{\"schema\":\"ziac.estate-scan-error.v1\",\"code\":\"host_not_configured\"}");
         return;
     };
     const output_path = artifact_file_path orelse {
-        event.returnValue("{\"schema\":\"ziac.estate-scan-error.v1\",\"code\":\"artifact_not_configured\"}");
+        event.returnString("{\"schema\":\"ziac.estate-scan-error.v1\",\"code\":\"artifact_not_configured\"}");
         return;
     };
     const result = std.process.run(std.heap.page_allocator, host_io, .{
@@ -36,7 +36,7 @@ fn scanEstate(event: *webui.Event) void {
         .stdout_limit = .limited(64 * 1024),
         .stderr_limit = .limited(64 * 1024),
     }) catch {
-        event.returnValue("{\"schema\":\"ziac.estate-scan-error.v1\",\"code\":\"scanner_unavailable\"}");
+        event.returnString("{\"schema\":\"ziac.estate-scan-error.v1\",\"code\":\"scanner_unavailable\"}");
         return;
     };
     defer std.heap.page_allocator.free(result.stdout);
@@ -46,11 +46,11 @@ fn scanEstate(event: *webui.Event) void {
         else => false,
     };
     if (!succeeded) {
-        event.returnValue("{\"schema\":\"ziac.estate-scan-error.v1\",\"code\":\"scan_failed\"}");
+        event.returnString("{\"schema\":\"ziac.estate-scan-error.v1\",\"code\":\"scan_failed\"}");
         return;
     }
     const payload = std.heap.page_allocator.dupeZ(u8, std.mem.trim(u8, result.stdout, " \t\r\n")) catch {
-        event.returnValue("{\"schema\":\"ziac.estate-scan-error.v1\",\"code\":\"receipt_unavailable\"}");
+        event.returnString("{\"schema\":\"ziac.estate-scan-error.v1\",\"code\":\"receipt_unavailable\"}");
         return;
     };
     defer std.heap.page_allocator.free(payload);
@@ -64,12 +64,12 @@ fn returnFileBounded(event: *webui.Event, path: []const u8, max_bytes: usize) vo
         std.heap.page_allocator,
         .limited(max_bytes),
     ) catch {
-        event.returnValue("");
+        event.returnString("");
         return;
     };
     defer std.heap.page_allocator.free(bytes);
     const payload = std.heap.page_allocator.dupeZ(u8, bytes) catch {
-        event.returnValue("");
+        event.returnString("");
         return;
     };
     defer std.heap.page_allocator.free(payload);
@@ -82,7 +82,7 @@ fn loadSession(event: *webui.Event) void {
 
 fn loadLogSnapshot(event: *webui.Event) void {
     const path = log_snapshot_path orelse {
-        event.returnValue("");
+        event.returnString("");
         return;
     };
     const bytes = std.Io.Dir.cwd().readFileAlloc(
@@ -91,12 +91,12 @@ fn loadLogSnapshot(event: *webui.Event) void {
         std.heap.page_allocator,
         .limited(8 * 1024 * 1024),
     ) catch {
-        event.returnValue("");
+        event.returnString("");
         return;
     };
     defer std.heap.page_allocator.free(bytes);
     const payload = std.heap.page_allocator.dupeZ(u8, bytes) catch {
-        event.returnValue("");
+        event.returnString("");
         return;
     };
     defer std.heap.page_allocator.free(payload);

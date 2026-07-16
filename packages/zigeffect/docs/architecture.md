@@ -1,6 +1,6 @@
-# zigeffect Architecture
+# ZigEffect architecture
 
-Date: 2026-06-05
+**Last architectural review:** 2026-07-15
 
 `zigeffect` is organized as a public facade plus domain modules. Users import
 `zigeffect` through `src/zigeffect.zig`; maintainers and agents work in the
@@ -14,11 +14,18 @@ The public module root is:
 packages/zigeffect/src/zigeffect.zig
 ```
 
-That file is a facade. It exports domain namespaces such as `fx.core`,
+That file is a facade. Application modules use `fx.kernel`, which exports the
+canonical `Service`, `Effect`, `Layer`, I/O-free `ManagedRuntime`, default
+services, runtime aspects, and application-inspection model. Process roots
+import `zigeffect_std` and use `zstd.ManagedRuntime`, which wraps the kernel
+interpreter with the embedded durable NenDB graph. The facade also exports
+domain namespaces such as `fx.core`,
 `fx.effect`, `fx.runtime`, `fx.layer`, `fx.services`, `fx.data`, `fx.match`,
 `fx.pattern`, `fx.traits`, `fx.workflow`, and `fx.cluster`, while preserving
-the existing top-level aliases such as `fx.Effect`, `fx.Context`, `fx.Scope`,
-`fx.Runtime`, `fx.Layer`, `fx.Schedule`, and `fx.TestEnv`. It also exposes
+older top-level aliases such as `fx.Effect`, `fx.Context`, `fx.Scope`,
+`fx.Runtime`, `fx.Layer`, `fx.Schedule`, and `fx.TestEnv` for unmigrated
+framework modules. Those aliases are not the application composition API. It
+also exposes
 `fx.storage` for durable storage schema metadata and SQL migration plans, and
 `fx.performance` for deterministic benchmark reports and bounded-resource
 verification gates. Domain namespaces also expose ergonomic aliases, for
@@ -40,6 +47,34 @@ specific sibling domain file instead. This keeps dependencies explicit and
 prevents facade cycles.
 
 ## Source Domains
+
+```text
+src/kernel/
+```
+
+Owns the canonical application algebra:
+
+- `service.zig`: stable service tags and the runtime registry;
+- `effect.zig`: lazy typed effects and fluent composition;
+- `layer.zig`: typed construction inputs, outputs, startup errors, provision,
+  memoization, and scoped acquisition;
+- `managed_runtime.zig`: the I/O-free root builder, interpreter, disposer, and
+  in-memory application inspection entry point;
+- `default_services.zig`: runtime defaults and per-run overrides;
+- `aspects.zig`: logger, metrics, tracer, supervisor, and causal fanout;
+- `topology.zig`: layer and service graph metadata; and
+- `application.zig`: the versioned application snapshot.
+
+Application-facing service, effect, layer, runtime, default-service, or
+inspection work starts here. Canonical kernel modules may reuse lower-level
+scope, cause, causal-store, and runtime machinery, but the dependency direction
+must not make application code depend on legacy environment types.
+
+The process-level runtime lives in
+`packages/zigeffect-std/src/runtime/root.zig`. It is the only layer allowed to
+compose the pure kernel with filesystem-backed causal persistence. It owns the
+embedded NenDB topology, durable property WAL, graph backend, causal store, and
+kernel runtime in dependency order.
 
 ```text
 src/core/
@@ -71,14 +106,16 @@ reports belong here.
 src/effect/
 ```
 
-Owns direct-style effect values and synchronous effect combinators:
+Owns the original environment-parameterized effect implementation used by
+unmigrated framework domains:
 
 - `effect.zig`: `Effect`, combinators, error recovery, retry/repeat execution.
 - `resource.zig`: `acquireRelease`.
 - `schedule.zig`: `Schedule` policies.
 
-Effect combinators, scoped acquisition helpers, and schedule algebra should land
-here unless they need runtime/fiber execution semantics.
+Do not extend this surface for new application composition. Canonical effect
+combinators belong in `src/kernel/effect.zig`; shared schedule or low-level
+runtime machinery may remain here until deliberately migrated.
 
 ```text
 src/runtime/
@@ -124,16 +161,18 @@ backend and cluster milestones.
 src/layer/
 ```
 
-Owns dependency layers and graph startup:
+Owns the legacy heterogeneous layer-graph implementation still used by
+unmigrated framework and adapter modules:
 
 - `layer.zig`: `Layer`, `LayerWithError`, `ProvidedLayer`, `RequiredLayer`,
   `MergeLayer`.
 - `graph.zig`: `LayerGraph`, generated graph environments,
   `LayerGraphRuntime`, `layerGraph`.
 
-Dependency-injected layer builders, graph startup ordering, graph memoization,
-and provider replacement APIs belong here, with metadata helpers in
-`src/dependency/` where appropriate.
+New application layer behavior belongs in `src/kernel/layer.zig` and
+`src/kernel/managed_runtime.zig`. Changes here should either maintain an
+existing internal consumer or remove migration debt; documentation and
+scaffolds must not present `LayerGraph` as a second recommended architecture.
 
 ```text
 src/services/

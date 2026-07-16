@@ -1,25 +1,36 @@
-# Migration To Durable Runtime
+# Migration to the durable runtime
 
-Date: 2026-06-10
+**Original guide:** 2026-06-10; **canonical-kernel review:** 2026-07-15
 
 This guide shows how to move from deterministic-only `zigeffect` programs to
 the durable workflow and local cluster runtime.
 
-## Keep Plain Zig Handlers
+Durable workflow and cluster domains still contain environment-parameterized
+compatibility APIs. Do not move an otherwise canonical application back to the
+legacy composition model. Isolate those adapters behind a module facade and
+keep the process root on one `zstd.ManagedRuntime` while the durable surface is
+migrated. It embeds the durable NenDB causal graph around the I/O-free kernel
+interpreter.
 
-Deterministic programs usually start as plain functions wrapped by `Effect`:
+## Keep canonical domain operations
+
+Deterministic domain operations remain direct Zig functions wrapped by a
+canonical effect:
 
 ```zig
-fn program(ctx: *fx.Context(AppEnv)) AppError!Result {
-    const logger = ctx.service(fx.Logger);
-    try logger.info("running");
-    return .{};
-}
+const Repository = fx.kernel.Service("orders/Repository", RepositoryApi);
+const Program = fx.kernel.Effect(Result, AppError, .{Repository});
+
+const program = Program.fromFn(struct {
+    fn run(ctx: *Program.Context) AppError!Result {
+        return ctx.service(Repository).load();
+    }
+}.run).named("orders.workflow-input");
 ```
 
-Keep that shape for durable code. Durable workflow, activity, and actor
-handlers are still direct-style Zig functions. The migration is about adding
-durable identity, journals, queues, clocks, signals, and runner ownership.
+Durable workflow, activity, and actor handlers are also direct-style Zig
+functions. The migration adds durable identity, journals, queues, clocks,
+signals, and runner ownership; it does not create a second application runtime.
 
 ## Add Durable Workflow Identity
 
@@ -31,7 +42,8 @@ const execution_id = fx.workflow.executionId("approval", "case-42");
 ```
 
 For typed definitions, attach idempotency keys so retries and restarts reuse the
-same execution identity:
+same execution identity. The current `AppEnv` parameter below is a durable
+compatibility boundary and must not escape into ordinary application modules:
 
 ```zig
 const Approval = fx.workflow

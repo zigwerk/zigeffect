@@ -1,8 +1,8 @@
 const std = @import("std");
 const zstd = @import("zigeffect_std");
 
-pub const cli_version = "0.6.0";
-pub const template_version: u32 = 6;
+pub const cli_version = "0.7.0";
+pub const template_version: u32 = 13;
 pub const template_schema = "zigeffect.scaffold-template.v1";
 pub const compatibility_schema = "zigeffect.compatibility.v1";
 pub const scaffold_state_schema = "zigeffect.scaffold-state.v1";
@@ -324,7 +324,7 @@ test "distribution metadata validates managed hashes and legacy manifest migrati
     future_template.template_version = template_version + 1;
     try std.testing.expectError(error.UnsupportedTemplateSchema, future_template.validate());
     var future_cli = state;
-    future_cli.cli_version = "0.7.0";
+    future_cli.cli_version = "0.8.0";
     try std.testing.expectError(error.NewerCliRequired, future_cli.validate());
 }
 
@@ -344,6 +344,7 @@ test "scaffold metadata releases every partial allocation" {
             defer plan.deinit();
             try plan.add(".agents/skills/zigeffect-development/SKILL.md", "skill\n");
             try plan.add(".claude/skills/zigeffect-development/SKILL.md", "skill\n");
+            try plan.add(".gemini/skills/zigeffect-development/SKILL.md", "skill\n");
             try plan.add("src/main.zig", "pub fn main() void {}\n");
             try addScaffoldMetadata(&plan, "allocation-app", .application);
             try plan.sort();

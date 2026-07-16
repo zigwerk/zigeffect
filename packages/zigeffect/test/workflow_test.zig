@@ -2540,6 +2540,7 @@ test "causal journal store maps workflow parent sequences to causal event ids" {
     try std.testing.expectEqualStrings("workflow.workflow_started", snapshot.events[1].type_name);
     try std.testing.expectEqualStrings("workflow.step_completed", snapshot.events[2].type_name);
     try std.testing.expectEqual(@as(?u64, snapshot.events[1].id), snapshot.events[2].parent_id);
+    try std.testing.expectEqual(@as(?u64, snapshot.events[2].id), causal_journal.latestCausalId());
 }
 
 test "workflow context records failed u64 steps with typed error names" {

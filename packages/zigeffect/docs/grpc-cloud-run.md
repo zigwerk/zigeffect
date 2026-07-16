@@ -16,6 +16,12 @@ deployed GCP service-to-service qualification, all run against committed source.
 See [`packages/zigeffect-grpc/README.md`](../../zigeffect-grpc/README.md) for the
 current exact matrix and receipt paths.
 
+Transport maturity and application-composition maturity are separate. The
+current generated `...EffectServer(..., Env)` and scoped channel/server layers
+use the legacy environment kernel. They remain compatibility adapters until the
+[native gRPC canonical migration](../../zigeffect-grpc/docs/effect-native-roadmap.md)
+reaches G5. New application roots should not copy that wiring.
+
 ## Performance Evidence
 
 The latest schema-v2 ARM64 Docker optimization diagnostic measured the common
@@ -33,14 +39,14 @@ mixed-shape soak and deployed GCP service-to-service qualification gates.
 The profiling record and exact benchmark method live in
 [`packages/zigeffect-grpc/benchmarks/PERFORMANCE.md`](../../zigeffect-grpc/benchmarks/PERFORMANCE.md).
 
-## Deployment Shape
+## Target deployment shape
 
 ```text
 SolidJS + TanStack Solid Query
   -> generated Connect/Protobuf client
   -> Cloud Run HTTPS ingress
-  -> ZigEffect generated service binding
-  -> typed Effect handler, layers and scoped resources
+  -> ZigEffect generated handler effect
+  -> canonical service tags, scoped layers and one ManagedRuntime
 
 Zig service
   -> persistent bounded gRPC channel
@@ -59,10 +65,12 @@ deployments outside Cloud Run can use peer-verified TLS and ALPN `h2`.
    a contract change.
 3. Generate typed Zig messages, clients and server bindings plus the browser
    package.
-4. Implement handlers through the public `zigeffect_std.Grpc` facade using
-   typed effects, layers, scoped resources and typed failures.
-5. Emit redacted causal facts at resolve, connect, pick, attempt, stream,
-   handler and drain boundaries.
+4. Define domain and implementation service tags, then register generated
+   method effects with `Typed.generatedRoutesLayer`. Domain modules never name
+   an application environment type.
+5. Use the canonical channel/pool/server layers. They install redacted causal
+   recording at resolve, connect, pick, attempt, stream, handler, status, drain
+   and shutdown boundaries automatically.
 6. Add a deterministic failing test before changing behavior. Use
    `VirtualWorld`, `FaultMatrix` or `Schedules` when the contract involves
    retry, concurrency, network faults, rotation or shutdown.
@@ -87,6 +95,21 @@ routes, interceptors, standard health, reflection and Channelz before reporting
 readiness. Configure maximum connections, concurrent streams, header/message
 sizes, queue capacity, deadlines, connection age and drain time explicitly.
 
+The native server remains an imperative driver below the package boundary.
+`Typed.generatedRoutesLayer` is the application API: generated method effects
+declare stable service tags, handler registration requires explicit registry
+tags, and `nativeServerLayer` requires the completed registries. One
+`zstd.ManagedRuntime` owns the process and its graph; the generated adapter
+derives a requirements-limited runtime handle from that root.
+
+Every dispatch opens a caller-owned request scope, runs a structural handler
+effect, encodes a unary response while that scope is still open, and then closes
+the scope with the actual success/failure status. The engine automatically
+parents layer startup, handler execution, resolved services, resources,
+finalizers and exits in the causal graph. Transport and generated handler facts
+share bounded request/trace correlation keys. Handler code emits manual facts
+only for domain meaning.
+
 Incremental handlers are the production streaming primitive. They use bounded
 queues and nghttp2 pause/resume for backpressure, propagate cancellation and
 deadlines, and place final gRPC status in canonical trailing metadata. Buffered
@@ -99,6 +122,13 @@ Ordinary concurrent calls multiplex across bounded HTTP/2 capacity. Reconnect,
 GOAWAY handling, keepalive and idempotent retry are automatic within declared
 limits. Transparent retry is allowed only before the commitment tracker observes
 response headers or messages.
+
+The current `Typed.generatedUnaryEffect` and `Typed.generatedStreamingEffect`
+wrappers preserve requirements and ownership but still use the compatibility
+environment surface. The canonical migration will provide a stable generated
+client tag from a scoped persistent-channel or pool layer; outbound call effects
+will require that tag and run unchanged beside SQL, config, workflow, and other
+application effects.
 
 Attach audience-bound Google identity as sensitive authorization metadata for
 private Cloud Run calls. Use client interceptors for metadata, trace context,

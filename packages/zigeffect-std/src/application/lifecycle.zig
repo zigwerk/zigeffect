@@ -1,8 +1,29 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const fx = @import("zigeffect");
 pub const External = @import("../external/root.zig");
 const Service = @import("../service/root.zig");
 const Secrets = @import("../secrets/root.zig");
+
+test "application lifecycle is a scope-owned service with typed effects" {
+    const lifecycle_layer = managerLayer();
+    const Layers = @TypeOf(.{lifecycle_layer});
+    const Env = fx.LayerGraphEnv(Layers);
+    var causal_store = fx.CausalStore.init(std.testing.allocator);
+    defer causal_store.deinit();
+    var app = fx.layerGraph(std.testing.allocator, .{lifecycle_layer}).withCausalStore(&causal_store);
+    defer app.deinit();
+
+    try app.run(startEffect(Env));
+    try app.run(readyEffect(Env));
+    const ready_snapshot = try app.run(snapshotEffect(Env));
+    try std.testing.expect(ready_snapshot.readiness);
+    try app.run(drainEffect(Env));
+    try app.run(stopEffect(Env));
+    var snapshot = try causal_store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expect(Service.hasOperation(snapshot, Manager, "lifecycle.ready", "success"));
+}
 
 pub const State = enum {
     stopped,
@@ -27,8 +48,13 @@ pub const Transition = struct { sequence: u64, from: State, to: State, reason: [
 pub const Evidence = struct {
     allocator: std.mem.Allocator,
     transitions: std.ArrayList(Transition) = .empty,
-    pub fn init(allocator: std.mem.Allocator) Evidence { return .{ .allocator = allocator }; }
-    pub fn deinit(self: *Evidence) void { for (self.transitions.items) |item| self.allocator.free(item.reason); self.transitions.deinit(self.allocator); }
+    pub fn init(allocator: std.mem.Allocator) Evidence {
+        return .{ .allocator = allocator };
+    }
+    pub fn deinit(self: *Evidence) void {
+        for (self.transitions.items) |item| self.allocator.free(item.reason);
+        self.transitions.deinit(self.allocator);
+    }
     fn record(self: *Evidence, from: State, to: State, reason: []const u8) !void {
         try Secrets.requireSafeBoundary(reason);
         const owned = try self.allocator.dupe(u8, reason);
@@ -166,6 +192,125 @@ pub const Manager = struct {
     }
 };
 
+pub const ManagerLayerEnv = struct {
+    allocator: std.mem.Allocator,
+    manager: Manager,
+
+    pub fn service(self: *ManagerLayerEnv, comptime Requested: type) *Requested {
+        if (Requested == Manager) return &self.manager;
+        return fx.serviceNotFound(ManagerLayerEnv, Requested);
+    }
+};
+
+fn releaseManagerLayer(env: *ManagerLayerEnv) void {
+    const allocator = env.allocator;
+    env.manager.stop() catch {};
+    env.manager.deinit();
+    allocator.destroy(env);
+}
+
+fn buildManagerLayer(allocator: std.mem.Allocator, scope: *fx.Scope) std.mem.Allocator.Error!*ManagerLayerEnv {
+    const env = try allocator.create(ManagerLayerEnv);
+    env.* = .{ .allocator = allocator, .manager = Manager.init(allocator) };
+    scope.addFinalizerFor(ManagerLayerEnv, env, releaseManagerLayer) catch |err| {
+        releaseManagerLayer(env);
+        return err;
+    };
+    return env;
+}
+
+pub fn managerLayer() @TypeOf(fx.Layer(ManagerLayerEnv).fromBuilder(buildManagerLayer).provides(.{Manager})) {
+    return fx.Layer(ManagerLayerEnv).fromBuilder(buildManagerLayer).provides(.{Manager});
+}
+
+const ManagerOperation = enum { start, ready, drain, stop };
+
+fn runManagerOperation(manager: *Manager, comptime operation: ManagerOperation) anyerror!void {
+    switch (operation) {
+        .start => try manager.start(),
+        .ready => try manager.ready(),
+        .drain => try manager.drain(),
+        .stop => try manager.stop(),
+    }
+}
+
+fn ManagerEffect(comptime EffectEnv: type, comptime operation: ManagerOperation) type {
+    return struct {
+        pub const SuccessType = void;
+        pub const FailureType = anyerror;
+        pub const EnvType = EffectEnv;
+        pub const RequiredServices = .{Manager};
+
+        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
+            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
+        }
+
+        pub fn run(_: @This(), ctx: *fx.Context(EffectEnv)) anyerror!void {
+            const manager = ctx.service(Manager);
+            runManagerOperation(manager, operation) catch |err| {
+                _ = Service.recordOperation(ctx, Manager, "lifecycle." ++ @tagName(operation), "failure", @errorName(err));
+                return err;
+            };
+            _ = Service.recordOperation(ctx, Manager, "lifecycle." ++ @tagName(operation), "success", "application lifecycle transitioned");
+        }
+    };
+}
+
+pub fn StartEffect(comptime EffectEnv: type) type {
+    return ManagerEffect(EffectEnv, .start);
+}
+
+pub fn startEffect(comptime EffectEnv: type) StartEffect(EffectEnv) {
+    return .{};
+}
+
+pub fn ReadyEffect(comptime EffectEnv: type) type {
+    return ManagerEffect(EffectEnv, .ready);
+}
+
+pub fn readyEffect(comptime EffectEnv: type) ReadyEffect(EffectEnv) {
+    return .{};
+}
+
+pub fn DrainEffect(comptime EffectEnv: type) type {
+    return ManagerEffect(EffectEnv, .drain);
+}
+
+pub fn drainEffect(comptime EffectEnv: type) DrainEffect(EffectEnv) {
+    return .{};
+}
+
+pub fn StopEffect(comptime EffectEnv: type) type {
+    return ManagerEffect(EffectEnv, .stop);
+}
+
+pub fn stopEffect(comptime EffectEnv: type) StopEffect(EffectEnv) {
+    return .{};
+}
+
+pub fn SnapshotEffect(comptime EffectEnv: type) type {
+    return struct {
+        pub const SuccessType = Snapshot;
+        pub const FailureType = error{};
+        pub const EnvType = EffectEnv;
+        pub const RequiredServices = .{Manager};
+
+        pub fn requiredServices(allocator: std.mem.Allocator) std.mem.Allocator.Error!fx.ServiceSet {
+            return fx.ServiceSet.fromTypes(allocator, RequiredServices);
+        }
+
+        pub fn run(_: @This(), ctx: *fx.Context(EffectEnv)) error{}!Snapshot {
+            const snapshot = ctx.service(Manager).snapshot();
+            _ = Service.recordOperation(ctx, Manager, "lifecycle.snapshot", "success", @tagName(snapshot.state));
+            return snapshot;
+        }
+    };
+}
+
+pub fn snapshotEffect(comptime EffectEnv: type) SnapshotEffect(EffectEnv) {
+    return .{};
+}
+
 pub const ProcessSignal = enum(u8) { none = 0, interrupt = 1, terminate = 2 };
 var process_signal = std.atomic.Value(u8).init(0);
 
@@ -201,8 +346,12 @@ pub const SignalRegistration = struct {
     }
 };
 
-pub fn requestedSignal() ProcessSignal { return @enumFromInt(process_signal.load(.acquire)); }
-pub fn requestShutdownForTest(signal: ProcessSignal) void { process_signal.store(@intFromEnum(signal), .release); }
+pub fn requestedSignal() ProcessSignal {
+    return @enumFromInt(process_signal.load(.acquire));
+}
+pub fn requestShutdownForTest(signal: ProcessSignal) void {
+    process_signal.store(@intFromEnum(signal), .release);
+}
 
 pub fn provider(manager: *Manager) Service.Provider(.{Manager}) {
     return Service.Provider(.{Manager}).init(.{manager});
@@ -273,11 +422,17 @@ test "application lifecycle is available through the standard service provider" 
 }
 
 test "lifecycle evidence is secret safe and process signals latch outside handlers" {
-    var evidence = Evidence.init(std.testing.allocator); defer evidence.deinit();
-    var lifecycle = Manager.initWithEvidence(std.testing.allocator, &evidence); defer lifecycle.deinit();
-    try lifecycle.start(); try lifecycle.ready(); try lifecycle.drain(); try lifecycle.stop();
+    var evidence = Evidence.init(std.testing.allocator);
+    defer evidence.deinit();
+    var lifecycle = Manager.initWithEvidence(std.testing.allocator, &evidence);
+    defer lifecycle.deinit();
+    try lifecycle.start();
+    try lifecycle.ready();
+    try lifecycle.drain();
+    try lifecycle.stop();
     try std.testing.expectEqual(@as(usize, 5), evidence.transitions.items.len);
-    const json = try evidence.workbenchJsonAlloc(std.testing.allocator); defer std.testing.allocator.free(json);
+    const json = try evidence.workbenchJsonAlloc(std.testing.allocator);
+    defer std.testing.allocator.free(json);
     try std.testing.expect(std.mem.indexOf(u8, json, "forced-stop") == null);
     requestShutdownForTest(.terminate);
     try std.testing.expectEqual(ProcessSignal.terminate, requestedSignal());

@@ -1,6 +1,11 @@
-# zigeffect Roadmap
+# ZigEffect roadmap
 
-Date: 2026-06-24 (updated 2026-07-10)
+**Last status review:** 2026-07-15
+
+The status table is authoritative. The numbered milestone narratives below are
+historical delivery records; “delivered” there means the recorded capability or
+prototype landed, not that it has completed canonical-kernel migration or
+production qualification.
 
 `zigeffect` is a Zig-native Effect-inspired engine whose primary debugging
 interface is a deterministic, queryable **causal event graph** that LLM agents
@@ -25,8 +30,8 @@ semantic fact comparison, not exact event-id graph isomorphism.
 
 | # | Pillar | Status | Where |
 |---|--------|--------|-------|
-| 1 | Effect core + typed errors | **done** | `src/effect/effect.zig`, `src/core/result.zig`, `src/core/context.zig` |
-| 2 | DI layers + layer graph | **done** | `src/layer/layer.zig`, `src/layer/graph.zig`, `src/dependency/*` |
+| 1 | Canonical effect core + typed errors | **application kernel landed; advanced legacy combinators still migrating** | `src/kernel/effect.zig`, `src/core/result.zig` |
+| 2 | Canonical services, layers and managed runtime | **root composition, memoization, defaults, aspects and inspection landed; std/adapters still migrating** | `src/kernel/*`, `packages/zigeffect-std/docs/effect-native-roadmap.md` |
 | 3 | Scoped resources + finalizers | **done** | `src/core/scope.zig`, `src/effect/resource.zig` |
 | 4 | Fiber runtime + concurrency | **real backends** (deterministic, zio coroutines, OS-thread pool) | `src/runtime/fiber.zig`, `src/runtime/thread_pool_executor.zig`, `src/effect/ergonomics.zig`, `packages/zigeffect-zio` |
 | 5 | Causal store + event graph + queries | **done** | `src/services/causal.zig` |
@@ -39,10 +44,10 @@ semantic fact comparison, not exact event-id graph isomorphism.
 | 12 | Agent-operable runtime layer | **bounded interventions, counterfactuals, invariants, evals, semantic diffs, live command executor/tap, poll bridge, local daemon/HTTP engine bridge, eval diff artifacts/links/manifests, dev-loop/remediation-decision/patch-proposal eval persistence** | `src/services/agent_intervention.zig`, `counterfactual.zig`, `causal_invariant.zig`, `agent_eval.zig`, `causal_diff.zig`, `causal_live_command.zig` |
 | 13 | Production-operable guardrails | **live commands, concurrency facts, transport policy/discovery registry, ops storage/alert policy, gated ops artifact responses, alert delivery/webhook/provider envelopes, provider secret injection and retry reporting, endpoint-aware runbooks** | `workbench/src/collector`, `src/services/causal_concurrency.zig`, `src/services/causal_ops.zig`, `causal_ops_storage.zig`, `causal_ops_alert.zig`, `src/cluster/transport.zig` |
 | 14 | Multi-runner causal evidence | **local lineage stitcher plus deployment artifact metadata** | `src/services/causal_runner_lineage.zig` |
-| 15 | Effect-grade standard library | **M1-M19 delivered**: service kernel, production Schema, production Schema-powered CLI, effect-native config/JSON/secrets, streams/queues/pubsub/sinks, local process/workspace/FS adapters, observability recorder/artifacts, HTTP/WebSocket contracts/adapters, Schema-coded local HTTP router, SQL contracts plus local Postgres adapter, typed SQL row decoding, Postgres migration planning/apply SQL, experimental QUIC/HTTP3/WebTransport adapter, local WebTransport workbench bridge, local agent toolkit, real local-tool cookbook examples, local agent supervisor, and workbench dev-session UX | `packages/zigeffect-std`, `packages/zigeffect-postgres`, `packages/zigeffect-quic`, `packages/zigeffect-std/docs/cookbook.md`, `docs/superpowers/specs/2026-06-25-zigeffect-std-effectts-grade-roadmap-design.md` |
-| 16 | Agentic application platform | **M88-M95 delivered**: project contracts, Codex/Claude skills, five production scaffolds, instrumented project workflows, provider-neutral development protocol, semantic application facts, Workbench project UX, offline provider conformance, install/completions, compatibility metadata, conflict-safe upgrades, generated snapshots, and one local release gate | `packages/zigeffect-cli`, `packages/zigeffect-std/src/project`, `packages/zigeffect-std/src/application`, `workbench/`, `docs/compatibility.md` |
-| 17 | Agent-first testing platform | **M112-M137 delivered locally**: native control/process-receipt protocol, execution identity, semantic coverage/gaps, typed statechart and schedule exploration, structural/custom shrinking, differential execution, deterministic distributed virtual world, mutation analysis, performance budgets, side-effect firewall, stress/history CLI, Testing v2 Workbench, universal suite receipts, repository-wide package migration, migration guard, and template-v5 generated projects | `packages/zigeffect/src/testing`, `packages/zigeffect-std/src/testing`, `packages/zigeffect-cli`, `workbench/src/testing`, `docs/agent-first-testing.md` |
-| 18 | Agentic statecharts and workflows | **production implementation complete**: deterministic SCXML-derived semantics, actors and durable trees, workflow command adapters, cluster fencing, immutable proposal/proof/review/application governance, native semantic version diff, bounded simulation and invariants, policy-gated actor/workflow controls, exact-fingerprint snapshot migration, portable plan compiler, twelve reusable agentic patterns, CLI lifecycle, XState v5 oracle, and SolidJS Statechart Studio | `src/statechart`, `src/workflow/statechart.zig`, `packages/zigeffect-std/src/statechart`, `packages/zigeffect-cli`, `docs/statecharts-production.md`, `workbench/src/statechart` |
+| 15 | Effect-grade standard library | **capability breadth landed; canonical migration in progress**: runtime defaults and FileSystem/Process are the current oracles; HTTP, SQL, messaging, agent and higher-level modules still contain compatibility APIs | `packages/zigeffect-std`, `packages/zigeffect-std/docs/effect-native-roadmap.md`, `packages/zigeffect-std/docs/effect-reference-review.md` |
+| 16 | Agentic application platform | **local template-v11 scaffolds canonical; production adapter bridge still legacy**: process-level runtime-owned embedded NenDB, project contracts, agent skills, five compile-tested project kinds, workflows, semantic facts, Workbench UX, compatibility metadata and release gates are delivered | `packages/zigeffect-cli`, `packages/zigeffect-std/src/project`, `packages/zigeffect-std/src/application`, `docs/compatibility.md` |
+| 17 | Agent-first testing platform | **M112-M137 delivered locally**: native control/process-receipt protocol, execution identity, semantic coverage/gaps, graph-durable assertion IDs, typed statechart and schedule exploration, structural/custom shrinking, differential execution, deterministic distributed virtual world, mutation analysis, performance budgets, side-effect firewall, stress/history CLI, Testing v2 Workbench, universal suite receipts, repository-wide package migration, migration guard, and template-v11 generated projects | `packages/zigeffect/src/testing`, `packages/zigeffect-std/src/testing`, `packages/zigeffect-cli`, `workbench/src/testing`, `docs/agent-first-testing.md` |
+| 18 | Agentic statecharts and workflows | **local implementation and deterministic qualification delivered; deployment qualification remains separate**: SCXML-derived semantics, actors, durable trees, workflow adapters, fencing, governed plans, bounded simulation, XState v5 oracle and SolidJS Studio | `src/statechart`, `src/workflow/statechart.zig`, `packages/zigeffect-std/src/statechart`, `packages/zigeffect-cli`, `docs/statecharts-production.md`, `workbench/src/statechart` |
 
 ## Testing v2 delivery map (M121–M130)
 
@@ -58,7 +63,7 @@ All ten milestones are implemented locally as one additive receipt-v1 release:
 | M126 | Stable requirement-linked mutation points and deterministic absolute/relative performance budgets |
 | M127 | Bounded multi-seed stress, atomic validated history, introduced/resolved failure matching |
 | M128 | Workbench protocol, gap, evidence, replay, shrink, and history surfaces |
-| M129 | Template-v4 scaffolds, generated/project Codex and Claude skills, guides, and compatibility state |
+| M129 | Initial template-v4 scaffolds, generated/project Codex and Claude skills, guides, and compatibility state; the current contract is template v9 |
 | M130 | Direct public API discovery, schema validation, package/release gates, and generated-application proof |
 
 The governing design and acceptance plan are
@@ -68,10 +73,15 @@ and
 
 ## What is real today
 
-- Direct-style effects with typed success/failure channels; `Exit`/`Cause`/`CauseTree`.
-- Dependency injection gates, layer startup/teardown, heterogeneous graph startup
-  with memoization, and readable dependency diagnostics.
-- Deterministic scoped cleanup with reverse-order, exit-aware finalizers.
+- A canonical application kernel with stable service tags, typed
+  success/failure/requirement effects, fluent composition, typed layers,
+  identity memoization, one managed runtime, runtime defaults/aspects, and a
+  versioned application snapshot.
+- Structured `Exit`/`Cause`/`CauseTree` and deterministic scoped cleanup with
+  reverse-order, exit-aware finalizers.
+- A legacy environment/layer-graph engine that still hosts advanced features
+  while they migrate. Its behavior is real, but its wiring is not the
+  application architecture for new code.
 - **Structured concurrency on three executors, one abstraction.** `fork`/`join`/
   `interrupt`, `forEachPar`/`zipPar`, and the race family — `raceFirst`/`raceAll`/
   `race` (prefer-success) / `both` (fail-fast) — run on the deterministic backend,
@@ -85,9 +95,11 @@ and
   including **heterogeneous transactions** (`atomicallyMixed` over `TRef`s of
   different value types). Fiber-local `FiberRef` with **auto-propagation** across
   `fork` (inline `Context` slots for `@sizeOf(T) <= 8`).
-- A bounded, opt-in **causal event model** (`CausalStore`) with structural /
-  finding-evidence / sampleable taxonomy, secret redaction, retention/sampling/
-  truncation disclosure, and the structural queries agents rely on.
+- A bounded **causal event model** (`CausalStore`) owned by canonical managed
+  runtimes by default, with structural / finding-evidence / sampleable taxonomy,
+  secret redaction, retention/sampling/truncation disclosure, and the structural
+  queries agents rely on. Low-level compatibility runtimes can attach one
+  explicitly.
 - The causal **dev loop** and the **closed remediation loop**: `findings()` →
   remediation → `PolicyEngine.decide()` (gate OFF by default) → `ApplyBoundary`
   (action + structural verify) → `applied` earned only when approve AND verify,
@@ -900,7 +912,7 @@ dry-runs, scaffold migrations, generated-project snapshots, public API gates,
 and one complete local release command.
 
 **Status:** delivered on 2026-07-10. The installable CLI was version `0.2.0` at
-delivery and is now `0.3.0` after M111,
+delivery and is now `0.7.0`,
 declares Zig `>=0.16.0,<0.17.0`, and emits deterministic Bash, Zsh, and Fish
 completions. Every scaffold includes a validated compatibility contract and a
 SHA-256 state file limited to CLI-owned metadata and agent skills. `upgrade` is
@@ -919,23 +931,26 @@ and ownership details live in `docs/compatibility.md`.
 
 **Status:** delivered on 2026-07-10.
 
-`zstd.CausalGraph.LocalDatabase` is a bounded Zig-native append-only graph WAL
-over the core NenDB-compatible writer contract. It validates complete committed
-rows, repairs only a partial tail, rebuilds bounded indexes, assigns restart-safe
-session/event ids, writes a node and optional parent edge atomically, rejects
-secret-shaped records, and exposes read-only summary/event/children snapshots.
-The stdlib includes allocation-failure, restart, traversal, corruption,
-capacity, redaction, and partial-recovery tests plus a compile-tested example.
-This does not install the upstream NenDB package.
+`zstd.CausalGraph.LocalDatabase` began as a bounded Zig-native append-only graph
+WAL over the core NenDB writer contract. On 2026-07-15 it was promoted to the
+canonical `zstd.ManagedRuntime` store: every accepted causal fact now writes an
+actual embedded NenDB topology node and optional parent edge, while the bounded
+JSONL WAL retains complete redacted properties and restart recovery. It
+validates committed rows, repairs only a partial tail, rebuilds bounded indexes,
+assigns restart-safe session/event ids, rejects secret-shaped records, and
+exposes read-only summary/event/children/delta snapshots. The reviewed upstream
+source is pinned at `packages/references/nen-db`; the Zig 0.16 runtime port and
+its provenance live under `packages/zigeffect-std/src/vendor/nendb`.
 
 ### M109 - Manifest-scoped graph query CLI
 
 **Status:** delivered on 2026-07-10.
 
-`zigeffect graph status|event|children` opens only the graph artifact declared
+`zigeffect graph status|since|event|children` opens only the graph artifact declared
 by a validated `zigeffect.project.json`. System queries require
 `--component <id>` and resolve the selected component beneath its validated
-path. JSON schemas are stable and bounded; no arbitrary database path or
+path. `since <event-id> --limit <n>` provides the bounded before/after delta used
+by agent development loops. JSON schemas are stable and bounded; no arbitrary database path or
 command execution surface exists. Real filesystem tests persist, close, reopen,
 and query parent/child evidence.
 
@@ -955,13 +970,16 @@ all include the graph workflow.
 
 **Status:** delivered on 2026-07-10.
 
-CLI `0.3.0` and scaffold template version `2` pin all five generated project
-contracts with new SHA-256 snapshots. Shell completions, compatibility docs,
+At that milestone, CLI `0.3.0` and scaffold template version `2` pinned all five
+generated project contracts with new SHA-256 snapshots. Shell completions, compatibility docs,
 the future-agent briefing, operations guidance, and the local release gate are
 aligned. The generated-project matrix runs every project in Debug and
 ReleaseSafe, builds system children independently, executes real application,
 service, API, and worker binaries, and queries each resulting graph through the
 CLI before the full local release proof.
+
+The current compatibility contract is CLI `0.7.0`, template version `10`; see
+[Compatibility](compatibility.md).
 
 ## Hardening milestone roadmap
 

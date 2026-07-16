@@ -1,6 +1,7 @@
 const std = @import("std");
 const causal = @import("causal.zig");
 const causal_backend = @import("causal_backend.zig");
+const sync = @import("../runtime/sync.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const causal_nendb_node_schema = "zigeffect.causal.nendb_node.v1";
@@ -40,6 +41,9 @@ pub const CausalNendbGraphWriter = struct {
 
 pub const CausalNendbStorageBackendOptions = struct {
     max_events: ?usize = null,
+    /// Keep an adapter-local query copy. Durable application runtimes disable
+    /// this because their embedded graph is the query source of truth.
+    retain_history: bool = true,
 };
 
 pub const CausalNendbRetentionPolicy = struct {
@@ -120,9 +124,11 @@ pub const CausalNendbStorageBackendError = error{
 
 pub const CausalNendbStorageBackendState = struct {
     allocator: Allocator,
+    mutex: sync.SpinLock = .{},
     writer: CausalNendbGraphWriter,
     events: std.ArrayList(causal.CausalEvent) = .empty,
     max_events: ?usize = null,
+    retain_history: bool = true,
     written_event_count: u64 = 0,
     failed_event_count: u64 = 0,
     flushed_count: u64 = 0,
@@ -137,6 +143,7 @@ pub const CausalNendbStorageBackendState = struct {
             .allocator = allocator,
             .writer = writer,
             .max_events = options.max_events,
+            .retain_history = options.retain_history,
         };
     }
 
@@ -156,22 +163,37 @@ pub const CausalNendbStorageBackendState = struct {
     }
 
     pub fn eventCount(self: *const CausalNendbStorageBackendState) usize {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         return self.events.items.len;
     }
 
     pub fn writtenEventCount(self: *const CausalNendbStorageBackendState) u64 {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         return self.written_event_count;
     }
 
     pub fn failedEventCount(self: *const CausalNendbStorageBackendState) u64 {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         return self.failed_event_count;
     }
 
     pub fn lastFailure(self: *const CausalNendbStorageBackendState) ?anyerror {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         return self.last_failure;
     }
 
     pub fn flushedCount(self: *const CausalNendbStorageBackendState) u64 {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         return self.flushed_count;
     }
 
@@ -179,6 +201,9 @@ pub const CausalNendbStorageBackendState = struct {
         self: *const CausalNendbStorageBackendState,
         policy: CausalNendbRetentionPolicy,
     ) CausalNendbRetentionReport {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         const retained_events = self.events.items.len;
         return .{
             .retained_events = retained_events,
@@ -198,6 +223,9 @@ pub const CausalNendbStorageBackendState = struct {
         self: *const CausalNendbStorageBackendState,
         policy: CausalNendbDurableHistoryPolicy,
     ) CausalNendbDurableHistoryReport {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         const retained_events = self.events.items.len;
         return .{
             .retained_events = retained_events,
@@ -216,7 +244,7 @@ pub const CausalNendbStorageBackendState = struct {
             .redaction_required = policy.redaction_required,
             .redaction_observed = !policy.redaction_required or self.hasRedactionEvidence(),
             .lineage_query_required = policy.lineage_query_required,
-            .lineage_query_supported = true,
+            .lineage_query_supported = self.retain_history,
             .compaction_required = isCompactionRequired(retained_events, policy.compaction_trigger_events),
             .backup_required = policy.backup_required,
             .recovery_required = policy.recovery_required,
@@ -224,6 +252,8 @@ pub const CausalNendbStorageBackendState = struct {
     }
 
     pub fn flush(self: *CausalNendbStorageBackendState) anyerror!void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         if (self.writer.flush) |flush_writer| {
             flush_writer(self.writer.state) catch |err| {
                 self.last_failure = err;
@@ -234,10 +264,16 @@ pub const CausalNendbStorageBackendState = struct {
     }
 
     pub fn snapshot(self: *const CausalNendbStorageBackendState, allocator: Allocator) Allocator.Error!causal.CausalSnapshot {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         return snapshotFromEvents(allocator, self.events.items);
     }
 
     pub fn cause(self: *const CausalNendbStorageBackendState, allocator: Allocator, event_id: u64) Allocator.Error!causal.CausalLineage {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         var output = std.ArrayList(causal.CausalEvent).empty;
         errdefer deinitEventList(allocator, &output);
 
@@ -247,6 +283,9 @@ pub const CausalNendbStorageBackendState = struct {
     }
 
     pub fn lineage(self: *const CausalNendbStorageBackendState, allocator: Allocator, event_id: u64) Allocator.Error!causal.CausalLineage {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         var output = std.ArrayList(causal.CausalEvent).empty;
         errdefer deinitEventList(allocator, &output);
 
@@ -260,6 +299,9 @@ pub const CausalNendbStorageBackendState = struct {
     }
 
     pub fn eventsByKind(self: *const CausalNendbStorageBackendState, allocator: Allocator, kind: causal.CausalEventKind) Allocator.Error!causal.CausalSnapshot {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         return self.filterEvents(allocator, struct {
             fn matches(event: causal.CausalEvent, expected: causal.CausalEventKind) bool {
                 return event.kind == expected;
@@ -268,6 +310,9 @@ pub const CausalNendbStorageBackendState = struct {
     }
 
     pub fn eventsByRun(self: *const CausalNendbStorageBackendState, allocator: Allocator, run_id: u64) Allocator.Error!causal.CausalSnapshot {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         return self.filterEvents(allocator, struct {
             fn matches(event: causal.CausalEvent, expected: u64) bool {
                 return event.run_id == expected;
@@ -276,6 +321,9 @@ pub const CausalNendbStorageBackendState = struct {
     }
 
     pub fn eventsByScope(self: *const CausalNendbStorageBackendState, allocator: Allocator, scope_id: u64) Allocator.Error!causal.CausalSnapshot {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         return self.filterEvents(allocator, struct {
             fn matches(event: causal.CausalEvent, expected: u64) bool {
                 return event.scope_id == expected;
@@ -284,6 +332,9 @@ pub const CausalNendbStorageBackendState = struct {
     }
 
     pub fn eventsByFiber(self: *const CausalNendbStorageBackendState, allocator: Allocator, fiber_id: u64) Allocator.Error!causal.CausalSnapshot {
+        const mutable = @constCast(self);
+        mutable.mutex.lock();
+        defer mutable.mutex.unlock();
         return self.filterEvents(allocator, struct {
             fn matches(event: causal.CausalEvent, expected: u64) bool {
                 return event.fiber_id == expected;
@@ -464,6 +515,7 @@ fn cloneSlice(allocator: Allocator, value: []const u8) Allocator.Error![]const u
 
 fn cloneEvent(allocator: Allocator, event: causal.CausalEvent) Allocator.Error!causal.CausalEvent {
     var owned = event;
+    owned._owned_text = &.{};
     owned.label = try cloneSlice(allocator, event.label);
     errdefer if (owned.label.len > 0) allocator.free(owned.label);
     owned.type_name = try cloneSlice(allocator, event.type_name);
@@ -595,6 +647,14 @@ fn appendNodeCommonProperties(output: *std.ArrayList(u8), allocator: Allocator, 
     try appendOptionalJsonU64(output, allocator, event.trace_id);
     try output.appendSlice(allocator, ",\"span_id\":");
     try appendOptionalJsonU64(output, allocator, event.span_id);
+    try output.appendSlice(allocator, ",\"context\":");
+    const context_json = try std.json.Stringify.valueAlloc(allocator, event.context, .{});
+    defer allocator.free(context_json);
+    try output.appendSlice(allocator, context_json);
+    try output.appendSlice(allocator, ",\"links\":");
+    const links_json = try std.json.Stringify.valueAlloc(allocator, event.activeLinks(), .{});
+    defer allocator.free(links_json);
+    try output.appendSlice(allocator, links_json);
     try output.appendSlice(allocator, ",\"label\":");
     try appendJsonString(output, allocator, event.label);
     try output.appendSlice(allocator, ",\"type_name\":");
@@ -643,26 +703,30 @@ fn formatNendbEdgeProperties(allocator: Allocator, event: causal.CausalEvent, pa
 
 fn recordNendbStorageBackend(raw: ?*anyopaque, event: causal.CausalEvent) anyerror!void {
     const state: *CausalNendbStorageBackendState = @ptrCast(@alignCast(raw.?));
+    state.mutex.lock();
+    defer state.mutex.unlock();
     if (state.max_events) |max_events| {
-        if (state.events.items.len >= max_events) {
+        if (state.written_event_count >= max_events) {
             state.failed_event_count += 1;
             state.last_failure = error.CausalNendbStorageBackendFull;
             return state.last_failure.?;
         }
     }
 
-    state.events.ensureUnusedCapacity(state.allocator, 1) catch |err| {
-        state.failed_event_count += 1;
-        state.last_failure = err;
-        return err;
-    };
-
-    const owned_event = cloneEvent(state.allocator, event) catch |err| {
-        state.failed_event_count += 1;
-        state.last_failure = err;
-        return err;
-    };
-    errdefer deinitEventStrings(state.allocator, owned_event);
+    var owned_event: ?causal.CausalEvent = null;
+    if (state.retain_history) {
+        state.events.ensureUnusedCapacity(state.allocator, 1) catch |err| {
+            state.failed_event_count += 1;
+            state.last_failure = err;
+            return err;
+        };
+        owned_event = cloneEvent(state.allocator, event) catch |err| {
+            state.failed_event_count += 1;
+            state.last_failure = err;
+            return err;
+        };
+    }
+    errdefer if (owned_event) |owned| deinitEventStrings(state.allocator, owned);
 
     var write = mapCausalEventToNendbWrite(state.allocator, event) catch |err| {
         state.failed_event_count += 1;
@@ -677,6 +741,6 @@ fn recordNendbStorageBackend(raw: ?*anyopaque, event: causal.CausalEvent) anyerr
         return err;
     };
 
-    state.events.appendAssumeCapacity(owned_event);
+    if (owned_event) |owned| state.events.appendAssumeCapacity(owned);
     state.written_event_count += 1;
 }

@@ -1,4 +1,5 @@
 const std = @import("std");
+const fx = @import("zigeffect");
 
 pub const Studio = @import("studio.zig");
 pub const Plan = @import("plan.zig");
@@ -14,6 +15,7 @@ pub const default_path = ".zigeffect/statecharts";
 pub const catalog_file = "catalog.json";
 pub const catalog_backup_file = "catalog.json.prev";
 pub const catalog_temporary_file = "catalog.json.tmp";
+pub const catalog_lock_file = "catalog.lock";
 
 pub const CatalogError = error{
     UnsupportedSchema,
@@ -23,6 +25,8 @@ pub const CatalogError = error{
     InstanceNotFound,
     ArtifactNotFound,
     CatalogRecoveryFailed,
+    CatalogLocked,
+    DefinitionVersionConflict,
 };
 
 pub const Projection = struct {
@@ -345,6 +349,101 @@ pub fn writeCatalogAtomic(
     };
 }
 
+/// Register one typed statechart and all of its portable projections without
+/// replacing definitions, runtime snapshots, executions, or studio artifacts
+/// already owned by the catalog. Re-registering an identical id/version is
+/// idempotent; changing a released version fails closed and requires a version
+/// bump.
+pub fn registerDefinitionAtomic(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
+    definition: anytype,
+    max_bytes: usize,
+) !void {
+    const DefinitionType = @TypeOf(definition.*);
+    const Artifacts = fx.statechart.Artifacts(DefinitionType);
+
+    const lock = dir.createFile(io, catalog_lock_file, .{ .exclusive = true }) catch |err| switch (err) {
+        error.PathAlreadyExists => return error.CatalogLocked,
+        else => return err,
+    };
+    defer dir.deleteFile(io, catalog_lock_file) catch {};
+    defer lock.close(io);
+    try lock.writeStreamingAll(io, definition.id);
+
+    const definition_json = try Artifacts.formatDefinitionJsonLimited(allocator, definition, max_bytes);
+    defer allocator.free(definition_json);
+    const xstate_json = try Artifacts.formatXStateJson(allocator, definition);
+    defer allocator.free(xstate_json);
+    const mermaid = try Artifacts.formatMermaid(allocator, definition);
+    defer allocator.free(mermaid);
+    const dot = try Artifacts.formatDot(allocator, definition);
+    defer allocator.free(dot);
+    if (xstate_json.len > max_bytes or mermaid.len > max_bytes or dot.len > max_bytes) return error.ArtifactSizeLimitExceeded;
+
+    var parsed_definition = try std.json.parseFromSlice(std.json.Value, allocator, definition_json, .{ .allocate = .alloc_always });
+    defer parsed_definition.deinit();
+    var parsed_xstate = try std.json.parseFromSlice(std.json.Value, allocator, xstate_json, .{ .allocate = .alloc_always });
+    defer parsed_xstate.deinit();
+    const definition_id = valueStringField(parsed_definition.value, "id") orelse return error.InvalidCatalog;
+    const definition_version = valueU64Field(parsed_definition.value, "version") orelse return error.InvalidCatalog;
+    const definition_fingerprint = valueU64Field(parsed_definition.value, "fingerprint") orelse return error.InvalidCatalog;
+    if (definition_version == 0 or definition_version > std.math.maxInt(u32)) return error.InvalidCatalog;
+
+    const has_catalog = if (dir.access(io, catalog_file, .{})) |_| true else |_| false;
+    const has_backup = if (dir.access(io, catalog_backup_file, .{})) |_| true else |_| false;
+    var existing: ?ParsedCatalog = if (has_catalog or has_backup)
+        try readCatalogRecovering(allocator, io, dir, max_bytes)
+    else
+        null;
+    defer if (existing) |*parsed| parsed.deinit();
+    const base = if (existing) |parsed| parsed.value else Catalog{
+        .schema = catalog_schema,
+        .schema_version = catalog_schema_version,
+    };
+
+    var definitions = std.ArrayList(std.json.Value).empty;
+    defer definitions.deinit(allocator);
+    try definitions.ensureTotalCapacity(allocator, base.definitions.len + 1);
+    for (base.definitions) |candidate| {
+        const candidate_id = valueStringField(candidate, "id") orelse return error.InvalidCatalog;
+        const candidate_version = valueU64Field(candidate, "version") orelse 1;
+        const candidate_fingerprint = valueU64Field(candidate, "fingerprint") orelse return error.InvalidCatalog;
+        if (std.mem.eql(u8, candidate_id, definition_id) and candidate_version == definition_version) {
+            if (candidate_fingerprint != definition_fingerprint) return error.DefinitionVersionConflict;
+            continue;
+        }
+        try definitions.append(allocator, candidate);
+    }
+    try definitions.append(allocator, parsed_definition.value);
+
+    var projections = std.ArrayList(Projection).empty;
+    defer projections.deinit(allocator);
+    try projections.ensureTotalCapacity(allocator, base.projections.len + 1);
+    for (base.projections) |projection| {
+        const projection_version = projection.definition_version orelse 1;
+        if (std.mem.eql(u8, projection.definition_id, definition_id) and projection_version == definition_version) continue;
+        try projections.append(allocator, projection);
+    }
+    try projections.append(allocator, .{
+        .definition_id = definition_id,
+        .definition_version = @intCast(definition_version),
+        .xstate = parsed_xstate.value,
+        .mermaid = mermaid,
+        .dot = dot,
+    });
+
+    var next = base;
+    next.definitions = definitions.items;
+    next.projections = projections.items;
+    try next.validate();
+    const encoded = try std.json.Stringify.valueAlloc(allocator, next, .{ .emit_null_optional_fields = false });
+    defer allocator.free(encoded);
+    if (encoded.len > max_bytes) return error.ArtifactSizeLimitExceeded;
+    try writeCatalogAtomic(allocator, io, dir, next);
+}
+
 pub fn readCatalogRecovering(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -478,6 +577,71 @@ test "catalog validates and queries definitions instances traces and projections
     const controls = try parsed.value.controlReceiptsJsonAlloc(std.testing.allocator);
     defer std.testing.allocator.free(controls);
     try std.testing.expect(std.mem.indexOf(u8, controls, "r-1") != null);
+}
+
+const RegistrationState = enum { idle, done };
+const RegistrationEvent = enum { finish };
+const RegistrationCommand = enum { notify };
+const RegistrationDefinition = fx.statechart.Definition(RegistrationState, RegistrationEvent, u64, RegistrationCommand);
+
+const registration_one = RegistrationDefinition.init(.{
+    .id = "test.registration-one",
+    .version = 1,
+    .initial = .idle,
+    .states = &.{ .{ .id = .idle }, .{ .id = .done, .kind = .final } },
+    .transitions = &.{.{ .id = "finish", .source = .idle, .event = .finish, .target = .done }},
+});
+
+const registration_two = RegistrationDefinition.init(.{
+    .id = "test.registration-two",
+    .version = 1,
+    .initial = .idle,
+    .states = &.{ .{ .id = .idle }, .{ .id = .done, .kind = .final } },
+    .transitions = &.{.{ .id = "finish", .source = .idle, .event = .finish, .target = .done }},
+});
+
+const registration_one_conflict = RegistrationDefinition.init(.{
+    .id = "test.registration-one",
+    .version = 1,
+    .initial = .idle,
+    .states = &.{ .{ .id = .idle }, .{ .id = .done, .kind = .final } },
+    .transitions = &.{.{ .id = "finish-changed", .source = .idle, .event = .finish, .target = .done }},
+});
+
+test "definition registration preserves the catalog and is idempotent" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try registerDefinitionAtomic(std.testing.allocator, std.testing.io, tmp.dir, &registration_one, 1024 * 1024);
+    try registerDefinitionAtomic(std.testing.allocator, std.testing.io, tmp.dir, &registration_two, 1024 * 1024);
+    try registerDefinitionAtomic(std.testing.allocator, std.testing.io, tmp.dir, &registration_one, 1024 * 1024);
+
+    var catalog = try readCatalogRecovering(std.testing.allocator, std.testing.io, tmp.dir, 1024 * 1024);
+    defer catalog.deinit();
+    try std.testing.expectEqual(@as(usize, 2), catalog.value.definitions.len);
+    try std.testing.expectEqual(@as(usize, 2), catalog.value.projections.len);
+    try std.testing.expect(catalog.value.definition("test.registration-one") != null);
+    const mermaid = try catalog.value.exportAlloc(std.testing.allocator, "test.registration-two", .mermaid);
+    defer std.testing.allocator.free(mermaid);
+    try std.testing.expect(std.mem.indexOf(u8, mermaid, "idle --> done : finish") != null);
+
+    try std.testing.expectError(error.DefinitionVersionConflict, registerDefinitionAtomic(
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        &registration_one_conflict,
+        1024 * 1024,
+    ));
+    const lock = try tmp.dir.createFile(std.testing.io, catalog_lock_file, .{ .exclusive = true });
+    lock.close(std.testing.io);
+    defer tmp.dir.deleteFile(std.testing.io, catalog_lock_file) catch {};
+    try std.testing.expectError(error.CatalogLocked, registerDefinitionAtomic(
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        &registration_two,
+        1024 * 1024,
+    ));
 }
 
 test "catalog queries v2 decimal-string u64 identities without precision loss" {

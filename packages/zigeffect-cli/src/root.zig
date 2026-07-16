@@ -19,6 +19,7 @@ pub const CliError = error{
     UnknownShell,
     InvalidOptionCombination,
     InvalidEventId,
+    InvalidLimit,
     InvalidStatechartId,
     InvalidInstanceId,
     InvalidSeed,
@@ -69,10 +70,12 @@ pub const UpgradeOptions = struct {
     json: bool = false,
 };
 
-pub const GraphOperation = enum { status, event, children };
+pub const GraphOperation = enum { status, since, event, children, path };
 pub const GraphOptions = struct {
     operation: GraphOperation,
     event_id: u64 = 0,
+    to_event_id: u64 = 0,
+    limit: usize = 256,
     root: []const u8 = ".",
     component: ?[]const u8 = null,
     json: bool = false,
@@ -127,7 +130,7 @@ pub const SafetyOptions = struct {
     receipt: []const u8 = ".zigeffect/receipts/latest-safety.json",
     root: []const u8 = ".",
 };
-pub const AgentOperation = enum { status, requirements, checks, evidence, next, handoff };
+pub const AgentOperation = enum { status, requirements, checks, evidence, next, context, handoff };
 pub const AgentOptions = struct {
     operation: AgentOperation,
     root: []const u8 = ".",
@@ -135,6 +138,9 @@ pub const AgentOptions = struct {
     session: []const u8 = "local-session",
     jsonl: bool = false,
     profile: []const u8 = "",
+    task: []const u8 = "",
+    changed: []const u8 = "",
+    budget: usize = 32 * 1024,
 };
 pub const BenchmarkOperation = enum { score, conformance, run };
 pub const BenchmarkOptions = struct {
@@ -499,11 +505,18 @@ fn runGraphAlloc(
         component_dir = try project_dir.openDir(io, component.path, .{ .follow_symlinks = false });
         break :graph_root component_dir.?;
     } else project_dir;
-    var snapshot = try zstd.CausalGraph.Snapshot.open(allocator, io, graph_root, .{
+    const graph_options = zstd.CausalGraph.Options{
         .path = manifest.value.artifacts.graph,
         .max_wal_bytes = manifest.value.safety.limits.max_artifact_bytes,
         .max_records = manifest.value.safety.limits.max_runtime_events,
-    });
+    };
+    var snapshot = zstd.CausalGraph.Snapshot.open(allocator, io, graph_root, graph_options) catch |failure| switch (failure) {
+        error.FileNotFound => if (options.operation == .status or (options.operation == .since and options.event_id == 0))
+            try zstd.CausalGraph.Snapshot.empty(allocator, graph_options)
+        else
+            return failure,
+        else => return failure,
+    };
     defer snapshot.deinit();
 
     const output = switch (options.operation) {
@@ -523,6 +536,7 @@ fn runGraphAlloc(
             });
         },
         .event => try snapshot.recordJsonAlloc(allocator, options.event_id),
+        .since => try snapshot.recordsAfterJsonAlloc(allocator, options.event_id, options.limit),
         .children => children: {
             const ids = try snapshot.childrenAlloc(allocator, options.event_id);
             defer allocator.free(ids);
@@ -532,6 +546,16 @@ fn runGraphAlloc(
             try text_output.print(allocator, "event {d} children={d}\n", .{ options.event_id, ids.len });
             for (ids) |id| try text_output.print(allocator, "- {d}\n", .{id});
             break :children try text_output.toOwnedSlice(allocator);
+        },
+        .path => path: {
+            var graph_path = try snapshot.pathAlloc(allocator, options.event_id, options.to_event_id, options.limit);
+            defer graph_path.deinit();
+            if (options.json) break :path try graph_path.jsonAlloc(allocator);
+            var text_output = std.ArrayList(u8).empty;
+            errdefer text_output.deinit(allocator);
+            try text_output.print(allocator, "event {d} -> {d} path={d}\n", .{ options.event_id, options.to_event_id, graph_path.event_ids.len });
+            for (graph_path.event_ids) |id| try text_output.print(allocator, "- {d}\n", .{id});
+            break :path try text_output.toOwnedSlice(allocator);
         },
     };
     return .{ .allocator = allocator, .exit_code = 0, .output = output };
@@ -1284,13 +1308,34 @@ fn runSelectedTestsAlloc(
     defer source_identity.deinit();
     const target_name = try builtinTargetAlloc(allocator);
     defer allocator.free(target_name);
+    const manifest_digest = try zstd.Development.manifestDigestAlloc(allocator, manifest);
+    defer allocator.free(manifest_digest);
+    try writeAtomicFile(io, project_dir, ".zigeffect/tests/progress.jsonl", "");
+    try zstd.Testing.Protocol.removeControl(io, project_dir);
+    defer zstd.Testing.Protocol.removeControl(io, project_dir) catch {};
+    try appendTestProgress(allocator, io, project_dir, manifest, .{
+        .state = "run_started",
+        .source_revision = source_identity.revision,
+        .selected = selected.len,
+        .completed = 0,
+        .timestamp_ms = run_started_ms,
+    });
     for (selected) |scenario| {
         const command = manifest.command(scenario.command) orelse return error.MissingProjectCommand;
+        var scenario_argv = std.ArrayList([]const u8).empty;
+        defer scenario_argv.deinit(allocator);
+        try scenario_argv.appendSlice(allocator, command.argv);
+        const filter_option = if (scenario.native_test_filter) |filter|
+            try std.fmt.allocPrint(allocator, "-Dtest-filter={s}", .{filter})
+        else
+            null;
+        defer if (filter_option) |value| allocator.free(value);
+        if (filter_option) |value| try scenario_argv.append(allocator, value);
         const seed = options.seed orelse scenario.default_seed;
         const parsed_fault = parseFaultToken(options.fault);
         const fault_kind = if (parsed_fault) |fault| fault.kind else .none;
         const fault_index = if (parsed_fault) |fault| fault.index else null;
-        const command_digest = try commandDigestAlloc(allocator, command.argv);
+        const command_digest = try commandDigestAlloc(allocator, scenario_argv.items);
         defer allocator.free(command_digest);
         const control = zstd.Testing.Protocol.Control{
             .project = manifest.name,
@@ -1301,12 +1346,21 @@ fn runSelectedTestsAlloc(
             .executor = "deterministic",
             .source_revision = source_identity.revision,
             .command_digest = command_digest,
+            .manifest_digest = manifest_digest,
         };
         try zstd.Testing.Protocol.removePublishedReceipt(io, project_dir, scenario.id);
         try zstd.Testing.Protocol.writeControl(allocator, io, project_dir, control);
         const started_ms = realTimestampMs(io);
+        try appendTestProgress(allocator, io, project_dir, manifest, .{
+            .state = "scenario_started",
+            .scenario = scenario.id,
+            .source_revision = source_identity.revision,
+            .selected = selected.len,
+            .completed = executions.items.len,
+            .timestamp_ms = started_ms,
+        });
         const process_result = try std.process.run(allocator, io, .{
-            .argv = command.argv,
+            .argv = scenario_argv.items,
             .cwd = .{ .dir = project_dir },
             .stdout_limit = .limited(manifest.safety.limits.max_artifact_bytes),
             .stderr_limit = .limited(manifest.safety.limits.max_artifact_bytes),
@@ -1342,6 +1396,10 @@ fn runSelectedTestsAlloc(
             try writeAtomicFile(io, project_dir, execution.stderr_path, process_result.stderr);
         }
         try execution.receipt.validate();
+        // Replace the process-published receipt with the orchestrator-enriched
+        // canonical receipt. This preserves exact target, tool, adapter,
+        // worktree, and command authority for later evidence reconciliation.
+        try zstd.Testing.Protocol.publishReceipt(allocator, io, project_dir, execution.receipt);
         switch (execution.receipt.status) {
             .passed => passed += 1,
             .failed => failed += 1,
@@ -1356,6 +1414,15 @@ fn runSelectedTestsAlloc(
         defer allocator.free(receipt_path);
         try writeAtomicFile(io, project_dir, receipt_path, receipt_json);
         try executions.append(allocator, execution);
+        try appendTestProgress(allocator, io, project_dir, manifest, .{
+            .state = "scenario_completed",
+            .scenario = scenario.id,
+            .status = @tagName(executions.items[executions.items.len - 1].receipt.status),
+            .source_revision = source_identity.revision,
+            .selected = selected.len,
+            .completed = executions.items.len,
+            .timestamp_ms = ended_ms,
+        });
     }
     const receipts = try allocator.alloc(zstd.Testing.TestReceipt, executions.items.len);
     defer allocator.free(receipts);
@@ -1385,6 +1452,23 @@ fn runSelectedTestsAlloc(
     errdefer allocator.free(json);
     try writeAtomicFile(io, project_dir, ".zigeffect/tests/latest.json", json);
     try persistTestHistory(allocator, io, project_dir, json);
+    const handoff_json = try zstd.Development.testProofHandoffJsonAlloc(allocator, manifest, run);
+    defer allocator.free(handoff_json);
+    try writeAtomicFile(io, project_dir, ".zigeffect/handoffs/tests/latest.json", handoff_json);
+    if (selected.len == 1) {
+        const scenario_handoff_path = try std.fmt.allocPrint(allocator, ".zigeffect/handoffs/tests/{s}.json", .{selected[0].id});
+        defer allocator.free(scenario_handoff_path);
+        try writeAtomicFile(io, project_dir, scenario_handoff_path, handoff_json);
+    }
+    try appendTestProgress(allocator, io, project_dir, manifest, .{
+        .state = "run_completed",
+        .status = @tagName(run.status()),
+        .source_revision = source_identity.revision,
+        .selected = selected.len,
+        .completed = executions.items.len,
+        .timestamp_ms = run.ended_ms,
+        .proof_handoff = ".zigeffect/handoffs/tests/latest.json",
+    });
     const exit_code: u8 = if (failed == 0 and incomplete == 0 and unsupported == 0 and canceled == 0) 0 else 1;
     if (options.json) return .{ .allocator = allocator, .exit_code = exit_code, .output = json };
     defer allocator.free(json);
@@ -1474,6 +1558,46 @@ fn persistTestHistory(allocator: std.mem.Allocator, io: std.Io, project_dir: std
     defer allocator.free(current);
     const next = try std.fmt.allocPrint(allocator, "{s}{s}\n", .{ current, run_json });
     defer allocator.free(next);
+    try writeAtomicFile(io, project_dir, path, next);
+}
+
+const TestProgressEvent = struct {
+    state: []const u8,
+    scenario: []const u8 = "",
+    status: []const u8 = "",
+    source_revision: []const u8,
+    selected: usize,
+    completed: usize,
+    timestamp_ms: i64,
+    proof_handoff: []const u8 = "",
+};
+
+fn appendTestProgress(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    project_dir: std.Io.Dir,
+    manifest: zstd.Project.Manifest,
+    event: TestProgressEvent,
+) !void {
+    const path = ".zigeffect/tests/progress.jsonl";
+    const current = try project_dir.readFileAlloc(io, path, allocator, .limited(manifest.safety.limits.max_artifact_bytes));
+    defer allocator.free(current);
+    const row = try std.json.Stringify.valueAlloc(allocator, .{
+        .schema = "zigeffect.test-progress.v1",
+        .project = manifest.name,
+        .state = event.state,
+        .scenario = event.scenario,
+        .status = event.status,
+        .source_revision = event.source_revision,
+        .selected = event.selected,
+        .completed = event.completed,
+        .timestamp_ms = event.timestamp_ms,
+        .proof_handoff = event.proof_handoff,
+    }, .{});
+    defer allocator.free(row);
+    const next = try std.fmt.allocPrint(allocator, "{s}{s}\n", .{ current, row });
+    defer allocator.free(next);
+    if (next.len > manifest.safety.limits.max_artifact_bytes) return error.ProgressArtifactLimitExceeded;
     try writeAtomicFile(io, project_dir, path, next);
 }
 
@@ -1570,6 +1694,7 @@ fn parseFaultToken(value: []const u8) ?ParsedFault {
 fn selectionReason(options: TestOptions) zstd.Testing.Contract.SelectionReason {
     if (options.operation == .replay) return .replay;
     if (options.operation == .affected) return .affected;
+    if (options.scenario.len != 0) return .scenario;
     if (options.requirement.len != 0) return .requirement;
     if (options.component.len != 0) return .component;
     if (options.tag.len != 0) return .tag;
@@ -1616,46 +1741,8 @@ fn commandDigestAlloc(allocator: std.mem.Allocator, argv: []const []const u8) ![
     return std.fmt.allocPrint(allocator, "sha256:{x}", .{digest});
 }
 
-const SourceIdentity = struct {
-    allocator: std.mem.Allocator,
-    revision: []const u8,
-    dirty: bool = false,
-    available: bool = false,
-
-    fn deinit(self: *SourceIdentity) void {
-        self.allocator.free(self.revision);
-    }
-};
-
-fn sourceIdentityAlloc(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !SourceIdentity {
-    const head = std.process.run(allocator, io, .{
-        .argv = &.{ "git", "rev-parse", "HEAD" },
-        .cwd = .{ .dir = dir },
-        .stdout_limit = .limited(4096),
-        .stderr_limit = .limited(4096),
-    }) catch return .{ .allocator = allocator, .revision = try allocator.dupe(u8, "working-tree") };
-    defer allocator.free(head.stdout);
-    defer allocator.free(head.stderr);
-    if (processExitCode(head.term) != 0) return .{ .allocator = allocator, .revision = try allocator.dupe(u8, "working-tree") };
-    const revision_text = std.mem.trim(u8, head.stdout, " \t\r\n");
-    if (revision_text.len == 0) return .{ .allocator = allocator, .revision = try allocator.dupe(u8, "working-tree") };
-    const revision = try allocator.dupe(u8, revision_text);
-    errdefer allocator.free(revision);
-
-    const dirty = std.process.run(allocator, io, .{
-        .argv = &.{ "git", "status", "--porcelain", "--untracked-files=no" },
-        .cwd = .{ .dir = dir },
-        .stdout_limit = .limited(1024 * 1024),
-        .stderr_limit = .limited(4096),
-    }) catch return .{ .allocator = allocator, .revision = revision, .available = true };
-    defer allocator.free(dirty.stdout);
-    defer allocator.free(dirty.stderr);
-    return .{
-        .allocator = allocator,
-        .revision = revision,
-        .dirty = processExitCode(dirty.term) == 0 and std.mem.trim(u8, dirty.stdout, " \t\r\n").len != 0,
-        .available = true,
-    };
+fn sourceIdentityAlloc(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !zstd.Development.SourceIdentity {
+    return zstd.Development.sourceIdentityAlloc(allocator, io, dir, .{});
 }
 
 fn builtinTargetAlloc(allocator: std.mem.Allocator) ![]u8 {
@@ -1697,7 +1784,9 @@ fn runAgentAlloc(
     defer allocator.free(manifest_text);
     var parsed = try zstd.Project.parseManifest(allocator, manifest_text);
     defer parsed.deinit();
-    var derived = try deriveAgentProtocol(allocator, io, project_dir, parsed.value, options.profile, realTimestampMs(io));
+    var source_identity = try sourceIdentityAlloc(allocator, io, project_dir);
+    defer source_identity.deinit();
+    var derived = try deriveAgentProtocol(allocator, io, project_dir, parsed.value, options.profile, realTimestampMs(io), source_identity.revision);
     defer derived.deinit();
 
     const output = switch (options.operation) {
@@ -1706,6 +1795,16 @@ fn runAgentAlloc(
         .checks => try encodeAcceptanceQueryAlloc(allocator, parsed.value.acceptance_checks, options.jsonl),
         .evidence => try encodeCollectionAlloc(allocator, "zigeffect.evidence-query.v1", derived.evidence, options.jsonl),
         .next => try encodeCollectionAlloc(allocator, "zigeffect.next-action-query.v1", derived.actions, options.jsonl),
+        .context => context: {
+            const changed_paths: []const []const u8 = if (options.changed.len == 0) &.{} else &.{options.changed};
+            break :context try zstd.Development.compileProjectContextJsonAlloc(allocator, io, project_dir, parsed.value, .{
+                .task_id = options.task,
+                .source_revision = source_identity.revision,
+                .source_dirty = source_identity.dirty,
+                .changed_paths = changed_paths,
+                .byte_budget = options.budget,
+            });
+        },
         .handoff => handoff: {
             const handoff = zstd.Project.Protocol.AgentHandoff{
                 .project = parsed.value.name,
@@ -1740,6 +1839,7 @@ const DerivedProtocol = struct {
     blockers: [][]const u8,
     adapter_profile: []const u8,
     adapters: []zstd.Capability.AdapterEvidence,
+    reconciliation: ?zstd.Development.Reconciliation = null,
     owned_ids: std.ArrayList([]u8) = .empty,
     tasks_owned: bool = false,
     evidence_owned: bool = false,
@@ -1755,6 +1855,7 @@ const DerivedProtocol = struct {
         if (self.actions_owned) self.allocator.free(self.actions);
         if (self.blockers_owned) self.allocator.free(self.blockers);
         if (self.adapters_owned) self.allocator.free(self.adapters);
+        if (self.reconciliation) |*value| value.deinit();
         self.* = undefined;
     }
 
@@ -1770,6 +1871,7 @@ fn deriveAgentProtocol(
     manifest: zstd.Project.Manifest,
     requested_profile: []const u8,
     evidence_time_ms: i64,
+    current_source_revision: []const u8,
 ) !DerivedProtocol {
     var result = DerivedProtocol{
         .allocator = allocator,
@@ -1786,12 +1888,27 @@ fn deriveAgentProtocol(
     result.adapter_profile = capabilities.profile_id;
     result.adapters = capabilities.evidence;
     result.adapters_owned = true;
-    var open_requirements: usize = 0;
+    var collected_evidence = try zstd.Development.collectEvidenceAlloc(
+        allocator,
+        io,
+        project_dir,
+        manifest,
+        current_source_revision,
+        manifest.safety.limits.max_artifact_bytes,
+    );
+    defer collected_evidence.deinit();
+    result.reconciliation = try zstd.Development.reconcileAlloc(
+        allocator,
+        manifest,
+        collected_evidence.run(),
+        current_source_revision,
+    );
+    const reconciled = &result.reconciliation.?;
+    const open_requirements = reconciled.requirements_open;
     var blocked_requirements: usize = 0;
-    for (manifest.requirements) |requirement| {
-        if (requirement.status != .satisfied) open_requirements += 1;
-        if (requirement.status == .blocked) blocked_requirements += 1;
-    }
+    for (reconciled.requirements) |requirement| if (requirement.state == .blocked) {
+        blocked_requirements += 1;
+    };
     result.tasks = try allocator.alloc(zstd.Project.Protocol.Task, open_requirements);
     result.tasks_owned = true;
     result.actions = try allocator.alloc(zstd.Project.Protocol.NextAction, open_requirements);
@@ -1800,111 +1917,68 @@ fn deriveAgentProtocol(
     result.blockers_owned = true;
     var task_index: usize = 0;
     var blocker_index: usize = 0;
-    for (manifest.requirements) |requirement| {
-        if (requirement.status == .satisfied) continue;
-        const task_id = try std.fmt.allocPrint(allocator, "task-{s}", .{requirement.id});
+    for (reconciled.requirements) |observed| {
+        if (observed.state == .satisfied) continue;
+        const requirement = manifest.requirement(observed.id) orelse return error.InvalidRequirement;
+        const task_id = try std.fmt.allocPrint(allocator, "task-{s}", .{observed.id});
         try result.owned_ids.append(allocator, task_id);
         const action_id = try std.fmt.allocPrint(allocator, "next-{s}", .{requirement.id});
         try result.owned_ids.append(allocator, action_id);
         result.tasks[task_index] = .{
             .id = task_id,
-            .requirement = requirement.id,
+            .requirement = observed.id,
             .component = requirement.component,
             .summary = requirement.summary,
-            .status = switch (requirement.status) {
-                .planned => .planned,
-                .active => .active,
+            .status = switch (observed.state) {
+                .pending => if (requirement.status == .planned) .planned else .active,
                 .blocked => .blocked,
+                .failed, .stale, .incomplete => .active,
                 .satisfied => unreachable,
             },
         };
         result.actions[task_index] = .{
             .id = action_id,
-            .requirement = requirement.id,
+            .requirement = observed.id,
             .component = requirement.component,
             .summary = requirement.summary,
-            .command = if (hasScenarioForRequirement(manifest, requirement.id)) "test" else if (manifest.command("check") != null) "check" else null,
+            .command = if (hasScenarioForRequirement(manifest, observed.id)) "test" else if (manifest.command("check") != null) "check" else null,
         };
         task_index += 1;
-        if (requirement.status == .blocked) {
+        if (observed.state == .blocked) {
             result.blockers[blocker_index] = requirement.summary;
             blocker_index += 1;
         }
     }
 
-    const has_check_receipt = check: {
-        project_dir.access(io, ".zigeffect/receipts/check.json", .{}) catch |err| switch (err) {
-            error.FileNotFound => break :check false,
-            else => return err,
-        };
-        break :check true;
+    var evidence_count: usize = 0;
+    for (reconciled.checks) |check| if (check.state == .passed and check.evidence_ref.len != 0) {
+        evidence_count += 1;
     };
-    const has_safety_receipt = safety_receipt: {
-        project_dir.access(io, ".zigeffect/receipts/latest-safety.json", .{}) catch |err| switch (err) {
-            error.FileNotFound => break :safety_receipt false,
-            else => return err,
-        };
-        break :safety_receipt true;
-    };
-    const has_test_receipt = test_receipt: {
-        project_dir.access(io, ".zigeffect/tests/latest.json", .{}) catch |err| switch (err) {
-            error.FileNotFound => break :test_receipt false,
-            else => return err,
-        };
-        break :test_receipt true;
-    };
-    const evidence_count: usize = if (manifest.requirements.len == 0) 0 else @as(usize, @intFromBool(has_check_receipt)) + @as(usize, @intFromBool(has_safety_receipt)) + @as(usize, @intFromBool(has_test_receipt));
     result.evidence = try allocator.alloc(zstd.Project.Protocol.Evidence, evidence_count);
     result.evidence_owned = true;
     var evidence_index: usize = 0;
-    if (has_check_receipt and manifest.requirements.len > 0) {
+    for (reconciled.checks) |check| {
+        if (check.state != .passed or check.evidence_ref.len == 0) continue;
+        const evidence_id = try std.fmt.allocPrint(allocator, "evidence-{s}", .{check.id});
+        try result.owned_ids.append(allocator, evidence_id);
         result.evidence[evidence_index] = .{
-            .id = "evidence-project-check",
-            .requirement = manifest.requirements[0].id,
-            .component = manifest.requirements[0].component,
+            .id = evidence_id,
+            .requirement = check.requirement,
+            .acceptance_check = check.id,
+            .component = check.component,
             .kind = .test_result,
-            .artifact = ".zigeffect/receipts/check.json",
-            .summary = "manifest-owned project check receipt",
+            .artifact = check.evidence_ref,
+            .summary = check.reason,
         };
         evidence_index += 1;
     }
-    if (has_safety_receipt and manifest.requirements.len > 0) {
-        result.evidence[evidence_index] = .{
-            .id = "evidence-agent-safety",
-            .requirement = manifest.requirements[0].id,
-            .acceptance_check = if (manifest.acceptance_checks.len > 0) manifest.acceptance_checks[0].id else null,
-            .component = manifest.requirements[0].component,
-            .kind = .artifact,
-            .artifact = ".zigeffect/receipts/latest-safety.json",
-            .summary = "source-linked agent safety receipt",
-        };
-        evidence_index += 1;
-    }
-    if (has_test_receipt and manifest.requirements.len > 0) {
-        result.evidence[evidence_index] = .{
-            .id = "evidence-agent-tests",
-            .requirement = manifest.requirements[0].id,
-            .acceptance_check = if (manifest.acceptance_checks.len > 0) manifest.acceptance_checks[0].id else null,
-            .component = manifest.requirements[0].component,
-            .kind = .test_result,
-            .artifact = ".zigeffect/tests/latest.json",
-            .summary = "requirement-linked deterministic test run receipt",
-        };
-    }
-    var pending: usize = 0;
-    var failed: usize = 0;
-    for (manifest.acceptance_checks) |check| switch (check.status) {
-        .pending => pending += 1,
-        .failed => failed += 1,
-        else => {},
-    };
     result.status = .{
         .project = manifest.name,
         .requirements_total = manifest.requirements.len,
-        .requirements_open = open_requirements,
+        .requirements_open = reconciled.requirements_open,
         .checks_total = manifest.acceptance_checks.len,
-        .checks_pending = pending,
-        .checks_failed = failed,
+        .checks_pending = reconciled.checks_pending,
+        .checks_failed = reconciled.checks_failed,
         .tasks = result.tasks,
         .evidence = result.evidence,
         .next_actions = result.actions,
@@ -2343,8 +2417,38 @@ fn generatedModulePathAlloc(allocator: std.mem.Allocator, options: GenerateOptio
 
 fn generatedModuleAlloc(allocator: std.mem.Allocator, options: GenerateOptions) ![]u8 {
     const body = switch (options.kind) {
-        .service => "pub const Service = struct {};\n",
-        .layer => "pub fn layer(value: anytype) @TypeOf(value.layer()) { return value.layer(); }\n",
+        .service => return std.fmt.allocPrint(allocator,
+            \\// Generated service module: {s}
+            \\const std = @import("std");
+            \\const zstd = @import("zigeffect_std");
+            \\const kernel = zstd.fx.kernel;
+            \\
+            \\pub const ServiceApi = struct {{
+            \\    pub const operations: []const []const u8 = &.{{"Service.execute"}};
+            \\    pub fn execute(_: *@This(), input: []const u8) []const u8 {{ return input; }}
+            \\}};
+            \\
+            \\pub const Service = kernel.Service("generated/{s}", ServiceApi);
+            \\const ExecuteBase = kernel.Effect([]const u8, std.mem.Allocator.Error, .{{Service}});
+            \\pub const Execute = ExecuteBase.Stateful([]const u8);
+            \\
+            \\pub fn execute(input: []const u8) Execute {{
+            \\    return Execute.init(input, struct {{
+            \\        fn run(value: []const u8, ctx: *Execute.Context) std.mem.Allocator.Error![]const u8 {{
+            \\            const output = ctx.service(Service).execute(value);
+            \\            if (ctx.recordCausal(.{{ .kind = .activity_completed, .service_key = Service.service_key, .label = "Service.execute", .status = "success" }}) == null) return error.OutOfMemory;
+            \\            return output;
+            \\        }}
+            \\    }}.run);
+            \\}}
+        , .{ options.name, options.name }),
+        .layer =>
+        \\const zstd = @import("zigeffect_std");
+        \\
+        \\pub fn layer(comptime Tag: type, value: Tag.API) @TypeOf(zstd.fx.kernel.Layer.succeed(Tag, value)) {
+        \\    return zstd.fx.kernel.Layer.succeed(Tag, value);
+        \\}
+        ,
         .schema => "const zstd = @import(\"zigeffect_std\");\npub const schema = zstd.Schema.string().nonEmpty();\n",
         .cli => "const zstd = @import(\"zigeffect_std\");\npub const command = zstd.Cli.CommandSpec{ .name = \"generated\", .description = \"generated command\" };\n",
         .http => "const zstd = @import(\"zigeffect_std\");\npub const health = zstd.Http.Request{ .method = \"GET\", .url = \"http://127.0.0.1/health\" };\n",
@@ -2415,7 +2519,9 @@ pub fn helpText() []const u8 {
     \\  zigeffect compatibility [--root <path>] [--json]
     \\  zigeffect upgrade [--root <path>] [--dry-run|--apply] [--json]
     \\  zigeffect graph status [--root <path>] [--component <id>] [--json]
+    \\  zigeffect graph since <event-id> [--limit <count>] [--root <path>] [--component <id>] [--json]
     \\  zigeffect graph <event|children> <event-id> [--root <path>] [--component <id>] [--json]
+    \\  zigeffect graph path <from-event-id> <to-event-id> [--limit <count>] [--root <path>] [--component <id>] [--json]
     \\  zigeffect statechart list [--root <path>] [--component <id>] [--json]
     \\  zigeffect statechart <show|versions|instances|coverage|paths> <machine-id> [--root <path>] [--json]
     \\  zigeffect statechart <trace|explain> <instance-id> [--root <path>] [--json]
@@ -2442,6 +2548,7 @@ pub fn helpText() []const u8 {
     \\  zigeffect project <show|validate|doctor|check|test|dev> [--root <path>] [--json]
     \\  zigeffect project check --agent --json [--root <path>]
     \\  zigeffect agent <status|requirements|checks|evidence|next> [--root <path>] [--jsonl]
+    \\  zigeffect agent context --task <id-or-summary> [--budget <bytes>] [--changed <path>] [--root <path>] --json
     \\  zigeffect agent handoff --provider <name> --session <id> [--root <path>]
     \\  zigeffect safety explain <finding-id> [--root <path>]
     \\  zigeffect safety replay <finding-id> [--receipt <path>]
@@ -2489,9 +2596,7 @@ fn addExecutableProject(
     defer allocator.free(postgres_path);
     const otel_path = if (real_profile) try siblingAdapterPathAlloc(allocator, std_path, "zigeffect-otel") else try allocator.dupe(u8, "");
     defer allocator.free(otel_path);
-    const adapter_zon = if (real_profile) try std.fmt.allocPrint(allocator,
-        "        .zigeffect_http = .{{ .path = \"{s}\" }},\n        .zigeffect_postgres_libpq = .{{ .path = \"{s}\" }},\n        .zigeffect_otel = .{{ .path = \"{s}\" }},",
-        .{ http_path, postgres_path, otel_path }) else try allocator.dupe(u8, "");
+    const adapter_zon = if (real_profile) try std.fmt.allocPrint(allocator, "        .zigeffect_http = .{{ .path = \"{s}\" }},\n        .zigeffect_postgres_libpq = .{{ .path = \"{s}\" }},\n        .zigeffect_otel = .{{ .path = \"{s}\" }},", .{ http_path, postgres_path, otel_path }) else try allocator.dupe(u8, "");
     defer allocator.free(adapter_zon);
 
     try addRenderedAt(plan, prefix, "build.zig", templates.executable_build, &.{
@@ -2516,6 +2621,7 @@ fn addExecutableProject(
     });
     if (real_profile) {
         try addRenderedAt(plan, prefix, "src/production_wiring.zig", templates.production_wiring_source, &.{});
+        try addRenderedAt(plan, prefix, "src/causal_graph.zig", templates.causal_graph_source, &.{});
         try addRenderedAt(plan, prefix, "config.example.json", "{\n  \"port\": 8080,\n  \"database_url\": \"postgresql://database:5432/app?sslmode=require\",\n  \"otlp_host\": \"otel-collector\",\n  \"otlp_port\": 4318,\n  \"migration_dialect\": \"postgresql\"\n}\n", &.{});
         try addRenderedAt(plan, prefix, "test/root_test.zig", templates.production_test, &.{});
     } else {
@@ -2649,6 +2755,7 @@ fn addRootCommon(plan: *zstd.Project.FilePlan, options: ScaffoldOptions) !void {
     try plan.add(".gitignore", templates.gitignore);
     try plan.add(".agents/skills/zigeffect-development/SKILL.md", templates.skill);
     try plan.add(".claude/skills/zigeffect-development/SKILL.md", templates.skill);
+    try plan.add(".gemini/skills/zigeffect-development/SKILL.md", templates.skill);
 }
 
 fn addManifest(plan: *zstd.Project.FilePlan, options: ScaffoldOptions) !void {
@@ -2683,6 +2790,11 @@ fn addManifest(plan: *zstd.Project.FilePlan, options: ScaffoldOptions) !void {
         .command = "test",
         .source_roots = if (options.kind == .system) &.{ "services/api", "packages/shared", "test" } else &.{ "src", "test" },
         .tags = &.{ "acceptance", "causal", "generated" },
+        .native_test_filter = switch (options.kind) {
+            .application, .service => "application acceptance",
+            .library, .package => "public effect validates input",
+            .system => if (options.profile == .@"local-fake") "system acceptance" else "production system emits a Testing v2 capability scenario",
+        },
         .default_seed = 1,
         .fault_profile = if (options.kind == .library or options.kind == .package) .allocation else .standard,
     }};
@@ -2944,14 +3056,21 @@ fn parseGraphArgs(args: []const []const u8) (CliError || zstd.Project.ProjectErr
     var root_set = false;
     var component_set = false;
     var event_id_set = false;
+    var limit_set = false;
     var index: usize = 1;
 
-    if (operation == .event or operation == .children) {
+    if (operation == .since or operation == .event or operation == .children or operation == .path) {
         if (index >= args.len or std.mem.startsWith(u8, args[index], "--")) return error.InvalidEventId;
         options.event_id = std.fmt.parseInt(u64, args[index], 10) catch return error.InvalidEventId;
-        if (options.event_id == 0) return error.InvalidEventId;
+        if (options.event_id == 0 and operation != .since) return error.InvalidEventId;
         event_id_set = true;
         index += 1;
+        if (operation == .path) {
+            if (index >= args.len or std.mem.startsWith(u8, args[index], "--")) return error.InvalidEventId;
+            options.to_event_id = std.fmt.parseInt(u64, args[index], 10) catch return error.InvalidEventId;
+            if (options.to_event_id == 0) return error.InvalidEventId;
+            index += 1;
+        }
     }
 
     while (index < args.len) {
@@ -2965,13 +3084,20 @@ fn parseGraphArgs(args: []const []const u8) (CliError || zstd.Project.ProjectErr
             try zstd.Project.validateIdentifier(component);
             options.component = component;
             component_set = true;
+        } else if (eql(args[index], "--limit")) {
+            if (operation != .since and operation != .path) return error.UnknownOption;
+            if (limit_set) return error.DuplicateOption;
+            const value = try optionValue(args, &index);
+            options.limit = std.fmt.parseInt(usize, value, 10) catch return error.InvalidLimit;
+            if (options.limit == 0 or options.limit > 4096) return error.InvalidLimit;
+            limit_set = true;
         } else if (eql(args[index], "--json")) {
             if (options.json) return error.DuplicateOption;
             options.json = true;
             index += 1;
         } else return error.UnknownOption;
     }
-    if ((operation == .event or operation == .children) and !event_id_set) return error.InvalidEventId;
+    if ((operation == .since or operation == .event or operation == .children or operation == .path) and !event_id_set) return error.InvalidEventId;
     try validateTarget(options.root);
     return options;
 }
@@ -3228,6 +3354,9 @@ fn parseAgentArgs(args: []const []const u8) CliError!AgentOptions {
     var session_set = false;
     var format_set = false;
     var profile_set = false;
+    var task_set = false;
+    var changed_set = false;
+    var budget_set = false;
     var index: usize = 1;
     while (index < args.len) {
         if (eql(args[index], "--root")) {
@@ -3246,6 +3375,20 @@ fn parseAgentArgs(args: []const []const u8) CliError!AgentOptions {
             if (profile_set) return error.DuplicateOption;
             options.profile = try optionValue(args, &index);
             profile_set = true;
+        } else if (eql(args[index], "--task")) {
+            if (task_set or operation != .context) return error.DuplicateOption;
+            options.task = try optionValue(args, &index);
+            task_set = true;
+        } else if (eql(args[index], "--changed")) {
+            if (changed_set or operation != .context) return error.DuplicateOption;
+            options.changed = try optionValue(args, &index);
+            changed_set = true;
+        } else if (eql(args[index], "--budget")) {
+            if (budget_set or operation != .context) return error.DuplicateOption;
+            const value = try optionValue(args, &index);
+            options.budget = std.fmt.parseInt(usize, value, 10) catch return error.InvalidLimit;
+            if (options.budget < 512 or options.budget > zstd.Development.max_context_bytes) return error.InvalidLimit;
+            budget_set = true;
         } else if (eql(args[index], "--json") or eql(args[index], "--jsonl")) {
             if (format_set) return error.DuplicateOption;
             options.jsonl = eql(args[index], "--jsonl");
@@ -3255,6 +3398,7 @@ fn parseAgentArgs(args: []const []const u8) CliError!AgentOptions {
     }
     try validateTarget(options.root);
     if (operation == .handoff and (options.provider.len == 0 or options.session.len == 0)) return error.MissingOptionValue;
+    if (operation == .context and options.task.len == 0) return error.MissingOptionValue;
     return options;
 }
 
@@ -3485,6 +3629,12 @@ test "CLI parses bounded project add and generate operations" {
     try std.testing.expectEqual(@as(u64, 42), graph_event.graph.event_id);
     const graph_children = try parseArgs(&.{ "graph", "children", "42", "--json" });
     try std.testing.expectEqual(GraphOperation.children, graph_children.graph.operation);
+    const graph_since = try parseArgs(&.{ "graph", "since", "42", "--limit", "64", "--json" });
+    try std.testing.expectEqual(GraphOperation.since, graph_since.graph.operation);
+    try std.testing.expectEqual(@as(u64, 42), graph_since.graph.event_id);
+    try std.testing.expectEqual(@as(usize, 64), graph_since.graph.limit);
+    try std.testing.expectEqual(@as(u64, 0), (try parseArgs(&.{ "graph", "since", "0" })).graph.event_id);
+    try std.testing.expectError(error.InvalidLimit, parseArgs(&.{ "graph", "since", "42", "--limit", "0" }));
     try std.testing.expectError(error.InvalidEventId, parseArgs(&.{ "graph", "event", "0" }));
     try std.testing.expectError(error.InvalidEventId, parseArgs(&.{ "graph", "event" }));
     try std.testing.expectError(error.InvalidEventId, parseArgs(&.{ "graph", "children", "not-a-number" }));
@@ -3575,6 +3725,20 @@ test "statechart generators emit native machine actor durable and model-test mod
         try std.testing.expect(std.mem.indexOf(u8, source, "__MACHINE_NAME__") == null);
         try std.testing.expect(std.mem.indexOf(u8, source, "review-flow") != null);
     }
+}
+
+test "service and layer generators emit canonical composable modules" {
+    const service = try generatedModuleAlloc(std.testing.allocator, .{ .kind = .service, .name = "orders", .component = "api" });
+    defer std.testing.allocator.free(service);
+    try std.testing.expect(std.mem.indexOf(u8, service, "kernel.Service(\"generated/orders\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, service, "kernel.Effect") != null);
+    try std.testing.expect(std.mem.indexOf(u8, service, "EffectEnv") == null);
+    try std.testing.expect(std.mem.indexOf(u8, service, "zstd.fx.Context") == null);
+
+    const layer = try generatedModuleAlloc(std.testing.allocator, .{ .kind = .layer, .name = "orders", .component = "api" });
+    defer std.testing.allocator.free(layer);
+    try std.testing.expect(std.mem.indexOf(u8, layer, "zstd.fx.kernel.Layer.succeed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, layer, "fromEnv") == null);
 }
 
 test "CLI parses provider-neutral agent queries and handoff" {
@@ -3872,6 +4036,7 @@ test "generator emits deterministic valid manifests skills and safe common files
         try std.testing.expect(plan.find("zigeffect.project.json") != null);
         try std.testing.expect(plan.find(".agents/skills/zigeffect-development/SKILL.md") != null);
         try std.testing.expect(plan.find(".claude/skills/zigeffect-development/SKILL.md") != null);
+        try std.testing.expect(plan.find(".gemini/skills/zigeffect-development/SKILL.md") != null);
         try std.testing.expect(plan.find(distribution.compatibility_path) != null);
         try std.testing.expect(plan.find(distribution.scaffold_state_path) != null);
         try std.testing.expect(plan.find("README.md") != null);
@@ -3932,13 +4097,110 @@ test "application and service plans wire every production boundary" {
             "zstd.Application.componentDependency",
             "zstd.Application.acceptanceEvaluation",
         }) |semantic_helper| try std.testing.expect(std.mem.indexOf(u8, app, semantic_helper) != null);
-        try std.testing.expect(std.mem.indexOf(u8, app, "store.attachBackend(graph_backend.backend())") != null);
-        try std.testing.expect(std.mem.indexOf(u8, app, "graph_backend.flush()") != null);
+        try std.testing.expect(std.mem.indexOf(u8, app, "zstd.ManagedRuntime") != null);
+        try std.testing.expect(std.mem.indexOf(u8, app, "runtime_options.graph = causal_graph_options") != null);
+        try std.testing.expect(std.mem.indexOf(u8, app, "runtime.agentMapJsonAlloc") != null);
+        try std.testing.expect(std.mem.indexOf(u8, app, "runtime.shutdown()") != null);
+        try std.testing.expect(std.mem.indexOf(u8, app, "attachBackend") == null);
 
         var manifest = try zstd.Project.parseManifest(std.testing.allocator, plan.find("zigeffect.project.json").?.content);
         defer manifest.deinit();
         try std.testing.expect(std.mem.eql(u8, manifest.value.artifacts.graph, zstd.CausalGraph.default_path));
         try std.testing.expect(std.mem.indexOfScalar(zstd.Project.Capability, manifest.value.components[0].capabilities, .causal_graph) != null);
+    }
+}
+
+test "local application scaffolds teach only the canonical service layer and managed runtime architecture" {
+    var plan = try generatePlan(std.testing.allocator, .{
+        .kind = .application,
+        .name = "canonical-app",
+        .target = "canonical-app",
+        .zigeffect_std_path = "../../zigeffect-std",
+        .profile = .@"local-fake",
+    });
+    defer plan.deinit();
+
+    const app = plan.find("src/app.zig").?.content;
+    const greeting = plan.find("src/services/greeting.zig").?.content;
+    const skill = plan.find(".agents/skills/zigeffect-development/SKILL.md").?.content;
+    const claude_skill = plan.find(".claude/skills/zigeffect-development/SKILL.md").?.content;
+    const gemini_skill = plan.find(".gemini/skills/zigeffect-development/SKILL.md").?.content;
+    const readme = plan.find("README.md").?.content;
+    const acceptance_test = plan.find("test/root_test.zig").?.content;
+    for ([_][]const u8{
+        "const kernel = zstd.fx.kernel;",
+        "zstd.ManagedRuntime",
+        "kernel.Layer.succeed",
+        "pub fn rootLayer()",
+        "pub fn runWithOptions(",
+        ".flatMap(",
+        ".named(\"application.bootstrap\")",
+        "runtime.inspect",
+    }) |contract| try std.testing.expect(std.mem.indexOf(u8, app, contract) != null);
+    try std.testing.expect(std.mem.indexOf(u8, greeting, "kernel.Service") != null);
+    try std.testing.expect(std.mem.indexOf(u8, greeting, "kernel.Effect") != null);
+    try std.testing.expect(std.mem.indexOf(u8, skill, "zstd.ManagedRuntime") != null);
+    try std.testing.expectEqualStrings(skill, claude_skill);
+    try std.testing.expectEqualStrings(skill, gemini_skill);
+    for ([_][]const u8{
+        "proof-carrying causal loop",
+        "zigeffect agent context",
+        ".zigeffect/tests/process-receipts/",
+        ".zigeffect/tests/raw-receipts/",
+        ".zigeffect/handoffs/tests/",
+        "work packet",
+        "fencing token",
+        "zigeffect graph path",
+        "project-mounted graph",
+        "Re-query",
+    }) |contract| try std.testing.expect(std.mem.indexOf(u8, skill, contract) != null);
+    try std.testing.expect(std.mem.indexOf(u8, readme, "## Architecture") != null);
+    try std.testing.expect(std.mem.indexOf(u8, readme, "`zstd.ManagedRuntime`") != null);
+    try std.testing.expect(std.mem.indexOf(u8, readme, "compatibility adapter bridge") != null);
+    try std.testing.expect(std.mem.indexOf(u8, acceptance_test, "context.causalStore()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, acceptance_test, "app.rootLayer()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, acceptance_test, "assertions.event(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, acceptance_test, "tmpDir") == null);
+
+    for ([_][]const u8{
+        "EffectEnv",
+        "LayerGraph",
+        "LayerWithError",
+        "ValueProvider",
+        "ctx.runEffect",
+        "zstd.fx.layerGraph",
+        "zstd.fx.Context(",
+    }) |legacy| {
+        try std.testing.expect(std.mem.indexOf(u8, app, legacy) == null);
+        try std.testing.expect(std.mem.indexOf(u8, greeting, legacy) == null);
+    }
+    try std.testing.expect(std.mem.indexOf(u8, skill, "Compose applications once with `zstd.fx.layerGraph`") == null);
+}
+
+test "library scaffolds expose composable service effects and a default layer" {
+    var plan = try generatePlan(std.testing.allocator, .{
+        .kind = .library,
+        .name = "canonical-library",
+        .target = "canonical-library",
+        .zigeffect_std_path = "../../zigeffect-std",
+    });
+    defer plan.deinit();
+
+    const source = plan.find("src/root.zig").?.content;
+    for ([_][]const u8{
+        "kernel.Service",
+        "kernel.Effect",
+        "kernel.Layer.succeed",
+        "defaultLayer",
+        "decodeInputAlloc",
+    }) |contract| try std.testing.expect(std.mem.indexOf(u8, source, contract) != null);
+    const acceptance_test = plan.find("test/root_test.zig").?.content;
+    try std.testing.expect(std.mem.indexOf(u8, acceptance_test, "context.causalStore()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, acceptance_test, "context.mapCausalEventIds(&runtime)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, acceptance_test, "assertions.event(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "ManagedRuntime") == null);
+    for ([_][]const u8{ "EffectEnv", "LayerGraph", "layerGraph", "ctx.runEffect" }) |legacy| {
+        try std.testing.expect(std.mem.indexOf(u8, source, legacy) == null);
     }
 }
 
@@ -3950,7 +4212,8 @@ test "scaffold profiles label authority and production plans use only real wirin
         defer plan.deinit();
         const profile_record = plan.find(".zigeffect/adapter-profile.json") orelse return error.MissingAdapterProfile;
         try std.testing.expect(std.mem.indexOf(u8, profile_record.content, @tagName(profile)) != null);
-        var manifest = try zstd.Project.parseManifest(std.testing.allocator, plan.find("zigeffect.project.json").?.content); defer manifest.deinit();
+        var manifest = try zstd.Project.parseManifest(std.testing.allocator, plan.find("zigeffect.project.json").?.content);
+        defer manifest.deinit();
         try std.testing.expectEqual(@as(usize, if (profile == .@"local-fake") 2 else 3), manifest.value.capability_requirements.len);
         if (profile == .production) try std.testing.expectEqual(zstd.Project.ExecutionPosture.production, manifest.value.execution_posture);
         if (profile != .@"local-fake") {
@@ -3962,6 +4225,37 @@ test "scaffold profiles label authority and production plans use only real wirin
             }
         }
     }
+}
+
+test "production scaffolds compose adapters as layers outside the root effect" {
+    var plan = try generatePlan(std.testing.allocator, .{
+        .kind = .application,
+        .name = "composed-production",
+        .target = "composed-production",
+        .zigeffect_std_path = "../../zigeffect-std",
+        .profile = .production,
+    });
+    defer plan.deinit();
+
+    const wiring = plan.find("src/production_wiring.zig").?.content;
+    for ([_][]const u8{
+        "http.serverLayer()",
+        "postgres.sessionLayer()",
+        "postgres.poolLayer()",
+        "otel.exporterLayer()",
+        "zstd.fx.layerGraph",
+        ".withCausalStore(&causal_store)",
+    }) |contract| try std.testing.expect(std.mem.indexOf(u8, wiring, contract) != null);
+
+    const effect_start = std.mem.indexOf(u8, wiring, "fn ProductionEffect") orelse return error.MissingProductionEffect;
+    const root_start = std.mem.indexOfPos(u8, wiring, effect_start, "pub fn run(") orelse return error.MissingCompositionRoot;
+    const effect_source = wiring[effect_start..root_start];
+    for ([_][]const u8{
+        "http.Server.init",
+        "postgres.Session.init",
+        "postgres.Pool.initAlloc",
+        "otel.Exporter.init",
+    }) |forbidden| try std.testing.expect(std.mem.indexOf(u8, effect_source, forbidden) == null);
 }
 
 test "system plan contains independently buildable services and shared package" {
@@ -3983,6 +4277,12 @@ test "system plan contains independently buildable services and shared package" 
         "packages/shared/build.zig",
         "packages/shared/src/root.zig",
     }) |path| try std.testing.expect(plan.find(path) != null);
+    const system_source = plan.find("src/root.zig").?.content;
+    const system_test = plan.find("test/root_test.zig").?.content;
+    try std.testing.expect(std.mem.indexOf(u8, system_source, "pub fn runWithOptions(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, system_test, "context.causalStore()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, system_test, "system.runWithOptions") != null);
+    try std.testing.expect(std.mem.indexOf(u8, system_test, "Greeting.greet") != null);
 }
 
 test "every scaffold matches the committed compatibility snapshot" {
@@ -4061,9 +4361,52 @@ test "graph commands query manifest-owned durable causal evidence" {
     try std.testing.expect(std.mem.indexOf(u8, event.output, "cli-graph-proof") != null);
     try std.testing.expect(std.mem.indexOf(u8, event.output, "\"from\":1") != null);
 
+    var since = try runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{ "graph", "since", "1", "--limit", "1", "--root", "graph-project", "--json" });
+    defer since.deinit();
+    try std.testing.expect(std.mem.indexOf(u8, since.output, zstd.CausalGraph.records_since_schema) != null);
+    try std.testing.expect(std.mem.indexOf(u8, since.output, "\"after_event_id\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, since.output, "\"next_event_id\":2") != null);
+
     var children = try runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{ "graph", "children", "1", "--root", "graph-project", "--json" });
     defer children.deinit();
     try std.testing.expect(std.mem.indexOf(u8, children.output, "\"children\":[2]") != null);
+
+    var path = try runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{ "graph", "path", "1", "2", "--limit", "8", "--root", "graph-project", "--json" });
+    defer path.deinit();
+    try std.testing.expect(std.mem.indexOf(u8, path.output, zstd.CausalGraph.path_schema) != null);
+    try std.testing.expect(std.mem.indexOf(u8, path.output, "\"event_ids\":[1,2]") != null);
+}
+
+test "graph status and since zero expose a read-only empty first-run baseline" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var plan = try generatePlan(std.testing.allocator, .{
+        .kind = .application,
+        .name = "empty-graph-project",
+        .target = "empty-graph-project",
+    });
+    defer plan.deinit();
+    _ = try writePlan(std.testing.io, tmp.dir, "empty-graph-project", plan, .{});
+
+    var status = try runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{
+        "graph", "status", "--root", "empty-graph-project", "--json",
+    });
+    defer status.deinit();
+    try std.testing.expectEqual(@as(u8, 0), status.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, status.output, "\"records\":0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status.output, "\"newest_durable_event_id\":null") != null);
+
+    var since = try runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{
+        "graph", "since", "0", "--root", "empty-graph-project", "--json",
+    });
+    defer since.deinit();
+    try std.testing.expectEqual(@as(u8, 0), since.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, since.output, "\"records\":[]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, since.output, "\"truncated\":false") != null);
+
+    var project = try tmp.dir.openDir(std.testing.io, "empty-graph-project", .{});
+    defer project.close(std.testing.io);
+    try std.testing.expectError(error.FileNotFound, project.access(std.testing.io, ".zigeffect/graph/causal-graph.jsonl", .{}));
 }
 
 test "statechart commands query only the manifest-owned artifact catalog" {

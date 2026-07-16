@@ -27,8 +27,8 @@ for file in "${build_files[@]}"; do
 done
 
 template_file=packages/zigeffect-cli/src/templates.zig
-template_tests="$(grep -c 'const tests = b.addTest' "$template_file")"
-template_v2_tests="$(grep 'const tests = b.addTest' "$template_file" | grep -c 'test_runner = .{ .path = testing_runner, .mode = .server }')"
+template_tests="$(grep -c 'const tests = b.addTest(test_options)' "$template_file")"
+template_v2_tests="$(grep -c 'var test_options = std.Build.TestOptions{.*test_runner = .{ .path = testing_runner, .mode = .server }' "$template_file")"
 if [[ "$template_tests" -eq 0 || "$template_tests" -ne "$template_v2_tests" ]]; then
   printf 'generated project template contains an unmigrated test artifact (%s/%s migrated)\n' "$template_v2_tests" "$template_tests" >&2
   exit 1

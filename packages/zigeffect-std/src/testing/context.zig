@@ -95,6 +95,8 @@ pub const TestContext = struct {
     limitations: std.ArrayList([]const u8) = .empty,
     dropped_assertions: usize = 0,
     truncated_artifacts: usize = 0,
+    causal_event_id_space: Contract.CausalEventIdSpace = .runtime_local,
+    causal_graph_session_id: ?u64 = null,
     finished: bool = false,
     control: ?Protocol.ParsedControl = null,
 
@@ -109,7 +111,10 @@ pub const TestContext = struct {
             .allocator = allocator,
             .options = selected,
             .env = env,
-            .causal_store = fx.CausalStore.initBounded(allocator, options.max_causal_events),
+            .causal_store = fx.CausalStore.initWithOptions(allocator, .{
+                .max_events = options.max_causal_events,
+                .max_event_string_bytes = 512,
+            }),
             .firewall = Sandbox.Firewall.init(allocator),
         };
     }
@@ -133,6 +138,7 @@ pub const TestContext = struct {
         selected.schedule_choices = parsed.value.schedule_choices;
         selected.source_revision = parsed.value.source_revision;
         selected.execution.command_digest = parsed.value.command_digest;
+        selected.execution.manifest_digest = parsed.value.manifest_digest;
         selected.execution.native_receipt = true;
         var result = try init(allocator, selected);
         result.control = parsed;
@@ -172,6 +178,34 @@ pub const TestContext = struct {
 
     pub fn runtime(self: *TestContext) @TypeOf(self.env.runtime()) {
         return self.env.runtime().withCausalStore(&self.causal_store);
+    }
+
+    /// Borrow the test-owned causal store for a canonical `zstd.ManagedRuntime`.
+    /// The runtime may attach its scoped durable backend, but never destroys the
+    /// store and restores any previous backend before shutdown returns.
+    pub fn causalStore(self: *TestContext) *fx.CausalStore {
+        return &self.causal_store;
+    }
+
+    /// Convert every assertion reference from recorder-local IDs to the
+    /// persistent IDs accepted by causal graph queries. Call this while the
+    /// managed runtime is live, after recording assertions and before publish.
+    pub fn mapCausalEventIds(self: *TestContext, managed: anytype) !void {
+        if (self.finished or self.causal_event_id_space != .runtime_local) return error.InvalidCausalEventIdSpace;
+        if (!managed.usesCausalStore(&self.causal_store)) return error.CausalStoreMismatch;
+        for (self.assertions.items) |assertion| {
+            for (assertion.causal_event_ids) |event_id| {
+                _ = managed.durableCausalEventId(event_id) orelse return error.CausalEventNotDurable;
+            }
+        }
+        for (self.assertions.items) |*assertion| {
+            const ids = @constCast(assertion.causal_event_ids);
+            for (ids) |*event_id| {
+                event_id.* = managed.durableCausalEventId(event_id.*).?;
+            }
+        }
+        self.causal_event_id_space = .graph_durable;
+        self.causal_graph_session_id = managed.causalGraphSessionId();
     }
 
     pub fn run(self: *TestContext, effect: anytype) !@TypeOf(effect).SuccessType {
@@ -330,6 +364,8 @@ pub const TestContext = struct {
             .coverage = coverage_report.summary,
             .evidence = self.evidence.items,
             .assertions = self.assertions.items,
+            .causal_event_id_space = self.causal_event_id_space,
+            .causal_graph_session_id = self.causal_graph_session_id,
             .causal = causal,
             .completeness = completeness,
             .limitations = self.limitations.items,
@@ -343,7 +379,8 @@ pub const TestContext = struct {
 
     pub fn publish(self: *TestContext, io: std.Io, dir: std.Io.Dir, ended_ms: i64) !void {
         const receipt = try self.finish(ended_ms);
-        try Protocol.publishReceipt(self.allocator, io, dir, receipt);
+        try Protocol.publishRawReceipt(self.allocator, io, dir, receipt);
+        if (self.control != null) try Protocol.publishReceipt(self.allocator, io, dir, receipt);
     }
 };
 
@@ -527,6 +564,47 @@ test "TestContext reads matching control and publishes native receipt" {
     try std.testing.expectEqual(Contract.FaultKind.timeout, parsed.value.fault_kind);
     try std.testing.expect(parsed.value.execution.native_receipt);
     try std.testing.expectEqualStrings("sha256:command", parsed.value.execution.command_digest);
+
+    var raw = try Protocol.readRawReceipt(std.testing.allocator, std.testing.io, tmp.dir, "context-test");
+    defer raw.deinit();
+    try std.testing.expectEqualStrings("sha256:controlled", raw.value.source_revision);
+}
+
+test "uncontrolled package tests cannot overwrite authoritative process evidence" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try Protocol.writeControl(std.testing.allocator, std.testing.io, tmp.dir, .{
+        .scenario = scenario(),
+        .project = "demo",
+        .seed = 99,
+        .source_revision = "sha256:authoritative",
+        .command_digest = "sha256:command",
+    });
+    var controlled = try TestContext.initFromProject(std.testing.allocator, std.testing.io, tmp.dir, .{
+        .project = "demo",
+        .suite = "unit",
+        .scenario = scenario(),
+    });
+    defer controlled.deinit();
+    try controlled.addAssertion(.{ .id = "controlled", .label = "controlled receipt", .status = .passed });
+    try controlled.publish(std.testing.io, tmp.dir, 20);
+    try Protocol.removeControl(std.testing.io, tmp.dir);
+
+    var local = try TestContext.initFromProject(std.testing.allocator, std.testing.io, tmp.dir, .{
+        .project = "demo",
+        .suite = "unit",
+        .scenario = scenario(),
+    });
+    defer local.deinit();
+    try local.addAssertion(.{ .id = "local", .label = "local package receipt", .status = .passed });
+    try local.publish(std.testing.io, tmp.dir, 30);
+
+    var authoritative = try Protocol.readPublishedReceipt(std.testing.allocator, std.testing.io, tmp.dir, "context-test");
+    defer authoritative.deinit();
+    try std.testing.expectEqualStrings("sha256:authoritative", authoritative.value.source_revision);
+    var raw = try Protocol.readRawReceipt(std.testing.allocator, std.testing.io, tmp.dir, "context-test");
+    defer raw.deinit();
+    try std.testing.expectEqualStrings("working-tree", raw.value.source_revision);
 }
 
 test "TestContext reports required zero-assertion and bounded evidence as incomplete" {

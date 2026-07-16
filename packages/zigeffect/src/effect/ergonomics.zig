@@ -39,12 +39,12 @@ pub fn AsEffect(comptime Parent: type, comptime NewSuccess: type, comptime Env: 
         replacement: NewSuccess,
 
         pub fn run(self: Self, ctx: *Context(Env)) Parent.FailureType!NewSuccess {
-            _ = try self.parent.run(ctx);
+            _ = try ctx.runEffect(self.parent);
             return self.replacement;
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(NewSuccess, Parent.FailureType) {
-            const parent_exit = self.parent.exit(ctx);
+            const parent_exit = ctx.exitEffect(self.parent);
             return switch (parent_exit) {
                 .success => .{ .success = self.replacement },
                 .failure => |err| .{ .failure = err },
@@ -88,13 +88,13 @@ pub fn WhenEffect(comptime Parent: type, comptime Env: type) type {
 
         pub fn run(self: Self, ctx: *Context(Env)) Parent.FailureType!?Parent.SuccessType {
             if (!self.cond) return null;
-            const value = try self.parent.run(ctx);
+            const value = try ctx.runEffect(self.parent);
             return value;
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(?Parent.SuccessType, Parent.FailureType) {
             if (!self.cond) return .{ .success = null };
-            const parent_exit = self.parent.exit(ctx);
+            const parent_exit = ctx.exitEffect(self.parent);
             return switch (parent_exit) {
                 .success => |value| .{ .success = value },
                 .failure => |err| .{ .failure = err },
@@ -141,13 +141,13 @@ pub fn ZipEffect(
         right: Right,
 
         pub fn run(self: Self, ctx: *Context(Env)) Failure!SuccessType {
-            const a = try self.left.run(ctx);
-            const b = try self.right.run(ctx);
+            const a = try ctx.runEffect(self.left);
+            const b = try ctx.runEffect(self.right);
             return .{ .left = a, .right = b };
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(SuccessType, Failure) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
 
@@ -189,13 +189,13 @@ pub fn ZipWithEffect(
         combine: *const fn (Left.SuccessType, Right.SuccessType) Combined,
 
         pub fn run(self: Self, ctx: *Context(Env)) Failure!Combined {
-            const a = try self.left.run(ctx);
-            const b = try self.right.run(ctx);
+            const a = try ctx.runEffect(self.left);
+            const b = try ctx.runEffect(self.right);
             return self.combine(a, b);
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(Combined, Failure) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
 
@@ -370,7 +370,7 @@ pub fn ForEachParEffect(
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(SuccessType, Failure) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
 
@@ -419,7 +419,7 @@ pub fn ZipParEffect(
             slot: *LeftSlot,
             fn run(raw: ?*anyopaque) void {
                 const self: *LeftJob = @ptrCast(@alignCast(raw.?));
-                if (self.eff.run(&self.ctx_value)) |v| {
+                if (self.ctx_value.runEffect(self.eff)) |v| {
                     self.slot.* = .{ .value = v };
                 } else |err| {
                     self.slot.* = .{ .err = err };
@@ -432,7 +432,7 @@ pub fn ZipParEffect(
             slot: *RightSlot,
             fn run(raw: ?*anyopaque) void {
                 const self: *RightJob = @ptrCast(@alignCast(raw.?));
-                if (self.eff.run(&self.ctx_value)) |v| {
+                if (self.ctx_value.runEffect(self.eff)) |v| {
                     self.slot.* = .{ .value = v };
                 } else |err| {
                     self.slot.* = .{ .err = err };
@@ -442,8 +442,8 @@ pub fn ZipParEffect(
 
         pub fn run(self: Self, ctx: *Context(Env)) Failure!SuccessType {
             if (ctx.executor == null) {
-                const a = try self.left.run(ctx);
-                const b = try self.right.run(ctx);
+                const a = try ctx.runEffect(self.left);
+                const b = try ctx.runEffect(self.right);
                 return .{ .left = a, .right = b };
             }
             const executor = ctx.executor.?;
@@ -496,7 +496,7 @@ pub fn ZipParEffect(
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(SuccessType, Failure) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
 
@@ -561,7 +561,7 @@ pub fn RaceFirstEffect(
                 slot: *Slot,
                 fn run(raw: ?*anyopaque) void {
                     const self: *@This() = @ptrCast(@alignCast(raw.?));
-                    if (self.eff.run(&self.ctx_value)) |v| {
+                    if (self.ctx_value.runEffect(self.eff)) |v| {
                         self.slot.* = .{ .value = v };
                     } else |e| {
                         self.slot.* = .{ .err = e };
@@ -571,8 +571,8 @@ pub fn RaceFirstEffect(
         }
 
         pub fn run(self: Self, ctx: *Context(Env)) Failure!A {
-            const executor = ctx.executor orelse return self.left.run(ctx);
-            if (!executor.canRace()) return self.left.run(ctx);
+            const executor = ctx.executor orelse return ctx.runEffect(self.left);
+            if (!executor.canRace()) return ctx.runEffect(self.left);
 
             const LJob = Job(Left);
             const RJob = Job(Right);
@@ -605,7 +605,7 @@ pub fn RaceFirstEffect(
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(A, Failure) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
         pub fn map(self: Self, comptime Next: type, mapper: *const fn (A) Next) effect_mod.MapEffect(Self, Next, Failure, Env) {
@@ -640,7 +640,7 @@ pub fn RaceAllEffect(
             slot: *Slot,
             fn run(raw: ?*anyopaque) void {
                 const self: *Job = @ptrCast(@alignCast(raw.?));
-                if (self.eff.run(&self.ctx_value)) |v| {
+                if (self.ctx_value.runEffect(self.eff)) |v| {
                     self.slot.* = .{ .value = v };
                 } else |e| {
                     self.slot.* = .{ .err = e };
@@ -650,8 +650,8 @@ pub fn RaceAllEffect(
 
         pub fn run(self: Self, ctx: *Context(Env)) Failure!A {
             std.debug.assert(self.items.len > 0);
-            const executor = ctx.executor orelse return self.items[0].run(ctx);
-            if (!executor.canRace()) return self.items[0].run(ctx);
+            const executor = ctx.executor orelse return ctx.runEffect(self.items[0]);
+            if (!executor.canRace()) return ctx.runEffect(self.items[0]);
 
             const slots = ctx.allocator.alloc(Slot, self.items.len) catch return @as(Failure, error.OutOfMemory);
             defer ctx.allocator.free(slots);
@@ -690,7 +690,7 @@ pub fn RaceAllEffect(
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(A, Failure) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
         pub fn map(self: Self, comptime Next: type, mapper: *const fn (A) Next) effect_mod.MapEffect(Self, Next, Failure, Env) {
@@ -732,7 +732,7 @@ pub fn RaceEffect(
                 slot: *Slot,
                 fn run(raw: ?*anyopaque) void {
                     const self: *@This() = @ptrCast(@alignCast(raw.?));
-                    if (self.eff.run(&self.ctx_value)) |v| {
+                    if (self.ctx_value.runEffect(self.eff)) |v| {
                         self.slot.* = .{ .value = v };
                     } else |e| {
                         self.slot.* = .{ .err = e };
@@ -785,11 +785,11 @@ pub fn RaceEffect(
         }
 
         fn sequential(self: Self, ctx: *Context(Env)) Failure!A {
-            return self.left.run(ctx) catch return self.right.run(ctx);
+            return ctx.runEffect(self.left) catch return ctx.runEffect(self.right);
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(A, Failure) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
         pub fn map(self: Self, comptime Next: type, mapper: *const fn (A) Next) effect_mod.MapEffect(Self, Next, Failure, Env) {
@@ -829,7 +829,7 @@ pub fn BothEffect(
             slot: *LeftSlot,
             fn run(raw: ?*anyopaque) void {
                 const self: *@This() = @ptrCast(@alignCast(raw.?));
-                if (self.eff.run(&self.ctx_value)) |v| {
+                if (self.ctx_value.runEffect(self.eff)) |v| {
                     self.slot.* = .{ .value = v };
                 } else |e| {
                     self.slot.* = .{ .err = e };
@@ -842,7 +842,7 @@ pub fn BothEffect(
             slot: *RightSlot,
             fn run(raw: ?*anyopaque) void {
                 const self: *@This() = @ptrCast(@alignCast(raw.?));
-                if (self.eff.run(&self.ctx_value)) |v| {
+                if (self.ctx_value.runEffect(self.eff)) |v| {
                     self.slot.* = .{ .value = v };
                 } else |e| {
                     self.slot.* = .{ .err = e };
@@ -903,13 +903,13 @@ pub fn BothEffect(
         }
 
         fn sequential(self: Self, ctx: *Context(Env)) Failure!SuccessType {
-            const a = try self.left.run(ctx);
-            const b = try self.right.run(ctx);
+            const a = try ctx.runEffect(self.left);
+            const b = try ctx.runEffect(self.right);
             return .{ .left = a, .right = b };
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(SuccessType, Failure) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
         pub fn map(self: Self, comptime Next: type, mapper: *const fn (SuccessType) Next) effect_mod.MapEffect(Self, Next, Failure, Env) {
@@ -958,7 +958,7 @@ pub fn ForEachAllocEffect(
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(SuccessType, Failure) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
 
@@ -1001,7 +1001,7 @@ pub fn ForEachDiscardEffect(
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(void, Failure) {
-            self.run(ctx) catch |err| return .{ .failure = err };
+            ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = {} };
         }
 
@@ -1044,13 +1044,13 @@ pub fn AllEffect(
                 return @as(Failure, error.OutOfMemory);
             errdefer ctx.allocator.free(results);
             for (self.items, 0..) |item, i| {
-                results[i] = try item.run(ctx);
+                results[i] = try ctx.runEffect(item);
             }
             return results;
         }
 
         pub fn exit(self: Self, ctx: *Context(Env)) Exit(SuccessType, Failure) {
-            const value = self.run(ctx) catch |err| return .{ .failure = err };
+            const value = ctx.runEffect(self) catch |err| return .{ .failure = err };
             return .{ .success = value };
         }
 

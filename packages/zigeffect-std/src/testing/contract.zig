@@ -75,6 +75,7 @@ pub const AssertionStatus = enum {
 
 pub const SelectionReason = enum {
     all,
+    scenario,
     requirement,
     component,
     tag,
@@ -153,6 +154,13 @@ pub const AssertionResult = struct {
     }
 };
 
+/// Identity domain used by assertion `causal_event_ids`. Durable IDs can be
+/// passed directly to `zigeffect graph event`; runtime-local IDs cannot.
+pub const CausalEventIdSpace = enum {
+    runtime_local,
+    graph_durable,
+};
+
 pub const Completeness = struct {
     dropped_assertions: usize = 0,
     dropped_diagnostics: usize = 0,
@@ -220,13 +228,14 @@ pub const ExecutionIdentity = struct {
     target: []const u8 = "",
     optimize: []const u8 = "",
     command_digest: []const u8 = "",
+    manifest_digest: []const u8 = "",
     worktree_dirty: bool = false,
     native_receipt: bool = false,
     adapter_profile: []const u8 = "",
     adapters: []const Capability.AdapterEvidence = &.{},
 
     pub fn validate(self: ExecutionIdentity) ContractError!void {
-        inline for (.{ self.tool_version, self.target, self.optimize, self.command_digest }) |value| {
+        inline for (.{ self.tool_version, self.target, self.optimize, self.command_digest, self.manifest_digest }) |value| {
             if (value.len > 4096) return error.InvalidBounds;
             if (value.len != 0) try validateFreeLabel(value);
         }
@@ -368,6 +377,8 @@ pub const TestReceipt = struct {
     fault_index: ?usize = null,
     schedule_choices: []const u32 = &.{},
     assertions: []const AssertionResult = &.{},
+    causal_event_id_space: CausalEventIdSpace = .runtime_local,
+    causal_graph_session_id: ?u64 = null,
     minimal_case: ?MinimalCase = null,
     memory: MemorySummary = .{},
     causal: CausalSummary = .{},
@@ -426,6 +437,8 @@ pub const TestReceipt = struct {
                 if (std.mem.eql(u8, previous.id, assertion.id)) return error.InvalidScenario;
             }
         }
+        if ((self.causal_event_id_space == .graph_durable) != (self.causal_graph_session_id != null)) return error.InvalidScenario;
+        if (self.causal_graph_session_id) |session_id| if (session_id == 0) return error.InvalidBounds;
         if (self.minimal_case) |minimal| try minimal.validate();
         if (self.stdout_artifact.len != 0) validatePath(self.stdout_artifact) catch return error.InvalidPath;
         if (self.stderr_artifact.len != 0) validatePath(self.stderr_artifact) catch return error.InvalidPath;
@@ -629,6 +642,10 @@ fn appendReceiptJson(output: *std.ArrayList(u8), allocator: std.mem.Allocator, r
     if (receipt.fault_index) |index| try output.print(allocator, "{d}", .{index}) else try output.appendSlice(allocator, "null");
     try output.appendSlice(allocator, ",\"schedule_choices\":");
     try appendU32Array(output, allocator, receipt.schedule_choices);
+    try output.appendSlice(allocator, ",\"causal_event_id_space\":");
+    try appendJsonString(output, allocator, @tagName(receipt.causal_event_id_space));
+    try output.appendSlice(allocator, ",\"causal_graph_session_id\":");
+    if (receipt.causal_graph_session_id) |session_id| try output.print(allocator, "{d}", .{session_id}) else try output.appendSlice(allocator, "null");
     try output.appendSlice(allocator, ",\"assertions\":[");
     for (receipt.assertions, 0..) |assertion, index| {
         if (index != 0) try output.append(allocator, ',');
@@ -664,6 +681,8 @@ fn appendExecution(output: *std.ArrayList(u8), allocator: std.mem.Allocator, val
     try appendSafeJsonString(output, allocator, value.optimize);
     try output.appendSlice(allocator, ",\"command_digest\":");
     try appendSafeJsonString(output, allocator, value.command_digest);
+    try output.appendSlice(allocator, ",\"manifest_digest\":");
+    try appendSafeJsonString(output, allocator, value.manifest_digest);
     try output.appendSlice(allocator, ",\"adapter_profile\":");
     try appendSafeJsonString(output, allocator, value.adapter_profile);
     try output.appendSlice(allocator, ",\"adapters\":[");

@@ -89,9 +89,10 @@ tool IDs, bounded input, durable session reads, explicit stop ownership, and
 redacted audit receipts; HTTP callers cannot provide argv. M86 provides a
 runtime-validated loopback browser client, ephemeral token bootstrap,
 single-flight polling, responsive Solid controls, and the supported Bun host
-that combines the collector with prompt-only Codex/Claude allowlists. M87 adds
-native interactive Codex and Claude tools, a bounded Bun PTY supervisor,
-authenticated terminal cursor/input/resize routes, and a lazy xterm.js panel.
+that combines the collector with prompt-only Codex/Claude allowlists. The
+interactive slice provides native Codex and Claude tools, a bounded Bun PTY
+supervisor, authenticated terminal cursor/input/resize routes, and a lazy
+xterm.js panel.
 Input is never copied into receipts, inherited control authority is removed from
 all child environments, and retained terminal output is redacted and explicitly
 memory-only. No hosted control plane is required.

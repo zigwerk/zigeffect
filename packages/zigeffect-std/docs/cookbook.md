@@ -1,4 +1,4 @@
-# zigeffect-std Cookbook
+# ZigEffect standard-library cookbook
 
 This cookbook contains local-first examples that compile through:
 
@@ -12,6 +12,12 @@ Each example imports only the public facade:
 ```zig
 const zstd = @import("zigeffect_std");
 ```
+
+These are compile-tested capability examples. Copy application composition only
+from examples that use `zstd.fx.kernel` and one `ManagedRuntime`. The current
+`grpc_unary.zig` example intentionally exercises the adapter's legacy
+`LayerGraph` bridge until the native gRPC migration roadmap reaches G5; it is a
+compatibility test, not the recommended application root.
 
 ## `schema_cli.zig`
 
@@ -55,8 +61,8 @@ What it proves:
 - Observability data can be recorded during a local tool run.
 - A deterministic JSON artifact can be written for later inspection.
 
-This is the shape for future `zstd`-based commands such as `doctor`, `check`,
-`lint`, and `snapshot`.
+This is the shape for `zstd`-based commands such as `doctor`, `check`, `lint`,
+and `snapshot`.
 
 ## `agent_dev_session.zig`
 
@@ -118,8 +124,7 @@ What it proves:
 - SQL contracts can be exercised with `zstd.Sql.FakeDatabase`.
 - Responses remain deterministic and locally testable.
 
-This is the smallest useful shape for future local API and database smoke
-tests.
+This is the smallest useful shape for local API and database smoke tests.
 
 ## `packages/zigeffect-postgres/examples/migrate.zig`
 
@@ -140,9 +145,8 @@ What it proves:
 - `apply-sql` produces executable transaction-wrapped SQL for `psql`.
 - URLs, passwords, and sentinel-shaped values do not appear in receipts.
 
-This is the first production-local Postgres shape: deterministic in CI, real
-enough for local development, and still replaceable by a future wire-protocol
-driver.
+This is a deterministic local Postgres migration boundary. Native connection
+and pool qualification belongs to the adapter package's live gates.
 
 ## `http_router.zig`
 
@@ -161,8 +165,9 @@ What it proves:
 - validation failures return deterministic redacted 400 payloads.
 - every handled request returns route receipt and trace JSON.
 
-This is the local development shape for API endpoints before a production
-network listener exists.
+This is the deterministic in-memory shape for API endpoint logic. A production
+listener is supplied by `zigeffect-http` and remains an adapter migration
+surface until it publishes canonical kernel layers.
 
 ## `local_toolbelt.zig`
 
@@ -188,20 +193,50 @@ What it proves:
 
 This is the copyable starting point for local project automation.
 
-## Next Local Milestones
+## `grpc_unary.zig`
 
-M13 proves the std library can build real local tools. M14-M17 extend those
-examples into a local agent/database development loop:
+This example verifies exact in-process gRPC method routing through the same
+contract consumed by the native transport. Its current `LayerGraph` wiring is
+explicit migration debt. Follow
+[`zigeffect-grpc/docs/effect-native-roadmap.md`](../../zigeffect-grpc/docs/effect-native-roadmap.md)
+instead of copying that root into a new application.
 
-- **M14 Local Agent Supervisor:** delivered. `zstd.Agent` now supervises local
-  process adapters, emits guardrails/checks/artifacts, and returns redacted
-  workbench-compatible JSONL plus receipts.
-- **M15 Workbench Dev Session UX:** delivered. The Solid workbench renders
-  sessions, commands, checks, artifacts, causal facts, durable local ownership,
-  and interactive PTY terminals.
-- **M16 HTTP Router / Local Server:** delivered. `zstd.Http` now provides
-  Schema-coded local JSON routes with receipt and trace JSON.
-- **M17 Postgres Maturity:** delivered. `zstd.Sql` now decodes rows through
-  Schema, exposes pool leases/stats and transaction receipts, and
-  `zigeffect-postgres` provides migration planning/apply SQL plus a copyable
-  local migration CLI.
+## `causal_graph.zig`
+
+Use this example to understand restart-safe local causal graph persistence,
+bounded queries, and durable event IDs. The graph database is an application
+evidence backend; it is not a service dependency every domain effect must
+request.
+
+## Register a typed statechart
+
+At application bootstrap, create the manifest-owned statechart artifact
+directory and register each public machine:
+
+```zig
+try root.createDirPath(io, zstd.Statechart.default_path);
+var dir = try root.openDir(io, zstd.Statechart.default_path, .{});
+defer dir.close(io);
+try zstd.Statechart.registerDefinitionAtomic(
+    allocator,
+    io,
+    dir,
+    &OrderWorkflow.definition,
+    16 * 1024 * 1024,
+);
+```
+
+Registration emits the native definition plus XState, Mermaid, and DOT
+projections while preserving snapshots and definitions registered by other
+components. Keep source references on states and transitions so agents can map
+catalog output back to the declaration. Bump the definition version whenever
+its fingerprint changes. Use the runtime causal recorder for live decisions
+and a `CausalJournalStore` for durable workflow activity events.
+
+## Architecture status
+
+The examples prove capability behavior and public imports. Migration status is
+tracked separately in [the canonical standard-library roadmap](effect-native-roadmap.md).
+A delivered capability is not automatically a canonical service/layer
+implementation; only code using stable tags, canonical effects/layers, and one
+managed runtime is a composition reference.
