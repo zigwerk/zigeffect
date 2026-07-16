@@ -15,7 +15,8 @@ test "reference provider fault matrix is complete replayable and source linked" 
     try std.testing.expectEqual(zstd.Testing.TestStatus.passed, receipt.status());
     try std.testing.expect(receipt.complete());
     try std.testing.expectEqual(@as(usize, 0), receipt.unsupported);
-    const artifact = try receipt.jsonAlloc(std.testing.allocator); defer std.testing.allocator.free(artifact);
+    const artifact = try receipt.jsonAlloc(std.testing.allocator);
+    defer std.testing.allocator.free(artifact);
     try std.testing.expect(std.mem.indexOf(u8, artifact, "network_partition") != null);
 
     var schedule = try zstd.Testing.exploreSchedules(std.testing.allocator, OrderSchedule{}, .{ .max_states = 128, .max_schedules = 64, .max_steps_per_schedule = 8 });
@@ -45,7 +46,8 @@ test "reference provider fault matrix is complete replayable and source linked" 
     try std.testing.expectEqual(zstd.Testing.TestStatus.passed, mutations.status());
 
     const scenario = zstd.Testing.Scenario{ .id = "provider-fault-matrix", .label = "all concrete providers recover or fail safely", .requirement = "req-recovery", .acceptance_check = "check-recovery", .component = "worker-service", .command = "fault-matrix", .tags = &.{ "fault", "differential", "mutation", "schedule" } };
-    var context = try zstd.Testing.TestContext.init(std.testing.allocator, .{ .project = "zigeffect-reference-orders", .suite = "provider-faults", .scenario = scenario, .seed = 0x5eed }); defer context.deinit();
+    var context = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{ .project = "zigeffect-reference-orders", .suite = "provider-faults", .scenario = scenario, .seed = 0x5eed });
+    defer context.deinit();
     try context.recordReport(.model, receipt);
     try context.recordReport(.schedule, schedule);
     try context.recordReport(.differential, differential);
@@ -103,22 +105,40 @@ fn executeFault(_: *u8, fault: zstd.Testing.FaultCase) !void {
         _ = model.create(command, .none) catch |err| if (err == error.OutOfMemory) return else return err;
         return;
     }
-    var model = try system.Model.init(std.testing.allocator); defer model.deinit();
+    var model = try system.Model.init(std.testing.allocator);
+    defer model.deinit();
     switch (fault.kind) {
         .sql_failure, .migration_failure => try std.testing.expectError(error.InjectedCrash, model.create(command, .before_order_commit)),
-        .journal_crash, .database_restart, .storage_failure => { try std.testing.expectError(error.InjectedCrash, model.create(command, .after_order_commit)); try model.dispatchOutbox(.none); try std.testing.expect(try model.processOne()); },
-        .broker_failure, .redelivery, .network_partition => { try std.testing.expectError(error.InjectedCrash, model.create(command, .after_publish_before_mark)); try model.dispatchOutbox(.none); try std.testing.expect(try model.processOne()); },
-        .object_storage_failure => { try std.testing.expectError(error.ChecksumMismatch, model.objects.put("orders/bad", "data", .{ .expected_sha256 = [_]u8{0} ** 32 })); },
-        .cache_failure => { _ = try model.cache.set("order", "pending", .{}); try std.testing.expectError(error.CacheVersionConflict, model.cache.compareAndSwap("order", 99, "completed", null)); },
+        .journal_crash, .database_restart, .storage_failure => {
+            try std.testing.expectError(error.InjectedCrash, model.create(command, .after_order_commit));
+            try model.dispatchOutbox(.none);
+            try std.testing.expect(try model.processOne());
+        },
+        .broker_failure, .redelivery, .network_partition => {
+            try std.testing.expectError(error.InjectedCrash, model.create(command, .after_publish_before_mark));
+            try model.dispatchOutbox(.none);
+            try std.testing.expect(try model.processOne());
+        },
+        .object_storage_failure => {
+            try std.testing.expectError(error.ChecksumMismatch, model.objects.put("orders/bad", "data", .{ .expected_sha256 = [_]u8{0} ** 32 }));
+        },
+        .cache_failure => {
+            _ = try model.cache.set("order", "pending", .{});
+            try std.testing.expectError(error.CacheVersionConflict, model.cache.compareAndSwap("order", 99, "completed", null));
+        },
         .lease_loss => try exerciseLeaseLoss(),
         .timeout, .cancellation, .interruption, .retry_exhaustion, .process_failure, .http_failure, .transport_failure, .telemetry_failure, .spawn_failure, .executor, .corrupt_artifact => try exerciseExternalFailure(fault.kind),
-        .none, .schedule_choice => { _ = try model.create(command, .none); try std.testing.expect(try model.processOne()); },
+        .none, .schedule_choice => {
+            _ = try model.create(command, .none);
+            try std.testing.expect(try model.processOne());
+        },
         .allocation_failure => return error.UnexpectedAllocationFaultDispatch,
     }
 }
 
 fn exerciseLeaseLoss() !void {
-    var storage = zstd.fx.InMemoryRunnerStorage.init(std.testing.allocator); defer storage.deinit();
+    var storage = zstd.fx.InMemoryRunnerStorage.init(std.testing.allocator);
+    defer storage.deinit();
     const first = zstd.fx.RunnerAddress{ .machine_id = 1, .runner_id = 1 };
     const second = zstd.fx.RunnerAddress{ .machine_id = 2, .runner_id = 2 };
     _ = try storage.acquire(.{ .shard_id = 1, .owner = first, .now_ms = 0, .ttl_ms = 10 });
@@ -127,25 +147,71 @@ fn exerciseLeaseLoss() !void {
 }
 
 fn exerciseExternalFailure(kind: zstd.Testing.FaultKind) !void {
-    const failure = zstd.External.Failure.init(@tagName(kind), "operation", switch (kind) { .cancellation, .interruption => .canceled, .corrupt_artifact => .corrupt_data, .executor => .unsupported, else => .unavailable }, @tagName(kind), @tagName(kind));
+    const failure = zstd.External.Failure.init(@tagName(kind), "operation", switch (kind) {
+        .cancellation, .interruption => .canceled,
+        .corrupt_artifact => .corrupt_data,
+        .executor => .unsupported,
+        else => .unavailable,
+    }, @tagName(kind), @tagName(kind));
     try failure.validate();
     const decision = (zstd.Resilience.RetryPolicy{ .max_attempts = 2 }).decide(failure, 1);
     if (failure.retryable()) try std.testing.expect(decision == .retry_after_ms) else try std.testing.expectEqual(zstd.Resilience.RetryDecision.stop_terminal, decision);
 }
 
 const OrderSchedule = struct {
-    committed: bool = false, published: bool = false, marked: bool = false, consumed: bool = false,
-    pub fn actionCount(_: @This()) usize { return 4; }
-    pub fn runnable(self: @This(), action: usize) bool { return switch (action) { 0 => !self.committed, 1 => self.committed and !self.published, 2 => self.published and !self.marked, 3 => self.published and !self.consumed, else => false }; }
-    pub fn step(self: *@This(), action: usize) !void { if (!self.runnable(action)) return error.NotRunnable; switch (action) { 0 => self.committed = true, 1 => self.published = true, 2 => self.marked = true, 3 => self.consumed = true, else => return error.InvalidScheduleAction } }
-    pub fn isComplete(self: @This()) bool { return self.marked and self.consumed; }
-    pub fn invariant(self: @This()) bool { return (!self.published or self.committed) and (!self.marked or self.published) and (!self.consumed or self.published); }
-    pub fn stateHash(self: @This()) u64 { return @as(u64, @intFromBool(self.committed)) | (@as(u64, @intFromBool(self.published)) << 1) | (@as(u64, @intFromBool(self.marked)) << 2) | (@as(u64, @intFromBool(self.consumed)) << 3); }
-    pub fn sourceRef(_: @This(), action: usize) ?u64 { return 10_000 + action; }
+    committed: bool = false,
+    published: bool = false,
+    marked: bool = false,
+    consumed: bool = false,
+    pub fn actionCount(_: @This()) usize {
+        return 4;
+    }
+    pub fn runnable(self: @This(), action: usize) bool {
+        return switch (action) {
+            0 => !self.committed,
+            1 => self.committed and !self.published,
+            2 => self.published and !self.marked,
+            3 => self.published and !self.consumed,
+            else => false,
+        };
+    }
+    pub fn step(self: *@This(), action: usize) !void {
+        if (!self.runnable(action)) return error.NotRunnable;
+        switch (action) {
+            0 => self.committed = true,
+            1 => self.published = true,
+            2 => self.marked = true,
+            3 => self.consumed = true,
+            else => return error.InvalidScheduleAction,
+        }
+    }
+    pub fn isComplete(self: @This()) bool {
+        return self.marked and self.consumed;
+    }
+    pub fn invariant(self: @This()) bool {
+        return (!self.published or self.committed) and (!self.marked or self.published) and (!self.consumed or self.published);
+    }
+    pub fn stateHash(self: @This()) u64 {
+        return @as(u64, @intFromBool(self.committed)) | (@as(u64, @intFromBool(self.published)) << 1) | (@as(u64, @intFromBool(self.marked)) << 2) | (@as(u64, @intFromBool(self.consumed)) << 3);
+    }
+    pub fn sourceRef(_: @This(), action: usize) ?u64 {
+        return 10_000 + action;
+    }
 };
 
 const DifferentialState = struct { live: []const u8 };
 const RawState = *anyopaque;
-fn modelOutcome(_: RawState, _: []const u8, _: std.mem.Allocator) anyerror!zstd.Testing.DifferentialOutcome { var model = try system.Model.init(std.testing.allocator); defer model.deinit(); _ = try model.create(command, .none); try std.testing.expect(try model.processOne()); return .{ .output = normalized }; }
-fn liveOutcome(raw: RawState, _: []const u8, _: std.mem.Allocator) anyerror!zstd.Testing.DifferentialOutcome { const state: *DifferentialState = @ptrCast(@alignCast(raw)); return .{ .output = state.live }; }
-fn killMutation(_: RawState, _: zstd.Testing.MutationPoint) anyerror!zstd.Testing.MutationOutcome { return .killed; }
+fn modelOutcome(_: RawState, _: []const u8, _: std.mem.Allocator) anyerror!zstd.Testing.DifferentialOutcome {
+    var model = try system.Model.init(std.testing.allocator);
+    defer model.deinit();
+    _ = try model.create(command, .none);
+    try std.testing.expect(try model.processOne());
+    return .{ .output = normalized };
+}
+fn liveOutcome(raw: RawState, _: []const u8, _: std.mem.Allocator) anyerror!zstd.Testing.DifferentialOutcome {
+    const state: *DifferentialState = @ptrCast(@alignCast(raw));
+    return .{ .output = state.live };
+}
+fn killMutation(_: RawState, _: zstd.Testing.MutationPoint) anyerror!zstd.Testing.MutationOutcome {
+    return .killed;
+}
