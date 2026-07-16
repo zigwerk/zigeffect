@@ -168,6 +168,10 @@ Graphify remains measured from its pinned 0.9.17 output. Its absence of the
 canonical Proto operation, complete interaction, native fact, hyperedge and
 supernode is reported as a measured semantic-quality gap; no new performance,
 memory or storage superiority claim is made without a fresh controlled run.
+The checked `request-path-meaning.v1` receipt is such a fresh run: it may claim
+only the dimensions supported by its retained samples, and must report memory,
+storage or conservative-precision gaps alongside any latency or gold-coverage
+advantage.
 
 ## Deferred work
 

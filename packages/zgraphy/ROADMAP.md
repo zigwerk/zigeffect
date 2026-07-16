@@ -2640,6 +2640,12 @@ Delivered M2 kernel slices:
   projections, nested Zig ownership, focused test coverage, validated proof
   steps, full fullstack-orders canonical coverage, snapshot-v2 persistence,
   snapshot-v1 reads and bounded proof-carrying explain output.
+- a source-hashed M2.6 candidate benchmark with two warmups and seven isolated
+  samples: zgraphy reaches 16/16 entities, 22/22 relations, 2/2 facts, one
+  request path and one feature versus Graphify's 10/16, 11/22 and no semantic
+  aggregates, while median process latency is 1.81x faster; measured peak-RSS
+  (1.63x) and persisted-size (3.40x) gaps remain explicit M3+ optimization
+  work, and conservative-precision superiority is not claimed.
 
 Exit evidence:
 

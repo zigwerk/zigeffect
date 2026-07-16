@@ -3061,7 +3061,7 @@ test "zgraphy M2 request path meaning persists one exact proof carrying feature"
         .component = "zgraphy",
         .command = "test",
         .default_seed = 1908,
-        .source_roots = &.{ "src/model.zig", "src/store.zig", "src/freshness.zig", "src/indexer.zig", "src/rpc_continuity.zig", "src/typescript_symbols.zig", "src/differential.zig", "src/main.zig", "src/semantic_schema.zig", "src/semantic-schema.v2.json", "benchmarks/fixtures/fullstack-orders", "benchmarks/gold/fullstack-orders.canonical.v1.json", "docs/superpowers/specs/2026-07-16-zgraphy-m2-request-path-meaning.md", "src/root.zig", "test/all_test.zig" },
+        .source_roots = &.{ "src/model.zig", "src/store.zig", "src/freshness.zig", "src/indexer.zig", "src/rpc_continuity.zig", "src/typescript_symbols.zig", "src/differential.zig", "src/main.zig", "src/semantic_schema.zig", "src/semantic-schema.v2.json", "benchmarks/fixtures/fullstack-orders", "benchmarks/gold/fullstack-orders.canonical.v1.json", "benchmarks/baselines/request-path-meaning.v1.json", "docs/superpowers/specs/2026-07-16-zgraphy-m2-request-path-meaning.md", "src/root.zig", "test/all_test.zig" },
         .tags = &.{ "acceptance", "m2", "meaning", "rpc", "request-path", "hyperedge", "supernode", "proof", "persistence", "typescript", "proto", "zig", "graphify", "deterministic" },
     };
     var evidence = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{
@@ -3217,6 +3217,35 @@ test "zgraphy M2 request path meaning persists one exact proof carrying feature"
     try std.testing.expectEqual(@as(usize, 2), receipt.facts.matched);
     try std.testing.expectEqual(@as(usize, 1), receipt.hyperedges.matched);
     try std.testing.expectEqual(@as(usize, 1), receipt.supernodes.matched);
+
+    const baseline_bytes = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "benchmarks/baselines/request-path-meaning.v1.json", std.testing.allocator, .limited(256 * 1024));
+    defer std.testing.allocator.free(baseline_bytes);
+    var baseline = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, baseline_bytes, .{});
+    defer baseline.deinit();
+    const baseline_root = baseline.value.object;
+    try std.testing.expectEqualStrings("zgraphy.request-path-meaning-benchmark.v1", baseline_root.get("schema").?.string);
+    const identity = baseline_root.get("identity").?.object;
+    try std.testing.expectEqualStrings(zgraphy.Differential.zgraphy_adapter_version, identity.get("zgraphy_adapter").?.string);
+    try std.testing.expectEqualStrings(zgraphy.Parity.pinned_graphify_commit, identity.get("graphify_commit").?.string);
+    const benchmark_quality = baseline_root.get("quality").?.object;
+    const benchmark_graphify = benchmark_quality.get("graphify").?.object;
+    const benchmark_zgraphy = benchmark_quality.get("zgraphy").?.object;
+    try std.testing.expectEqual(@as(i64, 10), benchmark_graphify.get("matched_entities").?.integer);
+    try std.testing.expectEqual(@as(i64, 11), benchmark_graphify.get("matched_relations").?.integer);
+    try std.testing.expectEqual(@as(i64, 16), benchmark_zgraphy.get("matched_entities").?.integer);
+    try std.testing.expectEqual(@as(i64, 22), benchmark_zgraphy.get("matched_relations").?.integer);
+    try std.testing.expectEqual(@as(i64, 2), benchmark_zgraphy.get("matched_facts").?.integer);
+    try std.testing.expectEqual(@as(i64, 1), benchmark_zgraphy.get("matched_hyperedges").?.integer);
+    try std.testing.expectEqual(@as(i64, 1), benchmark_zgraphy.get("matched_supernodes").?.integer);
+    const benchmark_performance = baseline_root.get("performance").?.object;
+    try std.testing.expectEqual(@as(i64, 232166625), benchmark_performance.get("graphify_process_elapsed_ns").?.object.get("p50").?.integer);
+    try std.testing.expectEqual(@as(i64, 128356958), benchmark_performance.get("zgraphy_process_elapsed_ns").?.object.get("p50").?.integer);
+    const claim_status = baseline_root.get("claim_status").?.object;
+    try std.testing.expectEqualStrings("measured_candidate_advantage", claim_status.get("semantic_gold_coverage").?.string);
+    try std.testing.expectEqualStrings("measured_candidate_advantage", claim_status.get("process_latency").?.string);
+    try std.testing.expectEqualStrings("measured_candidate_gap", claim_status.get("peak_memory").?.string);
+    try std.testing.expectEqualStrings("measured_candidate_gap", claim_status.get("persisted_size").?.string);
+    try std.testing.expectEqualStrings("not_claimed", claim_status.get("conservative_precision_superiority").?.string);
 
     try assertions.boolean(.{
         .id = "zgraphy.m2.request-path-native-meaning",

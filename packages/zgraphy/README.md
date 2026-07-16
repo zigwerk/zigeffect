@@ -137,6 +137,16 @@ subset while snapshot-v1 remains a readable rollback input; facts, claims and
 immutable multi-generation publication are not yet claimed as fully persisted
 schema-v2 records.
 
+The checked M2.6 `request-path-meaning.v1` candidate receipt measures complete
+fullstack gold coverage (16/16 entities, 22/22 relations, 2/2 facts, one
+request path and one feature) versus Graphify 0.9.17's 10/16 entities, 11/22
+relations and no semantic facts or aggregates. Across two warmups and seven
+isolated local ARM64 samples, zgraphy's median process time is 128.36 ms versus
+232.17 ms (1.81x faster). The same receipt records current gaps: 80.35 MB
+versus 49.35 MB median peak RSS and 74,649 versus 21,979 persisted bytes.
+Richer graph depth explains part of the byte difference but does not waive the
+M3+ memory and storage optimization gates or justify a broad precision claim.
+
 `contracts` validates and reports the operational boundary for provider
 authority and lifecycle, shared extractor conformance, staged config-v2,
 independent graph-health dimensions, redacted diagnostics, and rollback-safe
