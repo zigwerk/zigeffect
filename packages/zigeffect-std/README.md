@@ -89,7 +89,8 @@ with one import:
   boundaries with path-aware redacted issue lists.
 - `Parser` defines bounded, owned source-document facts and a replaceable parser
   service/layer. The optional `zigeffect-parser` package supplies the pinned
-  native TypeScript/TSX/JavaScript/JSX provider.
+  native TypeScript/TSX/JavaScript/JSX provider plus an offline Zig-native
+  Proto2/Proto3/Editions provider.
 - `Json` writes deterministic redacted JSON payloads.
 - `Jsonl` appends and parses newline-delimited JSON feeds.
 - `Stream` re-exports engine pull streams and adds local line helpers.

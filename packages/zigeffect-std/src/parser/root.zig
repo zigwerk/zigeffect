@@ -2,8 +2,8 @@ const std = @import("std");
 const fx = @import("zigeffect");
 const StdService = @import("../service/root.zig");
 
-pub const schema = "zigeffect.document-structural-facts.v2";
-pub const schema_version: u32 = 2;
+pub const schema = "zigeffect.document-structural-facts.v3";
+pub const schema_version: u32 = 3;
 
 pub const Language = enum(u8) {
     typescript,
@@ -54,6 +54,8 @@ pub const ImportKind = enum(u8) {
     import_require,
     dynamic,
     commonjs_require,
+    proto_public,
+    proto_weak,
 };
 
 pub const ImportBindingKind = enum(u8) {
@@ -162,6 +164,62 @@ pub const Call = struct {
     callee_span: Span,
 };
 
+pub const ProtocolFieldKind = enum(u8) {
+    normal,
+    map,
+    oneof,
+};
+
+pub const ProtocolCardinality = enum(u8) {
+    singular,
+    optional,
+    required,
+    repeated,
+};
+
+pub const ProtocolPackage = struct {
+    name: []const u8,
+    span: Span,
+    name_span: Span,
+};
+
+pub const ProtocolField = struct {
+    owner: []const u8,
+    name: []const u8,
+    type_name: []const u8,
+    map_key_type: []const u8,
+    oneof_name: []const u8,
+    number: u32,
+    kind: ProtocolFieldKind,
+    cardinality: ProtocolCardinality,
+    span: Span,
+    name_span: Span,
+    type_span: Span,
+    number_span: Span,
+};
+
+pub const ProtocolEnumValue = struct {
+    owner: []const u8,
+    name: []const u8,
+    number: i32,
+    span: Span,
+    name_span: Span,
+    number_span: Span,
+};
+
+pub const ProtocolRpc = struct {
+    service: []const u8,
+    name: []const u8,
+    request_type: []const u8,
+    response_type: []const u8,
+    client_streaming: bool,
+    server_streaming: bool,
+    span: Span,
+    name_span: Span,
+    request_span: Span,
+    response_span: Span,
+};
+
 pub const Summary = struct {
     declarations: usize = 0,
     imports: usize = 0,
@@ -169,6 +227,10 @@ pub const Summary = struct {
     exports: usize = 0,
     type_bindings: usize = 0,
     calls: usize = 0,
+    protocol_packages: usize = 0,
+    protocol_fields: usize = 0,
+    protocol_enum_values: usize = 0,
+    protocol_rpcs: usize = 0,
     traversed_nodes: usize = 0,
     parse_errors: usize = 0,
 };
@@ -204,6 +266,10 @@ pub const Result = struct {
     exports: []Export,
     type_bindings: []TypeBinding,
     calls: []Call,
+    protocol_packages: []ProtocolPackage,
+    protocol_fields: []ProtocolField,
+    protocol_enum_values: []ProtocolEnumValue,
+    protocol_rpcs: []ProtocolRpc,
     summary: Summary,
     fingerprint: [32]u8,
     owns_memory: bool = true,
@@ -221,6 +287,10 @@ pub const Result = struct {
         exports: []Export,
         type_bindings: []TypeBinding,
         calls: []Call,
+        protocol_packages: []ProtocolPackage,
+        protocol_fields: []ProtocolField,
+        protocol_enum_values: []ProtocolEnumValue,
+        protocol_rpcs: []ProtocolRpc,
         traversed_nodes: usize,
     ) !Result {
         const copied_path = try allocator.dupe(u8, path);
@@ -232,6 +302,10 @@ pub const Result = struct {
             .exports = exports.len,
             .type_bindings = type_bindings.len,
             .calls = calls.len,
+            .protocol_packages = protocol_packages.len,
+            .protocol_fields = protocol_fields.len,
+            .protocol_enum_values = protocol_enum_values.len,
+            .protocol_rpcs = protocol_rpcs.len,
             .traversed_nodes = traversed_nodes,
         };
         var result = Result{
@@ -247,8 +321,12 @@ pub const Result = struct {
             .exports = exports,
             .type_bindings = type_bindings,
             .calls = calls,
+            .protocol_packages = protocol_packages,
+            .protocol_fields = protocol_fields,
+            .protocol_enum_values = protocol_enum_values,
+            .protocol_rpcs = protocol_rpcs,
             .summary = summary,
-            .fingerprint = structuralFingerprint(parser_id, parser_version, copied_path, language, source_bytes, declarations, imports, import_bindings, exports, type_bindings, calls, summary),
+            .fingerprint = structuralFingerprint(parser_id, parser_version, copied_path, language, source_bytes, declarations, imports, import_bindings, exports, type_bindings, calls, protocol_packages, protocol_fields, protocol_enum_values, protocol_rpcs, summary),
         };
         result.validate() catch |failure| {
             allocator.free(copied_path);
@@ -278,6 +356,14 @@ pub const Result = struct {
         errdefer allocator.free(type_bindings);
         const calls = try allocator.alloc(Call, 0);
         errdefer allocator.free(calls);
+        const protocol_packages = try allocator.alloc(ProtocolPackage, 0);
+        errdefer allocator.free(protocol_packages);
+        const protocol_fields = try allocator.alloc(ProtocolField, 0);
+        errdefer allocator.free(protocol_fields);
+        const protocol_enum_values = try allocator.alloc(ProtocolEnumValue, 0);
+        errdefer allocator.free(protocol_enum_values);
+        const protocol_rpcs = try allocator.alloc(ProtocolRpc, 0);
+        errdefer allocator.free(protocol_rpcs);
         return initOwned(
             allocator,
             path,
@@ -291,6 +377,10 @@ pub const Result = struct {
             exports,
             type_bindings,
             calls,
+            protocol_packages,
+            protocol_fields,
+            protocol_enum_values,
+            protocol_rpcs,
             traversed_nodes,
         );
     }
@@ -329,6 +419,28 @@ pub const Result = struct {
             if (call.enclosing_declaration.len > 0) self.allocator.free(call.enclosing_declaration);
         }
         self.allocator.free(self.calls);
+        for (self.protocol_packages) |item| self.allocator.free(item.name);
+        self.allocator.free(self.protocol_packages);
+        for (self.protocol_fields) |field| {
+            self.allocator.free(field.owner);
+            self.allocator.free(field.name);
+            self.allocator.free(field.type_name);
+            if (field.map_key_type.len > 0) self.allocator.free(field.map_key_type);
+            if (field.oneof_name.len > 0) self.allocator.free(field.oneof_name);
+        }
+        self.allocator.free(self.protocol_fields);
+        for (self.protocol_enum_values) |value| {
+            self.allocator.free(value.owner);
+            self.allocator.free(value.name);
+        }
+        self.allocator.free(self.protocol_enum_values);
+        for (self.protocol_rpcs) |rpc| {
+            self.allocator.free(rpc.service);
+            self.allocator.free(rpc.name);
+            self.allocator.free(rpc.request_type);
+            self.allocator.free(rpc.response_type);
+        }
+        self.allocator.free(self.protocol_rpcs);
         self.allocator.free(self.path);
         self.path = "";
         self.declarations = &.{};
@@ -337,6 +449,10 @@ pub const Result = struct {
         self.exports = &.{};
         self.type_bindings = &.{};
         self.calls = &.{};
+        self.protocol_packages = &.{};
+        self.protocol_fields = &.{};
+        self.protocol_enum_values = &.{};
+        self.protocol_rpcs = &.{};
         self.owns_memory = false;
     }
 
@@ -346,6 +462,8 @@ pub const Result = struct {
             self.summary.declarations != self.declarations.len or self.summary.imports != self.imports.len or
             self.summary.import_bindings != self.import_bindings.len or self.summary.exports != self.exports.len or
             self.summary.type_bindings != self.type_bindings.len or self.summary.calls != self.calls.len or
+            self.summary.protocol_packages != self.protocol_packages.len or self.summary.protocol_fields != self.protocol_fields.len or
+            self.summary.protocol_enum_values != self.protocol_enum_values.len or self.summary.protocol_rpcs != self.protocol_rpcs.len or
             self.summary.parse_errors != 0)
         {
             return error.InvalidParserResult;
@@ -413,6 +531,46 @@ pub const Result = struct {
                 (index > 0 and call.callee_span.start_byte < previous_start)) return error.InvalidParserCall;
             previous_start = call.callee_span.start_byte;
         }
+        previous_start = 0;
+        for (self.protocol_packages, 0..) |item, index| {
+            if (item.name.len == 0 or !item.span.valid(self.source_bytes) or !item.name_span.valid(self.source_bytes) or
+                item.name_span.start_byte < item.span.start_byte or item.name_span.end_byte > item.span.end_byte or
+                (index > 0 and item.name_span.start_byte < previous_start)) return error.InvalidParserProtocolPackage;
+            previous_start = item.name_span.start_byte;
+        }
+        previous_start = 0;
+        for (self.protocol_fields, 0..) |field, index| {
+            if (field.owner.len == 0 or field.name.len == 0 or field.type_name.len == 0 or field.number == 0 or
+                !field.span.valid(self.source_bytes) or !field.name_span.valid(self.source_bytes) or
+                !field.type_span.valid(self.source_bytes) or !field.number_span.valid(self.source_bytes) or
+                field.name_span.start_byte < field.span.start_byte or field.name_span.end_byte > field.span.end_byte or
+                field.type_span.start_byte < field.span.start_byte or field.type_span.end_byte > field.span.end_byte or
+                field.number_span.start_byte < field.span.start_byte or field.number_span.end_byte > field.span.end_byte or
+                (field.kind == .map and field.map_key_type.len == 0) or (field.kind != .map and field.map_key_type.len > 0) or
+                (field.kind == .oneof and field.oneof_name.len == 0) or (field.kind != .oneof and field.oneof_name.len > 0) or
+                (index > 0 and field.name_span.start_byte < previous_start)) return error.InvalidParserProtocolField;
+            previous_start = field.name_span.start_byte;
+        }
+        previous_start = 0;
+        for (self.protocol_enum_values, 0..) |value, index| {
+            if (value.owner.len == 0 or value.name.len == 0 or !value.span.valid(self.source_bytes) or
+                !value.name_span.valid(self.source_bytes) or !value.number_span.valid(self.source_bytes) or
+                value.name_span.start_byte < value.span.start_byte or value.name_span.end_byte > value.span.end_byte or
+                value.number_span.start_byte < value.span.start_byte or value.number_span.end_byte > value.span.end_byte or
+                (index > 0 and value.name_span.start_byte < previous_start)) return error.InvalidParserProtocolEnumValue;
+            previous_start = value.name_span.start_byte;
+        }
+        previous_start = 0;
+        for (self.protocol_rpcs, 0..) |rpc, index| {
+            if (rpc.service.len == 0 or rpc.name.len == 0 or rpc.request_type.len == 0 or rpc.response_type.len == 0 or
+                !rpc.span.valid(self.source_bytes) or !rpc.name_span.valid(self.source_bytes) or
+                !rpc.request_span.valid(self.source_bytes) or !rpc.response_span.valid(self.source_bytes) or
+                rpc.name_span.start_byte < rpc.span.start_byte or rpc.name_span.end_byte > rpc.span.end_byte or
+                rpc.request_span.start_byte < rpc.span.start_byte or rpc.request_span.end_byte > rpc.span.end_byte or
+                rpc.response_span.start_byte < rpc.span.start_byte or rpc.response_span.end_byte > rpc.span.end_byte or
+                (index > 0 and rpc.name_span.start_byte < previous_start)) return error.InvalidParserProtocolRpc;
+            previous_start = rpc.name_span.start_byte;
+        }
         const expected = structuralFingerprint(
             self.parser_id,
             self.parser_version,
@@ -425,6 +583,10 @@ pub const Result = struct {
             self.exports,
             self.type_bindings,
             self.calls,
+            self.protocol_packages,
+            self.protocol_fields,
+            self.protocol_enum_values,
+            self.protocol_rpcs,
             self.summary,
         );
         if (!std.mem.eql(u8, &expected, &self.fingerprint)) return error.InvalidParserFingerprint;
@@ -468,6 +630,31 @@ pub const Result = struct {
     pub fn findCall(self: *const Result, callee: []const u8) ?*const Call {
         for (self.calls, 0..) |call, index| {
             if (std.mem.eql(u8, call.callee, callee)) return &self.calls[index];
+        }
+        return null;
+    }
+
+    pub fn findProtocolPackage(self: *const Result) ?*const ProtocolPackage {
+        return if (self.protocol_packages.len == 1) &self.protocol_packages[0] else null;
+    }
+
+    pub fn findProtocolField(self: *const Result, owner: []const u8, number: u32) ?*const ProtocolField {
+        for (self.protocol_fields, 0..) |field, index| {
+            if (field.number == number and std.mem.eql(u8, field.owner, owner)) return &self.protocol_fields[index];
+        }
+        return null;
+    }
+
+    pub fn findProtocolEnumValue(self: *const Result, owner: []const u8, name: []const u8) ?*const ProtocolEnumValue {
+        for (self.protocol_enum_values, 0..) |value, index| {
+            if (std.mem.eql(u8, value.owner, owner) and std.mem.eql(u8, value.name, name)) return &self.protocol_enum_values[index];
+        }
+        return null;
+    }
+
+    pub fn findProtocolRpc(self: *const Result, service: []const u8, name: []const u8) ?*const ProtocolRpc {
+        for (self.protocol_rpcs, 0..) |rpc, index| {
+            if (std.mem.eql(u8, rpc.service, service) and std.mem.eql(u8, rpc.name, name)) return &self.protocol_rpcs[index];
         }
         return null;
     }
@@ -547,6 +734,10 @@ pub fn structuralFingerprint(
     exports: []const Export,
     type_bindings: []const TypeBinding,
     calls: []const Call,
+    protocol_packages: []const ProtocolPackage,
+    protocol_fields: []const ProtocolField,
+    protocol_enum_values: []const ProtocolEnumValue,
+    protocol_rpcs: []const ProtocolRpc,
     summary: Summary,
 ) [32]u8 {
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
@@ -609,12 +800,57 @@ pub fn structuralFingerprint(
         updateSpan(&hasher, call.span);
         updateSpan(&hasher, call.callee_span);
     }
+    for (protocol_packages) |item| {
+        updateBytes(&hasher, item.name);
+        updateSpan(&hasher, item.span);
+        updateSpan(&hasher, item.name_span);
+    }
+    for (protocol_fields) |field| {
+        updateBytes(&hasher, field.owner);
+        updateBytes(&hasher, field.name);
+        updateBytes(&hasher, field.type_name);
+        updateBytes(&hasher, field.map_key_type);
+        updateBytes(&hasher, field.oneof_name);
+        updateU64(&hasher, field.number);
+        updateU64(&hasher, @intFromEnum(field.kind));
+        updateU64(&hasher, @intFromEnum(field.cardinality));
+        updateSpan(&hasher, field.span);
+        updateSpan(&hasher, field.name_span);
+        updateSpan(&hasher, field.type_span);
+        updateSpan(&hasher, field.number_span);
+    }
+    for (protocol_enum_values) |value| {
+        updateBytes(&hasher, value.owner);
+        updateBytes(&hasher, value.name);
+        var number_bytes: [4]u8 = @splat(0);
+        std.mem.writeInt(i32, &number_bytes, value.number, .little);
+        hasher.update(&number_bytes);
+        updateSpan(&hasher, value.span);
+        updateSpan(&hasher, value.name_span);
+        updateSpan(&hasher, value.number_span);
+    }
+    for (protocol_rpcs) |rpc| {
+        updateBytes(&hasher, rpc.service);
+        updateBytes(&hasher, rpc.name);
+        updateBytes(&hasher, rpc.request_type);
+        updateBytes(&hasher, rpc.response_type);
+        updateU64(&hasher, @intFromBool(rpc.client_streaming));
+        updateU64(&hasher, @intFromBool(rpc.server_streaming));
+        updateSpan(&hasher, rpc.span);
+        updateSpan(&hasher, rpc.name_span);
+        updateSpan(&hasher, rpc.request_span);
+        updateSpan(&hasher, rpc.response_span);
+    }
     updateU64(&hasher, @intCast(summary.declarations));
     updateU64(&hasher, @intCast(summary.imports));
     updateU64(&hasher, @intCast(summary.import_bindings));
     updateU64(&hasher, @intCast(summary.exports));
     updateU64(&hasher, @intCast(summary.type_bindings));
     updateU64(&hasher, @intCast(summary.calls));
+    updateU64(&hasher, @intCast(summary.protocol_packages));
+    updateU64(&hasher, @intCast(summary.protocol_fields));
+    updateU64(&hasher, @intCast(summary.protocol_enum_values));
+    updateU64(&hasher, @intCast(summary.protocol_rpcs));
     updateU64(&hasher, @intCast(summary.traversed_nodes));
     updateU64(&hasher, @intCast(summary.parse_errors));
     var digest: [32]u8 = @splat(0);

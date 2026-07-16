@@ -491,16 +491,27 @@ fn publishSuiteReceipt() !void {
     defer std.heap.page_allocator.free(json);
     const cwd = std.Io.Dir.cwd();
     if (std.mem.lastIndexOfScalar(u8, suite_receipt_path, '/')) |slash| try cwd.createDirPath(runner_threaded_io, suite_receipt_path[0..slash]);
-    const temporary = try std.fmt.allocPrint(std.heap.page_allocator, "{s}.tmp", .{suite_receipt_path});
+    for (0..1024) |slot| {
+        if (try writeSuiteReceiptSlot(cwd, json, slot)) return;
+    }
+    return error.AtomicTemporaryPathExhausted;
+}
+
+fn writeSuiteReceiptSlot(cwd: std.Io.Dir, content: []const u8, slot: usize) !bool {
+    const temporary = try std.fmt.allocPrint(std.heap.page_allocator, "{s}.tmp.{d}", .{ suite_receipt_path, slot });
     defer std.heap.page_allocator.free(temporary);
-    cwd.writeFile(runner_threaded_io, .{ .sub_path = temporary, .data = json }) catch |err| {
-        cwd.deleteFile(runner_threaded_io, temporary) catch {};
-        return err;
+    const file = cwd.createFile(runner_threaded_io, temporary, .{ .exclusive = true }) catch |err| switch (err) {
+        error.PathAlreadyExists => return false,
+        else => return err,
     };
-    cwd.rename(temporary, cwd, suite_receipt_path, runner_threaded_io) catch |err| {
-        cwd.deleteFile(runner_threaded_io, temporary) catch {};
-        return err;
-    };
+    var file_open = true;
+    defer if (file_open) file.close(runner_threaded_io);
+    defer cwd.deleteFile(runner_threaded_io, temporary) catch {};
+    try file.writeStreamingAll(runner_threaded_io, content);
+    file.close(runner_threaded_io);
+    file_open = false;
+    try cwd.rename(temporary, cwd, suite_receipt_path, runner_threaded_io);
+    return true;
 }
 
 fn countResults() ReceiptCounts {

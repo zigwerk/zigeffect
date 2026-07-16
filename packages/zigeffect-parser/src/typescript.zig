@@ -27,6 +27,10 @@ pub const ImportBinding = Parser.ImportBinding;
 pub const Export = Parser.Export;
 pub const TypeBinding = Parser.TypeBinding;
 pub const Call = Parser.Call;
+pub const ProtocolPackage = Parser.ProtocolPackage;
+pub const ProtocolField = Parser.ProtocolField;
+pub const ProtocolEnumValue = Parser.ProtocolEnumValue;
+pub const ProtocolRpc = Parser.ProtocolRpc;
 pub const Summary = Parser.Summary;
 pub const Options = Parser.Options;
 pub const Result = Parser.Result;
@@ -79,6 +83,14 @@ pub fn parse(
     errdefer deinitTypeBindings(allocator, type_binding_slice);
     const call_slice = try extractor.calls.toOwnedSlice(allocator);
     errdefer deinitCalls(allocator, call_slice);
+    const protocol_packages = try owned.copy(ProtocolPackage, allocator, &.{});
+    errdefer allocator.free(protocol_packages);
+    const protocol_fields = try owned.copy(ProtocolField, allocator, &.{});
+    errdefer allocator.free(protocol_fields);
+    const protocol_enum_values = try owned.copy(ProtocolEnumValue, allocator, &.{});
+    errdefer allocator.free(protocol_enum_values);
+    const protocol_rpcs = try owned.copy(ProtocolRpc, allocator, &.{});
+    errdefer allocator.free(protocol_rpcs);
     const copied_path = try owned.copy(u8, allocator, path);
     errdefer allocator.free(copied_path);
     const summary = Summary{
@@ -88,6 +100,10 @@ pub fn parse(
         .exports = export_slice.len,
         .type_bindings = type_binding_slice.len,
         .calls = call_slice.len,
+        .protocol_packages = 0,
+        .protocol_fields = 0,
+        .protocol_enum_values = 0,
+        .protocol_rpcs = 0,
         .traversed_nodes = extractor.traversed_nodes,
     };
     var result = Result{
@@ -103,8 +119,12 @@ pub fn parse(
         .exports = export_slice,
         .type_bindings = type_binding_slice,
         .calls = call_slice,
+        .protocol_packages = protocol_packages,
+        .protocol_fields = protocol_fields,
+        .protocol_enum_values = protocol_enum_values,
+        .protocol_rpcs = protocol_rpcs,
         .summary = summary,
-        .fingerprint = Parser.structuralFingerprint(parser_id, parser_version, path, language_mode, source.len, declaration_slice, import_slice, binding_slice, export_slice, type_binding_slice, call_slice, summary),
+        .fingerprint = Parser.structuralFingerprint(parser_id, parser_version, path, language_mode, source.len, declaration_slice, import_slice, binding_slice, export_slice, type_binding_slice, call_slice, protocol_packages, protocol_fields, protocol_enum_values, protocol_rpcs, summary),
     };
     errdefer result.deinit();
     try validate(&result);

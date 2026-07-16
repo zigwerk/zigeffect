@@ -128,16 +128,34 @@ pub fn writeAtomic(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, pa
     const json = try receipt.jsonAlloc(allocator);
     defer allocator.free(json);
     if (std.mem.lastIndexOfScalar(u8, path, '/')) |slash| try dir.createDirPath(io, path[0..slash]);
-    const temporary = try std.fmt.allocPrint(allocator, "{s}.tmp", .{path});
+    for (0..1024) |slot| {
+        if (try writeAtomicSlot(allocator, io, dir, path, json, slot)) return;
+    }
+    return error.AtomicTemporaryPathExhausted;
+}
+
+fn writeAtomicSlot(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
+    path: []const u8,
+    content: []const u8,
+    slot: usize,
+) !bool {
+    const temporary = try std.fmt.allocPrint(allocator, "{s}.tmp.{d}", .{ path, slot });
     defer allocator.free(temporary);
-    dir.writeFile(io, .{ .sub_path = temporary, .data = json }) catch |err| {
-        dir.deleteFile(io, temporary) catch {};
-        return err;
+    const file = dir.createFile(io, temporary, .{ .exclusive = true }) catch |err| switch (err) {
+        error.PathAlreadyExists => return false,
+        else => return err,
     };
-    dir.rename(temporary, dir, path, io) catch |err| {
-        dir.deleteFile(io, temporary) catch {};
-        return err;
-    };
+    var file_open = true;
+    defer if (file_open) file.close(io);
+    defer dir.deleteFile(io, temporary) catch {};
+    try file.writeStreamingAll(io, content);
+    file.close(io);
+    file_open = false;
+    try dir.rename(temporary, dir, path, io);
+    return true;
 }
 
 fn validateId(value: []const u8) !void {
@@ -221,11 +239,15 @@ test "suite receipt writes atomically and parses from disk" {
     const results = [_]TestResult{.{ .index = 0, .id = "atomic", .status = .passed }};
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
+    try tmp.dir.createDirPath(std.testing.io, "nested");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "nested/receipt.json.tmp.0", .data = "occupied-by-another-writer" });
     try writeAtomic(std.testing.allocator, std.testing.io, tmp.dir, "nested/receipt.json", sample(&results));
     const bytes = try tmp.dir.readFileAlloc(std.testing.io, "nested/receipt.json", std.testing.allocator, .limited(64 * 1024));
     defer std.testing.allocator.free(bytes);
     var parsed = try parse(std.testing.allocator, bytes);
     defer parsed.deinit();
     try std.testing.expectEqualStrings("core-unit", parsed.value.suite);
-    try std.testing.expectError(error.FileNotFound, tmp.dir.openFile(std.testing.io, "nested/receipt.json.tmp", .{}));
+    const occupied = try tmp.dir.readFileAlloc(std.testing.io, "nested/receipt.json.tmp.0", std.testing.allocator, .limited(64));
+    defer std.testing.allocator.free(occupied);
+    try std.testing.expectEqualStrings("occupied-by-another-writer", occupied);
 }
