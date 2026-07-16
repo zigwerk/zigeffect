@@ -13,8 +13,10 @@ Editions syntax. Consumers can call `TypeScript.parse` or
 runtime and use `zigeffect-std.Parser.parse`.
 
 The provider emits owned declarations, imports, import bindings, explicit
-exports/re-exports, lexical receiver-type bindings and call facts with exact
-spans. Static ESM, TypeScript `import = require`, static-string dynamic
+exports/re-exports, lexical receiver-type bindings, call facts, ordered call
+arguments, and direct-call result bindings with exact spans. These syntax facts
+let consumers recognize framework recipes without embedding framework policy
+in the parser. Static ESM, TypeScript `import = require`, static-string dynamic
 `import()`, and CommonJS `require()` are distinguished. Computed module
 arguments remain calls without fabricated import targets. Static identifier
 assignments to `exports.name`, `module.exports.name`, and `module.exports` emit

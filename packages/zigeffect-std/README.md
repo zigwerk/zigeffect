@@ -90,7 +90,9 @@ with one import:
 - `Parser` defines bounded, owned source-document facts and a replaceable parser
   service/layer. The optional `zigeffect-parser` package supplies the pinned
   native TypeScript/TSX/JavaScript/JSX provider plus an offline Zig-native
-  Proto2/Proto3/Editions provider.
+  Proto2/Proto3/Editions provider. Structural-facts v4 includes exact ordered
+  call arguments and direct-call result bindings for framework-neutral recipe
+  analysis.
 - `Json` writes deterministic redacted JSON payloads.
 - `Jsonl` appends and parses newline-delimited JSON feeds.
 - `Stream` re-exports engine pull streams and adds local line helpers.

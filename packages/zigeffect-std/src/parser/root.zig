@@ -2,8 +2,8 @@ const std = @import("std");
 const fx = @import("zigeffect");
 const StdService = @import("../service/root.zig");
 
-pub const schema = "zigeffect.document-structural-facts.v3";
-pub const schema_version: u32 = 3;
+pub const schema = "zigeffect.document-structural-facts.v4";
+pub const schema_version: u32 = 4;
 
 pub const Language = enum(u8) {
     typescript,
@@ -164,6 +164,34 @@ pub const Call = struct {
     callee_span: Span,
 };
 
+pub const ExpressionKind = enum(u8) {
+    identifier,
+    member,
+    string_literal,
+    number_literal,
+    object_literal,
+    array_literal,
+    call,
+    function,
+    other,
+};
+
+pub const CallArgument = struct {
+    call_span: Span,
+    index: u32,
+    expression: []const u8,
+    kind: ExpressionKind,
+    span: Span,
+};
+
+pub const CallBinding = struct {
+    binding: []const u8,
+    enclosing_declaration: []const u8,
+    span: Span,
+    name_span: Span,
+    call_span: Span,
+};
+
 pub const ProtocolFieldKind = enum(u8) {
     normal,
     map,
@@ -227,6 +255,8 @@ pub const Summary = struct {
     exports: usize = 0,
     type_bindings: usize = 0,
     calls: usize = 0,
+    call_arguments: usize = 0,
+    call_bindings: usize = 0,
     protocol_packages: usize = 0,
     protocol_fields: usize = 0,
     protocol_enum_values: usize = 0,
@@ -266,6 +296,8 @@ pub const Result = struct {
     exports: []Export,
     type_bindings: []TypeBinding,
     calls: []Call,
+    call_arguments: []CallArgument,
+    call_bindings: []CallBinding,
     protocol_packages: []ProtocolPackage,
     protocol_fields: []ProtocolField,
     protocol_enum_values: []ProtocolEnumValue,
@@ -287,6 +319,8 @@ pub const Result = struct {
         exports: []Export,
         type_bindings: []TypeBinding,
         calls: []Call,
+        call_arguments: []CallArgument,
+        call_bindings: []CallBinding,
         protocol_packages: []ProtocolPackage,
         protocol_fields: []ProtocolField,
         protocol_enum_values: []ProtocolEnumValue,
@@ -302,6 +336,8 @@ pub const Result = struct {
             .exports = exports.len,
             .type_bindings = type_bindings.len,
             .calls = calls.len,
+            .call_arguments = call_arguments.len,
+            .call_bindings = call_bindings.len,
             .protocol_packages = protocol_packages.len,
             .protocol_fields = protocol_fields.len,
             .protocol_enum_values = protocol_enum_values.len,
@@ -321,12 +357,14 @@ pub const Result = struct {
             .exports = exports,
             .type_bindings = type_bindings,
             .calls = calls,
+            .call_arguments = call_arguments,
+            .call_bindings = call_bindings,
             .protocol_packages = protocol_packages,
             .protocol_fields = protocol_fields,
             .protocol_enum_values = protocol_enum_values,
             .protocol_rpcs = protocol_rpcs,
             .summary = summary,
-            .fingerprint = structuralFingerprint(parser_id, parser_version, copied_path, language, source_bytes, declarations, imports, import_bindings, exports, type_bindings, calls, protocol_packages, protocol_fields, protocol_enum_values, protocol_rpcs, summary),
+            .fingerprint = structuralFingerprint(parser_id, parser_version, copied_path, language, source_bytes, declarations, imports, import_bindings, exports, type_bindings, calls, call_arguments, call_bindings, protocol_packages, protocol_fields, protocol_enum_values, protocol_rpcs, summary),
         };
         result.validate() catch |failure| {
             allocator.free(copied_path);
@@ -356,6 +394,10 @@ pub const Result = struct {
         errdefer allocator.free(type_bindings);
         const calls = try allocator.alloc(Call, 0);
         errdefer allocator.free(calls);
+        const call_arguments = try allocator.alloc(CallArgument, 0);
+        errdefer allocator.free(call_arguments);
+        const call_bindings = try allocator.alloc(CallBinding, 0);
+        errdefer allocator.free(call_bindings);
         const protocol_packages = try allocator.alloc(ProtocolPackage, 0);
         errdefer allocator.free(protocol_packages);
         const protocol_fields = try allocator.alloc(ProtocolField, 0);
@@ -377,6 +419,8 @@ pub const Result = struct {
             exports,
             type_bindings,
             calls,
+            call_arguments,
+            call_bindings,
             protocol_packages,
             protocol_fields,
             protocol_enum_values,
@@ -419,6 +463,13 @@ pub const Result = struct {
             if (call.enclosing_declaration.len > 0) self.allocator.free(call.enclosing_declaration);
         }
         self.allocator.free(self.calls);
+        for (self.call_arguments) |argument| self.allocator.free(argument.expression);
+        self.allocator.free(self.call_arguments);
+        for (self.call_bindings) |binding| {
+            self.allocator.free(binding.binding);
+            if (binding.enclosing_declaration.len > 0) self.allocator.free(binding.enclosing_declaration);
+        }
+        self.allocator.free(self.call_bindings);
         for (self.protocol_packages) |item| self.allocator.free(item.name);
         self.allocator.free(self.protocol_packages);
         for (self.protocol_fields) |field| {
@@ -449,6 +500,8 @@ pub const Result = struct {
         self.exports = &.{};
         self.type_bindings = &.{};
         self.calls = &.{};
+        self.call_arguments = &.{};
+        self.call_bindings = &.{};
         self.protocol_packages = &.{};
         self.protocol_fields = &.{};
         self.protocol_enum_values = &.{};
@@ -462,6 +515,7 @@ pub const Result = struct {
             self.summary.declarations != self.declarations.len or self.summary.imports != self.imports.len or
             self.summary.import_bindings != self.import_bindings.len or self.summary.exports != self.exports.len or
             self.summary.type_bindings != self.type_bindings.len or self.summary.calls != self.calls.len or
+            self.summary.call_arguments != self.call_arguments.len or self.summary.call_bindings != self.call_bindings.len or
             self.summary.protocol_packages != self.protocol_packages.len or self.summary.protocol_fields != self.protocol_fields.len or
             self.summary.protocol_enum_values != self.protocol_enum_values.len or self.summary.protocol_rpcs != self.protocol_rpcs.len or
             self.summary.parse_errors != 0)
@@ -531,6 +585,37 @@ pub const Result = struct {
                 (index > 0 and call.callee_span.start_byte < previous_start)) return error.InvalidParserCall;
             previous_start = call.callee_span.start_byte;
         }
+        var previous_call_span: ?Span = null;
+        var previous_argument_index: u32 = 0;
+        for (self.call_arguments) |argument| {
+            if (argument.expression.len == 0 or !argument.call_span.valid(self.source_bytes) or !argument.span.valid(self.source_bytes) or
+                argument.span.start_byte < argument.call_span.start_byte or argument.span.end_byte > argument.call_span.end_byte or
+                findCallBySpan(self.calls, argument.call_span) == null)
+            {
+                return error.InvalidParserCallArgument;
+            }
+            if (previous_call_span) |previous| {
+                const order = compareSpans(previous, argument.call_span);
+                if (order == .gt or (order == .eq and argument.index != previous_argument_index + 1)) {
+                    return error.InvalidParserCallArgument;
+                }
+                if (order != .eq and argument.index != 0) return error.InvalidParserCallArgument;
+            } else if (argument.index != 0) return error.InvalidParserCallArgument;
+            previous_call_span = argument.call_span;
+            previous_argument_index = argument.index;
+        }
+        previous_start = 0;
+        for (self.call_bindings, 0..) |binding, index| {
+            if (binding.binding.len == 0 or !binding.span.valid(self.source_bytes) or !binding.name_span.valid(self.source_bytes) or
+                !binding.call_span.valid(self.source_bytes) or binding.name_span.start_byte < binding.span.start_byte or
+                binding.name_span.end_byte > binding.span.end_byte or binding.call_span.start_byte < binding.span.start_byte or
+                binding.call_span.end_byte > binding.span.end_byte or findCallBySpan(self.calls, binding.call_span) == null or
+                (index > 0 and binding.name_span.start_byte < previous_start))
+            {
+                return error.InvalidParserCallBinding;
+            }
+            previous_start = binding.name_span.start_byte;
+        }
         previous_start = 0;
         for (self.protocol_packages, 0..) |item, index| {
             if (item.name.len == 0 or !item.span.valid(self.source_bytes) or !item.name_span.valid(self.source_bytes) or
@@ -583,6 +668,8 @@ pub const Result = struct {
             self.exports,
             self.type_bindings,
             self.calls,
+            self.call_arguments,
+            self.call_bindings,
             self.protocol_packages,
             self.protocol_fields,
             self.protocol_enum_values,
@@ -630,6 +717,28 @@ pub const Result = struct {
     pub fn findCall(self: *const Result, callee: []const u8) ?*const Call {
         for (self.calls, 0..) |call, index| {
             if (std.mem.eql(u8, call.callee, callee)) return &self.calls[index];
+        }
+        return null;
+    }
+
+    pub fn argumentsFor(self: *const Result, call: *const Call) []const CallArgument {
+        var start: ?usize = null;
+        var end: usize = 0;
+        for (self.call_arguments, 0..) |argument, index| {
+            if (!spansEqual(argument.call_span, call.span)) {
+                if (start != null) break;
+                continue;
+            }
+            if (start == null) start = index;
+            end = index + 1;
+        }
+        return if (start) |index| self.call_arguments[index..end] else &.{};
+    }
+
+    pub fn findCallBinding(self: *const Result, binding_name: []const u8, enclosing_declaration: []const u8) ?*const CallBinding {
+        for (self.call_bindings, 0..) |binding, index| {
+            if (std.mem.eql(u8, binding.binding, binding_name) and
+                std.mem.eql(u8, binding.enclosing_declaration, enclosing_declaration)) return &self.call_bindings[index];
         }
         return null;
     }
@@ -734,6 +843,8 @@ pub fn structuralFingerprint(
     exports: []const Export,
     type_bindings: []const TypeBinding,
     calls: []const Call,
+    call_arguments: []const CallArgument,
+    call_bindings: []const CallBinding,
     protocol_packages: []const ProtocolPackage,
     protocol_fields: []const ProtocolField,
     protocol_enum_values: []const ProtocolEnumValue,
@@ -800,6 +911,20 @@ pub fn structuralFingerprint(
         updateSpan(&hasher, call.span);
         updateSpan(&hasher, call.callee_span);
     }
+    for (call_arguments) |argument| {
+        updateSpan(&hasher, argument.call_span);
+        updateU64(&hasher, argument.index);
+        updateBytes(&hasher, argument.expression);
+        updateU64(&hasher, @intFromEnum(argument.kind));
+        updateSpan(&hasher, argument.span);
+    }
+    for (call_bindings) |binding| {
+        updateBytes(&hasher, binding.binding);
+        updateBytes(&hasher, binding.enclosing_declaration);
+        updateSpan(&hasher, binding.span);
+        updateSpan(&hasher, binding.name_span);
+        updateSpan(&hasher, binding.call_span);
+    }
     for (protocol_packages) |item| {
         updateBytes(&hasher, item.name);
         updateSpan(&hasher, item.span);
@@ -847,6 +972,8 @@ pub fn structuralFingerprint(
     updateU64(&hasher, @intCast(summary.exports));
     updateU64(&hasher, @intCast(summary.type_bindings));
     updateU64(&hasher, @intCast(summary.calls));
+    updateU64(&hasher, @intCast(summary.call_arguments));
+    updateU64(&hasher, @intCast(summary.call_bindings));
     updateU64(&hasher, @intCast(summary.protocol_packages));
     updateU64(&hasher, @intCast(summary.protocol_fields));
     updateU64(&hasher, @intCast(summary.protocol_enum_values));
@@ -861,6 +988,23 @@ pub fn structuralFingerprint(
 fn findImportTarget(imports: []const Import, target: []const u8) ?*const Import {
     for (imports) |*item| if (std.mem.eql(u8, item.target, target)) return item;
     return null;
+}
+
+fn findCallBySpan(calls: []const Call, span: Span) ?*const Call {
+    for (calls) |*call| if (spansEqual(call.span, span)) return call;
+    return null;
+}
+
+fn spansEqual(left: Span, right: Span) bool {
+    return left.start_byte == right.start_byte and left.end_byte == right.end_byte;
+}
+
+fn compareSpans(left: Span, right: Span) std.math.Order {
+    if (left.start_byte < right.start_byte) return .lt;
+    if (left.start_byte > right.start_byte) return .gt;
+    if (left.end_byte < right.end_byte) return .lt;
+    if (left.end_byte > right.end_byte) return .gt;
+    return .eq;
 }
 
 fn validPath(path: []const u8) bool {

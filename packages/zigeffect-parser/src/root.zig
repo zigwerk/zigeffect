@@ -152,6 +152,70 @@ test "native provider emits explicit exports and scoped receiver type bindings" 
     try std.testing.expect(result.findTypeBinding("unknown", "Controller.run") == null);
 }
 
+test "native provider emits exact call arguments and factory result bindings" {
+    const source =
+        \\import { createClient as makeClient } from "@connectrpc/connect";
+        \\import { OrdersService } from "../gen/orders_pb";
+        \\import { transport } from "./transport";
+        \\export const ordersClient = makeClient(OrdersService, transport);
+        \\export async function fetchOrder(id: string) {
+        \\  return ordersClient.getOrder({ id });
+        \\}
+    ;
+    var provider = NativeProvider{};
+    var first = try provider.parseAlloc(std.testing.allocator, .{
+        .path = "src/ordersClient.ts",
+        .source = source,
+        .language = .typescript,
+    });
+    defer first.deinit();
+    var second = try provider.parseAlloc(std.testing.allocator, .{
+        .path = "src/ordersClient.ts",
+        .source = source,
+        .language = .typescript,
+    });
+    defer second.deinit();
+
+    const factory = first.findCall("makeClient") orelse return error.MissingFactoryCall;
+    const arguments = first.argumentsFor(factory);
+    try std.testing.expectEqual(@as(usize, 2), arguments.len);
+    try std.testing.expectEqual(@as(u32, 0), arguments[0].index);
+    try std.testing.expectEqual(Contract.ExpressionKind.identifier, arguments[0].kind);
+    try std.testing.expectEqualStrings("OrdersService", arguments[0].expression);
+    try std.testing.expectEqualStrings(
+        "OrdersService",
+        source[arguments[0].span.start_byte..arguments[0].span.end_byte],
+    );
+    try std.testing.expectEqualStrings("transport", arguments[1].expression);
+
+    const binding = first.findCallBinding("ordersClient", "") orelse return error.MissingFactoryCallBinding;
+    try std.testing.expectEqual(factory.span.start_byte, binding.call_span.start_byte);
+    try std.testing.expectEqual(factory.span.end_byte, binding.call_span.end_byte);
+    try std.testing.expectEqualStrings(
+        "ordersClient",
+        source[binding.name_span.start_byte..binding.name_span.end_byte],
+    );
+    try std.testing.expectEqual(@as(usize, 3), first.summary.call_arguments);
+    try std.testing.expectEqual(@as(usize, 1), first.summary.call_bindings);
+    try std.testing.expectEqualSlices(u8, &first.fingerprint, &second.fingerprint);
+}
+
+test "native provider bounds call argument and binding facts" {
+    var provider = NativeProvider{};
+    try std.testing.expectError(error.TypeScriptFactLimitExceeded, provider.parseAlloc(std.testing.allocator, .{
+        .path = "src/bounded.ts",
+        .source = "const client = createClient(Service, transport);",
+        .language = .typescript,
+        .limits = .{ .max_facts = 1 },
+    }));
+    try std.testing.expectError(error.TypeScriptLabelLimitExceeded, provider.parseAlloc(std.testing.allocator, .{
+        .path = "src/labels.ts",
+        .source = "run(argumentNameThatExceedsTheBound);",
+        .language = .typescript,
+        .limits = .{ .max_label_bytes = 8 },
+    }));
+}
+
 test "native provider emits only static CommonJS export identities" {
     const source =
         \\function legacy(): number { return 1; }

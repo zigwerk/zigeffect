@@ -6,7 +6,7 @@ const Parser = zstd.Parser;
 pub const schema = Parser.schema;
 pub const schema_version = Parser.schema_version;
 pub const parser_id = "zigeffect.parser.protobuf.native";
-pub const parser_version = "1.0.0";
+pub const parser_version = "1.1.0";
 
 pub const Span = Parser.Span;
 pub const Declaration = Parser.Declaration;
@@ -784,6 +784,10 @@ pub fn parse(
     errdefer allocator.free(type_bindings);
     const calls = try allocator.alloc(Parser.Call, 0);
     errdefer allocator.free(calls);
+    const call_arguments = try allocator.alloc(Parser.CallArgument, 0);
+    errdefer allocator.free(call_arguments);
+    const call_bindings = try allocator.alloc(Parser.CallBinding, 0);
+    errdefer allocator.free(call_bindings);
 
     const copied_path = try allocator.dupe(u8, path);
     errdefer allocator.free(copied_path);
@@ -809,12 +813,14 @@ pub fn parse(
         .exports = exports,
         .type_bindings = type_bindings,
         .calls = calls,
+        .call_arguments = call_arguments,
+        .call_bindings = call_bindings,
         .protocol_packages = packages,
         .protocol_fields = fields,
         .protocol_enum_values = enum_values,
         .protocol_rpcs = rpcs,
         .summary = summary,
-        .fingerprint = Parser.structuralFingerprint(parser_id, parser_version, path, .protobuf, source.len, declarations, imports, bindings, exports, type_bindings, calls, packages, fields, enum_values, rpcs, summary),
+        .fingerprint = Parser.structuralFingerprint(parser_id, parser_version, path, .protobuf, source.len, declarations, imports, bindings, exports, type_bindings, calls, call_arguments, call_bindings, packages, fields, enum_values, rpcs, summary),
     };
     errdefer result.deinit();
     try result.validate();

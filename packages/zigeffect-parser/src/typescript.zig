@@ -12,7 +12,7 @@ extern fn tree_sitter_tsx() ?*const c.TSLanguage;
 pub const schema = Parser.schema;
 pub const schema_version = Parser.schema_version;
 pub const parser_id = "zigeffect-parser.tree-sitter-typescript";
-pub const parser_version = "tree-sitter-0.25.10-typescript-0.23.2-v3";
+pub const parser_version = "tree-sitter-0.25.10-typescript-0.23.2-v4";
 pub const LanguageMode = Parser.LanguageMode;
 pub const DeclarationKind = Parser.DeclarationKind;
 pub const ImportKind = Parser.ImportKind;
@@ -20,6 +20,7 @@ pub const ImportBindingKind = Parser.ImportBindingKind;
 pub const ExportKind = Parser.ExportKind;
 pub const TypeBindingKind = Parser.TypeBindingKind;
 pub const CallKind = Parser.CallKind;
+pub const ExpressionKind = Parser.ExpressionKind;
 pub const Span = Parser.Span;
 pub const Declaration = Parser.Declaration;
 pub const Import = Parser.Import;
@@ -27,6 +28,8 @@ pub const ImportBinding = Parser.ImportBinding;
 pub const Export = Parser.Export;
 pub const TypeBinding = Parser.TypeBinding;
 pub const Call = Parser.Call;
+pub const CallArgument = Parser.CallArgument;
+pub const CallBinding = Parser.CallBinding;
 pub const ProtocolPackage = Parser.ProtocolPackage;
 pub const ProtocolField = Parser.ProtocolField;
 pub const ProtocolEnumValue = Parser.ProtocolEnumValue;
@@ -70,6 +73,8 @@ pub fn parse(
     std.mem.sort(Export, extractor.exports.items, {}, lessThanExport);
     std.mem.sort(TypeBinding, extractor.type_bindings.items, {}, lessThanTypeBinding);
     std.mem.sort(Call, extractor.calls.items, {}, lessThanCall);
+    std.mem.sort(CallArgument, extractor.call_arguments.items, {}, lessThanCallArgument);
+    std.mem.sort(CallBinding, extractor.call_bindings.items, {}, lessThanCallBinding);
 
     const declaration_slice = try extractor.declarations.toOwnedSlice(allocator);
     errdefer deinitDeclarations(allocator, declaration_slice);
@@ -83,6 +88,10 @@ pub fn parse(
     errdefer deinitTypeBindings(allocator, type_binding_slice);
     const call_slice = try extractor.calls.toOwnedSlice(allocator);
     errdefer deinitCalls(allocator, call_slice);
+    const call_argument_slice = try extractor.call_arguments.toOwnedSlice(allocator);
+    errdefer deinitCallArguments(allocator, call_argument_slice);
+    const call_binding_slice = try extractor.call_bindings.toOwnedSlice(allocator);
+    errdefer deinitCallBindings(allocator, call_binding_slice);
     const protocol_packages = try owned.copy(ProtocolPackage, allocator, &.{});
     errdefer allocator.free(protocol_packages);
     const protocol_fields = try owned.copy(ProtocolField, allocator, &.{});
@@ -100,6 +109,8 @@ pub fn parse(
         .exports = export_slice.len,
         .type_bindings = type_binding_slice.len,
         .calls = call_slice.len,
+        .call_arguments = call_argument_slice.len,
+        .call_bindings = call_binding_slice.len,
         .protocol_packages = 0,
         .protocol_fields = 0,
         .protocol_enum_values = 0,
@@ -119,12 +130,14 @@ pub fn parse(
         .exports = export_slice,
         .type_bindings = type_binding_slice,
         .calls = call_slice,
+        .call_arguments = call_argument_slice,
+        .call_bindings = call_binding_slice,
         .protocol_packages = protocol_packages,
         .protocol_fields = protocol_fields,
         .protocol_enum_values = protocol_enum_values,
         .protocol_rpcs = protocol_rpcs,
         .summary = summary,
-        .fingerprint = Parser.structuralFingerprint(parser_id, parser_version, path, language_mode, source.len, declaration_slice, import_slice, binding_slice, export_slice, type_binding_slice, call_slice, protocol_packages, protocol_fields, protocol_enum_values, protocol_rpcs, summary),
+        .fingerprint = Parser.structuralFingerprint(parser_id, parser_version, path, language_mode, source.len, declaration_slice, import_slice, binding_slice, export_slice, type_binding_slice, call_slice, call_argument_slice, call_binding_slice, protocol_packages, protocol_fields, protocol_enum_values, protocol_rpcs, summary),
     };
     errdefer result.deinit();
     try validate(&result);
@@ -152,6 +165,8 @@ const Extractor = struct {
     exports: std.ArrayList(Export) = .empty,
     type_bindings: std.ArrayList(TypeBinding) = .empty,
     calls: std.ArrayList(Call) = .empty,
+    call_arguments: std.ArrayList(CallArgument) = .empty,
+    call_bindings: std.ArrayList(CallBinding) = .empty,
     traversed_nodes: usize = 0,
 
     fn deinit(self: *Extractor) void {
@@ -161,6 +176,8 @@ const Extractor = struct {
         deinitExportList(self.allocator, &self.exports);
         deinitTypeBindingList(self.allocator, &self.type_bindings);
         deinitCallList(self.allocator, &self.calls);
+        deinitCallArgumentList(self.allocator, &self.call_arguments);
+        deinitCallBindingList(self.allocator, &self.call_bindings);
     }
 
     fn walk(self: *Extractor, node: c.TSNode, depth: usize, scope: Scope, exported: bool, default_export: bool) !void {
@@ -217,6 +234,7 @@ const Extractor = struct {
                     try self.appendImportBinding(target, "*", name, .commonjs_require, false, name_node);
                 }
                 try self.extractVariableTypeBinding(node, name_node, value_node, scope);
+                try self.extractVariableCallBinding(node, name_node, value_node, scope);
                 child_exported = false;
                 if (kind == .function_value) child_scope = .{
                     .container = scope.container,
@@ -371,6 +389,26 @@ const Extractor = struct {
         try self.appendTypeBinding(node, name_node, constructor, name, type_name, enclosing, .constructor_instance, scope.span orelse spanForNode(node));
     }
 
+    fn extractVariableCallBinding(self: *Extractor, node: c.TSNode, name_node: c.TSNode, value_node: c.TSNode, scope: Scope) !void {
+        if (c.ts_node_is_null(value_node) or !std.mem.eql(u8, nodeType(value_node), "call_expression")) return;
+        const function_node = fieldNode(value_node, "function");
+        if (c.ts_node_is_null(function_node) or std.mem.eql(u8, nodeType(function_node), "import")) return;
+        const binding = nodeText(self.source, name_node) orelse return error.InvalidTypeScriptSourceRange;
+        try self.validateLabel(binding, error.InvalidTypeScriptCallBinding);
+        try self.ensureFactCapacity();
+        const binding_copy = try owned.copy(u8, self.allocator, binding);
+        errdefer self.allocator.free(binding_copy);
+        const enclosing = try scopeNameAlloc(self.allocator, scope, self.options.max_label_bytes);
+        errdefer if (enclosing.len > 0) self.allocator.free(enclosing);
+        try self.call_bindings.append(self.allocator, .{
+            .binding = binding_copy,
+            .enclosing_declaration = enclosing,
+            .span = spanForNode(node),
+            .name_span = spanForNode(name_node),
+            .call_span = spanForNode(value_node),
+        });
+    }
+
     fn extractFieldTypeBinding(self: *Extractor, node: c.TSNode, scope: Scope) !void {
         if (scope.container.len == 0) return;
         const name_node = fieldNode(node, "name");
@@ -492,6 +530,7 @@ const Extractor = struct {
                 try self.appendImport(node, source_node, target, .dynamic, false);
             }
             try self.appendCall(node, function_node, .dynamic_import, "import", "", "", scope);
+            try self.extractCallArguments(node);
             return;
         }
         if (std.mem.eql(u8, function_type, "identifier")) {
@@ -519,6 +558,7 @@ const Extractor = struct {
         } else {
             try self.appendCall(node, function_node, .direct, callee, "", "", scope);
         }
+        try self.extractCallArguments(node);
     }
 
     fn extractConstructorCall(self: *Extractor, node: c.TSNode, scope: Scope) !void {
@@ -527,6 +567,30 @@ const Extractor = struct {
         const callee = try self.compactNodeAlloc(constructor);
         defer self.allocator.free(callee);
         try self.appendCall(node, constructor, .constructor, callee, "", "", scope);
+        try self.extractCallArguments(node);
+    }
+
+    fn extractCallArguments(self: *Extractor, call_node: c.TSNode) !void {
+        const arguments = fieldNode(call_node, "arguments");
+        if (c.ts_node_is_null(arguments)) return;
+        const child_count = c.ts_node_named_child_count(arguments);
+        var index: u32 = 0;
+        while (index < child_count) : (index += 1) {
+            const argument_node = c.ts_node_named_child(arguments, index);
+            if (c.ts_node_is_null(argument_node)) return error.InvalidTypeScriptCallArgument;
+            const expression = try self.compactNodeAlloc(argument_node);
+            defer self.allocator.free(expression);
+            try self.ensureFactCapacity();
+            const expression_copy = try owned.copy(u8, self.allocator, expression);
+            errdefer self.allocator.free(expression_copy);
+            try self.call_arguments.append(self.allocator, .{
+                .call_span = spanForNode(call_node),
+                .index = index,
+                .expression = expression_copy,
+                .kind = expressionKind(nodeType(argument_node)),
+                .span = spanForNode(argument_node),
+            });
+        }
     }
 
     fn firstStaticStringArgument(self: *const Extractor, call: c.TSNode) c.TSNode {
@@ -774,10 +838,24 @@ const Extractor = struct {
         const with_bindings = std.math.add(usize, declaration_and_import, self.import_bindings.items.len) catch return error.TypeScriptFactLimitExceeded;
         const with_exports = std.math.add(usize, with_bindings, self.exports.items.len) catch return error.TypeScriptFactLimitExceeded;
         const with_types = std.math.add(usize, with_exports, self.type_bindings.items.len) catch return error.TypeScriptFactLimitExceeded;
-        const total = std.math.add(usize, with_types, self.calls.items.len) catch return error.TypeScriptFactLimitExceeded;
+        const with_calls = std.math.add(usize, with_types, self.calls.items.len) catch return error.TypeScriptFactLimitExceeded;
+        const with_arguments = std.math.add(usize, with_calls, self.call_arguments.items.len) catch return error.TypeScriptFactLimitExceeded;
+        const total = std.math.add(usize, with_arguments, self.call_bindings.items.len) catch return error.TypeScriptFactLimitExceeded;
         if (total >= self.options.max_facts) return error.TypeScriptFactLimitExceeded;
     }
 };
+
+fn expressionKind(node_type: []const u8) ExpressionKind {
+    if (std.mem.eql(u8, node_type, "identifier") or std.mem.eql(u8, node_type, "shorthand_property_identifier")) return .identifier;
+    if (std.mem.eql(u8, node_type, "member_expression") or std.mem.eql(u8, node_type, "subscript_expression")) return .member;
+    if (std.mem.eql(u8, node_type, "string") or std.mem.eql(u8, node_type, "template_string")) return .string_literal;
+    if (std.mem.eql(u8, node_type, "number")) return .number_literal;
+    if (std.mem.eql(u8, node_type, "object")) return .object_literal;
+    if (std.mem.eql(u8, node_type, "array")) return .array_literal;
+    if (std.mem.eql(u8, node_type, "call_expression") or std.mem.eql(u8, node_type, "new_expression")) return .call;
+    if (isFunctionValue(node_type)) return .function;
+    return .other;
+}
 
 fn validateOptions(path: []const u8, source: []const u8, options: Options) !void {
     if (!validPath(path)) return error.InvalidTypeScriptSourcePath;
@@ -930,6 +1008,17 @@ fn lessThanCall(_: void, left: Call, right: Call) bool {
     return std.mem.lessThan(u8, left.callee, right.callee);
 }
 
+fn lessThanCallArgument(_: void, left: CallArgument, right: CallArgument) bool {
+    if (left.call_span.start_byte != right.call_span.start_byte) return left.call_span.start_byte < right.call_span.start_byte;
+    if (left.call_span.end_byte != right.call_span.end_byte) return left.call_span.end_byte < right.call_span.end_byte;
+    return left.index < right.index;
+}
+
+fn lessThanCallBinding(_: void, left: CallBinding, right: CallBinding) bool {
+    if (left.name_span.start_byte != right.name_span.start_byte) return left.name_span.start_byte < right.name_span.start_byte;
+    return std.mem.lessThan(u8, left.binding, right.binding);
+}
+
 fn findImportTarget(imports: []const Import, target: []const u8) ?*const Import {
     for (imports) |*item| if (std.mem.eql(u8, item.target, target)) return item;
     return null;
@@ -985,6 +1074,19 @@ fn deinitCallList(allocator: std.mem.Allocator, values: *std.ArrayList(Call)) vo
     values.deinit(allocator);
 }
 
+fn deinitCallArgumentList(allocator: std.mem.Allocator, values: *std.ArrayList(CallArgument)) void {
+    for (values.items) |value| allocator.free(value.expression);
+    values.deinit(allocator);
+}
+
+fn deinitCallBindingList(allocator: std.mem.Allocator, values: *std.ArrayList(CallBinding)) void {
+    for (values.items) |value| {
+        allocator.free(value.binding);
+        if (value.enclosing_declaration.len > 0) allocator.free(value.enclosing_declaration);
+    }
+    values.deinit(allocator);
+}
+
 fn deinitDeclarations(allocator: std.mem.Allocator, values: []Declaration) void {
     for (values) |value| {
         allocator.free(value.name);
@@ -1030,6 +1132,19 @@ fn deinitCalls(allocator: std.mem.Allocator, values: []Call) void {
         allocator.free(value.callee);
         if (value.receiver.len > 0) allocator.free(value.receiver);
         if (value.member.len > 0) allocator.free(value.member);
+        if (value.enclosing_declaration.len > 0) allocator.free(value.enclosing_declaration);
+    }
+    allocator.free(values);
+}
+
+fn deinitCallArguments(allocator: std.mem.Allocator, values: []CallArgument) void {
+    for (values) |value| allocator.free(value.expression);
+    allocator.free(values);
+}
+
+fn deinitCallBindings(allocator: std.mem.Allocator, values: []CallBinding) void {
+    for (values) |value| {
+        allocator.free(value.binding);
         if (value.enclosing_declaration.len > 0) allocator.free(value.enclosing_declaration);
     }
     allocator.free(values);
