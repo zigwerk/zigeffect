@@ -1,0 +1,199 @@
+{
+  "schema": "zgraphy.graphify-parity.v1",
+  "schema_version": 1,
+  "baseline": {
+    "product": "Graphify",
+    "version": "0.9.17",
+    "commit": "cb96bdaa0c367bec8d5c5aee5d7c9ebb727e9780",
+    "reference_path": "packages/references/graphify"
+  },
+  "capabilities": [
+    {
+      "id": "discovery-corpus-health",
+      "title": "Discovery and corpus health",
+      "disposition": "core_parity",
+      "milestone": "M1",
+      "requirement": "ZG-REQ-002",
+      "status": "mvp_partial",
+      "reference_modules": ["graphify/detect.py", "graphify/paths.py"],
+      "reference_tests": ["test_detect", "test_paths", "test_word_count_cache"],
+      "improvement": "Give every safe discovered input a typed terminal disposition and explain the rule responsible for exclusion or omission."
+    },
+    {
+      "id": "corpus-ingress-conversion",
+      "title": "Corpus ingress and conversion",
+      "disposition": "optional_parity",
+      "milestone": "M10",
+      "requirement": "ZG-REQ-010",
+      "status": "planned",
+      "reference_modules": ["graphify/ingest.py", "graphify/transcribe.py", "graphify/google_workspace.py"],
+      "reference_tests": ["test_ingest", "test_transcribe", "test_google_workspace", "test_office_incremental"],
+      "improvement": "Run rich-corpus work as capability-gated resumable jobs with converter provenance and complete requested-versus-returned coverage."
+    },
+    {
+      "id": "deterministic-code-extraction",
+      "title": "Deterministic code extraction",
+      "disposition": "core_parity",
+      "milestone": "M2",
+      "requirement": "ZG-REQ-005",
+      "status": "mvp_partial",
+      "reference_modules": ["graphify/extract.py", "graphify/extractors/engine.py", "graphify/extractors/zig.py"],
+      "reference_tests": ["test_extract", "test_languages", "test_extractors_registry", "test_multilang"],
+      "improvement": "Use one typed fact IR and conformance suite while delivering deeper Zig and TypeScript semantics before grammar-count breadth."
+    },
+    {
+      "id": "symbol-member-dispatch-resolution",
+      "title": "Symbol member and dispatch resolution",
+      "disposition": "core_parity",
+      "milestone": "M2",
+      "requirement": "ZG-REQ-006",
+      "status": "planned",
+      "reference_modules": ["graphify/symbol_resolution.py", "graphify/extractors/resolution.py", "graphify/resolver_registry.py"],
+      "reference_tests": ["test_symbol_resolution", "test_js_import_resolution", "test_ts_receiver_member_calls", "test_indirect_dispatch"],
+      "improvement": "Retain every viable candidate and typed rejection reason, preferring scope import type build and contract evidence over global name uniqueness."
+    },
+    {
+      "id": "specialized-repository-adapters",
+      "title": "Specialized repository and live-system adapters",
+      "disposition": "improved_equivalent",
+      "milestone": "M5",
+      "requirement": "ZG-REQ-009",
+      "status": "planned",
+      "reference_modules": ["graphify/manifest_ingest.py", "graphify/mcp_ingest.py", "graphify/cargo_introspect.py", "graphify/pg_introspect.py", "graphify/scip_ingest.py"],
+      "reference_tests": ["test_manifest_ingest", "test_mcp_ingest", "test_cargo_introspect", "test_pg_introspect", "test_scip_ingest"],
+      "improvement": "Wrap source compiler generated database and runtime evidence in typed provider envelopes with authority freshness and explicit contradictions."
+    },
+    {
+      "id": "semantic-documents-model-providers",
+      "title": "Semantic documents and model providers",
+      "disposition": "optional_parity",
+      "milestone": "M10",
+      "requirement": "ZG-REQ-010",
+      "status": "planned",
+      "reference_modules": ["graphify/llm.py", "graphify/semantic_cleanup.py", "graphify/file_slice.py"],
+      "reference_tests": ["test_llm_backends", "test_llm_parser", "test_chunking", "test_semantic_cleanup"],
+      "improvement": "Keep deterministic document structure canonical and constrain model output to evidence-linked candidate claims with spend and egress controls."
+    },
+    {
+      "id": "graph-assembly-identity-dedup",
+      "title": "Graph assembly identity hyperedges and dedup",
+      "disposition": "improved_equivalent",
+      "milestone": "M0",
+      "requirement": "ZG-REQ-004",
+      "status": "mvp_partial",
+      "reference_modules": ["graphify/build.py", "graphify/ids.py", "graphify/dedup.py"],
+      "reference_tests": ["test_build", "test_hypergraph", "test_id_normalization_contract", "test_dedup"],
+      "improvement": "Store identity observations facts edges hyperedges claims and supernodes separately and never fuzzy-merge source symbols by label."
+    },
+    {
+      "id": "incremental-self-management",
+      "title": "Incremental cache update watch and self-management",
+      "disposition": "core_parity",
+      "milestone": "M3",
+      "requirement": "ZG-REQ-025",
+      "status": "planned",
+      "reference_modules": ["graphify/cache.py", "graphify/manifest.py", "graphify/watch.py", "graphify/hooks.py"],
+      "reference_tests": ["test_cache", "test_incremental", "test_watch", "test_hooks"],
+      "improvement": "Use immutable generations automatic freshness barriers and transactional invalidation mark validation sweep repair and bounded garbage collection."
+    },
+    {
+      "id": "analysis-communities-meaning",
+      "title": "Analysis communities summaries and meaning",
+      "disposition": "improved_equivalent",
+      "milestone": "M4",
+      "requirement": "ZG-REQ-012",
+      "status": "planned",
+      "reference_modules": ["graphify/analyze.py", "graphify/cluster.py", "docs/node-summaries-rfc.md"],
+      "reference_tests": ["test_analyze", "test_cluster", "test_community_hub_labels", "test_labeling"],
+      "improvement": "Treat hubs communities and labels as analysis signals while promoting only typed proof-carrying supernodes to trusted meaning."
+    },
+    {
+      "id": "query-navigation-retrieval",
+      "title": "Query navigation and retrieval",
+      "disposition": "core_parity",
+      "milestone": "M6",
+      "requirement": "ZG-REQ-013",
+      "status": "mvp_partial",
+      "reference_modules": ["graphify/serve.py", "graphify/affected.py"],
+      "reference_tests": ["test_query_cli", "test_path_cli", "test_explain_cli", "test_affected_cli", "test_serve"],
+      "improvement": "Plan exact lexical vector graph hyperedge supernode temporal and causal retrieval by intent and return bounded proof-carrying evidence packets."
+    },
+    {
+      "id": "agent-protocols-installation",
+      "title": "Agent protocols resources and installation",
+      "disposition": "core_parity",
+      "milestone": "M7",
+      "requirement": "ZG-REQ-014",
+      "status": "planned",
+      "reference_modules": ["graphify/serve.py", "graphify/install.py", "graphify/always_on"],
+      "reference_tests": ["test_serve_http", "test_install", "test_install_roundtrip", "test_agents_platform"],
+      "improvement": "Drive CLI MCP HTTP and ZigEffect services from one bounded versioned query schema and generate reversible owned host adapters."
+    },
+    {
+      "id": "agent-work-memory",
+      "title": "Agent work memory and reflection",
+      "disposition": "improved_equivalent",
+      "milestone": "M7",
+      "requirement": "ZG-REQ-018",
+      "status": "planned",
+      "reference_modules": ["graphify/querylog.py", "graphify/reflect.py"],
+      "reference_tests": ["test_querylog", "test_reflect"],
+      "improvement": "Keep outcome learning user-owned stale-aware removable and separate from canonical truth with measured exploration before ranking influence."
+    },
+    {
+      "id": "change-history-federation",
+      "title": "Change Git PR temporal history and federation",
+      "disposition": "improved_equivalent",
+      "milestone": "M9",
+      "requirement": "ZG-REQ-016",
+      "status": "planned",
+      "reference_modules": ["graphify/affected.py", "graphify/prs.py", "graphify/global_graph.py"],
+      "reference_tests": ["test_affected_member_seed", "test_prs", "test_global_graph", "test_merge_graphs_cli"],
+      "improvement": "Use content-addressed generations typed direct versus transitive impact symbol lineage and contract-aware PR or cross-repository conflict evidence."
+    },
+    {
+      "id": "interchange-export",
+      "title": "Interchange and non-visual export",
+      "disposition": "optional_parity",
+      "milestone": "M11",
+      "requirement": "ZG-REQ-019",
+      "status": "planned",
+      "reference_modules": ["graphify/export.py", "graphify/wiki.py", "graphify/exporters/graphdb.py"],
+      "reference_tests": ["test_export", "test_wiki", "test_falkordb_integration"],
+      "improvement": "Define a lossless native interchange first and make every lossy adapter report projected or dropped evidence hyperedges supernodes and generations."
+    },
+    {
+      "id": "security-failure-packaging",
+      "title": "Security failure handling and packaging",
+      "disposition": "core_parity",
+      "milestone": "M11",
+      "requirement": "ZG-REQ-020",
+      "status": "planned",
+      "reference_modules": ["graphify/security.py", "graphify/validate.py", "graphify/diagnostics.py"],
+      "reference_tests": ["test_security", "test_validate", "test_corrupt_graph_json", "test_wheel_packaging"],
+      "improvement": "Enforce typed capabilities and bounded ZigEffect resources at every parser process model network storage database exporter and agent boundary."
+    },
+    {
+      "id": "benchmarking-claims",
+      "title": "Benchmarking and comparative claims",
+      "disposition": "core_parity",
+      "milestone": "M0",
+      "requirement": "ZG-REQ-022",
+      "status": "planned",
+      "reference_modules": ["graphify/benchmark.py", "BENCHMARKS.md", "tests/bench_extract.py"],
+      "reference_tests": ["test_benchmark", "bench_extract", "bench_query_scoring"],
+      "improvement": "Use reviewed gold facts held-out agent tasks and complete quality latency memory storage token spend and failure matrices before making leadership claims."
+    },
+    {
+      "id": "human-visualization",
+      "title": "Human visualization and exploratory surfaces",
+      "disposition": "deferred_visual",
+      "milestone": "M12",
+      "requirement": "ZG-REQ-024",
+      "status": "deferred",
+      "reference_modules": ["graphify/exporters/html.py", "graphify/tree_html.py", "graphify/callflow_html.py"],
+      "reference_tests": ["test_export", "test_callflow_html"],
+      "improvement": "Build visual consumers only over the same bounded public query schemas after the headless agent engine passes its promotion gates."
+    }
+  ]
+}

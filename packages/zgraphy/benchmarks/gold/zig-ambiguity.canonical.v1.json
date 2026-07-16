@@ -1,0 +1,46 @@
+{
+  "schema": "zgraphy.canonical-benchmark-ir.v1",
+  "schema_version": 1,
+  "fixture_id": "zig-ambiguity",
+  "generation": 0,
+  "evidence": [
+    {"id":"e:zig-ambiguity:alpha","source":{"path":"src/alpha.zig","content_sha256":"9a82db3ec0413468662f4389b2cf0862730d2aeb528b01747db4a90d600cd39e","start_line":1,"start_column":1,"end_line":3,"end_column":1}},
+    {"id":"e:zig-ambiguity:beta","source":{"path":"src/beta.zig","content_sha256":"0d2a66e5ef0f00b2a6ab1d90e9342b32ecd8272826c9994fab3dbe1c7695f63a","start_line":1,"start_column":1,"end_line":3,"end_column":1}},
+    {"id":"e:zig-ambiguity:import-alpha","source":{"path":"src/main.zig","content_sha256":"952d3dadea034605c1b66b69bdae3ba1cc107bd69cae2594e46846eaaabc3cee","start_line":1,"start_column":1,"end_line":1,"end_column":1}},
+    {"id":"e:zig-ambiguity:import-beta","source":{"path":"src/main.zig","content_sha256":"952d3dadea034605c1b66b69bdae3ba1cc107bd69cae2594e46846eaaabc3cee","start_line":2,"start_column":1,"end_line":2,"end_column":1}},
+    {"id":"e:zig-ambiguity:choose","source":{"path":"src/main.zig","content_sha256":"952d3dadea034605c1b66b69bdae3ba1cc107bd69cae2594e46846eaaabc3cee","start_line":4,"start_column":1,"end_line":7,"end_column":1}},
+    {"id":"e:zig-ambiguity:dispatch","source":{"path":"src/main.zig","content_sha256":"952d3dadea034605c1b66b69bdae3ba1cc107bd69cae2594e46846eaaabc3cee","start_line":5,"start_column":1,"end_line":6,"end_column":1}}
+  ],
+  "entities": [
+    {"id":"repo:zig-ambiguity","kind":"repository","name":"zig-ambiguity","evidence":["e:zig-ambiguity:choose"]},
+    {"id":"file:zig-ambiguity:alpha","kind":"file","name":"src/alpha.zig","evidence":["e:zig-ambiguity:alpha"]},
+    {"id":"file:zig-ambiguity:beta","kind":"file","name":"src/beta.zig","evidence":["e:zig-ambiguity:beta"]},
+    {"id":"file:zig-ambiguity:main","kind":"file","name":"src/main.zig","evidence":["e:zig-ambiguity:choose"]},
+    {"id":"symbol:zig-ambiguity:alpha.load","kind":"function","name":"alpha.load","evidence":["e:zig-ambiguity:alpha"]},
+    {"id":"symbol:zig-ambiguity:beta.load","kind":"function","name":"beta.load","evidence":["e:zig-ambiguity:beta"]},
+    {"id":"symbol:zig-ambiguity:choose","kind":"function","name":"choose","evidence":["e:zig-ambiguity:choose"]},
+    {"id":"symbol:zig-ambiguity:loader","kind":"local_binding","name":"loader","evidence":["e:zig-ambiguity:dispatch"]}
+  ],
+  "relations": [
+    {"id":"rel:zig-ambiguity:repo-alpha","kind":"contains","from":"repo:zig-ambiguity","to":"file:zig-ambiguity:alpha","provenance":"extracted","confidence":1.0,"evidence":["e:zig-ambiguity:alpha"]},
+    {"id":"rel:zig-ambiguity:repo-beta","kind":"contains","from":"repo:zig-ambiguity","to":"file:zig-ambiguity:beta","provenance":"extracted","confidence":1.0,"evidence":["e:zig-ambiguity:beta"]},
+    {"id":"rel:zig-ambiguity:repo-main","kind":"contains","from":"repo:zig-ambiguity","to":"file:zig-ambiguity:main","provenance":"extracted","confidence":1.0,"evidence":["e:zig-ambiguity:choose"]},
+    {"id":"rel:zig-ambiguity:alpha-declares-load","kind":"declares","from":"file:zig-ambiguity:alpha","to":"symbol:zig-ambiguity:alpha.load","provenance":"extracted","confidence":1.0,"evidence":["e:zig-ambiguity:alpha"]},
+    {"id":"rel:zig-ambiguity:beta-declares-load","kind":"declares","from":"file:zig-ambiguity:beta","to":"symbol:zig-ambiguity:beta.load","provenance":"extracted","confidence":1.0,"evidence":["e:zig-ambiguity:beta"]},
+    {"id":"rel:zig-ambiguity:main-declares-choose","kind":"declares","from":"file:zig-ambiguity:main","to":"symbol:zig-ambiguity:choose","provenance":"extracted","confidence":1.0,"evidence":["e:zig-ambiguity:choose"]},
+    {"id":"rel:zig-ambiguity:choose-declares-loader","kind":"declares","from":"symbol:zig-ambiguity:choose","to":"symbol:zig-ambiguity:loader","provenance":"extracted","confidence":1.0,"evidence":["e:zig-ambiguity:dispatch"]},
+    {"id":"rel:zig-ambiguity:main-imports-alpha","kind":"imports","from":"file:zig-ambiguity:main","to":"file:zig-ambiguity:alpha","provenance":"resolved","confidence":1.0,"evidence":["e:zig-ambiguity:import-alpha"]},
+    {"id":"rel:zig-ambiguity:main-imports-beta","kind":"imports","from":"file:zig-ambiguity:main","to":"file:zig-ambiguity:beta","provenance":"resolved","confidence":1.0,"evidence":["e:zig-ambiguity:import-beta"]},
+    {"id":"rel:zig-ambiguity:choose-calls-loader","kind":"calls","from":"symbol:zig-ambiguity:choose","to":"symbol:zig-ambiguity:loader","provenance":"extracted","confidence":1.0,"evidence":["e:zig-ambiguity:dispatch"]},
+    {"id":"rel:zig-ambiguity:loader-candidate-alpha","kind":"selects_candidate","from":"symbol:zig-ambiguity:loader","to":"symbol:zig-ambiguity:alpha.load","provenance":"ambiguous","confidence":0.5,"evidence":["e:zig-ambiguity:dispatch"]},
+    {"id":"rel:zig-ambiguity:loader-candidate-beta","kind":"selects_candidate","from":"symbol:zig-ambiguity:loader","to":"symbol:zig-ambiguity:beta.load","provenance":"ambiguous","confidence":0.5,"evidence":["e:zig-ambiguity:dispatch"]}
+  ],
+  "facts": [
+    {"id":"fact:zig-ambiguity:loader-resolution","subject":"symbol:zig-ambiguity:loader","predicate":"call_resolution","value":"ambiguous","provenance":"ambiguous","confidence":1.0,"evidence":["e:zig-ambiguity:dispatch"],"alternatives":["symbol:zig-ambiguity:alpha.load","symbol:zig-ambiguity:beta.load"]}
+  ],
+  "hyperedges": [],
+  "supernodes": [],
+  "retrieval_tasks": [
+    {"id":"task:zig-ambiguity:explain-loader","intent":"ambiguity","query":"which load function can loader call","required_entities":["symbol:zig-ambiguity:alpha.load","symbol:zig-ambiguity:beta.load"],"required_relations":["rel:zig-ambiguity:choose-calls-loader","rel:zig-ambiguity:loader-candidate-alpha","rel:zig-ambiguity:loader-candidate-beta"],"required_facts":["fact:zig-ambiguity:loader-resolution"],"max_results":6}
+  ]
+}

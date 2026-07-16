@@ -1,0 +1,87 @@
+{
+  "schema": "zigeffect.project.v1",
+  "name": "zgraphy",
+  "version": "0.1.0",
+  "kind": "application",
+  "components": [
+    {"id":"zgraphy","kind":"application","path":".","depends_on":[],"capabilities":["cli","config","observability","agent","causal_graph"]}
+  ],
+  "commands": [
+    {"id":"build","argv":["zig","build"],"component":null},
+    {"id":"check","argv":["zig","build","test"],"component":null},
+    {"id":"check-debug","argv":["zig","build","test","-Doptimize=Debug"],"component":null},
+    {"id":"check-safe","argv":["zig","build","test","-Doptimize=ReleaseSafe"],"component":null},
+    {"id":"test","argv":["zig","build","test"],"component":null},
+    {"id":"dev","argv":["zig","build","test"],"component":null},
+    {"id":"doctor","argv":["zig","build","test"],"component":null},
+    {"id":"production-check","argv":["zig","build","test","-Doptimize=ReleaseSafe"],"component":null}
+  ],
+  "requirements": [
+    {"id":"req-local-repository-graph","summary":"zgraphy deterministically extracts and durably stores a bounded Zig repository graph","component":"zgraphy","status":"satisfied"},
+    {"id":"req-hybrid-retrieval","summary":"zgraphy combines inspectable keyword vector and graph retrieval with bounded paths","component":"zgraphy","status":"satisfied"},
+    {"id":"req-zigeffect-source-bridge","summary":"zgraphy links ZigEffect intent and causal facts to stable code source references","component":"zgraphy","status":"satisfied"},
+    {"id":"req-m0-graphify-parity-ledger","summary":"zgraphy exposes a versioned validated ledger covering every pinned Graphify capability family and its planned improvement","component":"zgraphy","status":"satisfied"},
+    {"id":"req-m0-canonical-benchmark-corpus","summary":"zgraphy owns a versioned engine-neutral benchmark IR and source-grounded Zig TypeScript Proto ambiguity and mutation gold corpus","component":"zgraphy","status":"satisfied"},
+    {"id":"req-m0-graphify-differential-adapter","summary":"zgraphy projects pinned Graphify graph JSON into canonical gold identities and emits bounded honest differential quality and projection-loss evidence","component":"zgraphy","status":"satisfied"},
+    {"id":"req-m0-zgraphy-differential-adapter","summary":"zgraphy projects its native repository graph into the same canonical gold identities and bounded differential receipt used for external baselines","component":"zgraphy","status":"satisfied"},
+    {"id":"req-m0-lexical-differential-adapter","summary":"zgraphy provides a bounded deterministic rg-class file and identifier baseline that projects through canonical receipts without inventing semantic relationships","component":"zgraphy","status":"satisfied"},
+    {"id":"req-m0-quality-matrix","summary":"zgraphy aggregates Graphify native and lexical canonical results into one compact weighted quality receipt bound to exact corpus source toolchain and environment identities","component":"zgraphy","status":"satisfied"},
+    {"id":"req-m0-resource-freshness","summary":"zgraphy records reproducible process resource samples and deterministic full-rebuild freshness pruning evidence while explicitly withholding unsupported incremental and automatic refresh claims","component":"zgraphy","status":"active"}
+  ],
+  "acceptance_checks": [
+    {"id":"check-local-repository-graph","requirement":"req-local-repository-graph","command":"test","expectation":"Zig source relationships and NenStore snapshots are stable complete and restart-safe","status":"passed"},
+    {"id":"check-hybrid-retrieval","requirement":"req-hybrid-retrieval","command":"test","expectation":"hybrid results expose keyword vector and graph scores and shortest paths stay bounded","status":"passed"},
+    {"id":"check-zigeffect-source-bridge","requirement":"req-zigeffect-source-bridge","command":"test","expectation":"manifest intent and managed-runtime causal facts resolve through stable source references","status":"passed"},
+    {"id":"check-m0-graphify-parity-ledger","requirement":"req-m0-graphify-parity-ledger","command":"test","expectation":"the embedded parity ledger is schema-valid complete unique and bound to the pinned Graphify commit","status":"passed"},
+    {"id":"check-m0-canonical-benchmark-corpus","requirement":"req-m0-canonical-benchmark-corpus","command":"test","expectation":"the canonical corpus validates identities relations evidence spans ambiguity supernodes retrieval expectations and mutation pruning outcomes against immutable source hashes","status":"passed"},
+    {"id":"check-m0-graphify-differential-adapter","requirement":"req-m0-graphify-differential-adapter","command":"test","expectation":"the pinned Graphify adapter maps source-qualified entities and directed relations while exposing every missing unexpected synthesized and provenance-mismatched result","status":"passed"},
+    {"id":"check-m0-zgraphy-differential-adapter","requirement":"req-m0-zgraphy-differential-adapter","command":"test","expectation":"the native zgraphy adapter projects source-qualified nodes directed edges provenance and evidence without hiding internal extras or missing gold meaning","status":"passed"},
+    {"id":"check-m0-lexical-differential-adapter","requirement":"req-m0-lexical-differential-adapter","command":"test","expectation":"the lexical baseline finds source-qualified files and identifiers across Zig TypeScript TSX and Proto while emitting no semantic relation claims","status":"passed"},
+    {"id":"check-m0-quality-matrix","requirement":"req-m0-quality-matrix","command":"test","expectation":"the quality matrix validates nine engine fixture runs recomputes weighted totals records exact identities and contains no unearned superiority claim","status":"passed"},
+    {"id":"check-m0-resource-freshness","requirement":"req-m0-resource-freshness","command":"test","expectation":"resource samples recompute integer quantiles and full rebuild mutation transitions are clean equivalent snapshot complete and honest about unsupported self maintenance","status":"pending"}
+  ],
+  "test_scenarios": [
+    {"id":"repository-graph-roundtrip","label":"Zig repository graph extracts and survives a NenStore round trip","requirement":"req-local-repository-graph","acceptance_check":"check-local-repository-graph","component":"zgraphy","command":"test","source_roots":["src/model.zig","src/nendb.zig","src/store.zig","src/indexer.zig","test/all_test.zig"],"tags":["acceptance","nendb","graph","deterministic"],"native_test_filter":"zgraphy repository graph","default_seed":1601,"fault_profile":"standard","required":true},
+    {"id":"hybrid-retrieval","label":"keyword vector and graph scores produce bounded inspectable retrieval","requirement":"req-hybrid-retrieval","acceptance_check":"check-hybrid-retrieval","component":"zgraphy","command":"test","source_roots":["src/search.zig","src/model.zig","test/all_test.zig"],"tags":["acceptance","keyword","vector","graph"],"native_test_filter":"zgraphy hybrid retrieval","default_seed":1602,"fault_profile":"standard","required":true},
+    {"id":"zigeffect-source-bridge","label":"ZigEffect intent and causal facts link to stable source references","requirement":"req-zigeffect-source-bridge","acceptance_check":"check-zigeffect-source-bridge","component":"zgraphy","command":"test","source_roots":["src/zigeffect_bridge.zig","src/indexer.zig","src/application.zig","test/all_test.zig"],"tags":["acceptance","zigeffect","causal","source"],"native_test_filter":"zgraphy ZigEffect source bridge","default_seed":1603,"fault_profile":"standard","required":true},
+    {"id":"m0-graphify-parity-ledger","label":"Pinned Graphify capability families have a complete versioned parity ledger","requirement":"req-m0-graphify-parity-ledger","acceptance_check":"check-m0-graphify-parity-ledger","component":"zgraphy","command":"test","source_roots":["src/parity.zig","src/graphify-parity.v1.json","src/root.zig","src/main.zig","test/all_test.zig"],"tags":["acceptance","m0","graphify","parity","deterministic"],"native_test_filter":"zgraphy M0 parity ledger","default_seed":1700,"fault_profile":"standard","required":true},
+    {"id":"m0-canonical-benchmark-corpus","label":"Canonical benchmark IR and source-grounded cross-stack gold corpus validate deterministically","requirement":"req-m0-canonical-benchmark-corpus","acceptance_check":"check-m0-canonical-benchmark-corpus","component":"zgraphy","command":"test","source_roots":["src/benchmark.zig","benchmarks/embedded.zig","benchmarks/corpus.v1.json","benchmarks/gold","benchmarks/fixtures","src/root.zig","src/main.zig","test/all_test.zig"],"tags":["acceptance","m0","benchmark","gold","cross-stack","freshness","deterministic"],"native_test_filter":"zgraphy M0 canonical benchmark corpus","default_seed":1701,"fault_profile":"standard","required":true},
+    {"id":"m0-graphify-differential-adapter","label":"Pinned Graphify raw graph projects into bounded canonical differential evidence","requirement":"req-m0-graphify-differential-adapter","acceptance_check":"check-m0-graphify-differential-adapter","component":"zgraphy","command":"test","source_roots":["src/differential.zig","src/benchmark.zig","benchmarks/embedded.zig","benchmarks/adapter-fixtures/graphify-0.9.17","benchmarks/run_graphify_reference.sh","benchmarks/gold","src/root.zig","src/main.zig","test/all_test.zig"],"tags":["acceptance","m0","graphify","adapter","differential","projection-loss","deterministic"],"native_test_filter":"zgraphy M0 Graphify differential adapter","default_seed":1702,"fault_profile":"standard","required":true},
+    {"id":"m0-zgraphy-differential-adapter","label":"Native zgraphy graph projects into bounded canonical differential evidence","requirement":"req-m0-zgraphy-differential-adapter","acceptance_check":"check-m0-zgraphy-differential-adapter","component":"zgraphy","command":"test","source_roots":["src/differential.zig","src/indexer.zig","src/model.zig","src/benchmark.zig","benchmarks/fixtures/zig-ambiguity","benchmarks/fixtures/mutation-pruning/baseline","benchmarks/gold/zig-ambiguity.canonical.v1.json","benchmarks/gold/mutation-pruning.canonical.v1.json","src/root.zig","src/main.zig","test/all_test.zig"],"tags":["acceptance","m0","zgraphy","adapter","differential","projection-loss","deterministic"],"native_test_filter":"zgraphy M0 native differential adapter","default_seed":1703,"fault_profile":"standard","required":true},
+    {"id":"m0-lexical-differential-adapter","label":"Bounded lexical graph provides an honest cross-language orientation floor","requirement":"req-m0-lexical-differential-adapter","acceptance_check":"check-m0-lexical-differential-adapter","component":"zgraphy","command":"test","source_roots":["src/lexical.zig","src/differential.zig","src/benchmark.zig","benchmarks/fixtures","benchmarks/gold","src/root.zig","src/main.zig","test/all_test.zig"],"tags":["acceptance","m0","lexical","baseline","typescript","proto","zig","deterministic"],"native_test_filter":"zgraphy M0 lexical differential adapter","default_seed":1704,"fault_profile":"standard","required":true},
+    {"id":"m0-quality-matrix","label":"Canonical quality matrix is weighted reproducible identified and claim-free","requirement":"req-m0-quality-matrix","acceptance_check":"check-m0-quality-matrix","component":"zgraphy","command":"test","source_roots":["src/quality_matrix.zig","src/differential.zig","src/benchmark.zig","benchmarks/corpus.v1.json","benchmarks/gold","benchmarks/run_graphify_reference.sh","benchmarks/baselines","src/root.zig","src/main.zig","test/all_test.zig"],"tags":["acceptance","m0","quality","matrix","reproducible","identity","deterministic"],"native_test_filter":"zgraphy M0 quality matrix","default_seed":1705,"fault_profile":"standard","required":true},
+    {"id":"m0-resource-freshness","label":"Resource statistics and full rebuild freshness evidence are reproducible bounded and claim honest","requirement":"req-m0-resource-freshness","acceptance_check":"check-m0-resource-freshness","component":"zgraphy","command":"test","source_roots":["src/resource_matrix.zig","src/freshness.zig","src/model.zig","src/indexer.zig","src/store.zig","benchmarks/fixtures/mutation-pruning","src/root.zig","src/main.zig","test/all_test.zig"],"tags":["acceptance","m0","resource","latency","memory","freshness","pruning","deterministic"],"native_test_filter":"zgraphy M0 resource and freshness","default_seed":1706,"fault_profile":"standard","required":true}
+  ],
+  "execution_posture": "local",
+  "capability_requirements": [],
+  "capability_descriptors": [],
+  "adapter_profiles": [],
+  "policy": {"allow_network":false,"require_approval_for_processes":true,"persist_raw_terminal":false},
+  "safety": {
+    "profile":"agent_safe_v1",
+    "safe_roots":["test"],
+    "audited_roots":["src"],
+    "allowances":[
+      {"id":"zgraphy-owned-slice","path":"src/memory.zig","construct":"manual_allocator_escape","fingerprint":"sha256:25aaab13621345146826b81483a979ec736e0ba5c56ccaa24ab84ca4902757b4","justification":"The audited memory boundary allocates bounded caller-sized graph columns and result slices; every caller retains the allocator and has matching error rollback and deinit coverage.","required_check":"check-safe"},
+      {"id":"zgraphy-owned-copy","path":"src/memory.zig","construct":"manual_allocator_escape","fingerprint":"sha256:b7344bc1982661c794a26799fbbad191a4fe1d56f714b749a79baefab8918236","justification":"The audited memory boundary copies bounded source metadata into graph-owned storage; every returned slice is released by the owning graph result or temporary resolver scope.","required_check":"check-safe"}
+    ],
+    "gates":[
+      {"kind":"source_policy","required":true,"command":null},
+      {"kind":"compile_debug","required":true,"command":"check-debug"},
+      {"kind":"compile_release_safe","required":true,"command":"check-safe"},
+      {"kind":"allocation_failures","required":false,"command":null},
+      {"kind":"leak_detection","required":true,"command":"check-debug"},
+      {"kind":"causal_invariants","required":true,"command":"check-debug"},
+      {"kind":"schedule_exploration","required":false,"command":null},
+      {"kind":"executor_equivalence","required":false,"command":null},
+      {"kind":"thread_sanitizer","required":false,"command":null},
+      {"kind":"c_undefined_behavior","required":false,"command":null},
+      {"kind":"stack_protection","required":false,"command":null},
+      {"kind":"fuzz","required":false,"command":null}
+    ],
+    "limits":{"max_source_bytes":8388608,"max_findings":1024,"max_diagnostics":1024,"max_schedules":10000,"max_fuzz_cases":100000,"max_artifact_bytes":16777216,"max_runtime_events":100000},
+    "production_posture":{"retain_generation_checks":true,"retain_critical_invariants":true,"retain_causal_findings":true}
+  },
+  "artifacts":{"sessions":".zigeffect/sessions","causal":".zigeffect/causal","receipts":".zigeffect/receipts","graph":".zigeffect/graph","statecharts":".zigeffect/statecharts"},
+  "dependencies":{"zigeffect":"../zigeffect","zigeffect_std":"../zigeffect-std"}
+}

@@ -1,0 +1,32 @@
+{
+  "schema":"zgraphy.resource-matrix.v1",
+  "schema_version":1,
+  "promotion_status":"baseline_only",
+  "identity":{"corpus_digest":"sha256:a25dcb727149294aaf82020aa1d5325007eec512c9f225549fce73debf68caed","zgraphy_source_revision":"sha256:3e6608f54e282df32972be69118c3c45b9f292c1f481179a6d832ac95d15d5d8","graphify_python":"3.11.15","graphify_environment_digest":"sha256:fd6957286203f5099709e7ba42a5d2da9984e9f8068661e389f9c86a1376a51d","machine_digest":"sha256:3fd16cc690b5aba3954da51830115030140f9870426f3bdf16f34794bdff334b","configuration_digest":"sha256:08dd1cf9f62e6a711ed99d785e2bf3b1cc4a75fbb3526f58c4d7a3031d3c02fc"},
+  "baseline":{"product":"Graphify","version":"0.9.17","commit":"cb96bdaa0c367bec8d5c5aee5d7c9ebb727e9780"},
+  "toolchain":{"zig":"0.16.0","architecture":"aarch64","operating_system":"macos","abi":"none","optimize":"ReleaseSafe"},
+  "sampling":{"warmups":2,"repetitions":7,"supervisor":"zgraphy-local-supervisor-v1"},
+  "samples":[
+    {"fixture_id":"mutation-pruning","engine":"graphify","workload":"cold_build","repetition":1,"elapsed_ns":140228666,"user_cpu_ns":101712000,"system_cpu_ns":32714000,"peak_rss_bytes":47038464,"persisted_bytes":2696,"nodes":5,"relations":4,"facts":0,"exit_code":0,"projection_valid":true},
+    {"fixture_id":"mutation-pruning","engine":"graphify","workload":"cold_build","repetition":2,"elapsed_ns":134929792,"user_cpu_ns":99536000,"system_cpu_ns":30611000,"peak_rss_bytes":47005696,"persisted_bytes":2696,"nodes":5,"relations":4,"facts":0,"exit_code":0,"projection_valid":true},
+    {"fixture_id":"mutation-pruning","engine":"graphify","workload":"cold_build","repetition":3,"elapsed_ns":139198416,"user_cpu_ns":99879000,"system_cpu_ns":34399000,"peak_rss_bytes":47071232,"persisted_bytes":2696,"nodes":5,"relations":4,"facts":0,"exit_code":0,"projection_valid":true},
+    {"fixture_id":"mutation-pruning","engine":"graphify","workload":"cold_build","repetition":4,"elapsed_ns":139673708,"user_cpu_ns":101917000,"system_cpu_ns":32771000,"peak_rss_bytes":47153152,"persisted_bytes":2696,"nodes":5,"relations":4,"facts":0,"exit_code":0,"projection_valid":true},
+    {"fixture_id":"mutation-pruning","engine":"graphify","workload":"cold_build","repetition":5,"elapsed_ns":138297083,"user_cpu_ns":101654000,"system_cpu_ns":32350999,"peak_rss_bytes":47136768,"persisted_bytes":2696,"nodes":5,"relations":4,"facts":0,"exit_code":0,"projection_valid":true},
+    {"fixture_id":"mutation-pruning","engine":"graphify","workload":"cold_build","repetition":6,"elapsed_ns":134109125,"user_cpu_ns":99543000,"system_cpu_ns":31256000,"peak_rss_bytes":47841280,"persisted_bytes":2696,"nodes":5,"relations":4,"facts":0,"exit_code":0,"projection_valid":true},
+    {"fixture_id":"mutation-pruning","engine":"graphify","workload":"cold_build","repetition":7,"elapsed_ns":132208666,"user_cpu_ns":97755000,"system_cpu_ns":30375000,"peak_rss_bytes":46956544,"persisted_bytes":2696,"nodes":5,"relations":4,"facts":0,"exit_code":0,"projection_valid":true},
+    {"fixture_id":"mutation-pruning","engine":"zgraphy","workload":"cold_build","repetition":1,"elapsed_ns":55493667,"user_cpu_ns":40257999,"system_cpu_ns":9925999,"peak_rss_bytes":39387136,"persisted_bytes":4756,"nodes":9,"relations":10,"facts":0,"exit_code":0,"projection_valid":true},
+    {"fixture_id":"mutation-pruning","engine":"zgraphy","workload":"cold_build","repetition":2,"elapsed_ns":52495000,"user_cpu_ns":40083000,"system_cpu_ns":9044000,"peak_rss_bytes":39387136,"persisted_bytes":4756,"nodes":9,"relations":10,"facts":0,"exit_code":0,"projection_valid":true},
+    {"fixture_id":"mutation-pruning","engine":"zgraphy","workload":"cold_build","repetition":3,"elapsed_ns":53470708,"user_cpu_ns":41099000,"system_cpu_ns":9026000,"peak_rss_bytes":39387136,"persisted_bytes":4756,"nodes":9,"relations":10,"facts":0,"exit_code":0,"projection_valid":true},
+    {"fixture_id":"mutation-pruning","engine":"zgraphy","workload":"cold_build","repetition":4,"elapsed_ns":51110291,"user_cpu_ns":40413000,"system_cpu_ns":8128000,"peak_rss_bytes":39354368,"persisted_bytes":4756,"nodes":9,"relations":10,"facts":0,"exit_code":0,"projection_valid":true},
+    {"fixture_id":"mutation-pruning","engine":"zgraphy","workload":"cold_build","repetition":5,"elapsed_ns":53178458,"user_cpu_ns":40789000,"system_cpu_ns":8763000,"peak_rss_bytes":39370752,"persisted_bytes":4756,"nodes":9,"relations":10,"facts":0,"exit_code":0,"projection_valid":true},
+    {"fixture_id":"mutation-pruning","engine":"zgraphy","workload":"cold_build","repetition":6,"elapsed_ns":52446500,"user_cpu_ns":41353999,"system_cpu_ns":8609000,"peak_rss_bytes":39387136,"persisted_bytes":4756,"nodes":9,"relations":10,"facts":0,"exit_code":0,"projection_valid":true},
+    {"fixture_id":"mutation-pruning","engine":"zgraphy","workload":"cold_build","repetition":7,"elapsed_ns":54804042,"user_cpu_ns":42302000,"system_cpu_ns":9864999,"peak_rss_bytes":39387136,"persisted_bytes":4756,"nodes":9,"relations":10,"facts":0,"exit_code":0,"projection_valid":true}
+  ],
+  "aggregates":[
+    {"fixture_id":"mutation-pruning","engine":"graphify","workload":"cold_build","sample_count":7,"elapsed_ns":{"minimum":132208666,"p50":138297083,"p95":140228666,"p99":140228666,"maximum":140228666},"user_cpu_ns":{"minimum":97755000,"p50":99879000,"p95":101917000,"p99":101917000,"maximum":101917000},"system_cpu_ns":{"minimum":30375000,"p50":32350999,"p95":34399000,"p99":34399000,"maximum":34399000},"peak_rss_bytes":{"minimum":46956544,"p50":47071232,"p95":47841280,"p99":47841280,"maximum":47841280},"persisted_bytes":{"minimum":2696,"p50":2696,"p95":2696,"p99":2696,"maximum":2696},"nodes":5,"relations":4,"facts":0},
+    {"fixture_id":"mutation-pruning","engine":"zgraphy","workload":"cold_build","sample_count":7,"elapsed_ns":{"minimum":51110291,"p50":53178458,"p95":55493667,"p99":55493667,"maximum":55493667},"user_cpu_ns":{"minimum":40083000,"p50":40789000,"p95":42302000,"p99":42302000,"maximum":42302000},"system_cpu_ns":{"minimum":8128000,"p50":9026000,"p95":9925999,"p99":9925999,"maximum":9925999},"peak_rss_bytes":{"minimum":39354368,"p50":39387136,"p95":39387136,"p99":39387136,"maximum":39387136},"persisted_bytes":{"minimum":4756,"p50":4756,"p95":4756,"p99":4756,"maximum":4756},"nodes":9,"relations":10,"facts":0}
+  ],
+  "comparison_eligible":true,
+  "claims":[],
+  "limitations":["candidate engineering baseline; no performance superiority claim","peak RSS is process-supervisor evidence and is not inferred from allocator counts"]
+}

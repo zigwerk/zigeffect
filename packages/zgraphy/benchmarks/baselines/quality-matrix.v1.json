@@ -1,0 +1,143 @@
+{
+  "schema": "zgraphy.quality-matrix.v1",
+  "schema_version": 1,
+  "promotion_status": "baseline_only",
+  "corpus_digest": "sha256:a25dcb727149294aaf82020aa1d5325007eec512c9f225549fce73debf68caed",
+  "zgraphy_source_revision": "sha256:83e116f7389f7c5378424780ef0c61cb514d24efb618743cf77596f77a0fd617",
+  "baseline": {
+    "product": "Graphify",
+    "version": "0.9.17",
+    "commit": "cb96bdaa0c367bec8d5c5aee5d7c9ebb727e9780"
+  },
+  "graphify_environment": {
+    "python": "3.11.15",
+    "digest": "sha256:fd6957286203f5099709e7ba42a5d2da9984e9f8068661e389f9c86a1376a51d"
+  },
+  "toolchain": {
+    "zig": "0.16.0",
+    "architecture": "aarch64",
+    "operating_system": "macos",
+    "abi": "none",
+    "optimize": "ReleaseSafe"
+  },
+  "fixtures": [
+    {
+      "fixture_id": "zig-ambiguity",
+      "engines": [
+        {
+          "engine": "graphify",
+          "entities": {"expected": 8, "matched": 7, "missing": 1, "unexpected": 0, "recall": 0.875, "conservative_precision": 1, "f1": 0.9333333333333333},
+          "relations": {"expected": 12, "matched": 8, "missing": 4, "unexpected": 0, "recall": 0.6666666666666666, "conservative_precision": 1, "f1": 0.8},
+          "facts": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+          "hyperedges": {"expected": 0, "matched": 0, "missing": 0, "unexpected": 0, "recall": 1, "conservative_precision": 1, "f1": 1},
+          "supernodes": {"expected": 0, "matched": 0, "missing": 0, "unexpected": 0, "recall": 1, "conservative_precision": 1, "f1": 1}
+        },
+        {
+          "engine": "zgraphy",
+          "entities": {"expected": 8, "matched": 8, "missing": 0, "unexpected": 3, "recall": 1, "conservative_precision": 0.7272727272727273, "f1": 0.8421052631578948},
+          "relations": {"expected": 12, "matched": 9, "missing": 3, "unexpected": 6, "recall": 0.75, "conservative_precision": 0.6, "f1": 0.6666666666666665},
+          "facts": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+          "hyperedges": {"expected": 0, "matched": 0, "missing": 0, "unexpected": 0, "recall": 1, "conservative_precision": 1, "f1": 1},
+          "supernodes": {"expected": 0, "matched": 0, "missing": 0, "unexpected": 0, "recall": 1, "conservative_precision": 1, "f1": 1}
+        },
+        {
+          "engine": "lexical",
+          "entities": {"expected": 8, "matched": 8, "missing": 0, "unexpected": 26, "recall": 1, "conservative_precision": 0.23529411764705882, "f1": 0.38095238095238093},
+          "relations": {"expected": 12, "matched": 3, "missing": 9, "unexpected": 0, "recall": 0.25, "conservative_precision": 1, "f1": 0.4},
+          "facts": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+          "hyperedges": {"expected": 0, "matched": 0, "missing": 0, "unexpected": 0, "recall": 1, "conservative_precision": 1, "f1": 1},
+          "supernodes": {"expected": 0, "matched": 0, "missing": 0, "unexpected": 0, "recall": 1, "conservative_precision": 1, "f1": 1}
+        }
+      ]
+    },
+    {
+      "fixture_id": "fullstack-orders",
+      "engines": [
+        {
+          "engine": "graphify",
+          "entities": {"expected": 16, "matched": 10, "missing": 6, "unexpected": 2, "recall": 0.625, "conservative_precision": 0.8333333333333334, "f1": 0.7142857142857143},
+          "relations": {"expected": 22, "matched": 11, "missing": 11, "unexpected": 11, "recall": 0.5, "conservative_precision": 0.5, "f1": 0.5},
+          "facts": {"expected": 2, "matched": 0, "missing": 2, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+          "hyperedges": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+          "supernodes": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0}
+        },
+        {
+          "engine": "zgraphy",
+          "entities": {"expected": 16, "matched": 5, "missing": 11, "unexpected": 4, "recall": 0.3125, "conservative_precision": 0.5555555555555556, "f1": 0.39999999999999997},
+          "relations": {"expected": 22, "matched": 4, "missing": 18, "unexpected": 6, "recall": 0.18181818181818182, "conservative_precision": 0.4, "f1": 0.25000000000000006},
+          "facts": {"expected": 2, "matched": 0, "missing": 2, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+          "hyperedges": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+          "supernodes": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0}
+        },
+        {
+          "engine": "lexical",
+          "entities": {"expected": 16, "matched": 15, "missing": 1, "unexpected": 76, "recall": 0.9375, "conservative_precision": 0.16483516483516483, "f1": 0.2803738317757009},
+          "relations": {"expected": 22, "matched": 4, "missing": 18, "unexpected": 0, "recall": 0.18181818181818182, "conservative_precision": 1, "f1": 0.3076923076923077},
+          "facts": {"expected": 2, "matched": 0, "missing": 2, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+          "hyperedges": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+          "supernodes": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0}
+        }
+      ]
+    },
+    {
+      "fixture_id": "mutation-pruning",
+      "engines": [
+        {
+          "engine": "graphify",
+          "entities": {"expected": 6, "matched": 6, "missing": 0, "unexpected": 0, "recall": 1, "conservative_precision": 1, "f1": 1},
+          "relations": {"expected": 7, "matched": 6, "missing": 1, "unexpected": 0, "recall": 0.8571428571428571, "conservative_precision": 1, "f1": 0.923076923076923},
+          "facts": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+          "hyperedges": {"expected": 0, "matched": 0, "missing": 0, "unexpected": 0, "recall": 1, "conservative_precision": 1, "f1": 1},
+          "supernodes": {"expected": 0, "matched": 0, "missing": 0, "unexpected": 0, "recall": 1, "conservative_precision": 1, "f1": 1}
+        },
+        {
+          "engine": "zgraphy",
+          "entities": {"expected": 6, "matched": 6, "missing": 0, "unexpected": 3, "recall": 1, "conservative_precision": 0.6666666666666666, "f1": 0.8},
+          "relations": {"expected": 7, "matched": 7, "missing": 0, "unexpected": 5, "recall": 1, "conservative_precision": 0.5833333333333334, "f1": 0.7368421052631579},
+          "facts": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+          "hyperedges": {"expected": 0, "matched": 0, "missing": 0, "unexpected": 0, "recall": 1, "conservative_precision": 1, "f1": 1},
+          "supernodes": {"expected": 0, "matched": 0, "missing": 0, "unexpected": 0, "recall": 1, "conservative_precision": 1, "f1": 1}
+        },
+        {
+          "engine": "lexical",
+          "entities": {"expected": 6, "matched": 6, "missing": 0, "unexpected": 17, "recall": 1, "conservative_precision": 0.2608695652173913, "f1": 0.41379310344827586},
+          "relations": {"expected": 7, "matched": 2, "missing": 5, "unexpected": 0, "recall": 0.2857142857142857, "conservative_precision": 1, "f1": 0.4444444444444445},
+          "facts": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+          "hyperedges": {"expected": 0, "matched": 0, "missing": 0, "unexpected": 0, "recall": 1, "conservative_precision": 1, "f1": 1},
+          "supernodes": {"expected": 0, "matched": 0, "missing": 0, "unexpected": 0, "recall": 1, "conservative_precision": 1, "f1": 1}
+        }
+      ]
+    }
+  ],
+  "aggregates": [
+    {
+      "engine": "graphify",
+      "entities": {"expected": 30, "matched": 23, "missing": 7, "unexpected": 2, "recall": 0.7666666666666667, "conservative_precision": 0.92, "f1": 0.8363636363636363},
+      "relations": {"expected": 41, "matched": 25, "missing": 16, "unexpected": 11, "recall": 0.6097560975609756, "conservative_precision": 0.6944444444444444, "f1": 0.6493506493506495},
+      "facts": {"expected": 4, "matched": 0, "missing": 4, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+      "hyperedges": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+      "supernodes": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0}
+    },
+    {
+      "engine": "zgraphy",
+      "entities": {"expected": 30, "matched": 19, "missing": 11, "unexpected": 10, "recall": 0.6333333333333333, "conservative_precision": 0.6551724137931034, "f1": 0.6440677966101694},
+      "relations": {"expected": 41, "matched": 20, "missing": 21, "unexpected": 17, "recall": 0.4878048780487805, "conservative_precision": 0.5405405405405406, "f1": 0.5128205128205128},
+      "facts": {"expected": 4, "matched": 0, "missing": 4, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+      "hyperedges": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+      "supernodes": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0}
+    },
+    {
+      "engine": "lexical",
+      "entities": {"expected": 30, "matched": 29, "missing": 1, "unexpected": 119, "recall": 0.9666666666666667, "conservative_precision": 0.19594594594594594, "f1": 0.3258426966292135},
+      "relations": {"expected": 41, "matched": 9, "missing": 32, "unexpected": 0, "recall": 0.21951219512195122, "conservative_precision": 1, "f1": 0.36},
+      "facts": {"expected": 4, "matched": 0, "missing": 4, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+      "hyperedges": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0},
+      "supernodes": {"expected": 1, "matched": 0, "missing": 1, "unexpected": 0, "recall": 0, "conservative_precision": 1, "f1": 0}
+    }
+  ],
+  "claims": [],
+  "limitations": [
+    "quality-only receipt; latency memory storage and freshness are excluded",
+    "candidate engineering baseline; no superiority claim"
+  ]
+}

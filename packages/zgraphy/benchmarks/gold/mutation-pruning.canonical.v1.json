@@ -1,0 +1,37 @@
+{
+  "schema": "zgraphy.canonical-benchmark-ir.v1",
+  "schema_version": 1,
+  "fixture_id": "mutation-pruning",
+  "generation": 0,
+  "evidence": [
+    {"id":"e:mutation:main-import","source":{"path":"baseline/src/main.zig","content_sha256":"b87432e1620931ddfb04f64646569c2e49e3d3574d048d59a723c15bbaf24f65","start_line":1,"start_column":1,"end_line":1,"end_column":1}},
+    {"id":"e:mutation:main","source":{"path":"baseline/src/main.zig","content_sha256":"b87432e1620931ddfb04f64646569c2e49e3d3574d048d59a723c15bbaf24f65","start_line":3,"start_column":1,"end_line":5,"end_column":1}},
+    {"id":"e:mutation:feature","source":{"path":"baseline/src/catalog.zig","content_sha256":"117c4996de4dd73f80f8258fe798ff485bc745110a861015fc6f95991c3dad0e","start_line":1,"start_column":1,"end_line":3,"end_column":1}},
+    {"id":"e:mutation:orphaned","source":{"path":"baseline/src/catalog.zig","content_sha256":"117c4996de4dd73f80f8258fe798ff485bc745110a861015fc6f95991c3dad0e","start_line":5,"start_column":1,"end_line":5,"end_column":1}}
+  ],
+  "entities": [
+    {"id":"repo:mutation","kind":"repository","name":"mutation-pruning","evidence":["e:mutation:main"]},
+    {"id":"file:mutation:main","kind":"file","name":"baseline/src/main.zig","evidence":["e:mutation:main"]},
+    {"id":"file:mutation:catalog","kind":"file","name":"baseline/src/catalog.zig","evidence":["e:mutation:feature"]},
+    {"id":"symbol:mutation:main","kind":"function","name":"main","evidence":["e:mutation:main"]},
+    {"id":"symbol:mutation:feature","kind":"function","name":"feature","evidence":["e:mutation:feature"]},
+    {"id":"symbol:mutation:orphaned","kind":"function","name":"orphaned","evidence":["e:mutation:orphaned"]}
+  ],
+  "relations": [
+    {"id":"rel:mutation:repo-main","kind":"contains","from":"repo:mutation","to":"file:mutation:main","provenance":"extracted","confidence":1.0,"evidence":["e:mutation:main"]},
+    {"id":"rel:mutation:repo-catalog","kind":"contains","from":"repo:mutation","to":"file:mutation:catalog","provenance":"extracted","confidence":1.0,"evidence":["e:mutation:feature"]},
+    {"id":"rel:mutation:main-declares-main","kind":"declares","from":"file:mutation:main","to":"symbol:mutation:main","provenance":"extracted","confidence":1.0,"evidence":["e:mutation:main"]},
+    {"id":"rel:mutation:catalog-declares-feature","kind":"declares","from":"file:mutation:catalog","to":"symbol:mutation:feature","provenance":"extracted","confidence":1.0,"evidence":["e:mutation:feature"]},
+    {"id":"rel:mutation:catalog-declares-orphaned","kind":"declares","from":"file:mutation:catalog","to":"symbol:mutation:orphaned","provenance":"extracted","confidence":1.0,"evidence":["e:mutation:orphaned"]},
+    {"id":"rel:mutation:main-imports-catalog","kind":"imports","from":"file:mutation:main","to":"file:mutation:catalog","provenance":"resolved","confidence":1.0,"evidence":["e:mutation:main-import"]},
+    {"id":"rel:mutation:main-calls-feature","kind":"calls","from":"symbol:mutation:main","to":"symbol:mutation:feature","provenance":"resolved","confidence":1.0,"evidence":["e:mutation:main","e:mutation:feature"]}
+  ],
+  "facts": [
+    {"id":"fact:mutation:catalog-version","subject":"symbol:mutation:feature","predicate":"returns_literal","value":"catalog-v1","provenance":"extracted","confidence":1.0,"evidence":["e:mutation:feature"],"alternatives":[]}
+  ],
+  "hyperedges": [],
+  "supernodes": [],
+  "retrieval_tasks": [
+    {"id":"task:mutation:stale-delete","intent":"freshness","query":"what must disappear when catalog is deleted","required_entities":["file:mutation:catalog","symbol:mutation:feature","symbol:mutation:orphaned"],"required_relations":["rel:mutation:main-imports-catalog","rel:mutation:main-calls-feature"],"required_facts":["fact:mutation:catalog-version"],"max_results":8}
+  ]
+}
