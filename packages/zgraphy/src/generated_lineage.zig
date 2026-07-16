@@ -286,18 +286,22 @@ fn analyzeProtobufEs(
         .{ .prefix = "@generated from rpc ", .kind = .operation, .entity = .operation, .direction = .generated_from },
     };
     var lines = std.mem.splitScalar(u8, document.source, '\n');
-    while (lines.next()) |line| for (markers) |marker| {
-        const at = std.mem.indexOf(u8, line, marker.prefix) orelse continue;
-        var value = std.mem.trim(u8, line[at + marker.prefix.len ..], " \t\r*/");
-        if (value.len == 0 or value.len > options.max_marker_bytes) continue;
-        var operation_buffer: [4096]u8 = @splat(0);
-        if (marker.kind == .operation) {
-            const dot = std.mem.lastIndexOfScalar(u8, value, '.') orelse continue;
-            value = std.fmt.bufPrint(&operation_buffer, "{s}/{s}", .{ value[0..dot], value[dot + 1 ..] }) catch continue;
+    var line_offset: usize = 0;
+    while (lines.next()) |line| {
+        defer line_offset += line.len + @intFromBool(line_offset + line.len < document.source.len);
+        for (markers) |marker| {
+            const at = std.mem.indexOf(u8, line, marker.prefix) orelse continue;
+            var value = std.mem.trim(u8, line[at + marker.prefix.len ..], " \t\r*/");
+            if (value.len == 0 or value.len > options.max_marker_bytes) continue;
+            var operation_buffer: [4096]u8 = @splat(0);
+            const symbol = if (marker.kind == .operation) operation_symbol: {
+                const dot = std.mem.lastIndexOfScalar(u8, value, '.') orelse continue;
+                value = std.fmt.bufPrint(&operation_buffer, "{s}/{s}", .{ value[0..dot], value[dot + 1 ..] }) catch continue;
+                break :operation_symbol generatedPropertyAfterMarker(document.source, line_offset + at, options.max_marker_bytes) orelse continue;
+            } else lastIdentitySegment(value);
+            try appendEntityLink(allocator, resolution, document.path, symbol, value, .protobuf_es, marker.kind, marker.entity, marker.direction, source_path, links, candidates);
         }
-        const symbol = lastIdentitySegment(value);
-        try appendEntityLink(allocator, resolution, document.path, symbol, value, .protobuf_es, marker.kind, marker.entity, marker.direction, source_path, links, candidates);
-    };
+    }
     return true;
 }
 
@@ -485,6 +489,42 @@ fn hasExactLine(source: []const u8, expected: []const u8) bool {
 fn lastIdentitySegment(value: []const u8) []const u8 {
     if (std.mem.lastIndexOfAny(u8, value, "./")) |index| return value[index + 1 ..];
     return value;
+}
+
+fn generatedPropertyAfterMarker(source: []const u8, marker_offset: usize, max_bytes: usize) ?[]const u8 {
+    if (marker_offset >= source.len) return null;
+    const line_end = std.mem.indexOfScalarPos(u8, source, marker_offset, '\n') orelse return null;
+    var remaining = source[line_end + 1 ..];
+    while (remaining.len > 0) {
+        const next_end = std.mem.indexOfScalar(u8, remaining, '\n') orelse remaining.len;
+        const line = std.mem.trim(u8, remaining[0..next_end], " \t\r");
+        if (std.mem.indexOf(u8, line, "@generated from ") != null) return null;
+        if (line.len > 0 and !std.mem.startsWith(u8, line, "/**") and !std.mem.startsWith(u8, line, "/*") and
+            !std.mem.startsWith(u8, line, "*") and !std.mem.startsWith(u8, line, "//"))
+        {
+            if (line[0] == '"' or line[0] == '\'') {
+                const quote = line[0];
+                const close = std.mem.indexOfScalarPos(u8, line, 1, quote) orelse return null;
+                const property = line[1..close];
+                const suffix = std.mem.trimStart(u8, line[close + 1 ..], " \t");
+                if (property.len == 0 or property.len > max_bytes or !std.mem.startsWith(u8, suffix, ":")) return null;
+                return property;
+            }
+            var end: usize = 0;
+            while (end < line.len and isJavaScriptIdentifierByte(line[end], end == 0)) : (end += 1) {}
+            if (end == 0 or end > max_bytes) return null;
+            const suffix = std.mem.trimStart(u8, line[end..], " \t");
+            if (!std.mem.startsWith(u8, suffix, ":")) return null;
+            return line[0..end];
+        }
+        if (next_end == remaining.len) break;
+        remaining = remaining[next_end + 1 ..];
+    }
+    return null;
+}
+
+fn isJavaScriptIdentifierByte(byte: u8, first: bool) bool {
+    return std.ascii.isAlphabetic(byte) or byte == '_' or byte == '$' or (!first and std.ascii.isDigit(byte));
 }
 
 fn hasEntity(resolution: *const proto.Result, kind: proto.EntityKind, canonical_name: []const u8) bool {

@@ -7,12 +7,12 @@
     "commit": "cb96bdaa0c367bec8d5c5aee5d7c9ebb727e9780",
     "mode": "extract --code-only --no-cluster --force",
     "fixture": "benchmarks/fixtures/fullstack-orders",
-    "source_graph_sha256": "e40b0c957b3d6fa7eeff5e724f3111c0e8e2698889548167dece4fc51ed021fd",
+    "source_graph_sha256": "1664579ccb1b164abf4e425e9fab6e18d1f30aeb164368e9fd672d14e207fc89",
     "proto_source_sha256": "6c145dd9f5da6dd7cbd8745b039c034f10200572b4132e87dd849c1f88c7367a"
   },
   "observed": {
-    "nodes": 11,
-    "relations": 19,
+    "nodes": 28,
+    "relations": 36,
     "proto_files": 0,
     "canonical_packages": 0,
     "canonical_services": 0,
@@ -29,7 +29,7 @@
     "fields": ["orders.v1.GetOrderRequest#1", "orders.v1.Order#1", "orders.v1.Order#2"]
   },
   "limitations": [
-    "Graphify labels named GetOrderRequest, Order and OrdersService originate from handwritten Zig and are not canonical Proto identities.",
-    "The controlled fullstack-orders fixture has no generated source files, so generated-binding lineage is proven separately by the source-grounded proto-lineage fixture."
+    "Graphify labels named GetOrderRequest, Order and OrdersService originate from generated or handwritten Zig and TypeScript syntax and are not canonical Proto identities.",
+    "The enhanced fixture contains strict Protobuf-ES and protoc-gen-zig sources, but Graphify emits no source-Proto or canonical generated-binding lineage relation."
   ]
 }

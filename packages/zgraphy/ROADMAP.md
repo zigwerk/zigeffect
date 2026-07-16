@@ -2607,7 +2607,10 @@ Delivered M2 kernel slices:
   services and RPC operations with lexical/import-aware type candidates; and
 - strict Protobuf-ES and protoc-gen-zig binding lineage to canonical source,
   plus a content-addressed Graphify 0.9.17 receipt proving its missing Proto
-  contract spine on the shared fullstack fixture.
+  contract spine on the shared fullstack fixture; and
+- exact Connect `createClient` invocation and ZigEffect generated-driver
+  registration recipes joined through one canonical Proto operation, with
+  negative lookalike/unregistered fixtures and a pinned Graphify gap receipt.
 - structural-facts v2 exports and lexical receiver-type bindings in the shared
   parser contract, including bounded static CommonJS export identities;
 - deterministic named/default/namespace/local-alias/star export closure,
@@ -2618,7 +2621,15 @@ Delivered M2 kernel slices:
 - graph materialization for import aliases, imports-from, aliases, re-exports,
   class/method ownership, calls and instantiations, plus a pinned Graphify
   symbol-overlap ledger with nine shared positive and three shared negative
-  facts.
+  facts;
+- structural-facts v4 call arguments and direct-call result bindings in the
+  shared parser contract, plus bounded Zig AST call arguments for reusable
+  framework-recipe analysis; and
+- source-grounded Connect `createClient` invocation continuity through actual
+  Protobuf-ES method spelling and canonical Proto operations to exact
+  `GeneratedDriverBinding`-registered Zig handlers, with deterministic
+  interaction facts, `invokes_operation` / `handles_operation` graph edges and
+  a pinned Graphify 0.9.17 cross-stack gap receipt.
 
 Exit evidence:
 

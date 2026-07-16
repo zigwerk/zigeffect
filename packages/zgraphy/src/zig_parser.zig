@@ -1,9 +1,9 @@
 const std = @import("std");
 const owned = @import("memory.zig");
 
-pub const schema = "zgraphy.zig-structural-facts.v2";
-pub const schema_version: u32 = 2;
-pub const parser_version = "std.zig.Ast-0.16-v2";
+pub const schema = "zgraphy.zig-structural-facts.v3";
+pub const schema_version: u32 = 3;
+pub const parser_version = "std.zig.Ast-0.16-v3";
 
 pub const DeclarationKind = enum(u8) {
     function,
@@ -72,10 +72,29 @@ pub const Call = struct {
     callee_span: Span,
 };
 
+pub const ExpressionKind = enum(u8) {
+    identifier,
+    member,
+    string_literal,
+    number_literal,
+    struct_literal,
+    call,
+    other,
+};
+
+pub const CallArgument = struct {
+    call_span: Span,
+    index: u32,
+    expression: []const u8,
+    kind: ExpressionKind,
+    span: Span,
+};
+
 pub const Summary = struct {
     declarations: usize = 0,
     imports: usize = 0,
     calls: usize = 0,
+    call_arguments: usize = 0,
     bindings: usize = 0,
     binding_references: usize = 0,
     parse_errors: usize = 0,
@@ -94,6 +113,7 @@ pub const Result = struct {
     declarations: []Declaration,
     imports: []Import,
     calls: []Call,
+    call_arguments: []CallArgument,
     bindings: []Binding,
     binding_references: []BindingReference,
     summary: Summary,
@@ -113,6 +133,8 @@ pub const Result = struct {
             if (call.enclosing_declaration.len > 0) self.allocator.free(call.enclosing_declaration);
         }
         self.allocator.free(self.calls);
+        for (self.call_arguments) |argument| self.allocator.free(argument.expression);
+        self.allocator.free(self.call_arguments);
         for (self.bindings) |binding| {
             self.allocator.free(binding.name);
             if (binding.enclosing_declaration.len > 0) self.allocator.free(binding.enclosing_declaration);
@@ -129,6 +151,7 @@ pub const Result = struct {
         self.declarations = &.{};
         self.imports = &.{};
         self.calls = &.{};
+        self.call_arguments = &.{};
         self.bindings = &.{};
         self.binding_references = &.{};
     }
@@ -159,6 +182,20 @@ pub const Result = struct {
             if (std.mem.eql(u8, call.callee, callee)) return &self.calls[index];
         }
         return null;
+    }
+
+    pub fn argumentsFor(self: *const Result, call: *const Call) []const CallArgument {
+        var start: ?usize = null;
+        var end: usize = 0;
+        for (self.call_arguments, 0..) |argument, index| {
+            if (argument.call_span.start_byte != call.span.start_byte or argument.call_span.end_byte != call.span.end_byte) {
+                if (start != null) break;
+                continue;
+            }
+            if (start == null) start = index;
+            end = index + 1;
+        }
+        return if (start) |index| self.call_arguments[index..end] else &.{};
     }
 
     pub fn findBinding(self: *const Result, name: []const u8, enclosing_declaration: []const u8) ?*const Binding {
@@ -197,6 +234,8 @@ pub fn parse(
     errdefer deinitImports(allocator, &imports);
     var calls: std.ArrayList(Call) = .empty;
     errdefer deinitCalls(allocator, &calls);
+    var call_arguments: std.ArrayList(CallArgument) = .empty;
+    errdefer deinitCallArguments(allocator, &call_arguments);
     var bindings: std.ArrayList(Binding) = .empty;
     errdefer deinitBindings(allocator, &bindings);
     var binding_references: std.ArrayList(BindingReference) = .empty;
@@ -322,18 +361,33 @@ pub fn parse(
         const enclosing = enclosingName(ranges.items, callee_span.start_byte, callee_span.end_byte);
         const enclosing_copy = if (enclosing.len > 0) try owned.copy(u8, allocator, enclosing) else "";
         errdefer if (enclosing_copy.len > 0) allocator.free(enclosing_copy);
-        try ensureFactCapacity(try factCount(&.{ declarations.items.len, imports.items.len, calls.items.len, bindings.items.len, binding_references.items.len }), options.max_facts);
+        try ensureFactCapacity(try factCount(&.{ declarations.items.len, imports.items.len, calls.items.len, call_arguments.items.len, bindings.items.len, binding_references.items.len }), options.max_facts);
+        const call_span = spanForNode(source, &tree, node);
         try calls.append(allocator, .{
             .callee = callee,
             .enclosing_declaration = enclosing_copy,
-            .span = spanForNode(source, &tree, node),
+            .span = call_span,
             .callee_span = callee_span,
         });
+        for (full_call.ast.params, 0..) |parameter, argument_index| {
+            const argument_span = spanForNode(source, &tree, parameter);
+            const expression = try compactExpressionAlloc(allocator, source[argument_span.start_byte..argument_span.end_byte], options.max_label_bytes);
+            errdefer allocator.free(expression);
+            try ensureFactCapacity(try factCount(&.{ declarations.items.len, imports.items.len, calls.items.len, call_arguments.items.len, bindings.items.len, binding_references.items.len }), options.max_facts);
+            try call_arguments.append(allocator, .{
+                .call_span = call_span,
+                .index = @intCast(argument_index),
+                .expression = expression,
+                .kind = expressionKind(&tree, parameter, argument_span, source),
+                .span = argument_span,
+            });
+        }
     }
 
     std.mem.sort(Declaration, declarations.items, {}, lessThanDeclaration);
     std.mem.sort(Import, imports.items, {}, lessThanImport);
     std.mem.sort(Call, calls.items, {}, lessThanCall);
+    std.mem.sort(CallArgument, call_arguments.items, {}, lessThanCallArgument);
     std.mem.sort(Binding, bindings.items, {}, lessThanBinding);
     std.mem.sort(BindingReference, binding_references.items, {}, lessThanBindingReference);
     const declaration_slice = try declarations.toOwnedSlice(allocator);
@@ -350,6 +404,11 @@ pub fn parse(
     errdefer {
         var values = std.ArrayList(Call).fromOwnedSlice(call_slice);
         deinitCalls(allocator, &values);
+    }
+    const call_argument_slice = try call_arguments.toOwnedSlice(allocator);
+    errdefer {
+        var values = std.ArrayList(CallArgument).fromOwnedSlice(call_argument_slice);
+        deinitCallArguments(allocator, &values);
     }
     const binding_slice = try bindings.toOwnedSlice(allocator);
     errdefer {
@@ -370,16 +429,18 @@ pub fn parse(
         .declarations = declaration_slice,
         .imports = import_slice,
         .calls = call_slice,
+        .call_arguments = call_argument_slice,
         .bindings = binding_slice,
         .binding_references = binding_reference_slice,
         .summary = .{
             .declarations = declaration_slice.len,
             .imports = import_slice.len,
             .calls = call_slice.len,
+            .call_arguments = call_argument_slice.len,
             .bindings = binding_slice.len,
             .binding_references = binding_reference_slice.len,
         },
-        .fingerprint = fingerprint(path, source.len, declaration_slice, import_slice, call_slice, binding_slice, binding_reference_slice),
+        .fingerprint = fingerprint(path, source.len, declaration_slice, import_slice, call_slice, call_argument_slice, binding_slice, binding_reference_slice),
     };
     errdefer result.deinit();
     try validate(&result);
@@ -389,7 +450,7 @@ pub fn parse(
 pub fn validate(result: *const Result) !void {
     if (!validPath(result.path) or result.source_bytes == 0 or
         result.summary.declarations != result.declarations.len or result.summary.imports != result.imports.len or
-        result.summary.calls != result.calls.len or result.summary.bindings != result.bindings.len or
+        result.summary.calls != result.calls.len or result.summary.call_arguments != result.call_arguments.len or result.summary.bindings != result.bindings.len or
         result.summary.binding_references != result.binding_references.len or result.summary.parse_errors != 0)
     {
         return error.InvalidZigParserResult;
@@ -419,6 +480,20 @@ pub fn validate(result: *const Result) !void {
             (index > 0 and call.callee_span.start_byte < previous_start)) return error.InvalidZigCall;
         previous_start = call.callee_span.start_byte;
     }
+    var previous_call_span: ?Span = null;
+    var previous_argument_index: u32 = 0;
+    for (result.call_arguments) |argument| {
+        if (argument.expression.len == 0 or !argument.call_span.valid(result.source_bytes) or !argument.span.valid(result.source_bytes) or
+            argument.span.start_byte < argument.call_span.start_byte or argument.span.end_byte > argument.call_span.end_byte or
+            findCallBySpan(result.calls, argument.call_span) == null) return error.InvalidZigCallArgument;
+        if (previous_call_span) |previous| {
+            const order = compareSpans(previous, argument.call_span);
+            if (order == .gt or (order == .eq and argument.index != previous_argument_index + 1) or
+                (order != .eq and argument.index != 0)) return error.InvalidZigCallArgument;
+        } else if (argument.index != 0) return error.InvalidZigCallArgument;
+        previous_call_span = argument.call_span;
+        previous_argument_index = argument.index;
+    }
     previous_start = 0;
     for (result.bindings, 0..) |binding, index| {
         if (binding.name.len == 0 or !binding.span.valid(result.source_bytes) or !binding.name_span.valid(result.source_bytes) or
@@ -438,7 +513,7 @@ pub fn validate(result: *const Result) !void {
             (index > 0 and reference.span.start_byte < previous_start)) return error.InvalidZigBindingReference;
         previous_start = reference.span.start_byte;
     }
-    const expected = fingerprint(result.path, result.source_bytes, result.declarations, result.imports, result.calls, result.bindings, result.binding_references);
+    const expected = fingerprint(result.path, result.source_bytes, result.declarations, result.imports, result.calls, result.call_arguments, result.bindings, result.binding_references);
     if (!std.mem.eql(u8, &expected, &result.fingerprint)) return error.InvalidZigParserFingerprint;
 }
 
@@ -637,6 +712,37 @@ fn compactExpressionAlloc(allocator: std.mem.Allocator, expression: []const u8, 
     return compact.toOwnedSlice(allocator);
 }
 
+fn expressionKind(tree: *const std.zig.Ast, node: std.zig.Ast.Node.Index, span: Span, source: []const u8) ExpressionKind {
+    const first = tree.firstToken(node);
+    const last = tree.lastToken(node);
+    if (first == last) return switch (tree.tokenTag(first)) {
+        .identifier => .identifier,
+        .string_literal, .multiline_string_literal_line => .string_literal,
+        .number_literal => .number_literal,
+        else => .other,
+    };
+    if (tree.nodeTag(node) == .field_access) return .member;
+    var call_buffer = [1]std.zig.Ast.Node.Index{.root};
+    if (tree.fullCall(&call_buffer, node) != null) return .call;
+    if (span.start_byte + 1 < span.end_byte and std.mem.startsWith(u8, source[span.start_byte..span.end_byte], ".{")) return .struct_literal;
+    return .other;
+}
+
+fn findCallBySpan(calls: []const Call, span: Span) ?*const Call {
+    for (calls) |*call| {
+        if (call.span.start_byte == span.start_byte and call.span.end_byte == span.end_byte) return call;
+    }
+    return null;
+}
+
+fn compareSpans(left: Span, right: Span) std.math.Order {
+    if (left.start_byte < right.start_byte) return .lt;
+    if (left.start_byte > right.start_byte) return .gt;
+    if (left.end_byte < right.end_byte) return .lt;
+    if (left.end_byte > right.end_byte) return .gt;
+    return .eq;
+}
+
 fn spanForNode(source: []const u8, tree: *const std.zig.Ast, node: std.zig.Ast.Node.Index) Span {
     return spanForTokens(source, tree, tree.firstToken(node), tree.lastToken(node));
 }
@@ -685,6 +791,12 @@ fn lessThanCall(_: void, left: Call, right: Call) bool {
     return std.mem.lessThan(u8, left.callee, right.callee);
 }
 
+fn lessThanCallArgument(_: void, left: CallArgument, right: CallArgument) bool {
+    if (left.call_span.start_byte != right.call_span.start_byte) return left.call_span.start_byte < right.call_span.start_byte;
+    if (left.call_span.end_byte != right.call_span.end_byte) return left.call_span.end_byte < right.call_span.end_byte;
+    return left.index < right.index;
+}
+
 fn lessThanBinding(_: void, left: Binding, right: Binding) bool {
     if (left.name_span.start_byte != right.name_span.start_byte) return left.name_span.start_byte < right.name_span.start_byte;
     return std.mem.lessThan(u8, left.name, right.name);
@@ -717,6 +829,11 @@ fn deinitCalls(allocator: std.mem.Allocator, values: *std.ArrayList(Call)) void 
     values.deinit(allocator);
 }
 
+fn deinitCallArguments(allocator: std.mem.Allocator, values: *std.ArrayList(CallArgument)) void {
+    for (values.items) |value| allocator.free(value.expression);
+    values.deinit(allocator);
+}
+
 fn deinitBindings(allocator: std.mem.Allocator, values: *std.ArrayList(Binding)) void {
     for (values.items) |value| {
         allocator.free(value.name);
@@ -740,6 +857,7 @@ fn fingerprint(
     declarations: []const Declaration,
     imports: []const Import,
     calls: []const Call,
+    call_arguments: []const CallArgument,
     bindings: []const Binding,
     binding_references: []const BindingReference,
 ) [32]u8 {
@@ -766,6 +884,13 @@ fn fingerprint(
         updateBytes(&hasher, call.enclosing_declaration);
         updateSpan(&hasher, call.span);
         updateSpan(&hasher, call.callee_span);
+    }
+    for (call_arguments) |argument| {
+        updateSpan(&hasher, argument.call_span);
+        updateU64(&hasher, argument.index);
+        updateBytes(&hasher, argument.expression);
+        updateU64(&hasher, @intFromEnum(argument.kind));
+        updateSpan(&hasher, argument.span);
     }
     for (bindings) |binding| {
         updateBytes(&hasher, binding.name);

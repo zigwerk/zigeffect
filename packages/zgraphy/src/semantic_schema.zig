@@ -266,7 +266,7 @@ pub const required_relation_names = [_][]const u8{
 };
 
 const required_mvp_mappings = [_][]const u8{
-    "contains", "declares", "imports", "calls", "depends_on", "satisfies", "verified_by", "executes", "covers", "source_root", "causal_parent", "observed_at", "references", "owned_by", "member_of", "part_of_target", "defines", "dispatches_to", "deferred_imports", "resolves_to", "imports_from", "re_exports", "aliases", "instantiates", "has_field", "uses_request", "uses_response", "references_type", "generated_from", "generated_client_for", "generated_server_for",
+    "contains", "declares", "imports", "calls", "depends_on", "satisfies", "verified_by", "executes", "covers", "source_root", "causal_parent", "observed_at", "references", "owned_by", "member_of", "part_of_target", "defines", "dispatches_to", "deferred_imports", "resolves_to", "imports_from", "re_exports", "aliases", "instantiates", "has_field", "uses_request", "uses_response", "references_type", "generated_from", "generated_client_for", "generated_server_for", "invokes_operation", "handles_operation",
 };
 
 const required_benchmark_mappings = [_][]const u8{

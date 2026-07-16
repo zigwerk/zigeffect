@@ -1,0 +1,36 @@
+{
+  "schema": "zgraphy.graphify-cross-stack-operation-gap.v1",
+  "classification": "confirmed-gap",
+  "baseline": {
+    "product": "Graphify",
+    "version": "0.9.17",
+    "commit": "cb96bdaa0c367bec8d5c5aee5d7c9ebb727e9780",
+    "mode": "extract --code-only --no-cluster --force --timing",
+    "fixture": "benchmarks/fixtures/fullstack-orders",
+    "source_graph_sha256": "1664579ccb1b164abf4e425e9fab6e18d1f30aeb164368e9fd672d14e207fc89",
+    "proto_source_sha256": "6c145dd9f5da6dd7cbd8745b039c034f10200572b4132e87dd849c1f88c7367a",
+    "frontend_source_sha256": "4fc269cf632a8ddd50627c56c816e1df1e82ecee07b5d2adb40741667bf302a8",
+    "backend_source_sha256": "fe834996ef07ead72ceee89fbf7d082608a2e38e044dc478a9aa02e8542edf51"
+  },
+  "observed": {
+    "nodes": 28,
+    "relations": 36,
+    "canonical_operations": 0,
+    "frontend_invokes_operation": 0,
+    "backend_handles_operation": 0,
+    "complete_interactions": 0,
+    "reported_total_seconds": 0.2
+  },
+  "expected": {
+    "canonical_operation": "orders.v1.OrdersService/GetOrder",
+    "frontend_callable": "frontend/src/ordersClient.ts#fetchOrder",
+    "backend_handler": "backend/src/orders_service.zig#OrdersService.GetOrder",
+    "request_type": "orders.v1.GetOrderRequest",
+    "response_type": "orders.v1.Order"
+  },
+  "limitations": [
+    "Graphify extracts the generated and handwritten syntax but skips orders.proto as unclassified.",
+    "Graphify emits no relation from fetchOrder or OrdersService.GetOrder to a canonical operation and therefore cannot form a source-grounded frontend-to-backend interaction.",
+    "The 0.2 second timing is one local run and is evidence for this receipt only, not a general performance claim."
+  ]
+}

@@ -28,6 +28,11 @@ evidence connects imported direct calls, namespace members, static class calls,
 local `new` bindings, bare typed parameters, fields and constructor properties
 without repository-wide name fallback. Import aliases, re-exports, class-owned
 methods, calls and instantiations are materialized as inspectable graph edges.
+Connect client construction and member calls now join through strict
+Protobuf-ES lineage to canonical Proto operations, while registered ZigEffect
+`GeneratedDriverBinding` handlers join through protoc-gen-zig lineage. The
+result exposes directed `invokes_operation` and `handles_operation` proof
+edges; shared spellings alone never qualify.
 
 The target engine is self-maintaining after `init`: default agent queries check
 freshness, publish safe incremental generations, prune invalidated facts and
@@ -305,8 +310,9 @@ Zig syntax enters through the compiler-owned AST, while the shared native
 parser supplies exact TypeScript/TSX/JavaScript and Proto facts. Zig call
 resolution and TypeScript module and symbol resolution preserve candidates and
 typed ambiguity without name-only cross-file guesses. Export/barrel/default/
-namespace flow, evidence-backed receiver calls, canonical Proto identities and
-strict Protobuf-ES/protoc-gen-zig source lineage are active. Application
-callsite-to-RPC/handler continuity, deeper Zig type/build resolution, neural
-embeddings, ANN, incremental watch and automatic pruning, MCP, editor
-installers, and visualisation remain later slices.
+namespace flow, evidence-backed receiver calls, canonical Proto identities,
+strict Protobuf-ES/protoc-gen-zig source lineage, and exact Connect-callsite to
+ZigEffect-handler operation continuity are active. Request-path hyperedges and
+feature supernodes, deeper Zig type/build resolution, neural embeddings, ANN,
+incremental watch and automatic pruning, MCP, editor installers, and
+visualisation remain later slices.

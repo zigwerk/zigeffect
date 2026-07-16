@@ -10,6 +10,7 @@ const typescript_resolution = @import("typescript_resolution.zig");
 const typescript_symbols = @import("typescript_symbols.zig");
 const protobuf_resolution = @import("protobuf_resolution.zig");
 const generated_lineage = @import("generated_lineage.zig");
+const rpc_continuity = @import("rpc_continuity.zig");
 
 pub const max_manifest_bytes: usize = 4 * 1024 * 1024;
 pub const max_causal_bytes: usize = 64 * 1024 * 1024;
@@ -46,6 +47,8 @@ pub const BuildSummary = struct {
     proto_references: usize = 0,
     proto_resolution_diagnostics: usize = 0,
     generated_bindings: usize = 0,
+    rpc_observations: usize = 0,
+    rpc_interactions: usize = 0,
     nodes: usize = 0,
     edges: usize = 0,
     vectors: usize = 0,
@@ -160,6 +163,15 @@ pub fn buildRepository(
         .max_candidates = options.max_edges,
     });
     defer generated_corpus.deinit();
+    var continuity_corpus = try rpc_continuity.Corpus.init(allocator, .{
+        .max_documents = options.max_files,
+        .max_document_bytes = options.max_file_bytes,
+        .max_total_document_bytes = options.max_source_bytes,
+        .max_observations = options.max_edges,
+        .max_candidates = options.max_edges,
+        .max_interactions = options.max_edges,
+    });
+    defer continuity_corpus.deinit();
     for (discovered.records) |record| {
         if (!isPlaced(record.disposition)) continue;
         try typescript_corpus.addFile(record.relative_path);
@@ -179,6 +191,7 @@ pub fn buildRepository(
         summary.source_bytes = std.math.add(usize, summary.source_bytes, source.len) catch return error.SourceLimitExceeded;
         if (summary.source_bytes > options.max_source_bytes) return error.SourceLimitExceeded;
         try protobuf_corpus.addSource(record.relative_path, source);
+        try continuity_corpus.addSource(record.relative_path, source, .protobuf);
         summary.files_indexed += 1;
     }
     for (discovered.records) |record| {
@@ -188,6 +201,7 @@ pub fn buildRepository(
         summary.source_bytes = std.math.add(usize, summary.source_bytes, source.len) catch return error.SourceLimitExceeded;
         if (summary.source_bytes > options.max_source_bytes) return error.SourceLimitExceeded;
         if (record.classification.is_generated) try generated_corpus.addSource(record.relative_path, source, .zig);
+        try continuity_corpus.addSource(record.relative_path, source, .zig);
         try zig_corpus.addSource(record.relative_path, source);
         const parsed = zig_corpus.parsedForPath(record.relative_path) orelse return error.MissingParsedZigSource;
         try indexParsedZigSource(&graph, record.relative_path, source, parsed);
@@ -202,6 +216,8 @@ pub fn buildRepository(
         if (summary.source_bytes > options.max_source_bytes) return error.SourceLimitExceeded;
         if (record.classification.is_generated) try generated_corpus.addSource(record.relative_path, source, .typescript);
         const mode = typeScriptModeForPath(record.relative_path) orelse return error.UnsupportedTypeScriptSourceExtension;
+        const continuity_language = continuityLanguage(mode) orelse return error.UnsupportedTypeScriptSourceExtension;
+        try continuity_corpus.addSource(record.relative_path, source, continuity_language);
         var parsed = try typescript_parser.parse(allocator, record.relative_path, source, mode, .{ .max_source_bytes = options.max_file_bytes });
         defer parsed.deinit();
         try typescript_corpus.addParsed(&parsed);
@@ -242,6 +258,11 @@ pub fn buildRepository(
     defer generated.deinit();
     try materializeGeneratedLineage(&graph, &proto_resolutions, &generated);
     summary.generated_bindings = generated.summary.links;
+    var continuity = try continuity_corpus.resolve();
+    defer continuity.deinit();
+    try materializeRpcContinuity(&graph, &proto_resolutions, &continuity);
+    summary.rpc_observations = continuity.summary.observations;
+    summary.rpc_interactions = continuity.summary.interactions;
     const causal_records = root.readFileAlloc(io, causal_wal_path, allocator, .limited(max_causal_bytes)) catch |failure| switch (failure) {
         error.FileNotFound => null,
         else => return failure,
@@ -1155,6 +1176,53 @@ fn materializeGeneratedLineage(
     }
 }
 
+fn materializeRpcContinuity(
+    graph: *model.RepositoryGraph,
+    proto: *const protobuf_resolution.Result,
+    result: *const rpc_continuity.Result,
+) !void {
+    try rpc_continuity.validate(result);
+    if (!std.mem.eql(u8, &result.proto_fingerprint, &proto.fingerprint)) return error.RpcContinuityProtoSnapshotMismatch;
+    for (result.observations) |observation| {
+        if (observation.status != .resolved or observation.candidate_count != 1) continue;
+        const source = switch (observation.role) {
+            .frontend_invocation => findQualifiedTypeScriptSymbol(graph, observation.source_path, observation.source_symbol),
+            .backend_handler => findUniqueQualifiedZigSymbol(graph, observation.source_path, observation.source_symbol),
+        } orelse return error.MissingRpcContinuitySourceNode;
+        const candidate = result.candidatesFor(&observation)[0];
+        if (candidate.entity_index >= proto.entities.len or
+            !std.mem.eql(u8, candidate.canonical_operation, proto.entities[candidate.entity_index].canonical_name) or
+            !std.mem.eql(u8, candidate.proto_source_path, proto.entities[candidate.entity_index].source_path))
+        {
+            return error.RpcContinuityProtoSnapshotMismatch;
+        }
+        const operation = protobufEntityNode(graph, &proto.entities[candidate.entity_index]) orelse return error.MissingRpcContinuityOperationNode;
+        try graph.addEdge(.{
+            .from = source.id,
+            .to = operation.id,
+            .relation = switch (observation.role) {
+                .frontend_invocation => .invokes_operation,
+                .backend_handler => .handles_operation,
+            },
+            .provenance = .inferred,
+            .source_path = observation.source_path,
+            .line = observation.span.start_line,
+        });
+    }
+}
+
+fn findUniqueQualifiedZigSymbol(graph: *const model.RepositoryGraph, path: []const u8, qualified: []const u8) ?*const model.Node {
+    const dot = std.mem.lastIndexOfScalar(u8, qualified, '.');
+    const leaf = if (dot) |index| qualified[index + 1 ..] else qualified;
+    var found: ?*const model.Node = null;
+    for (graph.nodes.items) |*node| {
+        if (node.kind != .symbol or !std.mem.eql(u8, node.path, path) or !std.mem.eql(u8, node.label, leaf)) continue;
+        if (found != null) return null;
+        found = node;
+    }
+    return found;
+}
+
 fn protobufNodeKind(kind: protobuf_resolution.EntityKind) model.NodeKind {
     return switch (kind) {
         .package => .package,
@@ -1463,4 +1531,14 @@ fn typeScriptModeForPath(path: []const u8) ?typescript_parser.LanguageMode {
     if (std.mem.eql(u8, extension, ".ts") or std.mem.eql(u8, extension, ".mts") or std.mem.eql(u8, extension, ".cts")) return .typescript;
     if (std.mem.eql(u8, extension, ".js") or std.mem.eql(u8, extension, ".mjs") or std.mem.eql(u8, extension, ".cjs")) return .javascript;
     return null;
+}
+
+fn continuityLanguage(mode: typescript_parser.LanguageMode) ?rpc_continuity.Language {
+    return switch (mode) {
+        .typescript => .typescript,
+        .tsx => .tsx,
+        .javascript => .javascript,
+        .jsx => .jsx,
+        else => null,
+    };
 }

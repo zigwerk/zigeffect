@@ -167,6 +167,8 @@
     {"source_schema":"mvp_v1","source_relation":"generated_from","target_relation":"generated_from","reverse_endpoints":false,"projection":"binary"},
     {"source_schema":"mvp_v1","source_relation":"generated_client_for","target_relation":"generated_client_for","reverse_endpoints":false,"projection":"binary"},
     {"source_schema":"mvp_v1","source_relation":"generated_server_for","target_relation":"generated_server_for","reverse_endpoints":false,"projection":"binary"},
+    {"source_schema":"mvp_v1","source_relation":"invokes_operation","target_relation":"invokes_operation","reverse_endpoints":false,"projection":"binary"},
+    {"source_schema":"mvp_v1","source_relation":"handles_operation","target_relation":"handles_operation","reverse_endpoints":false,"projection":"binary"},
 
     {"source_schema":"benchmark_v1","source_relation":"contains","target_relation":"contains","reverse_endpoints":false,"projection":"binary"},
     {"source_schema":"benchmark_v1","source_relation":"declares","target_relation":"declares","reverse_endpoints":false,"projection":"binary"},

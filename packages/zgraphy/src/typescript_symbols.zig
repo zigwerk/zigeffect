@@ -156,7 +156,8 @@ pub const Corpus = struct {
         try typescript_parser.validate(parsed);
         if (self.parsed_files.items.len >= self.options.max_files) return error.TypeScriptSymbolFileLimitExceeded;
         for (self.parsed_files.items) |existing| if (std.mem.eql(u8, existing.path, parsed.path)) return error.DuplicateTypeScriptSymbolSource;
-        const file_facts = parsed.declarations.len + parsed.imports.len + parsed.import_bindings.len + parsed.exports.len + parsed.type_bindings.len + parsed.calls.len;
+        const file_facts = parsed.declarations.len + parsed.imports.len + parsed.import_bindings.len + parsed.exports.len +
+            parsed.type_bindings.len + parsed.calls.len + parsed.call_arguments.len + parsed.call_bindings.len;
         const next_facts = std.math.add(usize, self.fact_count, file_facts) catch return error.TypeScriptSymbolFactLimitExceeded;
         if (next_facts > self.options.max_facts) return error.TypeScriptSymbolFactLimitExceeded;
         try self.parsed_files.append(self.allocator, parsed.*);
@@ -167,6 +168,8 @@ pub const Corpus = struct {
         parsed.exports = &.{};
         parsed.type_bindings = &.{};
         parsed.calls = &.{};
+        parsed.call_arguments = &.{};
+        parsed.call_bindings = &.{};
         parsed.protocol_packages = &.{};
         parsed.protocol_fields = &.{};
         parsed.protocol_enum_values = &.{};

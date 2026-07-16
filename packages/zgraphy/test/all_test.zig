@@ -499,7 +499,7 @@ test "zgraphy M0 native differential adapter reports canonical matches and inter
 
     try std.testing.expectEqualStrings("zgraphy", receipt.adapter.engine);
     try std.testing.expectEqualStrings("0.1.0", receipt.adapter.version);
-    try std.testing.expectEqualStrings("zgraphy-native-v2", receipt.adapter.adapter_version);
+    try std.testing.expectEqualStrings("zgraphy-native-v3", receipt.adapter.adapter_version);
     try std.testing.expectEqual(@as(usize, 12), receipt.input.nodes);
     try std.testing.expectEqual(@as(usize, 20), receipt.input.relations);
     try std.testing.expectEqual(@as(usize, 8), receipt.entities.matched);
@@ -663,7 +663,7 @@ test "zgraphy M0 quality matrix recomputes weighted identified claim-free totals
 
     const corpus_digest = zgraphy.Benchmark.canonicalCorpusDigest();
     const corpus_digest_hex = std.fmt.bytesToHex(corpus_digest, .lower);
-    try std.testing.expectEqualStrings("a25dcb727149294aaf82020aa1d5325007eec512c9f225549fce73debf68caed", &corpus_digest_hex);
+    try std.testing.expectEqualStrings("088363ebecb8827650df59c3bdb737bf4da77c98098daf2fe12f228b5aedbd78", &corpus_digest_hex);
 
     var checked_baseline = try zgraphy.QualityMatrix.parseEmbeddedBaseline(std.testing.allocator);
     defer checked_baseline.deinit();
@@ -906,7 +906,7 @@ test "zgraphy M0 semantic schema ontology is complete versioned and migration sa
 
     const digest = zgraphy.SemanticSchema.contractDigest();
     const digest_hex = std.fmt.bytesToHex(digest, .lower);
-    try std.testing.expectEqualStrings("171de155c28b29bbed87b4309e7656411516937aaf4406b3760a0c0737a78881", &digest_hex);
+    try std.testing.expectEqualStrings("6135845e308ce610c6cc787aac4e46421df70c000adb8ff8ca7c6eab2bb0bbe3", &digest_hex);
     const original_name = parsed.value.relations[1].name;
     parsed.value.relations[1].name = parsed.value.relations[0].name;
     try std.testing.expectError(error.DuplicateSemanticRelation, zgraphy.SemanticSchema.validate(&parsed.value));
@@ -1671,8 +1671,15 @@ test "zgraphy M2 Zig parser boundary emits exact AST facts without lexical false
     try std.testing.expectEqualStrings("handle", helper_call.enclosing_declaration);
     try std.testing.expectEqual(@as(u32, 12), helper_call.callee_span.start_line);
     try std.testing.expectEqual(@as(u32, 9), helper_call.callee_span.start_column);
+    const helper_arguments = first.argumentsFor(helper_call);
+    try std.testing.expectEqual(@as(usize, 1), helper_arguments.len);
+    try std.testing.expectEqual(zgraphy.ZigParser.ExpressionKind.identifier, helper_arguments[0].kind);
+    try std.testing.expectEqualStrings("value", helper_arguments[0].expression);
     const field_call = first.findCall("std.debug.print") orelse return error.MissingParsedFieldCall;
     try std.testing.expectEqualStrings("handle", field_call.enclosing_declaration);
+    const print_arguments = first.argumentsFor(field_call);
+    try std.testing.expectEqual(@as(usize, 2), print_arguments.len);
+    try std.testing.expectEqualStrings("\"value={d}\\n\"", print_arguments[0].expression);
     const test_call = first.findCall("service.handle") orelse return error.MissingParsedTestCall;
     try std.testing.expectEqualStrings("service handles", test_call.enclosing_declaration);
     try std.testing.expect(first.findCall("invented") == null);
@@ -2570,8 +2577,8 @@ test "zgraphy M2 Proto generated lineage preserves canonical contracts and stric
     try std.testing.expectEqualStrings("Graphify", gap.value.baseline.product);
     try std.testing.expectEqualStrings("0.9.17", gap.value.baseline.version);
     try std.testing.expectEqualStrings(zgraphy.Parity.pinned_graphify_commit, gap.value.baseline.commit);
-    try std.testing.expectEqual(@as(usize, 11), gap.value.observed.nodes);
-    try std.testing.expectEqual(@as(usize, 19), gap.value.observed.relations);
+    try std.testing.expectEqual(@as(usize, 28), gap.value.observed.nodes);
+    try std.testing.expectEqual(@as(usize, 36), gap.value.observed.relations);
     try std.testing.expectEqual(@as(usize, 0), gap.value.observed.proto_files);
     try std.testing.expectEqual(@as(usize, 0), gap.value.observed.canonical_packages);
     try std.testing.expectEqual(@as(usize, 0), gap.value.observed.canonical_services);
@@ -2697,6 +2704,8 @@ test "zgraphy M2 Proto generated lineage preserves canonical contracts and stric
     try expectGeneratedBinding(&lineage, .typescript, .file, "frontend/gen/orders/v1/orders_pb.ts", "orders/v1/orders.proto");
     try expectGeneratedBinding(&lineage, .typescript, .service, "frontend/gen/orders/v1/orders_pb.ts", "orders.v1.OrdersService");
     try expectGeneratedBinding(&lineage, .typescript, .operation, "frontend/gen/orders/v1/orders_pb.ts", "orders.v1.OrdersService/GetOrder");
+    const generated_get_order = lineage.findBinding(.typescript, .operation, "frontend/gen/orders/v1/orders_pb.ts", "orders.v1.OrdersService/GetOrder") orelse return error.MissingGeneratedGetOrderBinding;
+    try std.testing.expectEqualStrings("getOrder", generated_get_order.generated_symbol);
     try expectGeneratedBinding(&lineage, .zig, .service, "backend/gen/orders/v1.pb.zig", "orders.v1.OrdersService");
     try expectGeneratedBinding(&lineage, .zig, .operation, "backend/gen/orders/v1.pb.zig", "orders.v1.OrdersService/GetOrder");
     try std.testing.expect(lineage.findBinding(.typescript, .service, "frontend/src/deceptive.ts", "orders.v1.OrdersService") == null);
@@ -2763,6 +2772,269 @@ test "zgraphy M2 Proto generated lineage enforces corpus result and marker bound
     defer documents.deinit();
     try documents.addSource("gen/one_pb.ts", "// source", .typescript);
     try std.testing.expectError(error.GeneratedLineageDocumentLimitExceeded, documents.addSource("gen/two_pb.ts", "// source", .typescript));
+
+    const marker_proto =
+        \\syntax = "proto3";
+        \\package example.v1;
+        \\service Api {
+        \\  rpc Missing(Request) returns (Response);
+        \\  rpc Present(Request) returns (Response);
+        \\}
+        \\message Request {}
+        \\message Response {}
+    ;
+    var marker_protocol = try zgraphy.ProtobufResolution.Corpus.init(std.testing.allocator, .{});
+    defer marker_protocol.deinit();
+    try marker_protocol.addSource("proto/api.proto", marker_proto);
+    var marker_resolution = try marker_protocol.resolve();
+    defer marker_resolution.deinit();
+    const skipped_property =
+        \\// @generated by protoc-gen-es v2.10.0 with parameter "target=ts"
+        \\// @generated from file proto/api.proto (package example.v1, syntax proto3)
+        \\/** @generated from service example.v1.Api */
+        \\export const Api = {
+        \\  /** @generated from rpc example.v1.Api.Missing */
+        \\  /** @generated from rpc example.v1.Api.Present */
+        \\  present: {},
+        \\};
+    ;
+    var skipped_lineage = try zgraphy.GeneratedLineage.Corpus.init(std.testing.allocator, .{});
+    defer skipped_lineage.deinit();
+    try skipped_lineage.addSource("gen/api_pb.ts", skipped_property, .typescript);
+    var skipped_result = try skipped_lineage.resolve(&marker_resolution);
+    defer skipped_result.deinit();
+    try std.testing.expect(skipped_result.findBinding(.typescript, .operation, "gen/api_pb.ts", "example.v1.Api/Missing") == null);
+    const present = skipped_result.findBinding(.typescript, .operation, "gen/api_pb.ts", "example.v1.Api/Present") orelse return error.MissingAdjacentGeneratedProperty;
+    try std.testing.expectEqualStrings("present", present.generated_symbol);
+}
+
+test "zgraphy M2 cross-stack operation continuity proves generated client to exact Zig handler" {
+    const GraphifyGap = struct {
+        schema: []const u8,
+        classification: []const u8,
+        baseline: struct {
+            product: []const u8,
+            version: []const u8,
+            commit: []const u8,
+            mode: []const u8,
+            fixture: []const u8,
+            source_graph_sha256: []const u8,
+            proto_source_sha256: []const u8,
+            frontend_source_sha256: []const u8,
+            backend_source_sha256: []const u8,
+        },
+        observed: struct {
+            nodes: usize,
+            relations: usize,
+            canonical_operations: usize,
+            frontend_invokes_operation: usize,
+            backend_handles_operation: usize,
+            complete_interactions: usize,
+            reported_total_seconds: f64,
+        },
+        expected: struct {
+            canonical_operation: []const u8,
+            frontend_callable: []const u8,
+            backend_handler: []const u8,
+            request_type: []const u8,
+            response_type: []const u8,
+        },
+        limitations: []const []const u8,
+    };
+    const scenario = zstd.Testing.Scenario{
+        .id = "m2-cross-stack-operation-continuity",
+        .label = "Frontend generated-client calls and exact Zig handlers share canonical Proto operation proof",
+        .requirement = "req-m2-cross-stack-operation-continuity",
+        .acceptance_check = "check-m2-cross-stack-operation-continuity",
+        .component = "zgraphy",
+        .command = "test",
+        .default_seed = 1907,
+        .source_roots = &.{ "src/rpc_continuity.zig", "src/typescript_parser.zig", "src/typescript_resolution.zig", "src/generated_lineage.zig", "src/zig_parser.zig", "src/zig_resolution.zig", "src/protobuf_resolution.zig", "src/indexer.zig", "src/model.zig", "src/semantic_schema.zig", "src/semantic-schema.v2.json", "benchmarks/fixtures/fullstack-orders", "benchmarks/adapter-fixtures/graphify-0.9.17/cross-stack-operation-gap.json", "benchmarks/baselines/cross-stack-operation.v1.json", "src/root.zig", "test/all_test.zig" },
+        .tags = &.{ "acceptance", "m2", "cross-stack", "typescript", "connect", "protobuf-es", "proto", "rpc", "zig", "zigeffect-grpc", "generated-driver", "handler", "interaction", "graphify", "benchmark", "deterministic" },
+    };
+    var evidence = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{
+        .project = "zgraphy",
+        .suite = "zgraphy-tests",
+        .scenario = scenario,
+        .seed = 1907,
+    });
+    defer evidence.deinit();
+    const assertions = zstd.Testing.AssertionRecorder.init(&evidence);
+
+    const gap_bytes = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "benchmarks/adapter-fixtures/graphify-0.9.17/cross-stack-operation-gap.json", std.testing.allocator, .limited(128 * 1024));
+    defer std.testing.allocator.free(gap_bytes);
+    var gap = try std.json.parseFromSlice(GraphifyGap, std.testing.allocator, gap_bytes, .{ .ignore_unknown_fields = false });
+    defer gap.deinit();
+    try std.testing.expectEqualStrings("zgraphy.graphify-cross-stack-operation-gap.v1", gap.value.schema);
+    try std.testing.expectEqualStrings("confirmed-gap", gap.value.classification);
+    try std.testing.expectEqualStrings(zgraphy.Parity.pinned_graphify_commit, gap.value.baseline.commit);
+    try std.testing.expectEqual(@as(usize, 28), gap.value.observed.nodes);
+    try std.testing.expectEqual(@as(usize, 36), gap.value.observed.relations);
+    try std.testing.expectEqual(@as(usize, 0), gap.value.observed.canonical_operations);
+    try std.testing.expectEqual(@as(usize, 0), gap.value.observed.frontend_invokes_operation);
+    try std.testing.expectEqual(@as(usize, 0), gap.value.observed.backend_handles_operation);
+    try std.testing.expectEqual(@as(usize, 0), gap.value.observed.complete_interactions);
+
+    const benchmark_bytes = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "benchmarks/baselines/cross-stack-operation.v1.json", std.testing.allocator, .limited(256 * 1024));
+    defer std.testing.allocator.free(benchmark_bytes);
+    var benchmark_receipt = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, benchmark_bytes, .{});
+    defer benchmark_receipt.deinit();
+    const benchmark_object = benchmark_receipt.value.object;
+    try std.testing.expectEqualStrings("zgraphy.cross-stack-operation-benchmark.v1", benchmark_object.get("schema").?.string);
+    const quality = benchmark_object.get("quality").?.object;
+    try std.testing.expectEqual(@as(i64, 10), quality.get("graphify").?.object.get("matched_entities").?.integer);
+    try std.testing.expectEqual(@as(i64, 16), quality.get("zgraphy").?.object.get("matched_entities").?.integer);
+    const performance = benchmark_object.get("performance").?.object;
+    try std.testing.expectEqual(@as(i64, 157508375), performance.get("graphify_process_elapsed_ns").?.object.get("p50").?.integer);
+    try std.testing.expectEqual(@as(i64, 71452500), performance.get("zgraphy_process_elapsed_ns").?.object.get("p50").?.integer);
+    const claims = benchmark_object.get("claim_status").?.object;
+    try std.testing.expectEqualStrings("measured_candidate_gap", claims.get("persisted_size").?.string);
+    try std.testing.expectEqualStrings("unmeasured", claims.get("peak_memory").?.string);
+
+    var fixture = try std.Io.Dir.cwd().openDir(std.testing.io, "benchmarks/fixtures/fullstack-orders", .{ .iterate = true, .follow_symlinks = false });
+    defer fixture.close(std.testing.io);
+    const documents = [_]struct { path: []const u8, language: zgraphy.RpcContinuity.Language }{
+        .{ .path = "proto/orders/v1/orders.proto", .language = .protobuf },
+        .{ .path = "frontend/gen/orders_pb.ts", .language = .typescript },
+        .{ .path = "frontend/src/ordersClient.ts", .language = .typescript },
+        .{ .path = "frontend/src/deceptiveClient.ts", .language = .typescript },
+        .{ .path = "backend/gen/orders.pb.zig", .language = .zig },
+        .{ .path = "backend/src/orders_service.zig", .language = .zig },
+        .{ .path = "backend/src/unregistered_service.zig", .language = .zig },
+    };
+    var corpus = try zgraphy.RpcContinuity.Corpus.init(std.testing.allocator, .{});
+    defer corpus.deinit();
+    for (documents) |document| {
+        const source = try fixture.readFileAlloc(std.testing.io, document.path, std.testing.allocator, .limited(128 * 1024));
+        defer std.testing.allocator.free(source);
+        try corpus.addSource(document.path, source, document.language);
+    }
+    var first = try corpus.resolve();
+    defer first.deinit();
+    try zgraphy.RpcContinuity.validate(&first);
+
+    var reversed = try zgraphy.RpcContinuity.Corpus.init(std.testing.allocator, .{});
+    defer reversed.deinit();
+    var index: usize = documents.len;
+    while (index > 0) {
+        index -= 1;
+        const document = documents[index];
+        const source = try fixture.readFileAlloc(std.testing.io, document.path, std.testing.allocator, .limited(128 * 1024));
+        defer std.testing.allocator.free(source);
+        try reversed.addSource(document.path, source, document.language);
+    }
+    var second = try reversed.resolve();
+    defer second.deinit();
+    try std.testing.expectEqualSlices(u8, &first.fingerprint, &second.fingerprint);
+
+    const operation = "orders.v1.OrdersService/GetOrder";
+    const frontend = first.findResolved(.frontend_invocation, "frontend/src/ordersClient.ts", "fetchOrder", operation) orelse return error.MissingFrontendOperationInvocation;
+    try std.testing.expectEqualStrings("connect-create-client-v1", frontend.recipe);
+    const backend = first.findResolved(.backend_handler, "backend/src/orders_service.zig", "OrdersService.GetOrder", operation) orelse return error.MissingBackendOperationHandler;
+    try std.testing.expectEqualStrings("zigeffect-generated-driver-v1", backend.recipe);
+    const interaction = first.findInteraction(operation) orelse return error.MissingCrossStackInteraction;
+    try std.testing.expectEqualStrings("orders.v1.GetOrderRequest", interaction.request_type);
+    try std.testing.expectEqualStrings("orders.v1.Order", interaction.response_type);
+    try std.testing.expect(first.findObservation(.frontend_invocation, "frontend/src/deceptiveClient.ts", "deceptiveFetch") == null);
+    try std.testing.expect(first.findObservation(.backend_handler, "backend/src/unregistered_service.zig", "UnregisteredOrdersService.GetOrder") == null);
+
+    var built = try zgraphy.Indexer.buildRepository(std.testing.allocator, std.testing.io, fixture, .{
+        .repository_id = "repo-19071907190719071907190719071907",
+        .max_nodes = 4096,
+        .max_edges = 16_384,
+    });
+    defer built.deinit();
+    const frontend_node = findGraphNode(&built.graph, .symbol, "frontend/src/ordersClient.ts", "fetchOrder") orelse return error.MissingGraphedFrontendInvocation;
+    const backend_node = findGraphNode(&built.graph, .symbol, "backend/src/orders_service.zig", "GetOrder") orelse return error.MissingGraphedBackendHandler;
+    const operation_node = findGraphNode(&built.graph, .operation, "proto/orders/v1/orders.proto", operation) orelse return error.MissingGraphedContinuityOperation;
+    try std.testing.expect(built.graph.hasEdge(frontend_node.id, operation_node.id, .invokes_operation));
+    try std.testing.expect(built.graph.hasEdge(backend_node.id, operation_node.id, .handles_operation));
+    var gold = try zgraphy.Benchmark.parseEmbeddedGold(std.testing.allocator, "benchmarks/gold/fullstack-orders.canonical.v1.json");
+    defer gold.deinit();
+    var receipt = try zgraphy.Differential.projectZgraphy(std.testing.allocator, &built.graph, &gold.value);
+    defer receipt.deinit(std.testing.allocator);
+    try zgraphy.Differential.validateReceipt(&receipt);
+    try std.testing.expectEqual(@as(usize, 16), receipt.entities.matched);
+    try std.testing.expectEqual(@as(usize, 17), receipt.relations.matched);
+    try std.testing.expect(!zgraphy.Differential.containsId(receipt.missing_entity_ids, "contract:orders.v1.OrdersService/GetOrder"));
+    try std.testing.expect(!zgraphy.Differential.containsId(receipt.missing_relation_ids, "rel:orders:fetch-invokes-rpc"));
+    try std.testing.expect(!zgraphy.Differential.containsId(receipt.missing_relation_ids, "rel:orders:rpc-implemented-by-zig"));
+
+    try assertions.boolean(.{
+        .id = "zgraphy.m2.cross-stack-canonical-operation",
+        .label = "the generated frontend invocation and registered Zig handler resolve to one canonical Proto operation",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 2820, .column = 1 },
+        .repair_hint = "require exact factory import generated lineage and GeneratedDriverBinding registration evidence",
+    }, frontend.candidate_count == 1 and backend.candidate_count == 1 and first.summary.interactions == 1 and built.graph.hasEdge(frontend_node.id, operation_node.id, .invokes_operation) and built.graph.hasEdge(backend_node.id, operation_node.id, .handles_operation));
+    try assertions.boolean(.{
+        .id = "zgraphy.m2.cross-stack-negative-evidence",
+        .label = "local lookalikes and unregistered generated bindings cannot manufacture operation edges",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 2820, .column = 1 },
+        .repair_hint = "remove name-only fallbacks and require exact package imports plus registerAll on the bound adapter",
+    }, first.findObservation(.frontend_invocation, "frontend/src/deceptiveClient.ts", "deceptiveFetch") == null and first.findObservation(.backend_handler, "backend/src/unregistered_service.zig", "UnregisteredOrdersService.GetOrder") == null);
+    try assertions.noFindings(.{ .id = "zgraphy.m2.cross-stack-no-findings", .label = "cross-stack operation continuity validation has no causal findings" });
+    try assertions.noPendingFibers(.{ .id = "zgraphy.m2.cross-stack-no-pending", .label = "cross-stack operation continuity leaves no pending fibers" });
+    try evidence.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+}
+
+test "zgraphy M2 cross-stack operation continuity enforces document bounds" {
+    var corpus = try zgraphy.RpcContinuity.Corpus.init(std.testing.allocator, .{ .max_documents = 1 });
+    defer corpus.deinit();
+    try corpus.addSource("one.proto", "syntax = \"proto3\"; message One {}", .protobuf);
+    try std.testing.expectError(error.RpcContinuityDocumentLimitExceeded, corpus.addSource("two.proto", "syntax = \"proto3\"; message Two {}", .protobuf));
+
+    const proto_source = "syntax = \"proto3\"; package duplicate.v1; service Api { rpc Get(Request) returns (Response); } message Request {} message Response {}";
+    const ts_generated =
+        \\// @generated by protoc-gen-es v2.10.0 with parameter "target=ts"
+        \\// @generated from file proto/a/api.proto (package duplicate.v1, syntax proto3)
+        \\/** @generated from service duplicate.v1.Api */
+        \\export const Api = {
+        \\  /** @generated from rpc duplicate.v1.Api.Get */
+        \\  get: {},
+        \\};
+    ;
+    const ts_client =
+        \\import { createClient } from "@connectrpc/connect";
+        \\import { Api } from "../gen/api_pb";
+        \\const client = createClient(Api, {});
+        \\export function fetch() { return client.get({}); }
+    ;
+    const zig_generated =
+        \\// Code generated by protoc-gen-zig
+        \\///! package duplicate.v1
+        \\pub const Request = struct {};
+        \\pub const Response = struct {};
+        \\pub fn Api(comptime User: type, comptime Errors: type) type {
+        \\  return struct {
+        \\    pub const package = "duplicate.v1";
+        \\    pub const service_name = "Api";
+        \\    Get: *const fn (*User, Request) Errors!Response,
+        \\  };
+        \\}
+    ;
+    const zig_backend =
+        \\const zgrpc = @import("zigeffect-grpc");
+        \\const generated = @import("../gen/api.pb.zig");
+        \\pub const Impl = struct { pub fn Get(_: *Impl, _: generated.Request) !generated.Response { return .{}; } };
+        \\pub fn register(allocator: @import("std").mem.Allocator, unary: *zgrpc.Grpc.Registry, incremental: *zgrpc.Incremental.Registry, service: *Impl) !void {
+        \\  var binding = zgrpc.Typed.GeneratedDriverBinding(generated.Api(Impl, anyerror), Impl).init(allocator, service);
+        \\  try binding.registerAll(unary, incremental);
+        \\}
+    ;
+    var ambiguous = try zgraphy.RpcContinuity.Corpus.init(std.testing.allocator, .{});
+    defer ambiguous.deinit();
+    try ambiguous.addSource("proto/a/api.proto", proto_source, .protobuf);
+    try ambiguous.addSource("proto/b/api.proto", proto_source, .protobuf);
+    try ambiguous.addSource("frontend/gen/api_pb.ts", ts_generated, .typescript);
+    try ambiguous.addSource("frontend/src/client.ts", ts_client, .typescript);
+    try ambiguous.addSource("backend/gen/api.pb.zig", zig_generated, .zig);
+    try ambiguous.addSource("backend/src/service.zig", zig_backend, .zig);
+    var result = try ambiguous.resolve();
+    defer result.deinit();
+    const backend = result.findObservation(.backend_handler, "backend/src/service.zig", "Impl.Get") orelse return error.MissingAmbiguousBackendObservation;
+    try std.testing.expectEqual(zgraphy.RpcContinuity.Status.ambiguous, backend.status);
+    try std.testing.expectEqual(@as(usize, 2), backend.candidate_count);
+    try std.testing.expect(result.findInteraction("duplicate.v1.Api/Get") == null);
 }
 
 fn expectProtobufReference(

@@ -29,6 +29,7 @@ pub const TypeScriptSymbols = @import("typescript_symbols.zig");
 pub const ProtobufParser = @import("protobuf_parser.zig");
 pub const ProtobufResolution = @import("protobuf_resolution.zig");
 pub const GeneratedLineage = @import("generated_lineage.zig");
+pub const RpcContinuity = @import("rpc_continuity.zig");
 
 pub const RepositoryGraph = Model.RepositoryGraph;
 pub const Node = Model.Node;

@@ -9,7 +9,7 @@ const parity = @import("parity.zig");
 pub const schema = "zgraphy.differential-receipt.v1";
 pub const schema_version: u32 = 1;
 pub const adapter_version = "graphify-json-v1";
-pub const zgraphy_adapter_version = "zgraphy-native-v2";
+pub const zgraphy_adapter_version = "zgraphy-native-v3";
 pub const zgraphy_version = "0.1.0";
 pub const lexical_adapter_version = "lexical-token-v1";
 pub const max_graph_bytes: usize = 64 * 1024 * 1024;
@@ -686,9 +686,17 @@ fn findGoldEntityZgraphy(gold: *const benchmark.CanonicalIr, node: *const model.
         }
         return null;
     }
-    if (node.kind != .symbol and node.kind != .concept) return null;
+    const expected_kind: ?benchmark.EntityKind = switch (node.kind) {
+        .service => .service,
+        .operation => .rpc_method,
+        .message => .message,
+        .type => .type,
+        .symbol, .concept => null,
+        else => return null,
+    };
     for (gold.entities, 0..) |entity, index| {
         if (entity.kind == .repository or entity.kind == .file) continue;
+        if (expected_kind) |kind| if (entity.kind != kind) continue;
         if (!std.mem.eql(u8, symbolLeaf(entity.name), symbolLeaf(node.label))) continue;
         if (entitySourcePathMatches(gold, &entity, node.path)) return index;
     }
@@ -775,6 +783,9 @@ fn canonicalZgraphyRelation(relation: model.Relation) ?benchmark.RelationKind {
         .covers => .covers,
         .references => .references,
         .dispatches_to => .selects_candidate,
+        .generated_from => .generated_from,
+        .invokes_operation => .invokes_contract,
+        .handles_operation => .implements_contract,
         else => null,
     };
 }

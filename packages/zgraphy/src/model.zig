@@ -61,6 +61,8 @@ pub const Relation = enum(u16) {
     generated_from,
     generated_client_for,
     generated_server_for,
+    invokes_operation,
+    handles_operation,
 };
 
 pub const Provenance = enum(u8) {
