@@ -191,7 +191,10 @@ fn writeAtomicSlot(
     try file.writeStreamingAll(io, content);
     file.close(io);
     file_open = false;
-    try dir.rename(temporary, dir, path, io);
+    dir.rename(temporary, dir, path, io) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => return err,
+    };
     return true;
 }
 

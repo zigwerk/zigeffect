@@ -1712,16 +1712,30 @@ fn selectionValue(options: TestOptions) []const u8 {
 
 fn writeAtomicFile(io: std.Io, dir: std.Io.Dir, path: []const u8, content: []const u8) !void {
     if (std.mem.lastIndexOfScalar(u8, path, '/')) |slash| try dir.createDirPath(io, path[0..slash]);
-    const temporary = try std.fmt.allocPrint(std.heap.page_allocator, "{s}.tmp", .{path});
+    for (0..1024) |slot| {
+        if (try writeAtomicFileSlot(io, dir, path, content, slot)) return;
+    }
+    return error.AtomicTemporaryPathExhausted;
+}
+
+fn writeAtomicFileSlot(io: std.Io, dir: std.Io.Dir, path: []const u8, content: []const u8, slot: usize) !bool {
+    const temporary = try std.fmt.allocPrint(std.heap.page_allocator, "{s}.tmp.{d}", .{ path, slot });
     defer std.heap.page_allocator.free(temporary);
-    dir.writeFile(io, .{ .sub_path = temporary, .data = content }) catch |err| {
-        dir.deleteFile(io, temporary) catch {};
-        return err;
+    const file = dir.createFile(io, temporary, .{ .exclusive = true }) catch |err| switch (err) {
+        error.PathAlreadyExists => return false,
+        else => return err,
     };
-    dir.rename(temporary, dir, path, io) catch |err| {
-        dir.deleteFile(io, temporary) catch {};
-        return err;
+    var file_open = true;
+    defer if (file_open) file.close(io);
+    defer dir.deleteFile(io, temporary) catch {};
+    try file.writeStreamingAll(io, content);
+    file.close(io);
+    file_open = false;
+    dir.rename(temporary, dir, path, io) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => return err,
     };
+    return true;
 }
 
 fn realTimestampMs(io: std.Io) i64 {

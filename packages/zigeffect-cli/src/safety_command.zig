@@ -687,16 +687,37 @@ fn appendDiagnosticClone(
 fn writeAtomic(allocator: std.mem.Allocator, io: std.Io, base_dir: std.Io.Dir, path: []const u8, content: []const u8) !void {
     const slash = std.mem.lastIndexOfScalar(u8, path, '/') orelse return error.InvalidPath;
     try base_dir.createDirPath(io, path[0..slash]);
-    const temporary = try std.fmt.allocPrint(allocator, "{s}.tmp", .{path});
+    for (0..1024) |slot| {
+        if (try writeAtomicSlot(allocator, io, base_dir, path, content, slot)) return;
+    }
+    return error.AtomicTemporaryPathExhausted;
+}
+
+fn writeAtomicSlot(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    base_dir: std.Io.Dir,
+    path: []const u8,
+    content: []const u8,
+    slot: usize,
+) !bool {
+    const temporary = try std.fmt.allocPrint(allocator, "{s}.tmp.{d}", .{ path, slot });
     defer allocator.free(temporary);
-    base_dir.writeFile(io, .{ .sub_path = temporary, .data = content }) catch |err| {
-        base_dir.deleteFile(io, temporary) catch {};
-        return err;
+    const file = base_dir.createFile(io, temporary, .{ .exclusive = true }) catch |err| switch (err) {
+        error.PathAlreadyExists => return false,
+        else => return err,
     };
-    base_dir.rename(temporary, base_dir, path, io) catch |err| {
-        base_dir.deleteFile(io, temporary) catch {};
-        return err;
+    var file_open = true;
+    defer if (file_open) file.close(io);
+    defer base_dir.deleteFile(io, temporary) catch {};
+    try file.writeStreamingAll(io, content);
+    file.close(io);
+    file_open = false;
+    base_dir.rename(temporary, base_dir, path, io) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => return err,
     };
+    return true;
 }
 
 fn pathDeclaredBySafety(policy: zstd.Project.SafetyPolicy, path: []const u8) bool {
@@ -782,6 +803,23 @@ test "project safety check joins static policy compiler gates diagnostics and re
     const compiler_artifact = try tmp.dir.readFileAlloc(std.testing.io, ".zigeffect/receipts/compiler-check-debug.json", std.testing.allocator, .limited(1024 * 1024));
     defer std.testing.allocator.free(compiler_artifact);
     try std.testing.expect(std.mem.indexOf(u8, compiler_artifact, "zigeffect.compiler-artifact.v1") != null);
+}
+
+test "project safety receipt writer preserves another process temporary file" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(std.testing.io, ".zigeffect/receipts");
+    const occupied = ".zigeffect/receipts/latest-safety.json.tmp.0";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = occupied, .data = "other-writer" });
+
+    try writeAtomic(std.testing.allocator, std.testing.io, tmp.dir, ".zigeffect/receipts/latest-safety.json", "current-writer");
+
+    const target = try tmp.dir.readFileAlloc(std.testing.io, ".zigeffect/receipts/latest-safety.json", std.testing.allocator, .limited(1024));
+    defer std.testing.allocator.free(target);
+    try std.testing.expectEqualStrings("current-writer", target);
+    const preserved = try tmp.dir.readFileAlloc(std.testing.io, occupied, std.testing.allocator, .limited(1024));
+    defer std.testing.allocator.free(preserved);
+    try std.testing.expectEqualStrings("other-writer", preserved);
 }
 
 test "project safety check fails unsafe source and compiler diagnostics are source linked" {

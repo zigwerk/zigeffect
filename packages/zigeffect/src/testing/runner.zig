@@ -510,7 +510,10 @@ fn writeSuiteReceiptSlot(cwd: std.Io.Dir, content: []const u8, slot: usize) !boo
     try file.writeStreamingAll(runner_threaded_io, content);
     file.close(runner_threaded_io);
     file_open = false;
-    try cwd.rename(temporary, cwd, suite_receipt_path, runner_threaded_io);
+    cwd.rename(temporary, cwd, suite_receipt_path, runner_threaded_io) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => return err,
+    };
     return true;
 }
 
