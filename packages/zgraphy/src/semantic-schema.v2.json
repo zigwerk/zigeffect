@@ -146,6 +146,7 @@
     {"source_schema":"mvp_v1","source_relation":"aliases","target_relation":"aliases","reverse_endpoints":false,"projection":"binary"},
     {"source_schema":"mvp_v1","source_relation":"instantiates","target_relation":"instantiates","reverse_endpoints":false,"projection":"binary"},
     {"source_schema":"mvp_v1","source_relation":"calls","target_relation":"calls_direct","reverse_endpoints":false,"projection":"binary"},
+    {"source_schema":"mvp_v1","source_relation":"passes_callback","target_relation":"calls_callback","reverse_endpoints":false,"projection":"binary"},
     {"source_schema":"mvp_v1","source_relation":"depends_on","target_relation":"depends_on","reverse_endpoints":false,"projection":"binary"},
     {"source_schema":"mvp_v1","source_relation":"satisfies","target_relation":"satisfies","reverse_endpoints":false,"projection":"binary"},
     {"source_schema":"mvp_v1","source_relation":"verified_by","target_relation":"verified_by","reverse_endpoints":false,"projection":"binary"},

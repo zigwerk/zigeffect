@@ -9,7 +9,7 @@ const parity = @import("parity.zig");
 pub const schema = "zgraphy.differential-receipt.v1";
 pub const schema_version: u32 = 1;
 pub const adapter_version = "graphify-json-v1";
-pub const zgraphy_adapter_version = "zgraphy-native-v3";
+pub const zgraphy_adapter_version = "zgraphy-native-v4";
 pub const zgraphy_version = "0.1.0";
 pub const lexical_adapter_version = "lexical-token-v1";
 pub const max_graph_bytes: usize = 64 * 1024 * 1024;
@@ -320,6 +320,12 @@ pub fn projectZgraphy(
     const fact_seen = try owned.slice(bool, allocator, gold.facts.len);
     defer allocator.free(fact_seen);
     @memset(fact_seen, false);
+    const hyperedge_seen = try owned.slice(bool, allocator, gold.hyperedges.len);
+    defer allocator.free(hyperedge_seen);
+    @memset(hyperedge_seen, false);
+    const supernode_seen = try owned.slice(bool, allocator, gold.supernodes.len);
+    defer allocator.free(supernode_seen);
+    @memset(supernode_seen, false);
     const node_mappings = try owned.slice(?usize, allocator, graph.nodes.items.len);
     defer allocator.free(node_mappings);
     @memset(node_mappings, null);
@@ -393,6 +399,12 @@ pub fn projectZgraphy(
     for (gold.facts, 0..) |fact, index| {
         if (supportsZgraphyFact(graph, node_mappings, gold, &fact)) fact_seen[index] = true;
     }
+    for (gold.hyperedges, 0..) |hyperedge, index| {
+        if (supportsZgraphyHyperedge(graph, node_mappings, gold, &hyperedge)) hyperedge_seen[index] = true;
+    }
+    for (gold.supernodes, 0..) |supernode, index| {
+        if (supportsZgraphySupernode(graph, node_mappings, gold, &supernode)) supernode_seen[index] = true;
+    }
 
     var missing_entities: std.ArrayList([]const u8) = .empty;
     defer missing_entities.deinit(allocator);
@@ -408,13 +420,15 @@ pub fn projectZgraphy(
     for (gold.entities, entity_seen) |entity, seen| if (!seen) try missing_entities.append(allocator, entity.id);
     for (gold.relations, relation_seen) |relation, seen| if (!seen) try missing_relations.append(allocator, relation.id);
     for (gold.facts, fact_seen) |fact, seen| if (!seen) try missing_facts.append(allocator, fact.id);
-    for (gold.hyperedges) |hyperedge| try missing_hyperedges.append(allocator, hyperedge.id);
-    for (gold.supernodes) |supernode| try missing_supernodes.append(allocator, supernode.id);
+    for (gold.hyperedges, hyperedge_seen) |hyperedge, seen| if (!seen) try missing_hyperedges.append(allocator, hyperedge.id);
+    for (gold.supernodes, supernode_seen) |supernode, seen| if (!seen) try missing_supernodes.append(allocator, supernode.id);
 
     const projected_unique_entities = countTrue(entity_seen);
     const matched_entities = projected_unique_entities;
     const matched_relations = countTrue(relation_seen);
     const matched_facts = countTrue(fact_seen);
+    const matched_hyperedges = countTrue(hyperedge_seen);
+    const matched_supernodes = countTrue(supernode_seen);
     const unexpected_nodes = graph.nodes.items.len - mapped_input_nodes;
     const unexpected_relations = graph.edges.items.len - mapped_input_relations;
 
@@ -444,13 +458,13 @@ pub fn projectZgraphy(
             .version = zgraphy_version,
             .commit = "working-tree",
             .adapter_version = zgraphy_adapter_version,
-            .input_schema = "zgraphy.repository-graph.v1",
+            .input_schema = "zgraphy.repository-graph.v2",
             .output_schema = benchmark.canonical_ir_schema,
         },
         .input = .{
             .nodes = graph.nodes.items.len,
             .relations = graph.edges.items.len,
-            .hyperedges = 0,
+            .hyperedges = graph.hyperedgeCount(),
             .input_tokens = 0,
             .output_tokens = 0,
         },
@@ -466,8 +480,8 @@ pub fn projectZgraphy(
         .entities = score(gold.entities.len, matched_entities, unexpected_nodes),
         .relations = score(gold.relations.len, matched_relations, unexpected_relations),
         .facts = score(gold.facts.len, matched_facts, 0),
-        .hyperedges = score(gold.hyperedges.len, 0, 0),
-        .supernodes = score(gold.supernodes.len, 0, 0),
+        .hyperedges = score(gold.hyperedges.len, matched_hyperedges, graph.hyperedgeCount() - matched_hyperedges),
+        .supernodes = score(gold.supernodes.len, matched_supernodes, graph.supernodeCount() - matched_supernodes),
         .missing_entity_ids = missing_entity_ids,
         .missing_relation_ids = missing_relation_ids,
         .missing_fact_ids = missing_fact_ids,
@@ -617,7 +631,7 @@ pub fn validateReceipt(receipt: *const Receipt) !void {
         std.mem.eql(u8, receipt.adapter.version, zgraphy_version) and
         std.mem.eql(u8, receipt.adapter.commit, "working-tree") and
         std.mem.eql(u8, receipt.adapter.adapter_version, zgraphy_adapter_version) and
-        std.mem.eql(u8, receipt.adapter.input_schema, "zgraphy.repository-graph.v1");
+        std.mem.eql(u8, receipt.adapter.input_schema, "zgraphy.repository-graph.v2");
     const lexical_adapter = std.mem.eql(u8, receipt.adapter.engine, "lexical") and
         std.mem.eql(u8, receipt.adapter.version, "1") and
         std.mem.eql(u8, receipt.adapter.commit, "builtin") and
@@ -780,6 +794,7 @@ fn canonicalZgraphyRelation(relation: model.Relation) ?benchmark.RelationKind {
         .declares => .declares,
         .imports => .imports,
         .calls => .calls,
+        .passes_callback => .calls,
         .covers => .covers,
         .references => .references,
         .dispatches_to => .selects_candidate,
@@ -796,6 +811,29 @@ fn supportsZgraphyFact(
     gold: *const benchmark.CanonicalIr,
     fact: *const benchmark.Fact,
 ) bool {
+    if (std.mem.eql(u8, fact.predicate, "canonical_contract_identity")) {
+        if (fact.provenance != .extracted or fact.alternatives.len != 0) return false;
+        const subject_mapping = findEntityIndex(gold, fact.subject) orelse return false;
+        for (graph.hyperedges.items) |hyperedge| {
+            if (hyperedge.kind != .request_path or !std.mem.eql(u8, hyperedge.canonical_name, fact.value)) continue;
+            const operation = hyperedge.participant(.canonical_operation) orelse continue;
+            if (mapZgraphyEndpoint(graph, node_mappings, operation.node_id) == subject_mapping) return true;
+        }
+        return false;
+    }
+    if (std.mem.eql(u8, fact.predicate, "reaches_backend_handler")) {
+        if (fact.provenance != .derived or fact.alternatives.len != 0) return false;
+        const subject_mapping = findEntityIndex(gold, fact.subject) orelse return false;
+        const target_mapping = findEntityIndex(gold, fact.value) orelse return false;
+        for (graph.hyperedges.items) |hyperedge| {
+            if (hyperedge.kind != .request_path) continue;
+            const ui = hyperedge.participant(.ui_consumer) orelse continue;
+            const backend = hyperedge.participant(.backend_handler) orelse continue;
+            if (mapZgraphyEndpoint(graph, node_mappings, ui.node_id) == subject_mapping and
+                mapZgraphyEndpoint(graph, node_mappings, backend.node_id) == target_mapping) return true;
+        }
+        return false;
+    }
     if (!std.mem.eql(u8, fact.predicate, "call_resolution") or !std.mem.eql(u8, fact.value, "ambiguous") or
         fact.provenance != .ambiguous or fact.alternatives.len < 2) return false;
     const subject_mapping = findEntityIndex(gold, fact.subject) orelse return false;
@@ -824,6 +862,114 @@ fn supportsZgraphyFact(
         if (mapped_candidates == fact.alternatives.len) return true;
     }
     return false;
+}
+
+fn supportsZgraphyHyperedge(
+    graph: *const model.RepositoryGraph,
+    node_mappings: []const ?usize,
+    gold: *const benchmark.CanonicalIr,
+    expected: *const benchmark.Hyperedge,
+) bool {
+    if (expected.kind != .request_path) return false;
+    for (graph.hyperedges.items) |hyperedge| {
+        if (hyperedge.kind != .request_path) continue;
+        var participants_match = true;
+        for (expected.participants) |wanted| {
+            const wanted_entity = findEntityIndex(gold, wanted.entity) orelse return false;
+            const wanted_role = canonicalParticipantRole(wanted.role) orelse return false;
+            const participant = hyperedge.participant(wanted_role) orelse {
+                participants_match = false;
+                break;
+            };
+            if (mapZgraphyEndpoint(graph, node_mappings, participant.node_id) != wanted_entity) {
+                participants_match = false;
+                break;
+            }
+        }
+        if (!participants_match) continue;
+        var evidence_matches = true;
+        for (expected.evidence) |evidence_id| {
+            const wanted = findEvidence(gold, evidence_id) orelse return false;
+            var found = false;
+            for (hyperedge.evidence) |actual| {
+                if (sourcePathEquivalent(wanted.source.path, actual.source_path) and
+                    actual.span.start_line >= wanted.source.start_line and actual.span.start_line <= wanted.source.end_line)
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                evidence_matches = false;
+                break;
+            }
+        }
+        if (evidence_matches) return true;
+    }
+    return false;
+}
+
+fn supportsZgraphySupernode(
+    graph: *const model.RepositoryGraph,
+    node_mappings: []const ?usize,
+    gold: *const benchmark.CanonicalIr,
+    expected: *const benchmark.Supernode,
+) bool {
+    if (expected.kind != .feature) return false;
+    for (graph.supernodes.items) |supernode| {
+        if (supernode.kind != .feature or supernode.completeness != .end_to_end_feature or supernode.synopsis.len == 0) continue;
+        var members_match = true;
+        for (expected.members) |wanted_id| {
+            const wanted = findEntityIndex(gold, wanted_id) orelse return false;
+            var found = false;
+            for (supernode.members) |member| {
+                if (mapZgraphyEndpoint(graph, node_mappings, member.node_id) == wanted) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                members_match = false;
+                break;
+            }
+        }
+        if (!members_match) continue;
+        var proofs_match = true;
+        for (expected.proof_relations) |relation_id| {
+            const relation = findGoldRelation(gold, relation_id) orelse return false;
+            const wanted_from = findEntityIndex(gold, relation.from) orelse return false;
+            const wanted_to = findEntityIndex(gold, relation.to) orelse return false;
+            var found = false;
+            for (supernode.proof_steps) |proof| {
+                if (canonicalZgraphyRelation(proof.relation) != relation.kind) continue;
+                if (mapZgraphyEndpoint(graph, node_mappings, proof.from) == wanted_from and
+                    mapZgraphyEndpoint(graph, node_mappings, proof.to) == wanted_to)
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                proofs_match = false;
+                break;
+            }
+        }
+        if (proofs_match) return true;
+    }
+    return false;
+}
+
+fn canonicalParticipantRole(role: []const u8) ?model.ParticipantRole {
+    if (std.mem.eql(u8, role, "canonical_contract")) return .canonical_operation;
+    inline for (std.meta.fields(model.ParticipantRole)) |field| {
+        if (std.mem.eql(u8, role, field.name)) return @enumFromInt(field.value);
+    }
+    return null;
+}
+
+fn findGoldRelation(gold: *const benchmark.CanonicalIr, id: []const u8) ?*const benchmark.Relation {
+    for (gold.relations, 0..) |relation, index| if (std.mem.eql(u8, relation.id, id)) return &gold.relations[index];
+    return null;
 }
 
 fn canonicalProvenance(confidence: []const u8) ?benchmark.Provenance {

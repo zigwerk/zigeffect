@@ -6,9 +6,9 @@ const typescript_parser = @import("typescript_parser.zig");
 const typescript_resolution = @import("typescript_resolution.zig");
 const zig_parser = @import("zig_parser.zig");
 
-pub const schema = "zgraphy.rpc-continuity.v1";
-pub const schema_version: u32 = 1;
-pub const analyzer_version = "connect-zigeffect-generated-driver-v1";
+pub const schema = "zgraphy.rpc-continuity.v2";
+pub const schema_version: u32 = 2;
+pub const analyzer_version = "connect-zigeffect-generated-driver-v2";
 
 pub const Language = enum(u8) {
     typescript,
@@ -34,6 +34,8 @@ pub const Observation = struct {
     source_path: []const u8,
     source_symbol: []const u8,
     span: SourceSpan,
+    supporting_symbol: []const u8,
+    supporting_span: SourceSpan,
     recipe: []const u8,
     status: Status,
     candidate_start: usize,
@@ -117,6 +119,7 @@ pub const Result = struct {
         for (self.observations) |observation| {
             self.allocator.free(observation.source_path);
             self.allocator.free(observation.source_symbol);
+            self.allocator.free(observation.supporting_symbol);
             self.allocator.free(observation.recipe);
         }
         self.allocator.free(self.observations);
@@ -295,6 +298,8 @@ const TempObservation = struct {
     source_path: []const u8,
     source_symbol: []const u8,
     span: SourceSpan,
+    supporting_symbol: []const u8,
+    supporting_span: SourceSpan,
     recipe: []const u8,
     entity_indexes: []const usize,
 };
@@ -370,6 +375,8 @@ const Engine = struct {
             errdefer self.corpus.allocator.free(source_path);
             const source_symbol = try owned.copy(u8, self.corpus.allocator, item.source_symbol);
             errdefer self.corpus.allocator.free(source_symbol);
+            const supporting_symbol = try owned.copy(u8, self.corpus.allocator, item.supporting_symbol);
+            errdefer self.corpus.allocator.free(supporting_symbol);
             const recipe = try owned.copy(u8, self.corpus.allocator, item.recipe);
             errdefer self.corpus.allocator.free(recipe);
             const status: Status = if (item.entity_indexes.len == 1) .resolved else .ambiguous;
@@ -378,6 +385,8 @@ const Engine = struct {
                 .source_path = source_path,
                 .source_symbol = source_symbol,
                 .span = item.span,
+                .supporting_symbol = supporting_symbol,
+                .supporting_span = item.supporting_span,
                 .recipe = recipe,
                 .status = status,
                 .candidate_start = candidate_start,
@@ -466,7 +475,17 @@ const Engine = struct {
                             try appendLineageEntityIndexes(self.arena.allocator(), self.lineage, operation_link, &entity_indexes);
                         }
                     }
-                    try self.appendTempObservation(output, .frontend_invocation, parsed.path, call.enclosing_declaration, SourceSpan.fromTypeScript(call.span), "connect-create-client-v1", &entity_indexes);
+                    try self.appendTempObservation(
+                        output,
+                        .frontend_invocation,
+                        parsed.path,
+                        call.enclosing_declaration,
+                        SourceSpan.fromTypeScript(call.span),
+                        binding.binding,
+                        SourceSpan.fromTypeScript(binding.name_span),
+                        "connect-create-client-v1",
+                        &entity_indexes,
+                    );
                 }
             }
         }
@@ -498,7 +517,17 @@ const Engine = struct {
                     var entity_indexes: std.ArrayList(usize) = .empty;
                     defer entity_indexes.deinit(self.arena.allocator());
                     try appendLineageEntityIndexes(self.arena.allocator(), self.lineage, operation_link, &entity_indexes);
-                    try self.appendTempObservation(output, .backend_handler, parsed.path, symbol, SourceSpan.fromZig(handler.name_span), "zigeffect-generated-driver-v1", &entity_indexes);
+                    try self.appendTempObservation(
+                        output,
+                        .backend_handler,
+                        parsed.path,
+                        symbol,
+                        SourceSpan.fromZig(handler.name_span),
+                        implementation.name,
+                        SourceSpan.fromZig(implementation.name_span),
+                        "zigeffect-generated-driver-v1",
+                        &entity_indexes,
+                    );
                 }
             }
         }
@@ -511,6 +540,8 @@ const Engine = struct {
         source_path: []const u8,
         source_symbol: []const u8,
         span: SourceSpan,
+        supporting_symbol: []const u8,
+        supporting_span: SourceSpan,
         recipe: []const u8,
         entity_indexes: *std.ArrayList(usize),
     ) !void {
@@ -523,6 +554,8 @@ const Engine = struct {
             .source_path = source_path,
             .source_symbol = source_symbol,
             .span = span,
+            .supporting_symbol = supporting_symbol,
+            .supporting_span = supporting_span,
             .recipe = recipe,
             .entity_indexes = indexes,
         });
@@ -574,8 +607,8 @@ pub fn validate(result: *const Result) !void {
     var candidate_cursor: usize = 0;
     var previous: ?Observation = null;
     for (result.observations, 0..) |observation, observation_index| {
-        if (!validPath(observation.source_path) or observation.source_symbol.len == 0 or observation.recipe.len == 0 or
-            !observation.span.valid() or observation.candidate_start != candidate_cursor or observation.candidate_count == 0 or
+        if (!validPath(observation.source_path) or observation.source_symbol.len == 0 or observation.supporting_symbol.len == 0 or observation.recipe.len == 0 or
+            !observation.span.valid() or !observation.supporting_span.valid() or observation.candidate_start != candidate_cursor or observation.candidate_count == 0 or
             observation.candidate_start + observation.candidate_count > result.candidates.len) return error.InvalidRpcContinuityObservation;
         if (previous) |value| if (!lessThanOrEqualObservation(value, observation)) return error.InvalidRpcContinuityObservationOrder;
         previous = observation;
@@ -800,7 +833,9 @@ fn deduplicateTempObservations(values: *std.ArrayList(TempObservation)) void {
 fn sameTempObservation(left: TempObservation, right: TempObservation) bool {
     return left.role == right.role and std.mem.eql(u8, left.source_path, right.source_path) and
         std.mem.eql(u8, left.source_symbol, right.source_symbol) and left.span.start_byte == right.span.start_byte and
-        left.span.end_byte == right.span.end_byte and std.mem.eql(usize, left.entity_indexes, right.entity_indexes);
+        left.span.end_byte == right.span.end_byte and std.mem.eql(u8, left.supporting_symbol, right.supporting_symbol) and
+        left.supporting_span.start_byte == right.supporting_span.start_byte and left.supporting_span.end_byte == right.supporting_span.end_byte and
+        std.mem.eql(usize, left.entity_indexes, right.entity_indexes);
 }
 
 fn deduplicateIndexes(values: *std.ArrayList(usize)) void {
@@ -852,6 +887,8 @@ fn resultFingerprint(
         updateBytes(&hasher, observation.source_path);
         updateBytes(&hasher, observation.source_symbol);
         updateSpan(&hasher, observation.span);
+        updateBytes(&hasher, observation.supporting_symbol);
+        updateSpan(&hasher, observation.supporting_span);
         updateBytes(&hasher, observation.recipe);
         updateU64(&hasher, @intFromEnum(observation.status));
         updateU64(&hasher, @intCast(observation.candidate_start));
@@ -930,6 +967,7 @@ fn deinitObservations(allocator: std.mem.Allocator, values: []const Observation)
     for (values) |value| {
         allocator.free(value.source_path);
         allocator.free(value.source_symbol);
+        allocator.free(value.supporting_symbol);
         allocator.free(value.recipe);
     }
 }

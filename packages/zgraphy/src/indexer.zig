@@ -26,6 +26,13 @@ pub const BuildOptions = struct {
     max_path_bytes: usize = std.fs.max_path_bytes,
     max_nodes: usize = 100_000,
     max_edges: usize = 500_000,
+    max_hyperedges: usize = 100_000,
+    max_hyperedge_participants: usize = 1_000_000,
+    max_hyperedge_evidence: usize = 1_000_000,
+    max_supernodes: usize = 100_000,
+    max_supernode_members: usize = 1_000_000,
+    max_supernode_evidence: usize = 1_000_000,
+    max_supernode_proof_steps: usize = 1_000_000,
 };
 
 pub const BuildSummary = struct {
@@ -49,6 +56,8 @@ pub const BuildSummary = struct {
     generated_bindings: usize = 0,
     rpc_observations: usize = 0,
     rpc_interactions: usize = 0,
+    request_paths: usize = 0,
+    feature_supernodes: usize = 0,
     nodes: usize = 0,
     edges: usize = 0,
     vectors: usize = 0,
@@ -71,6 +80,8 @@ const Symbol = struct {
     id: u64,
     name: []const u8,
     line: u32,
+    kind: zig_parser.DeclarationKind,
+    span: zig_parser.Span,
 };
 
 const LocalBinding = struct {
@@ -93,6 +104,13 @@ pub fn buildRepository(
     var graph = try model.RepositoryGraph.init(allocator, .{
         .max_nodes = options.max_nodes,
         .max_edges = options.max_edges,
+        .max_hyperedges = options.max_hyperedges,
+        .max_hyperedge_participants = options.max_hyperedge_participants,
+        .max_hyperedge_evidence = options.max_hyperedge_evidence,
+        .max_supernodes = options.max_supernodes,
+        .max_supernode_members = options.max_supernode_members,
+        .max_supernode_evidence = options.max_supernode_evidence,
+        .max_supernode_proof_steps = options.max_supernode_proof_steps,
     });
     errdefer graph.deinit();
     var discovered = try discovery.scan(allocator, io, root, .{
@@ -260,9 +278,11 @@ pub fn buildRepository(
     summary.generated_bindings = generated.summary.links;
     var continuity = try continuity_corpus.resolve();
     defer continuity.deinit();
-    try materializeRpcContinuity(&graph, &proto_resolutions, &continuity);
+    try materializeRpcContinuity(&graph, &proto_resolutions, &continuity, &typescript_symbol_corpus, &zig_corpus);
     summary.rpc_observations = continuity.summary.observations;
     summary.rpc_interactions = continuity.summary.interactions;
+    summary.request_paths = graph.hyperedgeCount();
+    summary.feature_supernodes = graph.supernodeCount();
     const causal_records = root.readFileAlloc(io, causal_wal_path, allocator, .limited(max_causal_bytes)) catch |failure| switch (failure) {
         error.FileNotFound => null,
         else => return failure,
@@ -392,15 +412,27 @@ fn indexParsedZigSource(
             .line = line_number,
             .search_text = search_text,
         });
+        try symbols.append(graph.allocator, .{
+            .id = symbol_id,
+            .name = graph.findNode(symbol_id).?.label,
+            .line = line_number,
+            .kind = declaration_fact.kind,
+            .span = declaration_fact.span,
+        });
+    }
+    for (parsed.declarations, 0..) |declaration_fact, declaration_index| {
+        const owner = if (smallestContainingDeclaration(parsed.declarations, declaration_index)) |owner_index|
+            symbols.items[owner_index].id
+        else
+            file_id;
         try graph.addEdge(.{
-            .from = file_id,
-            .to = symbol_id,
+            .from = owner,
+            .to = symbols.items[declaration_index].id,
             .relation = .declares,
             .provenance = .extracted,
             .source_path = path,
-            .line = line_number,
+            .line = declaration_fact.name_span.start_line,
         });
-        try symbols.append(graph.allocator, .{ .id = symbol_id, .name = graph.findNode(symbol_id).?.label, .line = line_number });
     }
     for (parsed.bindings) |binding_fact| {
         if (binding_fact.scope != .local) continue;
@@ -445,6 +477,7 @@ fn indexParsedZigSource(
     }
     for (parsed.calls) |call_fact| {
         const caller = findUniqueSymbol(symbols.items, call_fact.enclosing_declaration) orelse continue;
+        const caller_symbol = findSymbolById(symbols.items, caller) orelse continue;
         const callee = calleeLeaf(call_fact.callee);
         if (callee.len == 0) continue;
         const local_target = findUniqueLocalBinding(local_bindings.items, callee, call_fact.enclosing_declaration);
@@ -456,10 +489,11 @@ fn indexParsedZigSource(
             .search_text = call_fact.callee,
         });
         if (target == caller) continue;
+        const target_node = graph.findNode(target) orelse continue;
         try graph.addEdge(.{
             .from = caller,
             .to = target,
-            .relation = .calls,
+            .relation = if (caller_symbol.kind == .test_decl and target_node.kind == .symbol) .covers else .calls,
             .provenance = if (local_target != null) .extracted else if (graph.findNode(target).?.kind == .concept) .ambiguous else .inferred,
             .source_path = path,
             .line = call_fact.callee_span.start_line,
@@ -754,6 +788,31 @@ fn findUniqueSymbol(symbols: []const Symbol, name: []const u8) ?u64 {
         found = symbol.id;
     }
     return found;
+}
+
+fn findSymbolById(symbols: []const Symbol, id: u64) ?*const Symbol {
+    for (symbols) |*symbol| if (symbol.id == id) return symbol;
+    return null;
+}
+
+fn smallestContainingDeclaration(declarations: []const zig_parser.Declaration, child_index: usize) ?usize {
+    const child = declarations[child_index];
+    var best: ?usize = null;
+    var best_width: usize = std.math.maxInt(usize);
+    for (declarations, 0..) |candidate, index| {
+        if (index == child_index or !declarationCanContain(candidate.kind) or
+            candidate.span.start_byte >= child.span.start_byte or candidate.span.end_byte <= child.span.end_byte) continue;
+        const width = candidate.span.end_byte - candidate.span.start_byte;
+        if (width < best_width) {
+            best = index;
+            best_width = width;
+        }
+    }
+    return best;
+}
+
+fn declarationCanContain(kind: zig_parser.DeclarationKind) bool {
+    return kind == .structure or kind == .enumeration or kind == .union_type or kind == .opaque_type;
 }
 
 fn findUniqueLocalBinding(bindings: []const LocalBinding, name: []const u8, enclosing: []const u8) ?u64 {
@@ -1180,6 +1239,8 @@ fn materializeRpcContinuity(
     graph: *model.RepositoryGraph,
     proto: *const protobuf_resolution.Result,
     result: *const rpc_continuity.Result,
+    typescript: *const typescript_symbols.Corpus,
+    zig: *const zig_resolution.Corpus,
 ) !void {
     try rpc_continuity.validate(result);
     if (!std.mem.eql(u8, &result.proto_fingerprint, &proto.fingerprint)) return error.RpcContinuityProtoSnapshotMismatch;
@@ -1209,6 +1270,281 @@ fn materializeRpcContinuity(
             .line = observation.span.start_line,
         });
     }
+    for (result.interactions) |interaction| {
+        try materializeRpcInteraction(graph, proto, result, &interaction, typescript, zig);
+    }
+}
+
+fn materializeRpcInteraction(
+    graph: *model.RepositoryGraph,
+    proto: *const protobuf_resolution.Result,
+    result: *const rpc_continuity.Result,
+    interaction: *const rpc_continuity.Interaction,
+    typescript: *const typescript_symbols.Corpus,
+    zig: *const zig_resolution.Corpus,
+) !void {
+    const frontend_observation = &result.observations[interaction.frontend_observation_index];
+    const backend_observation = &result.observations[interaction.backend_observation_index];
+    const frontend = findQualifiedTypeScriptSymbol(graph, frontend_observation.source_path, frontend_observation.source_symbol) orelse return error.MissingRpcContinuitySourceNode;
+    const client = findQualifiedTypeScriptSymbol(graph, frontend_observation.source_path, frontend_observation.supporting_symbol) orelse return error.MissingRpcClientBindingNode;
+    const backend = findUniqueQualifiedZigSymbol(graph, backend_observation.source_path, backend_observation.source_symbol) orelse return error.MissingRpcContinuitySourceNode;
+    const implementation = findUniqueQualifiedZigSymbol(graph, backend_observation.source_path, backend_observation.supporting_symbol) orelse return error.MissingRpcImplementationContainerNode;
+    const frontend_candidate = result.candidatesFor(frontend_observation)[0];
+    const operation_entity = &proto.entities[frontend_candidate.entity_index];
+    const operation = protobufEntityNode(graph, operation_entity) orelse return error.MissingRpcContinuityOperationNode;
+    const request_entity = findUniqueProtobufEntityByCanonical(proto, .message, interaction.request_type) orelse return error.MissingRpcRequestEntity;
+    const response_entity = findUniqueProtobufEntityByCanonical(proto, .message, interaction.response_type) orelse return error.MissingRpcResponseEntity;
+    const request = protobufEntityNode(graph, request_entity) orelse return error.MissingRpcRequestNode;
+    const response = protobufEntityNode(graph, response_entity) orelse return error.MissingRpcResponseNode;
+    const slash = std.mem.lastIndexOfScalar(u8, interaction.canonical_operation, '/') orelse return error.InvalidRpcOperationIdentity;
+    const service_entity = findProtobufEntity(proto, .service, operation_entity.source_path, interaction.canonical_operation[0..slash]) orelse return error.MissingRpcServiceEntity;
+    const service = protobufEntityNode(graph, service_entity) orelse return error.MissingRpcServiceNode;
+
+    try graph.addEdge(.{
+        .from = frontend.id,
+        .to = client.id,
+        .relation = .calls,
+        .provenance = .inferred,
+        .source_path = frontend_observation.source_path,
+        .line = frontend_observation.span.start_line,
+    });
+    try graph.addEdge(.{
+        .from = client.id,
+        .to = service.id,
+        .relation = .generated_from,
+        .provenance = .inferred,
+        .source_path = frontend_observation.source_path,
+        .line = frontend_observation.supporting_span.start_line,
+    });
+    try graph.addEdge(.{
+        .from = implementation.id,
+        .to = backend.id,
+        .relation = .declares,
+        .provenance = .extracted,
+        .source_path = backend_observation.source_path,
+        .line = backend_observation.span.start_line,
+    });
+
+    const ui = uniqueIncomingNode(graph, frontend.id, .passes_callback);
+    const loader = uniqueOutgoingNode(graph, backend.id, .calls);
+    const focused_test = uniqueIncomingNode(graph, backend.id, .covers);
+    var participants: [10]model.Participant = @splat(.{ .role = .ui_consumer, .node_id = 0 });
+    var participant_count: usize = 0;
+    appendParticipant(&participants, &participant_count, .frontend_callsite, frontend.id);
+    appendParticipant(&participants, &participant_count, .client_binding, client.id);
+    appendParticipant(&participants, &participant_count, .canonical_operation, operation.id);
+    appendParticipant(&participants, &participant_count, .request_message, request.id);
+    appendParticipant(&participants, &participant_count, .response_message, response.id);
+    appendParticipant(&participants, &participant_count, .implementation_container, implementation.id);
+    appendParticipant(&participants, &participant_count, .backend_handler, backend.id);
+    if (ui) |node| appendParticipant(&participants, &participant_count, .ui_consumer, node.id);
+    if (loader) |node| appendParticipant(&participants, &participant_count, .data_loader, node.id);
+    if (focused_test) |node| appendParticipant(&participants, &participant_count, .focused_test, node.id);
+
+    var direct_evidence: [10]model.SourceEvidence = @splat(.{
+        .role = .frontend_invocation,
+        .source_path = "",
+        .span = .{ .start_byte = 0, .end_byte = 0, .start_line = 0, .start_column = 0, .end_line = 0, .end_column = 0 },
+    });
+    var evidence_count: usize = 0;
+    appendEvidence(&direct_evidence, &evidence_count, .frontend_invocation, frontend_observation.source_path, modelSpan(frontend_observation.span));
+    appendEvidence(&direct_evidence, &evidence_count, .client_binding, frontend_observation.source_path, modelSpan(frontend_observation.supporting_span));
+    appendEvidence(&direct_evidence, &evidence_count, .canonical_contract, operation_entity.source_path, protobufSpan(operation_entity.span));
+    appendEvidence(&direct_evidence, &evidence_count, .request_schema, request_entity.source_path, protobufSpan(request_entity.span));
+    appendEvidence(&direct_evidence, &evidence_count, .response_schema, response_entity.source_path, protobufSpan(response_entity.span));
+    appendEvidence(&direct_evidence, &evidence_count, .implementation_container, backend_observation.source_path, modelSpan(backend_observation.supporting_span));
+    appendEvidence(&direct_evidence, &evidence_count, .backend_handler, backend_observation.source_path, modelSpan(backend_observation.span));
+    if (ui) |node| if (typescriptDeclarationSpan(typescript, node.path, node.label)) |span| {
+        appendEvidence(&direct_evidence, &evidence_count, .ui_consumer, node.path, typescriptModelSpan(span));
+    };
+    if (loader) |node| if (zigDeclarationSpan(zig, node.path, node.label)) |span| {
+        appendEvidence(&direct_evidence, &evidence_count, .data_loader, node.path, zigModelSpan(span));
+    };
+    if (focused_test) |node| if (zigDeclarationSpan(zig, node.path, node.label)) |span| {
+        appendEvidence(&direct_evidence, &evidence_count, .focused_test, node.path, zigModelSpan(span));
+    };
+
+    const interaction_fingerprint = rpcInteractionFingerprint(result, interaction);
+    const hyperedge_id = try graph.addHyperedge(.{
+        .kind = .request_path,
+        .canonical_name = interaction.canonical_operation,
+        .recipe = "rpc-request-path-v1",
+        .interaction_fingerprint = interaction_fingerprint,
+        .participants = participants[0..participant_count],
+        .evidence = direct_evidence[0..evidence_count],
+    });
+
+    var members: [10]model.SupernodeMember = @splat(.{ .role = .ui_consumer, .node_id = 0, .reason = "" });
+    var member_count: usize = 0;
+    appendMember(&members, &member_count, .frontend_callsite, frontend.id, "resolved generated-client invocation");
+    appendMember(&members, &member_count, .client_binding, client.id, "exact Connect client binding");
+    appendMember(&members, &member_count, .canonical_operation, operation.id, "canonical Proto operation");
+    appendMember(&members, &member_count, .request_message, request.id, "canonical request message");
+    appendMember(&members, &member_count, .response_message, response.id, "canonical response message");
+    appendMember(&members, &member_count, .implementation_container, implementation.id, "registered Zig implementation container");
+    appendMember(&members, &member_count, .backend_handler, backend.id, "exact registered Zig handler");
+    if (ui) |node| appendMember(&members, &member_count, .ui_consumer, node.id, "resolved frontend callback consumer");
+    if (loader) |node| appendMember(&members, &member_count, .data_loader, node.id, "resolved backend data dependency");
+    if (focused_test) |node| appendMember(&members, &member_count, .focused_test, node.id, "focused Zig test coverage");
+
+    var proof_steps: [12]model.ProofStep = @splat(.{ .from = 0, .to = 0, .relation = .contains });
+    var proof_count: usize = 0;
+    if (ui) |node| appendProof(&proof_steps, &proof_count, node.id, frontend.id, .passes_callback);
+    appendProof(&proof_steps, &proof_count, frontend.id, client.id, .calls);
+    appendProof(&proof_steps, &proof_count, client.id, service.id, .generated_from);
+    appendProof(&proof_steps, &proof_count, frontend.id, operation.id, .invokes_operation);
+    appendProof(&proof_steps, &proof_count, operation.id, request.id, .uses_request);
+    appendProof(&proof_steps, &proof_count, operation.id, response.id, .uses_response);
+    appendProof(&proof_steps, &proof_count, implementation.id, backend.id, .declares);
+    appendProof(&proof_steps, &proof_count, backend.id, operation.id, .handles_operation);
+    if (loader) |node| appendProof(&proof_steps, &proof_count, backend.id, node.id, .calls);
+    if (focused_test) |node| appendProof(&proof_steps, &proof_count, node.id, backend.id, .covers);
+
+    const complete_feature = ui != null and loader != null and focused_test != null;
+    const feature_name = try std.fmt.allocPrint(graph.allocator, "{s} feature", .{interaction.canonical_operation});
+    defer graph.allocator.free(feature_name);
+    const synopsis = try std.fmt.allocPrint(graph.allocator, "Frontend invocation reaches the registered Zig handler through canonical operation {s} with request {s} and response {s}.", .{
+        interaction.canonical_operation,
+        interaction.request_type,
+        interaction.response_type,
+    });
+    defer graph.allocator.free(synopsis);
+    _ = try graph.addSupernode(.{
+        .kind = .feature,
+        .canonical_name = interaction.canonical_operation,
+        .name = feature_name,
+        .recipe = "end-to-end-feature-v1",
+        .synopsis = synopsis,
+        .input_hyperedge_id = hyperedge_id,
+        .completeness = if (complete_feature) .end_to_end_feature else .contract_path,
+        .members = members[0..member_count],
+        .evidence = direct_evidence[0..evidence_count],
+        .proof_steps = proof_steps[0..proof_count],
+    });
+}
+
+fn appendParticipant(output: *[10]model.Participant, count: *usize, role: model.ParticipantRole, node_id: u64) void {
+    output[count.*] = .{ .role = role, .node_id = node_id };
+    count.* += 1;
+}
+
+fn appendEvidence(output: *[10]model.SourceEvidence, count: *usize, role: model.EvidenceRole, path: []const u8, span: model.SourceSpan) void {
+    output[count.*] = .{ .role = role, .source_path = path, .span = span };
+    count.* += 1;
+}
+
+fn appendMember(output: *[10]model.SupernodeMember, count: *usize, role: model.ParticipantRole, node_id: u64, reason: []const u8) void {
+    output[count.*] = .{ .role = role, .node_id = node_id, .reason = reason };
+    count.* += 1;
+}
+
+fn appendProof(output: *[12]model.ProofStep, count: *usize, from: u64, to: u64, relation: model.Relation) void {
+    output[count.*] = .{ .from = from, .to = to, .relation = relation };
+    count.* += 1;
+}
+
+fn uniqueIncomingNode(graph: *const model.RepositoryGraph, to: u64, relation: model.Relation) ?*const model.Node {
+    var found: ?*const model.Node = null;
+    for (graph.edges.items) |edge| {
+        if (edge.to != to or edge.relation != relation) continue;
+        const node = graph.findNode(edge.from) orelse continue;
+        if (found != null and found.?.id != node.id) return null;
+        found = node;
+    }
+    return found;
+}
+
+fn uniqueOutgoingNode(graph: *const model.RepositoryGraph, from: u64, relation: model.Relation) ?*const model.Node {
+    var found: ?*const model.Node = null;
+    for (graph.edges.items) |edge| {
+        if (edge.from != from or edge.relation != relation) continue;
+        const node = graph.findNode(edge.to) orelse continue;
+        if (found != null and found.?.id != node.id) return null;
+        found = node;
+    }
+    return found;
+}
+
+fn findUniqueProtobufEntityByCanonical(
+    result: *const protobuf_resolution.Result,
+    kind: protobuf_resolution.EntityKind,
+    canonical_name: []const u8,
+) ?*const protobuf_resolution.Entity {
+    var found: ?*const protobuf_resolution.Entity = null;
+    for (result.entities) |*entity| {
+        if (entity.kind != kind or !std.mem.eql(u8, entity.canonical_name, canonical_name)) continue;
+        if (found != null) return null;
+        found = entity;
+    }
+    return found;
+}
+
+fn typescriptDeclarationSpan(corpus: *const typescript_symbols.Corpus, path: []const u8, name: []const u8) ?typescript_parser.Span {
+    const parsed = corpus.parsedForPath(path) orelse return null;
+    var found: ?typescript_parser.Span = null;
+    for (parsed.declarations) |item| {
+        if (!std.mem.eql(u8, item.name, name)) continue;
+        if (found != null) return null;
+        found = item.name_span;
+    }
+    return found;
+}
+
+fn zigDeclarationSpan(corpus: *const zig_resolution.Corpus, path: []const u8, name: []const u8) ?zig_parser.Span {
+    const parsed = corpus.parsedForPath(path) orelse return null;
+    var found: ?zig_parser.Span = null;
+    for (parsed.declarations) |item| {
+        if (!std.mem.eql(u8, item.name, name)) continue;
+        if (found != null) return null;
+        found = item.name_span;
+    }
+    return found;
+}
+
+fn modelSpan(span: rpc_continuity.SourceSpan) model.SourceSpan {
+    return .{
+        .start_byte = span.start_byte,
+        .end_byte = span.end_byte,
+        .start_line = span.start_line,
+        .start_column = span.start_column,
+        .end_line = span.end_line,
+        .end_column = span.end_column,
+    };
+}
+
+fn protobufSpan(span: anytype) model.SourceSpan {
+    return .{
+        .start_byte = span.start_byte,
+        .end_byte = span.end_byte,
+        .start_line = span.start_line,
+        .start_column = span.start_column,
+        .end_line = span.end_line,
+        .end_column = span.end_column,
+    };
+}
+
+fn typescriptModelSpan(span: typescript_parser.Span) model.SourceSpan {
+    return protobufSpan(span);
+}
+
+fn zigModelSpan(span: zig_parser.Span) model.SourceSpan {
+    return protobufSpan(span);
+}
+
+fn rpcInteractionFingerprint(result: *const rpc_continuity.Result, interaction: *const rpc_continuity.Interaction) [32]u8 {
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    hasher.update(&result.fingerprint);
+    hasher.update(interaction.canonical_operation);
+    hasher.update(interaction.request_type);
+    hasher.update(interaction.response_type);
+    var bytes: [8]u8 = @splat(0);
+    std.mem.writeInt(u64, &bytes, @intCast(interaction.frontend_observation_index), .little);
+    hasher.update(&bytes);
+    std.mem.writeInt(u64, &bytes, @intCast(interaction.backend_observation_index), .little);
+    hasher.update(&bytes);
+    var digest: [32]u8 = @splat(0);
+    hasher.final(&digest);
+    return digest;
 }
 
 fn findUniqueQualifiedZigSymbol(graph: *const model.RepositoryGraph, path: []const u8, qualified: []const u8) ?*const model.Node {
@@ -1456,7 +1792,7 @@ fn materializeTypeScriptSymbols(graph: *model.RepositoryGraph, result: *const ty
                     });
                 }
             },
-            .direct_call, .member_call, .constructor_call => {
+            .direct_call, .member_call, .constructor_call, .callback_reference => {
                 const caller = findQualifiedTypeScriptSymbol(graph, resolution.source_path, resolution.enclosing_declaration) orelse continue;
                 for (resolved_candidates) |candidate| {
                     if (std.mem.eql(u8, candidate.target_name, "*")) continue;
@@ -1465,7 +1801,12 @@ fn materializeTypeScriptSymbols(graph: *model.RepositoryGraph, result: *const ty
                     try graph.addEdge(.{
                         .from = caller.id,
                         .to = target.id,
-                        .relation = if (resolution.kind == .constructor_call) .instantiates else .calls,
+                        .relation = if (resolution.kind == .constructor_call)
+                            .instantiates
+                        else if (resolution.kind == .callback_reference)
+                            .passes_callback
+                        else
+                            .calls,
                         .provenance = provenance,
                         .source_path = resolution.source_path,
                         .line = resolution.span.start_line,

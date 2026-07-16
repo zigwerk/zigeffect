@@ -499,7 +499,7 @@ test "zgraphy M0 native differential adapter reports canonical matches and inter
 
     try std.testing.expectEqualStrings("zgraphy", receipt.adapter.engine);
     try std.testing.expectEqualStrings("0.1.0", receipt.adapter.version);
-    try std.testing.expectEqualStrings("zgraphy-native-v3", receipt.adapter.adapter_version);
+    try std.testing.expectEqualStrings("zgraphy-native-v4", receipt.adapter.adapter_version);
     try std.testing.expectEqual(@as(usize, 12), receipt.input.nodes);
     try std.testing.expectEqual(@as(usize, 20), receipt.input.relations);
     try std.testing.expectEqual(@as(usize, 8), receipt.entities.matched);
@@ -906,7 +906,7 @@ test "zgraphy M0 semantic schema ontology is complete versioned and migration sa
 
     const digest = zgraphy.SemanticSchema.contractDigest();
     const digest_hex = std.fmt.bytesToHex(digest, .lower);
-    try std.testing.expectEqualStrings("6135845e308ce610c6cc787aac4e46421df70c000adb8ff8ca7c6eab2bb0bbe3", &digest_hex);
+    try std.testing.expectEqualStrings("fcd291413c5feb7abc0586444c6cd477c149b184c443e3c1169f3eeb17e7a603", &digest_hex);
     const original_name = parsed.value.relations[1].name;
     parsed.value.relations[1].name = parsed.value.relations[0].name;
     try std.testing.expectError(error.DuplicateSemanticRelation, zgraphy.SemanticSchema.validate(&parsed.value));
@@ -1694,6 +1694,21 @@ test "zgraphy M2 Zig parser boundary emits exact AST facts without lexical false
     try std.testing.expect(graph.hasEdge(graph_handle.id, graph_helper.id, .calls));
     try std.testing.expect(graph.findNodeByLabel("phantom") == null);
     try std.testing.expect(graph.findNodeByLabel("commented_out") == null);
+
+    const duplicate_binding_source =
+        \\pub fn duplicateBindings(first: anytype, second: anytype) void {
+        \\    const value = first.left;
+        \\    _ = value;
+        \\    {
+        \\        const value = second.right;
+        \\        _ = value;
+        \\    }
+        \\}
+    ;
+    var duplicate_bindings = try zgraphy.ZigParser.parse(std.testing.allocator, "src/duplicate-bindings.zig", duplicate_binding_source, .{});
+    defer duplicate_bindings.deinit();
+    try zgraphy.ZigParser.validate(&duplicate_bindings);
+    try std.testing.expectEqual(@as(usize, 2), duplicate_bindings.binding_references.len);
 
     try std.testing.expectError(error.InvalidZigSource, zgraphy.ZigParser.parse(std.testing.allocator, "src/broken.zig", "pub fn broken(", .{}));
     try std.testing.expectError(error.ZigSourceLimitExceeded, zgraphy.ZigParser.parse(std.testing.allocator, "src/large.zig", "pub fn main() void {}", .{ .max_source_bytes = 4 }));
@@ -2955,7 +2970,7 @@ test "zgraphy M2 cross-stack operation continuity proves generated client to exa
     defer receipt.deinit(std.testing.allocator);
     try zgraphy.Differential.validateReceipt(&receipt);
     try std.testing.expectEqual(@as(usize, 16), receipt.entities.matched);
-    try std.testing.expectEqual(@as(usize, 17), receipt.relations.matched);
+    try std.testing.expectEqual(@as(usize, 22), receipt.relations.matched);
     try std.testing.expect(!zgraphy.Differential.containsId(receipt.missing_entity_ids, "contract:orders.v1.OrdersService/GetOrder"));
     try std.testing.expect(!zgraphy.Differential.containsId(receipt.missing_relation_ids, "rel:orders:fetch-invokes-rpc"));
     try std.testing.expect(!zgraphy.Differential.containsId(receipt.missing_relation_ids, "rel:orders:rpc-implemented-by-zig"));
@@ -3035,6 +3050,195 @@ test "zgraphy M2 cross-stack operation continuity enforces document bounds" {
     try std.testing.expectEqual(zgraphy.RpcContinuity.Status.ambiguous, backend.status);
     try std.testing.expectEqual(@as(usize, 2), backend.candidate_count);
     try std.testing.expect(result.findInteraction("duplicate.v1.Api/Get") == null);
+}
+
+test "zgraphy M2 request path meaning persists one exact proof carrying feature" {
+    const scenario = zstd.Testing.Scenario{
+        .id = "m2-request-path-meaning",
+        .label = "Exact cross-stack interactions persist as typed request paths and proof-carrying feature meaning",
+        .requirement = "req-m2-request-path-meaning",
+        .acceptance_check = "check-m2-request-path-meaning",
+        .component = "zgraphy",
+        .command = "test",
+        .default_seed = 1908,
+        .source_roots = &.{ "src/model.zig", "src/store.zig", "src/freshness.zig", "src/indexer.zig", "src/rpc_continuity.zig", "src/typescript_symbols.zig", "src/differential.zig", "src/main.zig", "src/semantic_schema.zig", "src/semantic-schema.v2.json", "benchmarks/fixtures/fullstack-orders", "benchmarks/gold/fullstack-orders.canonical.v1.json", "docs/superpowers/specs/2026-07-16-zgraphy-m2-request-path-meaning.md", "src/root.zig", "test/all_test.zig" },
+        .tags = &.{ "acceptance", "m2", "meaning", "rpc", "request-path", "hyperedge", "supernode", "proof", "persistence", "typescript", "proto", "zig", "graphify", "deterministic" },
+    };
+    var evidence = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{
+        .project = "zgraphy",
+        .suite = "zgraphy-tests",
+        .scenario = scenario,
+        .seed = 1908,
+    });
+    defer evidence.deinit();
+    const assertions = zstd.Testing.AssertionRecorder.init(&evidence);
+
+    var fixture = try std.Io.Dir.cwd().openDir(std.testing.io, "benchmarks/fixtures/fullstack-orders", .{ .iterate = true, .follow_symlinks = false });
+    defer fixture.close(std.testing.io);
+    var built = try zgraphy.Indexer.buildRepository(std.testing.allocator, std.testing.io, fixture, .{
+        .repository_id = "repo-19081908190819081908190819081908",
+        .max_nodes = 4096,
+        .max_edges = 16_384,
+        .max_hyperedges = 64,
+        .max_hyperedge_participants = 640,
+        .max_hyperedge_evidence = 640,
+        .max_supernodes = 64,
+        .max_supernode_members = 640,
+        .max_supernode_proof_steps = 640,
+    });
+    defer built.deinit();
+
+    const operation_name = "orders.v1.OrdersService/GetOrder";
+    try std.testing.expectEqual(@as(usize, 1), built.summary.request_paths);
+    try std.testing.expectEqual(@as(usize, 1), built.summary.feature_supernodes);
+    try std.testing.expectEqual(@as(usize, 1), built.graph.hyperedgeCount());
+    try std.testing.expectEqual(@as(usize, 1), built.graph.supernodeCount());
+    const request_path = built.graph.findHyperedgeByCanonicalName(.request_path, operation_name) orelse return error.MissingRequestPathHyperedge;
+    try std.testing.expectEqualStrings("rpc-request-path-v1", request_path.recipe);
+    try std.testing.expect(request_path.evidence.len >= 5);
+    inline for (.{
+        zgraphy.Model.ParticipantRole.frontend_callsite,
+        zgraphy.Model.ParticipantRole.client_binding,
+        zgraphy.Model.ParticipantRole.canonical_operation,
+        zgraphy.Model.ParticipantRole.request_message,
+        zgraphy.Model.ParticipantRole.response_message,
+        zgraphy.Model.ParticipantRole.implementation_container,
+        zgraphy.Model.ParticipantRole.backend_handler,
+        zgraphy.Model.ParticipantRole.ui_consumer,
+        zgraphy.Model.ParticipantRole.data_loader,
+        zgraphy.Model.ParticipantRole.focused_test,
+    }) |role| try std.testing.expect(request_path.participant(role) != null);
+
+    const frontend = request_path.participant(.frontend_callsite).?;
+    const client = request_path.participant(.client_binding).?;
+    const operation = request_path.participant(.canonical_operation).?;
+    const backend_container = request_path.participant(.implementation_container).?;
+    const backend = request_path.participant(.backend_handler).?;
+    const ui = request_path.participant(.ui_consumer).?;
+    const loader = request_path.participant(.data_loader).?;
+    const focused_test = request_path.participant(.focused_test).?;
+    const service = findGraphNode(&built.graph, .service, "proto/orders/v1/orders.proto", "orders.v1.OrdersService") orelse return error.MissingRequestPathService;
+    try std.testing.expect(built.graph.hasEdge(frontend.node_id, client.node_id, .calls));
+    try std.testing.expect(built.graph.hasEdge(client.node_id, service.id, .generated_from));
+    try std.testing.expect(built.graph.hasEdge(ui.node_id, frontend.node_id, .passes_callback));
+    try std.testing.expect(built.graph.hasEdge(backend_container.node_id, backend.node_id, .declares));
+    try std.testing.expect(built.graph.hasEdge(backend.node_id, loader.node_id, .calls));
+    try std.testing.expect(built.graph.hasEdge(focused_test.node_id, backend.node_id, .covers));
+    const deceptive = findGraphNode(&built.graph, .symbol, "frontend/src/deceptiveClient.ts", "deceptiveFetch") orelse return error.MissingDeceptiveFrontendNode;
+    const unregistered = findGraphNode(&built.graph, .symbol, "backend/src/unregistered_service.zig", "GetOrder") orelse return error.MissingUnregisteredBackendNode;
+    for (request_path.participants) |participant| {
+        try std.testing.expect(participant.node_id != deceptive.id);
+        try std.testing.expect(participant.node_id != unregistered.id);
+    }
+
+    const feature = built.graph.findSupernodeByInputHyperedge(request_path.id) orelse return error.MissingRequestPathFeature;
+    try std.testing.expectEqual(zgraphy.Model.SupernodeKind.feature, feature.kind);
+    try std.testing.expectEqual(zgraphy.Model.SupernodeCompleteness.end_to_end_feature, feature.completeness);
+    try std.testing.expectEqualStrings("end-to-end-feature-v1", feature.recipe);
+    try std.testing.expect(feature.member(.frontend_callsite) != null);
+    try std.testing.expect(feature.member(.canonical_operation) != null);
+    try std.testing.expect(feature.member(.backend_handler) != null);
+    try std.testing.expect(feature.hasProofStep(ui.node_id, frontend.node_id, .passes_callback));
+    try std.testing.expect(feature.hasProofStep(frontend.node_id, operation.node_id, .invokes_operation));
+    try std.testing.expect(feature.hasProofStep(backend.node_id, operation.node_id, .handles_operation));
+    try std.testing.expect(feature.hasProofStep(focused_test.node_id, backend.node_id, .covers));
+
+    const health = zgraphy.Freshness.inspect(&built.graph);
+    try std.testing.expect(health.clean());
+    try std.testing.expectEqual(@as(usize, 0), health.dangling_hyperedge_participants);
+    try std.testing.expectEqual(@as(usize, 0), health.invalid_supernode_proofs);
+    const fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &built.graph);
+    var rebuilt = try zgraphy.Indexer.buildRepository(std.testing.allocator, std.testing.io, fixture, .{
+        .repository_id = "repo-19081908190819081908190819081908",
+        .max_nodes = 4096,
+        .max_edges = 16_384,
+        .max_hyperedges = 64,
+        .max_hyperedge_participants = 640,
+        .max_hyperedge_evidence = 640,
+        .max_supernodes = 64,
+        .max_supernode_members = 640,
+        .max_supernode_evidence = 640,
+        .max_supernode_proof_steps = 640,
+    });
+    defer rebuilt.deinit();
+    const rebuilt_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &rebuilt.graph);
+    try std.testing.expectEqualSlices(u8, &fingerprint, &rebuilt_fingerprint);
+    try std.testing.expectEqual(request_path.id, rebuilt.graph.findHyperedgeByCanonicalName(.request_path, operation_name).?.id);
+    try std.testing.expectEqual(feature.id, rebuilt.graph.findSupernodeByInputHyperedge(request_path.id).?.id);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try zgraphy.Store.save(std.testing.io, tmp.dir, "meaning.nendb.jsonl", &built.graph);
+    var loaded = try zgraphy.Store.load(std.testing.allocator, std.testing.io, tmp.dir, "meaning.nendb.jsonl", .{
+        .max_nodes = 4096,
+        .max_edges = 16_384,
+        .max_hyperedges = 64,
+        .max_hyperedge_participants = 640,
+        .max_hyperedge_evidence = 640,
+        .max_supernodes = 64,
+        .max_supernode_members = 640,
+        .max_supernode_proof_steps = 640,
+    });
+    defer loaded.deinit();
+    try std.testing.expectEqualStrings("zgraphy.nendb.snapshot.v2", zgraphy.Store.current_schema);
+    try std.testing.expectEqual(built.graph.hyperedgeCount(), loaded.hyperedgeCount());
+    try std.testing.expectEqual(built.graph.supernodeCount(), loaded.supernodeCount());
+    const loaded_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &loaded);
+    try std.testing.expectEqualSlices(u8, &fingerprint, &loaded_fingerprint);
+
+    const invalid_participants = try zgraphy.Memory.copy(zgraphy.Model.Participant, std.testing.allocator, request_path.participants);
+    defer std.testing.allocator.free(invalid_participants);
+    invalid_participants[1].role = invalid_participants[0].role;
+    try std.testing.expectError(error.InvalidHyperedgeParticipant, built.graph.addHyperedge(.{
+        .kind = request_path.kind,
+        .canonical_name = request_path.canonical_name,
+        .recipe = request_path.recipe,
+        .interaction_fingerprint = request_path.interaction_fingerprint,
+        .participants = invalid_participants,
+        .evidence = request_path.evidence,
+    }));
+
+    const legacy_snapshot = try std.fmt.allocPrint(std.testing.allocator, "{{\"record\":\"header\",\"schema\":\"zgraphy.nendb.snapshot.v1\",\"schema_version\":1,\"engine\":\"nendb_embedded_soa\",\"upstream_commit\":\"{s}\",\"embedder\":\"{s}\",\"dimensions\":{d}}}\n" ++
+        "{{\"record\":\"footer\",\"complete\":true,\"nodes\":0,\"edges\":0,\"vectors\":0}}\n", .{ zgraphy.Nendb.upstream_commit, zgraphy.Nendb.embedder, zgraphy.Nendb.embedding_dimensions });
+    defer std.testing.allocator.free(legacy_snapshot);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "legacy.nendb.jsonl", .data = legacy_snapshot });
+    var legacy = try zgraphy.Store.load(std.testing.allocator, std.testing.io, tmp.dir, "legacy.nendb.jsonl", .{});
+    defer legacy.deinit();
+    try std.testing.expectEqual(@as(usize, 0), legacy.hyperedgeCount());
+    try std.testing.expectEqual(@as(usize, 0), legacy.supernodeCount());
+
+    var gold = try zgraphy.Benchmark.parseEmbeddedGold(std.testing.allocator, "benchmarks/gold/fullstack-orders.canonical.v1.json");
+    defer gold.deinit();
+    var receipt = try zgraphy.Differential.projectZgraphy(std.testing.allocator, &built.graph, &gold.value);
+    defer receipt.deinit(std.testing.allocator);
+    try zgraphy.Differential.validateReceipt(&receipt);
+    try std.testing.expectEqual(@as(usize, 16), receipt.entities.matched);
+    try std.testing.expectEqual(@as(usize, 22), receipt.relations.matched);
+    try std.testing.expectEqual(@as(usize, 2), receipt.facts.matched);
+    try std.testing.expectEqual(@as(usize, 1), receipt.hyperedges.matched);
+    try std.testing.expectEqual(@as(usize, 1), receipt.supernodes.matched);
+
+    try assertions.boolean(.{
+        .id = "zgraphy.m2.request-path-native-meaning",
+        .label = "one exact RPC interaction yields a typed request path and complete feature proof",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 3040, .column = 1 },
+        .repair_hint = "materialize semantic records only from the validated RPC interaction and resolved adjacent graph evidence",
+    }, built.graph.hyperedgeCount() == 1 and built.graph.supernodeCount() == 1 and feature.completeness == .end_to_end_feature);
+    try assertions.boolean(.{
+        .id = "zgraphy.m2.request-path-persistence",
+        .label = "semantic records survive a complete backward-compatible NenDB snapshot round trip",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 3040, .column = 1 },
+        .repair_hint = "persist every participant member evidence span and proof step and include them in graph validation and fingerprinting",
+    }, loaded.hyperedgeCount() == 1 and loaded.supernodeCount() == 1 and std.mem.eql(u8, &fingerprint, &loaded_fingerprint));
+    try assertions.boolean(.{
+        .id = "zgraphy.m2.request-path-differential",
+        .label = "the native graph completely covers the canonical fullstack entities relations facts hyperedge and supernode",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 3040, .column = 1 },
+        .repair_hint = "preserve precise native semantics and update only the explicit benchmark projection",
+    }, receipt.entities.missing == 0 and receipt.relations.missing == 0 and receipt.facts.missing == 0 and receipt.hyperedges.missing == 0 and receipt.supernodes.missing == 0);
+    try assertions.noFindings(.{ .id = "zgraphy.m2.request-path-no-findings", .label = "request-path meaning validation has no causal findings" });
+    try assertions.noPendingFibers(.{ .id = "zgraphy.m2.request-path-no-pending", .label = "request-path meaning leaves no pending fibers" });
+    try evidence.publish(std.testing.io, std.Io.Dir.cwd(), 1);
 }
 
 fn expectProtobufReference(

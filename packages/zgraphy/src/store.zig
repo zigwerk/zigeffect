@@ -4,13 +4,15 @@ const nendb = @import("nendb.zig");
 
 pub const schema = "zgraphy.nendb.snapshot.v1";
 pub const schema_version: u32 = 1;
+pub const current_schema = "zgraphy.nendb.snapshot.v2";
+pub const current_schema_version: u32 = 2;
 pub const default_path = ".zgraphy/nendb.jsonl";
 pub const max_snapshot_bytes: usize = 512 * 1024 * 1024;
 
 const Header = struct {
     record: []const u8 = "header",
-    schema: []const u8 = schema,
-    schema_version: u32 = schema_version,
+    schema: []const u8 = current_schema,
+    schema_version: u32 = current_schema_version,
     engine: []const u8 = "nendb_embedded_soa",
     upstream_commit: []const u8 = nendb.upstream_commit,
     embedder: []const u8 = nendb.embedder,
@@ -38,12 +40,40 @@ const EdgeRecord = struct {
     line: u32,
 };
 
+const HyperedgeRecord = struct {
+    record: []const u8 = "hyperedge",
+    id: u64,
+    hyperedge_kind: model.HyperedgeKind,
+    canonical_name: []const u8,
+    recipe: []const u8,
+    interaction_fingerprint: [32]u8,
+    participants: []const model.Participant,
+    evidence: []const model.SourceEvidence,
+};
+
+const SupernodeRecord = struct {
+    record: []const u8 = "supernode",
+    id: u64,
+    supernode_kind: model.SupernodeKind,
+    canonical_name: []const u8,
+    name: []const u8,
+    recipe: []const u8,
+    synopsis: []const u8,
+    input_hyperedge_id: u64,
+    completeness: model.SupernodeCompleteness,
+    members: []const model.SupernodeMember,
+    evidence: []const model.SourceEvidence,
+    proof_steps: []const model.ProofStep,
+};
+
 const Footer = struct {
     record: []const u8 = "footer",
     complete: bool = true,
     nodes: usize,
     edges: usize,
     vectors: usize,
+    hyperedges: usize,
+    supernodes: usize,
 };
 
 const ParsedLine = struct {
@@ -66,14 +96,30 @@ const ParsedLine = struct {
     relation: ?model.Relation = null,
     provenance: ?model.Provenance = null,
     source_path: ?[]const u8 = null,
+    hyperedge_kind: ?model.HyperedgeKind = null,
+    supernode_kind: ?model.SupernodeKind = null,
+    canonical_name: ?[]const u8 = null,
+    name: ?[]const u8 = null,
+    recipe: ?[]const u8 = null,
+    synopsis: ?[]const u8 = null,
+    interaction_fingerprint: ?[32]u8 = null,
+    participants: ?[]const model.Participant = null,
+    evidence: ?[]const model.SourceEvidence = null,
+    input_hyperedge_id: ?u64 = null,
+    completeness: ?model.SupernodeCompleteness = null,
+    members: ?[]const model.SupernodeMember = null,
+    proof_steps: ?[]const model.ProofStep = null,
     complete: ?bool = null,
     nodes: ?usize = null,
     edges: ?usize = null,
     vectors: ?usize = null,
+    hyperedges: ?usize = null,
+    supernodes: ?usize = null,
 };
 
 pub fn save(io: std.Io, dir: std.Io.Dir, path: []const u8, graph: *const model.RepositoryGraph) !void {
     try validatePath(path);
+    try graph.validateSemanticRecords();
     if (std.mem.lastIndexOfScalar(u8, path, '/')) |slash| try dir.createDirPath(io, path[0..slash]);
     var output = std.Io.Writer.Allocating.init(graph.allocator);
     defer output.deinit();
@@ -99,21 +145,43 @@ pub fn save(io: std.Io, dir: std.Io.Dir, path: []const u8, graph: *const model.R
             .line = edge.line,
         });
     }
+    for (graph.hyperedges.items) |hyperedge| {
+        try appendLine(graph.allocator, &output.writer, HyperedgeRecord{
+            .id = hyperedge.id,
+            .hyperedge_kind = hyperedge.kind,
+            .canonical_name = hyperedge.canonical_name,
+            .recipe = hyperedge.recipe,
+            .interaction_fingerprint = hyperedge.interaction_fingerprint,
+            .participants = hyperedge.participants,
+            .evidence = hyperedge.evidence,
+        });
+    }
+    for (graph.supernodes.items) |supernode| {
+        try appendLine(graph.allocator, &output.writer, SupernodeRecord{
+            .id = supernode.id,
+            .supernode_kind = supernode.kind,
+            .canonical_name = supernode.canonical_name,
+            .name = supernode.name,
+            .recipe = supernode.recipe,
+            .synopsis = supernode.synopsis,
+            .input_hyperedge_id = supernode.input_hyperedge_id,
+            .completeness = supernode.completeness,
+            .members = supernode.members,
+            .evidence = supernode.evidence,
+            .proof_steps = supernode.proof_steps,
+        });
+    }
     try appendLine(graph.allocator, &output.writer, Footer{
         .nodes = graph.nodeCount(),
         .edges = graph.edgeCount(),
         .vectors = graph.vectorCount(),
+        .hyperedges = graph.hyperedgeCount(),
+        .supernodes = graph.supernodeCount(),
     });
     const bytes = try output.toOwnedSlice();
     defer graph.allocator.free(bytes);
     if (bytes.len > max_snapshot_bytes) return error.SnapshotTooLarge;
-    const temporary = try std.fmt.allocPrint(graph.allocator, "{s}.tmp", .{path});
-    defer graph.allocator.free(temporary);
-    try dir.writeFile(io, .{ .sub_path = temporary, .data = bytes });
-    dir.rename(temporary, dir, path, io) catch |failure| {
-        dir.deleteFile(io, temporary) catch {};
-        return failure;
-    };
+    try writeAtomic(graph.allocator, io, dir, path, bytes);
 }
 
 pub fn load(
@@ -130,6 +198,7 @@ pub fn load(
     errdefer graph.deinit();
     var saw_header = false;
     var saw_footer = false;
+    var current = false;
     var lines = std.mem.splitScalar(u8, bytes, '\n');
     while (lines.next()) |line| {
         if (line.len == 0) continue;
@@ -141,12 +210,13 @@ pub fn load(
             if (record.schema == null or record.schema_version == null or record.engine == null or record.upstream_commit == null or record.dimensions == null or record.embedder == null) {
                 return error.IncompleteSnapshot;
             }
-            if (!std.mem.eql(u8, record.schema.?, schema) or
-                record.schema_version != schema_version or
-                !std.mem.eql(u8, record.engine.?, "nendb_embedded_soa") or
+            const legacy_header = std.mem.eql(u8, record.schema.?, schema) and record.schema_version == schema_version;
+            const current_header = std.mem.eql(u8, record.schema.?, current_schema) and record.schema_version == current_schema_version;
+            if ((!legacy_header and !current_header) or !std.mem.eql(u8, record.engine.?, "nendb_embedded_soa") or
                 !std.mem.eql(u8, record.upstream_commit.?, nendb.upstream_commit) or
                 record.dimensions != nendb.embedding_dimensions or
                 !std.mem.eql(u8, record.embedder.?, nendb.embedder)) return error.IncompatibleSnapshot;
+            current = current_header;
             saw_header = true;
         } else if (std.mem.eql(u8, record.record, "node")) {
             if (!saw_header or saw_footer) return error.CorruptSnapshot;
@@ -174,14 +244,69 @@ pub fn load(
                 .source_path = record.source_path orelse "",
                 .line = record.line orelse 0,
             });
+        } else if (std.mem.eql(u8, record.record, "hyperedge")) {
+            if (!saw_header or saw_footer or !current) return error.CorruptSnapshot;
+            _ = try graph.addHyperedge(.{
+                .id = record.id orelse return error.CorruptSnapshot,
+                .kind = record.hyperedge_kind orelse return error.CorruptSnapshot,
+                .canonical_name = record.canonical_name orelse return error.CorruptSnapshot,
+                .recipe = record.recipe orelse return error.CorruptSnapshot,
+                .interaction_fingerprint = record.interaction_fingerprint orelse return error.CorruptSnapshot,
+                .participants = record.participants orelse return error.CorruptSnapshot,
+                .evidence = record.evidence orelse return error.CorruptSnapshot,
+            });
+        } else if (std.mem.eql(u8, record.record, "supernode")) {
+            if (!saw_header or saw_footer or !current) return error.CorruptSnapshot;
+            _ = try graph.addSupernode(.{
+                .id = record.id orelse return error.CorruptSnapshot,
+                .kind = record.supernode_kind orelse return error.CorruptSnapshot,
+                .canonical_name = record.canonical_name orelse return error.CorruptSnapshot,
+                .name = record.name orelse return error.CorruptSnapshot,
+                .recipe = record.recipe orelse return error.CorruptSnapshot,
+                .synopsis = record.synopsis orelse return error.CorruptSnapshot,
+                .input_hyperedge_id = record.input_hyperedge_id orelse return error.CorruptSnapshot,
+                .completeness = record.completeness orelse return error.CorruptSnapshot,
+                .members = record.members orelse return error.CorruptSnapshot,
+                .evidence = record.evidence orelse return error.CorruptSnapshot,
+                .proof_steps = record.proof_steps orelse return error.CorruptSnapshot,
+            });
         } else if (std.mem.eql(u8, record.record, "footer")) {
             if (!saw_header or saw_footer or record.complete != true) return error.IncompleteSnapshot;
             if (record.nodes != graph.nodeCount() or record.edges != graph.edgeCount() or record.vectors != graph.vectorCount()) return error.CorruptSnapshot;
+            if (current) {
+                if (record.hyperedges != graph.hyperedgeCount() or record.supernodes != graph.supernodeCount()) return error.CorruptSnapshot;
+            } else if (graph.hyperedgeCount() != 0 or graph.supernodeCount() != 0) return error.CorruptSnapshot;
             saw_footer = true;
         } else return error.CorruptSnapshot;
     }
     if (!saw_header or !saw_footer) return error.IncompleteSnapshot;
+    try graph.validateSemanticRecords();
     return graph;
+}
+
+fn writeAtomic(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, path: []const u8, bytes: []const u8) !void {
+    for (0..1024) |slot| if (try writeAtomicSlot(allocator, io, dir, path, bytes, slot)) return;
+    return error.AtomicTemporaryPathExhausted;
+}
+
+fn writeAtomicSlot(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, path: []const u8, bytes: []const u8, slot: usize) !bool {
+    const temporary = try std.fmt.allocPrint(allocator, "{s}.tmp.{d}", .{ path, slot });
+    defer allocator.free(temporary);
+    const file = dir.createFile(io, temporary, .{ .exclusive = true }) catch |failure| switch (failure) {
+        error.PathAlreadyExists => return false,
+        else => return failure,
+    };
+    var open = true;
+    defer if (open) file.close(io);
+    defer dir.deleteFile(io, temporary) catch {};
+    try file.writeStreamingAll(io, bytes);
+    file.close(io);
+    open = false;
+    dir.rename(temporary, dir, path, io) catch |failure| switch (failure) {
+        error.FileNotFound => return false,
+        else => return failure,
+    };
+    return true;
 }
 
 fn appendLine(allocator: std.mem.Allocator, writer: *std.Io.Writer, value: anytype) !void {

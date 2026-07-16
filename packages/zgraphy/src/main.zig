@@ -100,10 +100,12 @@ fn runBuild(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, json: bo
         .database = config.value.database,
         .summary = built.summary,
     });
-    return writeText(io, allocator, "built {d} nodes, {d} edges, {d} vectors from {d} files -> {s}\n", .{
+    return writeText(io, allocator, "built {d} nodes, {d} edges, {d} vectors, {d} request paths, {d} feature supernodes from {d} files -> {s}\n", .{
         built.summary.nodes,
         built.summary.edges,
         built.summary.vectors,
+        built.summary.request_paths,
+        built.summary.feature_supernodes,
         built.summary.files_indexed,
         config.value.database,
     });
@@ -137,11 +139,17 @@ fn runStatus(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, json: b
         .status = "ready",
         .database = loaded.database,
         .stats = stats,
+        .semantic = .{
+            .hyperedges = loaded.graph.hyperedgeCount(),
+            .supernodes = loaded.graph.supernodeCount(),
+        },
     });
-    return writeText(io, allocator, "ready: {d} nodes, {d} edges, {d} vectors ({s}, {s})\n", .{
+    return writeText(io, allocator, "ready: {d} nodes, {d} edges, {d} vectors, {d} hyperedges, {d} supernodes ({s}, {s})\n", .{
         stats.node_count,
         stats.edge_count,
         stats.vector_count,
+        loaded.graph.hyperedgeCount(),
+        loaded.graph.supernodeCount(),
         stats.engine,
         stats.embedder_name,
     });
@@ -210,9 +218,15 @@ fn runSemanticSchema(allocator: std.mem.Allocator, io: std.Io, args: []const []c
         .compatibility_mapping_count = parsed.value.compatibility.len,
         .graphify_provenance_mapping_count = parsed.value.graphify_provenance.len,
         .migration = parsed.value.migration,
-        .storage_implemented = false,
+        .storage = .{
+            .current_schema = zgraphy.Store.current_schema,
+            .legacy_read_schema = zgraphy.Store.schema,
+            .hyperedges = true,
+            .supernodes = true,
+            .complete_schema_v2 = false,
+        },
     });
-    return writeText(io, allocator, "semantic schema v{d}: {d} records, {d} node kinds, {d} provenance origins, {d} statuses, {d} relation families, {d} relations (storage pending)\n", .{
+    return writeText(io, allocator, "semantic schema v{d}: {d} records, {d} node kinds, {d} provenance origins, {d} statuses, {d} relation families, {d} relations (hyperedge/supernode storage active; full generations pending)\n", .{
         parsed.value.schema_version,
         parsed.value.records.len,
         parsed.value.node_kinds.len,
@@ -761,13 +775,25 @@ fn runExplain(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: 
         if (edge.from == node.id) outgoing += 1;
         if (edge.to == node.id) incoming += 1;
     }
+    const semantic_limit: usize = 64;
+    const request_path_count = matchingHyperedgeCount(&loaded.graph, node.id);
+    const feature_count = matchingSupernodeCount(&loaded.graph, node.id);
+    const request_paths = try owned.slice(zgraphy.Model.Hyperedge, allocator, @min(request_path_count, semantic_limit));
+    defer allocator.free(request_paths);
+    const features = try owned.slice(zgraphy.Model.Supernode, allocator, @min(feature_count, semantic_limit));
+    defer allocator.free(features);
+    copyMatchingHyperedges(&loaded.graph, node.id, request_paths);
+    copyMatchingSupernodes(&loaded.graph, node.id, features);
     if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
-        .schema = "zgraphy.explain.v1",
+        .schema = "zgraphy.explain.v2",
         .node = node.*,
         .incoming = incoming,
         .outgoing = outgoing,
+        .request_paths = request_paths,
+        .features = features,
+        .semantic_truncated = request_path_count > request_paths.len or feature_count > features.len,
     });
-    return writeText(io, allocator, "{s} id={d} kind={s} source={s}:{d} incoming={d} outgoing={d}\n", .{
+    return writeText(io, allocator, "{s} id={d} kind={s} source={s}:{d} incoming={d} outgoing={d} request_paths={d} features={d}\n", .{
         node.label,
         node.id,
         @tagName(node.kind),
@@ -775,7 +801,59 @@ fn runExplain(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: 
         node.line,
         incoming,
         outgoing,
+        request_path_count,
+        feature_count,
     });
+}
+
+fn matchingHyperedgeCount(graph: *const zgraphy.RepositoryGraph, node_id: u64) usize {
+    var count: usize = 0;
+    for (graph.hyperedges.items) |hyperedge| {
+        for (hyperedge.participants) |participant| {
+            if (participant.node_id != node_id) continue;
+            count += 1;
+            break;
+        }
+    }
+    return count;
+}
+
+fn matchingSupernodeCount(graph: *const zgraphy.RepositoryGraph, node_id: u64) usize {
+    var count: usize = 0;
+    for (graph.supernodes.items) |supernode| {
+        for (supernode.members) |member| {
+            if (member.node_id != node_id) continue;
+            count += 1;
+            break;
+        }
+    }
+    return count;
+}
+
+fn copyMatchingHyperedges(graph: *const zgraphy.RepositoryGraph, node_id: u64, output: []zgraphy.Model.Hyperedge) void {
+    var write: usize = 0;
+    for (graph.hyperedges.items) |hyperedge| {
+        if (write >= output.len) return;
+        for (hyperedge.participants) |participant| {
+            if (participant.node_id != node_id) continue;
+            output[write] = hyperedge;
+            write += 1;
+            break;
+        }
+    }
+}
+
+fn copyMatchingSupernodes(graph: *const zgraphy.RepositoryGraph, node_id: u64, output: []zgraphy.Model.Supernode) void {
+    var write: usize = 0;
+    for (graph.supernodes.items) |supernode| {
+        if (write >= output.len) return;
+        for (supernode.members) |member| {
+            if (member.node_id != node_id) continue;
+            output[write] = supernode;
+            write += 1;
+            break;
+        }
+    }
 }
 
 fn runPath(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8) !void {

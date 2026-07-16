@@ -50,13 +50,22 @@ pub const Health = struct {
     nodes: usize,
     edges: usize,
     vectors: usize,
+    hyperedges: usize,
+    supernodes: usize,
     dangling_edges: usize,
+    dangling_hyperedge_participants: usize,
+    dangling_supernode_members: usize,
+    missing_input_hyperedges: usize,
+    invalid_supernode_proofs: usize,
     missing_vectors: usize,
     unowned_vectors: usize,
     true_orphans: usize,
 
     pub fn clean(self: Health) bool {
-        return self.dangling_edges == 0 and self.missing_vectors == 0 and self.unowned_vectors == 0 and self.true_orphans == 0;
+        return self.dangling_edges == 0 and self.dangling_hyperedge_participants == 0 and
+            self.dangling_supernode_members == 0 and self.missing_input_hyperedges == 0 and
+            self.invalid_supernode_proofs == 0 and self.missing_vectors == 0 and
+            self.unowned_vectors == 0 and self.true_orphans == 0;
     }
 };
 
@@ -125,16 +134,41 @@ pub fn inspect(graph: *const model.RepositoryGraph) Health {
     for (graph.edges.items) |edge| {
         if (graph.findNode(edge.from) == null or graph.findNode(edge.to) == null) dangling_edges += 1;
     }
+    var dangling_hyperedge_participants: usize = 0;
+    for (graph.hyperedges.items) |hyperedge| {
+        for (hyperedge.participants) |participant| if (graph.findNode(participant.node_id) == null) {
+            dangling_hyperedge_participants += 1;
+        };
+    }
+    var dangling_supernode_members: usize = 0;
+    var missing_input_hyperedges: usize = 0;
+    var invalid_supernode_proofs: usize = 0;
+    for (graph.supernodes.items) |supernode| {
+        if (graph.findHyperedge(supernode.input_hyperedge_id) == null) missing_input_hyperedges += 1;
+        for (supernode.members) |member| {
+            if (graph.findNode(member.node_id) == null) dangling_supernode_members += 1;
+        }
+        for (supernode.proof_steps) |step| {
+            if (!graph.hasEdge(step.from, step.to, step.relation)) invalid_supernode_proofs += 1;
+        }
+    }
     const missing_vectors = if (graph.nodeCount() > graph.vectorCount()) graph.nodeCount() - graph.vectorCount() else 0;
     const unowned_vectors = if (graph.vectorCount() > graph.nodeCount()) graph.vectorCount() - graph.nodeCount() else 0;
+    const semantic_orphans = dangling_hyperedge_participants + dangling_supernode_members + missing_input_hyperedges + invalid_supernode_proofs;
     return .{
         .nodes = graph.nodeCount(),
         .edges = graph.edgeCount(),
         .vectors = graph.vectorCount(),
+        .hyperedges = graph.hyperedgeCount(),
+        .supernodes = graph.supernodeCount(),
         .dangling_edges = dangling_edges,
+        .dangling_hyperedge_participants = dangling_hyperedge_participants,
+        .dangling_supernode_members = dangling_supernode_members,
+        .missing_input_hyperedges = missing_input_hyperedges,
+        .invalid_supernode_proofs = invalid_supernode_proofs,
         .missing_vectors = missing_vectors,
         .unowned_vectors = unowned_vectors,
-        .true_orphans = dangling_edges + unowned_vectors,
+        .true_orphans = dangling_edges + unowned_vectors + semantic_orphans,
     };
 }
 
@@ -165,6 +199,24 @@ pub fn fingerprint(allocator: std.mem.Allocator, graph: *const model.RepositoryG
         }
     }.lessThan);
 
+    const hyperedge_order = try memory.slice(usize, allocator, graph.hyperedges.items.len);
+    defer allocator.free(hyperedge_order);
+    for (hyperedge_order, 0..) |*value, index| value.* = index;
+    std.mem.sort(usize, hyperedge_order, graph, struct {
+        fn lessThan(context: *const model.RepositoryGraph, left: usize, right: usize) bool {
+            return context.hyperedges.items[left].id < context.hyperedges.items[right].id;
+        }
+    }.lessThan);
+
+    const supernode_order = try memory.slice(usize, allocator, graph.supernodes.items.len);
+    defer allocator.free(supernode_order);
+    for (supernode_order, 0..) |*value, index| value.* = index;
+    std.mem.sort(usize, supernode_order, graph, struct {
+        fn lessThan(context: *const model.RepositoryGraph, left: usize, right: usize) bool {
+            return context.supernodes.items[left].id < context.supernodes.items[right].id;
+        }
+    }.lessThan);
+
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
     updateU64(&hasher, graph.nodeCount());
     for (node_order) |index| {
@@ -186,6 +238,48 @@ pub fn fingerprint(allocator: std.mem.Allocator, graph: *const model.RepositoryG
         updateU64(&hasher, @intFromEnum(edge.provenance));
         updateBytes(&hasher, edge.source_path);
         updateU64(&hasher, edge.line);
+    }
+    updateU64(&hasher, graph.hyperedgeCount());
+    for (hyperedge_order) |index| {
+        const hyperedge = graph.hyperedges.items[index];
+        updateU64(&hasher, hyperedge.id);
+        updateU64(&hasher, @intFromEnum(hyperedge.kind));
+        updateBytes(&hasher, hyperedge.canonical_name);
+        updateBytes(&hasher, hyperedge.recipe);
+        updateBytes(&hasher, &hyperedge.interaction_fingerprint);
+        updateU64(&hasher, hyperedge.participants.len);
+        for (hyperedge.participants) |participant| {
+            updateU64(&hasher, @intFromEnum(participant.role));
+            updateU64(&hasher, participant.node_id);
+        }
+        updateU64(&hasher, hyperedge.evidence.len);
+        for (hyperedge.evidence) |item| updateEvidence(&hasher, item);
+    }
+    updateU64(&hasher, graph.supernodeCount());
+    for (supernode_order) |index| {
+        const supernode = graph.supernodes.items[index];
+        updateU64(&hasher, supernode.id);
+        updateU64(&hasher, @intFromEnum(supernode.kind));
+        updateBytes(&hasher, supernode.canonical_name);
+        updateBytes(&hasher, supernode.name);
+        updateBytes(&hasher, supernode.recipe);
+        updateBytes(&hasher, supernode.synopsis);
+        updateU64(&hasher, supernode.input_hyperedge_id);
+        updateU64(&hasher, @intFromEnum(supernode.completeness));
+        updateU64(&hasher, supernode.members.len);
+        for (supernode.members) |member| {
+            updateU64(&hasher, @intFromEnum(member.role));
+            updateU64(&hasher, member.node_id);
+            updateBytes(&hasher, member.reason);
+        }
+        updateU64(&hasher, supernode.evidence.len);
+        for (supernode.evidence) |item| updateEvidence(&hasher, item);
+        updateU64(&hasher, supernode.proof_steps.len);
+        for (supernode.proof_steps) |step| {
+            updateU64(&hasher, step.from);
+            updateU64(&hasher, step.to);
+            updateU64(&hasher, @intFromEnum(step.relation));
+        }
     }
     var digest: [32]u8 = @splat(0);
     hasher.final(&digest);
@@ -293,6 +387,17 @@ fn transitionsPass(transitions: []const Transition) bool {
 fn updateBytes(hasher: *std.crypto.hash.sha2.Sha256, value: []const u8) void {
     updateU64(hasher, value.len);
     hasher.update(value);
+}
+
+fn updateEvidence(hasher: *std.crypto.hash.sha2.Sha256, item: model.SourceEvidence) void {
+    updateU64(hasher, @intFromEnum(item.role));
+    updateBytes(hasher, item.source_path);
+    updateU64(hasher, item.span.start_byte);
+    updateU64(hasher, item.span.end_byte);
+    updateU64(hasher, item.span.start_line);
+    updateU64(hasher, item.span.start_column);
+    updateU64(hasher, item.span.end_line);
+    updateU64(hasher, item.span.end_column);
 }
 
 fn updateU64(hasher: *std.crypto.hash.sha2.Sha256, value: anytype) void {

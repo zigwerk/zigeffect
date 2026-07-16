@@ -32,7 +32,14 @@ Connect client construction and member calls now join through strict
 Protobuf-ES lineage to canonical Proto operations, while registered ZigEffect
 `GeneratedDriverBinding` handlers join through protoc-gen-zig lineage. The
 result exposes directed `invokes_operation` and `handles_operation` proof
-edges; shared spellings alone never qualify.
+edges; shared spellings alone never qualify. Each complete interaction now
+materializes a native typed request-path hyperedge and a proof-carrying feature
+supernode. The first recipe includes the frontend callback consumer, exact
+client binding, canonical operation and messages, registered Zig container and
+handler, data loader, and focused test when those adjacent relations resolve
+uniquely. `zgraphy explain <node> --json` returns the bounded source spans,
+participants, members, completeness, and proof steps rather than a similarity
+summary.
 
 The target engine is self-maintaining after `init`: default agent queries check
 freshness, publish safe incremental generations, prune invalidated facts and
@@ -96,7 +103,7 @@ zgraphy benchmark resources .zgraphy/benchmarks/runs/resources/resource-samples.
   --json
 zgraphy benchmark freshness .zgraphy/benchmarks/runs/freshness/freshness-transitions.v1.json --json
 zgraphy query "where is causal graph persistence implemented?"
-zgraphy explain LocalDatabase
+zgraphy explain LocalDatabase --json
 zgraphy path ManagedRuntime LocalDatabase --max-hops 8
 ```
 
@@ -107,22 +114,28 @@ zgraphy build . --json
 zgraphy parity --json
 zgraphy benchmark corpus --json
 zgraphy query "repository indexing" --limit 10 --json
+zgraphy explain fetchOrder --json
 ```
 
 `init` creates config-v2 with one opaque persistent repository identity plus
 `.zgraphyignore`, without replacing user configuration. `build` is a bounded
 full rebuild in M1; `ingest` is an alias. It atomically writes the complete
 snapshot, deterministic redacted content/ownership manifest, and graph-health
-baseline under `.zgraphy/`. Readers reject incomplete footers or incompatible
-schema/embedder metadata. `doctor` rebuilds current state in memory and reports
+baseline under `.zgraphy/`. New snapshots use `zgraphy.nendb.snapshot.v2` to persist native
+hyperedges and supernodes; snapshot-v1 remains a backward-readable rollback
+input. Multi-generation publication and automatic refresh remain M3 work.
+Readers reject incomplete footers or incompatible schema/embedder metadata.
+`doctor` rebuilds current state in memory and reports
 clean, stale, missing, incompatible, or corrupt evidence without mutating the
 published graph.
 
 `schema` validates and reports the content-addressed semantic contract. Passing
 a relation name resolves its complete family policy, including endpoint roles,
 evidence and ambiguity requirements, affected-query traversal, invalidation,
-and external mappings. This is an additive M0 contract: snapshot v1 remains the
-active storage format and the command reports schema-v2 storage as pending.
+and external mappings. Snapshot-v2 now implements the hyperedge and supernode
+subset while snapshot-v1 remains a readable rollback input; facts, claims and
+immutable multi-generation publication are not yet claimed as fully persisted
+schema-v2 records.
 
 `contracts` validates and reports the operational boundary for provider
 authority and lifecycle, shared extractor conformance, staged config-v2,
@@ -312,7 +325,10 @@ resolution and TypeScript module and symbol resolution preserve candidates and
 typed ambiguity without name-only cross-file guesses. Export/barrel/default/
 namespace flow, evidence-backed receiver calls, canonical Proto identities,
 strict Protobuf-ES/protoc-gen-zig source lineage, and exact Connect-callsite to
-ZigEffect-handler operation continuity are active. Request-path hyperedges and
-feature supernodes, deeper Zig type/build resolution, neural embeddings, ANN,
-incremental watch and automatic pruning, MCP, editor installers, and
-visualisation remain later slices.
+ZigEffect-handler operation continuity are active. Native request-path
+hyperedges, end-to-end feature supernodes, callback-versus-direct-call
+semantics, exact nested Zig handler ownership, focused test coverage, semantic
+snapshot round-trips, and proof-carrying explain output are also active. Deeper
+Zig type/build resolution, HTTP paths, neural embeddings, ANN, incremental
+watch and automatic pruning, MCP, editor installers, and visualisation remain
+later slices.

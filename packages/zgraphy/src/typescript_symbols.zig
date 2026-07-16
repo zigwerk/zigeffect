@@ -3,9 +3,9 @@ const owned = @import("memory.zig");
 const typescript_parser = @import("typescript_parser.zig");
 const typescript_resolution = @import("typescript_resolution.zig");
 
-pub const schema = "zgraphy.typescript-symbol-resolution.v1";
-pub const schema_version: u32 = 1;
-pub const resolver_version = "exports-imports-scoped-receivers-v1";
+pub const schema = "zgraphy.typescript-symbol-resolution.v2";
+pub const schema_version: u32 = 2;
+pub const resolver_version = "exports-imports-scoped-receivers-callbacks-v2";
 
 pub const Status = enum(u8) {
     resolved,
@@ -21,6 +21,7 @@ pub const FactKind = enum(u8) {
     direct_call,
     member_call,
     constructor_call,
+    callback_reference,
 };
 
 pub const CandidateReason = enum(u8) {
@@ -33,6 +34,7 @@ pub const CandidateReason = enum(u8) {
     local_export_alias,
     static_receiver,
     typed_receiver,
+    callback_argument,
 };
 
 pub const Resolution = struct {
@@ -494,6 +496,18 @@ const Engine = struct {
                     .call = item,
                 });
             }
+            for (parsed.call_arguments) |*argument| {
+                if (argument.kind != .identifier or argument.expression.len == 0) continue;
+                const parent = findCallBySpan(parsed.calls, argument.call_span) orelse continue;
+                if (parent.enclosing_declaration.len == 0) continue;
+                try facts.append(self.arena.allocator(), .{
+                    .kind = .callback_reference,
+                    .source_path = parsed.path,
+                    .subject = argument.expression,
+                    .enclosing_declaration = parent.enclosing_declaration,
+                    .span = argument.span,
+                });
+            }
         }
     }
 
@@ -513,6 +527,32 @@ const Engine = struct {
             .direct_call => try self.resolveDirectCall(fact.source_path, fact.call.?.*, output, hint),
             .member_call => try self.resolveMemberCall(fact.source_path, fact.call.?.*, output, hint),
             .constructor_call => try self.resolveConstructorCall(fact.source_path, fact.call.?.*, output, hint),
+            .callback_reference => try self.resolveFunctionReference(fact.source_path, fact.subject, fact.enclosing_declaration, output, hint),
+        }
+    }
+
+    fn resolveFunctionReference(
+        self: *Engine,
+        source_path: []const u8,
+        subject: []const u8,
+        enclosing_declaration: []const u8,
+        output: *std.ArrayList(TempCandidate),
+        hint: *Hint,
+    ) !void {
+        const parsed = self.corpus.parsedForPath(source_path) orelse return;
+        for (parsed.declarations) |declaration| {
+            if (!callableDeclaration(declaration.kind) or !std.mem.eql(u8, declaration.name, subject)) continue;
+            if (std.mem.eql(u8, declaration.enclosing_declaration, enclosing_declaration) or declaration.enclosing_declaration.len == 0) {
+                try appendDeclarationCandidate(output, self.arena.allocator(), source_path, declaration, .callback_argument);
+            }
+        }
+        if (output.items.len > 0) return;
+        for (parsed.import_bindings) |binding| {
+            if (!std.mem.eql(u8, binding.local, subject)) continue;
+            const before = output.items.len;
+            try self.resolveImportBinding(source_path, binding, output, hint);
+            retainCallableCandidates(self.corpus, output, before);
+            setReasons(output.items[before..], .callback_argument);
         }
     }
 
@@ -896,6 +936,31 @@ fn hasClassDeclaration(parsed: *const typescript_parser.Result, candidate: TempC
 
 fn callableDeclaration(kind: typescript_parser.DeclarationKind) bool {
     return kind == .function or kind == .function_value or kind == .class;
+}
+
+fn findCallBySpan(calls: []const typescript_parser.Call, span: typescript_parser.Span) ?*const typescript_parser.Call {
+    for (calls) |*call| if (call.span.start_byte == span.start_byte and call.span.end_byte == span.end_byte) return call;
+    return null;
+}
+
+fn retainCallableCandidates(corpus: *const Corpus, output: *std.ArrayList(TempCandidate), start: usize) void {
+    var write = start;
+    for (output.items[start..]) |candidate| {
+        const parsed = corpus.parsedForPath(candidate.target_path) orelse continue;
+        var callable = false;
+        for (parsed.declarations) |declaration| {
+            if (callableDeclaration(declaration.kind) and std.mem.eql(u8, declaration.name, candidate.target_name) and
+                std.mem.eql(u8, declaration.enclosing_declaration, candidate.target_enclosing_declaration))
+            {
+                callable = true;
+                break;
+            }
+        }
+        if (!callable) continue;
+        output.items[write] = candidate;
+        write += 1;
+    }
+    output.items.len = write;
 }
 
 fn bareIdentifier(value: []const u8) bool {

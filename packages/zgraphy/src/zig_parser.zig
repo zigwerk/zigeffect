@@ -103,7 +103,7 @@ pub const Summary = struct {
 pub const Options = struct {
     max_source_bytes: usize = 4 * 1024 * 1024,
     max_facts: usize = 100_000,
-    max_label_bytes: usize = 1024,
+    max_label_bytes: usize = 16 * 1024,
 };
 
 pub const Result = struct {
@@ -356,11 +356,13 @@ pub fn parse(
         const full_call = tree.fullCall(&call_buffer, node) orelse continue;
         const callee_span = spanForNode(source, &tree, full_call.ast.fn_expr);
         const callee = try compactExpressionAlloc(allocator, source[callee_span.start_byte..callee_span.end_byte], options.max_label_bytes);
-        errdefer allocator.free(callee);
+        var callee_owned = true;
+        errdefer if (callee_owned) allocator.free(callee);
         if (callee.len == 0) return error.InvalidCallExpression;
         const enclosing = enclosingName(ranges.items, callee_span.start_byte, callee_span.end_byte);
         const enclosing_copy = if (enclosing.len > 0) try owned.copy(u8, allocator, enclosing) else "";
-        errdefer if (enclosing_copy.len > 0) allocator.free(enclosing_copy);
+        var enclosing_owned = enclosing_copy.len > 0;
+        errdefer if (enclosing_owned) allocator.free(enclosing_copy);
         try ensureFactCapacity(try factCount(&.{ declarations.items.len, imports.items.len, calls.items.len, call_arguments.items.len, bindings.items.len, binding_references.items.len }), options.max_facts);
         const call_span = spanForNode(source, &tree, node);
         try calls.append(allocator, .{
@@ -369,6 +371,8 @@ pub fn parse(
             .span = call_span,
             .callee_span = callee_span,
         });
+        callee_owned = false;
+        enclosing_owned = false;
         for (full_call.ast.params, 0..) |parameter, argument_index| {
             const argument_span = spanForNode(source, &tree, parameter);
             const expression = try compactExpressionAlloc(allocator, source[argument_span.start_byte..argument_span.end_byte], options.max_label_bytes);
@@ -442,7 +446,6 @@ pub fn parse(
         },
         .fingerprint = fingerprint(path, source.len, declaration_slice, import_slice, call_slice, call_argument_slice, binding_slice, binding_reference_slice),
     };
-    errdefer result.deinit();
     try validate(&result);
     return result;
 }
@@ -506,7 +509,7 @@ pub fn validate(result: *const Result) !void {
     }
     previous_start = 0;
     for (result.binding_references, 0..) |reference, index| {
-        const binding = findBindingExact(result.bindings, reference.binding, reference.enclosing_declaration) orelse return error.InvalidZigBindingReference;
+        const binding = findBindingByNameScopeAndContainment(result.bindings, reference.binding, reference.enclosing_declaration, reference.span) orelse return error.InvalidZigBindingReference;
         if (reference.expression.len == 0 or std.mem.indexOfScalar(u8, reference.expression, '.') == null or
             !reference.span.valid(result.source_bytes) or reference.span.start_byte < binding.initializer_span.start_byte or
             reference.span.end_byte > binding.initializer_span.end_byte or

@@ -7,7 +7,7 @@ Last updated: 2026-07-16
 Reference baseline: Graphify commit `cb96bdaa0c367bec8d5c5aee5d7c9ebb727e9780`
 
 Execution status: M0 comparative truth and M1 universal init/workspace graph
-are implemented, and M2 has advanced through 20 requirement-backed controlled
+are implemented, and M2 has advanced through 26 requirement-backed controlled
 scenarios. M1 now has
 opaque persistent repository identity, config-v1 migration to config-v2,
 bounded no-follow universal discovery, nested ignore precedence, typed terminal
@@ -190,10 +190,13 @@ The current implementation still has important limitations:
 
 - Zig extraction uses the compiler AST and a bounded evidence-preserving
   resolver, but is not yet a complete type/build/comptime semantic pipeline.
-- Symbol identity is not yet rich enough for overloads, scopes, members,
-  aliases, re-exports, generics, generated code, or cross-repository symbols.
-- The schema has a small set of node and edge kinds and no first-class facts,
-  source spans, evidence records, hyperedges, or materialised supernodes.
+- Symbol identity now covers explicit TypeScript aliases, re-exports, generated
+  Proto lineage and exact registered cross-stack handlers, but overloads,
+  generics, deeper Zig type/build/comptime identity and cross-repository symbols
+  remain incomplete.
+- Native source spans, evidence records, request-path hyperedges and
+  proof-carrying feature supernodes are active. General first-class fact and
+  claim persistence plus additional semantic recipes remain future work.
 - Supported static Zig imports and function-value calls are exact and
   ambiguity-preserving; nested block, member/type, package/build, and generated
   identities still need deeper resolution.
@@ -203,10 +206,12 @@ The current implementation still has important limitations:
   hashes, and graph reranking is only one-hop.
 - The curated differential corpus exists, but its held-out Zig, TypeScript,
   Proto, supernode, retrieval, and mutation coverage must keep expanding.
-- Query output ranks nodes but does not yet return a complete proof-carrying
-  evidence packet.
-- Non-Zig languages, deep build semantics, protocol identities, and repository
-  federation currently have placement/ownership only or remain deferred.
+- `explain --json` now returns bounded proof-carrying request paths and feature
+  aggregates for a selected node; broader intent-aware retrieval packets and
+  automatic context budgeting remain incomplete.
+- TypeScript/TSX/JavaScript and Proto have native parser/resolver coverage at
+  the current M2 boundary. Additional languages, deep build semantics, HTTP
+  paths and repository federation remain deferred.
 - Visualisation is intentionally absent.
 
 ## Graphify leverage strategy
@@ -2610,7 +2615,7 @@ Delivered M2 kernel slices:
   contract spine on the shared fullstack fixture; and
 - exact Connect `createClient` invocation and ZigEffect generated-driver
   registration recipes joined through one canonical Proto operation, with
-  negative lookalike/unregistered fixtures and a pinned Graphify gap receipt.
+  negative lookalike/unregistered fixtures and a pinned Graphify gap receipt;
 - structural-facts v2 exports and lexical receiver-type bindings in the shared
   parser contract, including bounded static CommonJS export identities;
 - deterministic named/default/namespace/local-alias/star export closure,
@@ -2629,7 +2634,12 @@ Delivered M2 kernel slices:
   Protobuf-ES method spelling and canonical Proto operations to exact
   `GeneratedDriverBinding`-registered Zig handlers, with deterministic
   interaction facts, `invokes_operation` / `handles_operation` graph edges and
-  a pinned Graphify 0.9.17 cross-stack gap receipt.
+  a pinned Graphify 0.9.17 cross-stack gap receipt; and
+- native `rpc-request-path-v1` hyperedges and `end-to-end-feature-v1`
+  supernodes with typed participants, direct spans, callback-specific
+  projections, nested Zig ownership, focused test coverage, validated proof
+  steps, full fullstack-orders canonical coverage, snapshot-v2 persistence,
+  snapshot-v1 reads and bounded proof-carrying explain output.
 
 Exit evidence:
 
