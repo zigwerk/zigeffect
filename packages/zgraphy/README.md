@@ -14,8 +14,9 @@ effects, stores, tests, requirements, and runtime causal evidence.
 
 Native source parsing is supplied by the reusable `zigeffect-parser` package
 through the grammar-free `zigeffect-std.Parser` contract. zgraphy consumes its
-bounded TypeScript/TSX/JavaScript facts and adds repository resolution, graph
-identity, retrieval, and freshness rather than owning language runtimes.
+bounded TypeScript/TSX/JavaScript and Proto facts and adds repository
+resolution, graph identity, retrieval, and freshness rather than owning
+language runtimes.
 Resolution runs against one immutable discovery inventory and understands
 relative ESM/CommonJS imports, JSONC tsconfig inheritance and aliases, pnpm/npm
 workspaces, package exports and entry fallbacks. Each occurrence is retained as
@@ -301,10 +302,11 @@ requirement receipts and replay commands are under `.zigeffect/tests/`.
 
 All safe languages receive queryable placement and manifest-derived ownership.
 Zig syntax enters through the compiler-owned AST, while the shared native
-parser supplies exact TypeScript/TSX/JavaScript facts. Zig call resolution and
-TypeScript module and symbol resolution preserve candidates and typed ambiguity
-without name-only cross-file guesses. Export/barrel/default/namespace flow and
-evidence-backed receiver calls are active; Proto/generated-client continuity,
-deeper Zig type/build resolution, neural embeddings, ANN, incremental watch and
-automatic pruning, MCP, editor installers, and visualisation remain later
-slices.
+parser supplies exact TypeScript/TSX/JavaScript and Proto facts. Zig call
+resolution and TypeScript module and symbol resolution preserve candidates and
+typed ambiguity without name-only cross-file guesses. Export/barrel/default/
+namespace flow, evidence-backed receiver calls, canonical Proto identities and
+strict Protobuf-ES/protoc-gen-zig source lineage are active. Application
+callsite-to-RPC/handler continuity, deeper Zig type/build resolution, neural
+embeddings, ANN, incremental watch and automatic pruning, MCP, editor
+installers, and visualisation remain later slices.

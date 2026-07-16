@@ -22,6 +22,11 @@ pub const NodeKind = enum(u8) {
     build_target,
     api_surface,
     module_reference,
+    type,
+    service,
+    operation,
+    message,
+    field,
 };
 
 pub const Relation = enum(u16) {
@@ -49,6 +54,13 @@ pub const Relation = enum(u16) {
     re_exports,
     aliases,
     instantiates,
+    has_field,
+    uses_request,
+    uses_response,
+    references_type,
+    generated_from,
+    generated_client_for,
+    generated_server_for,
 };
 
 pub const Provenance = enum(u8) {

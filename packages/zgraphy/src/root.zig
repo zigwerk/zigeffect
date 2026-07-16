@@ -26,6 +26,9 @@ pub const ZigResolution = @import("zig_resolution.zig");
 pub const TypeScriptParser = @import("typescript_parser.zig");
 pub const TypeScriptResolution = @import("typescript_resolution.zig");
 pub const TypeScriptSymbols = @import("typescript_symbols.zig");
+pub const ProtobufParser = @import("protobuf_parser.zig");
+pub const ProtobufResolution = @import("protobuf_resolution.zig");
+pub const GeneratedLineage = @import("generated_lineage.zig");
 
 pub const RepositoryGraph = Model.RepositoryGraph;
 pub const Node = Model.Node;

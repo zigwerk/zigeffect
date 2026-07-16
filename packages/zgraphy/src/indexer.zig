@@ -8,6 +8,8 @@ const zig_resolution = @import("zig_resolution.zig");
 const typescript_parser = @import("typescript_parser.zig");
 const typescript_resolution = @import("typescript_resolution.zig");
 const typescript_symbols = @import("typescript_symbols.zig");
+const protobuf_resolution = @import("protobuf_resolution.zig");
+const generated_lineage = @import("generated_lineage.zig");
 
 pub const max_manifest_bytes: usize = 4 * 1024 * 1024;
 pub const max_causal_bytes: usize = 64 * 1024 * 1024;
@@ -40,6 +42,10 @@ pub const BuildSummary = struct {
     module_resolution_diagnostics: usize = 0,
     symbol_resolutions: usize = 0,
     symbol_resolution_diagnostics: usize = 0,
+    proto_entities: usize = 0,
+    proto_references: usize = 0,
+    proto_resolution_diagnostics: usize = 0,
+    generated_bindings: usize = 0,
     nodes: usize = 0,
     edges: usize = 0,
     vectors: usize = 0,
@@ -138,6 +144,22 @@ pub fn buildRepository(
         .parser = .{ .max_source_bytes = options.max_file_bytes },
     });
     defer typescript_symbol_corpus.deinit();
+    var protobuf_corpus = try protobuf_resolution.Corpus.init(allocator, .{
+        .max_files = options.max_files,
+        .max_entities = options.max_nodes,
+        .max_references = options.max_edges,
+        .max_candidates = options.max_edges,
+        .max_result_bytes = options.max_source_bytes,
+        .parser = .{ .max_source_bytes = options.max_file_bytes },
+    });
+    defer protobuf_corpus.deinit();
+    var generated_corpus = try generated_lineage.Corpus.init(allocator, .{
+        .max_documents = options.max_files,
+        .max_document_bytes = options.max_file_bytes,
+        .max_links = options.max_edges,
+        .max_candidates = options.max_edges,
+    });
+    defer generated_corpus.deinit();
     for (discovered.records) |record| {
         if (!isPlaced(record.disposition)) continue;
         try typescript_corpus.addFile(record.relative_path);
@@ -151,11 +173,21 @@ pub fn buildRepository(
         try typescript_corpus.addDocument(record.relative_path, document);
     }
     for (discovered.records) |record| {
+        if (record.disposition != .deeply_indexed or record.classification.language != .proto) continue;
+        const source = try readVerifiedSource(allocator, io, root, record.relative_path, options.max_file_bytes, record.content_digest);
+        defer allocator.free(source);
+        summary.source_bytes = std.math.add(usize, summary.source_bytes, source.len) catch return error.SourceLimitExceeded;
+        if (summary.source_bytes > options.max_source_bytes) return error.SourceLimitExceeded;
+        try protobuf_corpus.addSource(record.relative_path, source);
+        summary.files_indexed += 1;
+    }
+    for (discovered.records) |record| {
         if (record.disposition != .deeply_indexed or record.classification.language != .zig) continue;
         const source = try readVerifiedSource(allocator, io, root, record.relative_path, options.max_file_bytes, record.content_digest);
         defer allocator.free(source);
         summary.source_bytes = std.math.add(usize, summary.source_bytes, source.len) catch return error.SourceLimitExceeded;
         if (summary.source_bytes > options.max_source_bytes) return error.SourceLimitExceeded;
+        if (record.classification.is_generated) try generated_corpus.addSource(record.relative_path, source, .zig);
         try zig_corpus.addSource(record.relative_path, source);
         const parsed = zig_corpus.parsedForPath(record.relative_path) orelse return error.MissingParsedZigSource;
         try indexParsedZigSource(&graph, record.relative_path, source, parsed);
@@ -168,6 +200,7 @@ pub fn buildRepository(
         defer allocator.free(source);
         summary.source_bytes = std.math.add(usize, summary.source_bytes, source.len) catch return error.SourceLimitExceeded;
         if (summary.source_bytes > options.max_source_bytes) return error.SourceLimitExceeded;
+        if (record.classification.is_generated) try generated_corpus.addSource(record.relative_path, source, .typescript);
         const mode = typeScriptModeForPath(record.relative_path) orelse return error.UnsupportedTypeScriptSourceExtension;
         var parsed = try typescript_parser.parse(allocator, record.relative_path, source, mode, .{ .max_source_bytes = options.max_file_bytes });
         defer parsed.deinit();
@@ -199,6 +232,16 @@ pub fn buildRepository(
     try materializeTypeScriptSymbols(&graph, &symbol_resolutions);
     summary.symbol_resolutions = symbol_resolutions.summary.facts;
     summary.symbol_resolution_diagnostics = symbol_resolutions.summary.diagnostics;
+    var proto_resolutions = try protobuf_corpus.resolve();
+    defer proto_resolutions.deinit();
+    try materializeProtobufResolutions(&graph, &proto_resolutions);
+    summary.proto_entities = proto_resolutions.summary.entities;
+    summary.proto_references = proto_resolutions.summary.references;
+    summary.proto_resolution_diagnostics = proto_resolutions.summary.diagnostics;
+    var generated = try generated_corpus.resolve(&proto_resolutions);
+    defer generated.deinit();
+    try materializeGeneratedLineage(&graph, &proto_resolutions, &generated);
+    summary.generated_bindings = generated.summary.links;
     const causal_records = root.readFileAlloc(io, causal_wal_path, allocator, .limited(max_causal_bytes)) catch |failure| switch (failure) {
         error.FileNotFound => null,
         else => return failure,
@@ -913,6 +956,261 @@ fn resolveFileImports(graph: *model.RepositoryGraph) !void {
             .line = edge.line,
         });
     }
+}
+
+fn materializeProtobufResolutions(graph: *model.RepositoryGraph, result: *const protobuf_resolution.Result) !void {
+    try protobuf_resolution.validate(result);
+    for (result.entities) |entity| {
+        const kind = protobufNodeKind(entity.kind);
+        const search_text = try std.fmt.allocPrint(graph.allocator, "{s} {s} protobuf {s}", .{
+            entity.canonical_name,
+            entity.display_name,
+            @tagName(entity.kind),
+        });
+        defer graph.allocator.free(search_text);
+        const entity_id = try graph.addNode(.{
+            .id = model.stableId(kind, entity.source_path, entity.canonical_name),
+            .kind = kind,
+            .label = entity.canonical_name,
+            .path = entity.source_path,
+            .line = entity.span.start_line,
+            .search_text = search_text,
+        });
+        const file = findFileByPath(graph, entity.source_path) orelse return error.MissingProtobufSourceFileNode;
+        try graph.addEdge(.{
+            .from = file.id,
+            .to = entity_id,
+            .relation = .declares,
+            .provenance = .extracted,
+            .source_path = entity.source_path,
+            .line = entity.span.start_line,
+        });
+    }
+
+    for (result.entities) |entity| switch (entity.kind) {
+        .package => {},
+        .message, .enumeration, .service => {
+            const package = packageEntityFor(result, entity.source_path) orelse continue;
+            const package_node = protobufEntityNode(graph, package) orelse return error.MissingProtobufPackageNode;
+            const entity_node = protobufEntityNode(graph, &entity) orelse return error.MissingProtobufEntityNode;
+            try graph.addEdge(.{
+                .from = package_node.id,
+                .to = entity_node.id,
+                .relation = .declares,
+                .provenance = .extracted,
+                .source_path = entity.source_path,
+                .line = entity.span.start_line,
+            });
+        },
+        .operation => {
+            const slash = std.mem.lastIndexOfScalar(u8, entity.canonical_name, '/') orelse continue;
+            const service = findProtobufEntity(result, .service, entity.source_path, entity.canonical_name[0..slash]) orelse continue;
+            const service_node = protobufEntityNode(graph, service) orelse return error.MissingProtobufServiceNode;
+            const operation_node = protobufEntityNode(graph, &entity) orelse return error.MissingProtobufOperationNode;
+            try graph.addEdge(.{
+                .from = service_node.id,
+                .to = operation_node.id,
+                .relation = .declares,
+                .provenance = .extracted,
+                .source_path = entity.source_path,
+                .line = entity.span.start_line,
+            });
+        },
+        .field => {
+            const hash = std.mem.lastIndexOfScalar(u8, entity.canonical_name, '#') orelse continue;
+            const message = findProtobufEntity(result, .message, entity.source_path, entity.canonical_name[0..hash]) orelse continue;
+            const message_node = protobufEntityNode(graph, message) orelse return error.MissingProtobufMessageNode;
+            const field_node = protobufEntityNode(graph, &entity) orelse return error.MissingProtobufFieldNode;
+            try graph.addEdge(.{
+                .from = message_node.id,
+                .to = field_node.id,
+                .relation = .has_field,
+                .provenance = .extracted,
+                .source_path = entity.source_path,
+                .line = entity.span.start_line,
+            });
+        },
+        .enum_value => {
+            const enumeration = enumOwnerEntity(result, &entity) orelse continue;
+            const enum_node = protobufEntityNode(graph, enumeration) orelse return error.MissingProtobufEnumNode;
+            const value_node = protobufEntityNode(graph, &entity) orelse return error.MissingProtobufEnumValueNode;
+            try graph.addEdge(.{
+                .from = enum_node.id,
+                .to = value_node.id,
+                .relation = .declares,
+                .provenance = .extracted,
+                .source_path = entity.source_path,
+                .line = entity.span.start_line,
+            });
+        },
+    };
+
+    for (result.references) |reference| {
+        const owner_kind: protobuf_resolution.EntityKind = switch (reference.kind) {
+            .field_type => .field,
+            .rpc_request, .rpc_response => .operation,
+        };
+        const owner = findProtobufEntity(result, owner_kind, reference.source_path, reference.owner) orelse return error.MissingProtobufReferenceOwner;
+        const owner_node = protobufEntityNode(graph, owner) orelse return error.MissingProtobufReferenceOwnerNode;
+        const relation: model.Relation = switch (reference.kind) {
+            .field_type => .references_type,
+            .rpc_request => .uses_request,
+            .rpc_response => .uses_response,
+        };
+        const provenance: model.Provenance = if (reference.status == .ambiguous) .ambiguous else .inferred;
+        for (result.candidatesFor(&reference)) |candidate| {
+            const target = &result.entities[candidate.entity_index];
+            const target_node = protobufEntityNode(graph, target) orelse return error.MissingProtobufReferenceTargetNode;
+            try graph.addEdge(.{
+                .from = owner_node.id,
+                .to = target_node.id,
+                .relation = relation,
+                .provenance = provenance,
+                .source_path = reference.source_path,
+                .line = reference.span.start_line,
+            });
+        }
+        if (reference.status == .external) {
+            const external_path = try std.fmt.allocPrint(graph.allocator, "external/protobuf/{s}", .{reference.target});
+            defer graph.allocator.free(external_path);
+            const external_id = try graph.addNode(.{
+                .kind = .type,
+                .label = reference.target,
+                .path = external_path,
+                .line = reference.span.start_line,
+                .search_text = reference.target,
+            });
+            try graph.addEdge(.{
+                .from = owner_node.id,
+                .to = external_id,
+                .relation = relation,
+                .provenance = .inferred,
+                .source_path = reference.source_path,
+                .line = reference.span.start_line,
+            });
+        }
+    }
+}
+
+fn materializeGeneratedLineage(
+    graph: *model.RepositoryGraph,
+    proto: *const protobuf_resolution.Result,
+    result: *const generated_lineage.Result,
+) !void {
+    try generated_lineage.validate(result, proto);
+    for (result.links) |link| {
+        const generated_file = findFileByPath(graph, link.generated_path) orelse return error.MissingGeneratedSourceFileNode;
+        const source_id = if (link.kind == .file)
+            generated_file.id
+        else blk: {
+            const kind = generatedNodeKind(link.kind);
+            const search_text = try std.fmt.allocPrint(graph.allocator, "{s} {s} {s} generated protobuf", .{
+                link.canonical_name,
+                link.generated_symbol,
+                @tagName(link.generator),
+            });
+            defer graph.allocator.free(search_text);
+            const binding_id = try graph.addNode(.{
+                .id = model.stableId(kind, link.generated_path, link.canonical_name),
+                .kind = kind,
+                .label = link.canonical_name,
+                .path = link.generated_path,
+                .line = 1,
+                .search_text = search_text,
+            });
+            try graph.addEdge(.{
+                .from = generated_file.id,
+                .to = binding_id,
+                .relation = .declares,
+                .provenance = .extracted,
+                .source_path = link.generated_path,
+                .line = 1,
+            });
+            break :blk binding_id;
+        };
+        const relation: model.Relation = if (link.kind == .service)
+            switch (link.direction) {
+                .generated_client_for => .generated_client_for,
+                .generated_server_for => .generated_server_for,
+                .generated_from => .generated_from,
+            }
+        else
+            .generated_from;
+        const provenance: model.Provenance = if (link.status == .ambiguous) .ambiguous else .inferred;
+        for (result.candidatesFor(&link)) |candidate| {
+            const target_entity = &proto.entities[candidate.entity_index];
+            const target_id = if (link.kind == .file)
+                (findFileByPath(graph, target_entity.source_path) orelse return error.MissingGeneratedProtoFileTarget).id
+            else
+                (protobufEntityNode(graph, target_entity) orelse return error.MissingGeneratedProtoEntityTarget).id;
+            try graph.addEdge(.{
+                .from = source_id,
+                .to = target_id,
+                .relation = relation,
+                .provenance = provenance,
+                .source_path = link.generated_path,
+                .line = 1,
+            });
+        }
+    }
+}
+
+fn protobufNodeKind(kind: protobuf_resolution.EntityKind) model.NodeKind {
+    return switch (kind) {
+        .package => .package,
+        .message => .message,
+        .enumeration => .type,
+        .service => .service,
+        .operation => .operation,
+        .field => .field,
+        .enum_value => .symbol,
+    };
+}
+
+fn generatedNodeKind(kind: generated_lineage.LinkKind) model.NodeKind {
+    return switch (kind) {
+        .file => .file,
+        .message => .message,
+        .enumeration => .type,
+        .service => .service,
+        .operation => .operation,
+    };
+}
+
+fn protobufEntityNode(graph: *const model.RepositoryGraph, entity: *const protobuf_resolution.Entity) ?*const model.Node {
+    return graph.findNode(model.stableId(protobufNodeKind(entity.kind), entity.source_path, entity.canonical_name));
+}
+
+fn packageEntityFor(result: *const protobuf_resolution.Result, source_path: []const u8) ?*const protobuf_resolution.Entity {
+    for (result.entities, 0..) |entity, index| {
+        if (entity.kind == .package and std.mem.eql(u8, entity.source_path, source_path)) return &result.entities[index];
+    }
+    return null;
+}
+
+fn findProtobufEntity(
+    result: *const protobuf_resolution.Result,
+    kind: protobuf_resolution.EntityKind,
+    source_path: []const u8,
+    canonical_name: []const u8,
+) ?*const protobuf_resolution.Entity {
+    for (result.entities, 0..) |entity, index| {
+        if (entity.kind == kind and std.mem.eql(u8, entity.source_path, source_path) and
+            std.mem.eql(u8, entity.canonical_name, canonical_name)) return &result.entities[index];
+    }
+    return null;
+}
+
+fn enumOwnerEntity(result: *const protobuf_resolution.Result, value: *const protobuf_resolution.Entity) ?*const protobuf_resolution.Entity {
+    var found: ?*const protobuf_resolution.Entity = null;
+    for (result.entities, 0..) |entity, index| {
+        if (entity.kind != .enumeration or !std.mem.eql(u8, entity.source_path, value.source_path) or
+            value.canonical_name.len <= entity.canonical_name.len or
+            !std.mem.startsWith(u8, value.canonical_name, entity.canonical_name) or
+            value.canonical_name[entity.canonical_name.len] != '.') continue;
+        if (found == null or entity.canonical_name.len > found.?.canonical_name.len) found = &result.entities[index];
+    }
+    return found;
 }
 
 fn materializeZigResolutions(graph: *model.RepositoryGraph, result: *const zig_resolution.Result) !void {

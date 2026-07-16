@@ -167,6 +167,10 @@ pub const Corpus = struct {
         parsed.exports = &.{};
         parsed.type_bindings = &.{};
         parsed.calls = &.{};
+        parsed.protocol_packages = &.{};
+        parsed.protocol_fields = &.{};
+        parsed.protocol_enum_values = &.{};
+        parsed.protocol_rpcs = &.{};
         parsed.owns_memory = false;
         self.fact_count = next_facts;
     }

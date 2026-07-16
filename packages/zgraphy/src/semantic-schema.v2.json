@@ -160,6 +160,13 @@
     {"source_schema":"mvp_v1","source_relation":"part_of_target","target_relation":"part_of_target","reverse_endpoints":false,"projection":"binary"},
     {"source_schema":"mvp_v1","source_relation":"defines","target_relation":"defines","reverse_endpoints":false,"projection":"binary"},
     {"source_schema":"mvp_v1","source_relation":"dispatches_to","target_relation":"dispatches_to","reverse_endpoints":false,"projection":"hyperedge_candidate"},
+    {"source_schema":"mvp_v1","source_relation":"has_field","target_relation":"has_field","reverse_endpoints":false,"projection":"binary"},
+    {"source_schema":"mvp_v1","source_relation":"uses_request","target_relation":"uses_request","reverse_endpoints":false,"projection":"binary"},
+    {"source_schema":"mvp_v1","source_relation":"uses_response","target_relation":"uses_response","reverse_endpoints":false,"projection":"binary"},
+    {"source_schema":"mvp_v1","source_relation":"references_type","target_relation":"references_type","reverse_endpoints":false,"projection":"binary"},
+    {"source_schema":"mvp_v1","source_relation":"generated_from","target_relation":"generated_from","reverse_endpoints":false,"projection":"binary"},
+    {"source_schema":"mvp_v1","source_relation":"generated_client_for","target_relation":"generated_client_for","reverse_endpoints":false,"projection":"binary"},
+    {"source_schema":"mvp_v1","source_relation":"generated_server_for","target_relation":"generated_server_for","reverse_endpoints":false,"projection":"binary"},
 
     {"source_schema":"benchmark_v1","source_relation":"contains","target_relation":"contains","reverse_endpoints":false,"projection":"binary"},
     {"source_schema":"benchmark_v1","source_relation":"declares","target_relation":"declares","reverse_endpoints":false,"projection":"binary"},

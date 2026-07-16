@@ -285,7 +285,7 @@ pub fn scan(
         var digest: [32]u8 = @splat(0);
         std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
         const classification = classify(entry.path);
-        const disposition: Disposition = if (classification.language == .zig or classification.language == .typescript or classification.language == .javascript)
+        const disposition: Disposition = if (classification.language == .zig or classification.language == .typescript or classification.language == .javascript or classification.language == .proto)
             .deeply_indexed
         else if (classification.artifact == .asset)
             .placed_asset

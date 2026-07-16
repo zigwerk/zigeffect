@@ -1,0 +1,35 @@
+{
+  "schema": "zgraphy.graphify-proto-lineage-gap.v1",
+  "classification": "confirmed-gap",
+  "baseline": {
+    "product": "Graphify",
+    "version": "0.9.17",
+    "commit": "cb96bdaa0c367bec8d5c5aee5d7c9ebb727e9780",
+    "mode": "extract --code-only --no-cluster --force",
+    "fixture": "benchmarks/fixtures/fullstack-orders",
+    "source_graph_sha256": "e40b0c957b3d6fa7eeff5e724f3111c0e8e2698889548167dece4fc51ed021fd",
+    "proto_source_sha256": "6c145dd9f5da6dd7cbd8745b039c034f10200572b4132e87dd849c1f88c7367a"
+  },
+  "observed": {
+    "nodes": 11,
+    "relations": 19,
+    "proto_files": 0,
+    "canonical_packages": 0,
+    "canonical_services": 0,
+    "canonical_operations": 0,
+    "canonical_messages": 0,
+    "canonical_fields": 0,
+    "generated_lineage_relations": 0
+  },
+  "expected_canonical_spine": {
+    "package": "orders.v1",
+    "services": ["orders.v1.OrdersService"],
+    "operations": ["orders.v1.OrdersService/GetOrder"],
+    "messages": ["orders.v1.GetOrderRequest", "orders.v1.Order"],
+    "fields": ["orders.v1.GetOrderRequest#1", "orders.v1.Order#1", "orders.v1.Order#2"]
+  },
+  "limitations": [
+    "Graphify labels named GetOrderRequest, Order and OrdersService originate from handwritten Zig and are not canonical Proto identities.",
+    "The controlled fullstack-orders fixture has no generated source files, so generated-binding lineage is proven separately by the source-grounded proto-lineage fixture."
+  ]
+}

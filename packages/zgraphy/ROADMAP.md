@@ -2603,6 +2603,11 @@ Delivered M2 kernel slices:
 - a pinned Graphify 0.9.17 overlap ledger that preserves valid shared edges
   while recording zgraphy's expanded duplicate candidates and rejection of
   Graphify's package-escape and phantom-relative edges;
+- canonical Proto packages, nested messages/enums, stable-number fields,
+  services and RPC operations with lexical/import-aware type candidates; and
+- strict Protobuf-ES and protoc-gen-zig binding lineage to canonical source,
+  plus a content-addressed Graphify 0.9.17 receipt proving its missing Proto
+  contract spine on the shared fullstack fixture.
 - structural-facts v2 exports and lexical receiver-type bindings in the shared
   parser contract, including bounded static CommonJS export identities;
 - deterministic named/default/namespace/local-alias/star export closure,
