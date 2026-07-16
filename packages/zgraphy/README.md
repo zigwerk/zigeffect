@@ -53,6 +53,15 @@ zgraphy benchmark matrix \
   --graphify-python 3.11.15 \
   --graphify-environment sha256:<environment-digest> \
   --json
+zgraphy benchmark workload mutation-pruning cold-build --json
+zgraphy benchmark resources .zgraphy/benchmarks/runs/resources/resource-samples.v1.json \
+  --source-revision sha256:<source-digest> \
+  --graphify-python 3.11.15 \
+  --graphify-environment sha256:<environment-digest> \
+  --machine sha256:<machine-digest> \
+  --configuration sha256:<configuration-digest> \
+  --json
+zgraphy benchmark freshness .zgraphy/benchmarks/runs/freshness/freshness-transitions.v1.json --json
 zgraphy query "where is causal graph persistence implemented?"
 zgraphy explain LocalDatabase
 zgraphy path ManagedRuntime LocalDatabase --max-hops 8
@@ -177,6 +186,22 @@ and Python environment digest. The receipt is deliberately
 memory, persisted size, and freshness until their M0 gate is implemented.
 `benchmarks/run_graphify_reference.sh` now emits this matrix after the three
 individual differential receipts.
+
+M0 resource and freshness evidence is separated from quality. The standard
+library-only `benchmarks/run_resource_baseline.py` supervisor uses `wait4` to
+collect seven paired ReleaseSafe process samples after two warmups, then the
+native resource aggregator recomputes integer p50/p95/p99 latency, CPU, peak
+RSS, and persisted-byte statistics. `benchmarks/run_freshness_baseline.py`
+applies modify, rename, and delete to disposable fixture copies and compares
+each result with an independent clean build.
+
+The checked freshness receipt proves full-rebuild equivalence, complete
+snapshots, deletion pruning, and zero stale/dangling/orphan/vector defects. It
+also records that the current path-derived identity preserves 0/2 required
+symbols across rename and that semantic fact invalidation is not implemented.
+Incremental update, automatic pre-query refresh, watch mode, automatic pruning,
+repair, and garbage collection remain explicitly unsupported. The resource
+receipt contains no performance claim.
 
 Testing uses the ZigEffect Testing v2 server runner. The authoritative native
 suite receipt is `.zigeffect/tests/suites/zgraphy-tests.json`; semantic

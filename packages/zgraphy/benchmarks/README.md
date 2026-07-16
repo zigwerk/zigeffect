@@ -91,3 +91,39 @@ The current baseline is engineering evidence, not a superiority claim. It
 contains no latency, peak-memory, persisted-size, update-equivalence, or
 freshness result. Those dimensions are the next M0 gate and must be collected
 under bounded, repeated workloads before any performance language is allowed.
+
+## Resource and freshness baselines
+
+Build the ReleaseSafe binary, then run the process-isolated resource and
+mutation supervisors:
+
+```bash
+zig build install -Doptimize=ReleaseSafe
+.zgraphy/benchmarks/graphify-0.9.17/bin/python benchmarks/run_resource_baseline.py
+python3 benchmarks/run_freshness_baseline.py
+```
+
+`run_resource_baseline.py` requires Darwin or Linux `wait4`, removes known
+model credentials from child environments, performs two excluded warmups and
+seven retained runs per engine, validates every output through zgraphy, and
+writes raw logs only below ignored `.zgraphy/benchmarks/runs/resources/`.
+The native `zgraphy.resource-matrix.v1` aggregator retains all samples and
+recomputes integer nearest-rank statistics. Peak RSS is reported only from the
+process supervisor.
+
+`run_freshness_baseline.py` reconstructs disposable observed and clean states
+for modify, rename, and delete. Every state is rebuilt, saved, loaded, health
+checked, fingerprinted, and compared. The checked receipt honestly fails the
+future freshness target because path-derived IDs do not survive rename and
+semantic facts are not yet present to invalidate, while still proving that a
+full rebuild publishes no stale, dangling, or orphaned active records.
+
+Checked candidate evidence lives in:
+
+- `baselines/resource-matrix.v1.json`;
+- `baselines/freshness-receipt.v1.json`; and
+- `baselines/quality-matrix.v1.json`.
+
+These receipts have empty `claims` arrays. They do not authorize “faster” or
+“leaner” product language, and full-rebuild pruning is not described as
+incremental or automatic self-maintenance.

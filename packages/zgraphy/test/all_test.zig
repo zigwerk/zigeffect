@@ -706,7 +706,7 @@ test "zgraphy M0 resource and freshness receipts are bounded reproducible and cl
         .component = "zgraphy",
         .command = "test",
         .default_seed = 1706,
-        .source_roots = &.{ "src/resource_matrix.zig", "src/freshness.zig", "src/model.zig", "src/indexer.zig", "src/store.zig", "benchmarks/fixtures/mutation-pruning", "src/root.zig", "src/main.zig", "test/all_test.zig" },
+        .source_roots = &.{ "src/resource_matrix.zig", "src/freshness.zig", "src/model.zig", "src/indexer.zig", "src/store.zig", "benchmarks/fixtures/mutation-pruning", "benchmarks/run_resource_baseline.py", "benchmarks/run_freshness_baseline.py", "benchmarks/baselines/resource-matrix.v1.json", "benchmarks/baselines/freshness-receipt.v1.json", "src/root.zig", "src/main.zig", "test/all_test.zig" },
         .tags = &.{ "acceptance", "m0", "resource", "latency", "memory", "freshness", "pruning", "deterministic" },
     };
     var evidence = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{

@@ -6,7 +6,7 @@ Last updated: 2026-07-16
 
 Reference baseline: Graphify commit `cb96bdaa0c367bec8d5c5aee5d7c9ebb727e9780`
 
-Execution status: M0 active. Six requirement-backed slices are delivered.
+Execution status: M0 active. Seven requirement-backed slices are delivered.
 `zgraphy parity` validates and exposes the embedded
 `src/graphify-parity.v1.json` ledger for all 17 reviewed Graphify capability
 families. `zgraphy benchmark corpus` validates the engine-neutral canonical IR
@@ -19,9 +19,12 @@ The bounded lexical adapter supplies the `rg`-class cross-language orientation
 floor without semantic claims. The `zgraphy.quality-matrix.v1` aggregator now
 runs all nine engine/fixture comparisons, recomputes weighted totals, binds the
 result to exact corpus, source, Graphify environment, and Zig toolchain
-identities, and emits no superiority claim. The next M0 slice adds latency,
-peak-memory, persisted-size, update-equivalence, and freshness/pruning
-receipts; M0 is not yet complete.
+identities, and emits no superiority claim. The M0 resource/freshness slice now
+has paired process supervision, retained integer samples, full-build versus
+clean-build mutation fingerprints, snapshot reload checks, and explicit graph
+health accounting. Its current baseline proves clean full-rebuild pruning but
+records failed rename identity and semantic invalidation targets plus
+unsupported incremental/pre-query automation. M0 is not yet complete.
 
 ## Executive outcome
 
