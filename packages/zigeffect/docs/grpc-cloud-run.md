@@ -149,10 +149,11 @@ Connect-ES and native gRPC have separate applicable gates.
 
 ## Observability And Diagnosis
 
-The middleware exports native OTLP histograms, attempt and connection
-instruments, trace propagation links and exemplars where the OTLP/HTTP schema
-supports them. Causal facts describe semantic boundaries without payloads or
-secrets. When a deterministic or live test fails:
+The middleware automatically exports native OTLP histograms, attempt and
+connection instruments, trace propagation links, exemplars and redacted causal
+transport facts. Handlers do not reproduce request, retry, stream or shutdown
+events; they add only business behavior and genuinely domain-specific typed
+events. When a deterministic or live test fails:
 
 1. inspect the Testing v2 receipt and exact replay metadata;
 2. find the first failed assertion or causal boundary;

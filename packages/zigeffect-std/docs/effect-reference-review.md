@@ -127,8 +127,10 @@ observability bundle just to become visible.
 
 ZigEffect uses runtime aspects for logger, metrics, tracer, supervisor, and
 causal recording. Structural execution is automatically visible. Portable
-services add redacted semantic facts at boundaries. Causal facts supplement
-OTEL signals; they do not replace them.
+standard-library and transport adapters automatically add redacted semantic
+facts at their boundaries; business effects do not request an observability
+bundle or recorder merely to become visible. Causal facts supplement OTEL
+signals; they do not replace them.
 
 ### Resource families are scope algebra
 

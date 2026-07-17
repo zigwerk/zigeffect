@@ -439,28 +439,24 @@ implementations once through one managed runtime:
 const kernel = zstd.fx.kernel;
 
 const OrderRepository = kernel.Service("orders/Repository", RepositoryApi);
-const Observability = kernel.Service("orders/Observability", ObservabilityApi);
 
 const CreateOrderBase = kernel.Effect(
     Order,
     CreateOrderError,
-    .{ OrderRepository, Observability },
+    .{OrderRepository},
 );
 const CreateOrder = CreateOrderBase.Stateful(CreateOrderInput);
 
 fn createOrder(input: CreateOrderInput) CreateOrder {
     return CreateOrder.init(input, struct {
         fn run(value: CreateOrderInput, ctx: *CreateOrder.Context) CreateOrderError!Order {
-            const order = try ctx.service(OrderRepository).createIdempotent(value);
-            try ctx.service(Observability).orderCreated(order.id);
-            return order;
+            return ctx.service(OrderRepository).createIdempotent(value);
         }
     }.run);
 }
 
 const RepositoryLive = kernel.Layer.succeed(OrderRepository, repository_live);
-const ObservabilityLive = kernel.Layer.succeed(Observability, observability_live);
-const MainLayer = RepositoryLive.merge(ObservabilityLive);
+const MainLayer = RepositoryLive;
 
 var runtime = try zstd.ManagedRuntime(@TypeOf(MainLayer)).make(
     allocator,
@@ -477,12 +473,13 @@ const order = try runtime.run(
 try runtime.shutdown();
 ```
 
-Config, Schema, HTTP, SQL, external process, artifact, dependency, and acceptance
-boundaries emit stable semantic application facts. Those facts let the agent
-compare business intent across executor-specific IDs and scheduling order. The
-runtime itself automatically records layer startup, nested effects, resolved
-services, request scopes, resources, exits and finalizers, so those structural
-facts require no application instrumentation.
+The runtime automatically records layer startup, nested effects, resolved
+services, request scopes, resources, exits and finalizers. Config, Schema,
+HTTP, SQL, process and storage adapters automatically add their redacted
+boundary semantics. The business effect therefore has no observability service
+or causal calls. A narrow typed domain-event service is warranted only when
+meaning cannot be preserved by the stable effect, service and adapter operation
+names. See [Runtime-owned causal applications](runtime-owned-causal-applications.md).
 
 ### 6. Run the governed checks
 

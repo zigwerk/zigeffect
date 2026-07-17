@@ -1,3 +1,7 @@
+//! Low-level causal-adapter conformance fixture; not application scaffolding.
+//! Canonical apps use `zstd.ManagedRuntime` plus runtime-backed adapters and
+//! never construct a store or call `CausalAppTrace` directly.
+
 const std = @import("std");
 const fx = @import("zigeffect");
 

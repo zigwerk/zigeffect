@@ -1,3 +1,7 @@
+//! Historical low-level engine conformance fixture; not application scaffolding.
+//! Canonical apps use services, layers and one `zstd.ManagedRuntime`; runtime
+//! and reusable adapters own all causal recording.
+
 const std = @import("std");
 const fx = @import("zigeffect");
 

@@ -1,3 +1,6 @@
+//! Low-level engine fiber fixture; not application scaffolding.
+//! Direct stores are used here only to prove framework causal behavior.
+
 const std = @import("std");
 const fx = @import("zigeffect");
 

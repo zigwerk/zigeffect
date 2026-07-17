@@ -520,6 +520,7 @@ pub const executable_test =
     \\    var context = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{ .project = "__PROJECT_NAME__", .suite = "acceptance", .scenario = acceptanceScenario(), .seed = 42 });
     \\    defer context.deinit();
     \\    const layer = app.rootLayer();
+    \\    // Test-only injection keeps assertions and the project graph on one runtime.
     \\    var runtime = try zstd.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), layer, .{ .causal_store = context.causalStore() });
     \\    defer runtime.deinit();
     \\    try runtime.run(app.program(std.testing.io, std.Io.Dir.cwd()));
@@ -666,6 +667,7 @@ pub const library_test =
     \\    defer context.deinit();
     \\    const input = try library.decodeInputAlloc(std.testing.allocator, "{\"value\":21}");
     \\    const layer = library.defaultLayer();
+    \\    // Test-only injection keeps assertions and the project graph on one runtime.
     \\    var runtime = try zstd.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), layer, .{ .causal_store = context.causalStore() });
     \\    defer runtime.deinit();
     \\    const actual = try runtime.run(library.double(input.value));
@@ -817,6 +819,7 @@ pub const system_test =
     \\    const scenario = zstd.Testing.Scenario{ .id = "bootstrap-boundaries", .label = "api worker and shared package agree", .requirement = "req-bootstrap", .acceptance_check = "check-bootstrap", .component = "api-service", .command = "test" };
     \\    var context = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{ .project = "__PROJECT_NAME__", .suite = "system", .scenario = scenario });
     \\    defer context.deinit();
+    \\    // Test-only injection keeps assertions and the project graph on one runtime.
     \\    try system.runWithOptions(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{ .causal_store = context.causalStore() });
     \\    const assertions = zstd.Testing.AssertionRecorder.init(&context);
     \\    try assertions.equal(.{ .id = "shared-contract", .label = "shared contract version" }, @as(u32, 1), system.shared.contract_version);
@@ -1118,9 +1121,9 @@ pub const skill =
     \\3. Map the request to a requirement, acceptance check, component,
     \\   manifest-owned command, and one or more `test_scenarios`. Declare missing
     \\   intent before implementing behavior.
-    \\4. Read the component's public facade, layers, schemas, tests, and causal
-    \\   helpers. Use public `zigeffect_std` APIs; never import another component's
-    \\   internals.
+    \\4. Read the component's public facade, layers, schemas, tests, and reusable
+    \\   boundary adapters. Use public `zigeffect_std` APIs; never import another
+    \\   component's internals.
     \\
     \\## Implement inspectable behavior
     \\
@@ -1143,13 +1146,19 @@ pub const skill =
     \\  publishing. Do not create a synthetic receipt beside a detached graph.
     \\- Use `zigeffect add` and `zigeffect generate` before hand-writing framework
     \\  structure.
-    \\- Emit semantic facts at external, workflow, statechart, artifact, and
-    \\  acceptance boundaries. Use typed statecharts for inspectable long-lived
-    \\  control flow and durable statecharts for replayable workflows.
+    \\- Use standard-library, transport and framework adapters for external,
+    \\  workflow, statechart and artifact facts; they record automatically.
+    \\  Application code adds only genuinely domain-specific typed events. Use
+    \\  typed statecharts for inspectable control and durable workflows for replay.
     \\- Compose typed decisions with `zstd.Statechart.Effect.layer`/`step`,
-    \\  journals with `zstd.Workflow.journalLayer`/`append`, and process signals
-    \\  with `zstd.Application.Lifecycle.signalLayer()`. Child requests and jobs
-    \\  use bounded `ctx.runtime()` handles from the one owning runtime.
+    \\  journals with `zstd.Workflow.journalLayer`/`append`, direct workflow
+    \\  interpretation with `zstd.Workflow.execution`, and process signals with
+    \\  `zstd.Application.Lifecycle.signalLayer()`. Child requests and jobs use
+    \\  bounded `ctx.runtime()` handles from the one owning runtime.
+    \\- Never use `CausalStore.init*`, `attachBackend`, `withCausalStore`,
+    \\  `ctx.recordCausal`, `CausalJournalStore`, or `recordDecisionCausal` in
+    \\  product code. Direct stores are framework-test fixtures;
+    \\  `context.causalStore()` is a deterministic root-runtime test injection only.
     \\- Never put credentials, personal data, or raw terminal scrollback in
     \\  manifests, facts, receipts, fixtures, snapshots, or Workbench payloads.
     \\

@@ -1,3 +1,7 @@
+//! Low-level causal graph backend fixture; not application scaffolding.
+//! Canonical applications receive embedded NenDB automatically from
+//! `zstd.ManagedRuntime` and never attach this backend themselves.
+
 const std = @import("std");
 const zstd = @import("zigeffect_std");
 

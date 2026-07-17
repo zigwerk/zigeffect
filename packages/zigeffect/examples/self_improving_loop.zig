@@ -1,3 +1,5 @@
+//! Framework-internal development-loop fixture; not application scaffolding.
+//! Direct store construction is part of the causal algorithm under test.
 //! The self-improving loop, as a runnable example.
 //!
 //! Demonstrates the vision end-to-end with the public API: a causal graph

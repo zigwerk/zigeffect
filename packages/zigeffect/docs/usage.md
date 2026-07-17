@@ -214,9 +214,12 @@ tracing, and supervision. Structural events are emitted automatically for:
 - run, scope, fiber, resource, and finalizer lifecycle; and
 - typed completion and failure.
 
-Domain operations should add stable, redacted semantic facts at external
-boundaries. They should not pass a causal store, logger, registry, or tracer
-through every service merely to be observable.
+Standard-library, transport and domain-framework adapters add stable, redacted
+semantic facts at external boundaries automatically. Business effects should
+not pass a causal store, recorder, logger, registry or tracer merely to be
+observable. Add a typed domain-event service only when meaning cannot be
+preserved by stable effect, service and adapter operation names. See
+[Runtime-owned causal applications](runtime-owned-causal-applications.md).
 
 ## Inspect a running application
 

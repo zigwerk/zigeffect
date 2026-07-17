@@ -313,8 +313,9 @@ and
   inventory now tracks semantic diff, eval diff, eval diff links, ops artifact
   response, ops runbook, ops alert delivery, and runner lineage artifact
   families.
-- App-facing causal traces (`CausalAppTrace`) emitting `zigeffect.causal.v1` from
-  Worker-shaped request/job paths.
+- Runtime-owned app traces emitted by reusable request/job adapters; the
+  low-level `CausalAppTrace` primitive remains an adapter implementation and
+  conformance surface rather than application wiring.
 - Export adapters as sinks (JSONL, DOT, OTel-shaped, **OTLP/JSON**, graph-history,
   NenDB write-contract, async stream) with per-adapter conformance gates.
 - **The real zio backend** (`packages/zigeffect-zio`): `blockingSleep` parks a

@@ -1,3 +1,5 @@
+//! Framework-internal live-attach emitter; not application scaffolding.
+//! This deliberately constructs a store to exercise the backend contract.
 //! Live-attach engine emitter — the runnable engine half of the live-attach loop.
 //!
 //!     zig build live-stream-example && ./zig-out/bin/zigeffect-live-stream-example \

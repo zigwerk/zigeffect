@@ -4,10 +4,11 @@
 
 This document is the detailed causal architecture and delivery record. For the
 current application API, start with [Usage](usage.md) and
-[Compositional applications](compositional-applications.md). Every canonical
-managed runtime now owns a bounded causal store by default; examples that
-manually attach a store describe lower-level adapters, tests, or historical
-delivery stages rather than the application composition model.
+[Runtime-owned causal applications](runtime-owned-causal-applications.md).
+Every canonical managed runtime owns a bounded causal store and embedded NenDB
+graph by default; examples that manually attach a store describe lower-level
+adapters, tests, or historical delivery stages rather than application
+composition.
 
 The runtime exposes effect execution as a structured causal graph rather than
 as unstructured logs.
@@ -521,17 +522,16 @@ policy, and new-schema checklist. Update that registry and
 `docs/schema-governance.md` before changing artifact fields or adding a
 user-facing workbench mapping.
 
-Bounded stores are opt-in through `CausalStore.initBounded(allocator,
-max_events)`. Retention applies to the in-memory store, not attached backends.
-Queries operate on retained events only, so `dropped_events` is the signal that
-an agent may be looking at a truncated parent chain.
-
-Causal sampling is opt-in through `CausalStore.initWithOptions`. The first
-policy is deterministic `every_n` sampling for `log_recorded`,
-`metric_recorded`, and `span_recorded` only. Runtime structure, service, scope,
+Canonical applications configure retention and sampling with
+`zstd.CausalRuntime.Options.causal_options`; they do not construct the store.
+The low-level `CausalStore.initBounded` and `initWithOptions` constructors are
+for runtime internals, embedded hosts and framework/backend conformance tests.
+Retention applies to the in-memory window, not attached backends. Queries over
+that window use `dropped_events` to report a potentially truncated parent
+chain. Deterministic `every_n` sampling applies only to `log_recorded`,
+`metric_recorded`, and `span_recorded`; runtime structure, service, scope,
 resource, fiber, schedule, exit, and assertion events are retained before
-bounded retention trimming. Sampled-out events consume event IDs, skip storage
-and backend emission, and increment `sampled_events` in reports and JSON.
+bounded trimming.
 
 Causal event string fields are defensively redacted before the store retains
 them or forwards them to attached backends. The first policy redacts common
@@ -722,10 +722,11 @@ not by wandering through source files first.
 - **Typed facts beat text inference.** Runtime events should preserve Zig
   error-set names, service type names, fiber ids, scope ids, layer names, span
   ids, and schedule labels.
-- **The graph is opt-in and bounded.** The deterministic core must remain
-  usable without telemetry. Event retention, sampling, and memory limits must
-  be explicit. Use `CausalStore.initBounded` when a harness needs capped
-  retained memory.
+- **The application graph is automatic and bounded.** Canonical managed
+  runtimes always install recording and embedded NenDB persistence. Configure
+  retention and sampling through runtime options. Only the lower-level
+  deterministic kernel and conformance harnesses may operate without a durable
+  graph or construct stores directly.
 - **Runtime hooks converge through services.** Add event sinks as services or
   runtime configuration. Do not create parallel lookup or cleanup systems.
 - **Scopes still own cleanup.** Causal observation must describe scope cleanup,
@@ -886,13 +887,13 @@ run effect -> inspect causal snapshot -> query lineage -> inspect cause
 
 ### Executable Example
 
-`examples/causal_readiness.zig` is the canonical first app example. It builds a
-layer graph with config, logger, metrics, tracing, and a database-like service,
-attaches a `CausalStore`, runs a readiness effect, preserves missing config as
-a typed `error.MissingConfig`, and prints both `formatCausalReport` and
-`formatCausalJson`.
+The `examples/causal_*.zig` programs are low-level engine conformance fixtures
+for store, lineage, failure and compatibility behavior. They deliberately use
+framework primitives and are not application scaffolds. For application code,
+use the generated `zstd.ManagedRuntime` structure or the business-only
+[`todo-grpc-backend`](../../../apps/todo-grpc-backend/README.md).
 
-Agents should use it as a small rehearsal before diagnosing real app failures:
+Agents may use the engine fixtures when changing low-level causal behavior:
 
 1. Run `cd packages/zigeffect && zig build examples`.
 2. Inspect the causal snapshot or JSON output from the example.
@@ -1161,15 +1162,12 @@ findings, relationships, query commands, metadata, and selected event details,
 but it cannot apply patches, update the registry, approve policy decisions, or
 write remediation artifacts.
 
-The first M7 app-facing adapter is `CausalAppTrace`. It wraps a caller-owned
-`CausalStore` and maps request/job lifecycle facts onto existing causal event
-kinds: `run_started`, `run_completed`, `service_required`, `layer_completed`,
-`scope_opened`, `resource_acquired`, `resource_finalized`, `fiber_started`,
-`fiber_joined`, `schedule_decision`, and `assertion_recorded`. Request paths
-should initialize stores with `defaultRequestCausalStoreOptions`; background
-jobs should use `defaultJobCausalStoreOptions`. Both defaults bound memory and
-event string length, and both export standard `zigeffect.causal.v1` JSON for
-the existing query, advice, diagnosis, and SolidJS workbench tools.
+The first M7 primitive was `CausalAppTrace`, which mapped request/job lifecycle
+facts onto existing event kinds. It is now a low-level adapter implementation
+and conformance surface. Canonical request and job adapters derive a narrow
+recorder from the effect context; applications do not construct a store or call
+`CausalAppTrace`. Request/job retention defaults remain bounded and export the
+same standard events to the runtime-owned graph and workbench.
 
 The M7 adapter also records app semantic facts through
 `CausalAppSemanticRefs`. `recordDataRead`, `recordDataTransformed`,
@@ -1294,15 +1292,12 @@ Document the app pattern for labeling effects, services, layers, resources,
 and traces. Add examples showing an agent diagnosing a failing app effect and a
 resource leak.
 
-Initial app diagnostic coverage exists in `examples/causal_readiness.zig`.
-The first M7 request-path reference exists in
-`examples/causal_app_request.zig`: it models a Worker-compatible app request
-that returns a response plus owned causal JSON for caller-managed persistence.
-App incident mapping now classifies app config, requirement, response, retry,
-resource, and fiber failures over standard causal events. App remediation audit
-artifacts now record pending app remediation evidence before policy gates or
-patch proposals. Future examples should add richer resource leaks, retries, and
-fiber interruption paths so agents can compare multiple failure shapes.
+Initial low-level diagnostic coverage landed in `examples/causal_readiness.zig`
+and `examples/causal_app_request.zig`. Those files now remain engine
+conformance/history fixtures. The canonical application boundary subsequently
+moved ownership into `zstd.ManagedRuntime` and reusable adapters, which classify
+config, requirement, response, retry, resource and fiber failures without
+caller-managed persistence.
 
 ### Phase 6: Engine Improvement Harness
 
@@ -1351,15 +1346,14 @@ The causal runtime is useful when:
 
 ## Naming
 
-`NeuroEffect` is a strong product or research-program name. Inside the package,
-prefer neutral API names:
+`NeuroEffect` is a strong product or research-program name. Inside low-level
+runtime and conformance code, prefer neutral API names:
 
 - `CausalStore`
 - `CausalEvent`
 - `CausalSnapshot`
 - `CausalQuery`
 - `formatCausalReport`
-- `Runtime.withCausalStore`
 
-That keeps the public API clear while leaving room for a stronger external
-story.
+Application-facing APIs instead expose managed runtimes and narrow typed
+adapter/domain services, keeping store ownership out of business code.

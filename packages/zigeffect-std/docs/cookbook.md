@@ -228,8 +228,9 @@ Registration emits the native definition plus XState, Mermaid, and DOT
 projections while preserving snapshots and definitions registered by other
 components. Keep source references on states and transitions so agents can map
 catalog output back to the declaration. Bump the definition version whenever
-its fingerprint changes. Use the runtime causal recorder for live decisions
-and a `CausalJournalStore` for durable workflow activity events.
+its fingerprint changes. Use `zstd.Workflow.execution` when interpreting a
+statechart workflow; it derives live decision and durable journal recording
+from the effect context automatically.
 
 ## Refreshable resources and bounded pools
 

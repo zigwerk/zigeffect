@@ -1,3 +1,5 @@
+//! Framework-internal multi-service export fixture; not application scaffolding.
+//! This deliberately constructs per-service stores to exercise the hub protocol.
 //! Multi-service hub emitter — two zigeffect services streaming causal NDJSON.
 //!
 //!     zig build multi-service-stream-example && ./zig-out/bin/zigeffect-multi-service-stream-example \
@@ -11,6 +13,10 @@
 //! stamps the service identity onto every event — the per-event fields only
 //! carry the layer tags. `buildMultiServiceNdjson` is the testable core;
 //! `main` streams it.
+
+//! Low-level multi-runtime stream/backend fixture; not application scaffolding.
+//! Canonical services use one managed runtime per process and configure export
+//! through runtime adapters rather than constructing stores.
 
 const std = @import("std");
 const fx = @import("zigeffect");

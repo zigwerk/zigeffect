@@ -197,8 +197,9 @@ authority.
 
 ## Semantic causal facts
 
-The runtime records structural facts automatically. Add application facts at
-boundaries where domain meaning would otherwise be lost:
+The runtime records structural facts automatically. Standard-library,
+transport and domain-framework adapters record the following boundary facts
+automatically:
 
 - config loads and schema decoding;
 - CLI and API requests;
@@ -208,8 +209,11 @@ boundaries where domain meaning would otherwise be lost:
 - workflow and statechart transitions; and
 - acceptance evaluation.
 
-Use stable labels, causal parents, and domain references. Redact secrets and
-personal data before recording. Keep payloads and recent-event windows bounded.
+Do not mirror these events with `ctx.recordCausal` or thread a recorder through
+business APIs. When domain meaning would otherwise be lost, expose a narrow
+typed domain-event service whose live platform adapter uses stable labels,
+causal parents and redacted domain references. See
+[Runtime-owned causal applications](runtime-owned-causal-applications.md).
 
 ## Side-effect authority
 

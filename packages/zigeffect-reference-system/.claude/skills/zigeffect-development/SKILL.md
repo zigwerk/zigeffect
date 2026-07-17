@@ -39,9 +39,9 @@ text is a bounded diagnostic artifact, not proof that a requirement passed.
 3. Map the request to a requirement, acceptance check, component,
    manifest-owned command, and one or more `test_scenarios`. Declare missing
    intent before implementing behavior.
-4. Read the component's public facade, layers, schemas, tests, and causal
-   helpers. Use public `zigeffect_std` APIs; never import another component's
-   internals.
+4. Read the component's public facade, layers, schemas, tests, and reusable
+   boundary adapters. Use public `zigeffect_std` APIs; never import another
+   component's internals.
 
 ## Implement inspectable behavior
 
@@ -57,14 +57,19 @@ text is a bounded diagnostic artifact, not proof that a requirement passed.
   publishing; a temporary graph cannot support CLI proof.
 - Use `zigeffect add` and `zigeffect generate` before hand-writing framework
   structure.
-- Emit semantic facts at external, workflow, statechart, artifact, and
-  acceptance boundaries. Use typed statecharts for inspectable long-lived
-  control flow and durable statecharts for replayable workflows.
+- Use standard-library, transport and framework adapters for external,
+  workflow, statechart and artifact facts; they record automatically.
+  Application code adds only genuinely domain-specific typed events. Use typed
+  statecharts for inspectable control and durable workflows for replay.
 - Compose definitions with `zstd.Statechart.Effect.layer`/`step`, journals
   with `zstd.Workflow.journalLayer`/`append`, lifecycle signals at the root,
   and every API request or worker job with a bounded runtime handle.
 - Never put credentials, personal data, or raw terminal scrollback in
   manifests, facts, receipts, fixtures, snapshots, or Workbench payloads.
+- Never use `CausalStore.init*`, `attachBackend`, `withCausalStore`,
+  `ctx.recordCausal`, `CausalJournalStore`, or `recordDecisionCausal` in product
+  code. Direct stores are framework-test fixtures; `context.causalStore()` is a
+  deterministic root-runtime test injection only.
 
 ## Test requirements with `zstd.Testing`
 

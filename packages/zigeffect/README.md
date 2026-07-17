@@ -155,32 +155,31 @@ artifact preserves `applied=false` and `mutation_authority=none`. A parallel
 `causal-app-*` chain does the same for app-facing incidents. See
 [docs/operations.md](docs/operations.md).
 
-### App-facing causal traces
+### Runtime-owned application boundaries
 
-Record app request / background-job incidents with the same causal vocabulary
-from a Cloudflare Worker–shaped path, keeping the request path pure:
+Canonical applications create one `zstd.ManagedRuntime` and run their HTTP,
+gRPC, queue or workflow adapter through it. The runtime owns the store and
+embedded NenDB graph; the adapter derives the narrow recording capability it
+needs and automatically emits request/job, retry and response boundaries.
 
 ```zig
-var store = fx.CausalStore.initWithOptions(
+var runtime = try zstd.ManagedRuntime(@TypeOf(MainLayer)).make(
     allocator,
-    fx.defaultRequestCausalStoreOptions(),
+    io,
+    project_root,
+    MainLayer,
+    .{},
 );
-defer store.deinit();
+defer runtime.deinit();
 
-var trace = try fx.CausalAppTrace.startRequest(&store, .{
-    .method = "GET",
-    .route = "/api/projects/:id",
-    .runtime = "worker",
-});
-try trace.recordServiceResolution("ProjectService", "satisfied");
-try trace.complete(.success);
-
-const json = try fx.formatCausalJson(allocator, &store);
-defer allocator.free(json);
+try runtime.run(serve().named("projects.serve"));
+try runtime.shutdown();
 ```
 
-These emit normal `zigeffect.causal.v1` events, so app artifacts open in the same
-workbench and answer the same `causal-query` commands.
+Application handlers do not create `CausalStore`, call `recordCausal`, attach a
+backend or reproduce service/lifecycle events. Low-level `CausalAppTrace`
+remains an adapter implementation and framework-conformance primitive. See
+[Runtime-owned causal applications](docs/runtime-owned-causal-applications.md).
 
 ### Visual workbench
 

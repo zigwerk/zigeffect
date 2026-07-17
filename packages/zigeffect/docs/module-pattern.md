@@ -148,4 +148,5 @@ compose the same program with deterministic layers.
 - Is there one named root program and one managed runtime?
 - Are implementation modules hidden behind a public facade?
 - Can tests replace every external boundary with a deterministic layer?
-- Do semantic boundaries emit bounded, redacted causal facts?
+- Do reusable boundary adapters automatically emit bounded, redacted causal
+  facts without exposing a store or recorder to business code?

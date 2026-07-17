@@ -130,8 +130,8 @@ test "create order records causal acceptance evidence" {
     );
     defer context.deinit();
 
-    // Use context.runtime(), context.context(), context.service(), or a typed
-    // service layer. Effects executed here attach to the real CausalStore.
+    // Effects executed through the controlled managed runtime automatically
+    // record to its real causal store and project-mounted graph.
     const assertions = zstd.Testing.AssertionRecorder.init(&context);
     try assertions.boolean(.{
         .id = "one-order",
