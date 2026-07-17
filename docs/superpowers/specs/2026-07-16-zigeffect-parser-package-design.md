@@ -98,3 +98,10 @@ This slice does not add path/module resolution, TypeScript type checking,
 incremental tree edits, retained syntax trees, semantic embeddings, Proto
 linking, or Markdown parsing. Those are later providers and zgraphy resolution
 milestones built on this package boundary.
+
+## Subsequent delivery
+
+The Proto provider was delivered with canonical generated-code lineage, and
+the compiler-AST Zig provider was promoted into this package on 2026-07-17.
+See `2026-07-17-zigeffect-parser-zig-provider.md` for the lossless direct Zig
+result, zgraphy facade, resource bounds, and common-contract boundary.

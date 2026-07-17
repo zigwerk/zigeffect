@@ -2,6 +2,7 @@ const std = @import("std");
 const zstd = @import("zigeffect_std");
 
 pub const Contract = zstd.Parser;
+pub const Zig = @import("zig.zig");
 pub const TypeScript = @import("typescript.zig");
 pub const ProtocolBuffers = @import("protobuf.zig");
 
@@ -34,13 +35,89 @@ pub fn parserLayer(provider: *NativeProvider) @TypeOf(Contract.parserLayer(provi
     return Contract.parserLayer(providerApi(provider));
 }
 
-test "native provider rejects languages without an installed grammar" {
+test "native common-contract provider rejects languages without a lossless normalized result" {
     var provider = NativeProvider{};
     try std.testing.expectError(error.UnsupportedDocumentLanguage, provider.parseAlloc(std.testing.allocator, .{
         .path = "src/main.zig",
         .source = "pub fn main() void {}",
         .language = .zig,
     }));
+}
+
+test "native package owns bounded deterministic Zig compiler AST facts" {
+    const source =
+        \\const std = @import("std");
+        \\pub fn run(value: usize) void {
+        \\    helper(value);
+        \\    std.debug.print("{d}", .{value});
+        \\}
+        \\fn helper(_: usize) void {}
+        \\// fn phantom() void {}
+    ;
+    var first = try Zig.parse(std.testing.allocator, "src/main.zig", source, .{});
+    defer first.deinit();
+    var second = try Zig.parse(std.testing.allocator, "src/main.zig", source, .{});
+    defer second.deinit();
+
+    try Zig.validate(&first);
+    try Zig.validate(&second);
+    try std.testing.expectEqualStrings("zigeffect-parser.std-zig-ast", Zig.parser_id);
+    try std.testing.expect(first.findDeclaration("run") != null);
+    try std.testing.expect(first.findDeclaration("helper") != null);
+    try std.testing.expect(first.findDeclaration("phantom") == null);
+    try std.testing.expect(first.findImport("std") != null);
+    try std.testing.expect(first.findCall("helper") != null);
+    try std.testing.expect(first.findCall("std.debug.print") != null);
+    try std.testing.expectEqualSlices(u8, &first.fingerprint, &second.fingerprint);
+
+    var idempotent = try Zig.parse(std.testing.allocator, "src/idempotent.zig", "pub fn main() void {}", .{});
+    idempotent.deinit();
+    idempotent.deinit();
+}
+
+test "native Zig provider rejects malformed and resource-exhausting documents" {
+    try std.testing.expectError(error.InvalidZigSource, Zig.parse(
+        std.testing.allocator,
+        "src/broken.zig",
+        "pub fn broken(",
+        .{},
+    ));
+    try std.testing.expectError(error.ZigNodeLimitExceeded, Zig.parse(
+        std.testing.allocator,
+        "src/nodes.zig",
+        "pub fn main() void {}",
+        .{ .max_nodes = 1 },
+    ));
+    try std.testing.expectError(error.ZigDepthLimitExceeded, Zig.parse(
+        std.testing.allocator,
+        "src/depth.zig",
+        "pub fn main() void { if (true) {} }",
+        .{ .max_depth = 1 },
+    ));
+    try std.testing.expectError(error.ZigSourceLimitExceeded, Zig.parse(
+        std.testing.allocator,
+        "src/source.zig",
+        "pub fn main() void {}",
+        .{ .max_source_bytes = 4 },
+    ));
+    try std.testing.expectError(error.ZigFactLimitExceeded, Zig.parse(
+        std.testing.allocator,
+        "src/facts.zig",
+        "pub fn one() void {} pub fn two() void {}",
+        .{ .max_facts = 1 },
+    ));
+    try std.testing.expectError(error.InvalidZigDeclaration, Zig.parse(
+        std.testing.allocator,
+        "src/label.zig",
+        "pub fn longName() void {}",
+        .{ .max_label_bytes = 4 },
+    ));
+    try std.testing.expectError(error.InvalidZigParserOptions, Zig.parse(
+        std.testing.allocator,
+        "src/options.zig",
+        "pub fn main() void {}",
+        .{ .max_depth = 0 },
+    ));
 }
 
 test "native provider emits owned deterministic TypeScript facts" {
@@ -303,6 +380,7 @@ test "native provider emits canonical bounded Proto structural facts" {
 }
 
 test {
+    std.testing.refAllDecls(Zig);
     std.testing.refAllDecls(TypeScript);
     std.testing.refAllDecls(ProtocolBuffers);
 }

@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const zigeffect_dependency = b.dependency("zigeffect", .{});
+    const zigeffect_dependency = b.dependency("zigeffect", .{ .target = target, .optimize = optimize });
     const zigeffect = zigeffect_dependency.module("zigeffect");
     const testing_runner = zigeffect_dependency.module("zigeffect_test_runner").root_source_file.?;
     _ = b.addModule("zigeffect_test_runner", .{
