@@ -31,6 +31,7 @@ pub const RuntimeHandle = context_mod.RuntimeHandle;
 pub const ContextView = context_mod.ContextView;
 
 pub const Effect = effect_mod.Effect;
+pub const NamedEffect = effect_mod.NamedEffect;
 pub const Layer = layer_mod.Layer;
 pub const ManagedRuntimeOptions = managed_runtime_mod.ManagedRuntimeOptions;
 pub const ManagedRuntime = managed_runtime_mod.ManagedRuntime;

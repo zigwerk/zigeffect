@@ -8918,6 +8918,242 @@ pub fn shutdownServerEffect(options: ShutdownOptions) ShutdownServerEffect() {
     }.run);
 }
 
+/// Canonical composition and process lifecycle for a generated native gRPC
+/// application. Product code supplies its implementation/dependency layer and
+/// transport policy; ZigEffect owns the registries, standard services,
+/// runtime causal boundary, lifecycle, readiness, drain, and checked shutdown.
+pub const Application = struct {
+    fn Descriptor(comptime Service: type) type {
+        return struct {
+            const service_name = Typed.serviceFullName(Service);
+            const service_names = [_][]const u8{
+                service_name,
+                "grpc.health.v1.Health",
+                "grpc.channelz.v1.Channelz",
+                "grpc.reflection.v1.ServerReflection",
+                "grpc.reflection.v1alpha.ServerReflection",
+            };
+            const initial_health = [_]StandardServices.InitialHealth{
+                .{ .service = "", .status = .serving },
+                .{ .service = service_name, .status = .serving },
+            };
+        };
+    }
+
+    pub const Config = struct {
+        /// Stable application identity used by Channelz and agent discovery.
+        name: []const u8,
+        server: NativeServerConfig,
+        /// Supply the application's descriptor set when full reflection of
+        /// product messages is required. Health/reflection remain available
+        /// with the package-owned standard descriptor by default.
+        descriptor_set: []const u8 = StandardServices.embedded_descriptor_set,
+        channelz: ?NativeChannelzConfig = null,
+    };
+
+    fn standardConfig(comptime Service: type, config: Config) StandardServices.Config {
+        const descriptor = Descriptor(Service);
+        return .{
+            .descriptor_set = config.descriptor_set,
+            .service_names = &descriptor.service_names,
+            .initial_health = &descriptor.initial_health,
+        };
+    }
+
+    fn channelzConfig(config: Config) NativeChannelzConfig {
+        return config.channelz orelse .{
+            .server_ref = .{ .id = 1, .name = config.name },
+            .listener_ref = .{ .id = 2, .name = config.name },
+            .listener_name = config.server.options.host,
+        };
+    }
+
+    /// Generated routes plus all three bounded registries. This smaller facade
+    /// is useful for in-process contract tests that do not open a listener.
+    pub fn routesLayer(
+        comptime Service: type,
+        comptime ImplementationService: type,
+        dependencies: anytype,
+    ) @TypeOf(Typed.generatedRoutesLayer(Service, ImplementationService).provideMerge(
+        zstd.fx.kernel.Layer.mergeAll(.{
+            dependencies,
+            Typed.unaryRegistryLayer(),
+            Typed.streamingRegistryLayer(),
+            Typed.incrementalRegistryLayer(),
+        }),
+    )) {
+        const foundations = zstd.fx.kernel.Layer.mergeAll(.{
+            dependencies,
+            Typed.unaryRegistryLayer(),
+            Typed.streamingRegistryLayer(),
+            Typed.incrementalRegistryLayer(),
+        });
+        return Typed.generatedRoutesLayer(Service, ImplementationService).provideMerge(foundations);
+    }
+
+    /// Complete live layer for one generated service. Additional application
+    /// services belong in `dependencies`; transport internals do not.
+    pub fn layer(
+        comptime Service: type,
+        comptime ImplementationService: type,
+        dependencies: anytype,
+        config: Config,
+    ) @TypeOf(zstd.fx.kernel.Layer.mergeAll(.{
+        nativeChannelzLayer().provideMerge(
+            nativeServerLayer().provideMerge(
+                StandardServices.layer().provideMerge(
+                    zstd.fx.kernel.Layer.mergeAll(.{
+                        routesLayer(Service, ImplementationService, dependencies),
+                        StandardServices.configLayer(standardConfig(Service, config)),
+                        nativeServerConfigLayer(config.server),
+                        nativeChannelzConfigLayer(channelzConfig(config)),
+                    }),
+                ),
+            ),
+        ),
+        zstd.Application.Lifecycle.managerLayer(),
+        zstd.Application.Lifecycle.signalLayer(),
+    })) {
+        const configured_routes = zstd.fx.kernel.Layer.mergeAll(.{
+            routesLayer(Service, ImplementationService, dependencies),
+            StandardServices.configLayer(standardConfig(Service, config)),
+            nativeServerConfigLayer(config.server),
+            nativeChannelzConfigLayer(channelzConfig(config)),
+        });
+        const standards = StandardServices.layer().provideMerge(configured_routes);
+        const server = nativeServerLayer().provideMerge(standards);
+        const transport = nativeChannelzLayer().provideMerge(server);
+        return zstd.fx.kernel.Layer.mergeAll(.{
+            transport,
+            zstd.Application.Lifecycle.managerLayer(),
+            zstd.Application.Lifecycle.signalLayer(),
+        });
+    }
+
+    pub const StopSource = struct {
+        state: ?*anyopaque = null,
+        requested_fn: *const fn (?*anyopaque) bool,
+
+        pub fn processSignals() StopSource {
+            return .{ .requested_fn = struct {
+                fn requested(_: ?*anyopaque) bool {
+                    return zstd.Application.Lifecycle.requestedSignal() != .none;
+                }
+            }.requested };
+        }
+
+        pub fn from(
+            comptime State: type,
+            state: *State,
+            comptime requested: *const fn (*State) bool,
+        ) StopSource {
+            return .{
+                .state = state,
+                .requested_fn = struct {
+                    fn call(raw: ?*anyopaque) bool {
+                        const typed: *State = @ptrCast(@alignCast(raw.?));
+                        return requested(typed);
+                    }
+                }.call,
+            };
+        }
+
+        pub fn isRequested(self: StopSource) bool {
+            return self.requested_fn(self.state);
+        }
+    };
+
+    pub const RunOptions = struct {
+        readiness_attempts: usize = 200,
+        poll_interval_ms: i64 = 25,
+        shutdown: ShutdownOptions = .{ .deadline_ms = 25_000 },
+        stop: StopSource = StopSource.processSignals(),
+
+        fn validate(self: RunOptions) !void {
+            if (self.readiness_attempts == 0 or self.poll_interval_ms <= 0) return error.InvalidApplicationRunOptions;
+            try self.shutdown.validate();
+        }
+    };
+
+    fn ServeContext(comptime Runtime: type) type {
+        return struct {
+            runtime: *Runtime,
+            done: std.atomic.Value(bool) = .init(false),
+            result: ?anyerror = null,
+            report: SupervisorReport = .{},
+
+            fn run(self: *@This()) void {
+                self.report = self.runtime.run(serveEffect().named("grpc.application.serve")) catch |failure| {
+                    self.result = failure;
+                    self.done.store(true, .release);
+                    return;
+                };
+                self.done.store(true, .release);
+            }
+        };
+    }
+
+    fn recover(runtime: anytype, shutdown: ShutdownOptions) void {
+        _ = runtime.run(drainServerEffect().named("grpc.application.drain.recovery")) catch {};
+        _ = runtime.run(shutdownServerEffect(shutdown).named("grpc.application.shutdown.recovery")) catch {};
+    }
+
+    /// Run the standard native server program and dispose the process runtime
+    /// only after the embedded causal graph has passed its health/flush checks.
+    pub fn run(runtime: anytype, io: std.Io, options: RunOptions) !SupervisorReport {
+        try options.validate();
+        try runtime.run(zstd.Application.Lifecycle.start().named("grpc.application.lifecycle.start"));
+
+        const Runtime = @typeInfo(@TypeOf(runtime)).pointer.child;
+        const Serving = ServeContext(Runtime);
+        var serving = Serving{ .runtime = runtime };
+        const thread = try std.Thread.spawn(.{}, Serving.run, .{&serving});
+        var joined = false;
+        errdefer if (!joined) {
+            recover(runtime, options.shutdown);
+            thread.join();
+        };
+
+        var ready = false;
+        var attempt: usize = 0;
+        while (attempt < options.readiness_attempts and !serving.done.load(.acquire)) : (attempt += 1) {
+            if (runtime.run(serverReadyEffect().named("grpc.application.readiness")) catch false) {
+                ready = true;
+                break;
+            }
+            io.sleep(.fromMilliseconds(options.poll_interval_ms), .awake) catch break;
+        }
+        if (!ready) {
+            recover(runtime, options.shutdown);
+            thread.join();
+            joined = true;
+            if (serving.result) |failure| return failure;
+            return error.ServerNotReady;
+        }
+
+        try runtime.run(zstd.Application.Lifecycle.ready().named("grpc.application.lifecycle.ready"));
+        while (!options.stop.isRequested() and !serving.done.load(.acquire)) {
+            io.sleep(.fromMilliseconds(options.poll_interval_ms), .awake) catch break;
+        }
+
+        try runtime.run(zstd.Application.Lifecycle.drain().named("grpc.application.lifecycle.drain"));
+        try runtime.run(drainServerEffect().named("grpc.application.drain"));
+        const shutdown = try runtime.run(shutdownServerEffect(options.shutdown).named("grpc.application.shutdown"));
+        thread.join();
+        joined = true;
+        if (serving.result) |failure| return failure;
+        if (shutdown.active_remaining != 0) return error.ShutdownIncomplete;
+
+        try runtime.run(zstd.Application.Lifecycle.stop().named("grpc.application.lifecycle.stop"));
+        if (runtime.graphSummary().records == 0 or runtime.causalHealth().status != .healthy) {
+            return error.UnhealthyCausalRuntime;
+        }
+        const report = serving.report;
+        try runtime.shutdown();
+        return report;
+    }
+};
+
 test "persistent channel layer owns the channel and exposes the std gRPC client service" {
     const config = persistentChannelConfigLayer(.{
         .io = std.testing.io,
@@ -9027,4 +9263,96 @@ test "native server layer owns listener lifecycle and serves lifecycle effects" 
     try std.testing.expect(saw_automatic_boundary_fact);
     try std.testing.expect(runtime.graphSummary().records > 0);
     try runtime.shutdown();
+}
+
+test "application facade owns generated routes standard services transport and lifecycle" {
+    const Message = struct {
+        value: u8 = 0,
+
+        pub fn encode(self: @This(), writer: *std.Io.Writer, _: std.mem.Allocator) !void {
+            try writer.writeByte(self.value);
+        }
+
+        pub fn decode(reader: *std.Io.Reader, _: std.mem.Allocator) !@This() {
+            return .{ .value = try reader.takeByte() };
+        }
+
+        pub fn deinit(_: *@This(), _: std.mem.Allocator) void {}
+    };
+    const Service = struct {
+        pub const package = "example.v1";
+        pub const service_name = "ApplicationFacade";
+        Ping: *const fn (*void, Message) anyerror!Message,
+    };
+    const Implementation = struct {
+        pub fn Ping(_: *@This(), _: *zstd.fx.kernel.ContextView(.{}), request: Message) !Message {
+            return request;
+        }
+    };
+    const ImplementationService = zstd.fx.kernel.Service(
+        "test/grpc/ApplicationFacadeImplementation",
+        Implementation,
+    );
+    const dependencies = zstd.fx.kernel.Layer.succeed(ImplementationService, .{});
+    const root = Application.layer(Service, ImplementationService, dependencies, .{
+        .name = "application-facade-test",
+        .server = .{
+            .io = std.testing.io,
+            .options = .{
+                .host = "127.0.0.1",
+                .port = 0,
+                .max_connections = 1,
+                .handler_worker_count = 1,
+                .handler_queue_capacity = 4,
+            },
+        },
+    });
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var runtime = try zstd.ManagedRuntime(@TypeOf(root)).make(
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        root,
+        .{},
+    );
+    defer runtime.deinit();
+
+    var application = try runtime.inspect(std.testing.allocator, .{});
+    defer application.deinit();
+    inline for (.{
+        Typed.UnaryRegistry,
+        Typed.StreamingRegistry,
+        Typed.IncrementalRegistry,
+        StandardServices.Service,
+        NativeServerService,
+        NativeChannelzService,
+        zstd.Application.Lifecycle.Lifecycle,
+        zstd.Application.Lifecycle.ProcessSignals,
+    }) |ExpectedService| {
+        var found = false;
+        for (application.services) |service| {
+            if (std.mem.eql(u8, service.key, ExpectedService.service_key)) found = true;
+        }
+        try std.testing.expect(found);
+    }
+    try std.testing.expect(try runtime.run(serverReadyEffect()));
+    try std.testing.expect(runtime.graphSummary().records > 0);
+    const Stop = struct {
+        fn requested(_: *@This()) bool {
+            return true;
+        }
+    };
+    var stop = Stop{};
+    const report = try Application.run(&runtime, std.testing.io, .{
+        .stop = Application.StopSource.from(Stop, &stop, Stop.requested),
+    });
+    try std.testing.expectEqual(@as(usize, 0), report.failed);
+}
+
+test "application runner rejects non-positive polling intervals" {
+    try std.testing.expectError(
+        error.InvalidApplicationRunOptions,
+        (Application.RunOptions{ .poll_interval_ms = -1 }).validate(),
+    );
 }

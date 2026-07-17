@@ -94,6 +94,11 @@ a Connect-Web transport and `@tanstack/solid-query` option helpers.
 Native gRPC now uses the same canonical composition model as a generated
 ZigEffect application:
 
+- `Application.layer` composes a generated implementation/dependency layer
+  with registries, standard services, Channelz, the scoped native server, and
+  process lifecycle services;
+- `Application.run` owns readiness, signal waiting, drain, bounded shutdown,
+  causal health enforcement, and graph flush;
 - `Typed.generatedRoutesLayer` registers generated unary and streaming effects
   from an implementation service tag;
 - `Typed.generatedClientLayer` supplies a generated client capability;
@@ -117,7 +122,8 @@ header values, credentials, metadata, and payloads are not retained.
 
 Manual `init`/`deinit` remains the driver API for focused adapter work.
 `Typed.GeneratedDriverBinding` is the explicitly low-level generated adapter;
-application code should use `Typed.generatedRoutesLayer`.
+ordinary application code should start with `Application.layer` and
+`Application.run`. Use `Application.routesLayer` for in-process contract tests.
 
 See [`docs/effect-native-roadmap.md`](docs/effect-native-roadmap.md) for the
 completed composition gates and remaining platform qualification work.

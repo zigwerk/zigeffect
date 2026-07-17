@@ -98,7 +98,6 @@ pub const production_wiring_source =
     \\const http = @import("zigeffect_http");
     \\const postgres = @import("zigeffect_postgres_libpq");
     \\const otel = @import("zigeffect_otel");
-    \\const causal_graph = @import("causal_graph.zig");
     \\
     \\pub const Config = struct { port: i64, otlp_host: []const u8, otlp_port: i64, migration_dialect: []const u8 };
     \\pub const config_schema = zstd.Schema.structSchema(Config, .{
@@ -285,17 +284,11 @@ pub const production_wiring_source =
     \\pub fn run(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, environ: std.process.Environ) !void {
     \\    var application_map_slot = http.ApplicationMapSlot{};
     \\    const main_layer = rootLayer(.{ .io = io, .root = root, .environ = environ, .application_map = &application_map_slot });
-    \\    var runtime = try zstd.ManagedRuntime(@TypeOf(main_layer)).make(allocator, io, root, main_layer, .{ .graph = causal_graph.options });
+    \\    var runtime = try zstd.ManagedRuntime(@TypeOf(main_layer)).make(allocator, io, root, main_layer, .{});
     \\    defer runtime.deinit();
     \\    try application_map_slot.install(@TypeOf(runtime), &runtime);
     \\    defer application_map_slot.clear();
     \\    try runtime.run(program());
-    \\    var application = try runtime.inspect(allocator, .{ .max_recent_events = 64 });
-    \\    defer application.deinit();
-    \\    if (application.services.len < 8 or application.causal.findings.len != 0) return error.InvalidApplicationSnapshot;
-    \\    const agent_map = try runtime.agentMapJsonAlloc(allocator, .{ .max_recent_events = 64 });
-    \\    defer allocator.free(agent_map);
-    \\    if (agent_map.len == 0 or runtime.causalHealth().status != .healthy) return error.MissingApplicationMap;
     \\    try runtime.shutdown();
     \\}
 ;
@@ -310,6 +303,8 @@ pub const production_test =
 ;
 
 pub const app_source =
+    \\//! Minimal application composition. Named effects provide semantic identity;
+    \\//! the managed runtime owns causal recording, NenDB, and agent discovery.
     \\const std = @import("std");
     \\const zstd = @import("zigeffect_std");
     \\const kernel = zstd.fx.kernel;
@@ -317,77 +312,54 @@ pub const app_source =
     \\const command = @import("cli.zig");
     \\const http = @import("http.zig");
     \\const sql = @import("sql.zig");
-    \\const causal = @import("causal.zig");
-    \\const causal_graph = @import("causal_graph.zig");
     \\const greeting = @import("services/greeting.zig");
     \\__SHARED_SOURCE_IMPORT__
     \\pub const component_name = "__PROJECT_NAME__";
     \\pub const Greeting = greeting.Greeting;
-    \\pub const causal_graph_options = causal_graph.options;
     \\
-    \\const BootstrapInputs = struct { io: std.Io, root: std.Io.Dir };
     \\const BootstrapBase = kernel.Effect(void, anyerror, .{});
-    \\const Bootstrap = BootstrapBase.Stateful(BootstrapInputs);
+    \\const BootstrapProgram = BootstrapBase.Stateful(void);
+    \\const Bootstrap = kernel.NamedEffect(BootstrapProgram);
     \\
-    \\fn record(ctx: anytype, fact: zstd.Application.Fact) !void {
-    \\    if (zstd.Application.record(ctx, fact) == null) return error.OutOfMemory;
-    \\}
-    \\
-    \\fn bootstrap(io: std.Io, root: std.Io.Dir) Bootstrap {
-    \\    return Bootstrap.init(.{ .io = io, .root = root }, struct {
-    \\        fn run(inputs: BootstrapInputs, ctx: *Bootstrap.Context) anyerror!void {
-    \\            _ = inputs.io;
-    \\            _ = inputs.root;
+    \\fn bootstrap() Bootstrap {
+    \\    return BootstrapProgram.init({}, struct {
+    \\        fn run(_: void, ctx: *BootstrapProgram.Context) anyerror!void {
     \\            const allocator = ctx.allocator();
     \\            const app_config = try config.decodeJsonAlloc(allocator, "{\"port\":5178,\"development\":true}");
     \\    if (app_config.port != 5178) return error.InvalidConfig;
-    \\            try record(ctx, zstd.Application.configLoad("application", "success", "source=local"));
-    \\            try record(ctx, zstd.Application.schemaDecode("AppConfig", "success", "validated config"));
     \\    const port = try command.decodePortAlloc(allocator, &.{ "--port", "5178" });
     \\    if (port != 5178) return error.InvalidCommand;
-    \\            try record(ctx, zstd.Application.commandExecution("run", "success", "typed CLI decoded"));
     \\
     \\    var route = try http.runHealthRoute(allocator);
     \\    defer route.deinit(allocator);
     \\    if (route.response.status != 200) return error.UnhealthyRoute;
-    \\            try record(ctx, zstd.Application.requestHandling("POST /health", "success", "status=200"));
-    \\            try record(ctx, zstd.Application.externalCall("local-http-router", "health", "success"));
     \\    const row_count = try sql.runSmokeQuery(allocator);
     \\    if (row_count != 1) return error.UnexpectedRowCount;
-    \\            try record(ctx, zstd.Application.sqlTransaction("local-sql", "health-query", "committed"));
     \\__SHARED_SOURCE_USE__
-    \\            try record(ctx, zstd.Application.componentDependency(component_name, "zigeffect-std", "resolved"));
     \\        }
-    \\    }.run);
+    \\    }.run).named("application.bootstrap.inputs");
     \\}
     \\
     \\const FinalizeGreetingBase = kernel.Effect(void, anyerror, .{});
-    \\const FinalizeGreeting = FinalizeGreetingBase.Stateful([]u8);
+    \\const FinalizeGreetingProgram = FinalizeGreetingBase.Stateful([]u8);
+    \\const FinalizeGreeting = kernel.NamedEffect(FinalizeGreetingProgram);
     \\fn finalizeGreeting(message: []u8) FinalizeGreeting {
-    \\    return FinalizeGreeting.init(message, struct {
-    \\        fn run(owned_message: []u8, ctx: *FinalizeGreeting.Context) anyerror!void {
-    \\            const allocator = ctx.allocator();
-    \\            defer allocator.free(owned_message);
-    \\            try record(ctx, zstd.Application.acceptanceEvaluation("check-bootstrap", "passed", "application boundaries passed"));
-    \\            try record(ctx, zstd.Application.artifactProduction("workbench-attachment", "created", "bounded causal attachment"));
-    \\            try record(ctx, zstd.Application.artifactProduction("causal-graph", "prepared", causal_graph.wal_path));
-    \\
-    \\            var recorder = zstd.Observability.Recorder.init(allocator);
-    \\            defer recorder.deinit();
-    \\            try recorder.increment("app.runs", 1);
-    \\            const workbench = try recorder.workbenchJsonAlloc(allocator, component_name);
-    \\            defer allocator.free(workbench);
+    \\    return FinalizeGreetingProgram.init(message, struct {
+    \\        fn run(owned_message: []u8, ctx: *FinalizeGreetingProgram.Context) anyerror!void {
+    \\            ctx.allocator().free(owned_message);
     \\        }
-    \\    }.run);
+    \\    }.run).named("application.greeting.release");
     \\}
     \\
     \\pub fn program(io: std.Io, root: std.Io.Dir) @TypeOf(
-    \\    bootstrap(io, root)
+    \\    bootstrap()
     \\        .andThen(greeting.greet(component_name))
     \\        .flatMap(finalizeGreeting)
     \\        .named("application.bootstrap"),
     \\) {
-    \\    return bootstrap(io, root)
+    \\    _ = io;
+    \\    _ = root;
+    \\    return bootstrap()
     \\        .andThen(greeting.greet(component_name))
     \\        .flatMap(finalizeGreeting)
     \\        .named("application.bootstrap");
@@ -399,43 +371,14 @@ pub const app_source =
     \\
     \\pub fn runWithOptions(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, options: zstd.CausalRuntime.Options) !void {
     \\    const main_layer = rootLayer();
-    \\    var runtime_options = options;
-    \\    runtime_options.graph = causal_graph_options;
-    \\    var runtime = try zstd.ManagedRuntime(@TypeOf(main_layer)).make(allocator, io, root, main_layer, runtime_options);
+    \\    var runtime = try zstd.ManagedRuntime(@TypeOf(main_layer)).make(allocator, io, root, main_layer, options);
     \\    defer runtime.deinit();
     \\    try runtime.run(program(io, root));
-    \\    var inspection = try runtime.inspect(allocator, .{ .max_recent_events = 64 });
-    \\    defer inspection.deinit();
-    \\    if (inspection.services.len != 1 or inspection.causal.findings.len != 0) return error.InvalidApplicationSnapshot;
-    \\    const graph = runtime.graphSummary();
-    \\    const health = runtime.causalHealth();
-    \\    if (graph.records == 0 or health.status != .healthy) return error.MissingCausalEvidence;
-    \\    const agent_map = try runtime.agentMapJsonAlloc(allocator, .{ .max_recent_events = 64 });
-    \\    defer allocator.free(agent_map);
-    \\    if (agent_map.len == 0) return error.MissingApplicationMap;
     \\    try runtime.shutdown();
     \\}
     \\
     \\pub fn run(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir) !void {
     \\    return runWithOptions(allocator, io, root, .{});
-    \\}
-;
-
-pub const causal_graph_source =
-    \\const std = @import("std");
-    \\const zstd = @import("zigeffect_std");
-    \\
-    \\pub const path = zstd.CausalGraph.default_path;
-    \\pub const wal_path = path ++ "/" ++ zstd.CausalGraph.default_wal_name;
-    \\pub const max_events: usize = 100_000;
-    \\pub const options = zstd.CausalGraph.Options{
-    \\    .path = path,
-    \\    .max_records = max_events,
-    \\    .max_wal_bytes = 16 * 1024 * 1024,
-    \\};
-    \\
-    \\pub fn open(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir) !zstd.CausalGraph.LocalDatabase {
-    \\    return zstd.CausalGraph.LocalDatabase.init(allocator, io, root, options);
     \\}
 ;
 
@@ -460,7 +403,7 @@ pub const cli_source =
     \\const std = @import("std");
     \\const zstd = @import("zigeffect_std");
     \\
-    \\const Args = struct { port: i64, verbose: bool };
+    \\const Args = struct { port: i64 };
     \\
     \\pub fn decodePortAlloc(allocator: std.mem.Allocator, args: []const []const u8) !i64 {
     \\    const command = zstd.Cli.typedCommand(Args, .{
@@ -475,7 +418,6 @@ pub const cli_source =
     \\            .default_value = "5178",
     \\            .help = "local HTTP port",
     \\        }),
-    \\        zstd.Cli.flag("verbose", .{ .long = "verbose", .short = 'v', .help = "verbose local output" }),
     \\    });
     \\    var parsed = try zstd.Cli.parse(allocator, command.toCommandSpec(), args);
     \\    defer parsed.deinit(allocator);
@@ -528,35 +470,6 @@ pub const sql_source =
     \\}
 ;
 
-pub const causal_source =
-    \\const std = @import("std");
-    \\const zstd = @import("zigeffect_std");
-    \\
-    \\pub const workbench_query = "?live=ws://127.0.0.1:4318";
-    \\
-    \\pub fn attachmentJsonAlloc(
-    \\    allocator: std.mem.Allocator,
-    \\    component: []const u8,
-    \\    facts: usize,
-    \\    graph: zstd.CausalGraph.Summary,
-    \\) ![]u8 {
-    \\    return std.json.Stringify.valueAlloc(allocator, .{
-    \\        .schema = "zigeffect.application-attachment.v2",
-    \\        .schema_version = 2,
-    \\        .component = component,
-    \\        .facts = facts,
-    \\        .causal_graph = .{
-    \\            .schema = graph.schema,
-    \\            .path = graph.path,
-    \\            .wal_name = graph.wal_name,
-    \\            .records = graph.records,
-    \\            .edges = graph.edges,
-    \\            .session = graph.sessions,
-    \\        },
-    \\    }, .{});
-    \\}
-;
-
 pub const greeting_source =
     \\const std = @import("std");
     \\const zstd = @import("zigeffect_std");
@@ -574,17 +487,15 @@ pub const greeting_source =
     \\
     \\pub const Greeting = kernel.Service("application/Greeting", GreetingApi);
     \\const GreetBase = kernel.Effect([]u8, std.mem.Allocator.Error, .{Greeting});
-    \\pub const Greet = GreetBase.Stateful([]const u8);
+    \\const GreetProgram = GreetBase.Stateful([]const u8);
+    \\pub const Greet = kernel.NamedEffect(GreetProgram);
     \\
     \\pub fn greet(name: []const u8) Greet {
-    \\    return Greet.init(name, struct {
-    \\        fn run(value: []const u8, ctx: *Greet.Context) std.mem.Allocator.Error![]u8 {
-    \\            const result = try ctx.service(Greeting).formatAlloc(ctx.allocator(), value);
-    \\            errdefer ctx.allocator().free(result);
-    \\            if (ctx.recordCausal(.{ .kind = .activity_completed, .service_key = Greeting.service_key, .label = "Greeting.greet", .status = "success", .redacted_detail = value }) == null) return error.OutOfMemory;
-    \\            return result;
+    \\    return GreetProgram.init(name, struct {
+    \\        fn run(value: []const u8, ctx: *GreetProgram.Context) std.mem.Allocator.Error![]u8 {
+    \\            return ctx.service(Greeting).formatAlloc(ctx.allocator(), value);
     \\        }
-    \\    }.run);
+    \\    }.run).named("Greeting.greet");
     \\}
 ;
 
@@ -609,7 +520,7 @@ pub const executable_test =
     \\    var context = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{ .project = "__PROJECT_NAME__", .suite = "acceptance", .scenario = acceptanceScenario(), .seed = 42 });
     \\    defer context.deinit();
     \\    const layer = app.rootLayer();
-    \\    var runtime = try zstd.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), layer, .{ .graph = app.causal_graph_options, .causal_store = context.causalStore() });
+    \\    var runtime = try zstd.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), layer, .{ .causal_store = context.causalStore() });
     \\    defer runtime.deinit();
     \\    try runtime.run(app.program(std.testing.io, std.Io.Dir.cwd()));
     \\    var inspection = try runtime.inspect(std.testing.allocator, .{ .max_recent_events = 128 });
@@ -617,7 +528,7 @@ pub const executable_test =
     \\    const assertions = zstd.Testing.AssertionRecorder.init(&context);
     \\    try assertions.applicationService(.{ .id = "greeting-service", .label = "greeting service is provided at the root", .repair_hint = "compose Greeting once in app.rootLayer" }, &inspection, app.Greeting.service_key, true);
     \\    try assertions.applicationOperation(.{ .id = "greeting-operation", .label = "greeting operation is agent discoverable", .repair_hint = "declare GreetingApi.operations" }, &inspection, app.Greeting.service_key, "Greeting.greet");
-    \\    _ = try assertions.event(.{ .id = "greeting-causal", .label = "greeting execution is causally addressable", .repair_hint = "run greeting through the managed runtime" }, .{ .kind = .activity_completed, .label = "Greeting.greet", .status = "success" });
+    \\    _ = try assertions.event(.{ .id = "greeting-causal", .label = "greeting execution is causally addressable", .repair_hint = "run greeting through the managed runtime" }, .{ .kind = .effect_completed, .label = "Greeting.greet", .status = "success" });
     \\    try assertions.noFindings(.{ .id = "causal-clean", .label = "runtime has no causal findings" });
     \\    try assertions.noPendingFibers(.{ .id = "fibers-clean", .label = "runtime has no pending fibers" });
     \\    var budgets = try zstd.Testing.Budgets.evaluateAlloc(std.testing.allocator, &.{.{ .id = "bootstrap-steps", .kind = .deterministic_steps, .value = 1 }}, &.{.{ .id = "bootstrap-budget", .metric_id = "bootstrap-steps", .absolute_max = 10 }});
@@ -713,16 +624,15 @@ pub const library_source =
     \\pub const Calculator = kernel.Service("library/Calculator", CalculatorApi);
     \\pub const DefaultLayer = @TypeOf(kernel.Layer.succeed(Calculator, .{}));
     \\const DoubleBase = kernel.Effect(i64, std.mem.Allocator.Error, .{Calculator});
-    \\pub const Double = DoubleBase.Stateful(i64);
+    \\const DoubleProgram = DoubleBase.Stateful(i64);
+    \\pub const Double = kernel.NamedEffect(DoubleProgram);
     \\
     \\pub fn double(value: i64) Double {
-    \\    return Double.init(value, struct {
-    \\        fn run(input: i64, ctx: *Double.Context) std.mem.Allocator.Error!i64 {
-    \\            const output = ctx.service(Calculator).double(input);
-    \\            if (ctx.recordCausal(.{ .kind = .activity_completed, .service_key = Calculator.service_key, .label = "Calculator.double", .status = "success", .redacted_detail = component_name }) == null) return error.OutOfMemory;
-    \\            return output;
+    \\    return DoubleProgram.init(value, struct {
+    \\        fn run(input: i64, ctx: *DoubleProgram.Context) std.mem.Allocator.Error!i64 {
+    \\            return ctx.service(Calculator).double(input);
     \\        }
-    \\    }.run);
+    \\    }.run).named("Calculator.double");
     \\}
     \\
     \\pub fn defaultLayer() DefaultLayer {
@@ -758,14 +668,14 @@ pub const library_test =
     \\    const layer = library.defaultLayer();
     \\    var runtime = try zstd.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), layer, .{ .causal_store = context.causalStore() });
     \\    defer runtime.deinit();
-    \\    const actual = try runtime.run(library.double(input.value).named("library.double"));
+    \\    const actual = try runtime.run(library.double(input.value));
     \\    var inspection = try runtime.inspect(std.testing.allocator, .{ .max_recent_events = 64 });
     \\    defer inspection.deinit();
     \\    const assertions = zstd.Testing.AssertionRecorder.init(&context);
     \\    try assertions.equal(.{ .id = "double-value", .label = "public effect doubles valid input" }, @as(i64, 42), actual);
     \\    try assertions.applicationService(.{ .id = "calculator-service", .label = "calculator service is provided by the default layer" }, &inspection, library.Calculator.service_key, true);
     \\    try assertions.applicationOperation(.{ .id = "calculator-operation", .label = "calculator operation is discoverable" }, &inspection, library.Calculator.service_key, "Calculator.double");
-    \\    _ = try assertions.event(.{ .id = "double-causal", .label = "double execution is causally addressable" }, .{ .kind = .activity_completed, .label = "Calculator.double", .status = "success" });
+    \\    _ = try assertions.event(.{ .id = "double-causal", .label = "double execution is causally addressable" }, .{ .kind = .effect_completed, .label = "Calculator.double", .status = "success" });
     \\    try assertions.noFindings(.{ .id = "causal-clean", .label = "library execution has no causal findings" });
     \\    var budgets = try zstd.Testing.Budgets.evaluateAlloc(std.testing.allocator, &.{.{ .id = "double-steps", .kind = .deterministic_steps, .value = 1 }}, &.{.{ .id = "double-budget", .metric_id = "double-steps", .absolute_max = 8 }});
     \\    defer budgets.deinit();
@@ -910,7 +820,7 @@ pub const system_test =
     \\    try system.runWithOptions(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{ .causal_store = context.causalStore() });
     \\    const assertions = zstd.Testing.AssertionRecorder.init(&context);
     \\    try assertions.equal(.{ .id = "shared-contract", .label = "shared contract version" }, @as(u32, 1), system.shared.contract_version);
-    \\    _ = try assertions.event(.{ .id = "component-causal", .label = "a child application executed through its managed runtime" }, .{ .kind = .activity_completed, .label = "Greeting.greet", .status = "success" });
+    \\    _ = try assertions.event(.{ .id = "component-causal", .label = "a child application executed through its managed runtime" }, .{ .kind = .effect_completed, .label = "Greeting.greet", .status = "success" });
     \\    try assertions.noPendingFibers(.{ .id = "fibers-clean", .label = "child applications left no pending fibers" });
     \\    try assertions.noFindings(.{ .id = "causal-clean", .label = "child applications left no causal findings" });
     \\    var world = try zstd.Testing.VirtualWorld.runAlloc(std.testing.allocator, &.{

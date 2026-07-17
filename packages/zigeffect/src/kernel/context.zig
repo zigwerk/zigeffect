@@ -210,6 +210,14 @@ pub fn ContextView(comptime Requirements: anytype) type {
             };
         }
 
+        /// Interpret a child effect with the same dependency set and causal
+        /// lineage. Boundary adapters use this to compose domain programs
+        /// without constructing another runtime or handling graph plumbing.
+        pub fn run(self: *const Self, effect: anytype) @TypeOf(effect).FailureType!@TypeOf(effect).SuccessType {
+            var handle = self.runtime();
+            return handle.run(effect);
+        }
+
         pub fn inspectApplication(
             self: *const Self,
             target_allocator: Allocator,

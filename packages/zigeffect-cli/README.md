@@ -48,19 +48,24 @@ files. Files are written through sibling temporary files and renamed into
 place.
 
 Generated applications and services include typed Config/Schema and CLI
-boundaries, local HTTP and SQL fakes, an effect-native service and layer, causal
-evidence, an embedded durable NenDB causal graph, workbench attachment metadata,
-deterministic tests, the project manifest, and matching Codex/Claude skills.
+boundaries, local HTTP and SQL fakes, an effect-native service and layer,
+deterministic causal acceptance tests, the project manifest, and matching
+Codex/Claude/Gemini skills. The managed runtime supplies the embedded durable NenDB
+causal graph and agent-query data; scaffolds do not generate causal plumbing
+modules or manual recording calls.
 Libraries and packages expose a
 tested effect-native public facade. Systems contain two independently buildable
 services and a shared package.
 
-Template-v14 local application/service projects use canonical service tags,
+Template-v15 local application/service projects use canonical service tags,
 fluent effects and layers, one named root program, and one
 `zstd.ManagedRuntime`. The runtime automatically owns the memory recorder,
 embedded NenDB topology, crash-safe property WAL, application map, and checked
-shutdown. Libraries and generated service/layer modules export effects and
-default layers without hiding their own runtime. Tests replace layers without
+shutdown. Application authors name domain effects; they do not call
+`recordCausal`, create a `CausalStore`, configure graph persistence, or inspect
+the runtime during normal execution. Libraries and generated service/layer
+modules export effects and default layers without hiding their own runtime.
+Tests may inspect a controlled runtime as proof, and replace layers without
 changing the program or its causal shape.
 
 The production profile composes config, lifecycle and process signals, HTTP,
@@ -109,7 +114,7 @@ zigeffect safety baseline --root ./my-system
 ```
 
 `add` atomically updates a validated system manifest and writes an independently
-buildable child. `generate` accepts only the seven declared module kinds and a
+buildable child. `generate` accepts only its declared module kinds and a
 manifest component id. Project execution selects fixed command ids from the
 manifest; there is no arbitrary command or passthrough argv option. Check, test,
 and dev output is bounded and redacted, with receipts persisted under

@@ -60,24 +60,6 @@ const ImplementationService = zstd.fx.kernel.Service(
     Implementation,
 );
 
-fn ServeContext(comptime Runtime: type) type {
-    return struct {
-        runtime: *Runtime,
-        done: std.atomic.Value(bool) = .init(false),
-        result: ?anyerror = null,
-        report: zgrpc.SupervisorReport = .{},
-
-        fn run(self: *@This()) void {
-            self.report = self.runtime.run(zgrpc.serveEffect().named("cloud-run.grpc.serve")) catch |err| {
-                self.result = err;
-                self.done.store(true, .release);
-                return;
-            };
-            self.done.store(true, .release);
-        }
-    };
-}
-
 pub fn main(init: std.process.Init) !void {
     const port = try std.fmt.parseInt(u16, init.environ_map.get("PORT") orelse "8080", 10);
     var allowed_origins: std.ArrayList([]const u8) = .empty;
@@ -91,30 +73,13 @@ pub fn main(init: std.process.Init) !void {
     }
     const cors_credentials = std.mem.eql(u8, init.environ_map.get("CORS_ALLOW_CREDENTIALS") orelse "false", "true");
 
-    const service_names = [_][]const u8{
-        "zigeffect.grpc.v1.ConformanceService",
-        "grpc.health.v1.Health",
-        "grpc.channelz.v1.Channelz",
-        "grpc.reflection.v1.ServerReflection",
-        "grpc.reflection.v1alpha.ServerReflection",
-    };
-    var telemetry = zgrpc.Middleware.Telemetry{};
-    const interceptors = [_]zgrpc.Middleware.Interceptor{telemetry.interceptor()};
-
-    const foundations = zstd.fx.kernel.Layer.mergeAll(.{
+    const business = zstd.fx.kernel.Layer.mergeAll(.{
         zstd.fx.kernel.Layer.succeed(ConformancePolicy, .{}),
         zstd.fx.kernel.Layer.succeed(ImplementationService, .{}),
-        zgrpc.Typed.unaryRegistryLayer(),
-        zgrpc.Typed.streamingRegistryLayer(),
-        zgrpc.Typed.incrementalRegistryLayer(),
-        zgrpc.StandardServices.configLayer(.{
-            .service_names = &service_names,
-            .initial_health = &.{
-                .{ .service = "", .status = .serving },
-                .{ .service = "zigeffect.grpc.v1.ConformanceService", .status = .serving },
-            },
-        }),
-        zgrpc.nativeServerConfigLayer(.{
+    });
+    const live = zgrpc.Application.layer(Service, ImplementationService, business, .{
+        .name = "zigeffect-grpc-cloud-run",
+        .server = .{
             .io = init.io,
             .options = .{
                 .host = "0.0.0.0",
@@ -122,58 +87,21 @@ pub fn main(init: std.process.Init) !void {
                 .max_connections = 80,
                 .max_calls_per_connection = 100_000,
                 .goaway_grace_millis = 250,
-                .interceptors = &interceptors,
                 .cors = .{
                     .allowed_origins = allowed_origins.items,
                     .allow_credentials = cors_credentials,
                 },
             },
-        }),
-        zgrpc.nativeChannelzConfigLayer(.{
-            .server_ref = .{ .id = 1, .name = "zigeffect-grpc-cloud-run" },
-            .listener_ref = .{ .id = 2, .name = "cloud-run-h2c-listener" },
-            .listener_name = "0.0.0.0",
-        }),
+        },
     });
-    const routes = zgrpc.Typed.generatedRoutesLayer(Service, ImplementationService)
-        .provideMerge(foundations);
-    const standards = zgrpc.StandardServices.layer().provideMerge(routes);
-    const server = zgrpc.nativeServerLayer().provideMerge(standards);
-    const grpc_layer = zgrpc.nativeChannelzLayer().provideMerge(server);
-    const main_layer = zstd.fx.kernel.Layer.mergeAll(.{
-        grpc_layer,
-        zstd.Application.Lifecycle.managerLayer(),
-        zstd.Application.Lifecycle.signalLayer(),
-    });
-    const Runtime = zstd.ManagedRuntime(@TypeOf(main_layer));
+    const Runtime = zstd.ManagedRuntime(@TypeOf(live));
     var runtime = try Runtime.make(
         std.heap.smp_allocator,
         init.io,
         std.Io.Dir.cwd(),
-        main_layer,
+        live,
         .{},
     );
     defer runtime.deinit();
-
-    try runtime.run(zstd.Application.Lifecycle.start().named("cloud-run.lifecycle.start"));
-    try runtime.run(zstd.Application.Lifecycle.ready().named("cloud-run.lifecycle.ready"));
-    const Serving = ServeContext(Runtime);
-    var serving = Serving{ .runtime = &runtime };
-    const thread = try std.Thread.spawn(.{}, Serving.run, .{&serving});
-
-    while (zstd.Application.Lifecycle.requestedSignal() == .none and !serving.done.load(.acquire)) {
-        init.io.sleep(.fromMilliseconds(25), .awake) catch break;
-    }
-    try runtime.run(zstd.Application.Lifecycle.drain().named("cloud-run.lifecycle.drain"));
-    const shutdown = try runtime.run(zgrpc.shutdownServerEffect(.{
-        .deadline_ms = 25_000,
-    }).named("cloud-run.grpc.shutdown"));
-    thread.join();
-    if (serving.result) |err| return err;
-    if (shutdown.active_remaining != 0) return error.ShutdownIncomplete;
-    try runtime.run(zstd.Application.Lifecycle.stop().named("cloud-run.lifecycle.stop"));
-    var application = try runtime.inspect(std.heap.smp_allocator, .{ .max_recent_events = 128 });
-    defer application.deinit();
-    if (application.services.len < 12 or application.causal.findings.len != 0) return error.InvalidApplicationSnapshot;
-    try runtime.shutdown();
+    _ = try zgrpc.Application.run(&runtime, init.io, .{});
 }

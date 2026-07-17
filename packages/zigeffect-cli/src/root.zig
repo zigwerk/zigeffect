@@ -2482,16 +2482,15 @@ fn generatedModuleAlloc(allocator: std.mem.Allocator, options: GenerateOptions) 
             \\
             \\pub const Service = kernel.Service("generated/{s}", ServiceApi);
             \\const ExecuteBase = kernel.Effect([]const u8, std.mem.Allocator.Error, .{{Service}});
-            \\pub const Execute = ExecuteBase.Stateful([]const u8);
+            \\const ExecuteProgram = ExecuteBase.Stateful([]const u8);
+            \\pub const Execute = kernel.NamedEffect(ExecuteProgram);
             \\
             \\pub fn execute(input: []const u8) Execute {{
-            \\    return Execute.init(input, struct {{
-            \\        fn run(value: []const u8, ctx: *Execute.Context) std.mem.Allocator.Error![]const u8 {{
-            \\            const output = ctx.service(Service).execute(value);
-            \\            if (ctx.recordCausal(.{{ .kind = .activity_completed, .service_key = Service.service_key, .label = "Service.execute", .status = "success" }}) == null) return error.OutOfMemory;
-            \\            return output;
+            \\    return ExecuteProgram.init(input, struct {{
+            \\        fn run(value: []const u8, ctx: *ExecuteProgram.Context) std.mem.Allocator.Error![]const u8 {{
+            \\            return ctx.service(Service).execute(value);
             \\        }}
-            \\    }}.run);
+            \\    }}.run).named("Service.execute");
             \\}}
         , .{ options.name, options.name }),
         .layer =>
@@ -2673,7 +2672,6 @@ fn addExecutableProject(
     });
     if (real_profile) {
         try addRenderedAt(plan, prefix, "src/production_wiring.zig", templates.production_wiring_source, &.{});
-        try addRenderedAt(plan, prefix, "src/causal_graph.zig", templates.causal_graph_source, &.{});
         try addRenderedAt(plan, prefix, "config.example.json", "{\n  \"port\": 8080,\n  \"otlp_host\": \"otel-collector\",\n  \"otlp_port\": 4318,\n  \"migration_dialect\": \"postgresql\"\n}\n", &.{});
         try addRenderedAt(plan, prefix, "test/root_test.zig", templates.production_test, &.{});
     } else {
@@ -2681,8 +2679,6 @@ fn addExecutableProject(
         try addRenderedAt(plan, prefix, "src/cli.zig", templates.cli_source, &.{.{ "__PROJECT_NAME__", component_name }});
         try addRenderedAt(plan, prefix, "src/http.zig", templates.http_source, &.{});
         try addRenderedAt(plan, prefix, "src/sql.zig", templates.sql_source, &.{});
-        try addRenderedAt(plan, prefix, "src/causal.zig", templates.causal_source, &.{});
-        try addRenderedAt(plan, prefix, "src/causal_graph.zig", templates.causal_graph_source, &.{});
         try addRenderedAt(plan, prefix, "src/services/greeting.zig", templates.greeting_source, &.{});
         try addRenderedAt(plan, prefix, "test/root_test.zig", templates.executable_test, &.{.{ "__PROJECT_NAME__", component_name }});
     }
@@ -3784,6 +3780,9 @@ test "service and layer generators emit canonical composable modules" {
     defer std.testing.allocator.free(service);
     try std.testing.expect(std.mem.indexOf(u8, service, "kernel.Service(\"generated/orders\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, service, "kernel.Effect") != null);
+    try std.testing.expect(std.mem.indexOf(u8, service, "kernel.NamedEffect") != null);
+    try std.testing.expect(std.mem.indexOf(u8, service, ".named(\"Service.execute\")") != null);
+    try std.testing.expect(std.mem.indexOf(u8, service, "recordCausal") == null);
     try std.testing.expect(std.mem.indexOf(u8, service, "EffectEnv") == null);
     try std.testing.expect(std.mem.indexOf(u8, service, "zstd.fx.Context") == null);
 
@@ -4133,32 +4132,54 @@ test "application and service plans wire every production boundary" {
             "src/http.zig",
             "src/sql.zig",
             "src/services/greeting.zig",
-            "src/causal.zig",
-            "src/causal_graph.zig",
         }) |path| try std.testing.expect(plan.find(path) != null);
+        try std.testing.expect(plan.find("src/causal.zig") == null);
+        try std.testing.expect(plan.find("src/causal_graph.zig") == null);
 
         const app = plan.find("src/app.zig").?.content;
-        for ([_][]const u8{
-            "zstd.Application.configLoad",
-            "zstd.Application.schemaDecode",
-            "zstd.Application.commandExecution",
-            "zstd.Application.requestHandling",
-            "zstd.Application.sqlTransaction",
-            "zstd.Application.externalCall",
-            "zstd.Application.artifactProduction",
-            "zstd.Application.componentDependency",
-            "zstd.Application.acceptanceEvaluation",
-        }) |semantic_helper| try std.testing.expect(std.mem.indexOf(u8, app, semantic_helper) != null);
         try std.testing.expect(std.mem.indexOf(u8, app, "zstd.ManagedRuntime") != null);
-        try std.testing.expect(std.mem.indexOf(u8, app, "runtime_options.graph = causal_graph_options") != null);
-        try std.testing.expect(std.mem.indexOf(u8, app, "runtime.agentMapJsonAlloc") != null);
         try std.testing.expect(std.mem.indexOf(u8, app, "runtime.shutdown()") != null);
-        try std.testing.expect(std.mem.indexOf(u8, app, "attachBackend") == null);
+        for ([_][]const u8{
+            "recordCausal",
+            "zstd.Application.record",
+            "causal_graph_options",
+            "Observability.Recorder",
+            "runtime.inspect",
+            "runtime.agentMapJsonAlloc",
+            "runtime_options.graph",
+            "attachBackend",
+        }) |boilerplate| try std.testing.expect(std.mem.indexOf(u8, app, boilerplate) == null);
 
         var manifest = try zstd.Project.parseManifest(std.testing.allocator, plan.find("zigeffect.project.json").?.content);
         defer manifest.deinit();
         try std.testing.expect(std.mem.eql(u8, manifest.value.artifacts.graph, zstd.CausalGraph.default_path));
         try std.testing.expect(std.mem.indexOfScalar(zstd.Project.Capability, manifest.value.components[0].capabilities, .causal_graph) != null);
+    }
+}
+
+test "every scaffold keeps causal infrastructure out of production source" {
+    for ([_]zstd.Project.ProjectKind{ .application, .service, .library, .package, .system }) |kind| {
+        var plan = try generatePlan(std.testing.allocator, .{
+            .kind = kind,
+            .name = "automatic-causal",
+            .target = "automatic-causal",
+            .zigeffect_std_path = "../../zigeffect-std",
+        });
+        defer plan.deinit();
+
+        for (plan.files.items) |file| {
+            const source = std.mem.startsWith(u8, file.path, "src/") or std.mem.indexOf(u8, file.path, "/src/") != null;
+            if (!source or !std.mem.endsWith(u8, file.path, ".zig")) continue;
+            for ([_][]const u8{
+                "recordCausal",
+                "CausalStore.init",
+                ".causal_store =",
+                "causal_graph_options",
+                "attachBackend",
+            }) |boilerplate| {
+                try std.testing.expect(std.mem.indexOf(u8, file.content, boilerplate) == null);
+            }
+        }
     }
 }
 
@@ -4187,10 +4208,12 @@ test "local application scaffolds teach only the canonical service layer and man
         "pub fn runWithOptions(",
         ".flatMap(",
         ".named(\"application.bootstrap\")",
-        "runtime.inspect",
+        "runtime.shutdown()",
     }) |contract| try std.testing.expect(std.mem.indexOf(u8, app, contract) != null);
     try std.testing.expect(std.mem.indexOf(u8, greeting, "kernel.Service") != null);
     try std.testing.expect(std.mem.indexOf(u8, greeting, "kernel.Effect") != null);
+    try std.testing.expect(std.mem.indexOf(u8, greeting, "kernel.NamedEffect") != null);
+    try std.testing.expect(std.mem.indexOf(u8, greeting, "recordCausal") == null);
     try std.testing.expect(std.mem.indexOf(u8, skill, "zstd.ManagedRuntime") != null);
     try std.testing.expectEqualStrings(skill, claude_skill);
     try std.testing.expectEqualStrings(skill, gemini_skill);
@@ -4212,6 +4235,7 @@ test "local application scaffolds teach only the canonical service layer and man
     try std.testing.expect(std.mem.indexOf(u8, acceptance_test, "context.causalStore()") != null);
     try std.testing.expect(std.mem.indexOf(u8, acceptance_test, "app.rootLayer()") != null);
     try std.testing.expect(std.mem.indexOf(u8, acceptance_test, "assertions.event(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, acceptance_test, ".kind = .effect_completed") != null);
     try std.testing.expect(std.mem.indexOf(u8, acceptance_test, "tmpDir") == null);
 
     for ([_][]const u8{
@@ -4300,7 +4324,6 @@ test "production scaffolds compose adapters as layers outside the root effect" {
         "http.ApplicationMapSlot",
         "http.RuntimeApplicationMapHandler",
         "zstd.Security.secureEql",
-        "runtime.agentMapJsonAlloc",
         "zstd.Application.Lifecycle.signalLayer()",
     }) |contract| try std.testing.expect(std.mem.indexOf(u8, wiring, contract) != null);
 
@@ -4310,6 +4333,9 @@ test "production scaffolds compose adapters as layers outside the root effect" {
     try std.testing.expect(std.mem.indexOf(u8, plan.find("src/main.zig").?.content, "init.minimal.environ") != null);
     try std.testing.expect(std.mem.indexOf(u8, wiring, "allocator.create(") == null);
     try std.testing.expect(std.mem.indexOf(u8, wiring, "HandlerBundle") == null);
+    try std.testing.expect(std.mem.indexOf(u8, wiring, "runtime.inspect") == null);
+    try std.testing.expect(std.mem.indexOf(u8, wiring, "runtime.agentMapJsonAlloc") == null);
+    try std.testing.expect(plan.find("src/causal_graph.zig") == null);
 
     const effect_start = std.mem.indexOf(u8, wiring, "pub fn program") orelse return error.MissingProductionEffect;
     const root_start = std.mem.indexOfPos(u8, wiring, effect_start, "pub fn run(") orelse return error.MissingCompositionRoot;
@@ -4336,10 +4362,8 @@ test "system plan contains independently buildable services and shared package" 
     for ([_][]const u8{
         "services/api/build.zig",
         "services/api/src/main.zig",
-        "services/api/src/causal_graph.zig",
         "services/worker/build.zig",
         "services/worker/src/main.zig",
-        "services/worker/src/causal_graph.zig",
         "packages/shared/build.zig",
         "packages/shared/src/root.zig",
     }) |path| try std.testing.expect(plan.find(path) != null);
