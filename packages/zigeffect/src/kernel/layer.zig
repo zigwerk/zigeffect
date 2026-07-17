@@ -270,7 +270,12 @@ pub fn ScopedLayer(
                 context.failed(self.id, Tag.service_key, failure);
                 return failure;
             };
-            context.runtime.scope.addFinalizerFor(Tag.API, pointer, release) catch |failure| {
+            context.runtime.scope.addFinalizerForWithContext(
+                Tag.API,
+                pointer,
+                release,
+                context.runtime.causal_context,
+            ) catch |failure| {
                 release(pointer);
                 context.failed(self.id, Tag.service_key, failure);
                 return failure;

@@ -248,7 +248,7 @@ pub fn Pool(
                         allocator.destroy(pool);
                         return failure;
                     };
-                    ctx.scope().addFinalizerFor(Self, pool, Self.destroyPool) catch |failure| {
+                    ctx.addFinalizerFor(Self, pool, Self.destroyPool) catch |failure| {
                         Self.destroyPool(pool);
                         return failure;
                     };
@@ -406,7 +406,7 @@ pub fn Pool(
                 .entry = selected,
                 .clock = ctx.clock(),
             };
-            ctx.scope().addFinalizerFor(Borrow, borrow, returnBorrow) catch |failure| {
+            ctx.addFinalizerFor(Borrow, borrow, returnBorrow) catch |failure| {
                 self.undoBorrow(selected, ctx.clock());
                 self.allocator.destroy(borrow);
                 _ = StdService.completeOperation(ctx, operation, "failure", @errorName(failure));

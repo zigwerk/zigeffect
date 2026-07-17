@@ -288,6 +288,30 @@ boundary escapes its borrow scope. Pool exhaustion is an explicit typed
 failure in the synchronous interpreter. It never blocks an operating-system
 thread.
 
+## Track a domain identity through the runtime
+
+Declare a typed key, then scope the business effect that owns the value:
+
+```zig
+const ProductId = zstd.Lineage.Key([]const u8, .{
+    .name = "commerce.product.id",
+    .privacy = .internal,
+    .propagation = .distributed,
+    .export_policy = .otel,
+});
+
+const order = try runtime.run(
+    Orders.create(command).track(ProductId, command.product_id),
+);
+```
+
+The marker is inherited by nested effects, services, resources and child
+fibers. The managed runtime stores only an opaque project-scoped reference in
+the causal graph. Standard gRPC calls propagate distributed references and
+generated handlers restore them automatically; only keys with `.otel` export
+policy become OTEL attributes. See the
+[typed lineage guide](../../zigeffect/docs/typed-data-lineage.md).
+
 Both service types advertise their operation catalogs in the application map.
 Acquisition scopes and borrow finalizers are recorded structurally by the
 runtime, while refresh/get/invalidate operations emit redacted semantic facts.

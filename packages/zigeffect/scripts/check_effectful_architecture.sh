@@ -20,8 +20,10 @@ fi
 
 application_paths=()
 while IFS= read -r target; do application_paths+=("$target"); done < <(jq -r '.application_paths[]' "$POLICY")
+application_globs=(-g '*.zig')
+while IFS= read -r pattern; do application_globs+=(-g "$pattern"); done < <(jq -r '.application_excluded_globs[]? // empty' "$POLICY")
 
-if violations="$(rg -n "$application_forbidden" "${application_paths[@]}" -g '*.zig' || true)" && [[ -n "$violations" ]]; then
+if violations="$(rg -n "$application_forbidden" "${application_paths[@]}" "${application_globs[@]}" || true)" && [[ -n "$violations" ]]; then
   printf 'Application source manually owns a low-level runtime or causal backend:\n%s\n' "$violations" >&2
   exit 1
 fi

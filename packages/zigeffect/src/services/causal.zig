@@ -1,9 +1,12 @@
 const std = @import("std");
 const causal_backend = @import("causal_backend.zig");
+const lineage_mod = @import("lineage.zig");
 const sync = @import("../runtime/sync.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const CausalBackend = causal_backend.CausalBackend;
+pub const LineageRef = lineage_mod.Ref;
+pub const LineageSet = lineage_mod.Set;
 pub const causal_json_schema = "zigeffect.causal.v1";
 pub const causal_json_schema_version: u32 = 1;
 pub const causal_event_taxonomy_version: u32 = 1;
@@ -126,6 +129,7 @@ pub const CausalEventKind = enum {
     assertion_recorded,
     workflow_event_recorded,
     statechart_event_recorded,
+    lineage_bound,
     race_started,
     race_winner_selected,
     race_loser_interrupted,
@@ -200,6 +204,7 @@ pub fn causalEventTaxonomy(kind: CausalEventKind) CausalEventTaxonomy {
         .assertion_recorded,
         .workflow_event_recorded,
         .statechart_event_recorded,
+        .lineage_bound,
         .race_started,
         .race_winner_selected,
         .race_loser_interrupted,
@@ -266,7 +271,7 @@ pub fn isCausalSampleableEvent(kind: CausalEventKind) bool {
     return causalEventTaxonomy(kind).sampleable;
 }
 
-pub const causal_context_schema_version: u8 = 2;
+pub const causal_context_schema_version: u8 = 3;
 pub const max_causal_links: usize = 4;
 
 pub const TraceParent = struct {
@@ -330,6 +335,9 @@ pub const CausalContextV2 = struct {
     trace_id_high: ?u64 = null,
     trace_id_low: ?u64 = null,
     span_id: ?u64 = null,
+    /// Bounded non-raw domain references attached once and inherited by
+    /// effect, fiber, service, transport and telemetry projections.
+    lineage: LineageSet = .{},
 
     pub fn merge(parent: CausalContextV2, child: CausalContextV2) CausalContextV2 {
         return .{
@@ -350,6 +358,7 @@ pub const CausalContextV2 = struct {
             .trace_id_high = child.trace_id_high orelse parent.trace_id_high,
             .trace_id_low = child.trace_id_low orelse parent.trace_id_low,
             .span_id = child.span_id orelse parent.span_id,
+            .lineage = LineageSet.merge(parent.lineage, child.lineage),
         };
     }
 
@@ -360,7 +369,7 @@ pub const CausalContextV2 = struct {
             self.agent_id == null and self.agent_attempt == null and
             self.development_task_id == null and self.work_packet_id == null and
             self.change_set_id == null and self.source_revision_id == null and self.trace_id_high == null and
-            self.trace_id_low == null and self.span_id == null;
+            self.trace_id_low == null and self.span_id == null and self.lineage.isEmpty();
     }
 };
 
@@ -1404,6 +1413,21 @@ pub const CausalStore = struct {
         }
 
         return .{ .allocator = allocator, .events = try output.toOwnedSlice(allocator) };
+    }
+
+    /// Return every retained event that observed one typed value reference.
+    /// The ordinary parent/cause fields remain intact, so callers can inspect
+    /// the exact effect and fiber path rather than a detached attribute list.
+    pub fn trackedLineage(
+        self: *const CausalStore,
+        allocator: Allocator,
+        reference: LineageRef,
+    ) Allocator.Error!CausalSnapshot {
+        return self.filterEvents(allocator, struct {
+            fn matches(event: CausalEvent, expected: LineageRef) bool {
+                return event.context.lineage.contains(expected);
+            }
+        }.matches, reference);
     }
 
     pub fn cause(self: *const CausalStore, allocator: Allocator, event_id: u64) Allocator.Error!CausalLineage {

@@ -98,7 +98,7 @@ pub const CausalFacts = struct {
         service: []const u8,
         method: []const u8,
     ) void {
-        self.emitCorrelated(boundary, status, service, method, null, null);
+        self.emitCorrelated(boundary, status, service, method, null, null, .{}, false);
     }
 
     pub fn emitCall(
@@ -108,6 +108,13 @@ pub const CausalFacts = struct {
         context: *const CallContext,
     ) void {
         const trace_parent = zstd.fx.parseTraceParent(context.traceparent) catch null;
+        var causal_context = if (trace_parent) |trace| trace.context() else zstd.fx.CausalContextV2{};
+        var lineage_baggage_invalid = false;
+        const lineage = zstd.Lineage.Set.parseBaggage(context.baggage) catch invalid: {
+            lineage_baggage_invalid = true;
+            break :invalid zstd.Lineage.Set.empty;
+        };
+        causal_context.lineage = lineage;
         self.emitCorrelated(
             boundary,
             status,
@@ -115,6 +122,8 @@ pub const CausalFacts = struct {
             context.method,
             if (context.request_id.len == 0) null else std.hash.Wyhash.hash(0, context.request_id),
             trace_parent,
+            causal_context,
+            lineage_baggage_invalid,
         );
     }
 
@@ -126,14 +135,20 @@ pub const CausalFacts = struct {
         method: []const u8,
         boundary_id: ?u64,
         trace_parent: ?zstd.fx.TraceParent,
+        causal_context: zstd.fx.CausalContextV2,
+        lineage_baggage_invalid: bool,
     ) void {
         const safe_service = boundedRpcAttribute(service);
         const safe_method = boundedRpcAttribute(method);
         var detail_buffer: [600]u8 = undefined;
         const detail = std.fmt.bufPrint(
             &detail_buffer,
-            "service={s} method={s}",
-            .{ safe_service, safe_method },
+            "service={s} method={s}{s}",
+            .{
+                safe_service,
+                safe_method,
+                if (lineage_baggage_invalid) " lineage=invalid_omitted" else "",
+            },
         ) catch "service=other method=other";
         _ = self.recorder.record(.{
             .kind = .external_signal_received,
@@ -141,7 +156,7 @@ pub const CausalFacts = struct {
             .boundary_id = boundary_id,
             .trace_id = if (trace_parent) |trace| trace.trace_id_low else null,
             .span_id = if (trace_parent) |trace| trace.parent_id else null,
-            .context = if (trace_parent) |trace| trace.context() else .{},
+            .context = causal_context,
             .label = @tagName(boundary),
             .type_name = "GrpcBoundaryFact",
             .status = status,
@@ -932,6 +947,14 @@ test "causal RPC facts correlate request and W3C trace context without retaining
     var store = zstd.fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
     var facts = CausalFacts{ .recorder = .fromStore(&store), .service_key = "orders-api" };
+    const ProductId = zstd.Lineage.Key([]const u8, .{
+        .name = "commerce.product.id",
+        .privacy = .internal,
+        .propagation = .distributed,
+    });
+    const product = try ProductId.reference(77, "product-42");
+    var baggage_buffer: [zstd.Lineage.max_baggage_bytes]u8 = undefined;
+    const baggage = try zstd.Lineage.Set.empty.with(product).formatBaggage(&baggage_buffer);
     const context = CallContext{
         .protocol = .connect,
         .authority = "api.example.test",
@@ -940,6 +963,7 @@ test "causal RPC facts correlate request and W3C trace context without retaining
         .shape = .unary,
         .request_id = "request-42",
         .traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        .baggage = baggage,
     };
     facts.emitCall(.handler, "started", &context);
     var snapshot = try store.snapshot(std.testing.allocator);
@@ -950,8 +974,30 @@ test "causal RPC facts correlate request and W3C trace context without retaining
     try std.testing.expectEqual(@as(u64, 0x00f067aa0ba902b7), snapshot.events[0].span_id.?);
     try std.testing.expectEqual(@as(?u64, 0x4bf92f3577b34da6), snapshot.events[0].context.trace_id_high);
     try std.testing.expectEqual(@as(?u64, 0xa3ce929d0e0e4736), snapshot.events[0].context.trace_id_low);
+    try std.testing.expect(snapshot.events[0].context.lineage.contains(product));
     try std.testing.expect(std.mem.indexOf(u8, snapshot.events[0].redacted_detail, context.request_id) == null);
     try std.testing.expect(std.mem.indexOf(u8, snapshot.events[0].redacted_detail, context.traceparent) == null);
+}
+
+test "causal RPC facts fail closed and report malformed reserved lineage baggage" {
+    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+    var facts = CausalFacts{ .recorder = .fromStore(&store), .service_key = "orders-api" };
+    const context = CallContext{
+        .protocol = .grpc,
+        .authority = "api.example.test",
+        .service = "orders.v1.Orders",
+        .method = "Create",
+        .shape = .unary,
+        .baggage = "zigeffect-lineage=raw-product-id",
+    };
+    facts.emitCall(.handler, "started", &context);
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 1), snapshot.events.len);
+    try std.testing.expect(snapshot.events[0].context.lineage.isEmpty());
+    try std.testing.expect(std.mem.indexOf(u8, snapshot.events[0].redacted_detail, "lineage=invalid_omitted") != null);
+    try std.testing.expect(std.mem.indexOf(u8, snapshot.events[0].redacted_detail, "raw-product-id") == null);
 }
 
 test "gRPC boundary facts persist through the canonical application runtime" {

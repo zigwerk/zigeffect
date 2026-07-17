@@ -187,7 +187,7 @@ pub fn Manual(
                         allocator.destroy(resource);
                         return failure;
                     };
-                    ctx.scope().addFinalizerFor(Self, resource, Self.destroy) catch |failure| {
+                    ctx.addFinalizerFor(Self, resource, Self.destroy) catch |failure| {
                         Self.destroy(resource);
                         return failure;
                     };

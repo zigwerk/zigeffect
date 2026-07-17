@@ -14,6 +14,8 @@ pub const records_since_schema = "zigeffect.causal.local-graph-records-since.v1"
 pub const records_since_schema_version: u32 = 1;
 pub const path_schema = "zigeffect.causal.local-graph-path.v1";
 pub const path_schema_version: u32 = 1;
+pub const lineage_schema = "zigeffect.causal.local-graph-lineage.v1";
+pub const lineage_schema_version: u32 = 1;
 pub const default_path = ".zigeffect/graph";
 pub const default_wal_name = "causal-graph.jsonl";
 pub const default_max_records: usize = 65_536;
@@ -450,6 +452,86 @@ pub const LocalDatabase = struct {
         return output.toOwnedSlice(allocator);
     }
 
+    /// Scan one bounded durable page and return only records carrying the
+    /// requested opaque typed value. `after_durable_event_id` advances over
+    /// scanned records, not only matches, so sparse queries always make
+    /// progress and expose incomplete pagination explicitly.
+    pub fn lineageRecordsJsonAlloc(
+        self: *LocalDatabase,
+        allocator: std.mem.Allocator,
+        reference: fx.Lineage.Ref,
+        after_durable_event_id: u64,
+        limit: usize,
+        scan_limit: usize,
+    ) ![]u8 {
+        if (!reference.valid() or limit == 0 or limit > 4096 or scan_limit == 0 or scan_limit > max_records) {
+            return error.InvalidGraphOptions;
+        }
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const range = try recordsAfterRange(self.entries.items, after_durable_event_id, scan_limit);
+        var matches: std.ArrayList(IndexEntry) = .empty;
+        defer matches.deinit(allocator);
+        var scanned: usize = 0;
+        var last_scanned: ?u64 = null;
+        var stopped_early = false;
+        for (self.entries.items[range.start..range.end], 0..) |entry, relative_index| {
+            const row = try allocator.alloc(u8, entry.length);
+            defer allocator.free(row);
+            const read = try self.wal_file.readPositionalAll(self.io, row, entry.offset);
+            if (read != entry.length) return error.CorruptGraph;
+            scanned += 1;
+            last_scanned = entry.durable_event_id;
+            if (try persistedRowContainsLineage(allocator, row, reference)) {
+                try matches.append(allocator, entry);
+                if (matches.items.len == limit) {
+                    stopped_early = relative_index + 1 < range.end - range.start;
+                    break;
+                }
+            }
+        }
+
+        const truncated = stopped_early or range.truncated;
+        const next_json = if (truncated and last_scanned != null)
+            try std.fmt.allocPrint(allocator, "{d}", .{last_scanned.?})
+        else
+            try allocator.dupe(u8, "null");
+        defer allocator.free(next_json);
+
+        var output: std.ArrayList(u8) = .empty;
+        errdefer output.deinit(allocator);
+        const header = try std.fmt.allocPrint(
+            allocator,
+            "{{\"schema\":\"{s}\",\"schema_version\":{d},\"after_event_id\":{d},\"next_after_event_id\":{s},\"scanned\":{d},\"matched\":{d},\"truncated\":{s},\"reference\":",
+            .{
+                lineage_schema,
+                lineage_schema_version,
+                after_durable_event_id,
+                next_json,
+                scanned,
+                matches.items.len,
+                if (truncated) "true" else "false",
+            },
+        );
+        defer allocator.free(header);
+        try output.appendSlice(allocator, header);
+        const reference_json = try std.json.Stringify.valueAlloc(allocator, reference, .{});
+        defer allocator.free(reference_json);
+        try output.appendSlice(allocator, reference_json);
+        try output.appendSlice(allocator, ",\"records\":[");
+        for (matches.items, 0..) |entry, index| {
+            if (index != 0) try output.append(allocator, ',');
+            const row = try allocator.alloc(u8, entry.length);
+            defer allocator.free(row);
+            const read = try self.wal_file.readPositionalAll(self.io, row, entry.offset);
+            if (read != entry.length) return error.CorruptGraph;
+            try output.appendSlice(allocator, row);
+        }
+        try output.appendSlice(allocator, "]}");
+        return output.toOwnedSlice(allocator);
+    }
+
     pub fn summary(self: *LocalDatabase) Summary {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -625,6 +707,36 @@ pub const LocalDatabase = struct {
         if (persisted_edge != null) self.edge_count += 1;
     }
 };
+
+const LineagePropertiesProjection = struct {
+    context: struct {
+        lineage: struct {
+            refs: []fx.Lineage.Ref = &.{},
+            truncated: bool = false,
+        } = .{},
+    } = .{},
+};
+
+fn persistedRowContainsLineage(
+    allocator: std.mem.Allocator,
+    row: []const u8,
+    reference: fx.Lineage.Ref,
+) !bool {
+    var persisted = std.json.parseFromSlice(PersistedRecord, allocator, row, .{ .allocate = .alloc_always }) catch
+        return error.CorruptGraph;
+    defer persisted.deinit();
+    var properties = std.json.parseFromSlice(
+        LineagePropertiesProjection,
+        allocator,
+        persisted.value.node.properties,
+        .{ .allocate = .alloc_always, .ignore_unknown_fields = true },
+    ) catch return error.CorruptGraph;
+    defer properties.deinit();
+    for (properties.value.context.lineage.refs) |candidate| {
+        if (candidate.sameIdentity(reference)) return true;
+    }
+    return false;
+}
 
 pub const Snapshot = struct {
     allocator: std.mem.Allocator,
@@ -1295,4 +1407,51 @@ test "causal graph validates projected node and edge metadata" {
         },
     };
     try std.testing.expectError(error.InvalidGraphRecord, invalid_edge.validate());
+}
+
+test "durable causal graph returns bounded paginated typed lineage records" {
+    const ProductId = fx.Lineage.Key([]const u8, .{
+        .name = "commerce.product.id",
+        .privacy = .internal,
+        .propagation = .distributed,
+        .export_policy = .otel,
+    });
+    const product = try ProductId.reference(77, "product-42");
+    const lineage = fx.Lineage.Set.empty.with(product);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{});
+    defer database.deinit();
+
+    const events = [_]fx.CausalEvent{
+        .{ .id = 1, .kind = .run_started, .label = "matching-start", .context = .{ .lineage = lineage } },
+        .{ .id = 2, .kind = .activity_completed, .parent_id = 1, .label = "unrelated" },
+        .{ .id = 3, .kind = .run_completed, .parent_id = 2, .label = "matching-end", .context = .{ .lineage = lineage } },
+    };
+    for (events) |event| {
+        var write = try fx.mapCausalEventToNendbWrite(std.testing.allocator, event);
+        defer fx.deinitCausalNendbWrite(std.testing.allocator, &write);
+        try database.appendWrite(write);
+    }
+
+    const json = try database.lineageRecordsJsonAlloc(std.testing.allocator, product, 0, 8, 8);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "zigeffect.causal.local-graph-lineage.v1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "matching-start") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "matching-end") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "unrelated") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "product-42") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"scanned\":3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"matched\":2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"truncated\":false") != null);
+
+    const first_page = try database.lineageRecordsJsonAlloc(std.testing.allocator, product, 0, 1, 8);
+    defer std.testing.allocator.free(first_page);
+    try std.testing.expect(std.mem.indexOf(u8, first_page, "\"next_after_event_id\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, first_page, "\"truncated\":true") != null);
+    const second_page = try database.lineageRecordsJsonAlloc(std.testing.allocator, product, 1, 8, 8);
+    defer std.testing.allocator.free(second_page);
+    try std.testing.expect(std.mem.indexOf(u8, second_page, "matching-end") != null);
+    try std.testing.expect(std.mem.indexOf(u8, second_page, "matching-start") == null);
 }

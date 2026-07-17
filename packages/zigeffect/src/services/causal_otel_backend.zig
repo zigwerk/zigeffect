@@ -177,6 +177,20 @@ fn appendOptionalU64Attribute(
     }
 }
 
+fn appendBoolAttribute(
+    allocator: Allocator,
+    attributes: *std.ArrayList(CausalOtelAttribute),
+    key: []const u8,
+    value: bool,
+) Allocator.Error!void {
+    const owned_key = try cloneString(allocator, key);
+    errdefer if (owned_key.len > 0) allocator.free(owned_key);
+    try attributes.append(allocator, .{
+        .key = owned_key,
+        .value = .{ .bool = value },
+    });
+}
+
 fn appendOptionalStringAttribute(
     allocator: Allocator,
     attributes: *std.ArrayList(CausalOtelAttribute),
@@ -243,6 +257,28 @@ pub fn mapCausalEventToOtelRecord(allocator: Allocator, event: causal.CausalEven
     try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.work_packet_id", event.context.work_packet_id);
     try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.change_set_id", event.context.change_set_id);
     try appendOptionalU64Attribute(allocator, &attributes, "zigeffect.causal.source_revision_id", event.context.source_revision_id);
+    const telemetry_lineage_count = event.context.lineage.telemetryCount();
+    if (telemetry_lineage_count != 0) {
+        try appendU64Attribute(allocator, &attributes, "zigeffect.lineage.count", telemetry_lineage_count);
+        try appendU64Attribute(allocator, &attributes, "zigeffect.lineage.exported_count", telemetry_lineage_count);
+        try appendBoolAttribute(allocator, &attributes, "zigeffect.lineage.truncated", event.context.lineage.truncated);
+        var exported_index: usize = 0;
+        for (event.context.lineage.active()) |reference| {
+            if (reference.export_policy != .otel) continue;
+            var key_buffer: [64]u8 = undefined;
+            const key_id_key = std.fmt.bufPrint(&key_buffer, "zigeffect.lineage.{d}.key_id", .{exported_index}) catch unreachable;
+            try appendU64Attribute(allocator, &attributes, key_id_key, reference.key_id);
+            const high_key = std.fmt.bufPrint(&key_buffer, "zigeffect.lineage.{d}.value_id_high", .{exported_index}) catch unreachable;
+            try appendU64Attribute(allocator, &attributes, high_key, reference.value_id_high);
+            const low_key = std.fmt.bufPrint(&key_buffer, "zigeffect.lineage.{d}.value_id_low", .{exported_index}) catch unreachable;
+            try appendU64Attribute(allocator, &attributes, low_key, reference.value_id_low);
+            const privacy_key = std.fmt.bufPrint(&key_buffer, "zigeffect.lineage.{d}.privacy", .{exported_index}) catch unreachable;
+            try appendStringAttribute(allocator, &attributes, privacy_key, @tagName(reference.privacy));
+            const propagation_key = std.fmt.bufPrint(&key_buffer, "zigeffect.lineage.{d}.propagation", .{exported_index}) catch unreachable;
+            try appendStringAttribute(allocator, &attributes, propagation_key, @tagName(reference.propagation));
+            exported_index += 1;
+        }
+    }
     try appendU64Attribute(allocator, &attributes, "zigeffect.causal.link_count", event.activeLinks().len);
     for (event.activeLinks(), 0..) |link, index| {
         const kind_key = try std.fmt.allocPrint(allocator, "zigeffect.causal.link.{d}.kind", .{index});

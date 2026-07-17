@@ -29,6 +29,9 @@ test "root facade keeps stable public namespaces" {
     try std.testing.expectEqualStrings("statechart", fx.statechart.domain);
     try std.testing.expectEqualStrings("cluster", fx.cluster.domain);
     try std.testing.expectEqualStrings("performance", fx.performance.domain);
+    try std.testing.expect(@hasDecl(fx, "Lineage"));
+    try std.testing.expect(@hasDecl(fx.Lineage, "Key"));
+    try std.testing.expect(@hasDecl(fx.Lineage, "Set"));
 }
 
 test "statechart namespace keeps typed definition exports" {

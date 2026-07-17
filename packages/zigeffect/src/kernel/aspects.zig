@@ -199,6 +199,7 @@ fn causalAspect(store: *causal_mod.CausalStore) RuntimeAspect {
                     .type_name = event.type_name,
                     .status = event.status,
                     .redacted_detail = event.redacted_detail,
+                    .context = event.context,
                 }) catch null;
             }
         }.onEvent,

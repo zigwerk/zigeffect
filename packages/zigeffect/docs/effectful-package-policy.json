@@ -41,6 +41,12 @@
     "packages/zgraphy/src/main.zig",
     "packages/zigeffect-reference-system/services"
   ],
+  "application_excluded_globs": [
+    "!scaffold.zig"
+  ],
+  "application_exclusion_rationale": {
+    "!scaffold.zig": "scaffold source contains negative policy text; rendered application sources have dedicated architecture tests"
+  },
   "generated_application_template": {
     "path": "packages/zigeffect-cli/src/templates.zig",
     "start": "pub const production_wiring_source =",

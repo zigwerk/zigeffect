@@ -4,8 +4,8 @@ const CausalGraph = @import("../causal_graph/root.zig");
 const Project = @import("../project/root.zig");
 const Development = @import("../development/root.zig");
 
-pub const agent_map_schema = "zigeffect.agent.application-map.v4";
-pub const agent_map_schema_version: u32 = 4;
+pub const agent_map_schema = "zigeffect.agent.application-map.v5";
+pub const agent_map_schema_version: u32 = 5;
 pub const development_map_schema = "zigeffect.agent.development-map.v3";
 pub const development_map_schema_version: u32 = 3;
 pub const causal_health_schema = "zigeffect.causal.runtime-health.v1";
@@ -329,6 +329,33 @@ pub fn ManagedRuntime(comptime RootLayer: type) type {
             );
         }
 
+        /// Compute the same opaque reference used by `.track` without exposing
+        /// the source value to the graph. Guarded agent endpoints use this to
+        /// turn an authorized product/order lookup into a lineage query.
+        pub fn lineageReference(self: *Self, comptime Key: type, value: Key.Value) fx.Lineage.Error!fx.Lineage.Ref {
+            return Key.reference(self.requireState().causal_context.project_id, value);
+        }
+
+        /// Return one bounded, progress-making page of durable NenDB records
+        /// that observed the reference. Continue from `next_after_event_id`
+        /// whenever `truncated` is true.
+        pub fn graphLineageJsonAlloc(
+            self: *Self,
+            allocator: std.mem.Allocator,
+            reference: fx.Lineage.Ref,
+            after_durable_event_id: u64,
+            limit: usize,
+            scan_limit: usize,
+        ) ![]u8 {
+            return self.requireState().graph.lineageRecordsJsonAlloc(
+                allocator,
+                reference,
+                after_durable_event_id,
+                limit,
+                scan_limit,
+            );
+        }
+
         /// Return the single bounded discovery document used by guarded agent
         /// endpoints. Follow-up event and child queries use durable graph IDs.
         pub fn agentMapJsonAlloc(
@@ -350,7 +377,7 @@ pub fn ManagedRuntime(comptime RootLayer: type) type {
 
             return std.fmt.allocPrint(
                 allocator,
-                "{{\"schema\":\"{s}\",\"schema_version\":{d},\"application\":{s},\"graph\":{s},\"causal_health\":{s},\"causal_context\":{s},\"development\":{{\"schema\":\"{s}\",\"schema_version\":{d},\"manifest\":{s},\"observed\":{s},\"artifacts\":{{\"progress\":\".zigeffect/tests/progress.jsonl\",\"proof_handoff\":\".zigeffect/handoffs/tests/latest.json\"}},\"workflow\":{{\"context\":\"zigeffect agent context --task <id-or-summary> --budget 32768 --json\",\"compatibility\":\"zigeffect compatibility --json\",\"validate\":\"zigeffect project validate --json\",\"status\":\"zigeffect agent status --json\",\"next\":\"zigeffect agent next --json\",\"tests\":\"zigeffect test list --json\",\"affected\":\"zigeffect test affected --changed <path> --json\",\"run_scenario\":\"zigeffect test run --scenario <id> --json\",\"coverage\":\"zigeffect test coverage --requirement <id> --json\",\"gaps\":\"zigeffect test gaps --requirement <id> --json\",\"graph_status\":\"zigeffect graph status --json\",\"graph_since\":\"zigeffect graph since <event-id> --limit 256 --json\",\"graph_path\":\"zigeffect graph path <from> <to> --json\",\"handoff\":\"zigeffect agent handoff --provider <provider> --session <session> --json\"}}}},\"queries\":{{\"discovery\":\"agent_map\",\"since\":\"graph_since\",\"event\":\"graph_record\",\"children\":\"graph_children\",\"path\":\"graph_path\",\"recent_event_id_space\":\"runtime_local\",\"durable_event_id_space\":\"graph\",\"correlation_model\":\"zigeffect.causal-context.v2\",\"default_delta_limit\":256}}}}",
+                "{{\"schema\":\"{s}\",\"schema_version\":{d},\"application\":{s},\"graph\":{s},\"causal_health\":{s},\"causal_context\":{s},\"development\":{{\"schema\":\"{s}\",\"schema_version\":{d},\"manifest\":{s},\"observed\":{s},\"artifacts\":{{\"progress\":\".zigeffect/tests/progress.jsonl\",\"proof_handoff\":\".zigeffect/handoffs/tests/latest.json\"}},\"workflow\":{{\"context\":\"zigeffect agent context --task <id-or-summary> --budget 65536 --json\",\"compatibility\":\"zigeffect compatibility --json\",\"validate\":\"zigeffect project validate --json\",\"status\":\"zigeffect agent status --json\",\"next\":\"zigeffect agent next --json\",\"tests\":\"zigeffect test list --json\",\"affected\":\"zigeffect test affected --changed <path> --json\",\"run_scenario\":\"zigeffect test run --scenario <id> --json\",\"coverage\":\"zigeffect test coverage --requirement <id> --json\",\"gaps\":\"zigeffect test gaps --requirement <id> --json\",\"graph_status\":\"zigeffect graph status --json\",\"graph_since\":\"zigeffect graph since <event-id> --limit 256 --json\",\"graph_path\":\"zigeffect graph path <from> <to> --json\",\"graph_lineage\":\"runtime.graphLineageJsonAlloc(reference, after, limit, scan_limit)\",\"handoff\":\"zigeffect agent handoff --provider <provider> --session <session> --json\"}}}},\"queries\":{{\"discovery\":\"agent_map\",\"since\":\"graph_since\",\"event\":\"graph_record\",\"children\":\"graph_children\",\"path\":\"graph_path\",\"lineage\":\"graph_lineage\",\"recent_event_id_space\":\"runtime_local\",\"durable_event_id_space\":\"graph\",\"correlation_model\":\"zigeffect.causal-context.v3\",\"default_delta_limit\":256}}}}",
                 .{
                     agent_map_schema,
                     agent_map_schema_version,

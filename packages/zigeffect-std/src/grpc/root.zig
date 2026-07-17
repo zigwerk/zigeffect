@@ -1134,6 +1134,77 @@ const CallState = struct {
     options: CallOptions,
 };
 
+const LineageRequest = struct {
+    allocator: std.mem.Allocator,
+    request: UnaryRequest,
+    metadata: []Metadata,
+    baggage: []u8,
+
+    fn deinit(self: *LineageRequest) void {
+        self.allocator.free(self.baggage);
+        self.allocator.free(self.metadata);
+        self.* = undefined;
+    }
+};
+
+fn requestWithLineageAlloc(
+    allocator: std.mem.Allocator,
+    request: UnaryRequest,
+    lineage: fx.Lineage.Set,
+) !?LineageRequest {
+    var encoded_buffer: [fx.Lineage.max_baggage_bytes]u8 = undefined;
+    const encoded = try lineage.formatBaggage(&encoded_buffer);
+    if (encoded.len == 0) return null;
+
+    var existing_count: usize = 0;
+    var baggage_size = encoded.len;
+    for (request.metadata) |entry| {
+        if (!std.mem.eql(u8, entry.name, "baggage")) continue;
+        existing_count += 1;
+        const existing = std.mem.trim(u8, entry.value, " \t");
+        if (existing.len == 0) continue;
+        const reserved = try fx.Lineage.Set.parseBaggage(existing);
+        if (!reserved.isEmpty()) return error.InvalidBaggage;
+        if (baggage_size >= fx.Lineage.max_header_bytes or
+            existing.len > fx.Lineage.max_header_bytes - baggage_size - 1)
+        {
+            return error.BaggageTooLarge;
+        }
+        baggage_size += existing.len + 1;
+    }
+    const baggage = try allocator.alloc(u8, baggage_size);
+    errdefer allocator.free(baggage);
+    var baggage_offset: usize = 0;
+    for (request.metadata) |entry| {
+        if (!std.mem.eql(u8, entry.name, "baggage")) continue;
+        const existing = std.mem.trim(u8, entry.value, " \t");
+        if (existing.len == 0) continue;
+        @memcpy(baggage[baggage_offset .. baggage_offset + existing.len], existing);
+        baggage_offset += existing.len;
+        baggage[baggage_offset] = ',';
+        baggage_offset += 1;
+    }
+    @memcpy(baggage[baggage_offset .. baggage_offset + encoded.len], encoded);
+
+    const metadata = try allocator.alloc(Metadata, request.metadata.len - existing_count + 1);
+    errdefer allocator.free(metadata);
+    var metadata_index: usize = 0;
+    for (request.metadata) |entry| {
+        if (std.mem.eql(u8, entry.name, "baggage")) continue;
+        metadata[metadata_index] = entry;
+        metadata_index += 1;
+    }
+    metadata[metadata_index] = .{ .name = "baggage", .value = baggage };
+    var enriched = request;
+    enriched.metadata = metadata;
+    return .{
+        .allocator = allocator,
+        .request = enriched,
+        .metadata = metadata,
+        .baggage = baggage,
+    };
+}
+
 pub const CallError = error{
     OutOfMemory,
     CallFailed,
@@ -1157,7 +1228,22 @@ pub fn call(request: UnaryRequest, options: CallOptions) CallEffect {
                 .status = "running",
                 .redacted_detail = "bounded gRPC call started; payload, metadata, and credentials omitted",
             });
-            const response = ctx.service(GrpcClient).invokeAlloc(ctx.allocator(), state.request, state.options) catch |err| {
+            var lineage_request = requestWithLineageAlloc(ctx.allocator(), state.request, ctx.lineage()) catch |err| {
+                _ = ctx.recordCausal(.{
+                    .kind = .io_completed,
+                    .parent_id = started,
+                    .cause_event_id = started,
+                    .service_key = GrpcClient.service_key,
+                    .label = "grpc.call",
+                    .type_name = @errorName(err),
+                    .status = "failure",
+                    .redacted_detail = "bounded gRPC lineage propagation failed; source values omitted",
+                });
+                return callError(err);
+            };
+            defer if (lineage_request) |*owned| owned.deinit();
+            const effective_request = if (lineage_request) |owned| owned.request else state.request;
+            const response = ctx.service(GrpcClient).invokeAlloc(ctx.allocator(), effective_request, state.options) catch |err| {
                 _ = ctx.recordCausal(.{
                     .kind = .io_completed,
                     .parent_id = started,
@@ -1740,6 +1826,106 @@ test "gRPC call is a canonical service effect with deterministic layer substitut
         try std.testing.expect(std.mem.indexOf(u8, event.redacted_detail, "sentinel-secret") == null);
     }
     try std.testing.expect(found);
+}
+
+test "gRPC call automatically propagates distributed typed lineage as opaque baggage" {
+    const ProductId = fx.Lineage.Key([]const u8, .{
+        .name = "commerce.product.id",
+        .privacy = .internal,
+        .propagation = .distributed,
+        .export_policy = .otel,
+    });
+    const Capture = struct {
+        baggage: [fx.Lineage.max_baggage_bytes]u8 = undefined,
+        baggage_len: usize = 0,
+
+        fn invoke(
+            self: *@This(),
+            allocator: std.mem.Allocator,
+            request: UnaryRequest,
+            _: CallOptions,
+        ) anyerror!UnaryResponse {
+            for (request.metadata) |entry| {
+                if (!std.mem.eql(u8, entry.name, "baggage")) continue;
+                if (entry.value.len > self.baggage.len) return error.MetadataTooLarge;
+                @memcpy(self.baggage[0..entry.value.len], entry.value);
+                self.baggage_len = entry.value.len;
+            }
+            return UnaryResponse.initAlloc(allocator, "ok", .ok());
+        }
+    };
+
+    var capture = Capture{};
+    const client = Client{
+        .ptr = &capture,
+        .invoke_fn = struct {
+            fn call(raw: *anyopaque, allocator: std.mem.Allocator, request: UnaryRequest, options: CallOptions) anyerror!UnaryResponse {
+                const self: *Capture = @ptrCast(@alignCast(raw));
+                return self.invoke(allocator, request, options);
+            }
+        }.call,
+    };
+    const layer = clientLayer(client);
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, layer, .{
+        .causal_context = .{ .project_id = 77 },
+    });
+    defer runtime.deinit();
+
+    var response = try runtime.run(call(.{
+        .authority = "api.example.test",
+        .service = "orders.v1.Orders",
+        .method = "Create",
+        .payload = "omitted",
+        .timeout_millis = 1000,
+    }, .{}).track(ProductId, "product-42"));
+    defer response.deinit();
+
+    try std.testing.expect(capture.baggage_len > 0);
+    const baggage = capture.baggage[0..capture.baggage_len];
+    try std.testing.expect(std.mem.indexOf(u8, baggage, "product-42") == null);
+    const propagated = try fx.Lineage.Set.parseBaggage(baggage);
+    try std.testing.expect(propagated.contains(try ProductId.reference(77, "product-42")));
+}
+
+test "gRPC lineage baggage composition preserves unrelated members and reserves its namespace" {
+    const ProductId = fx.Lineage.Key([]const u8, .{
+        .name = "commerce.product.id",
+        .privacy = .internal,
+        .propagation = .distributed,
+    });
+    const product = try ProductId.reference(77, "product-42");
+    const request = UnaryRequest{
+        .authority = "api.example.test",
+        .service = "orders.v1.Orders",
+        .method = "Create",
+        .payload = "omitted",
+        .timeout_millis = 1_000,
+        .metadata = &.{
+            .{ .name = "baggage", .value = "tenant=public" },
+            .{ .name = "baggage", .value = "" },
+        },
+    };
+    var composed = (try requestWithLineageAlloc(
+        std.testing.allocator,
+        request,
+        fx.Lineage.Set.empty.with(product),
+    )).?;
+    defer composed.deinit();
+    try std.testing.expectEqualStrings("tenant=public,zigeffect-lineage=", composed.baggage[0.."tenant=public,zigeffect-lineage=".len]);
+    try std.testing.expect((try fx.Lineage.Set.parseBaggage(composed.baggage)).contains(product));
+
+    try std.testing.expectError(error.InvalidBaggage, requestWithLineageAlloc(
+        std.testing.allocator,
+        .{
+            .authority = request.authority,
+            .service = request.service,
+            .method = request.method,
+            .payload = request.payload,
+            .timeout_millis = request.timeout_millis,
+            .metadata = &.{.{ .name = "baggage", .value = "zigeffect-lineage=reserved" }},
+        },
+        fx.Lineage.Set.empty.with(product),
+    ));
 }
 
 test "gRPC request headers preserve canonical pseudo-header order and hide binary bytes" {

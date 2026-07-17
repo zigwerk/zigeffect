@@ -14,6 +14,12 @@ const ProbeApi = struct {
 };
 
 const Probe = kernel.Service("durable-runtime-test/Probe", ProbeApi);
+const ProductId = zstd.Lineage.Key([]const u8, .{
+    .name = "commerce.product.id",
+    .privacy = .internal,
+    .propagation = .distributed,
+    .export_policy = .otel,
+});
 const ReadBase = kernel.Effect(u32, std.mem.Allocator.Error, .{Probe});
 const Read = ReadBase.Stateful(void);
 
@@ -81,11 +87,11 @@ test "application runtime owns one durable causal graph and agent map" {
         std.testing.io,
         tmp.dir,
         layer,
-        .{},
+        .{ .causal_context = .{ .project_id = 77 } },
     );
     defer runtime.deinit();
 
-    const value = try runtime.run(readProbe().named("probe.program"));
+    const value = try runtime.run(readProbe().track(ProductId, "product-42").named("probe.program"));
     try std.testing.expectEqual(@as(u32, 42), value);
     _ = try runtime.causalRecorder().record(.{
         .kind = .external_signal_received,
@@ -114,6 +120,8 @@ test "application runtime owns one durable causal graph and agent map" {
     try std.testing.expect(map_object.get("graph") != null);
     try std.testing.expect(map_object.get("causal_health") != null);
     try std.testing.expect(map_object.get("queries") != null);
+    try std.testing.expect(std.mem.indexOf(u8, map_json, "graph_lineage") != null);
+    try std.testing.expect(std.mem.indexOf(u8, map_json, "--budget 65536") != null);
     try std.testing.expect(std.mem.indexOf(u8, map_json, Probe.service_key) != null);
     try std.testing.expect(std.mem.indexOf(u8, map_json, "probe.program") != null);
     try std.testing.expect(std.mem.indexOf(u8, map_json, "probe/42") != null);
@@ -123,6 +131,13 @@ test "application runtime owns one durable causal graph and agent map" {
     try std.testing.expectEqual(summary.records, summary.engine_nodes);
     try std.testing.expectEqual(summary.edges, summary.engine_edges);
     const newest = summary.newest_durable_event_id.?;
+    const product = try runtime.lineageReference(ProductId, "product-42");
+    const lineage_json = try runtime.graphLineageJsonAlloc(std.testing.allocator, product, 0, 128, 2048);
+    defer std.testing.allocator.free(lineage_json);
+    var lineage = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, lineage_json, .{});
+    defer lineage.deinit();
+    try std.testing.expect(lineage.value.object.get("matched").?.integer > 0);
+    try std.testing.expect(std.mem.indexOf(u8, lineage_json, "product-42") == null);
     const record_json = try runtime.graphRecordJsonAlloc(std.testing.allocator, newest);
     defer std.testing.allocator.free(record_json);
     try std.testing.expect(std.mem.indexOf(u8, record_json, "source_event_id") != null);

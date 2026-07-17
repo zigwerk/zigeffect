@@ -111,6 +111,9 @@ pub const RuntimeContext = struct {
         enriched.scope_id = enriched.scope_id orelse self.scope.causal_scope_id;
         enriched.trace_id = enriched.trace_id orelse self.scope.causal_trace_id;
         enriched.span_id = enriched.span_id orelse self.scope.causal_span_id;
+        enriched.context = causal_mod.CausalContextV2.merge(self.causal_context, enriched.context);
+        enriched.context.trace_id_low = enriched.context.trace_id_low orelse enriched.trace_id;
+        enriched.context.span_id = enriched.context.span_id orelse enriched.span_id;
 
         return self.core.emit(enriched);
     }
@@ -145,6 +148,70 @@ pub fn ContextView(comptime Requirements: anytype) type {
 
         pub fn scope(self: *const Self) *Scope {
             return self.runtime_context.scope;
+        }
+
+        /// Register a typed resource finalizer in the current scope. The
+        /// runtime captures this effect's lineage on acquisition and reuses
+        /// that immutable context when the finalizer runs, even after the
+        /// dynamic effect has returned.
+        pub fn addFinalizerFor(
+            self: *Self,
+            comptime Resource: type,
+            resource: *Resource,
+            comptime release: *const fn (*Resource) void,
+        ) scope_mod.FinalizerRegistrationError!void {
+            if (self.runtime_context.scope.closed) return error.MissingScope;
+            return self.runtime_context.scope.addFinalizerForWithContext(
+                Resource,
+                resource,
+                release,
+                self.runtime_context.causal_context,
+            );
+        }
+
+        pub fn addFinalizerFallibleFor(
+            self: *Self,
+            comptime Resource: type,
+            resource: *Resource,
+            comptime release: anytype,
+        ) scope_mod.FinalizerRegistrationError!void {
+            if (self.runtime_context.scope.closed) return error.MissingScope;
+            return self.runtime_context.scope.addFinalizerFallibleForWithContext(
+                Resource,
+                resource,
+                release,
+                self.runtime_context.causal_context,
+            );
+        }
+
+        pub fn addFinalizerExitFor(
+            self: *Self,
+            comptime Resource: type,
+            resource: *Resource,
+            comptime release: *const fn (*Resource, scope_mod.FinalizerExit) void,
+        ) scope_mod.FinalizerRegistrationError!void {
+            if (self.runtime_context.scope.closed) return error.MissingScope;
+            return self.runtime_context.scope.addFinalizerExitForWithContext(
+                Resource,
+                resource,
+                release,
+                self.runtime_context.causal_context,
+            );
+        }
+
+        pub fn addFinalizerExitFallibleFor(
+            self: *Self,
+            comptime Resource: type,
+            resource: *Resource,
+            comptime release: anytype,
+        ) scope_mod.FinalizerRegistrationError!void {
+            if (self.runtime_context.scope.closed) return error.MissingScope;
+            return self.runtime_context.scope.addFinalizerExitFallibleForWithContext(
+                Resource,
+                resource,
+                release,
+                self.runtime_context.causal_context,
+            );
         }
 
         pub fn clock(self: *const Self) *Clock {
@@ -206,6 +273,13 @@ pub fn ContextView(comptime Requirements: anytype) type {
                 .span_id = self.runtime_context.scope.causal_span_id,
                 .context = self.runtime_context.causal_context,
             });
+        }
+
+        /// Read the bounded non-raw references attached to this effect. This
+        /// exposes correlation only; store ownership and source values remain
+        /// private to the managed runtime.
+        pub fn lineage(self: *const Self) causal_mod.LineageSet {
+            return self.runtime_context.causal_context.lineage;
         }
 
         /// Derive a reusable interpreter handle limited to this effect's
@@ -320,6 +394,7 @@ pub fn RuntimeHandle(comptime AvailableServices: anytype) type {
             var scope = Scope.init(self.core.allocator);
             defer scope.deinit();
             const run_id = self.core.causal_store.nextRunId();
+            scope.setCausalContext(self.causal_context);
             scope.attachRuntimeSignal(self.core.signalSink(), run_id, self.causal_parent_id, null, null);
 
             const fiber_id = self.core.next_fiber_id.fetchAdd(1, .monotonic);

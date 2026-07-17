@@ -4227,6 +4227,9 @@ test "local application scaffolds teach only the canonical service layer and man
         "fencing token",
         "zigeffect graph path",
         "project-mounted graph",
+        "zstd.Lineage.Key",
+        ".track(Key, value)",
+        "runtime.graphLineageJsonAlloc",
         "Re-query",
     }) |contract| try std.testing.expect(std.mem.indexOf(u8, skill, contract) != null);
     try std.testing.expect(std.mem.indexOf(u8, readme, "## Architecture") != null);

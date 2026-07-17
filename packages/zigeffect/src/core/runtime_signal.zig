@@ -29,6 +29,8 @@ pub const RuntimeEvent = struct {
     cause_event_id: ?u64 = null,
     trace_id: ?u64 = null,
     span_id: ?u64 = null,
+    /// Allocation-free correlation inherited by structural runtime events.
+    context: CausalContextV2 = .{},
     label: []const u8 = "",
     service_key: []const u8 = "",
     status: []const u8 = "",
@@ -72,3 +74,4 @@ pub const RuntimeSignalSink = struct {
 const causal_mod = @import("../services/causal.zig");
 
 pub const CausalEvent = causal_mod.CausalEvent;
+pub const CausalContextV2 = causal_mod.CausalContextV2;

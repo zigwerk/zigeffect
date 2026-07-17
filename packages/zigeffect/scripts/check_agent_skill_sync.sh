@@ -81,6 +81,24 @@ requires packages/ziac/src/agent-kit/skills/ziac-provider-maintenance/SKILL.md "
 requires packages/ziac/src/agent-kit/skills/ziac-provider-qualification/SKILL.md "constructs causal stores"
 requires packages/zigeffect/docs/runtime-owned-causal-applications.md "application code must not manually record"
 
+lineage_contracts=(
+  "zstd.Lineage.Key"
+  ".track(Key, value)"
+  "runtime.graphLineageJsonAlloc"
+)
+requires AGENTS.md "zstd.Lineage.Key" ".track(Key, value)"
+requires .agents/skills/zigeffect-development/SKILL.md "${lineage_contracts[@]}"
+requires .claude/skills/zigeffect-development/SKILL.md "${lineage_contracts[@]}"
+requires .gemini/skills/zigeffect-development/SKILL.md "${lineage_contracts[@]}"
+requires packages/zigeffect-reference-system/.agents/skills/zigeffect-development/SKILL.md "${lineage_contracts[@]}"
+requires packages/zigeffect-reference-system/.claude/skills/zigeffect-development/SKILL.md "${lineage_contracts[@]}"
+requires packages/zigeffect-cli/src/templates.zig "${lineage_contracts[@]}"
+requires packages/zigeffect/docs/typed-data-lineage.md "${lineage_contracts[@]}"
+requires .agents/skills/ziac/SKILL.md "${lineage_contracts[@]}"
+requires .claude/skills/ziac/SKILL.md "${lineage_contracts[@]}"
+requires .gemini/skills/ziac/SKILL.md "${lineage_contracts[@]}"
+requires packages/ziac/src/scaffold.zig "${lineage_contracts[@]}"
+
 cli_template_version="$(sed -n 's/^pub const template_version: u32 = \([0-9][0-9]*\);$/\1/p' packages/zigeffect-cli/src/distribution.zig)"
 if [[ -z "$cli_template_version" ]]; then
   printf 'Unable to read the ZigEffect CLI template version.\n' >&2

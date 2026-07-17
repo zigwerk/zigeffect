@@ -19,6 +19,10 @@ pub const Scope = struct {
         resource_type: []const u8 = "",
         resource_id: ?u64 = null,
         acquired_event_id: ?u64 = null,
+        /// Captured when the resource enters the scope. A later finalizer may
+        /// run after the dynamic effect context has unwound, so it must not
+        /// consult mutable process- or scope-wide "current lineage" state.
+        causal_context: CausalContextV2 = .{},
     };
 
     allocator: Allocator,
@@ -87,13 +91,20 @@ pub const Scope = struct {
         self.causal_context = CausalContextV2.merge(self.causal_context, context);
     }
 
-    fn recordLifecycle(self: *Scope, event: CausalEvent) ?u64 {
+    fn recordLifecycleWithContext(
+        self: *Scope,
+        event: CausalEvent,
+        captured_context: CausalContextV2,
+    ) ?u64 {
         var owned = event;
         owned.run_id = owned.run_id orelse self.causal_run_id;
         owned.scope_id = owned.scope_id orelse self.causal_scope_id;
         owned.trace_id = owned.trace_id orelse self.causal_trace_id;
         owned.span_id = owned.span_id orelse self.causal_span_id;
-        owned.context = CausalContextV2.merge(self.causal_context, owned.context);
+        owned.context = CausalContextV2.merge(
+            self.causal_context,
+            CausalContextV2.merge(captured_context, owned.context),
+        );
         owned.context.trace_id_low = owned.context.trace_id_low orelse owned.trace_id;
         owned.context.span_id = owned.context.span_id orelse owned.span_id;
         if (self.runtime_signal) |sink| {
@@ -113,6 +124,7 @@ pub const Scope = struct {
                 .cause_event_id = owned.cause_event_id,
                 .trace_id = owned.trace_id,
                 .span_id = owned.span_id,
+                .context = owned.context,
                 .label = owned.label,
                 .type_name = owned.type_name,
                 .status = owned.status,
@@ -121,6 +133,10 @@ pub const Scope = struct {
         }
         const store = self.causal_store orelse return null;
         return store.record(owned) catch null;
+    }
+
+    fn recordLifecycle(self: *Scope, event: CausalEvent) ?u64 {
+        return self.recordLifecycleWithContext(event, .{});
     }
 
     fn finalizerExitStatus(exit: FinalizerExit) []const u8 {
@@ -152,18 +168,18 @@ pub const Scope = struct {
         else
             return;
         finalizer.resource_id = finalizer.resource_id orelse resource_id;
-        finalizer.acquired_event_id = self.recordLifecycle(.{
+        finalizer.acquired_event_id = self.recordLifecycleWithContext(.{
             .kind = .resource_acquired,
             .parent_id = self.causal_opened_event_id,
             .resource_id = finalizer.resource_id,
             .type_name = finalizer.resource_type,
             .status = "success",
-        });
+        }, finalizer.causal_context);
     }
 
     fn recordResourceFinalized(self: *Scope, finalizer: Finalizer, failure: ?[]const u8) void {
         if (finalizer.resource_type.len == 0) return;
-        _ = self.recordLifecycle(.{
+        _ = self.recordLifecycleWithContext(.{
             .kind = .resource_finalized,
             .parent_id = finalizer.acquired_event_id orelse self.causal_opened_event_id,
             .resource_id = finalizer.resource_id,
@@ -171,7 +187,7 @@ pub const Scope = struct {
             .type_name = finalizer.resource_type,
             .status = if (failure == null) "success" else "failure",
             .redacted_detail = failure orelse "",
-        });
+        }, finalizer.causal_context);
     }
 
     fn recordScopeClosed(self: *Scope, exit: FinalizerExit) void {
@@ -237,6 +253,16 @@ pub const Scope = struct {
         resource: *Resource,
         comptime release: *const fn (*Resource) void,
     ) Allocator.Error!void {
+        return self.addFinalizerForWithContext(Resource, resource, release, self.causal_context);
+    }
+
+    pub fn addFinalizerForWithContext(
+        self: *Scope,
+        comptime Resource: type,
+        resource: *Resource,
+        comptime release: *const fn (*Resource) void,
+        causal_context: CausalContextV2,
+    ) Allocator.Error!void {
         const Runner = struct {
             fn run(raw: ?*anyopaque, exit: FinalizerExit) ?[]const u8 {
                 _ = exit;
@@ -250,6 +276,7 @@ pub const Scope = struct {
             .state = resource,
             .run = Runner.run,
             .resource_type = @typeName(Resource),
+            .causal_context = causal_context,
         });
         self.recordResourceAcquired(&self.finalizers.items[self.finalizers.items.len - 1]);
     }
@@ -259,6 +286,16 @@ pub const Scope = struct {
         comptime Resource: type,
         resource: *Resource,
         comptime release: anytype,
+    ) Allocator.Error!void {
+        return self.addFinalizerFallibleForWithContext(Resource, resource, release, self.causal_context);
+    }
+
+    pub fn addFinalizerFallibleForWithContext(
+        self: *Scope,
+        comptime Resource: type,
+        resource: *Resource,
+        comptime release: anytype,
+        causal_context: CausalContextV2,
     ) Allocator.Error!void {
         const Runner = struct {
             fn run(raw: ?*anyopaque, exit: FinalizerExit) ?[]const u8 {
@@ -273,6 +310,7 @@ pub const Scope = struct {
             .state = resource,
             .run = Runner.run,
             .resource_type = @typeName(Resource),
+            .causal_context = causal_context,
         });
         self.recordResourceAcquired(&self.finalizers.items[self.finalizers.items.len - 1]);
     }
@@ -319,6 +357,16 @@ pub const Scope = struct {
         resource: *Resource,
         comptime release: *const fn (*Resource, FinalizerExit) void,
     ) Allocator.Error!void {
+        return self.addFinalizerExitForWithContext(Resource, resource, release, self.causal_context);
+    }
+
+    pub fn addFinalizerExitForWithContext(
+        self: *Scope,
+        comptime Resource: type,
+        resource: *Resource,
+        comptime release: *const fn (*Resource, FinalizerExit) void,
+        causal_context: CausalContextV2,
+    ) Allocator.Error!void {
         const Runner = struct {
             fn run(raw: ?*anyopaque, exit: FinalizerExit) ?[]const u8 {
                 const typed: *Resource = @ptrCast(@alignCast(raw.?));
@@ -331,6 +379,7 @@ pub const Scope = struct {
             .state = resource,
             .run = Runner.run,
             .resource_type = @typeName(Resource),
+            .causal_context = causal_context,
         });
         self.recordResourceAcquired(&self.finalizers.items[self.finalizers.items.len - 1]);
     }
@@ -340,6 +389,16 @@ pub const Scope = struct {
         comptime Resource: type,
         resource: *Resource,
         comptime release: anytype,
+    ) Allocator.Error!void {
+        return self.addFinalizerExitFallibleForWithContext(Resource, resource, release, self.causal_context);
+    }
+
+    pub fn addFinalizerExitFallibleForWithContext(
+        self: *Scope,
+        comptime Resource: type,
+        resource: *Resource,
+        comptime release: anytype,
+        causal_context: CausalContextV2,
     ) Allocator.Error!void {
         const Runner = struct {
             fn run(raw: ?*anyopaque, exit: FinalizerExit) ?[]const u8 {
@@ -353,6 +412,7 @@ pub const Scope = struct {
             .state = resource,
             .run = Runner.run,
             .resource_type = @typeName(Resource),
+            .causal_context = causal_context,
         });
         self.recordResourceAcquired(&self.finalizers.items[self.finalizers.items.len - 1]);
     }

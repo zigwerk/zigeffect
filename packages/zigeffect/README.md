@@ -181,6 +181,14 @@ backend or reproduce service/lifecycle events. Low-level `CausalAppTrace`
 remains an adapter implementation and framework-conformance primitive. See
 [Runtime-owned causal applications](docs/runtime-owned-causal-applications.md).
 
+Business identities can be marked without causal plumbing. Define a typed
+`zstd.Lineage.Key` and call `.track(Key, value)` on the effect that owns the
+value. ZigEffect turns it into an opaque project-scoped reference, inherits it
+through child effects and fibers, stores it in the embedded graph, propagates
+distributed keys through gRPC, and exports only explicitly allowed keys to
+OTEL. Raw source values are never written to those surfaces. See
+[typed data lineage](docs/typed-data-lineage.md).
+
 ### Visual workbench
 
 `causal-workbench` builds a read-only SolidJS renderer (via `zig-webui`) over a

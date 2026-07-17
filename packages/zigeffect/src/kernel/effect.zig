@@ -3,6 +3,7 @@ const service_mod = @import("service.zig");
 const clock_mod = @import("../services/clock.zig");
 const defaults_mod = @import("default_services.zig");
 const identity_mod = @import("../core/runtime_identity.zig");
+const lineage_mod = @import("../services/lineage.zig");
 
 pub const RuntimeContext = context_mod.RuntimeContext;
 pub const ContextView = context_mod.ContextView;
@@ -41,6 +42,14 @@ fn assertErrorSet(comptime Candidate: type) void {
         else => @compileError(
             "zigeffect mapError mapper must return an error set; received " ++ @typeName(Candidate),
         ),
+    }
+}
+
+fn assertLineageKey(comptime Key: type) void {
+    if (!@hasDecl(Key, "Value") or !@hasDecl(Key, "name") or
+        !@hasDecl(Key, "reference") or !@hasDecl(Key, "key_id"))
+    {
+        @compileError("Effect.track requires a key declared with zstd.Lineage.Key");
     }
 }
 
@@ -87,6 +96,14 @@ fn EffectMethods(comptime Parent: type) type {
         pub fn withDefaults(self: Parent, overrides: defaults_mod.DefaultOverrides) WithDefaultsEffect(Parent) {
             return .{ .parent = self, .overrides = overrides };
         }
+
+        /// Scope this effect to one typed non-raw domain reference. The
+        /// runtime propagates the resulting reference; the source value is
+        /// never copied into causal, graph, transport, or OTEL records.
+        pub fn track(self: Parent, comptime Key: type, value: Key.Value) TrackLineageEffect(Parent, Key) {
+            assertLineageKey(Key);
+            return .{ .parent = self, .value = value };
+        }
     };
 }
 
@@ -103,6 +120,7 @@ fn declareEffectMethods(comptime Self: type) type {
         pub const named = Methods.named;
         pub const withClock = Methods.withClock;
         pub const withDefaults = Methods.withDefaults;
+        pub const track = Methods.track;
     };
 }
 
@@ -128,6 +146,7 @@ pub fn Effect(
         pub const named = Methods.named;
         pub const withClock = Methods.withClock;
         pub const withDefaults = Methods.withDefaults;
+        pub const track = Methods.track;
 
         const Mode = union(enum) {
             run_fn: *const fn (*Context) Failure!Success,
@@ -230,6 +249,7 @@ pub fn StatefulEffect(
         pub const named = Methods.named;
         pub const withClock = Methods.withClock;
         pub const withDefaults = Methods.withDefaults;
+        pub const track = Methods.track;
 
         state: State,
         run_fn: *const fn (State, *Context) Failure!Success,
@@ -272,6 +292,57 @@ pub fn StatefulEffect(
     };
 }
 
+pub fn TrackLineageEffect(comptime Parent: type, comptime Key: type) type {
+    assertLineageKey(Key);
+    return struct {
+        const Self = @This();
+        const Methods = declareEffectMethods(Self);
+        pub const SuccessType = Parent.SuccessType;
+        pub const FailureType = Parent.FailureType || lineage_mod.Error;
+        pub const RequiredServices = Parent.RequiredServices;
+        pub const map = Methods.map;
+        pub const flatMap = Methods.flatMap;
+        pub const tap = Methods.tap;
+        pub const andThen = Methods.andThen;
+        pub const catchAll = Methods.catchAll;
+        pub const mapError = Methods.mapError;
+        pub const zip = Methods.zip;
+        pub const named = Methods.named;
+        pub const withClock = Methods.withClock;
+        pub const withDefaults = Methods.withDefaults;
+        pub const track = Methods.track;
+
+        parent: Parent,
+        value: Key.Value,
+
+        pub fn runIn(self: Self, runtime: *RuntimeContext) FailureType!SuccessType {
+            const reference = Key.reference(runtime.causal_context.project_id, self.value) catch |failure| {
+                _ = runtime.recordCausal(.{
+                    .kind = .lineage_bound,
+                    .label = Key.name,
+                    .type_name = @errorName(failure),
+                    .status = "rejected",
+                    .redacted_detail = "typed lineage binding rejected; source value omitted",
+                });
+                return failure;
+            };
+            var scoped = runtime.*;
+            scoped.causal_context.lineage = lineage_mod.Set.merge(
+                runtime.causal_context.lineage,
+                lineage_mod.Set.empty.with(reference),
+            );
+            _ = scoped.recordCausal(.{
+                .kind = .lineage_bound,
+                .label = Key.name,
+                .type_name = @typeName(Key.Value),
+                .status = "bound",
+                .redacted_detail = "typed lineage reference attached; source value omitted",
+            });
+            return self.parent.runIn(&scoped);
+        }
+    };
+}
+
 pub fn WithClockEffect(comptime Parent: type) type {
     return struct {
         const Self = @This();
@@ -289,6 +360,7 @@ pub fn WithClockEffect(comptime Parent: type) type {
         pub const named = Methods.named;
         pub const withClock = Methods.withClock;
         pub const withDefaults = Methods.withDefaults;
+        pub const track = Methods.track;
 
         parent: Parent,
         clock: *Clock,
@@ -318,6 +390,7 @@ pub fn WithDefaultsEffect(comptime Parent: type) type {
         pub const named = Methods.named;
         pub const withClock = Methods.withClock;
         pub const withDefaults = Methods.withDefaults;
+        pub const track = Methods.track;
 
         parent: Parent,
         overrides: defaults_mod.DefaultOverrides,
@@ -348,6 +421,7 @@ pub fn MapEffect(comptime Parent: type, comptime mapper: anytype) type {
         pub const named = Methods.named;
         pub const withClock = Methods.withClock;
         pub const withDefaults = Methods.withDefaults;
+        pub const track = Methods.track;
 
         parent: Parent,
 
@@ -376,6 +450,7 @@ pub fn FlatMapEffect(comptime Parent: type, comptime mapper: anytype) type {
         pub const named = Methods.named;
         pub const withClock = Methods.withClock;
         pub const withDefaults = Methods.withDefaults;
+        pub const track = Methods.track;
 
         parent: Parent,
 
@@ -405,6 +480,7 @@ pub fn TapEffect(comptime Parent: type, comptime observer: anytype) type {
         pub const named = Methods.named;
         pub const withClock = Methods.withClock;
         pub const withDefaults = Methods.withDefaults;
+        pub const track = Methods.track;
 
         parent: Parent,
 
@@ -434,6 +510,7 @@ pub fn ThenEffect(comptime Parent: type, comptime Next: type) type {
         pub const named = Methods.named;
         pub const withClock = Methods.withClock;
         pub const withDefaults = Methods.withDefaults;
+        pub const track = Methods.track;
 
         parent: Parent,
         next: Next,
@@ -470,6 +547,7 @@ pub fn CatchAllEffect(comptime Parent: type, comptime handler: anytype) type {
         pub const named = Methods.named;
         pub const withClock = Methods.withClock;
         pub const withDefaults = Methods.withDefaults;
+        pub const track = Methods.track;
 
         parent: Parent,
 
@@ -498,6 +576,7 @@ pub fn MapErrorEffect(comptime Parent: type, comptime mapper: anytype) type {
         pub const named = Methods.named;
         pub const withClock = Methods.withClock;
         pub const withDefaults = Methods.withDefaults;
+        pub const track = Methods.track;
 
         parent: Parent,
 
@@ -532,6 +611,7 @@ pub fn ZipEffect(comptime Left: type, comptime Right: type) type {
         pub const named = Methods.named;
         pub const withClock = Methods.withClock;
         pub const withDefaults = Methods.withDefaults;
+        pub const track = Methods.track;
 
         left: Left,
         right: Right,
@@ -561,6 +641,7 @@ pub fn NamedEffect(comptime Parent: type) type {
         pub const named = Methods.named;
         pub const withClock = Methods.withClock;
         pub const withDefaults = Methods.withDefaults;
+        pub const track = Methods.track;
 
         parent: Parent,
         label: []const u8,

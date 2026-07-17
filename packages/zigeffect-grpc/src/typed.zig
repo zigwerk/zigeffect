@@ -784,6 +784,7 @@ const CausalCorrelation = struct {
     trace_id: ?u64 = null,
     span_id: ?u64 = null,
     context: fx.CausalContextV2 = .{},
+    lineage_baggage_invalid: bool = false,
 };
 
 pub const GeneratedHandlerError = error{
@@ -808,19 +809,38 @@ fn validTraceparent(value: []const u8) bool {
 fn causalCorrelation(metadata: []const Grpc.Metadata) CausalCorrelation {
     var request_id: []const u8 = "";
     var traceparent: []const u8 = "";
+    var lineage = fx.Lineage.Set.empty;
+    var lineage_baggage_invalid = false;
+    var lineage_member_seen = false;
     for (metadata) |entry| {
         if ((std.mem.eql(u8, entry.name, "x-request-id") or std.mem.eql(u8, entry.name, "request-id")) and entry.value.len <= 128) {
             request_id = entry.value;
         } else if (std.mem.eql(u8, entry.name, "traceparent")) {
             traceparent = entry.value;
+        } else if (std.mem.eql(u8, entry.name, "baggage")) {
+            const parsed = fx.Lineage.Set.parseBaggage(entry.value) catch {
+                lineage_baggage_invalid = true;
+                continue;
+            };
+            if (!parsed.isEmpty()) {
+                if (lineage_member_seen) {
+                    lineage_baggage_invalid = true;
+                } else {
+                    lineage = parsed;
+                    lineage_member_seen = true;
+                }
+            }
         }
     }
     const trace_parent = fx.parseTraceParent(traceparent) catch null;
+    var context = if (trace_parent) |trace| trace.context() else fx.CausalContextV2{};
+    if (!lineage_baggage_invalid) context.lineage = lineage;
     return .{
         .boundary_id = if (request_id.len == 0) null else std.hash.Wyhash.hash(0, request_id),
         .trace_id = if (trace_parent) |trace| trace.trace_id_low else null,
         .span_id = if (trace_parent) |trace| trace.parent_id else null,
-        .context = if (trace_parent) |trace| trace.context() else .{},
+        .context = context,
+        .lineage_baggage_invalid = lineage_baggage_invalid,
     };
 }
 
@@ -873,7 +893,10 @@ fn generatedUnaryHandlerEffect(
                 .context = state.correlation.context,
                 .label = operation,
                 .status = "running",
-                .redacted_detail = "generated gRPC handler started; request, response, metadata, and credentials omitted",
+                .redacted_detail = if (state.correlation.lineage_baggage_invalid)
+                    "generated gRPC handler started; invalid lineage baggage omitted"
+                else
+                    "generated gRPC handler started; request, response, metadata, and credentials omitted",
             });
             const response = if (comptime implementation_info.params.len == 3)
                 @call(.auto, implementation_method, .{ state.implementation, ctx, state.request })
@@ -1128,13 +1151,15 @@ pub fn GeneratedServerAdapter(comptime Service: type, comptime ImplementationSer
                         const Request = RequestType(Service, method);
                         var decoded = try decodeAlloc(Request, allocator, request.payload);
                         defer deinitMessage(Request, allocator, &decoded);
-                        return self.runtime.run(generatedUnaryHandlerEffect(
+                        const correlation = causalCorrelation(request.metadata);
+                        var runtime = self.runtime.withCausalContext(correlation.context);
+                        return runtime.run(generatedUnaryHandlerEffect(
                             Service,
                             ImplementationService,
                             method,
                             self.implementation,
                             decoded,
-                            causalCorrelation(request.metadata),
+                            correlation,
                         ).named("grpc.server." ++ field.name));
                     }
                 }
@@ -1154,13 +1179,15 @@ pub fn GeneratedServerAdapter(comptime Service: type, comptime ImplementationSer
                             .allocator = self.allocator,
                             .call = call,
                         };
-                        return self.runtime.run(generatedStreamingHandlerEffect(
+                        const correlation = causalCorrelation(call.context.metadata);
+                        var runtime = self.runtime.withCausalContext(correlation.context);
+                        return runtime.run(generatedStreamingHandlerEffect(
                             Service,
                             ImplementationService,
                             method,
                             self.implementation,
                             &stream,
-                            causalCorrelation(call.context.metadata),
+                            correlation,
                         ).named("grpc.server." ++ field.name));
                     }
                 }
@@ -1563,6 +1590,15 @@ test "generated server uses canonical requirements layers runtime child scope an
 
     const payload = try encodeAlloc(std.testing.allocator, Message{ .value = 40 });
     defer std.testing.allocator.free(payload);
+    const ProductId = fx.Lineage.Key([]const u8, .{
+        .name = "commerce.product.id",
+        .privacy = .internal,
+        .propagation = .distributed,
+        .export_policy = .otel,
+    });
+    const product = try ProductId.reference(77, "product-42");
+    var baggage_buffer: [fx.Lineage.max_baggage_bytes]u8 = undefined;
+    const baggage = try fx.Lineage.Set.empty.with(product).formatBaggage(&baggage_buffer);
     State.reset();
     const invoke_program = invokeRegistered(.{
         .authority = "local",
@@ -1572,6 +1608,7 @@ test "generated server uses canonical requirements layers runtime child scope an
         .metadata = &.{
             .{ .name = "x-request-id", .value = "layered-42" },
             .{ .name = "traceparent", .value = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" },
+            .{ .name = "baggage", .value = baggage },
         },
         .timeout_millis = 1_000,
     }, .{}).named("grpc.test.invoke");
@@ -1592,6 +1629,7 @@ test "generated server uses canonical requirements layers runtime child scope an
     var saw_boundary_correlation = false;
     var service_parent_id: ?u64 = null;
     var saw_request_scope = false;
+    var saw_product_lineage = false;
     for (snapshot.causal.recent_events) |event| {
         if (event.kind == .io_wait_started and std.mem.eql(u8, event.label, "grpc.server.Increment")) {
             handler_operation_id = event.id;
@@ -1603,12 +1641,14 @@ test "generated server uses canonical requirements layers runtime child scope an
         }
         if (event.kind == .service_required and std.mem.eql(u8, event.service_key, Counter.service_key) and std.mem.eql(u8, event.status, "resolved")) {
             service_parent_id = event.parent_id;
+            saw_product_lineage = event.context.lineage.contains(product);
         }
         if (event.kind == .scope_closed and std.mem.eql(u8, event.status, "success")) saw_request_scope = true;
     }
     try std.testing.expect(handler_operation_id != null);
     try std.testing.expect(saw_boundary_correlation);
     try std.testing.expect(service_parent_id != null);
+    try std.testing.expect(saw_product_lineage);
     try std.testing.expect(saw_request_scope);
     try std.testing.expect(runtime.graphSummary().records > 0);
     try runtime.shutdown();

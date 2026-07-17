@@ -1150,6 +1150,12 @@ pub const skill =
     \\  workflow, statechart and artifact facts; they record automatically.
     \\  Application code adds only genuinely domain-specific typed events. Use
     \\  typed statecharts for inspectable control and durable workflows for replay.
+    \\- For a product, order, tenant, user or workflow identity that must be
+    \\  queryable, declare a privacy-classified `zstd.Lineage.Key` and scope the
+    \\  owning effect with `.track(Key, value)`. Never pass lineage references
+    \\  through business APIs or add baggage manually; runtime and gRPC adapters
+    \\  propagate opaque references. Tests prove raw values are absent. Authorized
+    \\  queries use `runtime.lineageReference` and `runtime.graphLineageJsonAlloc`.
     \\- Compose typed decisions with `zstd.Statechart.Effect.layer`/`step`,
     \\  journals with `zstd.Workflow.journalLayer`/`append`, direct workflow
     \\  interpretation with `zstd.Workflow.execution`, and process signals with

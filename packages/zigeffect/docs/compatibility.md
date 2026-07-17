@@ -8,7 +8,7 @@ not require a hosted service.
 | Zig | `>= 0.16.0`, `< 0.17.0` |
 | zigeffect CLI | `0.7.0` |
 | project manifest | `zigeffect.project.v1` |
-| scaffold template | `zigeffect.scaffold-template.v1`, version `10` |
+| scaffold template | `zigeffect.scaffold-template.v1`, version `16` |
 | core API | `0.1.x` |
 | zigeffect-std API | `0.1.x` |
 | local causal graph | `zigeffect.causal.local-graph-record.v1` under the manifest-owned graph path |
@@ -70,6 +70,16 @@ root layer through that managed runtime using the `TestContext` causal store.
 Its receipt maps assertion references to durable graph IDs, fresh graph
 status/since queries return a read-only zero baseline, and application-map v2
 joins live topology to validated manifest intent and exact agent commands.
+
+Template version `15` removes application-owned causal plumbing from generated
+gRPC roots and agent guidance. Applications compose one runtime and write
+business effects; runtime and transport adapters own recording, graph storage,
+correlation and shutdown.
+
+Template version `16` teaches typed data lineage in every generated agent
+skill: declare `zstd.Lineage.Key`, annotate only the owning effect with `.track`,
+and leave fiber inheritance, durable querying, gRPC baggage and optional OTEL
+projection to the runtime and standard adapters.
 
 Template version `14` makes production roots compose config, environment
 secrets, process signals, HTTP, Postgres, and OTLP as canonical layers. One

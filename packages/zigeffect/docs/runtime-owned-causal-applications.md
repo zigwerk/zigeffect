@@ -62,6 +62,27 @@ the effect/service/scope path; the HTTP, gRPC and repository adapters record
 their boundaries automatically. Stable effect and service names provide domain
 meaning without mirrored `recordCausal` calls.
 
+When a particular business identity must be queryable across that structure,
+scope the business effect with a typed marker:
+
+```zig
+const ProductId = zstd.Lineage.Key([]const u8, .{
+    .name = "commerce.product.id",
+    .privacy = .internal,
+    .propagation = .distributed,
+    .export_policy = .otel,
+});
+
+try runtime.run(createOrder(command).track(ProductId, command.product_id));
+```
+
+This is the only application annotation. It declares that a value has domain
+identity; it does not manipulate a store, graph, span or header. The runtime
+projects the value to an opaque project-scoped reference, carries it through
+effects and fibers, persists it in NenDB, propagates it through standard gRPC
+adapters, and exports it to OTEL only when the key opts in. See
+[typed data lineage](typed-data-lineage.md).
+
 For infrastructure applications the same rule becomes:
 
 ```zig

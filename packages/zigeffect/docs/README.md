@@ -13,10 +13,12 @@ identify migration debt or explain low-level compatibility internals.
 1. [Usage](usage.md) — authoritative application-facing API guide.
 2. [Runtime-owned causal applications](runtime-owned-causal-applications.md) —
    what the runtime, adapters, applications and tests each own.
-3. [Compositional applications](compositional-applications.md) — services,
+3. [Typed data lineage](typed-data-lineage.md) — mark domain identities once;
+   inherit them through fibers, graphs, gRPC and optional OTEL export.
+4. [Compositional applications](compositional-applications.md) — services,
    fluent effects, layers, one runtime, and application inspection.
-4. [Module pattern](module-pattern.md) — organizing larger capabilities.
-5. [Architecture](architecture.md) — source ownership and import direction.
+5. [Module pattern](module-pattern.md) — organizing larger capabilities.
+6. [Architecture](architecture.md) — source ownership and import direction.
 
 ## Build applications
 

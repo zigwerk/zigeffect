@@ -32,7 +32,7 @@ zig build causal-schema-governance -- --format json
   "current_core_schema": "zigeffect.causal.v1",
   "current_core_schema_version": 1,
   "current_event_taxonomy_version": 1,
-  "schema_count": 36,
+  "schema_count": 45,
   "policy": {
     "versioning": "schema names artifact family; schema_version tracks family shape; event_taxonomy_version tracks event-kind role semantics",
     "migration": "legacy core artifacts remain readable; strict governance artifacts fail closed; rewrite tooling is deferred until a real v2 exists",
@@ -110,6 +110,16 @@ zig build causal-schema-governance -- --format json
       "governance_requirements": ["NenDB adapter tests", "durable history report tests", "docs"]
     },
     {
+      "schema": "zigeffect.causal.local-graph-lineage.v1",
+      "version": 1,
+      "category": "app-runtime",
+      "status": "current",
+      "emitted_by": ["zstd.CausalGraph.LocalDatabase"],
+      "consumed_by": ["guarded application endpoints", "agents"],
+      "compatibility": ["bounded-query-contract", "opaque-reference-only"],
+      "governance_requirements": ["durable pagination tests", "raw-value absence tests", "docs"]
+    },
+    {
       "schema": "zigeffect.causal.app-runtime.v1",
       "version": 1,
       "category": "app-runtime",
@@ -178,6 +188,86 @@ zig build causal-schema-governance -- --format json
       "consumed_by": ["agents", "causal-dev-agent", "future workbench graph slices", "cross-run comparison"],
       "compatibility": ["strict-v1", "record-only", "bounded cross-run comparison"],
       "governance_requirements": ["agent query tests", "bounded response tests", "cross-run comparison tests", "policy metadata docs"]
+    },
+    {
+      "schema": "zigeffect.causal.semantic-diff.v1",
+      "version": 1,
+      "category": "agent-evidence",
+      "status": "current",
+      "emitted_by": ["formatCausalGraphDiffJson"],
+      "consumed_by": ["causal-workbench", "agent evals", "dev-loop artifacts", "agents"],
+      "compatibility": ["strict-v1", "record-only", "workbench-readable"],
+      "governance_requirements": ["diff formatter tests", "workbench parser tests", "docs"]
+    },
+    {
+      "schema": "zigeffect.causal.agent-eval-diff.v1",
+      "version": 1,
+      "category": "agent-evidence",
+      "status": "current",
+      "emitted_by": ["runAgentEvalWithDiffArtifact"],
+      "consumed_by": ["agents", "dev-loop artifacts", "causal-workbench"],
+      "compatibility": ["strict-v1", "record-only", "remediation-linked"],
+      "governance_requirements": ["eval artifact tests", "embedded diff tests", "docs"]
+    },
+    {
+      "schema": "zigeffect.causal.agent-eval-diff-link.v1",
+      "version": 1,
+      "category": "agent-evidence",
+      "status": "current",
+      "emitted_by": ["formatAgentEvalDiffArtifactLinkJson"],
+      "consumed_by": ["remediation chains", "agents", "dev-loop artifacts"],
+      "compatibility": ["strict-v1", "record-only", "artifact-reference"],
+      "governance_requirements": ["link formatter tests", "remediation id tests", "docs"]
+    },
+    {
+      "schema": "zigeffect.causal.agent-eval-linked-manifest.v1",
+      "version": 1,
+      "category": "agent-evidence",
+      "status": "current",
+      "emitted_by": ["formatAgentEvalLinkedDiffManifestJson"],
+      "consumed_by": ["dev-loop artifacts", "remediation chains", "agents"],
+      "compatibility": ["strict-v1", "record-only", "artifact-reference"],
+      "governance_requirements": ["manifest formatter tests", "artifact path tests", "docs"]
+    },
+    {
+      "schema": "zigeffect.causal.ops-artifact-response.v1",
+      "version": 1,
+      "category": "operations",
+      "status": "current",
+      "emitted_by": ["formatCausalOpsArtifactResponseJson"],
+      "consumed_by": ["operators", "agents", "future served artifact endpoint"],
+      "compatibility": ["strict-v1", "policy-gated", "redacted"],
+      "governance_requirements": ["access tests", "redaction tests", "docs"]
+    },
+    {
+      "schema": "zigeffect.causal.ops-runbook.v1",
+      "version": 1,
+      "category": "operations",
+      "status": "current",
+      "emitted_by": ["formatCausalOpsRunbookJson"],
+      "consumed_by": ["operators", "agents"],
+      "compatibility": ["strict-v1", "record-only", "redacted"],
+      "governance_requirements": ["runbook formatter tests", "redaction tests", "docs"]
+    },
+    {
+      "schema": "zigeffect.causal.ops-alert-delivery.v1",
+      "version": 1,
+      "category": "operations",
+      "status": "current",
+      "emitted_by": ["formatCausalOpsAlertDeliveryJson"],
+      "consumed_by": ["external alert adapters", "operators", "agents"],
+      "compatibility": ["strict-v1", "redacted", "delivery-adapter-ready"],
+      "governance_requirements": ["delivery envelope tests", "redaction tests", "docs"]
+    },
+    {
+      "schema": "zigeffect.causal.runner-lineage.v1",
+      "version": 1,
+      "category": "cluster",
+      "status": "current",
+      "emitted_by": ["formatCausalRunnerLineageJson"],
+      "consumed_by": ["agents", "operators", "future multi-runner deployment tooling"],
+      "compatibility": ["strict-v1", "record-only", "deployment-metadata"],
+      "governance_requirements": ["lineage artifact tests", "deployment metadata tests", "docs"]
     },
     {
       "schema": "zigeffect.causal.test-matrix.v1",

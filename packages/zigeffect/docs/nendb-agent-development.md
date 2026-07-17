@@ -23,7 +23,7 @@ makes checked runtime shutdown fail.
 ## One discovery query
 
 `runtime.agentMapJsonAlloc` returns
-`zigeffect.agent.application-map.v2`. A guarded
+`zigeffect.agent.application-map.v5`. A guarded
 `zigeffect-http.ApplicationMapHandler` exposes the same document without
 creating another model. It contains:
 
@@ -31,7 +31,8 @@ creating another model. It contains:
 - lifecycle, unresolved fibers, findings, and bounded recent semantic events;
 - embedded NenDB summary and exact engine provenance;
 - durable-write health and incomplete-evidence counters; and
-- the supported `since`, event, and child query vocabulary plus ID spaces.
+- the supported `since`, event, child, path and typed-lineage query vocabulary
+  plus ID spaces.
 
 The route must be authenticated and response-bounded. It must not expose raw
 payloads, credentials, personal data, or an arbitrary graph filesystem path.
@@ -54,6 +55,11 @@ payloads, credentials, personal data, or an arbitrary graph filesystem path.
    zigeffect graph event <durable-event-id> --json
    zigeffect graph children <durable-event-id> --json
    ```
+
+   For an authorized domain-value lookup, derive its opaque typed reference
+   inside the application with `runtime.lineageReference(Key, value)`, then page
+   `runtime.graphLineageJsonAlloc`. Continue from `next_after_event_id` whenever
+   the result is truncated; raw identity values never enter the query result.
 
    Assertion IDs are directly queryable only when the receipt declares
    `causal_event_id_space: "graph_durable"` and a non-zero

@@ -120,6 +120,15 @@ the handler effects without an opt-in recorder path. Incoming `x-request-id`
 and W3C `traceparent` values become bounded numeric correlation keys; their raw
 header values, credentials, metadata, and payloads are not retained.
 
+Effects scoped with `zstd.Lineage.Key` are also transport-transparent.
+`zstd.Grpc.call` writes distributed opaque references to the reserved bounded
+`zigeffect-lineage` W3C baggage member. Generated handlers install that context
+before invoking business effects, so services, child fibers and downstream
+calls remain on the same product/order/tenant slice. Raw identity values never
+enter metadata, causal records or OTEL; graph-only versus OTEL export is chosen
+by the typed key. Malformed or duplicate reserved baggage fails closed. See the
+[typed data lineage guide](../zigeffect/docs/typed-data-lineage.md).
+
 Manual `init`/`deinit` remains the driver API for focused adapter work.
 `Typed.GeneratedDriverBinding` is the explicitly low-level generated adapter;
 ordinary application code should start with `Application.layer` and

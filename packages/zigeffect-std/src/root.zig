@@ -36,6 +36,7 @@ pub const FileSystem = @import("filesystem/root.zig");
 pub const Workspace = @import("workspace/root.zig");
 pub const Process = @import("process/root.zig");
 pub const Observability = @import("observability/root.zig");
+pub const Lineage = fx.Lineage;
 pub const Testing = @import("testing/root.zig");
 pub const Sql = @import("sql/root.zig");
 pub const Http = @import("http/root.zig");
@@ -118,6 +119,8 @@ test "root system primitive boundaries expose canonical effects and services" {
 
 test "root exports durable causal graph database" {
     const zstd = @import("root.zig");
+    try std.testing.expect(@hasDecl(zstd, "Lineage"));
+    try std.testing.expect(@hasDecl(zstd.Lineage, "Key"));
     try std.testing.expect(@hasDecl(zstd.CausalGraph, "LocalDatabase"));
     try std.testing.expect(@hasDecl(zstd.CausalGraph, "Snapshot"));
     try std.testing.expect(@hasDecl(zstd, "ManagedRuntime"));

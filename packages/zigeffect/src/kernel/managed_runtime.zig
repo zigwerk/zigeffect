@@ -106,6 +106,7 @@ pub fn ManagedRuntime(comptime RootLayer: type) type {
             }
 
             const startup_run_id = causal_store.nextRunId();
+            core.application_scope.setCausalContext(options.causal_context);
             core.application_scope.attachRuntimeSignal(core.signalSink(), startup_run_id, null, null, null);
             var context = RuntimeContext{
                 .core = core,
