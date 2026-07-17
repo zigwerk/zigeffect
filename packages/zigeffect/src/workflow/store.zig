@@ -509,7 +509,7 @@ pub const JournalStore = struct {
 pub const CausalJournalStore = struct {
     allocator: Allocator,
     inner: JournalStore,
-    causal_store: *CausalStore,
+    causal_recorder: causal_mod.CausalRecorder,
     run_id: ?u64 = null,
     sequence_ids: std.ArrayList(CausalJournalSequenceId) = .empty,
 
@@ -519,10 +519,19 @@ pub const CausalJournalStore = struct {
         causal_store: *CausalStore,
         run_id: ?u64,
     ) CausalJournalStore {
+        return initRecorder(allocator, inner, causal_mod.CausalRecorder.fromStore(causal_store), run_id);
+    }
+
+    pub fn initRecorder(
+        allocator: Allocator,
+        inner: JournalStore,
+        causal_recorder: causal_mod.CausalRecorder,
+        run_id: ?u64,
+    ) CausalJournalStore {
         return .{
             .allocator = allocator,
             .inner = inner,
-            .causal_store = causal_store,
+            .causal_recorder = causal_recorder,
             .run_id = run_id,
         };
     }
@@ -582,7 +591,7 @@ pub const CausalJournalStore = struct {
         if (event.parent_sequence) |parent_sequence| {
             mapped.parent_id = self.causalIdForSequence(parent_sequence) orelse parent_sequence;
         }
-        const causal_id = try self.causal_store.record(mapped);
+        const causal_id = try self.causal_recorder.record(mapped);
         self.sequence_ids.appendAssumeCapacity(.{
             .workflow_sequence = event.sequence,
             .causal_id = causal_id,

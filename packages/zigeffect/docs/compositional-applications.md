@@ -27,12 +27,6 @@ pub fn find(id: u64) Find {
         fn run(value: u64, ctx: *Find.Context) error{NotFound}!u64 {
             const orders = ctx.service(Orders);
             if (value < orders.first_id) return error.NotFound;
-            _ = ctx.recordCausal(.{
-                .kind = .activity_completed,
-                .service_key = Orders.service_key,
-                .label = "Orders.find",
-                .status = "success",
-            });
             return value;
         }
     }.run);
@@ -43,6 +37,13 @@ The tag is the dependency identity. The API is the replaceable implementation
 contract. The operation returns a lazy effect whose service and error types are
 visible to the compiler. Live and fake layers can replace `OrdersApi` without
 changing `find` or any program built from it.
+
+There is no causal call in the operation. The managed runtime already records
+the named effect, service resolution, fibers, scopes, failures and traces.
+Reusable framework and transport adapters may derive a recording-only
+`kernel.CausalRecorder` when they must add domain boundary semantics after an
+effect returns; application business logic never receives the store and does
+not reconstruct runtime events.
 
 ## Programs compose without an interpreter
 

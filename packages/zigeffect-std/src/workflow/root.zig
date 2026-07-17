@@ -14,6 +14,60 @@ pub fn journalLayer(store: fx.workflow.JournalStore) @TypeOf(kernel.Layer.succee
     return kernel.Layer.succeed(Journal, .{ .store = store });
 }
 
+/// Effect-derived durable workflow interpreter. Application code supplies a
+/// journal and statechart decisions; the standard library automatically joins
+/// journal, statechart and runtime lineage in the causal graph.
+pub const Execution = struct {
+    allocator: std.mem.Allocator,
+    inner: fx.workflow.JournalStore,
+    recorder: fx.kernel.CausalRecorder,
+    decorated: fx.workflow.CausalJournalStore,
+
+    pub fn init(ctx: anytype, allocator: std.mem.Allocator, inner: fx.workflow.JournalStore) Execution {
+        const recorder = ctx.causalRecorder();
+        return .{
+            .allocator = allocator,
+            .inner = inner,
+            .recorder = recorder,
+            .decorated = fx.workflow.CausalJournalStore.initRecorder(allocator, inner, recorder, null),
+        };
+    }
+
+    pub fn deinit(self: *Execution) void {
+        self.decorated.deinit();
+        self.* = undefined;
+    }
+
+    pub fn journal(self: *Execution) fx.workflow.JournalStore {
+        return self.decorated.asJournalStore();
+    }
+
+    pub fn latestEventId(self: *const Execution) ?u64 {
+        return self.decorated.latestCausalId();
+    }
+
+    pub fn decision(
+        self: *Execution,
+        comptime DefinitionType: type,
+        definition: *const DefinitionType,
+        value: anytype,
+        parent_id: ?u64,
+    ) !u64 {
+        return fx.statechart.recordDecision(
+            DefinitionType,
+            self.recorder,
+            self.allocator,
+            definition,
+            value,
+            self.latestEventId() orelse parent_id,
+        );
+    }
+};
+
+pub fn execution(ctx: anytype, allocator: std.mem.Allocator, journal: fx.workflow.JournalStore) Execution {
+    return Execution.init(ctx, allocator, journal);
+}
+
 const AppendProgram = kernel.Effect(fx.workflow.JournalSequence, fx.workflow.JournalStoreAppendError, .{Journal}).Stateful(fx.workflow.JournalAppend);
 pub fn append(request: fx.workflow.JournalAppend) AppendProgram {
     return AppendProgram.init(request, struct {

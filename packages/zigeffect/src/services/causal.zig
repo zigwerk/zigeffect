@@ -42,16 +42,45 @@ pub const CausalStoreOptions = struct {
 
 /// Narrow, copyable capability for boundary adapters that must emit semantic
 /// facts after their layer has been acquired. It exposes recording only—not
-/// store ownership, snapshots, retention controls, or backend lifecycle.
+/// store ownership, snapshots, retention controls, or backend lifecycle. The
+/// captured lineage keeps later adapter events attached to the effect that
+/// handed out the recorder without retaining a live ContextView.
 pub const CausalRecorder = struct {
+    pub const Lineage = struct {
+        run_id: ?u64 = null,
+        parent_id: ?u64 = null,
+        fiber_id: ?u64 = null,
+        scope_id: ?u64 = null,
+        trace_id: ?u64 = null,
+        span_id: ?u64 = null,
+        context: CausalContextV2 = .{},
+    };
+
     store: *CausalStore,
+    lineage: Lineage = .{},
 
     pub fn fromStore(store: *CausalStore) CausalRecorder {
         return .{ .store = store };
     }
 
+    pub fn withLineage(store: *CausalStore, lineage: Lineage) CausalRecorder {
+        return .{ .store = store, .lineage = lineage };
+    }
+
     pub fn record(self: CausalRecorder, event: CausalEvent) Allocator.Error!u64 {
-        return self.store.record(event);
+        var enriched = event;
+        enriched.run_id = enriched.run_id orelse self.lineage.run_id;
+        enriched.parent_id = enriched.parent_id orelse self.lineage.parent_id;
+        enriched.fiber_id = enriched.fiber_id orelse self.lineage.fiber_id;
+        enriched.scope_id = enriched.scope_id orelse self.lineage.scope_id;
+        enriched.trace_id = enriched.trace_id orelse self.lineage.trace_id;
+        enriched.span_id = enriched.span_id orelse self.lineage.span_id;
+        enriched.context = CausalContextV2.merge(self.lineage.context, enriched.context);
+        enriched.context.trace_id_low = enriched.context.trace_id_low orelse enriched.trace_id;
+        enriched.context.span_id = enriched.context.span_id orelse enriched.span_id;
+        enriched.trace_id = enriched.trace_id orelse enriched.context.trace_id_low;
+        enriched.span_id = enriched.span_id orelse enriched.context.span_id;
+        return self.store.record(enriched);
     }
 };
 
@@ -2145,4 +2174,37 @@ pub fn formatCausalDot(allocator: Allocator, store: *const CausalStore) Allocato
     try appendCausalDotGraphFooter(&output, allocator);
 
     return output.toOwnedSlice(allocator);
+}
+
+test "recording capability preserves captured runtime lineage" {
+    var store = CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+    const recorder = CausalRecorder.withLineage(&store, .{
+        .run_id = 41,
+        .parent_id = 42,
+        .fiber_id = 43,
+        .scope_id = 44,
+        .trace_id = 45,
+        .span_id = 46,
+        .context = .{ .project_id = 47, .component_id = 48 },
+    });
+
+    _ = try recorder.record(.{
+        .kind = .span_recorded,
+        .label = "adapter.boundary",
+        .status = "success",
+    });
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 1), snapshot.events.len);
+    const event = snapshot.events[0];
+    try std.testing.expectEqual(@as(?u64, 41), event.run_id);
+    try std.testing.expectEqual(@as(?u64, 42), event.parent_id);
+    try std.testing.expectEqual(@as(?u64, 43), event.fiber_id);
+    try std.testing.expectEqual(@as(?u64, 44), event.scope_id);
+    try std.testing.expectEqual(@as(?u64, 45), event.trace_id);
+    try std.testing.expectEqual(@as(?u64, 46), event.span_id);
+    try std.testing.expectEqual(@as(?u64, 47), event.context.project_id);
+    try std.testing.expectEqual(@as(?u64, 48), event.context.component_id);
 }

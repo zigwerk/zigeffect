@@ -193,9 +193,19 @@ pub fn ContextView(comptime Requirements: anytype) type {
 
         /// Derive a recording-only capability for long-lived transport and
         /// platform adapters acquired by a layer. The managed runtime retains
-        /// ownership of the store and its durable backend.
+        /// ownership of the store and its durable backend. Captured lineage
+        /// keeps adapter facts joined to this effect after the context itself
+        /// leaves the call stack.
         pub fn causalRecorder(self: *const Self) causal_mod.CausalRecorder {
-            return causal_mod.CausalRecorder.fromStore(self.runtime_context.core.causal_store);
+            return causal_mod.CausalRecorder.withLineage(self.runtime_context.core.causal_store, .{
+                .run_id = self.runtime_context.causal_run_id,
+                .parent_id = self.runtime_context.causal_parent_id,
+                .fiber_id = self.runtime_context.fiber_id,
+                .scope_id = self.runtime_context.scope.causal_scope_id,
+                .trace_id = self.runtime_context.scope.causal_trace_id,
+                .span_id = self.runtime_context.scope.causal_span_id,
+                .context = self.runtime_context.causal_context,
+            });
         }
 
         /// Derive a reusable interpreter handle limited to this effect's

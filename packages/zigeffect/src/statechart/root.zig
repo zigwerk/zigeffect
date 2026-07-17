@@ -93,6 +93,7 @@ pub const MutationKind = mutation.MutationKind;
 pub const MutationCatalog = mutation.MutationCatalog;
 pub const mapDecisionToCausal = causal.mapDecisionToCausal;
 pub const recordDecisionCausal = causal.recordDecisionCausal;
+pub const recordDecision = causal.recordDecision;
 pub const deinitMappedCausalEvent = causal.deinitMappedCausalEvent;
 
 test {

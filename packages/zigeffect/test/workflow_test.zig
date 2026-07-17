@@ -2757,7 +2757,7 @@ test "workflow context records and replays failed u64 activities" {
     try std.testing.expectEqualStrings("exit.cause.failure:Declined", events.events[3].redacted_detail);
 }
 
-test "workflow context retries failed activities with clock and causal decisions" {
+test "workflow context recorder preserves retry schedule decisions" {
     const Payload = struct {
         account_id: u64,
     };
@@ -2815,7 +2815,7 @@ test "workflow context retries failed activities with clock and causal decisions
             .workflow_id = 7,
             .execution_id = 8,
             .clock = &clock,
-            .causal_store = &causal,
+            .causal_recorder = fx.kernel.CausalRecorder.withLineage(&causal, .{ .run_id = 1 }),
             .causal_run_id = 1,
         });
         defer context.deinit();
@@ -2831,7 +2831,7 @@ test "workflow context retries failed activities with clock and causal decisions
             .workflow_id = 7,
             .execution_id = 8,
             .clock = &clock,
-            .causal_store = &causal,
+            .causal_recorder = fx.kernel.CausalRecorder.withLineage(&causal, .{ .run_id = 1 }),
             .causal_run_id = 1,
         });
         defer context.deinit();

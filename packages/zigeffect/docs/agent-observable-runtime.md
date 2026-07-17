@@ -118,6 +118,13 @@ executable proof rather than a manual event-array search. The development
 workflow is documented in
 [Proof-carrying development plane](proof-carrying-development-plane.md).
 
+Framework adapters that add protocol or domain semantics use the copyable
+recording-only `kernel.CausalRecorder` obtained from an effect context. It
+captures run, parent, fiber, scope, trace, span and typed causal context but
+cannot inspect, configure or release the runtime-owned store. Application code
+therefore stays as services, effects, layers and business policy; tests alone
+may inject a controlled store for assertions and proof publication.
+
 The production-hardening direction is tracked separately in
 [roadmap.md](roadmap.md). It stays record-only and never assumes zigeffect can
 mutate production systems or enforce live RBAC.

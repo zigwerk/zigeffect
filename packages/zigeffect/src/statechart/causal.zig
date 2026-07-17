@@ -63,6 +63,21 @@ pub fn recordDecisionCausal(
     return store.record(event);
 }
 
+/// Record a decision through a runtime-derived, recording-only capability so
+/// workflow adapters retain active causal lineage without receiving a store.
+pub fn recordDecision(
+    comptime DefinitionType: type,
+    recorder: causal_mod.CausalRecorder,
+    allocator: Allocator,
+    definition: *const DefinitionType,
+    decision: *const machine_mod.Machine(DefinitionType).Decision,
+    parent_id: ?u64,
+) Allocator.Error!u64 {
+    var event = try mapDecisionToCausal(DefinitionType, allocator, definition, decision, parent_id);
+    defer deinitMappedCausalEvent(allocator, &event);
+    return recorder.record(event);
+}
+
 pub fn deinitMappedCausalEvent(allocator: Allocator, event: *CausalEvent) void {
     freeText(allocator, event.artifact_id);
     freeText(allocator, event.domain_entity_ref);

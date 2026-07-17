@@ -48,6 +48,7 @@ pub const WorkflowContextOptions = struct {
     execution_id: ExecutionId,
     clock: ?*Clock = null,
     causal_store: ?*CausalStore = null,
+    causal_recorder: ?causal_mod.CausalRecorder = null,
     causal_run_id: ?u64 = null,
 };
 
@@ -57,7 +58,7 @@ pub const WorkflowContext = struct {
     workflow_id: WorkflowId,
     execution_id: ExecutionId,
     clock: ?*Clock,
-    causal_store: ?*CausalStore,
+    causal_recorder: ?causal_mod.CausalRecorder,
     causal_run_id: ?u64,
     causal_journal_store: ?*CausalJournalStore = null,
     next_sequence: JournalSequence,
@@ -72,23 +73,27 @@ pub const WorkflowContext = struct {
         else
             replay_events.events[replay_events.events.len - 1].sequence + 1;
 
+        const recorder = options.causal_recorder orelse if (options.causal_store) |store|
+            causal_mod.CausalRecorder.fromStore(store)
+        else
+            null;
         var context = WorkflowContext{
             .allocator = allocator,
             .journal_store = journal_store,
             .workflow_id = options.workflow_id,
             .execution_id = options.execution_id,
             .clock = options.clock,
-            .causal_store = options.causal_store,
+            .causal_recorder = recorder,
             .causal_run_id = options.causal_run_id,
             .next_sequence = next_sequence,
             .replay_events = replay_events,
         };
-        if (options.causal_store) |causal_store| {
+        if (recorder) |causal_recorder| {
             const causal_journal_store = try allocator.create(CausalJournalStore);
-            causal_journal_store.* = CausalJournalStore.init(
+            causal_journal_store.* = CausalJournalStore.initRecorder(
                 allocator,
                 journal_store,
-                causal_store,
+                causal_recorder,
                 options.causal_run_id,
             );
             context.causal_journal_store = causal_journal_store;
@@ -824,8 +829,8 @@ pub const WorkflowContext = struct {
         status: []const u8,
         detail: []const u8,
     ) void {
-        const store = self.causal_store orelse return;
-        _ = store.record(.{
+        const recorder = self.causal_recorder orelse return;
+        _ = recorder.record(.{
             .kind = .schedule_decision,
             .run_id = self.causal_run_id,
             .label = schedule.labelOrKind(),
