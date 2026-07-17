@@ -5,6 +5,39 @@ const owned = zgraphy.Memory;
 
 const CommandProgram = zstd.fx.kernel.Effect(void, anyerror, .{zgraphy.Application.ApplicationInputs});
 
+const command_identities = [_]struct { token: []const u8, label: []const u8 }{
+    .{ .token = "init", .label = "init" },
+    .{ .token = "build", .label = "build" },
+    .{ .token = "ingest", .label = "ingest" },
+    .{ .token = "status", .label = "status" },
+    .{ .token = "doctor", .label = "doctor" },
+    .{ .token = "watch", .label = "watch" },
+    .{ .token = "gc", .label = "gc" },
+    .{ .token = "pin", .label = "pin" },
+    .{ .token = "unpin", .label = "unpin" },
+    .{ .token = "query", .label = "query" },
+    .{ .token = "explain", .label = "explain" },
+    .{ .token = "path", .label = "path" },
+    .{ .token = "parity", .label = "parity" },
+    .{ .token = "schema", .label = "schema" },
+    .{ .token = "contracts", .label = "contracts" },
+    .{ .token = "security", .label = "security" },
+    .{ .token = "evaluation", .label = "evaluation" },
+};
+
+const benchmark_identities = [_]struct { token: []const u8, label: []const u8 }{
+    .{ .token = "corpus", .label = "benchmark.corpus" },
+    .{ .token = "lexical", .label = "benchmark.lexical" },
+    .{ .token = "zgraphy", .label = "benchmark.zgraphy" },
+    .{ .token = "graphify", .label = "benchmark.graphify" },
+    .{ .token = "matrix", .label = "benchmark.matrix" },
+    .{ .token = "workload", .label = "benchmark.workload" },
+    .{ .token = "resources", .label = "benchmark.resources" },
+    .{ .token = "freshness", .label = "benchmark.freshness" },
+    .{ .token = "churn", .label = "benchmark.churn" },
+    .{ .token = "performance", .label = "benchmark.performance" },
+};
+
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     if (args.len < 2 or isHelp(args[1])) {
@@ -24,44 +57,44 @@ pub fn main(init: std.process.Init) !void {
         .{ .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 4096, .max_wal_bytes = 16 * 1024 * 1024 } },
     );
     defer runtime.deinit();
-    try runtime.run(zstd.Application.Lifecycle.start());
-    try runtime.run(zstd.Application.Lifecycle.ready());
-    runtime.run(commandEffect()) catch |failure| {
-        runtime.run(zstd.Application.Lifecycle.drain()) catch {};
-        runtime.run(zstd.Application.Lifecycle.stop()) catch {};
-        return failure;
+    const command = commandIdentity(args);
+    var command_failure: ?anyerror = null;
+    runtime.run(zstd.Application.Lifecycle.start()) catch |failure| {
+        command_failure = failure;
     };
-    var application = try runtime.inspect(init.gpa, .{ .max_recent_events = 64 });
-    defer application.deinit();
-    if (application.services.len == 0) return error.InvalidApplicationSnapshot;
-    if (runtime.causalHealth().status != .healthy) return error.CausalRuntimeUnhealthy;
-    try runtime.run(zstd.Application.Lifecycle.drain());
-    try runtime.run(zstd.Application.Lifecycle.stop());
-    try runtime.shutdown();
+    if (command_failure == null) runtime.run(zstd.Application.Lifecycle.ready()) catch |failure| {
+        command_failure = failure;
+    };
+    if (command_failure == null) runtime.run(commandEffect().named(command)) catch |failure| {
+        command_failure = failure;
+    };
+
+    if (zgraphy.Application.checkedCleanup(&runtime, init.gpa)) |failure| return failure;
+    if (command_failure) |failure| return failure;
 }
 
 fn commandEffect() CommandProgram {
     return CommandProgram.fromFn(struct {
         fn run(ctx: *CommandProgram.Context) anyerror!void {
             const value = ctx.service(zgraphy.Application.ApplicationInputs);
-            const command = value.args[1];
-            dispatch(ctx.allocator(), value.io, value.root, value.args) catch |failure| {
-                _ = ctx.recordCausal(.{
-                    .kind = .activity_completed,
-                    .label = "zgraphy.cli",
-                    .status = "failure",
-                    .redacted_detail = @errorName(failure),
-                });
-                return failure;
-            };
-            _ = ctx.recordCausal(.{
-                .kind = .activity_completed,
-                .label = command,
-                .status = "success",
-                .redacted_detail = "zgraphy-cli-command",
-            });
+            try dispatch(ctx.allocator(), value.io, value.root, value.args);
         }
     }.run);
+}
+
+fn commandIdentity(args: []const []const u8) []const u8 {
+    if (args.len < 2) return "invalid-command";
+    if (std.mem.eql(u8, args[1], "benchmark")) {
+        const subcommand = positional(args, 0) orelse "corpus";
+        for (benchmark_identities) |identity| {
+            if (std.mem.eql(u8, subcommand, identity.token)) return identity.label;
+        }
+        return "benchmark.invalid";
+    }
+    for (command_identities) |identity| {
+        if (std.mem.eql(u8, args[1], identity.token)) return identity.label;
+    }
+    return "invalid-command";
 }
 
 fn dispatch(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8) !void {

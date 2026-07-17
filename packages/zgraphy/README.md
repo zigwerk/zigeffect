@@ -247,6 +247,17 @@ knowledge. Applications connect the two with a stable source reference:
 
 ```zig
 const zgraphy = @import("zgraphy");
+const zstd = @import("zigeffect_std");
+
+const application_layer = appLayer.merge(zgraphy.ZigEffectBridge.liveLayer());
+var runtime = try zstd.ManagedRuntime(@TypeOf(application_layer)).make(
+    allocator,
+    io,
+    root,
+    application_layer,
+    .{},
+);
+defer runtime.deinit();
 
 const source_ref = try zgraphy.ZigEffectBridge.sourceRefAlloc(
     allocator,
@@ -261,9 +272,13 @@ try runtime.run(zgraphy.ZigEffectBridge.linkEffect(.{
 }));
 ```
 
-On the next `zgraphy build`, the safe causal projection becomes a
-`causal_event` node with an `observed_at` edge to that exact source symbol. Raw
-payloads and terminal output are not imported.
+The owning adapter emits a typed `span_recorded` event with type
+`zgraphy.source.link`, the `SourceLinkEvents` service key, the supplied label,
+`observed` status, and the stable source reference in `domain_entity_ref`. On
+the next `zgraphy build`, the safe causal projection becomes a `causal_event`
+node with an `observed_at` edge to that exact source symbol. This is a domain
+event, not an application-authored completion mirror; raw payloads and terminal
+output are not imported.
 
 The public package exports a `RepositoryGraph` service/query effect for larger
 applications and an `ApplicationInputs` root layer for its own CLI. Every

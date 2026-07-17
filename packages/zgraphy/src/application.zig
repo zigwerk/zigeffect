@@ -49,29 +49,38 @@ pub const QueryRequest = struct {
 
 const QueryBase = kernel.Effect(search.Results, anyerror, .{RepositoryGraph});
 pub const QueryEffect = QueryBase.Stateful(QueryRequest);
+pub const QueryProgram = kernel.NamedEffect(QueryEffect);
 
-pub fn queryEffect(request: QueryRequest) QueryEffect {
+pub fn queryEffect(request: QueryRequest) QueryProgram {
     return QueryEffect.init(request, struct {
         fn run(value: QueryRequest, ctx: *QueryEffect.Context) anyerror!search.Results {
             const graph = ctx.service(RepositoryGraph).graph;
-            const results = search.queryAlloc(ctx.allocator(), graph, value.text, value.options) catch |failure| {
-                _ = ctx.recordCausal(.{
-                    .kind = .activity_completed,
-                    .service_key = RepositoryGraph.service_key,
-                    .label = "zgraphy.query",
-                    .status = "failure",
-                    .redacted_detail = @errorName(failure),
-                });
-                return failure;
-            };
-            _ = ctx.recordCausal(.{
-                .kind = .activity_completed,
-                .service_key = RepositoryGraph.service_key,
-                .label = "zgraphy.query",
-                .status = "success",
-                .redacted_detail = "bounded-hybrid-retrieval",
-            });
-            return results;
+            return search.queryAlloc(ctx.allocator(), graph, value.text, value.options);
         }
-    }.run);
+    }.run).named("zgraphy.query");
+}
+
+/// Completes the process boundary while the managed runtime is still live.
+/// Checked shutdown has precedence because a command result cannot be trusted
+/// when its causal evidence failed to flush durably.
+pub fn checkedCleanup(runtime: anytype, allocator: std.mem.Allocator) ?anyerror {
+    var infrastructure_failure: ?anyerror = null;
+    runtime.run(zstd.Application.Lifecycle.drain()) catch |failure| retainFirstFailure(&infrastructure_failure, failure);
+    runtime.run(zstd.Application.Lifecycle.stop()) catch |failure| retainFirstFailure(&infrastructure_failure, failure);
+
+    if (runtime.inspect(allocator, .{ .max_recent_events = 64 })) |application_value| {
+        var application = application_value;
+        defer application.deinit();
+        if (application.services.len == 0) retainFirstFailure(&infrastructure_failure, error.InvalidApplicationSnapshot);
+    } else |failure| {
+        retainFirstFailure(&infrastructure_failure, failure);
+    }
+    if (runtime.causalHealth().status != .healthy) retainFirstFailure(&infrastructure_failure, error.CausalRuntimeUnhealthy);
+
+    runtime.shutdown() catch |failure| return failure;
+    return infrastructure_failure;
+}
+
+fn retainFirstFailure(current: *?anyerror, failure: anyerror) void {
+    if (current.* == null) current.* = failure;
 }

@@ -38,6 +38,43 @@ const bridge_scenario = zstd.Testing.Scenario{
     .tags = &.{ "acceptance", "zigeffect", "causal", "source" },
 };
 
+const cli_causality_scenario = zstd.Testing.Scenario{
+    .id = "runtime-owned-cli-causality",
+    .label = "Runtime-owned command causality and checked cleanup cover success failure and help preflight",
+    .requirement = "req-runtime-owned-cli-causality",
+    .acceptance_check = "check-runtime-owned-cli-causality",
+    .component = "zgraphy",
+    .command = "test",
+    .default_seed = 1604,
+    .source_roots = &.{ "src/main.zig", "src/application.zig", "test/all_test.zig" },
+    .tags = &.{ "acceptance", "cli", "causal", "lifecycle", "shutdown", "deterministic" },
+};
+
+const CliSuccess = zstd.fx.kernel.Effect(void, error{}, .{});
+
+fn cliSuccess() CliSuccess {
+    return CliSuccess.fromFn(struct {
+        fn run(_: *CliSuccess.Context) error{}!void {}
+    }.run);
+}
+
+const CliFailure = zstd.fx.kernel.Effect(void, error{InjectedCommandFailure}, .{});
+
+fn cliFailure() CliFailure {
+    return CliFailure.fromFn(struct {
+        fn run(_: *CliFailure.Context) error{InjectedCommandFailure}!void {
+            return error.InjectedCommandFailure;
+        }
+    }.run);
+}
+
+fn hasCausalEvent(events: []const zstd.fx.CausalEvent, kind: zstd.fx.CausalEventKind, label: []const u8, status: []const u8) bool {
+    for (events) |event| {
+        if (event.kind == kind and std.mem.eql(u8, event.label, label) and std.mem.eql(u8, event.status, status)) return true;
+    }
+    return false;
+}
+
 test "zgraphy command application exposes a non-empty canonical root layer" {
     try std.testing.expectEqualStrings(".zgraphy/runtime/causal", zgraphy.Application.causal_graph_path);
     try std.testing.expectEqualStrings(".zigeffect/graph/causal-graph.jsonl", zgraphy.Indexer.causal_wal_path);
@@ -59,6 +96,218 @@ test "zgraphy command application exposes a non-empty canonical root layer" {
         if (std.mem.eql(u8, service.key, zstd.Application.Lifecycle.ProcessSignals.service_key)) has_signals = true;
     }
     try std.testing.expect(has_inputs and has_lifecycle and has_signals);
+}
+
+test "zgraphy runtime-owned CLI causality checks every outcome and help preflight" {
+    var evidence = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{
+        .project = "zgraphy",
+        .suite = "zgraphy-tests",
+        .scenario = cli_causality_scenario,
+        .seed = 1604,
+    });
+    defer evidence.deinit();
+    const assertions = zstd.Testing.AssertionRecorder.init(&evidence);
+
+    const main_source = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/main.zig", std.testing.allocator, .limited(2 * 1024 * 1024));
+    defer std.testing.allocator.free(main_source);
+    const application_source = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/application.zig", std.testing.allocator, .limited(256 * 1024));
+    defer std.testing.allocator.free(application_source);
+
+    try assertions.boolean(.{
+        .id = "zgraphy.cli.runtime-owned-recording",
+        .label = "CLI and query effects contain no application-authored causal completion mirrors",
+        .source = .{ .id = "zgraphy-main", .path = "src/main.zig", .line = 8, .column = 1 },
+        .repair_hint = "remove ctx.recordCausal and activity_completed mirrors from commandEffect and queryEffect",
+    }, std.mem.indexOf(u8, main_source, "ctx.recordCausal") == null and
+        std.mem.indexOf(u8, main_source, ".activity_completed") == null and
+        std.mem.indexOf(u8, application_source, "ctx.recordCausal") == null and
+        std.mem.indexOf(u8, application_source, ".activity_completed") == null);
+    try assertions.boolean(.{
+        .id = "zgraphy.cli.named-command",
+        .label = "the one dispatch effect is named from a bounded parsed command identity",
+        .repair_hint = "interpret commandEffect exactly once with Effect.named using the parsed command identity",
+    }, std.mem.indexOf(u8, main_source, "commandEffect().named(command)") != null);
+    try assertions.boolean(.{
+        .id = "zgraphy.cli.checked-cleanup",
+        .label = "command failure cannot bypass checked lifecycle cleanup and shutdown",
+        .repair_hint = "route both command outcomes through drain stop live health inspection and exactly one checked shutdown",
+    }, std.mem.indexOf(u8, main_source, "Lifecycle.drain()) catch {}") == null and
+        std.mem.indexOf(u8, main_source, "Lifecycle.stop()) catch {}") == null and
+        std.mem.count(u8, application_source, "runtime.shutdown()") == 1 and
+        std.mem.indexOf(u8, main_source, ".shutdown()") == null);
+
+    const cleanup_precedence = std.mem.indexOf(u8, main_source, "if (zgraphy.Application.checkedCleanup") orelse return error.MissingCheckedCleanup;
+    const command_precedence = std.mem.indexOf(u8, main_source, "if (command_failure) |failure| return failure") orelse return error.MissingCommandFailureReturn;
+    try assertions.boolean(.{
+        .id = "zgraphy.cli.infrastructure-precedence",
+        .label = "checked cleanup and shutdown failure takes precedence over a command failure",
+        .repair_hint = "return checkedCleanup failure before returning the retained named-command failure",
+    }, cleanup_precedence < command_precedence);
+
+    const top_level_commands = [_][]const u8{
+        "init", "build", "ingest", "status", "doctor", "watch", "gc", "pin", "unpin", "query", "explain", "path", "parity", "schema", "contracts", "security", "evaluation", "benchmark",
+    };
+    const benchmark_commands = [_][]const u8{
+        "corpus", "lexical", "zgraphy", "graphify", "matrix", "workload", "resources", "freshness", "churn", "performance",
+    };
+    var dispatch_parity = true;
+    for (top_level_commands) |name| {
+        const dispatch_needle = try std.fmt.allocPrint(std.testing.allocator, "command, \"{s}\"", .{name});
+        defer std.testing.allocator.free(dispatch_needle);
+        const help_needle = try std.fmt.allocPrint(std.testing.allocator, "zgraphy {s}", .{name});
+        defer std.testing.allocator.free(help_needle);
+        const identity_present = if (std.mem.eql(u8, name, "benchmark"))
+            std.mem.indexOf(u8, main_source, "args[1], \"benchmark\"") != null
+        else blk: {
+            const identity_needle = try std.fmt.allocPrint(std.testing.allocator, ".token = \"{s}\", .label = \"{s}\"", .{ name, name });
+            defer std.testing.allocator.free(identity_needle);
+            break :blk std.mem.indexOf(u8, main_source, identity_needle) != null;
+        };
+        dispatch_parity = dispatch_parity and std.mem.indexOf(u8, main_source, dispatch_needle) != null and
+            std.mem.indexOf(u8, main_source, help_needle) != null and identity_present;
+    }
+    for (benchmark_commands) |name| {
+        const dispatch_needle = try std.fmt.allocPrint(std.testing.allocator, "subcommand, \"{s}\"", .{name});
+        defer std.testing.allocator.free(dispatch_needle);
+        const identity_needle = try std.fmt.allocPrint(std.testing.allocator, ".token = \"{s}\", .label = \"benchmark.{s}\"", .{ name, name });
+        defer std.testing.allocator.free(identity_needle);
+        const help_needle = try std.fmt.allocPrint(std.testing.allocator, "benchmark {s}", .{name});
+        defer std.testing.allocator.free(help_needle);
+        dispatch_parity = dispatch_parity and std.mem.indexOf(u8, main_source, dispatch_needle) != null and
+            std.mem.indexOf(u8, main_source, identity_needle) != null and
+            std.mem.indexOf(u8, main_source, help_needle) != null;
+    }
+    try assertions.boolean(.{
+        .id = "zgraphy.cli.dispatch-parity",
+        .label = "every top-level command alias and benchmark subcommand retains dispatch identity and help parity",
+        .repair_hint = "keep the bounded identity table dispatch branches and help contract aligned without changing command output",
+    }, dispatch_parity);
+
+    try assertions.boolean(.{
+        .id = "zgraphy.cli.query-path-unaffected",
+        .label = "the shipped query command still calls Search.queryAlloc directly",
+        .repair_hint = "leave runQuery on the shipped Search.queryAlloc path in this slice",
+    }, std.mem.indexOf(u8, main_source, "zgraphy.Search.queryAlloc(allocator") != null);
+
+    const help_preflight = std.mem.indexOf(u8, main_source, "if (args.len < 2 or isHelp(args[1]))") orelse return error.MissingHelpPreflight;
+    const repository_state = std.mem.indexOf(u8, main_source, "createDirPath(init.io, \".zgraphy\")") orelse return error.MissingRepositoryStateCreation;
+    try assertions.boolean(.{
+        .id = "zgraphy.cli.help-preflight",
+        .label = "help returns before any .zgraphy repository state can be created",
+        .repair_hint = "keep help handling before root opening runtime construction and .zgraphy creation",
+    }, help_preflight < repository_state);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const args = [_][]const u8{ "zgraphy", "status" };
+    const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir, .args = &args });
+    var runtime = try zstd.ManagedRuntime(@TypeOf(layer)).make(
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        layer,
+        .{ .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 256 }, .causal_store = evidence.causalStore() },
+    );
+    defer runtime.deinit();
+    try runtime.run(zstd.Application.Lifecycle.start());
+    try runtime.run(zstd.Application.Lifecycle.ready());
+    try runtime.run(cliSuccess().named("status"));
+    try std.testing.expectError(error.InjectedCommandFailure, runtime.run(cliFailure().named("query")));
+    _ = try assertions.event(.{
+        .id = "zgraphy.cli.named-success",
+        .label = "the runtime records successful command identity structurally",
+        .repair_hint = "name the dispatch effect with the bounded parsed command identity",
+    }, .{ .kind = .effect_completed, .label = "status", .status = "success" });
+    _ = try assertions.event(.{
+        .id = "zgraphy.cli.named-failure",
+        .label = "the runtime records failed command identity structurally",
+        .repair_hint = "retain command failures through the named dispatch effect before checked cleanup",
+    }, .{ .kind = .effect_completed, .label = "query", .status = "failure" });
+    try assertions.noFindings(.{ .id = "zgraphy.cli.no-findings", .label = "runtime-owned CLI causality has no causal findings" });
+    try assertions.noPendingFibers(.{ .id = "zgraphy.cli.no-pending", .label = "runtime-owned CLI causality leaves no pending fibers" });
+    try evidence.mapCausalEventIds(&runtime);
+    if (zgraphy.Application.checkedCleanup(&runtime, std.testing.allocator)) |failure| return failure;
+    try evidence.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+}
+
+test "zgraphy runtime-owned CLI causality records named success and failure with checked cleanup" {
+    var success_tmp = std.testing.tmpDir(.{});
+    defer success_tmp.cleanup();
+    var success_causal = zstd.fx.CausalStore.init(std.testing.allocator);
+    defer success_causal.deinit();
+    const success_args = [_][]const u8{ "zgraphy", "status" };
+    const success_layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = success_tmp.dir, .args = &success_args });
+    var success_runtime = try zstd.ManagedRuntime(@TypeOf(success_layer)).make(
+        std.testing.allocator,
+        std.testing.io,
+        success_tmp.dir,
+        success_layer,
+        .{ .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 128 }, .causal_store = &success_causal },
+    );
+    defer success_runtime.deinit();
+    try success_runtime.run(zstd.Application.Lifecycle.start());
+    try success_runtime.run(zstd.Application.Lifecycle.ready());
+    try success_runtime.run(cliSuccess().named("status"));
+    if (zgraphy.Application.checkedCleanup(&success_runtime, std.testing.allocator)) |failure| return failure;
+
+    var success_snapshot = try success_causal.snapshot(std.testing.allocator);
+    defer success_snapshot.deinit();
+    try std.testing.expect(hasCausalEvent(success_snapshot.events, .effect_completed, "status", "success"));
+    try std.testing.expect(hasCausalEvent(success_snapshot.events, .span_recorded, "Lifecycle.drain", "success"));
+    try std.testing.expect(hasCausalEvent(success_snapshot.events, .span_recorded, "Lifecycle.stop", "success"));
+
+    var failure_tmp = std.testing.tmpDir(.{});
+    defer failure_tmp.cleanup();
+    var failure_causal = zstd.fx.CausalStore.init(std.testing.allocator);
+    defer failure_causal.deinit();
+    const failure_args = [_][]const u8{ "zgraphy", "query" };
+    const failure_layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = failure_tmp.dir, .args = &failure_args });
+    var failure_runtime = try zstd.ManagedRuntime(@TypeOf(failure_layer)).make(
+        std.testing.allocator,
+        std.testing.io,
+        failure_tmp.dir,
+        failure_layer,
+        .{ .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 128 }, .causal_store = &failure_causal },
+    );
+    defer failure_runtime.deinit();
+    try failure_runtime.run(zstd.Application.Lifecycle.start());
+    try failure_runtime.run(zstd.Application.Lifecycle.ready());
+    try std.testing.expectError(error.InjectedCommandFailure, failure_runtime.run(cliFailure().named("query")));
+    if (zgraphy.Application.checkedCleanup(&failure_runtime, std.testing.allocator)) |failure| return failure;
+
+    var failure_snapshot = try failure_causal.snapshot(std.testing.allocator);
+    defer failure_snapshot.deinit();
+    try std.testing.expect(hasCausalEvent(failure_snapshot.events, .effect_completed, "query", "failure"));
+    try std.testing.expect(hasCausalEvent(failure_snapshot.events, .span_recorded, "Lifecycle.drain", "success"));
+    try std.testing.expect(hasCausalEvent(failure_snapshot.events, .span_recorded, "Lifecycle.stop", "success"));
+}
+
+test "zgraphy runtime-owned CLI causality exposes checked shutdown flush failure after command failure" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var causal = zstd.fx.CausalStore.init(std.testing.allocator);
+    defer causal.deinit();
+    const args = [_][]const u8{ "zgraphy", "query" };
+    const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir, .args = &args });
+    var runtime = try zstd.ManagedRuntime(@TypeOf(layer)).make(
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        layer,
+        .{ .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 1 }, .causal_store = &causal },
+    );
+    defer runtime.deinit();
+    try runtime.run(zstd.Application.Lifecycle.start());
+    try runtime.run(zstd.Application.Lifecycle.ready());
+    try std.testing.expectError(error.InjectedCommandFailure, runtime.run(cliFailure().named("query")));
+    const cleanup_failure = zgraphy.Application.checkedCleanup(&runtime, std.testing.allocator) orelse return error.MissingCheckedShutdownFailure;
+    try std.testing.expectEqual(error.CausalNendbStorageBackendFull, cleanup_failure);
+
+    var snapshot = try causal.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expect(hasCausalEvent(snapshot.events, .effect_completed, "query", "failure"));
+    try std.testing.expect(hasCausalEvent(snapshot.events, .span_recorded, "Lifecycle.drain", "success"));
+    try std.testing.expect(hasCausalEvent(snapshot.events, .span_recorded, "Lifecycle.stop", "success"));
 }
 
 const parity_scenario = zstd.Testing.Scenario{
@@ -377,9 +626,60 @@ test "zgraphy hybrid retrieval exposes keyword vector and graph contributions" {
         .label = "bounded graph retrieval finds the expected shortest path",
         .repair_hint = "repair bounded breadth-first traversal without hiding exhausted bounds",
     }, path.complete and path.node_ids.len == 3);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const query_layer = zgraphy.Application.graphLayer(&graph);
+    var runtime = try zstd.ManagedRuntime(@TypeOf(query_layer)).make(
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        query_layer,
+        .{ .graph = .{ .path = ".zigeffect/graph", .max_records = 128 }, .causal_store = evidence.causalStore() },
+    );
+    defer runtime.deinit();
+    var effect_results = try runtime.run(zgraphy.Application.queryEffect(.{
+        .text = "card payment database",
+        .options = .{ .limit = 3 },
+    }));
+    defer effect_results.deinit();
+    try std.testing.expect(effect_results.items.len >= 2);
+    _ = try assertions.event(.{
+        .id = "zgraphy.retrieval.named-query",
+        .label = "queryEffect is structurally recorded under its stable business name",
+        .repair_hint = "keep queryEffect business-only and name it zgraphy.query",
+    }, .{ .kind = .effect_completed, .label = "zgraphy.query", .status = "success" });
     try assertions.noFindings(.{ .id = "zgraphy.retrieval.no-findings", .label = "hybrid retrieval has no causal findings" });
     try assertions.noPendingFibers(.{ .id = "zgraphy.retrieval.no-pending", .label = "hybrid retrieval leaves no pending fibers" });
+    try evidence.mapCausalEventIds(&runtime);
+    try runtime.shutdown();
     try evidence.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+}
+
+test "zgraphy source-link fake records typed events and exposes recording failures" {
+    var fake = zgraphy.ZigEffectBridge.Fake{};
+    const layer = zgraphy.ZigEffectBridge.fakeLayer(&fake);
+    var runtime = try zstd.fx.kernel.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, layer, .{});
+    defer runtime.deinit();
+
+    try runtime.run(zgraphy.ZigEffectBridge.linkEffect(.{
+        .source_ref = "zgraphy://source/src/main.zig#main",
+        .label = "fixture.main",
+    }));
+    try std.testing.expectEqual(@as(usize, 1), fake.calls);
+    const event = fake.last_event orelse return error.MissingFakeSourceLinkEvent;
+    try std.testing.expectEqual(zstd.fx.CausalEventKind.span_recorded, event.kind);
+    try std.testing.expectEqualStrings("zgraphy.source.link", event.type_name);
+    try std.testing.expectEqualStrings(zgraphy.ZigEffectBridge.SourceLinkEvents.service_key, event.service_key);
+    try std.testing.expectEqualStrings("fixture.main", event.label);
+    try std.testing.expectEqualStrings("observed", event.status);
+    try std.testing.expectEqualStrings("zgraphy://source/src/main.zig#main", event.domain_entity_ref);
+
+    fake.fail_recording = true;
+    try std.testing.expectError(error.InjectedSourceLinkRecordingFailure, runtime.run(zgraphy.ZigEffectBridge.linkEffect(.{
+        .source_ref = "zgraphy://source/src/main.zig#main",
+        .label = "fixture.main",
+    })));
 }
 
 test "zgraphy ZigEffect source bridge links manifest intent to stable code references" {
@@ -407,12 +707,12 @@ test "zgraphy ZigEffect source bridge links manifest intent to stable code refer
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    const empty = zstd.fx.kernel.Layer.empty();
-    var runtime = try zstd.ManagedRuntime(@TypeOf(empty)).make(
+    const link_layer = zgraphy.ZigEffectBridge.liveLayer();
+    var runtime = try zstd.ManagedRuntime(@TypeOf(link_layer)).make(
         std.testing.allocator,
         std.testing.io,
         tmp.dir,
-        empty,
+        link_layer,
         .{ .graph = .{ .path = ".zigeffect/graph", .max_records = 128 }, .causal_store = evidence.causalStore() },
     );
     defer runtime.deinit();
@@ -426,8 +726,32 @@ test "zgraphy ZigEffect source bridge links manifest intent to stable code refer
         .id = "zgraphy.bridge.causal-source-ref",
         .label = "the managed runtime records the stable zgraphy source reference",
         .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 199, .column = 1 },
-        .repair_hint = "run ZigEffectBridge.linkEffect through the canonical managed runtime",
-    }, .{ .kind = .activity_completed, .label = "fixture.main", .status = "observed" });
+        .repair_hint = "compose SourceLinkEvents.liveLayer and run linkEffect through the canonical managed runtime",
+    }, .{ .kind = .span_recorded, .type_name = "zgraphy.source.link", .label = "fixture.main", .status = "observed" });
+    var causal_snapshot = try evidence.causalStore().snapshot(std.testing.allocator);
+    defer causal_snapshot.deinit();
+    var typed_source_link = false;
+    var legacy_source_link = false;
+    for (causal_snapshot.events) |event| {
+        typed_source_link = typed_source_link or (event.kind == .span_recorded and
+            std.mem.eql(u8, event.type_name, "zgraphy.source.link") and
+            std.mem.eql(u8, event.service_key, zgraphy.ZigEffectBridge.SourceLinkEvents.service_key) and
+            std.mem.eql(u8, event.label, "fixture.main") and
+            std.mem.eql(u8, event.status, "observed") and
+            std.mem.eql(u8, event.domain_entity_ref, source_ref));
+        legacy_source_link = legacy_source_link or (event.kind == .activity_completed and
+            std.mem.eql(u8, event.label, "fixture.main"));
+    }
+    try assertions.boolean(.{
+        .id = "zgraphy.bridge.typed-source-link-fields",
+        .label = "the typed source-link event retains its service identity and exact source reference",
+        .repair_hint = "preserve SourceLinkEvents service_key and domain_entity_ref when recording zgraphy.source.link",
+    }, typed_source_link);
+    try assertions.boolean(.{
+        .id = "zgraphy.bridge.legacy-source-link-absent",
+        .label = "the source-link adapter emits no legacy activity completion mirror",
+        .repair_hint = "emit only the typed zgraphy.source.link span event from SourceLinkEvents",
+    }, !legacy_source_link);
     try assertions.noFindings(.{ .id = "zgraphy.bridge.no-findings", .label = "source linking has no causal findings" });
     try assertions.noPendingFibers(.{ .id = "zgraphy.bridge.no-pending", .label = "source linking leaves no pending fibers" });
     try evidence.mapCausalEventIds(&runtime);
