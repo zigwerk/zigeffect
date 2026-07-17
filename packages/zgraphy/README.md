@@ -1,7 +1,7 @@
 # zgraphy
 
 `zgraphy` is a local-first, Zig-native repository knowledge graph. The current
-M2 engine walks mixed-language repositories, preserves every safe file's
+M3.8 engine walks mixed-language repositories, preserves every safe file's
 placement, derives application/package/library ownership from Zig, JavaScript,
 Python, Rust, Go, Proto and ZigEffect manifests, deeply extracts Zig plus
 TypeScript/TSX/JavaScript structure and module relationships, and stores graph
@@ -13,10 +13,10 @@ Connect/Protobuf or HTTP clients and schemas into Zig handlers, services,
 effects, stores, tests, requirements, and runtime causal evidence.
 
 Native source parsing is supplied by the reusable `zigeffect-parser` package
-through the grammar-free `zigeffect-std.Parser` contract. zgraphy consumes its
-bounded TypeScript/TSX/JavaScript and Proto facts and adds repository
-resolution, graph identity, retrieval, and freshness rather than owning
-language runtimes.
+alongside the grammar-free `zigeffect-std.Parser` contract. zgraphy consumes
+its bounded compiler-AST Zig, TypeScript/TSX/JavaScript, and Proto facts through
+thin compatibility facades, then adds repository resolution, graph identity,
+retrieval, and freshness rather than owning language runtimes.
 Resolution runs against one immutable discovery inventory and understands
 relative ESM/CommonJS imports, JSONC tsconfig inheritance and aliases, pnpm/npm
 workspaces, package exports and entry fallbacks. Each occurrence is retained as
@@ -41,11 +41,38 @@ uniquely. `zgraphy explain <node> --json` returns the bounded source spans,
 participants, members, completeness, and proof steps rather than a similarity
 summary.
 
-The target engine is self-maintaining after `init`: default agent queries check
-freshness, publish safe incremental generations, prune invalidated facts and
-true orphans, repair indexes, and garbage-collect owned stale data. It never
-silently answers from a stale required graph dimension; failed refresh keeps the
-last complete generation and returns typed stale/partial evidence.
+The current engine is self-maintaining for deterministic local source changes
+after `init`: default graph reads check freshness, reuse content-addressed
+structural facts for unchanged Zig, TypeScript, JavaScript and Proto files,
+selectively reuse unchanged proof-carrying request paths and feature
+supernodes, publish complete validated immutable generations, and prune
+invalidated facts and semantic aggregates before answering. Relation-specific
+adjacency and field-aware label/path/search-text indexes drive routine graph
+and keyword queries. Every generation now owns a digest-bound canonical delta
+journal with explicit node, edge, vector, hyperedge and supernode tombstones;
+strict replay must equal the complete checkpoint and native-index identity
+before activation. Reads can recover from either a healthy full snapshot or an
+exact parent-plus-journal replay. Failed refresh never activates a partial
+candidate. Native redacted Git context now makes branch, detached-HEAD, and
+linked-worktree state freshness-significant even when source bytes are
+unchanged. Unique exact-content path transitions retain typed rename/move
+lineage and delta provenance outside the clean current-source graph; duplicate
+content remains explicit ambiguity. Every active node, edge, hyperedge, and
+supernode now has one validated
+origin owner. Unchanged compiler, document, runtime, model, pin, and historical
+overlays survive source-only refreshes; dependency-invalid or replaced provider
+records are swept with typed reasons. A damaged index or checkpoint triggers
+the smallest validated immutable repair successor before a graph answer is
+returned, while the damaged generation remains untouched for diagnosis. The
+native foreground watcher performs a bounded no-follow metadata poll, ignores
+zgraphy's output and configured exclusions, debounces bursts, persists redacted
+requests across writer contention, and drains every successful refresh through
+the same immutable `ensureFresh` transaction used by default queries. SIGINT
+and SIGTERM drain the typed ZigEffect lifecycle to `stopped`. Reader-safe
+automatic retention now bounds immutable generations, journals, tombstones and
+structural cache entries while preserving active, fallback, replacement, recent
+and user-pinned history. Manual `gc` is dry-run by default; daemon installation
+and modified-content rename inference remain later work.
 
 Queries combine inspectable keyword, vector, and graph scores. The default
 `feature_hash_v1` vectors are deterministic local code features, not neural
@@ -73,8 +100,14 @@ The installed executable is `zgraphy`.
 ```bash
 zgraphy init .
 zgraphy build .
+zgraphy watch .
+zgraphy watch . --poll-ms 100 --debounce-ms 200 --json
 zgraphy status
 zgraphy doctor . --json
+zgraphy gc . --json              # deterministic dry-run
+zgraphy gc . --apply --json
+zgraphy pin g-<sha256> --root .
+zgraphy unpin g-<sha256> --root .
 zgraphy parity
 zgraphy schema
 zgraphy schema calls_direct --json
@@ -118,24 +151,42 @@ zgraphy explain fetchOrder --json
 ```
 
 `init` creates config-v2 with one opaque persistent repository identity plus
-`.zgraphyignore`, without replacing user configuration. `build` is a bounded
-full rebuild in M1; `ingest` is an alias. It atomically writes the complete
-snapshot, deterministic redacted content/ownership manifest, and graph-health
-baseline under `.zgraphy/`. New snapshots use `zgraphy.nendb.snapshot.v2` to persist native
-hyperedges and supernodes; snapshot-v1 remains a backward-readable rollback
-input. Multi-generation publication and automatic refresh remain M3 work.
-Readers reject incomplete footers or incompatible schema/embedder metadata.
-`doctor` rebuilds current state in memory and reports
-clean, stale, missing, incompatible, or corrupt evidence without mutating the
-published graph.
+`.zgraphyignore`, without replacing user configuration. `build` performs a
+bounded canonical base-graph reconstruction backed by M3.2's validated
+per-file structural-fact cache and M3.3's selective semantic-record reuse;
+`ingest` is an alias. It publishes the complete snapshot, redacted
+content/ownership/extraction manifests, canonical delta journal, graph health
+and generation metadata plus exact origin and repair artifacts under an
+immutable content-addressed directory, then strictly replays the journal and
+atomically activates one pointer.
+New snapshots use `zgraphy.nendb.snapshot.v3` to persist native hyperedges and
+supernodes and bind reconstructed secondary-index statistics and fingerprint;
+snapshot-v1 and snapshot-v2 remain backward-readable rollback inputs. `status`,
+`query`, `explain` and `path` hash-check bounded local inputs before reading:
+unchanged repositories reparse zero files and retain the active generation,
+while changes trigger a locked successor build that parses only changed
+cacheable inputs, selectively reuses or recomputes exact RPC aggregates, and
+prunes exact old records before any answer is returned.
+Readers reject incomplete footers, corrupt generation evidence, incompatible
+schema/embedder metadata and failed refreshes rather than serving known-stale
+state. A healthy complete checkpoint remains queryable if its auxiliary journal
+is later damaged, while an unavailable target checkpoint can be reconstructed
+from its healthy parent and journal only after exact fingerprint and orphan
+checks; a normal graph read then publishes a distinct complete repair
+successor. `doctor` rebuilds current state in memory and reports clean,
+degraded, stale, missing, incompatible, corrupt, or replay-recovered evidence
+without mutating the published graph.
 
 `schema` validates and reports the content-addressed semantic contract. Passing
 a relation name resolves its complete family policy, including endpoint roles,
 evidence and ambiguity requirements, affected-query traversal, invalidation,
-and external mappings. Snapshot-v2 now implements the hyperedge and supernode
-subset while snapshot-v1 remains a readable rollback input; facts, claims and
-immutable multi-generation publication are not yet claimed as fully persisted
-schema-v2 records.
+and external mappings. Snapshot-v3 implements the hyperedge/supernode subset
+plus digest-bound adjacency and lexical reconstruction while snapshot-v1/v2
+remain readable rollback inputs. Immutable complete
+generations and canonical graph-record deltas are active for the current node,
+edge, vector, hyperedge and supernode families; standalone fact/claim records,
+column-level incremental storage remains future schema-v2 work; whole immutable
+generation and structural-cache retention is active.
 
 The checked M2.6 `request-path-meaning.v1` candidate receipt measures complete
 fullstack gold coverage (16/16 entities, 22/22 relations, 2/2 facts, one
@@ -217,7 +268,10 @@ payloads and terminal output are not imported.
 The public package exports a `RepositoryGraph` service/query effect for larger
 applications and an `ApplicationInputs` root layer for its own CLI. Every
 command runs through one process-level `zstd.ManagedRuntime`; its embedded
-NenDB causal graph and application map are runtime-owned.
+NenDB causal graph and application map are runtime-owned under
+`.zgraphy/runtime/causal`. This is deliberately isolated from the target
+application's `.zigeffect/graph`: zgraphy can import application evidence
+without observing its own CLI commands or churning an unchanged generation.
 
 ## Architecture and evidence
 
@@ -228,6 +282,8 @@ The product design and staged plan are checked in at:
   benchmark programme, and release gates;
 - [`docs/superpowers/specs/2026-07-16-zgraphy-m1-universal-discovery.md`](docs/superpowers/specs/2026-07-16-zgraphy-m1-universal-discovery.md);
 - [`docs/superpowers/specs/2026-07-16-zgraphy-m1-operational-baseline.md`](docs/superpowers/specs/2026-07-16-zgraphy-m1-operational-baseline.md);
+- [`docs/superpowers/specs/2026-07-17-zgraphy-m3-derived-index-transactions.md`](docs/superpowers/specs/2026-07-17-zgraphy-m3-derived-index-transactions.md);
+- [`docs/superpowers/plans/2026-07-17-zgraphy-m3-derived-index-transactions.md`](docs/superpowers/plans/2026-07-17-zgraphy-m3-derived-index-transactions.md);
 - [`../../docs/superpowers/specs/2026-07-16-zgraphy-design.md`](../../docs/superpowers/specs/2026-07-16-zgraphy-design.md)
 - [`../../docs/superpowers/plans/2026-07-16-zgraphy-mvp.md`](../../docs/superpowers/plans/2026-07-16-zgraphy-mvp.md)
 
@@ -287,13 +343,36 @@ RSS, and persisted-byte statistics. `benchmarks/run_freshness_baseline.py`
 applies modify, rename, and delete to disposable fixture copies and compares
 each result with an independent clean build.
 
-The checked freshness receipt proves full-rebuild equivalence, complete
+The historical M0 freshness receipt proves full-rebuild equivalence, complete
 snapshots, deletion pruning, and zero stale/dangling/orphan/vector defects. It
 also records that the current path-derived identity preserves 0/2 required
-symbols across rename and that semantic fact invalidation is not implemented.
-Incremental update, automatic pre-query refresh, watch mode, automatic pruning,
-repair, and garbage collection remain explicitly unsupported. The resource
-receipt contains no performance claim.
+symbols across rename. M3.1 now adds immutable activation, automatic pre-query
+refresh and full-generation pruning of invalid nodes, edges, vectors,
+hyperedges and supernodes. M3.2 adds content-addressed per-file parser facts and
+dependency invalidation; M3.3 adds selective exact RPC aggregate reuse,
+transactional relation/incident adjacency, field-aware lexical postings, and
+snapshot-v3 digest verification. M3.4 adds canonical checkpoint/delta journals,
+typed replacement/deletion/exclusion tombstones, strict parent-to-target replay,
+generation-v4 bindings, full-snapshot fallback, parent-plus-journal recovery,
+and degraded doctor evidence. Persisted column-level mutation, bounded
+retention and garbage collection remain explicitly unsupported. M3.5 adds generation-v5 bindings for native symbolic,
+packed-ref, detached, unborn and linked-worktree context plus exact
+unique-content `renamed_from`/`moved_from` history, ambiguity accounting,
+redacted doctor/status evidence, and zero-parse branch-only successors. Modified
+renames and historical graph federation remain later gates. The resource
+receipt contains no performance claim. M3.6 adds generation-v6 exact origin
+ownership, provider-safe carry/replacement/sweep, legitimate-isolate
+protection, and automatic immutable index/checkpoint/clean-rebuild escalation.
+M3.7 adds the typed `zgraphy.watch-coordinator` statechart, content-free native
+metadata observation, bounded debounce/retry/drain controls, a checksummed
+repository-bound pending queue, foreground CLI polling, lease-contention and
+late-request preservation, lifecycle signal draining, and watch queue health
+in `status` and `doctor`. M3.8 adds backward-compatible retention policy,
+checksummed generation pins, complete retained-manifest cache liveness,
+shared-reader/exclusive-GC leases, automatic applied collection, dry-run-default
+manual `gc`, immutable journal/tombstone compaction, and redacted status/doctor
+evidence. Daemon installation, Git-hook mutation, and release-corpus one-file
+performance superiority remain open.
 
 The first schema-v2 foundation is now executable as
 `src/semantic-schema.v2.json`, with strict typed validation in
@@ -302,8 +381,9 @@ The first schema-v2 foundation is now executable as
 kinds, independent origin and epistemic-status axes, nine relation families,
 96 canonical relations, every MVP and benchmark compatibility mapping, and
 Graphify provenance projections. The contract is SHA-256 addressed; malformed
-or incomplete registries fail closed. It deliberately does not yet implement
-provider execution, schema-v2 persistence, or automatic refresh.
+or incomplete registries fail closed. Provider execution and complete
+fact/claim persistence are still deferred; automatic local refresh now applies
+to the implemented graph-record subset.
 
 `src/operational-contracts.v1.json` and
 `docs/operational-contracts-rfc.md` make the next foundation executable. The
@@ -338,7 +418,8 @@ strict Protobuf-ES/protoc-gen-zig source lineage, and exact Connect-callsite to
 ZigEffect-handler operation continuity are active. Native request-path
 hyperedges, end-to-end feature supernodes, callback-versus-direct-call
 semantics, exact nested Zig handler ownership, focused test coverage, semantic
-snapshot round-trips, and proof-carrying explain output are also active. Deeper
-Zig type/build resolution, HTTP paths, neural embeddings, ANN, incremental
-watch and automatic pruning, MCP, editor installers, and visualisation remain
-later slices.
+snapshot round-trips, selective proof-based reuse, native indexed traversal,
+path-aware keyword retrieval, and proof-carrying explain output are also active.
+Deeper Zig type/build resolution, HTTP paths, neural embeddings, ANN, base-row
+delta persistence, provider-cache expiry, MCP, daemon/editor installers, and
+visualisation remain later slices.

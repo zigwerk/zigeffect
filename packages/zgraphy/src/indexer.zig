@@ -2,15 +2,18 @@ const std = @import("std");
 const model = @import("model.zig");
 const owned = @import("memory.zig");
 const discovery = @import("discovery.zig");
+const extraction_cache = @import("extraction_cache.zig");
 const ownership = @import("ownership.zig");
 const zig_parser = @import("zig_parser.zig");
 const zig_resolution = @import("zig_resolution.zig");
 const typescript_parser = @import("typescript_parser.zig");
 const typescript_resolution = @import("typescript_resolution.zig");
 const typescript_symbols = @import("typescript_symbols.zig");
+const protobuf_parser = @import("protobuf_parser.zig");
 const protobuf_resolution = @import("protobuf_resolution.zig");
 const generated_lineage = @import("generated_lineage.zig");
 const rpc_continuity = @import("rpc_continuity.zig");
+const semantic_recipes = @import("semantic_recipes.zig");
 
 pub const max_manifest_bytes: usize = 4 * 1024 * 1024;
 pub const max_causal_bytes: usize = 64 * 1024 * 1024;
@@ -26,6 +29,7 @@ pub const BuildOptions = struct {
     max_path_bytes: usize = std.fs.max_path_bytes,
     max_nodes: usize = 100_000,
     max_edges: usize = 500_000,
+    max_lexical_postings: usize = 4_000_000,
     max_hyperedges: usize = 100_000,
     max_hyperedge_participants: usize = 1_000_000,
     max_hyperedge_evidence: usize = 1_000_000,
@@ -33,6 +37,8 @@ pub const BuildOptions = struct {
     max_supernode_members: usize = 1_000_000,
     max_supernode_evidence: usize = 1_000_000,
     max_supernode_proof_steps: usize = 1_000_000,
+    extraction_cache_options: extraction_cache.Options = .{},
+    previous_graph: ?*const model.RepositoryGraph = null,
 };
 
 pub const BuildSummary = struct {
@@ -58,6 +64,18 @@ pub const BuildSummary = struct {
     rpc_interactions: usize = 0,
     request_paths: usize = 0,
     feature_supernodes: usize = 0,
+    derived_hyperedges_reused: usize = 0,
+    derived_hyperedges_recomputed: usize = 0,
+    derived_supernodes_reused: usize = 0,
+    derived_supernodes_recomputed: usize = 0,
+    cacheable_files: usize = 0,
+    cache_hits: usize = 0,
+    cache_misses: usize = 0,
+    cache_rejected: usize = 0,
+    cache_writes: usize = 0,
+    reparsed_files: usize = 0,
+    direct_invalidations: usize = 0,
+    invalidation_closure: usize = 0,
     nodes: usize = 0,
     edges: usize = 0,
     vectors: usize = 0,
@@ -68,8 +86,10 @@ pub const BuildResult = struct {
     summary: BuildSummary,
     discovery_result: discovery.Result,
     ownership_result: ownership.Result,
+    extraction: extraction_cache.BuildEvidence,
 
     pub fn deinit(self: *BuildResult) void {
+        self.extraction.deinit();
         self.ownership_result.deinit();
         self.discovery_result.deinit();
         self.graph.deinit();
@@ -104,6 +124,7 @@ pub fn buildRepository(
     var graph = try model.RepositoryGraph.init(allocator, .{
         .max_nodes = options.max_nodes,
         .max_edges = options.max_edges,
+        .max_lexical_postings = options.max_lexical_postings,
         .max_hyperedges = options.max_hyperedges,
         .max_hyperedge_participants = options.max_hyperedge_participants,
         .max_hyperedge_evidence = options.max_hyperedge_evidence,
@@ -139,6 +160,8 @@ pub fn buildRepository(
         .ownership_manifest_digest = owned_context.manifest_digest,
         .ownership = owned_context.summary,
     };
+    var extraction = try extraction_cache.Session.init(allocator, io, root, options.extraction_cache_options);
+    defer extraction.deinit();
     var zig_corpus = try zig_resolution.Corpus.init(allocator, .{
         .max_files = options.max_files,
         .max_symbols = options.max_nodes,
@@ -208,7 +231,24 @@ pub fn buildRepository(
         defer allocator.free(source);
         summary.source_bytes = std.math.add(usize, summary.source_bytes, source.len) catch return error.SourceLimitExceeded;
         if (summary.source_bytes > options.max_source_bytes) return error.SourceLimitExceeded;
-        try protobuf_corpus.addSource(record.relative_path, source);
+        const digest = record.content_digest orelse return error.MissingDiscoveryFingerprint;
+        var parsed = (try extraction.loadDocument(
+            record.relative_path,
+            .proto,
+            digest,
+            source,
+            .protobuf,
+            protobuf_parser.parser_id,
+            protobuf_parser.parser_version,
+            protobuf_corpus.options.parser,
+        )) orelse parsed: {
+            var value = try protobuf_parser.parse(allocator, record.relative_path, source, protobuf_corpus.options.parser);
+            errdefer value.deinit();
+            try extraction.storeDocument(record.relative_path, .proto, digest, source, .protobuf, protobuf_parser.parser_id, protobuf_parser.parser_version, protobuf_corpus.options.parser, &value);
+            break :parsed value;
+        };
+        defer parsed.deinit();
+        try protobuf_corpus.addParsedOwned(&parsed);
         try continuity_corpus.addSource(record.relative_path, source, .protobuf);
         summary.files_indexed += 1;
     }
@@ -220,7 +260,15 @@ pub fn buildRepository(
         if (summary.source_bytes > options.max_source_bytes) return error.SourceLimitExceeded;
         if (record.classification.is_generated) try generated_corpus.addSource(record.relative_path, source, .zig);
         try continuity_corpus.addSource(record.relative_path, source, .zig);
-        try zig_corpus.addSource(record.relative_path, source);
+        const digest = record.content_digest orelse return error.MissingDiscoveryFingerprint;
+        var parsed_value = (try extraction.loadZig(record.relative_path, digest, source, zig_corpus.options.parser)) orelse parsed: {
+            var value = try zig_parser.parse(allocator, record.relative_path, source, zig_corpus.options.parser);
+            errdefer value.deinit();
+            try extraction.storeZig(record.relative_path, digest, source, zig_corpus.options.parser, &value);
+            break :parsed value;
+        };
+        defer parsed_value.deinit();
+        try zig_corpus.addParsedOwned(&parsed_value);
         const parsed = zig_corpus.parsedForPath(record.relative_path) orelse return error.MissingParsedZigSource;
         try indexParsedZigSource(&graph, record.relative_path, source, parsed);
         summary.files_indexed += 1;
@@ -236,7 +284,23 @@ pub fn buildRepository(
         const mode = typeScriptModeForPath(record.relative_path) orelse return error.UnsupportedTypeScriptSourceExtension;
         const continuity_language = continuityLanguage(mode) orelse return error.UnsupportedTypeScriptSourceExtension;
         try continuity_corpus.addSource(record.relative_path, source, continuity_language);
-        var parsed = try typescript_parser.parse(allocator, record.relative_path, source, mode, .{ .max_source_bytes = options.max_file_bytes });
+        const parser_options = typescript_parser.Options{ .max_source_bytes = options.max_file_bytes };
+        const digest = record.content_digest orelse return error.MissingDiscoveryFingerprint;
+        var parsed = (try extraction.loadDocument(
+            record.relative_path,
+            record.classification.language,
+            digest,
+            source,
+            mode,
+            typescript_parser.parser_id,
+            typescript_parser.parser_version,
+            parser_options,
+        )) orelse parsed_value: {
+            var value = try typescript_parser.parse(allocator, record.relative_path, source, mode, parser_options);
+            errdefer value.deinit();
+            try extraction.storeDocument(record.relative_path, record.classification.language, digest, source, mode, typescript_parser.parser_id, typescript_parser.parser_version, parser_options, &value);
+            break :parsed_value value;
+        };
         defer parsed.deinit();
         try typescript_corpus.addParsed(&parsed);
         try indexParsedTypeScriptSource(&graph, record.relative_path, source, &parsed);
@@ -276,13 +340,32 @@ pub fn buildRepository(
     defer generated.deinit();
     try materializeGeneratedLineage(&graph, &proto_resolutions, &generated);
     summary.generated_bindings = generated.summary.links;
-    var continuity = try continuity_corpus.resolve();
+    var continuity = try continuity_corpus.resolvePrepared(.{
+        .proto = &proto_resolutions,
+        .protobuf = &protobuf_corpus,
+        .lineage = &generated,
+        .modules = &module_resolutions,
+        .typescript = typescript_symbol_corpus.parsedResults(),
+        .zig = zig_corpus.parsedResults(),
+    });
     defer continuity.deinit();
-    try materializeRpcContinuity(&graph, &proto_resolutions, &continuity, &typescript_symbol_corpus, &zig_corpus);
+    const derived = try materializeRpcContinuity(
+        &graph,
+        &proto_resolutions,
+        &continuity,
+        &typescript_symbol_corpus,
+        &zig_corpus,
+        &extraction,
+        options.previous_graph,
+    );
     summary.rpc_observations = continuity.summary.observations;
     summary.rpc_interactions = continuity.summary.interactions;
     summary.request_paths = graph.hyperedgeCount();
     summary.feature_supernodes = graph.supernodeCount();
+    summary.derived_hyperedges_reused = derived.hyperedges_reused;
+    summary.derived_hyperedges_recomputed = derived.hyperedges_recomputed;
+    summary.derived_supernodes_reused = derived.supernodes_reused;
+    summary.derived_supernodes_recomputed = derived.supernodes_recomputed;
     const causal_records = root.readFileAlloc(io, causal_wal_path, allocator, .limited(max_causal_bytes)) catch |failure| switch (failure) {
         error.FileNotFound => null,
         else => return failure,
@@ -294,11 +377,22 @@ pub fn buildRepository(
     summary.nodes = graph.nodeCount();
     summary.edges = graph.edgeCount();
     summary.vectors = graph.vectorCount();
+    var extraction_evidence = try extraction.finish(&graph);
+    errdefer extraction_evidence.deinit();
+    summary.cacheable_files = extraction_evidence.stats.cacheable_files;
+    summary.cache_hits = extraction_evidence.stats.hits;
+    summary.cache_misses = extraction_evidence.stats.misses;
+    summary.cache_rejected = extraction_evidence.stats.rejected;
+    summary.cache_writes = extraction_evidence.stats.writes;
+    summary.reparsed_files = extraction_evidence.stats.reparsed_files;
+    summary.direct_invalidations = extraction_evidence.stats.direct_invalidations;
+    summary.invalidation_closure = extraction_evidence.stats.invalidation_closure;
     return .{
         .graph = graph,
         .summary = summary,
         .discovery_result = discovered,
         .ownership_result = owned_context,
+        .extraction = extraction_evidence,
     };
 }
 
@@ -1235,13 +1329,27 @@ fn materializeGeneratedLineage(
     }
 }
 
+const DerivedRecordStats = struct {
+    hyperedges_reused: usize = 0,
+    hyperedges_recomputed: usize = 0,
+    supernodes_reused: usize = 0,
+    supernodes_recomputed: usize = 0,
+};
+
+const DerivedRecordOutcome = struct {
+    hyperedge_reused: bool,
+    supernode_reused: bool,
+};
+
 fn materializeRpcContinuity(
     graph: *model.RepositoryGraph,
     proto: *const protobuf_resolution.Result,
     result: *const rpc_continuity.Result,
     typescript: *const typescript_symbols.Corpus,
     zig: *const zig_resolution.Corpus,
-) !void {
+    extraction: *extraction_cache.Session,
+    previous_graph: ?*const model.RepositoryGraph,
+) !DerivedRecordStats {
     try rpc_continuity.validate(result);
     if (!std.mem.eql(u8, &result.proto_fingerprint, &proto.fingerprint)) return error.RpcContinuityProtoSnapshotMismatch;
     for (result.observations) |observation| {
@@ -1270,9 +1378,15 @@ fn materializeRpcContinuity(
             .line = observation.span.start_line,
         });
     }
+    var invalidations = try extraction.previewInvalidations(graph);
+    defer invalidations.deinit();
+    var stats: DerivedRecordStats = .{};
     for (result.interactions) |interaction| {
-        try materializeRpcInteraction(graph, proto, result, &interaction, typescript, zig);
+        const outcome = try materializeRpcInteraction(graph, proto, result, &interaction, typescript, zig, previous_graph, &invalidations);
+        if (outcome.hyperedge_reused) stats.hyperedges_reused += 1 else stats.hyperedges_recomputed += 1;
+        if (outcome.supernode_reused) stats.supernodes_reused += 1 else stats.supernodes_recomputed += 1;
     }
+    return stats;
 }
 
 fn materializeRpcInteraction(
@@ -1282,7 +1396,9 @@ fn materializeRpcInteraction(
     interaction: *const rpc_continuity.Interaction,
     typescript: *const typescript_symbols.Corpus,
     zig: *const zig_resolution.Corpus,
-) !void {
+    previous_graph: ?*const model.RepositoryGraph,
+    invalidations: *const extraction_cache.InvalidationPreview,
+) !DerivedRecordOutcome {
     const frontend_observation = &result.observations[interaction.frontend_observation_index];
     const backend_observation = &result.observations[interaction.backend_observation_index];
     const frontend = findQualifiedTypeScriptSymbol(graph, frontend_observation.source_path, frontend_observation.source_symbol) orelse return error.MissingRpcContinuitySourceNode;
@@ -1364,16 +1480,6 @@ fn materializeRpcInteraction(
         appendEvidence(&direct_evidence, &evidence_count, .focused_test, node.path, zigModelSpan(span));
     };
 
-    const interaction_fingerprint = rpcInteractionFingerprint(result, interaction);
-    const hyperedge_id = try graph.addHyperedge(.{
-        .kind = .request_path,
-        .canonical_name = interaction.canonical_operation,
-        .recipe = "rpc-request-path-v1",
-        .interaction_fingerprint = interaction_fingerprint,
-        .participants = participants[0..participant_count],
-        .evidence = direct_evidence[0..evidence_count],
-    });
-
     var members: [10]model.SupernodeMember = @splat(.{ .role = .ui_consumer, .node_id = 0, .reason = "" });
     var member_count: usize = 0;
     appendMember(&members, &member_count, .frontend_callsite, frontend.id, "resolved generated-client invocation");
@@ -1401,6 +1507,12 @@ fn materializeRpcInteraction(
     if (focused_test) |node| appendProof(&proof_steps, &proof_count, node.id, backend.id, .covers);
 
     const complete_feature = ui != null and loader != null and focused_test != null;
+    const interaction_fingerprint = rpcInteractionFingerprint(
+        interaction,
+        participants[0..participant_count],
+        direct_evidence[0..evidence_count],
+        proof_steps[0..proof_count],
+    );
     const feature_name = try std.fmt.allocPrint(graph.allocator, "{s} feature", .{interaction.canonical_operation});
     defer graph.allocator.free(feature_name);
     const synopsis = try std.fmt.allocPrint(graph.allocator, "Frontend invocation reaches the registered Zig handler through canonical operation {s} with request {s} and response {s}.", .{
@@ -1409,18 +1521,21 @@ fn materializeRpcInteraction(
         interaction.response_type,
     });
     defer graph.allocator.free(synopsis);
-    _ = try graph.addSupernode(.{
-        .kind = .feature,
+    const materialized = try semantic_recipes.materializeRequestPath(graph, previous_graph, invalidations, .{
         .canonical_name = interaction.canonical_operation,
-        .name = feature_name,
-        .recipe = "end-to-end-feature-v1",
-        .synopsis = synopsis,
-        .input_hyperedge_id = hyperedge_id,
+        .interaction_fingerprint = interaction_fingerprint,
+        .participants = participants[0..participant_count],
+        .evidence = direct_evidence[0..evidence_count],
+        .feature_name = feature_name,
+        .feature_synopsis = synopsis,
         .completeness = if (complete_feature) .end_to_end_feature else .contract_path,
         .members = members[0..member_count],
-        .evidence = direct_evidence[0..evidence_count],
         .proof_steps = proof_steps[0..proof_count],
     });
+    return .{
+        .hyperedge_reused = materialized.hyperedge_reused,
+        .supernode_reused = materialized.supernode_reused,
+    };
 }
 
 fn appendParticipant(output: *[10]model.Participant, count: *usize, role: model.ParticipantRole, node_id: u64) void {
@@ -1531,20 +1646,62 @@ fn zigModelSpan(span: zig_parser.Span) model.SourceSpan {
     return protobufSpan(span);
 }
 
-fn rpcInteractionFingerprint(result: *const rpc_continuity.Result, interaction: *const rpc_continuity.Interaction) [32]u8 {
+fn rpcInteractionFingerprint(
+    interaction: *const rpc_continuity.Interaction,
+    participants: []const model.Participant,
+    evidence: []const model.SourceEvidence,
+    proofs: []const model.ProofStep,
+) [32]u8 {
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
-    hasher.update(&result.fingerprint);
-    hasher.update(interaction.canonical_operation);
-    hasher.update(interaction.request_type);
-    hasher.update(interaction.response_type);
-    var bytes: [8]u8 = @splat(0);
-    std.mem.writeInt(u64, &bytes, @intCast(interaction.frontend_observation_index), .little);
-    hasher.update(&bytes);
-    std.mem.writeInt(u64, &bytes, @intCast(interaction.backend_observation_index), .little);
-    hasher.update(&bytes);
+    updateInteractionBytes(&hasher, "rpc-interaction-local-v2");
+    updateInteractionBytes(&hasher, semantic_recipes.findById(.rpc_request_path_v2).name);
+    updateInteractionBytes(&hasher, semantic_recipes.findById(.end_to_end_feature_v2).name);
+    updateInteractionBytes(&hasher, interaction.canonical_operation);
+    updateInteractionBytes(&hasher, interaction.request_type);
+    updateInteractionBytes(&hasher, interaction.response_type);
+    inline for (std.meta.fields(model.ParticipantRole)) |field| {
+        const role: model.ParticipantRole = @enumFromInt(field.value);
+        for (participants) |participant| if (participant.role == role) {
+            updateInteractionInt(&hasher, @intFromEnum(participant.role));
+            updateInteractionInt(&hasher, participant.node_id);
+        };
+    }
+    inline for (std.meta.fields(model.EvidenceRole)) |field| {
+        const role: model.EvidenceRole = @enumFromInt(field.value);
+        for (evidence) |item| if (item.role == role) {
+            updateInteractionInt(&hasher, @intFromEnum(item.role));
+            updateInteractionBytes(&hasher, item.source_path);
+            updateInteractionSpan(&hasher, item.span);
+        };
+    }
+    for (proofs) |proof| {
+        updateInteractionInt(&hasher, proof.from);
+        updateInteractionInt(&hasher, proof.to);
+        updateInteractionInt(&hasher, @intFromEnum(proof.relation));
+    }
     var digest: [32]u8 = @splat(0);
     hasher.final(&digest);
     return digest;
+}
+
+fn updateInteractionSpan(hasher: *std.crypto.hash.sha2.Sha256, span: model.SourceSpan) void {
+    updateInteractionInt(hasher, span.start_byte);
+    updateInteractionInt(hasher, span.end_byte);
+    updateInteractionInt(hasher, span.start_line);
+    updateInteractionInt(hasher, span.start_column);
+    updateInteractionInt(hasher, span.end_line);
+    updateInteractionInt(hasher, span.end_column);
+}
+
+fn updateInteractionBytes(hasher: *std.crypto.hash.sha2.Sha256, value: []const u8) void {
+    updateInteractionInt(hasher, value.len);
+    hasher.update(value);
+}
+
+fn updateInteractionInt(hasher: *std.crypto.hash.sha2.Sha256, value: anytype) void {
+    var bytes: [8]u8 = @splat(0);
+    std.mem.writeInt(u64, &bytes, @intCast(value), .little);
+    hasher.update(&bytes);
 }
 
 fn findUniqueQualifiedZigSymbol(graph: *const model.RepositoryGraph, path: []const u8, qualified: []const u8) ?*const model.Node {

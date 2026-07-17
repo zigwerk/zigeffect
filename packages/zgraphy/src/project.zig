@@ -25,6 +25,9 @@ pub const Config = struct {
     max_path_bytes: usize = std.fs.max_path_bytes,
     max_nodes: usize = 100_000,
     max_edges: usize = 500_000,
+    automatic_gc: bool = true,
+    retention_generations: usize = 8,
+    retention_grace_ms: u64 = 5 * 60 * 1000,
 };
 
 const ConfigV1 = struct {
@@ -100,7 +103,9 @@ pub fn validateConfig(config: Config) !void {
         !validOwnedPath(config.content_manifest) or !validOwnedPath(config.health_report) or
         config.max_entries == 0 or config.max_files == 0 or config.max_file_bytes == 0 or
         config.max_source_bytes == 0 or config.max_depth == 0 or config.max_path_bytes == 0 or
-        config.max_path_bytes > std.fs.max_path_bytes or config.max_nodes == 0 or config.max_edges == 0)
+        config.max_path_bytes > std.fs.max_path_bytes or config.max_nodes == 0 or config.max_edges == 0 or
+        config.retention_generations < 2 or config.retention_generations > 128 or
+        config.retention_grace_ms > 30 * 24 * 60 * 60 * 1000)
     {
         return error.InvalidConfig;
     }

@@ -24,11 +24,19 @@ pub fn main(init: std.process.Init) !void {
         .{ .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 4096, .max_wal_bytes = 16 * 1024 * 1024 } },
     );
     defer runtime.deinit();
-    try runtime.run(commandEffect());
+    try runtime.run(zstd.Application.Lifecycle.start());
+    try runtime.run(zstd.Application.Lifecycle.ready());
+    runtime.run(commandEffect()) catch |failure| {
+        runtime.run(zstd.Application.Lifecycle.drain()) catch {};
+        runtime.run(zstd.Application.Lifecycle.stop()) catch {};
+        return failure;
+    };
     var application = try runtime.inspect(init.gpa, .{ .max_recent_events = 64 });
     defer application.deinit();
     if (application.services.len == 0) return error.InvalidApplicationSnapshot;
     if (runtime.causalHealth().status != .healthy) return error.CausalRuntimeUnhealthy;
+    try runtime.run(zstd.Application.Lifecycle.drain());
+    try runtime.run(zstd.Application.Lifecycle.stop());
     try runtime.shutdown();
 }
 
@@ -62,6 +70,10 @@ fn dispatch(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []
     if (std.mem.eql(u8, command, "build") or std.mem.eql(u8, command, "ingest")) return runBuild(allocator, io, root, hasFlag(args, "--json"));
     if (std.mem.eql(u8, command, "status")) return runStatus(allocator, io, root, hasFlag(args, "--json"));
     if (std.mem.eql(u8, command, "doctor")) return runDoctor(allocator, io, root, hasFlag(args, "--json"));
+    if (std.mem.eql(u8, command, "watch")) return runWatch(allocator, io, root, args);
+    if (std.mem.eql(u8, command, "gc")) return runGc(allocator, io, root, args);
+    if (std.mem.eql(u8, command, "pin")) return runGenerationPin(allocator, io, root, args, true);
+    if (std.mem.eql(u8, command, "unpin")) return runGenerationPin(allocator, io, root, args, false);
     if (std.mem.eql(u8, command, "query")) return runQuery(allocator, io, root, args);
     if (std.mem.eql(u8, command, "explain")) return runExplain(allocator, io, root, args);
     if (std.mem.eql(u8, command, "path")) return runPath(allocator, io, root, args);
@@ -90,24 +102,147 @@ fn runInit(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, json: boo
 fn runBuild(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, json: bool) !void {
     var config = try zgraphy.Project.loadConfig(allocator, io, root);
     defer config.deinit();
-    var built = try zgraphy.Indexer.buildRepository(allocator, io, root, zgraphy.Operations.buildOptions(config.value));
-    defer built.deinit();
-    try zgraphy.Store.save(io, root, config.value.database, &built.graph);
-    try zgraphy.Operations.publish(allocator, io, root, config.value, &built);
+    var managed = try zgraphy.Operations.updateManaged(allocator, io, root, config.value, .{});
+    defer managed.deinit();
+    var reader = try zgraphy.Operations.GenerationReadLease.acquireShared(io, root);
+    defer reader.deinit();
+    var active = try zgraphy.Operations.readActiveGeneration(allocator, io, root, config.value);
+    defer active.deinit();
     if (json) return writeJson(io, allocator, .{
-        .schema = "zgraphy.build.v1",
+        .schema = "zgraphy.build.v9",
         .status = "complete",
-        .database = config.value.database,
-        .summary = built.summary,
+        .update_kind = @tagName(managed.kind),
+        .database = managed.publication.database,
+        .generation = managed.publication.generation,
+        .refresh = refreshView(&managed.publication),
+        .summary = managed.summary,
+        .secondary_index_schema = zgraphy.Nendb.secondary_index_schema,
+        .secondary_index_fingerprint = active.value.secondary_index_fingerprint,
+        .secondary_indexes = active.value.secondary_indexes,
+        .delta = .{
+            .schema = active.value.delta_schema,
+            .journal = active.value.delta_journal,
+            .fingerprint = active.value.delta_fingerprint,
+            .summary = active.value.delta_summary,
+        },
+        .repository_context = .{
+            .schema = zgraphy.RepositoryContext.schema,
+            .artifact = active.value.repository_context,
+            .fingerprint = active.value.repository_context_fingerprint,
+        },
+        .change_lineage = .{
+            .schema = zgraphy.ChangeLineage.schema,
+            .artifact = active.value.change_lineage,
+            .input_fingerprint = active.value.change_lineage_input_fingerprint,
+            .fingerprint = active.value.change_lineage_fingerprint,
+            .summary = active.value.change_lineage_summary,
+        },
+        .origin = .{
+            .schema = zgraphy.OriginLedger.schema,
+            .artifact = active.value.origin_ledger,
+            .input_fingerprint = active.value.origin_input_fingerprint,
+            .fingerprint = active.value.origin_fingerprint,
+            .summary = active.value.origin_summary,
+        },
+        .repair = .{
+            .schema = zgraphy.Repair.schema,
+            .artifact = active.value.repair_report,
+            .replaces_generation = active.value.replaces_generation,
+            .plan_fingerprint = active.value.repair_plan_fingerprint,
+            .fingerprint = active.value.repair_fingerprint,
+            .summary = active.value.repair_summary,
+        },
+        .retention = managed.publication.retention,
     });
-    return writeText(io, allocator, "built {d} nodes, {d} edges, {d} vectors, {d} request paths, {d} feature supernodes from {d} files -> {s}\n", .{
-        built.summary.nodes,
-        built.summary.edges,
-        built.summary.vectors,
-        built.summary.request_paths,
-        built.summary.feature_supernodes,
-        built.summary.files_indexed,
-        config.value.database,
+    return writeText(io, allocator, "built {d} nodes, {d} edges, {d} vectors, {d} request paths, {d} feature supernodes from {d} files ({d} reparsed, {d} cache hits, derived {d}/{d} reused, {d} lexical terms) -> {s} ({s})\n", .{
+        managed.summary.nodes,
+        managed.summary.edges,
+        managed.summary.vectors,
+        managed.summary.request_paths,
+        managed.summary.feature_supernodes,
+        managed.summary.files_indexed,
+        managed.publication.reparsed_files,
+        managed.publication.cache_hits,
+        managed.summary.derived_hyperedges_reused,
+        managed.summary.derived_supernodes_reused,
+        active.value.secondary_indexes.lexical_terms,
+        managed.publication.database,
+        managed.publication.generation,
+    });
+}
+
+fn runGc(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8) !void {
+    var config = try zgraphy.Project.loadConfig(allocator, io, root);
+    defer config.deinit();
+    var report = try zgraphy.Operations.collectGarbage(
+        allocator,
+        io,
+        root,
+        config.value,
+        if (hasFlag(args, "--apply")) .apply else .dry_run,
+    );
+    defer report.deinit();
+    if (hasFlag(args, "--json")) {
+        const fingerprint = std.fmt.bytesToHex(report.plan_fingerprint, .lower);
+        return writeJson(io, allocator, .{
+            .schema = zgraphy.Retention.schema,
+            .schema_version = zgraphy.Retention.schema_version,
+            .repository_id = report.repository_id,
+            .active_generation = report.active_generation,
+            .plan_fingerprint = fingerprint[0..],
+            .summary = report.summary,
+            .actions = report.actions,
+            .complete = true,
+        });
+    }
+    return writeText(io, allocator, "gc {s}: {d} generation and {d} cache candidates; deleted {d}/{d}; {d} failures\n", .{
+        @tagName(report.summary.status),
+        report.summary.generation_candidates,
+        report.summary.cache_candidates,
+        report.summary.generations_deleted,
+        report.summary.cache_entries_deleted,
+        report.summary.failed_actions,
+    });
+}
+
+fn runGenerationPin(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8, present: bool) !void {
+    const generation = positional(args, 0) orelse return error.MissingGeneration;
+    var config = try zgraphy.Project.loadConfig(allocator, io, root);
+    defer config.deinit();
+    if (present) {
+        try zgraphy.Operations.pinGeneration(allocator, io, root, config.value, generation);
+    } else {
+        try zgraphy.Operations.unpinGeneration(allocator, io, root, config.value, generation);
+    }
+    if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
+        .schema = zgraphy.Retention.pins_schema,
+        .schema_version = zgraphy.Retention.schema_version,
+        .status = if (present) "pinned" else "unpinned",
+        .generation = generation,
+    });
+    return writeText(io, allocator, "{s} {s}\n", .{ if (present) "pinned" else "unpinned", generation });
+}
+
+fn runWatch(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8) !void {
+    var config = try zgraphy.Project.loadConfig(allocator, io, root);
+    defer config.deinit();
+    const max_cycles = try optionalNumericOption(args, "--max-cycles", 1, 1_000_000_000);
+    const summary = try zgraphy.Watch.runForeground(allocator, io, root, config.value, .{
+        .poll_ms = try numericOption(args, "--poll-ms", 250, 1, 60_000),
+        .debounce_ms = try numericOption(args, "--debounce-ms", 250, 1, 60_000),
+        .retry_ms = try numericOption(args, "--retry-ms", 100, 1, 60_000),
+        .max_cycles = max_cycles,
+        .max_drain_passes = try numericOption(args, "--max-drain-passes", 20, 1, 256),
+    });
+    if (hasFlag(args, "--json")) return writeJson(io, allocator, summary);
+    return writeText(io, allocator, "watch {s}: {d} cycles, {d} changes, {d} refreshed, {d} current, {d} contentions, {d} pending requests\n", .{
+        @tagName(summary.state),
+        summary.cycles,
+        summary.observation_changes,
+        summary.refreshed,
+        summary.current,
+        summary.contentions,
+        summary.pending_requests,
     });
 }
 
@@ -115,36 +250,119 @@ fn runDoctor(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, json: b
     var config = try zgraphy.Project.loadConfig(allocator, io, root);
     defer config.deinit();
     var report = try zgraphy.Operations.doctor(allocator, io, root, config.value);
+    const pending = zgraphy.Watch.inspectPending(allocator, io, root, config.value.repository_id);
+    const pending_fingerprint = std.fmt.bytesToHex(pending.fingerprint, .lower);
+    const watch = zgraphy.Operations.WatchDoctorView{
+        .status = switch (pending.status) {
+            .empty => .empty,
+            .ready => .ready,
+            .corrupt => .corrupt,
+            .unavailable => .unavailable,
+        },
+        .pending_requests = pending.pending_requests,
+        .pending_hints = pending.pending_hints,
+        .fingerprint = if (pending.has_fingerprint) pending_fingerprint[0..] else "",
+        .repair_hint = pending.repair_hint,
+    };
     if (json) {
-        const encoded = try zgraphy.Operations.encodeDoctorAlloc(allocator, config.value, &report);
+        const encoded = try zgraphy.Operations.encodeDoctorWithWatchAlloc(allocator, config.value, &report, watch);
         defer allocator.free(encoded);
         try std.Io.File.stdout().writeStreamingAll(io, encoded);
         return std.Io.File.stdout().writeStreamingAll(io, "\n");
     }
-    return writeText(io, allocator, "{s}: {d} nodes, {d} edges, {d} vectors, {d} diagnostics\n", .{
-        @tagName(report.status),
+    return writeText(io, allocator, "{s}: {d} nodes, {d} edges, {d} vectors, {d} diagnostics, watch queue {s} ({d} requests)\n", .{
+        if (pending.status == .corrupt) "corrupt" else if (pending.status == .unavailable) "degraded" else @tagName(report.status),
         report.nodes,
         report.edges,
         report.vectors,
         report.diagnostics().len,
+        @tagName(pending.status),
+        pending.pending_requests,
     });
 }
 
 fn runStatus(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, json: bool) !void {
     var loaded = try loadGraph(allocator, io, root);
     defer loaded.deinit();
+    var config = try zgraphy.Project.loadConfig(allocator, io, root);
+    defer config.deinit();
+    var reader = try zgraphy.Operations.GenerationReadLease.acquireShared(io, root);
+    defer reader.deinit();
+    var active = try zgraphy.Operations.readActiveGeneration(allocator, io, root, config.value);
+    defer active.deinit();
+    if (!std.mem.eql(u8, active.value.generation, loaded.refresh.generation)) return error.ActiveGenerationChanged;
+    var repository_context = try zgraphy.RepositoryContext.read(allocator, io, root, active.value.repository_context);
+    defer repository_context.deinit();
+    var change_lineage = try zgraphy.ChangeLineage.read(allocator, io, root, active.value.change_lineage);
+    defer change_lineage.deinit();
+    const pending = zgraphy.Watch.inspectPending(allocator, io, root, config.value.repository_id);
+    const pending_fingerprint = std.fmt.bytesToHex(pending.fingerprint, .lower);
     const stats = loaded.graph.topology.stats();
+    const secondary_index_fingerprint = try loaded.graph.secondaryIndexFingerprint(allocator);
+    const secondary_index_hex = std.fmt.bytesToHex(secondary_index_fingerprint, .lower);
+    const status_label = switch (pending.status) {
+        .corrupt, .unavailable => "degraded",
+        .empty, .ready => "ready",
+    };
     if (json) return writeJson(io, allocator, .{
-        .schema = "zgraphy.status.v1",
-        .status = "ready",
-        .database = loaded.database,
+        .schema = "zgraphy.status.v9",
+        .status = status_label,
+        .database = loaded.refresh.database,
+        .generation = loaded.refresh.generation,
+        .refresh = refreshView(&loaded.refresh),
+        .freshness_capabilities = zgraphy.Freshness.Capabilities.currentM3_8(),
+        .retention = loaded.refresh.retention,
+        .watch = .{
+            .statechart_id = "zgraphy.watch-coordinator",
+            .statechart_version = 1,
+            .queue_status = pending.status,
+            .pending_requests = pending.pending_requests,
+            .pending_hints = pending.pending_hints,
+            .pending_fingerprint = if (pending.has_fingerprint) pending_fingerprint[0..] else "",
+            .repair_hint = pending.repair_hint,
+            .process_liveness = "unclaimed",
+        },
+        .recovery_source = loaded.recovery_source,
+        .delta = .{
+            .schema = zgraphy.DeltaJournal.schema,
+            .journal = loaded.refresh.delta_journal,
+            .fingerprint = loaded.refresh.delta_fingerprint,
+            .summary = loaded.refresh.delta_summary,
+        },
+        .repository_context = repository_context.value,
+        .change_lineage = .{
+            .schema = zgraphy.ChangeLineage.schema,
+            .artifact = active.value.change_lineage,
+            .input_fingerprint = change_lineage.value.input_fingerprint,
+            .fingerprint = change_lineage.value.fingerprint,
+            .summary = change_lineage.value.summary,
+        },
+        .origin = .{
+            .schema = zgraphy.OriginLedger.schema,
+            .artifact = active.value.origin_ledger,
+            .input_fingerprint = active.value.origin_input_fingerprint,
+            .fingerprint = active.value.origin_fingerprint,
+            .summary = active.value.origin_summary,
+        },
+        .repair = .{
+            .schema = zgraphy.Repair.schema,
+            .artifact = active.value.repair_report,
+            .replaces_generation = active.value.replaces_generation,
+            .plan_fingerprint = active.value.repair_plan_fingerprint,
+            .fingerprint = active.value.repair_fingerprint,
+            .summary = active.value.repair_summary,
+        },
         .stats = stats,
+        .secondary_index_schema = zgraphy.Nendb.secondary_index_schema,
+        .secondary_index_fingerprint = &secondary_index_hex,
+        .secondary_indexes = loaded.graph.secondaryIndexStats(),
         .semantic = .{
             .hyperedges = loaded.graph.hyperedgeCount(),
             .supernodes = loaded.graph.supernodeCount(),
         },
     });
-    return writeText(io, allocator, "ready: {d} nodes, {d} edges, {d} vectors, {d} hyperedges, {d} supernodes ({s}, {s})\n", .{
+    return writeText(io, allocator, "{s}: {d} nodes, {d} edges, {d} vectors, {d} hyperedges, {d} supernodes ({s}, {s}, generation {s}, refresh {s}, watch queue {s}/{d})\n", .{
+        status_label,
         stats.node_count,
         stats.edge_count,
         stats.vector_count,
@@ -152,6 +370,10 @@ fn runStatus(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, json: b
         loaded.graph.supernodeCount(),
         stats.engine,
         stats.embedder_name,
+        loaded.refresh.generation,
+        @tagName(loaded.refresh.status),
+        @tagName(pending.status),
+        pending.pending_requests,
     });
 }
 
@@ -374,6 +596,12 @@ fn runBenchmark(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args
     if (std.mem.eql(u8, subcommand, "freshness")) {
         return runFreshnessReceipt(allocator, io, root, args);
     }
+    if (std.mem.eql(u8, subcommand, "churn")) {
+        return runM3ChurnReceipt(allocator, io, root, args);
+    }
+    if (std.mem.eql(u8, subcommand, "performance")) {
+        return runM3PerformanceReceipt(allocator, io, root, args);
+    }
     if (std.mem.eql(u8, subcommand, "matrix")) {
         return runQualityMatrix(allocator, io, root, args, &corpus.value);
     }
@@ -473,6 +701,82 @@ fn runBenchmark(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args
         summary.facts,
         summary.retrieval_tasks,
         summary.mutations,
+    });
+}
+
+fn runM3ChurnReceipt(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8) !void {
+    const observation_path = positional(args, 1) orelse return error.MissingChurnObservations;
+    const bytes = try root.readFileAlloc(io, observation_path, allocator, .limited(zgraphy.M3Qualification.max_churn_observation_bytes));
+    defer allocator.free(bytes);
+    var parsed = try zgraphy.M3Qualification.parseChurnObservationFile(allocator, bytes);
+    defer parsed.deinit();
+    var receipt = try zgraphy.M3Qualification.buildChurn(
+        allocator,
+        parsed.value.identity,
+        parsed.value.budgets,
+        parsed.value.transitions,
+    );
+    defer receipt.deinit(allocator);
+    try zgraphy.M3Qualification.validateChurn(&receipt);
+    if (hasFlag(args, "--json")) return writeJson(io, allocator, receipt);
+    return writeText(io, allocator, "M3 churn: {d} transitions, {d} operation kinds, peak {d} generations/{d} cache entries, deleted {d} generations, reader deferrals {d}, repairs {d}, gate {s}\n", .{
+        receipt.summary.transitions,
+        receipt.summary.operation_kinds,
+        receipt.summary.peak_generations,
+        receipt.summary.peak_cache_entries,
+        receipt.summary.gc_generations_deleted,
+        receipt.summary.reader_deferrals,
+        receipt.summary.repairs,
+        if (receipt.churn_gate_passed) "passed" else "failed",
+    });
+}
+
+fn runM3PerformanceReceipt(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8) !void {
+    const sample_path = positional(args, 1) orelse return error.MissingPerformanceSamples;
+    const source_revision = try requiredStringOption(args, "--source-revision");
+    const machine_digest = try requiredStringOption(args, "--machine");
+    const configuration_digest = try requiredStringOption(args, "--configuration");
+    const correctness_digest = try requiredStringOption(args, "--correctness");
+    const quality_digest = try requiredStringOption(args, "--quality");
+    const resource_digest = try requiredStringOption(args, "--resources");
+    const graphify_python = try requiredStringOption(args, "--graphify-python");
+    const graphify_environment = try requiredStringOption(args, "--graphify-environment");
+    const warmups: u16 = @intCast(try numericOption(args, "--warmups", 2, 1, zgraphy.M3Qualification.max_repetitions));
+    const repetitions: u16 = @intCast(try numericOption(args, "--repetitions", 7, zgraphy.M3Qualification.min_repetitions, zgraphy.M3Qualification.max_repetitions));
+    const bytes = try root.readFileAlloc(io, sample_path, allocator, .limited(zgraphy.M3Qualification.max_performance_sample_bytes));
+    defer allocator.free(bytes);
+    var parsed = try zgraphy.M3Qualification.parsePerformanceSampleFile(allocator, bytes);
+    defer parsed.deinit();
+    const identity = parsed.value.identity;
+    if (!std.mem.eql(u8, identity.source_revision, source_revision) or
+        !std.mem.eql(u8, identity.machine_digest, machine_digest) or
+        !std.mem.eql(u8, identity.configuration_digest, configuration_digest) or
+        !std.mem.eql(u8, identity.correctness_digest, correctness_digest) or
+        !std.mem.eql(u8, identity.quality_matrix_digest, quality_digest) or
+        !std.mem.eql(u8, identity.resource_matrix_digest, resource_digest) or
+        !std.mem.eql(u8, identity.graphify_python, graphify_python) or
+        !std.mem.eql(u8, identity.graphify_environment_digest, graphify_environment) or
+        parsed.value.sampling.warmups != warmups or parsed.value.sampling.repetitions != repetitions)
+    {
+        return error.PerformanceIdentityOptionMismatch;
+    }
+    var receipt = try zgraphy.M3Qualification.buildPerformance(
+        allocator,
+        identity,
+        parsed.value.sampling,
+        parsed.value.targets,
+        parsed.value.samples,
+    );
+    defer receipt.deinit(allocator);
+    try zgraphy.M3Qualification.validatePerformance(&receipt);
+    if (hasFlag(args, "--json")) return writeJson(io, allocator, receipt);
+    return writeText(io, allocator, "M3 one-file comparison: speedup {d} bp (target {d}), RSS ratio {d} bp (max {d}), persisted ratio {d} bp, claim {s}\n", .{
+        receipt.comparison.speedup_basis_points,
+        receipt.targets.minimum_speedup_basis_points,
+        receipt.comparison.rss_ratio_basis_points,
+        receipt.targets.maximum_rss_ratio_basis_points,
+        receipt.comparison.persisted_ratio_basis_points,
+        if (receipt.performance_gate_passed) "earned" else "withheld",
     });
 }
 
@@ -743,9 +1047,11 @@ fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []
         defer allocator.free(views);
         for (results.items, 0..) |result, index| views[index] = resultView(&loaded.graph, result);
         return writeJson(io, allocator, .{
-            .schema = "zgraphy.query.v1",
+            .schema = "zgraphy.query.v3",
             .query = query,
             .embedder = results.embedder,
+            .generation = loaded.refresh.generation,
+            .refresh = refreshView(&loaded.refresh),
             .results = views,
         });
     }
@@ -785,8 +1091,10 @@ fn runExplain(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: 
     copyMatchingHyperedges(&loaded.graph, node.id, request_paths);
     copyMatchingSupernodes(&loaded.graph, node.id, features);
     if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
-        .schema = "zgraphy.explain.v2",
+        .schema = "zgraphy.explain.v4",
         .node = node.*,
+        .generation = loaded.refresh.generation,
+        .refresh = refreshView(&loaded.refresh),
         .incoming = incoming,
         .outgoing = outgoing,
         .request_paths = request_paths,
@@ -867,7 +1175,9 @@ fn runPath(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []c
     var path = try loaded.graph.shortestPathAlloc(allocator, from.id, to.id, max_hops);
     defer path.deinit();
     if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
-        .schema = "zgraphy.path.v1",
+        .schema = "zgraphy.path.v3",
+        .generation = loaded.refresh.generation,
+        .refresh = refreshView(&loaded.refresh),
         .complete = path.complete,
         .exhausted = path.exhausted,
         .node_ids = path.node_ids,
@@ -882,28 +1192,72 @@ fn runPath(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []c
 }
 
 const LoadedGraph = struct {
-    allocator: std.mem.Allocator,
     graph: zgraphy.RepositoryGraph,
-    database: []const u8,
+    refresh: zgraphy.Operations.Publication,
+    recovery_source: zgraphy.Operations.RecoverySource,
 
     fn deinit(self: *LoadedGraph) void {
         self.graph.deinit();
-        self.allocator.free(self.database);
+        self.refresh.deinit();
     }
 };
 
 fn loadGraph(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir) !LoadedGraph {
     var config = try zgraphy.Project.loadConfig(allocator, io, root);
     defer config.deinit();
-    const database = try owned.copy(u8, allocator, config.value.database);
-    errdefer allocator.free(database);
+    const managed = try zgraphy.Operations.loadManagedGraph(allocator, io, root, config.value);
     return .{
-        .allocator = allocator,
-        .graph = try zgraphy.Store.load(allocator, io, root, database, .{
-            .max_nodes = config.value.max_nodes,
-            .max_edges = config.value.max_edges,
-        }),
-        .database = database,
+        .graph = managed.graph,
+        .refresh = managed.refresh,
+        .recovery_source = managed.recovery_source,
+    };
+}
+
+const RefreshView = struct {
+    status: zgraphy.Operations.RefreshStatus,
+    trigger: zgraphy.Operations.RefreshTrigger,
+    activated: bool,
+    generation: []const u8,
+    previous_generation: []const u8,
+    delta_journal: []const u8,
+    delta_fingerprint: []const u8,
+    delta_summary: zgraphy.DeltaJournal.Summary,
+    checked_files: usize,
+    reparsed_files: usize,
+    cache_hits: usize,
+    cache_misses: usize,
+    cache_rejected: usize,
+    cache_writes: usize,
+    direct_invalidations: usize,
+    invalidation_closure: usize,
+    pruned: zgraphy.Operations.PrunedRecords,
+    origin: zgraphy.OriginLedger.Summary,
+    repair: zgraphy.Repair.Summary,
+    retention: zgraphy.Retention.Summary,
+};
+
+fn refreshView(publication: *const zgraphy.Operations.Publication) RefreshView {
+    return .{
+        .status = publication.status,
+        .trigger = publication.trigger,
+        .activated = publication.activated,
+        .generation = publication.generation,
+        .previous_generation = publication.previous_generation,
+        .delta_journal = publication.delta_journal,
+        .delta_fingerprint = publication.delta_fingerprint,
+        .delta_summary = publication.delta_summary,
+        .checked_files = publication.checked_files,
+        .reparsed_files = publication.reparsed_files,
+        .cache_hits = publication.cache_hits,
+        .cache_misses = publication.cache_misses,
+        .cache_rejected = publication.cache_rejected,
+        .cache_writes = publication.cache_writes,
+        .direct_invalidations = publication.direct_invalidations,
+        .invalidation_closure = publication.invalidation_closure,
+        .pruned = publication.pruned,
+        .origin = publication.origin,
+        .repair = publication.repair,
+        .retention = publication.retention,
     };
 }
 
@@ -964,7 +1318,8 @@ fn requiredStringOption(args: []const []const u8, name: []const u8) ![]const u8 
 }
 
 fn optionTakesValue(option: []const u8) bool {
-    return std.mem.eql(u8, option, "--limit") or
+    return std.mem.eql(u8, option, "--root") or
+        std.mem.eql(u8, option, "--limit") or
         std.mem.eql(u8, option, "--max-hops") or
         std.mem.eql(u8, option, "--source-revision") or
         std.mem.eql(u8, option, "--graphify-python") or
@@ -972,7 +1327,12 @@ fn optionTakesValue(option: []const u8) bool {
         std.mem.eql(u8, option, "--machine") or
         std.mem.eql(u8, option, "--configuration") or
         std.mem.eql(u8, option, "--warmups") or
-        std.mem.eql(u8, option, "--repetitions");
+        std.mem.eql(u8, option, "--repetitions") or
+        std.mem.eql(u8, option, "--poll-ms") or
+        std.mem.eql(u8, option, "--debounce-ms") or
+        std.mem.eql(u8, option, "--retry-ms") or
+        std.mem.eql(u8, option, "--max-cycles") or
+        std.mem.eql(u8, option, "--max-drain-passes");
 }
 
 fn numericOption(args: []const []const u8, name: []const u8, default: usize, minimum: usize, maximum: usize) !usize {
@@ -986,15 +1346,33 @@ fn numericOption(args: []const []const u8, name: []const u8, default: usize, min
     return default;
 }
 
+fn optionalNumericOption(args: []const []const u8, name: []const u8, minimum: usize, maximum: usize) !?usize {
+    for (args, 0..) |arg, index| {
+        if (!std.mem.eql(u8, arg, name)) continue;
+        if (index + 1 >= args.len) return error.MissingOptionValue;
+        const value = try std.fmt.parseInt(usize, args[index + 1], 10);
+        if (value < minimum or value > maximum) return error.InvalidOptionValue;
+        return value;
+    }
+    return null;
+}
+
 fn selectedRoot(args: []const []const u8) []const u8 {
+    for (args, 0..) |arg, index| {
+        if (!std.mem.eql(u8, arg, "--root") or index + 1 >= args.len or std.mem.startsWith(u8, args[index + 1], "--")) continue;
+        return args[index + 1];
+    }
     if (args.len >= 3 and
-        (std.mem.eql(u8, args[1], "init") or std.mem.eql(u8, args[1], "build") or std.mem.eql(u8, args[1], "ingest") or std.mem.eql(u8, args[1], "doctor")) and
+        (std.mem.eql(u8, args[1], "init") or std.mem.eql(u8, args[1], "build") or std.mem.eql(u8, args[1], "ingest") or std.mem.eql(u8, args[1], "doctor") or std.mem.eql(u8, args[1], "watch") or std.mem.eql(u8, args[1], "gc")) and
         !std.mem.startsWith(u8, args[2], "--")) return args[2];
     return ".";
 }
 
 fn isRootPosition(args: []const []const u8, index: usize) bool {
-    return index == 2 and !std.mem.eql(u8, selectedRoot(args), ".");
+    return index == 2 and args.len >= 3 and
+        (std.mem.eql(u8, args[1], "init") or std.mem.eql(u8, args[1], "build") or
+            std.mem.eql(u8, args[1], "ingest") or std.mem.eql(u8, args[1], "doctor") or std.mem.eql(u8, args[1], "watch") or std.mem.eql(u8, args[1], "gc")) and
+        !std.mem.startsWith(u8, args[2], "--");
 }
 
 fn hasFlag(args: []const []const u8, flag: []const u8) bool {
@@ -1027,6 +1405,10 @@ fn printHelp(io: std.Io) !void {
         \\  zgraphy init [root] [--json]
         \\  zgraphy build [root] [--json]
         \\  zgraphy ingest [root] [--json]
+        \\  zgraphy watch [root] [--poll-ms N] [--debounce-ms N] [--retry-ms N] [--max-cycles N] [--max-drain-passes N] [--json]
+        \\  zgraphy gc [root] [--apply] [--json]  # dry-run unless --apply
+        \\  zgraphy pin <generation> [--root repository] [--json]
+        \\  zgraphy unpin <generation> [--root repository] [--json]
         \\  zgraphy query <text> [--limit N] [--json]
         \\  zgraphy explain <node-id-or-label> [--json]
         \\  zgraphy path <from> <to> [--max-hops N] [--json]
@@ -1045,6 +1427,9 @@ fn printHelp(io: std.Io) !void {
         \\  zgraphy benchmark workload <fixture-id> <cold-build|warm-unchanged-build|one-file-modify|rename|delete> [fixture-root] [--json]
         \\  zgraphy benchmark resources <samples.json> --source-revision <sha256> --graphify-python <version> --graphify-environment <sha256> --machine <sha256> --configuration <sha256> [--warmups N] [--repetitions N] [--json]
         \\  zgraphy benchmark freshness <transitions.json> [--json]
+        \\  zgraphy benchmark churn <observations.json> [--json]
+        \\  zgraphy benchmark performance <samples.json> --source-revision <sha256> --machine <sha256> --configuration <sha256> --correctness <sha256> --quality <sha256> --resources <sha256> --graphify-python <version> --graphify-environment <sha256> [--warmups N] [--repetitions N] [--json]
+        \\  Add --root <repository-path> to any repository command.
         \\
     );
 }

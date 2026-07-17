@@ -185,6 +185,10 @@ pub const Corpus = struct {
         return null;
     }
 
+    pub fn parsedResults(self: *const Corpus) []const typescript_parser.Result {
+        return self.parsed_files.items;
+    }
+
     pub fn resolve(self: *const Corpus, modules: *const typescript_resolution.Result) !Result {
         try typescript_resolution.validate(modules);
         var engine = Engine.init(self, modules);

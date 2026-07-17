@@ -39,7 +39,9 @@ const bridge_scenario = zstd.Testing.Scenario{
 };
 
 test "zgraphy command application exposes a non-empty canonical root layer" {
-    try std.testing.expectEqualStrings(".zigeffect/graph", zgraphy.Application.causal_graph_path);
+    try std.testing.expectEqualStrings(".zgraphy/runtime/causal", zgraphy.Application.causal_graph_path);
+    try std.testing.expectEqualStrings(".zigeffect/graph/causal-graph.jsonl", zgraphy.Indexer.causal_wal_path);
+    try std.testing.expect(!std.mem.startsWith(u8, zgraphy.Indexer.causal_wal_path, zgraphy.Application.causal_graph_path));
     const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = std.Io.Dir.cwd(), .args = &.{ "zgraphy", "status" } });
     var causal = zstd.fx.CausalStore.init(std.testing.allocator);
     defer causal.deinit();
@@ -47,8 +49,16 @@ test "zgraphy command application exposes a non-empty canonical root layer" {
     defer runtime.deinit();
     var snapshot = try runtime.inspect(std.testing.allocator, .{});
     defer snapshot.deinit();
-    try std.testing.expectEqual(@as(usize, 1), snapshot.services.len);
-    try std.testing.expectEqualStrings(zgraphy.Application.ApplicationInputs.service_key, snapshot.services[0].key);
+    try std.testing.expectEqual(@as(usize, 3), snapshot.services.len);
+    var has_inputs = false;
+    var has_lifecycle = false;
+    var has_signals = false;
+    for (snapshot.services) |service| {
+        if (std.mem.eql(u8, service.key, zgraphy.Application.ApplicationInputs.service_key)) has_inputs = true;
+        if (std.mem.eql(u8, service.key, zstd.Application.Lifecycle.Lifecycle.service_key)) has_lifecycle = true;
+        if (std.mem.eql(u8, service.key, zstd.Application.Lifecycle.ProcessSignals.service_key)) has_signals = true;
+    }
+    try std.testing.expect(has_inputs and has_lifecycle and has_signals);
 }
 
 const parity_scenario = zstd.Testing.Scenario{
@@ -159,6 +169,128 @@ test "zgraphy repository graph persists a complete NenStore snapshot and rejects
         error.IncompleteSnapshot,
         zgraphy.Store.load(std.testing.allocator, std.testing.io, tmp.dir, "broken.jsonl", .{}),
     );
+}
+
+test "zgraphy NenDB columns allocate lazily grow together and preserve hard limits" {
+    const limits = zgraphy.Nendb.Options{
+        .max_nodes = 4096,
+        .max_edges = 4096,
+        .max_lexical_postings = 100_000,
+    };
+    var topology = try zgraphy.Nendb.GraphData.init(std.testing.allocator, limits);
+    defer topology.deinit();
+
+    const initial_node_capacity = topology.node_ids.len;
+    const initial_edge_capacity = topology.edge_from.len;
+    try std.testing.expect(initial_node_capacity > 0 and initial_node_capacity < limits.max_nodes);
+    try std.testing.expect(initial_edge_capacity > 0 and initial_edge_capacity < limits.max_edges);
+    try std.testing.expectEqual(initial_node_capacity * zgraphy.Nendb.embedding_dimensions, topology.vectors.len);
+    try std.testing.expectEqual(initial_node_capacity, topology.node_kinds.len);
+    try std.testing.expectEqual(initial_node_capacity, topology.node_active.len);
+    try std.testing.expectEqual(initial_node_capacity, topology.node_lexical_start.len);
+    try std.testing.expectEqual(initial_node_capacity, topology.node_lexical_count.len);
+    try std.testing.expectEqual(initial_edge_capacity, topology.edge_to.len);
+    try std.testing.expectEqual(initial_edge_capacity, topology.edge_labels.len);
+    try std.testing.expectEqual(initial_edge_capacity, topology.edge_active.len);
+
+    const node_total = @max(initial_node_capacity + 1, initial_edge_capacity + 2);
+    const embedding = zgraphy.Nendb.embedText("lazy bounded topology");
+    for (0..node_total) |index| {
+        _ = try topology.addNode(@intCast(index + 1), 1, &embedding, .{
+            .label = "node",
+            .path = "src/lazy.zig",
+            .search_text = "lazy bounded topology",
+        });
+    }
+    for (0..initial_edge_capacity + 1) |index| {
+        _ = try topology.addEdge(@intCast(index + 1), @intCast(index + 2), 1);
+    }
+    try std.testing.expect(topology.node_ids.len > initial_node_capacity and topology.node_ids.len < limits.max_nodes);
+    try std.testing.expect(topology.edge_from.len > initial_edge_capacity and topology.edge_from.len <= limits.max_edges);
+    try std.testing.expectEqual(topology.node_ids.len * zgraphy.Nendb.embedding_dimensions, topology.vectors.len);
+    try std.testing.expectEqualSlices(f32, &embedding, topology.vectorAt(0));
+    try std.testing.expectEqualSlices(f32, &embedding, topology.vectorAt(@intCast(node_total - 1)));
+    const validation_work = try topology.validateSecondaryIndexesWithWork();
+    try std.testing.expectEqual(topology.node_count, validation_work.node_records);
+    try std.testing.expectEqual(topology.edge_count, validation_work.edge_records);
+    try std.testing.expectEqual(topology.edge_count * 2, validation_work.relation_postings);
+    try std.testing.expectEqual(topology.edge_count * 2, validation_work.incident_postings);
+    try std.testing.expectEqual(topology.lexical_records.items.len, validation_work.lexical_records);
+    try std.testing.expectEqual(topology.lexical_records.items.len, validation_work.lexical_postings);
+
+    var bounded = try zgraphy.Nendb.GraphData.init(std.testing.allocator, .{
+        .max_nodes = 2,
+        .max_edges = 1,
+        .max_lexical_postings = 64,
+    });
+    defer bounded.deinit();
+    _ = try bounded.addNode(1, 1, &embedding, .{ .label = "one", .path = "one", .search_text = "" });
+    _ = try bounded.addNode(2, 1, &embedding, .{ .label = "two", .path = "two", .search_text = "" });
+    try std.testing.expectError(error.NodeCapacityExceeded, bounded.addNode(3, 1, &embedding, .{ .label = "three", .path = "three", .search_text = "" }));
+    _ = try bounded.addEdge(1, 2, 1);
+    try std.testing.expectError(error.EdgeCapacityExceeded, bounded.addEdge(2, 1, 1));
+    try bounded.validateSecondaryIndexes();
+}
+
+test "zgraphy origin coverage validates one indexed probe per owned record" {
+    var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{
+        .max_nodes = 1024,
+        .max_edges = 2048,
+    });
+    defer graph.deinit();
+    for (0..300) |index| {
+        _ = try graph.addNode(.{
+            .id = @intCast(index + 1),
+            .kind = .symbol,
+            .label = "owned",
+            .path = "src/owned.zig",
+        });
+    }
+    for (0..299) |index| try graph.addEdge(.{
+        .from = @intCast(index + 1),
+        .to = @intCast(index + 2),
+        .relation = .calls,
+    });
+
+    const owners = [_]zgraphy.OriginLedger.Owner{.{
+        .id = "owner-source-syntax",
+        .tier = .source_syntax,
+        .provider_id = "native-source-syntax",
+        .provider_fingerprint = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        .freshness = .current,
+        .authority = .repository_read,
+        .dependencies = &.{},
+    }};
+    var ownership: std.ArrayList(zgraphy.OriginLedger.Ownership) = .empty;
+    defer ownership.deinit(std.testing.allocator);
+    for (graph.nodes.items) |node| try ownership.append(std.testing.allocator, .{
+        .record = .{ .kind = .node, .id = node.id },
+        .owner_id = owners[0].id,
+    });
+    for (graph.edges.items) |edge| try ownership.append(std.testing.allocator, .{
+        .record = .{ .kind = .edge, .from = edge.from, .to = edge.to, .relation = edge.relation },
+        .owner_id = owners[0].id,
+    });
+
+    const work = try zgraphy.OriginLedger.validateCoverage(&graph, &owners, ownership.items);
+    try std.testing.expectEqual(ownership.items.len, work.records);
+    try std.testing.expectEqual(ownership.items.len, work.owner_lookups);
+    try std.testing.expectEqual(ownership.items.len, work.record_lookups);
+    try std.testing.expectEqual(ownership.items.len, work.duplicate_checks);
+
+    const last = ownership.items.len - 1;
+    const saved_last = ownership.items[last];
+    ownership.items[last] = ownership.items[0];
+    try std.testing.expectError(error.ConflictingRecordOwnership, zgraphy.OriginLedger.validateCoverage(&graph, &owners, ownership.items));
+    ownership.items[last] = saved_last;
+    const saved_owner = ownership.items[0].owner_id;
+    ownership.items[0].owner_id = "unknown-owner";
+    try std.testing.expectError(error.UnknownOriginOwner, zgraphy.OriginLedger.validateCoverage(&graph, &owners, ownership.items));
+    ownership.items[0].owner_id = saved_owner;
+    const saved_record = ownership.items[0].record;
+    ownership.items[0].record.id = std.math.maxInt(u64);
+    try std.testing.expectError(error.InvalidOriginCoverage, zgraphy.OriginLedger.validateCoverage(&graph, &owners, ownership.items));
+    ownership.items[0].record = saved_record;
 }
 
 test "zgraphy repository graph builds an initialized local fixture deterministically" {
@@ -1637,6 +1769,14 @@ test "zgraphy M2 Zig parser boundary emits exact AST facts without lexical false
     defer evidence.deinit();
     const assertions = zstd.Testing.AssertionRecorder.init(&evidence);
 
+    try std.testing.expectEqualStrings("zigeffect-parser.std-zig-ast", zgraphy.ZigParser.parser_id);
+    const provider_source = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "../zigeffect-parser/src/zig.zig", std.testing.allocator, .limited(2 * 1024 * 1024));
+    defer std.testing.allocator.free(provider_source);
+    var provider_digest: [32]u8 = @splat(0);
+    std.crypto.hash.sha2.Sha256.hash(provider_source, &provider_digest, .{});
+    const provider_digest_hex = std.fmt.bytesToHex(provider_digest, .lower);
+    try std.testing.expectEqualStrings(zgraphy.ZigParser.provider_source_sha256, &provider_digest_hex);
+
     const source = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fixtures/zig-parser/deep.zig", std.testing.allocator, .limited(64 * 1024));
     defer std.testing.allocator.free(source);
     var first = try zgraphy.ZigParser.parse(std.testing.allocator, "test/fixtures/zig-parser/deep.zig", source, .{});
@@ -2928,6 +3068,70 @@ test "zgraphy M2 cross-stack operation continuity proves generated client to exa
     defer first.deinit();
     try zgraphy.RpcContinuity.validate(&first);
 
+    var prepared_proto = try zgraphy.ProtobufResolution.Corpus.init(std.testing.allocator, .{});
+    defer prepared_proto.deinit();
+    var prepared_lineage = try zgraphy.GeneratedLineage.Corpus.init(std.testing.allocator, .{});
+    defer prepared_lineage.deinit();
+    var prepared_modules = try zgraphy.TypeScriptResolution.Corpus.init(std.testing.allocator, .{});
+    defer prepared_modules.deinit();
+    var prepared_typescript = try zgraphy.TypeScriptSymbols.Corpus.init(std.testing.allocator, .{});
+    defer prepared_typescript.deinit();
+    var prepared_zig = try zgraphy.ZigResolution.Corpus.init(std.testing.allocator, .{});
+    defer prepared_zig.deinit();
+    for (documents) |document| switch (document.language) {
+        .typescript, .tsx, .javascript, .jsx => try prepared_modules.addFile(document.path),
+        .zig, .protobuf => {},
+    };
+    for (documents) |document| {
+        const source = try fixture.readFileAlloc(std.testing.io, document.path, std.testing.allocator, .limited(128 * 1024));
+        defer std.testing.allocator.free(source);
+        switch (document.language) {
+            .protobuf => try prepared_proto.addSource(document.path, source),
+            .zig => {
+                try prepared_lineage.addSource(document.path, source, .zig);
+                try prepared_zig.addSource(document.path, source);
+            },
+            .typescript, .tsx, .javascript, .jsx => {
+                try prepared_lineage.addSource(document.path, source, .typescript);
+                const mode: zgraphy.TypeScriptParser.LanguageMode = switch (document.language) {
+                    .typescript => .typescript,
+                    .tsx => .tsx,
+                    .javascript => .javascript,
+                    .jsx => .jsx,
+                    .zig, .protobuf => return error.InvalidPreparedTypeScriptLanguage,
+                };
+                var parsed = try zgraphy.TypeScriptParser.parse(std.testing.allocator, document.path, source, mode, .{});
+                errdefer parsed.deinit();
+                try prepared_modules.addParsed(&parsed);
+                try prepared_typescript.addParsedOwned(&parsed);
+            },
+        }
+    }
+    var prepared_proto_result = try prepared_proto.resolve();
+    defer prepared_proto_result.deinit();
+    var prepared_lineage_result = try prepared_lineage.resolve(&prepared_proto_result);
+    defer prepared_lineage_result.deinit();
+    var prepared_module_result = try prepared_modules.resolve();
+    defer prepared_module_result.deinit();
+    var prepared_result = try corpus.resolvePrepared(.{
+        .proto = &prepared_proto_result,
+        .protobuf = &prepared_proto,
+        .lineage = &prepared_lineage_result,
+        .modules = &prepared_module_result,
+        .typescript = prepared_typescript.parsedResults(),
+        .zig = prepared_zig.parsedResults(),
+    });
+    defer prepared_result.deinit();
+    try std.testing.expectEqualSlices(u8, &first.fingerprint, &prepared_result.fingerprint);
+    try std.testing.expectError(error.PreparedRpcContinuityDocumentMismatch, corpus.resolvePrepared(.{
+        .proto = &prepared_proto_result,
+        .protobuf = &prepared_proto,
+        .lineage = &prepared_lineage_result,
+        .modules = &prepared_module_result,
+        .typescript = prepared_typescript.parsedResults()[0 .. prepared_typescript.parsedResults().len - 1],
+        .zig = prepared_zig.parsedResults(),
+    }));
+
     var reversed = try zgraphy.RpcContinuity.Corpus.init(std.testing.allocator, .{});
     defer reversed.deinit();
     var index: usize = documents.len;
@@ -3094,7 +3298,7 @@ test "zgraphy M2 request path meaning persists one exact proof carrying feature"
     try std.testing.expectEqual(@as(usize, 1), built.graph.hyperedgeCount());
     try std.testing.expectEqual(@as(usize, 1), built.graph.supernodeCount());
     const request_path = built.graph.findHyperedgeByCanonicalName(.request_path, operation_name) orelse return error.MissingRequestPathHyperedge;
-    try std.testing.expectEqualStrings("rpc-request-path-v1", request_path.recipe);
+    try std.testing.expectEqualStrings("rpc-request-path-v2", request_path.recipe);
     try std.testing.expect(request_path.evidence.len >= 5);
     inline for (.{
         zgraphy.Model.ParticipantRole.frontend_callsite,
@@ -3134,7 +3338,7 @@ test "zgraphy M2 request path meaning persists one exact proof carrying feature"
     const feature = built.graph.findSupernodeByInputHyperedge(request_path.id) orelse return error.MissingRequestPathFeature;
     try std.testing.expectEqual(zgraphy.Model.SupernodeKind.feature, feature.kind);
     try std.testing.expectEqual(zgraphy.Model.SupernodeCompleteness.end_to_end_feature, feature.completeness);
-    try std.testing.expectEqualStrings("end-to-end-feature-v1", feature.recipe);
+    try std.testing.expectEqualStrings("end-to-end-feature-v2", feature.recipe);
     try std.testing.expect(feature.member(.frontend_callsite) != null);
     try std.testing.expect(feature.member(.canonical_operation) != null);
     try std.testing.expect(feature.member(.backend_handler) != null);
@@ -3180,7 +3384,7 @@ test "zgraphy M2 request path meaning persists one exact proof carrying feature"
         .max_supernode_proof_steps = 640,
     });
     defer loaded.deinit();
-    try std.testing.expectEqualStrings("zgraphy.nendb.snapshot.v2", zgraphy.Store.current_schema);
+    try std.testing.expectEqualStrings("zgraphy.nendb.snapshot.v3", zgraphy.Store.current_schema);
     try std.testing.expectEqual(built.graph.hyperedgeCount(), loaded.hyperedgeCount());
     try std.testing.expectEqual(built.graph.supernodeCount(), loaded.supernodeCount());
     const loaded_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &loaded);
@@ -3206,6 +3410,14 @@ test "zgraphy M2 request path meaning persists one exact proof carrying feature"
     defer legacy.deinit();
     try std.testing.expectEqual(@as(usize, 0), legacy.hyperedgeCount());
     try std.testing.expectEqual(@as(usize, 0), legacy.supernodeCount());
+
+    const semantic_snapshot = try std.fmt.allocPrint(std.testing.allocator, "{{\"record\":\"header\",\"schema\":\"zgraphy.nendb.snapshot.v2\",\"schema_version\":2,\"engine\":\"nendb_embedded_soa\",\"upstream_commit\":\"{s}\",\"embedder\":\"{s}\",\"dimensions\":{d}}}\n" ++
+        "{{\"record\":\"footer\",\"complete\":true,\"nodes\":0,\"edges\":0,\"vectors\":0,\"hyperedges\":0,\"supernodes\":0}}\n", .{ zgraphy.Nendb.upstream_commit, zgraphy.Nendb.embedder, zgraphy.Nendb.embedding_dimensions });
+    defer std.testing.allocator.free(semantic_snapshot);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "semantic-v2.nendb.jsonl", .data = semantic_snapshot });
+    var semantic_v2 = try zgraphy.Store.load(std.testing.allocator, std.testing.io, tmp.dir, "semantic-v2.nendb.jsonl", .{});
+    defer semantic_v2.deinit();
+    try semantic_v2.validateSecondaryIndexes();
 
     var gold = try zgraphy.Benchmark.parseEmbeddedGold(std.testing.allocator, "benchmarks/gold/fullstack-orders.canonical.v1.json");
     defer gold.deinit();
@@ -3270,6 +3482,2443 @@ test "zgraphy M2 request path meaning persists one exact proof carrying feature"
     try evidence.publish(std.testing.io, std.Io.Dir.cwd(), 1);
 }
 
+test "zgraphy M3 automatic freshness activates clean generations and prunes invalidated meaning" {
+    const scenario = zstd.Testing.Scenario{
+        .id = "m3-automatic-freshness",
+        .label = "Graph reads atomically refresh immutable generations and prune invalidated repository meaning",
+        .requirement = "req-m3-automatic-freshness",
+        .acceptance_check = "check-m3-automatic-freshness",
+        .component = "zgraphy",
+        .command = "test",
+        .default_seed = 2001,
+        .source_roots = &.{ "src/operations.zig", "src/project.zig", "src/discovery.zig", "src/ownership.zig", "src/indexer.zig", "src/store.zig", "src/freshness.zig", "src/model.zig", "src/main.zig", "benchmarks/fixtures/fullstack-orders", "docs/superpowers/specs/2026-07-16-zgraphy-m3-automatic-freshness.md", "src/root.zig", "test/all_test.zig" },
+        .tags = &.{ "acceptance", "m3", "freshness", "automatic-refresh", "generation", "transaction", "lock", "pruning", "delete", "rename", "orphan", "hyperedge", "supernode", "deterministic" },
+    };
+    var evidence = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{
+        .project = "zgraphy",
+        .suite = "zgraphy-tests",
+        .scenario = scenario,
+        .seed = 2001,
+    });
+    defer evidence.deinit();
+    const assertions = zstd.Testing.AssertionRecorder.init(&evidence);
+
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try copyFullstackOrdersFixture(std.testing.allocator, std.testing.io, tmp.dir);
+    try std.testing.expectEqual(zgraphy.Project.InitStatus.initialized, try zgraphy.Project.init(std.testing.allocator, std.testing.io, tmp.dir));
+    var config = try zgraphy.Project.loadConfig(std.testing.allocator, std.testing.io, tmp.dir);
+    defer config.deinit();
+
+    var initial = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer initial.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.RefreshStatus.refreshed, initial.publication.status);
+    try std.testing.expect(initial.publication.activated);
+    try std.testing.expectEqual(@as(usize, 1), initial.built.graph.hyperedgeCount());
+    try std.testing.expectEqual(@as(usize, 1), initial.built.graph.supernodeCount());
+    const initial_generation = try zgraphy.Memory.copy(u8, std.testing.allocator, initial.publication.generation);
+    defer std.testing.allocator.free(initial_generation);
+    const initial_database = try zgraphy.Memory.copy(u8, std.testing.allocator, initial.publication.database);
+    defer std.testing.allocator.free(initial_database);
+
+    var unchanged = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer unchanged.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.RefreshStatus.current, unchanged.refresh.status);
+    try std.testing.expectEqual(@as(usize, 0), unchanged.refresh.reparsed_files);
+    try std.testing.expectEqualStrings(initial_generation, unchanged.refresh.generation);
+    const capabilities = zgraphy.Freshness.Capabilities.currentM3_1();
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.supported, capabilities.pre_query_refresh);
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.supported, capabilities.automatic_pruning);
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.unsupported, capabilities.incremental_update);
+
+    try tmp.dir.deleteFile(std.testing.io, "frontend/src/ordersClient.ts");
+    try tmp.dir.rename("backend/src/unregistered_service.zig", tmp.dir, "backend/src/archived_service.zig", std.testing.io);
+    const page = try tmp.dir.readFileAlloc(std.testing.io, "frontend/src/OrderPage.tsx", std.testing.allocator, .limited(64 * 1024));
+    defer std.testing.allocator.free(page);
+    const changed_page = try std.fmt.allocPrint(std.testing.allocator, "{s}\nexport const refreshMarker = true;\n", .{page});
+    defer std.testing.allocator.free(changed_page);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "frontend/src/OrderPage.tsx", .data = changed_page });
+
+    var refreshed = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer refreshed.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.RefreshStatus.refreshed, refreshed.refresh.status);
+    try std.testing.expect(!std.mem.eql(u8, initial_generation, refreshed.refresh.generation));
+    try std.testing.expect(refreshed.refresh.reparsed_files > 0);
+    try std.testing.expect(refreshed.refresh.pruned.nodes > 0);
+    try std.testing.expectEqual(@as(usize, 1), refreshed.refresh.pruned.hyperedges);
+    try std.testing.expectEqual(@as(usize, 1), refreshed.refresh.pruned.supernodes);
+    try std.testing.expectEqual(@as(usize, 0), refreshed.graph.hyperedgeCount());
+    try std.testing.expectEqual(@as(usize, 0), refreshed.graph.supernodeCount());
+    const deleted_file = zgraphy.stableId(.file, "frontend/src/ordersClient.ts", "ordersClient.ts");
+    const renamed_file = zgraphy.stableId(.file, "backend/src/unregistered_service.zig", "unregistered_service.zig");
+    const replacement_file = zgraphy.stableId(.file, "backend/src/archived_service.zig", "archived_service.zig");
+    try std.testing.expect(refreshed.graph.findNode(deleted_file) == null);
+    try std.testing.expect(refreshed.graph.findNode(renamed_file) == null);
+    try std.testing.expect(refreshed.graph.findNode(replacement_file) != null);
+    try std.testing.expect(zgraphy.Freshness.inspect(&refreshed.graph).clean());
+
+    var previous = try zgraphy.Store.load(std.testing.allocator, std.testing.io, tmp.dir, initial_database, .{});
+    defer previous.deinit();
+    try std.testing.expectEqual(@as(usize, 1), previous.hyperedgeCount());
+    try std.testing.expectEqual(@as(usize, 1), previous.supernodeCount());
+    try std.testing.expect(previous.findNode(deleted_file) != null);
+
+    const refreshed_generation = try zgraphy.Memory.copy(u8, std.testing.allocator, refreshed.refresh.generation);
+    defer std.testing.allocator.free(refreshed_generation);
+    try copyFullstackOrdersFile(std.testing.allocator, std.testing.io, tmp.dir, "frontend/src/ordersClient.ts");
+    var staged = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{ .activate = false });
+    defer staged.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.RefreshStatus.staged, staged.publication.status);
+    try std.testing.expect(!staged.publication.activated);
+    try std.testing.expectEqual(@as(usize, 1), staged.built.graph.hyperedgeCount());
+    var still_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer still_active.deinit();
+    try std.testing.expectEqualStrings(refreshed_generation, still_active.value.generation);
+    try std.testing.expect(!std.mem.eql(u8, staged.publication.generation, still_active.value.generation));
+
+    var activated = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer activated.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.RefreshStatus.refreshed, activated.refresh.status);
+    try std.testing.expectEqualStrings(staged.publication.generation, activated.refresh.generation);
+    try std.testing.expectEqual(@as(usize, 1), activated.graph.hyperedgeCount());
+    try std.testing.expectEqual(@as(usize, 1), activated.graph.supernodeCount());
+    try std.testing.expect(zgraphy.Freshness.inspect(&activated.graph).clean());
+
+    const active_pointer = try tmp.dir.readFileAlloc(std.testing.io, zgraphy.Operations.active_generation_path, std.testing.allocator, .limited(64 * 1024));
+    defer std.testing.allocator.free(active_pointer);
+    try std.testing.expect(std.mem.indexOf(u8, active_pointer, "/Users/") == null);
+    try std.testing.expect(std.mem.indexOf(u8, active_pointer, "source_body") == null);
+
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.freshness-barrier",
+        .label = "unchanged reads reuse the active generation and changed reads activate a clean successor before answering",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 3260, .column = 1 },
+        .repair_hint = "compare bounded discovery and ownership digests before parsing and fail closed unless a complete candidate activates",
+    }, unchanged.refresh.status == .current and unchanged.refresh.reparsed_files == 0 and refreshed.refresh.status == .refreshed and zgraphy.Freshness.inspect(&refreshed.graph).clean());
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.pruning",
+        .label = "delete rename and lost RPC evidence remove every stale identity and dependent semantic aggregate from the active graph",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 3260, .column = 1 },
+        .repair_hint = "publish a validated clean generation and account every record present only in the previous active graph",
+    }, refreshed.graph.findNode(deleted_file) == null and refreshed.graph.findNode(renamed_file) == null and refreshed.graph.findNode(replacement_file) != null and refreshed.graph.hyperedgeCount() == 0 and refreshed.graph.supernodeCount() == 0);
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.interruption-safety",
+        .label = "staging cannot move the active pointer and prior immutable generations remain complete while a successor is activated",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 3260, .column = 1 },
+        .repair_hint = "write and validate generation metadata before atomically renaming the sole active pointer",
+    }, previous.hyperedgeCount() == 1 and staged.publication.status == .staged and std.mem.eql(u8, refreshed_generation, still_active.value.generation) and std.mem.eql(u8, staged.publication.generation, activated.refresh.generation));
+    try assertions.noFindings(.{ .id = "zgraphy.m3.automatic-freshness-no-findings", .label = "automatic freshness and pruning validation has no causal findings" });
+    try assertions.noPendingFibers(.{ .id = "zgraphy.m3.automatic-freshness-no-pending", .label = "automatic freshness and pruning leaves no pending fibers" });
+    try evidence.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+}
+
+test "zgraphy M3 incremental extraction cache reparses only invalidated source facts" {
+    const scenario = zstd.Testing.Scenario{
+        .id = "m3-incremental-extraction-cache",
+        .label = "Content-addressed structural facts reparse only changed files and preserve complete graph truth",
+        .requirement = "req-m3-incremental-extraction-cache",
+        .acceptance_check = "check-m3-incremental-extraction-cache",
+        .component = "zgraphy",
+        .command = "test",
+        .default_seed = 2002,
+        .source_roots = &.{ "src/extraction_cache.zig", "src/indexer.zig", "src/zig_parser.zig", "src/zig_resolution.zig", "src/typescript_parser.zig", "src/typescript_resolution.zig", "src/typescript_symbols.zig", "src/protobuf_parser.zig", "src/protobuf_resolution.zig", "src/operations.zig", "src/freshness.zig", "src/model.zig", "src/root.zig", "benchmarks/fixtures/fullstack-orders", "docs/superpowers/specs/2026-07-16-zgraphy-m3-incremental-extraction-cache.md", "test/all_test.zig" },
+        .tags = &.{ "acceptance", "m3", "incremental", "cache", "content-addressed", "invalidation", "closure", "zig", "typescript", "javascript", "proto", "generation", "equivalence", "corruption", "deterministic" },
+    };
+    var evidence = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{
+        .project = "zgraphy",
+        .suite = "zgraphy-tests",
+        .scenario = scenario,
+        .seed = 2002,
+    });
+    defer evidence.deinit();
+    const assertions = zstd.Testing.AssertionRecorder.init(&evidence);
+
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try copyFullstackOrdersFixture(std.testing.allocator, std.testing.io, tmp.dir);
+    try std.testing.expectEqual(zgraphy.Project.InitStatus.initialized, try zgraphy.Project.init(std.testing.allocator, std.testing.io, tmp.dir));
+    var config = try zgraphy.Project.loadConfig(std.testing.allocator, std.testing.io, tmp.dir);
+    defer config.deinit();
+
+    var cold = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer cold.deinit();
+    try std.testing.expectEqual(@as(usize, 8), cold.built.summary.cacheable_files);
+    try std.testing.expectEqual(@as(usize, 8), cold.publication.reparsed_files);
+    try std.testing.expectEqual(@as(usize, 0), cold.publication.cache_hits);
+    try std.testing.expectEqual(@as(usize, 8), cold.publication.cache_misses);
+    try std.testing.expectEqual(@as(usize, 8), cold.publication.cache_writes);
+    const cold_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &cold.built.graph);
+
+    var warm = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer warm.deinit();
+    const warm_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &warm.built.graph);
+    try std.testing.expectEqual(@as(usize, 0), warm.publication.reparsed_files);
+    try std.testing.expectEqual(@as(usize, 8), warm.publication.cache_hits);
+    try std.testing.expectEqual(@as(usize, 0), warm.publication.cache_misses);
+    try std.testing.expect(std.mem.eql(u8, &cold_fingerprint, &warm_fingerprint));
+    try std.testing.expectEqualStrings(cold.publication.generation, warm.publication.generation);
+    const capabilities = zgraphy.Freshness.Capabilities.currentM3_2();
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.supported, capabilities.incremental_extraction_cache);
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.supported, capabilities.dependency_invalidation_closure);
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.unsupported, capabilities.incremental_update);
+
+    const client = try tmp.dir.readFileAlloc(std.testing.io, "frontend/src/ordersClient.ts", std.testing.allocator, .limited(64 * 1024));
+    defer std.testing.allocator.free(client);
+    const changed_client = try std.fmt.allocPrint(std.testing.allocator, "{s}\nexport const cacheMarker = 1;\n", .{client});
+    defer std.testing.allocator.free(changed_client);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "frontend/src/ordersClient.ts", .data = changed_client });
+
+    var one_changed = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer one_changed.deinit();
+    try std.testing.expectEqual(@as(usize, 1), one_changed.refresh.reparsed_files);
+    try std.testing.expectEqual(@as(usize, 7), one_changed.refresh.cache_hits);
+    try std.testing.expectEqual(@as(usize, 1), one_changed.refresh.cache_misses);
+    try std.testing.expectEqual(@as(usize, 1), one_changed.refresh.direct_invalidations);
+    try std.testing.expect(one_changed.refresh.invalidation_closure >= 2);
+    try std.testing.expectEqual(@as(usize, 1), one_changed.graph.hyperedgeCount());
+
+    var active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer active.deinit();
+    var extraction_manifest = try zgraphy.ExtractionCache.readManifest(std.testing.allocator, std.testing.io, tmp.dir, active.value.extraction_manifest);
+    defer extraction_manifest.deinit();
+    const extraction_manifest_bytes = try tmp.dir.readFileAlloc(std.testing.io, active.value.extraction_manifest, std.testing.allocator, .limited(zgraphy.ExtractionCache.max_manifest_bytes));
+    defer std.testing.allocator.free(extraction_manifest_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, extraction_manifest_bytes, "/Users/") == null);
+    try std.testing.expect(std.mem.indexOf(u8, extraction_manifest_bytes, "source_body") == null);
+    const corrupt_unit = extraction_manifest.find("backend/src/unregistered_service.zig") orelse return error.MissingExtractionUnit;
+    const corrupt_entry_path = try zgraphy.ExtractionCache.entryPathAlloc(std.testing.allocator, corrupt_unit.cache_key);
+    defer std.testing.allocator.free(corrupt_entry_path);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = corrupt_entry_path, .data = "{\"truncated\":" });
+
+    const page = try tmp.dir.readFileAlloc(std.testing.io, "frontend/src/OrderPage.tsx", std.testing.allocator, .limited(64 * 1024));
+    defer std.testing.allocator.free(page);
+    const changed_page = try std.fmt.allocPrint(std.testing.allocator, "{s}\nexport const cacheRepairMarker = true;\n", .{page});
+    defer std.testing.allocator.free(changed_page);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "frontend/src/OrderPage.tsx", .data = changed_page });
+
+    var repaired = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer repaired.deinit();
+    try std.testing.expectEqual(@as(usize, 2), repaired.refresh.reparsed_files);
+    try std.testing.expectEqual(@as(usize, 1), repaired.refresh.cache_rejected);
+    try std.testing.expectEqual(@as(usize, 2), repaired.refresh.cache_writes);
+    try std.testing.expectEqual(@as(usize, 6), repaired.refresh.cache_hits);
+    try std.testing.expectEqual(@as(usize, 1), repaired.graph.hyperedgeCount());
+
+    try tmp.dir.rename("backend/src/unregistered_service.zig", tmp.dir, "backend/src/archived_service.zig", std.testing.io);
+    var renamed = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer renamed.deinit();
+    try std.testing.expectEqual(@as(usize, 1), renamed.refresh.reparsed_files);
+    try std.testing.expectEqual(@as(usize, 7), renamed.refresh.cache_hits);
+    try std.testing.expect(renamed.refresh.direct_invalidations >= 2);
+    try std.testing.expect(renamed.refresh.invalidation_closure >= renamed.refresh.direct_invalidations);
+    const old_file = zgraphy.stableId(.file, "backend/src/unregistered_service.zig", "unregistered_service.zig");
+    const new_file = zgraphy.stableId(.file, "backend/src/archived_service.zig", "archived_service.zig");
+    try std.testing.expect(renamed.graph.findNode(old_file) == null);
+    try std.testing.expect(renamed.graph.findNode(new_file) != null);
+
+    var clean_full = try zgraphy.Indexer.buildRepository(std.testing.allocator, std.testing.io, tmp.dir, zgraphy.Operations.buildOptions(config.value));
+    defer clean_full.deinit();
+    const clean_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &clean_full.graph);
+    const accumulated_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &renamed.graph);
+    try std.testing.expect(std.mem.eql(u8, &clean_fingerprint, &accumulated_fingerprint));
+    try std.testing.expectEqual(clean_full.graph.hyperedgeCount(), renamed.graph.hyperedgeCount());
+    try std.testing.expectEqual(clean_full.graph.supernodeCount(), renamed.graph.supernodeCount());
+
+    const active_before_stage = try zgraphy.Memory.copy(u8, std.testing.allocator, renamed.refresh.generation);
+    defer std.testing.allocator.free(active_before_stage);
+    try tmp.dir.rename("backend/src/archived_service.zig", tmp.dir, "backend/src/unregistered_service.zig", std.testing.io);
+    var staged = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{ .activate = false });
+    defer staged.deinit();
+    var pointer_after_stage = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer pointer_after_stage.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.RefreshStatus.staged, staged.publication.status);
+    try std.testing.expectEqualStrings(active_before_stage, pointer_after_stage.value.generation);
+
+    const active_pointer = try tmp.dir.readFileAlloc(std.testing.io, zgraphy.Operations.active_generation_path, std.testing.allocator, .limited(64 * 1024));
+    defer std.testing.allocator.free(active_pointer);
+    try std.testing.expect(std.mem.indexOf(u8, active_pointer, "/Users/") == null);
+    try std.testing.expect(std.mem.indexOf(u8, active_pointer, "source_body") == null);
+
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.incremental-cache-reuse",
+        .label = "warm and one-file updates reuse validated structural facts and parse only invalidated cacheable inputs",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 3403, .column = 1 },
+        .repair_hint = "key cache entries by content path language and parser recipe and validate their structural fingerprint before ownership transfer",
+    }, warm.publication.reparsed_files == 0 and one_changed.refresh.reparsed_files == 1 and one_changed.refresh.cache_hits == 7);
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.incremental-cache-integrity",
+        .label = "corrupt cache data becomes a parser miss and cached accumulation equals a clean full parse",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 3403, .column = 1 },
+        .repair_hint = "reject malformed entries before use and reconstruct a complete validated candidate from owned facts",
+    }, repaired.refresh.cache_rejected == 1 and std.mem.eql(u8, &clean_fingerprint, &accumulated_fingerprint));
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.incremental-closure-transaction",
+        .label = "rename invalidation removes stale source identity and staged cache-backed generations cannot move the active pointer",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 3403, .column = 1 },
+        .repair_hint = "compute closure over predecessor and candidate dependencies and retain M3.1 atomic pointer activation",
+    }, renamed.graph.findNode(old_file) == null and renamed.graph.findNode(new_file) != null and staged.publication.status == .staged and std.mem.eql(u8, active_before_stage, pointer_after_stage.value.generation));
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.runtime-causal-isolation",
+        .label = "zgraphy CLI telemetry cannot enter the target application evidence graph or churn an unchanged generation",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 3403, .column = 1 },
+        .repair_hint = "keep zgraphy's managed-runtime causal directory under .zgraphy and import target application evidence only from .zigeffect/graph",
+    }, std.mem.eql(u8, zgraphy.Application.causal_graph_path, ".zgraphy/runtime/causal") and std.mem.eql(u8, zgraphy.Indexer.causal_wal_path, ".zigeffect/graph/causal-graph.jsonl") and std.mem.eql(u8, cold.publication.generation, warm.publication.generation));
+    try assertions.noFindings(.{ .id = "zgraphy.m3.incremental-cache-no-findings", .label = "incremental extraction cache validation has no causal findings" });
+    try assertions.noPendingFibers(.{ .id = "zgraphy.m3.incremental-cache-no-pending", .label = "incremental extraction cache leaves no pending fibers" });
+    try evidence.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+}
+
+test "zgraphy M3 derived and index transactions preserve selective graph truth" {
+    const scenario = zstd.Testing.Scenario{
+        .id = "m3-derived-index-transactions",
+        .label = "Selective semantic records and native secondary indexes remain exact across incremental generations",
+        .requirement = "req-m3-derived-index-transactions",
+        .acceptance_check = "check-m3-derived-index-transactions",
+        .component = "zgraphy",
+        .command = "test",
+        .default_seed = 2003,
+        .source_roots = &.{ "src/nendb.zig", "src/model.zig", "src/search.zig", "src/store.zig", "src/extraction_cache.zig", "src/indexer.zig", "src/operations.zig", "src/freshness.zig", "src/main.zig", "benchmarks/fixtures/fullstack-orders", "docs/superpowers/specs/2026-07-17-zgraphy-m3-derived-index-transactions.md", "test/all_test.zig" },
+        .tags = &.{ "acceptance", "m3", "incremental", "semantic", "hyperedge", "supernode", "adjacency", "lexical", "index", "transaction", "snapshot", "graphify", "equivalence", "deterministic" },
+    };
+    var evidence = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{
+        .project = "zgraphy",
+        .suite = "zgraphy-tests",
+        .scenario = scenario,
+        .seed = 2003,
+    });
+    defer evidence.deinit();
+    const assertions = zstd.Testing.AssertionRecorder.init(&evidence);
+
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try copyFullstackOrdersFixture(std.testing.allocator, std.testing.io, tmp.dir);
+    try std.testing.expectEqual(zgraphy.Project.InitStatus.initialized, try zgraphy.Project.init(std.testing.allocator, std.testing.io, tmp.dir));
+    var config = try zgraphy.Project.loadConfig(std.testing.allocator, std.testing.io, tmp.dir);
+    defer config.deinit();
+
+    var cold = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer cold.deinit();
+    try cold.built.graph.validateSecondaryIndexes();
+    const cold_index = cold.built.graph.secondaryIndexStats();
+    try std.testing.expect(cold_index.indexed_documents == cold.built.graph.nodeCount());
+    try std.testing.expect(cold_index.adjacency_postings == cold.built.graph.edgeCount() * 2);
+    try std.testing.expect(cold_index.lexical_terms > 0 and cold_index.lexical_postings > 0);
+    const m3_3_capabilities = zgraphy.Freshness.Capabilities.currentM3_3();
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.supported, m3_3_capabilities.selective_derived_record_reuse);
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.supported, m3_3_capabilities.transactional_secondary_indexes);
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.supported, m3_3_capabilities.digest_verified_index_reconstruction);
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.unsupported, m3_3_capabilities.incremental_update);
+    try std.testing.expectEqual(@as(usize, 1), cold.built.summary.derived_hyperedges_recomputed);
+    try std.testing.expectEqual(@as(usize, 1), cold.built.summary.derived_supernodes_recomputed);
+    try std.testing.expectEqual(@as(usize, 0), cold.built.summary.derived_hyperedges_reused);
+    try std.testing.expectEqual(@as(usize, 0), cold.built.summary.derived_supernodes_reused);
+    const cold_graph_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &cold.built.graph);
+    const cold_index_fingerprint = try cold.built.graph.secondaryIndexFingerprint(std.testing.allocator);
+
+    const cold_hyperedge = cold.built.graph.findHyperedgeByCanonicalName(.request_path, "orders.v1.OrdersService/GetOrder") orelse return error.MissingColdRequestPath;
+    const cold_supernode = cold.built.graph.findSupernodeByInputHyperedge(cold_hyperedge.id) orelse return error.MissingColdFeature;
+    const cold_hyperedge_id = cold_hyperedge.id;
+    const cold_supernode_id = cold_supernode.id;
+
+    var warm = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer warm.deinit();
+    try std.testing.expectEqual(@as(usize, 1), warm.built.summary.derived_hyperedges_reused);
+    try std.testing.expectEqual(@as(usize, 1), warm.built.summary.derived_supernodes_reused);
+    try std.testing.expectEqual(@as(usize, 0), warm.built.summary.derived_hyperedges_recomputed);
+    try std.testing.expectEqual(@as(usize, 0), warm.built.summary.derived_supernodes_recomputed);
+    try std.testing.expectEqualStrings(cold.publication.generation, warm.publication.generation);
+    const warm_graph_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &warm.built.graph);
+    const warm_index_fingerprint = try warm.built.graph.secondaryIndexFingerprint(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &cold_graph_fingerprint, &warm_graph_fingerprint);
+    try std.testing.expectEqualSlices(u8, &cold_index_fingerprint, &warm_index_fingerprint);
+
+    const unrelated_source = try tmp.dir.readFileAlloc(std.testing.io, "backend/src/unregistered_service.zig", std.testing.allocator, .limited(64 * 1024));
+    defer std.testing.allocator.free(unrelated_source);
+    const changed_unrelated = try std.fmt.allocPrint(std.testing.allocator, "{s}\n// m3.3 unrelated semantic reuse\n", .{unrelated_source});
+    defer std.testing.allocator.free(changed_unrelated);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "backend/src/unregistered_service.zig", .data = changed_unrelated });
+    var unrelated = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer unrelated.deinit();
+    try std.testing.expectEqual(@as(usize, 1), unrelated.publication.reparsed_files);
+    try std.testing.expectEqual(@as(usize, 1), unrelated.built.summary.derived_hyperedges_reused);
+    try std.testing.expectEqual(@as(usize, 1), unrelated.built.summary.derived_supernodes_reused);
+    try std.testing.expectEqual(cold_hyperedge_id, unrelated.built.graph.hyperedges.items[0].id);
+    try std.testing.expectEqual(cold_supernode_id, unrelated.built.graph.supernodes.items[0].id);
+
+    const proof_source = try tmp.dir.readFileAlloc(std.testing.io, "frontend/src/OrderPage.tsx", std.testing.allocator, .limited(64 * 1024));
+    defer std.testing.allocator.free(proof_source);
+    const changed_proof = try std.fmt.allocPrint(std.testing.allocator, "{s}\n// m3.3 proof dependency changed\n", .{proof_source});
+    defer std.testing.allocator.free(changed_proof);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "frontend/src/OrderPage.tsx", .data = changed_proof });
+    var proof_changed = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer proof_changed.deinit();
+    try std.testing.expectEqual(@as(usize, 1), proof_changed.publication.reparsed_files);
+    try std.testing.expectEqual(@as(usize, 0), proof_changed.built.summary.derived_hyperedges_reused);
+    try std.testing.expectEqual(@as(usize, 0), proof_changed.built.summary.derived_supernodes_reused);
+    try std.testing.expectEqual(@as(usize, 1), proof_changed.built.summary.derived_hyperedges_recomputed);
+    try std.testing.expectEqual(@as(usize, 1), proof_changed.built.summary.derived_supernodes_recomputed);
+    try proof_changed.built.graph.validateSecondaryIndexes();
+
+    const frontend = findGraphNode(&proof_changed.built.graph, .symbol, "frontend/src/ordersClient.ts", "fetchOrder") orelse return error.MissingIndexedFrontend;
+    const operation = findGraphNode(&proof_changed.built.graph, .operation, "proto/orders/v1/orders.proto", "orders.v1.OrdersService/GetOrder") orelse return error.MissingIndexedOperation;
+    const outgoing = proof_changed.built.graph.outgoingRelationEdges(frontend.id, .invokes_operation);
+    const incoming = proof_changed.built.graph.incomingRelationEdges(operation.id, .invokes_operation);
+    try std.testing.expectEqual(@as(usize, 1), outgoing.len);
+    try std.testing.expectEqual(@as(usize, 1), incoming.len);
+    const indexed_edge = proof_changed.built.graph.edgeAt(outgoing[0]) orelse return error.MissingIndexedEdge;
+    try std.testing.expectEqual(frontend.id, indexed_edge.from);
+    try std.testing.expectEqual(operation.id, indexed_edge.to);
+    var request_path = try proof_changed.built.graph.shortestPathAlloc(std.testing.allocator, frontend.id, operation.id, 2);
+    defer request_path.deinit();
+    try std.testing.expect(request_path.complete);
+    try std.testing.expectEqualSlices(u64, &.{ frontend.id, operation.id }, request_path.node_ids);
+
+    var path_graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer path_graph.deinit();
+    const path_only = try path_graph.addSearchableNode(.symbol, "Alpha", "src/path_only_marker/source.zig", 1, "unrelated semantics");
+    var path_results = try zgraphy.Search.queryAlloc(std.testing.allocator, &path_graph, "path only marker", .{ .limit = 1 });
+    defer path_results.deinit();
+    try std.testing.expectEqual(@as(usize, 1), path_results.items.len);
+    try std.testing.expectEqual(path_only, path_results.items[0].node_id);
+    try std.testing.expect(path_results.items[0].keyword_score > 0);
+
+    const snapshot_path = ".zgraphy/m3-index-roundtrip.jsonl";
+    try zgraphy.Store.save(std.testing.io, tmp.dir, snapshot_path, &proof_changed.built.graph);
+    var reloaded = try zgraphy.Store.load(std.testing.allocator, std.testing.io, tmp.dir, snapshot_path, .{});
+    defer reloaded.deinit();
+    try reloaded.validateSecondaryIndexes();
+    try std.testing.expectEqual(proof_changed.built.graph.secondaryIndexStats(), reloaded.secondaryIndexStats());
+    const reloaded_index_fingerprint = try reloaded.secondaryIndexFingerprint(std.testing.allocator);
+    const proof_index_fingerprint = try proof_changed.built.graph.secondaryIndexFingerprint(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &proof_index_fingerprint, &reloaded_index_fingerprint);
+
+    const corrupt_path = ".zgraphy/m3-index-corrupt.jsonl";
+    const snapshot_bytes = try tmp.dir.readFileAlloc(std.testing.io, snapshot_path, std.testing.allocator, .limited(zgraphy.Store.max_snapshot_bytes));
+    defer std.testing.allocator.free(snapshot_bytes);
+    const corrupt_bytes = try zgraphy.Memory.copy(u8, std.testing.allocator, snapshot_bytes);
+    defer std.testing.allocator.free(corrupt_bytes);
+    const index_marker = "\"secondary_index_fingerprint\":\"";
+    const marker_offset = std.mem.indexOf(u8, corrupt_bytes, index_marker) orelse return error.MissingSecondaryIndexFingerprint;
+    const digest_offset = marker_offset + index_marker.len;
+    corrupt_bytes[digest_offset] = if (corrupt_bytes[digest_offset] == '0') '1' else '0';
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = corrupt_path, .data = corrupt_bytes });
+    try std.testing.expectError(error.SecondaryIndexFingerprintMismatch, zgraphy.Store.load(std.testing.allocator, std.testing.io, tmp.dir, corrupt_path, .{}));
+
+    var clean_full = try zgraphy.Indexer.buildRepository(std.testing.allocator, std.testing.io, tmp.dir, zgraphy.Operations.buildOptions(config.value));
+    defer clean_full.deinit();
+    const clean_graph_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &clean_full.graph);
+    const proof_graph_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &proof_changed.built.graph);
+    const clean_index_fingerprint = try clean_full.graph.secondaryIndexFingerprint(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &proof_graph_fingerprint, &clean_graph_fingerprint);
+    try std.testing.expectEqualSlices(u8, &proof_index_fingerprint, &clean_index_fingerprint);
+
+    const active_before_delete = try zgraphy.Memory.copy(u8, std.testing.allocator, proof_changed.publication.generation);
+    defer std.testing.allocator.free(active_before_delete);
+    try tmp.dir.deleteFile(std.testing.io, "frontend/src/ordersClient.ts");
+    var staged = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{ .activate = false });
+    defer staged.deinit();
+    try std.testing.expectEqual(@as(usize, 0), staged.built.graph.hyperedgeCount());
+    try std.testing.expectEqual(@as(usize, 0), staged.built.graph.supernodeCount());
+    try staged.built.graph.validateSecondaryIndexes();
+    var still_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer still_active.deinit();
+    try std.testing.expectEqualStrings(active_before_delete, still_active.value.generation);
+    var deleted = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer deleted.deinit();
+    try std.testing.expectEqual(@as(usize, 0), deleted.built.graph.hyperedgeCount());
+    try std.testing.expectEqual(@as(usize, 0), deleted.built.graph.supernodeCount());
+    try std.testing.expect(deleted.built.graph.findNode(frontend.id) == null);
+    try std.testing.expectEqual(@as(usize, 0), deleted.built.summary.derived_hyperedges_reused);
+    try std.testing.expectEqual(@as(usize, 0), deleted.built.summary.derived_supernodes_reused);
+
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.selective-derived-records",
+        .label = "unchanged semantic recipes are reused while proof-source changes recompute and deletion prunes them",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 3560, .column = 1 },
+        .repair_hint = "fingerprint local recipe inputs and require live evidence participants and proof edges before cloning predecessor aggregates",
+    }, warm.built.summary.derived_hyperedges_reused == 1 and unrelated.built.summary.derived_supernodes_reused == 1 and proof_changed.built.summary.derived_hyperedges_recomputed == 1 and deleted.built.graph.hyperedgeCount() == 0);
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.native-secondary-indexes",
+        .label = "relation adjacency and field-aware lexical postings answer exact graph and path-only queries",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 3560, .column = 1 },
+        .repair_hint = "maintain outgoing incoming and lexical postings transactionally with canonical node and edge rows",
+    }, outgoing.len == 1 and incoming.len == 1 and request_path.complete and path_results.items[0].keyword_score > 0);
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.index-persistence-equivalence",
+        .label = "snapshot reconstruction and accumulated selective builds equal clean canonical graph and index fingerprints",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 3560, .column = 1 },
+        .repair_hint = "bind deterministic index metadata into snapshot v3 and reject mismatched footer evidence before activation",
+    }, std.mem.eql(u8, &proof_index_fingerprint, &reloaded_index_fingerprint) and std.mem.eql(u8, &proof_index_fingerprint, &clean_index_fingerprint) and std.mem.eql(u8, &proof_graph_fingerprint, &clean_graph_fingerprint));
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.index-transaction-activation",
+        .label = "a staged deletion can update canonical and index state without moving the active generation",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 3560, .column = 1 },
+        .repair_hint = "validate canonical rows semantic records and secondary indexes before the sole active pointer rename",
+    }, staged.publication.status == .staged and std.mem.eql(u8, active_before_delete, still_active.value.generation));
+    try assertions.noFindings(.{ .id = "zgraphy.m3.derived-index-no-findings", .label = "derived record and secondary index validation has no causal findings" });
+    try assertions.noPendingFibers(.{ .id = "zgraphy.m3.derived-index-no-pending", .label = "derived record and secondary index transactions leave no pending fibers" });
+    try evidence.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+}
+
+test "zgraphy M3 canonical delta journal and recovery preserve exact generation truth" {
+    const scenario = zstd.Testing.Scenario{
+        .id = "m3-canonical-delta-journal",
+        .label = "Canonical generation deltas and tombstones replay exact graph truth and recover without partial state",
+        .requirement = "req-m3-canonical-delta-journal",
+        .acceptance_check = "check-m3-canonical-delta-journal",
+        .component = "zgraphy",
+        .command = "test",
+        .default_seed = 2004,
+        .source_roots = &.{ "src/delta_journal.zig", "src/operations.zig", "src/model.zig", "src/nendb.zig", "src/store.zig", "src/discovery.zig", "src/extraction_cache.zig", "src/freshness.zig", "src/main.zig", "src/root.zig", "benchmarks/fixtures/fullstack-orders", "docs/superpowers/specs/2026-07-17-zgraphy-m3-canonical-delta-journal.md", "test/all_test.zig" },
+        .tags = &.{ "acceptance", "m3", "incremental", "delta", "journal", "tombstone", "replay", "checkpoint", "recovery", "corruption", "pruning", "graphify", "equivalence", "deterministic" },
+    };
+    var evidence = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{
+        .project = "zgraphy",
+        .suite = "zgraphy-tests",
+        .scenario = scenario,
+        .seed = 2004,
+    });
+    defer evidence.deinit();
+    const assertions = zstd.Testing.AssertionRecorder.init(&evidence);
+
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try copyFullstackOrdersFixture(std.testing.allocator, std.testing.io, tmp.dir);
+    try std.testing.expectEqual(zgraphy.Project.InitStatus.initialized, try zgraphy.Project.init(std.testing.allocator, std.testing.io, tmp.dir));
+    var config = try zgraphy.Project.loadConfig(std.testing.allocator, std.testing.io, tmp.dir);
+    defer config.deinit();
+
+    var cold = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer cold.deinit();
+    var cold_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer cold_active.deinit();
+    try std.testing.expectEqualStrings(zgraphy.DeltaJournal.schema, cold_active.value.delta_schema);
+    try std.testing.expect(cold_active.value.delta_summary.upserts > 0);
+    try std.testing.expectEqual(@as(usize, 0), cold_active.value.delta_summary.tombstones);
+    var cold_info = try zgraphy.DeltaJournal.inspect(std.testing.allocator, std.testing.io, tmp.dir, cold_active.value.delta_journal);
+    defer cold_info.deinit();
+    try std.testing.expectEqual(zgraphy.DeltaJournal.Mode.checkpoint, cold_info.mode);
+    try std.testing.expectEqual(cold.built.graph.nodeCount(), cold_info.summary.target_nodes);
+    try std.testing.expectEqual(cold.built.graph.edgeCount(), cold_info.summary.target_edges);
+    var cold_replayed = try zgraphy.DeltaJournal.replay(std.testing.allocator, std.testing.io, tmp.dir, cold_active.value.delta_journal, null, .{});
+    defer cold_replayed.deinit();
+    var cold_stored = try zgraphy.Store.load(std.testing.allocator, std.testing.io, tmp.dir, cold_active.value.database, .{});
+    defer cold_stored.deinit();
+    const cold_replayed_graph = try zgraphy.Freshness.fingerprint(std.testing.allocator, &cold_replayed);
+    const cold_stored_graph = try zgraphy.Freshness.fingerprint(std.testing.allocator, &cold_stored);
+    const cold_replayed_index = try cold_replayed.secondaryIndexFingerprint(std.testing.allocator);
+    const cold_stored_index = try cold_stored.secondaryIndexFingerprint(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &cold_stored_graph, &cold_replayed_graph);
+    try std.testing.expectEqualSlices(u8, &cold_stored_index, &cold_replayed_index);
+
+    const m3_4_capabilities = zgraphy.Freshness.Capabilities.currentM3_4();
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.supported, m3_4_capabilities.canonical_delta_journal);
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.supported, m3_4_capabilities.tombstone_replay);
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.supported, m3_4_capabilities.full_snapshot_recovery);
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.unsupported, m3_4_capabilities.incremental_update);
+
+    var warm = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer warm.deinit();
+    try std.testing.expectEqualStrings(cold.publication.generation, warm.publication.generation);
+    try std.testing.expectEqualStrings(cold_active.value.delta_journal, warm.publication.delta_journal);
+
+    const client = try tmp.dir.readFileAlloc(std.testing.io, "frontend/src/ordersClient.ts", std.testing.allocator, .limited(64 * 1024));
+    defer std.testing.allocator.free(client);
+    const source_only_secret = "M3_4_SOURCE_BODY_MUST_NOT_PERSIST_9137";
+    const shifted_client = try std.fmt.allocPrint(std.testing.allocator, "// {s}\n{s}", .{ source_only_secret, client });
+    defer std.testing.allocator.free(shifted_client);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "frontend/src/ordersClient.ts", .data = shifted_client });
+
+    var changed = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer changed.deinit();
+    var changed_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer changed_active.deinit();
+    var changed_info = try zgraphy.DeltaJournal.inspect(std.testing.allocator, std.testing.io, tmp.dir, changed_active.value.delta_journal);
+    defer changed_info.deinit();
+    try std.testing.expectEqual(zgraphy.DeltaJournal.Mode.delta, changed_info.mode);
+    try std.testing.expect(changed_info.summary.tombstones > 0 and changed_info.summary.upserts > 0);
+    try std.testing.expect(changed_info.summary.causes.replaced > 0);
+    try std.testing.expectEqual(@as(usize, 0), changed_info.summary.causes.deleted);
+    const changed_journal_bytes = try tmp.dir.readFileAlloc(std.testing.io, changed_active.value.delta_journal, std.testing.allocator, .limited(zgraphy.DeltaJournal.max_journal_bytes));
+    defer std.testing.allocator.free(changed_journal_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, changed_journal_bytes, source_only_secret) == null);
+    try std.testing.expect(std.mem.indexOf(u8, changed_journal_bytes, &tmp.sub_path) == null);
+
+    var changed_replayed = try zgraphy.DeltaJournal.replay(std.testing.allocator, std.testing.io, tmp.dir, changed_active.value.delta_journal, &cold_stored, .{});
+    defer changed_replayed.deinit();
+    var changed_stored = try zgraphy.Store.load(std.testing.allocator, std.testing.io, tmp.dir, changed_active.value.database, .{});
+    defer changed_stored.deinit();
+    var clean_built = try zgraphy.Indexer.buildRepository(std.testing.allocator, std.testing.io, tmp.dir, zgraphy.Operations.buildOptions(config.value));
+    defer clean_built.deinit();
+    var clean_canonical = try zgraphy.DeltaJournal.canonicalClone(std.testing.allocator, &clean_built.graph, .{});
+    defer clean_canonical.deinit();
+    const changed_replayed_graph = try zgraphy.Freshness.fingerprint(std.testing.allocator, &changed_replayed);
+    const changed_stored_graph = try zgraphy.Freshness.fingerprint(std.testing.allocator, &changed_stored);
+    const clean_graph = try zgraphy.Freshness.fingerprint(std.testing.allocator, &clean_canonical);
+    const changed_replayed_index = try changed_replayed.secondaryIndexFingerprint(std.testing.allocator);
+    const changed_stored_index = try changed_stored.secondaryIndexFingerprint(std.testing.allocator);
+    const clean_index = try clean_canonical.secondaryIndexFingerprint(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &changed_stored_graph, &changed_replayed_graph);
+    try std.testing.expectEqualSlices(u8, &clean_graph, &changed_replayed_graph);
+    try std.testing.expectEqualSlices(u8, &changed_stored_index, &changed_replayed_index);
+    try std.testing.expectEqualSlices(u8, &clean_index, &changed_replayed_index);
+
+    try tmp.dir.deleteFile(std.testing.io, "frontend/src/ordersClient.ts");
+    var deleted = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer deleted.deinit();
+    var deleted_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer deleted_active.deinit();
+    var deleted_info = try zgraphy.DeltaJournal.inspect(std.testing.allocator, std.testing.io, tmp.dir, deleted_active.value.delta_journal);
+    defer deleted_info.deinit();
+    try std.testing.expect(deleted_info.summary.causes.deleted > 0);
+    try std.testing.expectEqual(@as(usize, 0), deleted.built.graph.hyperedgeCount());
+    try std.testing.expectEqual(@as(usize, 0), deleted.built.graph.supernodeCount());
+
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".zgraphyignore", .data = "backend/src/unregistered_service.zig\n" });
+    var excluded = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer excluded.deinit();
+    var excluded_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer excluded_active.deinit();
+    var excluded_info = try zgraphy.DeltaJournal.inspect(std.testing.allocator, std.testing.io, tmp.dir, excluded_active.value.delta_journal);
+    defer excluded_info.deinit();
+    try std.testing.expect(excluded_info.summary.causes.excluded > 0);
+    try std.testing.expectEqual(@as(usize, 0), excluded_info.summary.causes.deleted);
+    try std.testing.expect(zgraphy.Freshness.inspect(&excluded.built.graph).clean());
+
+    const active_before_staged = try zgraphy.Memory.copy(u8, std.testing.allocator, excluded_active.value.generation);
+    defer std.testing.allocator.free(active_before_staged);
+    const backend = try tmp.dir.readFileAlloc(std.testing.io, "backend/src/orders_service.zig", std.testing.allocator, .limited(64 * 1024));
+    defer std.testing.allocator.free(backend);
+    const staged_source = try std.fmt.allocPrint(std.testing.allocator, "// staged m3.4 candidate\n{s}", .{backend});
+    defer std.testing.allocator.free(staged_source);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "backend/src/orders_service.zig", .data = staged_source });
+    var staged = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{ .activate = false });
+    defer staged.deinit();
+    const staged_bytes = try tmp.dir.readFileAlloc(std.testing.io, staged.publication.delta_journal, std.testing.allocator, .limited(zgraphy.DeltaJournal.max_journal_bytes));
+    defer std.testing.allocator.free(staged_bytes);
+    try std.testing.expectError(error.ParentGraphFingerprintMismatch, zgraphy.DeltaJournal.replay(std.testing.allocator, std.testing.io, tmp.dir, staged.publication.delta_journal, &changed_stored, .{}));
+    const bad_sequence = try zgraphy.Memory.copy(u8, std.testing.allocator, staged_bytes);
+    defer std.testing.allocator.free(bad_sequence);
+    const sequence_marker = "\"sequence\":0";
+    const sequence_offset = std.mem.indexOf(u8, bad_sequence, sequence_marker) orelse return error.MissingDeltaSequence;
+    bad_sequence[sequence_offset + sequence_marker.len - 1] = '9';
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".zgraphy/reordered-delta.jsonl", .data = bad_sequence });
+    try std.testing.expectError(error.InvalidDeltaSequence, zgraphy.DeltaJournal.inspect(std.testing.allocator, std.testing.io, tmp.dir, ".zgraphy/reordered-delta.jsonl"));
+    const unknown_record = try zgraphy.Memory.copy(u8, std.testing.allocator, staged_bytes);
+    defer std.testing.allocator.free(unknown_record);
+    const node_upsert_name = "node_upsert";
+    const unknown_name = "unknown_row";
+    const record_offset = std.mem.indexOf(u8, unknown_record, node_upsert_name) orelse return error.MissingDeltaNodeUpsert;
+    @memcpy(unknown_record[record_offset .. record_offset + unknown_name.len], unknown_name);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".zgraphy/unknown-delta.jsonl", .data = unknown_record });
+    try std.testing.expectError(error.UnknownDeltaRecord, zgraphy.DeltaJournal.inspect(std.testing.allocator, std.testing.io, tmp.dir, ".zgraphy/unknown-delta.jsonl"));
+    const footer_offset = std.mem.lastIndexOf(u8, staged_bytes, "{\"record\":\"footer\"") orelse return error.MissingDeltaFooter;
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".zgraphy/truncated-delta.jsonl", .data = staged_bytes[0..footer_offset] });
+    try std.testing.expectError(error.IncompleteDeltaJournal, zgraphy.DeltaJournal.inspect(std.testing.allocator, std.testing.io, tmp.dir, ".zgraphy/truncated-delta.jsonl"));
+    try std.testing.expectError(error.IncompleteDeltaJournal, zgraphy.DeltaJournal.replay(std.testing.allocator, std.testing.io, tmp.dir, ".zgraphy/truncated-delta.jsonl", &changed_stored, .{}));
+    var after_staged = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer after_staged.deinit();
+    try std.testing.expectEqualStrings(active_before_staged, after_staged.value.generation);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "backend/src/orders_service.zig", .data = backend });
+
+    const active_journal_bytes = try tmp.dir.readFileAlloc(std.testing.io, excluded_active.value.delta_journal, std.testing.allocator, .limited(zgraphy.DeltaJournal.max_journal_bytes));
+    defer std.testing.allocator.free(active_journal_bytes);
+    const corrupt_journal = try zgraphy.Memory.copy(u8, std.testing.allocator, active_journal_bytes);
+    defer std.testing.allocator.free(corrupt_journal);
+    const journal_marker = "\"journal_fingerprint\":\"sha256:";
+    const journal_marker_offset = std.mem.indexOf(u8, corrupt_journal, journal_marker) orelse return error.MissingDeltaFingerprint;
+    const journal_digest_offset = journal_marker_offset + journal_marker.len;
+    corrupt_journal[journal_digest_offset] = if (corrupt_journal[journal_digest_offset] == '0') '1' else '0';
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = excluded_active.value.delta_journal, .data = corrupt_journal });
+    try std.testing.expectError(error.DeltaJournalFingerprintMismatch, zgraphy.DeltaJournal.inspect(std.testing.allocator, std.testing.io, tmp.dir, excluded_active.value.delta_journal));
+    var degraded_doctor = try zgraphy.Operations.doctor(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    var found_delta_diagnostic = false;
+    for (degraded_doctor.diagnostics()) |diagnostic| if (std.mem.eql(u8, diagnostic.code, "delta_journal_degraded")) {
+        found_delta_diagnostic = true;
+    };
+    try std.testing.expectEqual(zgraphy.Operations.HealthStatus.degraded, degraded_doctor.status);
+    try std.testing.expect(degraded_doctor.ready and found_delta_diagnostic);
+    var snapshot_fallback = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer snapshot_fallback.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.RecoverySource.full_snapshot, snapshot_fallback.recovery_source);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = excluded_active.value.delta_journal, .data = active_journal_bytes });
+
+    const active_snapshot_bytes = try tmp.dir.readFileAlloc(std.testing.io, excluded_active.value.database, std.testing.allocator, .limited(zgraphy.Store.max_snapshot_bytes));
+    defer std.testing.allocator.free(active_snapshot_bytes);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = excluded_active.value.database, .data = active_snapshot_bytes[0 .. active_snapshot_bytes.len / 2] });
+    var recovered_doctor = try zgraphy.Operations.doctor(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    var found_recovery_diagnostic = false;
+    for (recovered_doctor.diagnostics()) |diagnostic| if (std.mem.eql(u8, diagnostic.code, "snapshot_recovered_from_delta")) {
+        found_recovery_diagnostic = true;
+    };
+    try std.testing.expectEqual(zgraphy.Operations.HealthStatus.degraded, recovered_doctor.status);
+    try std.testing.expect(recovered_doctor.ready and found_recovery_diagnostic);
+    var replay_fallback = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer replay_fallback.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.RecoverySource.full_snapshot, replay_fallback.recovery_source);
+    try std.testing.expectEqual(zgraphy.Repair.Action.rebuild_checkpoint, replay_fallback.refresh.repair.action);
+    try std.testing.expect(!std.mem.eql(u8, replay_fallback.refresh.generation, excluded_active.value.generation));
+    const recovered_graph = try zgraphy.Freshness.fingerprint(std.testing.allocator, &replay_fallback.graph);
+    const excluded_graph = try zgraphy.Freshness.fingerprint(std.testing.allocator, &excluded.built.graph);
+    try std.testing.expectEqualSlices(u8, &excluded_graph, &recovered_graph);
+    var repaired = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer repaired.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.RefreshStatus.current, repaired.publication.status);
+    try std.testing.expectEqualStrings(replay_fallback.refresh.generation, repaired.publication.generation);
+    try std.testing.expectEqual(@as(usize, 0), repaired.publication.delta_summary.operations);
+    var repaired_graph = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer repaired_graph.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.RecoverySource.full_snapshot, repaired_graph.recovery_source);
+
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.canonical-delta-replay",
+        .label = "checkpoint and successor journals replay to exact published and clean graph and native-index identity",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 3760, .column = 1 },
+        .repair_hint = "persist complete typed operations in canonical order and validate parent target graph and index fingerprints before activation",
+    }, std.mem.eql(u8, &cold_stored_graph, &cold_replayed_graph) and std.mem.eql(u8, &changed_stored_graph, &changed_replayed_graph) and std.mem.eql(u8, &clean_index, &changed_replayed_index));
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.typed-tombstones",
+        .label = "replacement deletion and live-file exclusion remain distinct while dependent semantic state is pruned",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 3760, .column = 1 },
+        .repair_hint = "classify current included paths before absence and bind every removed canonical identity to deterministic source-change evidence",
+    }, changed_info.summary.causes.replaced > 0 and deleted_info.summary.causes.deleted > 0 and excluded_info.summary.causes.excluded > 0 and excluded.built.graph.hyperedgeCount() == 0);
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.delta-recovery",
+        .label = "a complete snapshot or exact parent plus journal repairs reads while corrupt staged state cannot activate",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 3760, .column = 1 },
+        .repair_hint = "keep full checkpoints independent from journals and require complete replay validation before using the recovery representation",
+    }, snapshot_fallback.recovery_source == .full_snapshot and replay_fallback.refresh.repair.action == .rebuild_checkpoint and replay_fallback.recovery_source == .full_snapshot and repaired_graph.recovery_source == .full_snapshot and std.mem.eql(u8, active_before_staged, after_staged.value.generation));
+    try assertions.noFindings(.{ .id = "zgraphy.m3.delta-journal-no-findings", .label = "canonical delta and recovery validation has no causal findings" });
+    try assertions.noPendingFibers(.{ .id = "zgraphy.m3.delta-journal-no-pending", .label = "canonical delta and recovery leaves no pending fibers" });
+    try evidence.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+}
+
+test "zgraphy M3 repository context and change lineage reconcile rename move branch and worktree state" {
+    const scenario = zstd.Testing.Scenario{
+        .id = "m3-repository-lineage",
+        .label = "Repository context and exact rename or move lineage remain fresh unambiguous and path-redacted",
+        .requirement = "req-m3-repository-lineage",
+        .acceptance_check = "check-m3-repository-lineage",
+        .component = "zgraphy",
+        .command = "test",
+        .default_seed = 2005,
+        .source_roots = &.{ "src/repository_context.zig", "src/change_lineage.zig", "src/delta_journal.zig", "src/operations.zig", "src/discovery.zig", "src/freshness.zig", "src/main.zig", "src/root.zig", "benchmarks/fixtures/fullstack-orders", "docs/superpowers/specs/2026-07-17-zgraphy-m3-repository-lineage.md", "test/all_test.zig" },
+        .tags = &.{ "acceptance", "m3", "freshness", "git", "branch", "worktree", "rename", "move", "lineage", "ambiguity", "delta", "redaction", "equivalence", "deterministic" },
+    };
+    var evidence = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{
+        .project = "zgraphy",
+        .suite = "zgraphy-tests",
+        .scenario = scenario,
+        .seed = 2005,
+    });
+    defer evidence.deinit();
+    const assertions = zstd.Testing.AssertionRecorder.init(&evidence);
+
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try copyFullstackOrdersFixture(std.testing.allocator, std.testing.io, tmp.dir);
+    try tmp.dir.createDirPath(std.testing.io, ".git/refs/heads");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".git/HEAD", .data = "ref: refs/heads/main\n" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".git/refs/heads/main", .data = "1111111111111111111111111111111111111111\n" });
+    try tmp.dir.createDirPath(std.testing.io, "duplicate");
+    const duplicate_source = "pub fn duplicateMarker() void {}\n";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "duplicate/a.zig", .data = duplicate_source });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "duplicate/b.zig", .data = duplicate_source });
+
+    try std.testing.expectEqual(zgraphy.Project.InitStatus.initialized, try zgraphy.Project.init(std.testing.allocator, std.testing.io, tmp.dir));
+    var config = try zgraphy.Project.loadConfig(std.testing.allocator, std.testing.io, tmp.dir);
+    defer config.deinit();
+    var cold = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer cold.deinit();
+    var cold_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer cold_active.deinit();
+    var cold_context = try zgraphy.RepositoryContext.read(std.testing.allocator, std.testing.io, tmp.dir, cold_active.value.repository_context);
+    defer cold_context.deinit();
+    try std.testing.expectEqual(zgraphy.RepositoryContext.Presence.git, cold_context.value.presence);
+    try std.testing.expectEqual(zgraphy.RepositoryContext.WorktreeKind.primary, cold_context.value.worktree_kind);
+    try std.testing.expectEqual(zgraphy.RepositoryContext.HeadKind.symbolic, cold_context.value.head_kind);
+    try std.testing.expectEqualStrings("refs/heads/main", cold_context.value.head_ref);
+
+    try tmp.dir.rename("backend/src/unregistered_service.zig", tmp.dir, "backend/src/archived_service.zig", std.testing.io);
+    var renamed = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer renamed.deinit();
+    var renamed_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer renamed_active.deinit();
+    var renamed_lineage = try zgraphy.ChangeLineage.read(std.testing.allocator, std.testing.io, tmp.dir, renamed_active.value.change_lineage);
+    defer renamed_lineage.deinit();
+    try std.testing.expectEqual(@as(usize, 1), renamed_lineage.value.summary.records);
+    try std.testing.expectEqual(@as(usize, 1), renamed_lineage.value.summary.renamed);
+    try std.testing.expectEqual(@as(usize, 0), renamed_lineage.value.summary.ambiguous_groups);
+    const rename_record = renamed_lineage.value.records[0];
+    try std.testing.expectEqual(zgraphy.ChangeLineage.Relation.renamed_from, rename_record.relation);
+    try std.testing.expectEqualStrings("backend/src/unregistered_service.zig", rename_record.predecessor_path);
+    try std.testing.expectEqualStrings("backend/src/archived_service.zig", rename_record.successor_path);
+    const old_file = zgraphy.stableId(.file, rename_record.predecessor_path, "unregistered_service.zig");
+    const renamed_file = zgraphy.stableId(.file, rename_record.successor_path, "archived_service.zig");
+    try std.testing.expect(renamed.graph.findNode(old_file) == null);
+    try std.testing.expect(renamed.graph.findNode(renamed_file) != null);
+    var renamed_delta = try zgraphy.DeltaJournal.inspect(std.testing.allocator, std.testing.io, tmp.dir, renamed_active.value.delta_journal);
+    defer renamed_delta.deinit();
+    try std.testing.expect(renamed_delta.summary.causes.renamed > 0);
+
+    try tmp.dir.createDirPath(std.testing.io, "backend/lib");
+    try tmp.dir.rename("backend/src/archived_service.zig", tmp.dir, "backend/lib/archived_service.zig", std.testing.io);
+    var moved = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer moved.deinit();
+    var moved_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer moved_active.deinit();
+    var moved_lineage = try zgraphy.ChangeLineage.read(std.testing.allocator, std.testing.io, tmp.dir, moved_active.value.change_lineage);
+    defer moved_lineage.deinit();
+    try std.testing.expectEqual(@as(usize, 2), moved_lineage.value.summary.records);
+    try std.testing.expectEqual(@as(usize, 1), moved_lineage.value.summary.moved);
+    var found_move = false;
+    for (moved_lineage.value.records) |record| if (record.relation == .moved_from and
+        std.mem.eql(u8, record.predecessor_path, "backend/src/archived_service.zig") and
+        std.mem.eql(u8, record.successor_path, "backend/lib/archived_service.zig"))
+    {
+        found_move = true;
+    };
+    try std.testing.expect(found_move);
+    var moved_delta = try zgraphy.DeltaJournal.inspect(std.testing.allocator, std.testing.io, tmp.dir, moved_active.value.delta_journal);
+    defer moved_delta.deinit();
+    try std.testing.expect(moved_delta.summary.causes.moved > 0);
+
+    try tmp.dir.rename("duplicate/a.zig", tmp.dir, "duplicate/c.zig", std.testing.io);
+    try tmp.dir.rename("duplicate/b.zig", tmp.dir, "duplicate/d.zig", std.testing.io);
+    var ambiguous = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer ambiguous.deinit();
+    var ambiguous_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer ambiguous_active.deinit();
+    var ambiguous_lineage = try zgraphy.ChangeLineage.read(std.testing.allocator, std.testing.io, tmp.dir, ambiguous_active.value.change_lineage);
+    defer ambiguous_lineage.deinit();
+    try std.testing.expectEqual(@as(usize, 2), ambiguous_lineage.value.summary.records);
+    try std.testing.expectEqual(@as(usize, 1), ambiguous_lineage.value.summary.ambiguous_groups);
+
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".git/refs/heads/feature", .data = "2222222222222222222222222222222222222222\n" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".git/HEAD", .data = "ref: refs/heads/feature\n" });
+    var branch_changed = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer branch_changed.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.RefreshTrigger.changed_repository_context, branch_changed.refresh.trigger);
+    try std.testing.expectEqual(@as(usize, 0), branch_changed.refresh.reparsed_files);
+    try std.testing.expectEqual(@as(usize, 0), branch_changed.refresh.delta_summary.operations);
+    try std.testing.expect(!std.mem.eql(u8, ambiguous.refresh.generation, branch_changed.refresh.generation));
+
+    try tmp.dir.deleteFile(std.testing.io, ".git/refs/heads/feature");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".git/packed-refs", .data = "# pack-refs with: peeled fully-peeled sorted\n2222222222222222222222222222222222222222 refs/heads/feature\n" });
+    var packed_context = try zgraphy.RepositoryContext.inspect(std.testing.allocator, std.testing.io, tmp.dir);
+    defer packed_context.deinit();
+    try std.testing.expectEqual(zgraphy.RepositoryContext.HeadKind.symbolic, packed_context.value.head_kind);
+    try std.testing.expectEqualStrings("2222222222222222222222222222222222222222", packed_context.value.head_oid);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".git/HEAD", .data = "3333333333333333333333333333333333333333\n" });
+    var detached = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer detached.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.RefreshTrigger.changed_repository_context, detached.refresh.trigger);
+    try std.testing.expectEqual(@as(usize, 0), detached.refresh.reparsed_files);
+    try std.testing.expectEqual(@as(usize, 0), detached.refresh.delta_summary.operations);
+
+    try tmp.dir.createDirPath(std.testing.io, ".git/worktrees/linked");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".git/worktrees/linked/HEAD", .data = "ref: refs/heads/feature\n" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".git/worktrees/linked/commondir", .data = "../..\n" });
+    var root_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const root_path_length = try tmp.dir.realPath(std.testing.io, &root_path_buffer);
+    const root_path = root_path_buffer[0..root_path_length];
+    const linked_admin = try std.fmt.allocPrint(std.testing.allocator, "{s}/.git/worktrees/linked", .{root_path});
+    defer std.testing.allocator.free(linked_admin);
+    var linked = std.testing.tmpDir(.{ .iterate = true });
+    defer linked.cleanup();
+    const linked_dot_git = try std.fmt.allocPrint(std.testing.allocator, "gitdir: {s}\n", .{linked_admin});
+    defer std.testing.allocator.free(linked_dot_git);
+    try linked.dir.writeFile(std.testing.io, .{ .sub_path = ".git", .data = linked_dot_git });
+    var primary_context = try zgraphy.RepositoryContext.inspect(std.testing.allocator, std.testing.io, tmp.dir);
+    defer primary_context.deinit();
+    var linked_context = try zgraphy.RepositoryContext.inspect(std.testing.allocator, std.testing.io, linked.dir);
+    defer linked_context.deinit();
+    try std.testing.expectEqual(zgraphy.RepositoryContext.WorktreeKind.linked, linked_context.value.worktree_kind);
+    try std.testing.expectEqualStrings(primary_context.value.common_repository_id, linked_context.value.common_repository_id);
+    try std.testing.expect(!std.mem.eql(u8, primary_context.value.worktree_id, linked_context.value.worktree_id));
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".git/worktrees/linked/HEAD", .data = "ref: refs/heads/not-created\n" });
+    var unborn_context = try zgraphy.RepositoryContext.inspect(std.testing.allocator, std.testing.io, linked.dir);
+    defer unborn_context.deinit();
+    try std.testing.expectEqual(zgraphy.RepositoryContext.HeadKind.unborn, unborn_context.value.head_kind);
+    var malformed = std.testing.tmpDir(.{ .iterate = true });
+    defer malformed.cleanup();
+    try malformed.dir.writeFile(std.testing.io, .{ .sub_path = ".git", .data = "not-a-git-pointer\n" });
+    try std.testing.expectError(error.InvalidGitPointer, zgraphy.RepositoryContext.inspect(std.testing.allocator, std.testing.io, malformed.dir));
+
+    var clean = try zgraphy.Indexer.buildRepository(std.testing.allocator, std.testing.io, tmp.dir, zgraphy.Operations.buildOptions(config.value));
+    defer clean.deinit();
+    const managed_graph_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &detached.graph);
+    const clean_graph_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &clean.graph);
+    const managed_index_fingerprint = try detached.graph.secondaryIndexFingerprint(std.testing.allocator);
+    const clean_index_fingerprint = try clean.graph.secondaryIndexFingerprint(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &clean_graph_fingerprint, &managed_graph_fingerprint);
+    try std.testing.expectEqualSlices(u8, &clean_index_fingerprint, &managed_index_fingerprint);
+
+    var branch_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer branch_active.deinit();
+    const active_bytes = try tmp.dir.readFileAlloc(std.testing.io, zgraphy.Operations.active_generation_path, std.testing.allocator, .limited(zgraphy.Operations.max_active_generation_bytes));
+    defer std.testing.allocator.free(active_bytes);
+    const context_bytes = try tmp.dir.readFileAlloc(std.testing.io, branch_active.value.repository_context, std.testing.allocator, .limited(zgraphy.RepositoryContext.max_artifact_bytes));
+    defer std.testing.allocator.free(context_bytes);
+    const lineage_bytes = try tmp.dir.readFileAlloc(std.testing.io, branch_active.value.change_lineage, std.testing.allocator, .limited(zgraphy.ChangeLineage.max_artifact_bytes));
+    defer std.testing.allocator.free(lineage_bytes);
+    for (&[_][]const u8{ active_bytes, context_bytes, lineage_bytes }) |bytes| {
+        try std.testing.expect(std.mem.indexOf(u8, bytes, root_path) == null);
+        try std.testing.expect(std.mem.indexOf(u8, bytes, "source_body") == null);
+    }
+    var doctor = try zgraphy.Operations.doctor(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    const doctor_bytes = try zgraphy.Operations.encodeDoctorAlloc(std.testing.allocator, config.value, &doctor);
+    defer std.testing.allocator.free(doctor_bytes);
+    try std.testing.expect(doctor.ready);
+    try std.testing.expectEqual(@as(usize, 2), doctor.change_lineage_summary.records);
+    try std.testing.expect(std.mem.indexOf(u8, doctor_bytes, root_path) == null);
+
+    const m3_5_capabilities = zgraphy.Freshness.Capabilities.currentM3_5();
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.supported, m3_5_capabilities.repository_context_reconciliation);
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.supported, m3_5_capabilities.exact_change_lineage);
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.exact-change-lineage",
+        .label = "unique exact-content transitions retain rename and move lineage while ambiguous duplicates create no confident relation",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 4000, .column = 1 },
+        .repair_hint = "match only unique compatible predecessor and successor content groups and keep history outside the live current-source graph",
+    }, renamed_lineage.value.summary.renamed == 1 and moved_lineage.value.summary.moved == 1 and ambiguous_lineage.value.summary.records == 2 and ambiguous_lineage.value.summary.ambiguous_groups == 1);
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.repository-context-freshness",
+        .label = "branch-only and linked-worktree context is opaque isolated and freshness-significant without reparsing unchanged source",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 4000, .column = 1 },
+        .repair_hint = "bind validated native Git context to generation identity and compare it before accepting a manifest-matching active generation",
+    }, branch_changed.refresh.trigger == .changed_repository_context and branch_changed.refresh.reparsed_files == 0 and detached.refresh.trigger == .changed_repository_context and detached.refresh.reparsed_files == 0 and std.mem.eql(u8, primary_context.value.common_repository_id, linked_context.value.common_repository_id) and !std.mem.eql(u8, primary_context.value.worktree_id, linked_context.value.worktree_id));
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.lineage-current-equivalence",
+        .label = "lineage never resurrects stale live identities and accumulated current semantics remain equal to a clean build",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 4000, .column = 1 },
+        .repair_hint = "persist lineage as a separately validated generation overlay and keep canonical live graph construction path-scoped",
+    }, renamed.graph.findNode(old_file) == null and std.mem.eql(u8, &clean_graph_fingerprint, &managed_graph_fingerprint) and std.mem.eql(u8, &clean_index_fingerprint, &managed_index_fingerprint));
+    try assertions.noFindings(.{ .id = "zgraphy.m3.repository-lineage-no-findings", .label = "repository context and lineage validation has no causal findings" });
+    try assertions.noPendingFibers(.{ .id = "zgraphy.m3.repository-lineage-no-pending", .label = "repository context and lineage leaves no pending fibers" });
+    try evidence.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+}
+
+test "zgraphy M3 origin sweep and automatic repair preserve owned truth" {
+    const scenario = zstd.Testing.Scenario{
+        .id = "m3-origin-sweep-repair",
+        .label = "Origin-owned graph records sweep transactionally and damaged generations repair through immutable successors",
+        .requirement = "req-m3-origin-sweep-repair",
+        .acceptance_check = "check-m3-origin-sweep-repair",
+        .component = "zgraphy",
+        .command = "test",
+        .default_seed = 2006,
+        .source_roots = &.{ "src/origin_ledger.zig", "src/repair.zig", "src/operations.zig", "src/store.zig", "src/model.zig", "src/nendb.zig", "src/delta_journal.zig", "src/extraction_cache.zig", "src/discovery.zig", "src/freshness.zig", "src/main.zig", "src/root.zig", "benchmarks/fixtures/fullstack-orders", "docs/superpowers/specs/2026-07-17-zgraphy-m3-origin-sweep-repair.md", "test/all_test.zig" },
+        .tags = &.{ "acceptance", "m3", "origin", "provider", "ownership", "mark", "sweep", "orphan", "repair", "index", "checkpoint", "cache", "generation", "graphify", "equivalence", "redaction", "deterministic" },
+    };
+    var evidence = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{
+        .project = "zgraphy",
+        .suite = "zgraphy-tests",
+        .scenario = scenario,
+        .seed = 2006,
+    });
+    defer evidence.deinit();
+    const assertions = zstd.Testing.AssertionRecorder.init(&evidence);
+
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try copyFullstackOrdersFixture(std.testing.allocator, std.testing.io, tmp.dir);
+    try std.testing.expectEqual(zgraphy.Project.InitStatus.initialized, try zgraphy.Project.init(std.testing.allocator, std.testing.io, tmp.dir));
+    var config = try zgraphy.Project.loadConfig(std.testing.allocator, std.testing.io, tmp.dir);
+    defer config.deinit();
+
+    var initial_sources = try zgraphy.Discovery.scan(std.testing.allocator, std.testing.io, tmp.dir, .{ .repository_id = config.value.repository_id });
+    defer initial_sources.deinit();
+    const initial_dependency = initial_sources.findByPath("frontend/src/ordersClient.ts") orelse return error.MissingOriginDependency;
+    const initial_digest = initial_dependency.content_digest orelse return error.MissingOriginDependencyDigest;
+    const model_dependencies = [_]zgraphy.OriginLedger.Dependency{.{
+        .path = "frontend/src/ordersClient.ts",
+        .content_digest = initial_digest,
+    }};
+
+    var model_overlay_graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer model_overlay_graph.deinit();
+    const model_node = try model_overlay_graph.addNode(.{
+        .kind = .concept,
+        .label = "Orders client semantic intent",
+        .path = "frontend/src/ordersClient.ts",
+        .line = 1,
+        .search_text = "model-owned orders client behavior",
+    });
+    var compiler_overlay_graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer compiler_overlay_graph.deinit();
+    const external_node = try compiler_overlay_graph.addNode(.{
+        .kind = .external_module,
+        .label = "@remote/payments",
+        .search_text = "registered compiler external identity",
+    });
+    var runtime_overlay_graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer runtime_overlay_graph.deinit();
+    const runtime_node = try runtime_overlay_graph.addNode(.{
+        .kind = .causal_event,
+        .label = "orders.client.observed",
+        .search_text = "bounded runtime causal summary",
+    });
+    var pinned_overlay_graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer pinned_overlay_graph.deinit();
+    const pinned_node = try pinned_overlay_graph.addNode(.{
+        .kind = .concept,
+        .label = "Pinned orders architecture",
+        .search_text = "human confirmed architecture concept",
+    });
+    var historical_overlay_graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer historical_overlay_graph.deinit();
+    const historical_node = try historical_overlay_graph.addNode(.{
+        .kind = .concept,
+        .label = "Historical orders lineage",
+        .search_text = "retained historical identity",
+    });
+
+    const model_records = [_]zgraphy.OriginLedger.RecordRef{.{ .kind = .node, .id = model_node }};
+    const compiler_records = [_]zgraphy.OriginLedger.RecordRef{.{ .kind = .node, .id = external_node }};
+    const runtime_records = [_]zgraphy.OriginLedger.RecordRef{.{ .kind = .node, .id = runtime_node }};
+    const pinned_records = [_]zgraphy.OriginLedger.RecordRef{.{ .kind = .node, .id = pinned_node }};
+    const historical_records = [_]zgraphy.OriginLedger.RecordRef{.{ .kind = .node, .id = historical_node }};
+    const overlays = [_]zgraphy.OriginLedger.Overlay{
+        .{
+            .owner = .{
+                .tier = .model_suggestion,
+                .provider_id = "local-model/orders-intent",
+                .provider_fingerprint = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                .dependencies = &model_dependencies,
+            },
+            .graph = &model_overlay_graph,
+            .owned_records = &model_records,
+        },
+        .{
+            .owner = .{
+                .tier = .compiler_index,
+                .provider_id = "compiler-index/typescript",
+                .provider_fingerprint = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            },
+            .graph = &compiler_overlay_graph,
+            .owned_records = &compiler_records,
+        },
+        .{
+            .owner = .{
+                .tier = .runtime_causal,
+                .provider_id = "zigeffect/runtime-summary",
+                .provider_fingerprint = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            },
+            .graph = &runtime_overlay_graph,
+            .owned_records = &runtime_records,
+        },
+        .{
+            .owner = .{
+                .tier = .human_confirmation,
+                .provider_id = "user/pinned-orders-architecture",
+                .provider_fingerprint = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            },
+            .graph = &pinned_overlay_graph,
+            .owned_records = &pinned_records,
+        },
+        .{
+            .owner = .{
+                .tier = .historical_lineage,
+                .provider_id = "zgraphy/change-lineage",
+                .provider_fingerprint = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            },
+            .graph = &historical_overlay_graph,
+            .owned_records = &historical_records,
+        },
+    };
+
+    var cold = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{
+        .origin_overlays = &overlays,
+    });
+    defer cold.deinit();
+    var cold_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer cold_active.deinit();
+    var cold_origin = try zgraphy.OriginLedger.read(std.testing.allocator, std.testing.io, tmp.dir, cold_active.value.origin_ledger);
+    defer cold_origin.deinit();
+    var cold_graph = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer cold_graph.deinit();
+    try zgraphy.OriginLedger.validate(&cold_graph.graph, cold_origin.value);
+    const cold_record_count = cold_graph.graph.nodeCount() + cold_graph.graph.edgeCount() + cold_graph.graph.hyperedgeCount() + cold_graph.graph.supernodeCount();
+    try std.testing.expectEqual(cold_record_count, cold_origin.value.summary.records);
+    try std.testing.expectEqual(cold_origin.value.summary.records, cold_origin.value.summary.owned_records);
+
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "frontend/src/deceptiveClient.ts",
+        .data = "export const deceptiveClient = { unchangedProviderDependency: true };\n",
+    });
+    var carried = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer carried.deinit();
+    try std.testing.expect(carried.graph.findNode(model_node) != null);
+    try std.testing.expect(carried.graph.findNode(external_node) != null);
+    try std.testing.expect(carried.graph.findNode(runtime_node) != null);
+    try std.testing.expect(carried.graph.findNode(pinned_node) != null);
+    try std.testing.expect(carried.graph.findNode(historical_node) != null);
+    try std.testing.expect(carried.refresh.origin.carried_records >= overlays.len);
+
+    const refreshed_source = "import { createClient } from \"@connectrpc/connect\";\nexport const refreshedOrdersClient = createClient;\n";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "frontend/src/ordersClient.ts", .data = refreshed_source });
+    var refreshed_sources = try zgraphy.Discovery.scan(std.testing.allocator, std.testing.io, tmp.dir, .{ .repository_id = config.value.repository_id });
+    defer refreshed_sources.deinit();
+    const refreshed_dependency = refreshed_sources.findByPath("frontend/src/ordersClient.ts") orelse return error.MissingOriginDependency;
+    const refreshed_digest = refreshed_dependency.content_digest orelse return error.MissingOriginDependencyDigest;
+    const refreshed_dependencies = [_]zgraphy.OriginLedger.Dependency{.{
+        .path = "frontend/src/ordersClient.ts",
+        .content_digest = refreshed_digest,
+    }};
+    var refreshed_model_graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer refreshed_model_graph.deinit();
+    const refreshed_model_node = try refreshed_model_graph.addNode(.{
+        .kind = .concept,
+        .label = "Refreshed orders client semantic intent",
+        .path = "frontend/src/ordersClient.ts",
+        .line = 1,
+        .search_text = "replacement model-owned orders client behavior",
+    });
+    const refreshed_model_records = [_]zgraphy.OriginLedger.RecordRef{.{ .kind = .node, .id = refreshed_model_node }};
+    const refreshed_overlays = [_]zgraphy.OriginLedger.Overlay{.{
+        .owner = .{
+            .tier = .model_suggestion,
+            .provider_id = "local-model/orders-intent",
+            .provider_fingerprint = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            .dependencies = &refreshed_dependencies,
+        },
+        .graph = &refreshed_model_graph,
+        .owned_records = &refreshed_model_records,
+    }};
+    var replaced = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{
+        .origin_overlays = &refreshed_overlays,
+    });
+    defer replaced.deinit();
+    var replaced_graph = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer replaced_graph.deinit();
+    try std.testing.expect(replaced_graph.graph.findNode(model_node) == null);
+    try std.testing.expect(replaced_graph.graph.findNode(refreshed_model_node) != null);
+    try std.testing.expect(replaced.publication.origin.replaced_records > 0);
+
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "frontend/src/ordersClient.ts",
+        .data = "export const changedAgain = true;\n",
+    });
+    var swept = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer swept.deinit();
+    try std.testing.expect(swept.graph.findNode(refreshed_model_node) == null);
+    try std.testing.expect(swept.graph.findNode(external_node) != null);
+    try std.testing.expect(swept.graph.findNode(runtime_node) != null);
+    try std.testing.expect(swept.graph.findNode(pinned_node) != null);
+    try std.testing.expect(swept.graph.findNode(historical_node) != null);
+    try std.testing.expect(swept.refresh.origin.sweep_reasons.dependency_changed > 0);
+    var swept_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer swept_active.deinit();
+    var swept_origin = try zgraphy.OriginLedger.read(std.testing.allocator, std.testing.io, tmp.dir, swept_active.value.origin_ledger);
+    defer swept_origin.deinit();
+    try zgraphy.OriginLedger.validate(&swept.graph, swept_origin.value);
+
+    var invalid_overlay_graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer invalid_overlay_graph.deinit();
+    _ = try invalid_overlay_graph.addNode(.{ .kind = .concept, .label = "Unowned provider output" });
+    const invalid_overlay = [_]zgraphy.OriginLedger.Overlay{.{
+        .owner = .{
+            .tier = .model_suggestion,
+            .provider_id = "local-model/unowned",
+            .provider_fingerprint = "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        },
+        .graph = &invalid_overlay_graph,
+        .owned_records = &.{},
+    }};
+    try std.testing.expectError(error.UnownedOverlayRecord, zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{
+        .activate = false,
+        .origin_overlays = &invalid_overlay,
+    }));
+
+    var before_index_repair = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer before_index_repair.deinit();
+    const damaged_generation = try zgraphy.Memory.copy(u8, std.testing.allocator, before_index_repair.value.generation);
+    defer std.testing.allocator.free(damaged_generation);
+    const snapshot_bytes = try tmp.dir.readFileAlloc(std.testing.io, before_index_repair.value.database, std.testing.allocator, .limited(zgraphy.Store.max_snapshot_bytes));
+    defer std.testing.allocator.free(snapshot_bytes);
+    const corrupt_index_bytes = try zgraphy.Memory.copy(u8, std.testing.allocator, snapshot_bytes);
+    defer std.testing.allocator.free(corrupt_index_bytes);
+    const index_marker = "\"secondary_index_fingerprint\":\"";
+    const index_offset = std.mem.indexOf(u8, corrupt_index_bytes, index_marker) orelse return error.MissingSecondaryIndexFingerprint;
+    const digest_offset = index_offset + index_marker.len;
+    corrupt_index_bytes[digest_offset] = if (corrupt_index_bytes[digest_offset] == '0') '1' else '0';
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = before_index_repair.value.database, .data = corrupt_index_bytes });
+
+    var index_repaired = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer index_repaired.deinit();
+    try std.testing.expectEqual(zgraphy.Repair.Action.rebuild_secondary_indexes, index_repaired.refresh.repair.action);
+    try std.testing.expectEqual(@as(usize, 0), index_repaired.refresh.reparsed_files);
+    try std.testing.expect(!std.mem.eql(u8, damaged_generation, index_repaired.refresh.generation));
+    try std.testing.expectEqual(zgraphy.Operations.RecoverySource.full_snapshot, index_repaired.recovery_source);
+    const retained_damaged_snapshot = try tmp.dir.readFileAlloc(std.testing.io, before_index_repair.value.database, std.testing.allocator, .limited(zgraphy.Store.max_snapshot_bytes));
+    defer std.testing.allocator.free(retained_damaged_snapshot);
+    try std.testing.expectEqualSlices(u8, corrupt_index_bytes, retained_damaged_snapshot);
+
+    var before_clean_repair = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer before_clean_repair.deinit();
+    const clean_repair_source = try zgraphy.Memory.copy(u8, std.testing.allocator, before_clean_repair.value.generation);
+    defer std.testing.allocator.free(clean_repair_source);
+    const repair_snapshot = try tmp.dir.readFileAlloc(std.testing.io, before_clean_repair.value.database, std.testing.allocator, .limited(zgraphy.Store.max_snapshot_bytes));
+    defer std.testing.allocator.free(repair_snapshot);
+    const repair_journal = try tmp.dir.readFileAlloc(std.testing.io, before_clean_repair.value.delta_journal, std.testing.allocator, .limited(zgraphy.DeltaJournal.max_journal_bytes));
+    defer std.testing.allocator.free(repair_journal);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = before_clean_repair.value.database, .data = repair_snapshot[0 .. repair_snapshot.len / 2] });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = before_clean_repair.value.delta_journal, .data = repair_journal[0 .. repair_journal.len / 2] });
+    var clean_repaired = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer clean_repaired.deinit();
+    try std.testing.expectEqual(zgraphy.Repair.Action.clean_rebuild, clean_repaired.refresh.repair.action);
+    try std.testing.expect(!std.mem.eql(u8, clean_repair_source, clean_repaired.refresh.generation));
+    try std.testing.expectEqual(zgraphy.Operations.RecoverySource.full_snapshot, clean_repaired.recovery_source);
+
+    var clean = try zgraphy.Indexer.buildRepository(std.testing.allocator, std.testing.io, tmp.dir, zgraphy.Operations.buildOptions(config.value));
+    defer clean.deinit();
+    const repaired_graph_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &clean_repaired.graph);
+    const clean_graph_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &clean.graph);
+    const repaired_index_fingerprint = try clean_repaired.graph.secondaryIndexFingerprint(std.testing.allocator);
+    const clean_index_fingerprint = try clean.graph.secondaryIndexFingerprint(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &clean_graph_fingerprint, &repaired_graph_fingerprint);
+    try std.testing.expectEqualSlices(u8, &clean_index_fingerprint, &repaired_index_fingerprint);
+
+    var final_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer final_active.deinit();
+    var final_origin = try zgraphy.OriginLedger.read(std.testing.allocator, std.testing.io, tmp.dir, final_active.value.origin_ledger);
+    defer final_origin.deinit();
+    var final_repair = try zgraphy.Repair.read(std.testing.allocator, std.testing.io, tmp.dir, final_active.value.repair_report);
+    defer final_repair.deinit();
+    try zgraphy.OriginLedger.validate(&clean_repaired.graph, final_origin.value);
+    try zgraphy.Repair.validate(
+        std.testing.allocator,
+        final_repair.value,
+        final_active.value.generation,
+        final_active.value.replaces_generation,
+    );
+    var doctor = try zgraphy.Operations.doctor(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    const doctor_bytes = try zgraphy.Operations.encodeDoctorAlloc(std.testing.allocator, config.value, &doctor);
+    defer std.testing.allocator.free(doctor_bytes);
+    try std.testing.expect(doctor.ready);
+    try std.testing.expectEqual(zgraphy.Repair.Action.clean_rebuild, doctor.last_repair.action);
+    var root_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const root_path_length = try tmp.dir.realPath(std.testing.io, &root_path_buffer);
+    try std.testing.expect(std.mem.indexOf(u8, doctor_bytes, root_path_buffer[0..root_path_length]) == null);
+
+    const m3_6_capabilities = zgraphy.Freshness.Capabilities.currentM3_6();
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.supported, m3_6_capabilities.origin_owned_sweep);
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.supported, m3_6_capabilities.repair);
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.origin-owned-sweep",
+        .label = "unchanged origin-owned meaning survives while replacement and dependency invalidation sweep exact closures",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 4206, .column = 1 },
+        .repair_hint = "assign every record one bounded owner and reconcile refreshed providers before dependency-aware mark validate and sweep",
+    }, carried.graph.findNode(model_node) != null and replaced_graph.graph.findNode(model_node) == null and replaced_graph.graph.findNode(refreshed_model_node) != null and swept.graph.findNode(refreshed_model_node) == null and swept.refresh.origin.sweep_reasons.dependency_changed > 0);
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.legitimate-isolation",
+        .label = "registered external runtime pinned and historical degree-zero identities remain live and exactly owned",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 4206, .column = 1 },
+        .repair_hint = "treat live ownership and protected identity as the orphan criterion rather than graph degree",
+    }, swept.graph.findNode(external_node) != null and swept.graph.findNode(runtime_node) != null and swept.graph.findNode(pinned_node) != null and swept.graph.findNode(historical_node) != null);
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.immutable-repair-escalation",
+        .label = "index and clean repair publish distinct validated successors without mutating damaged generations",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 4206, .column = 1 },
+        .repair_hint = "classify generation failures and publish the smallest proof-supported immutable successor while retaining the last pointer until validation",
+    }, index_repaired.refresh.repair.action == .rebuild_secondary_indexes and index_repaired.refresh.reparsed_files == 0 and clean_repaired.refresh.repair.action == .clean_rebuild and std.mem.eql(u8, corrupt_index_bytes, retained_damaged_snapshot) and std.mem.eql(u8, &clean_graph_fingerprint, &repaired_graph_fingerprint));
+    try assertions.noFindings(.{ .id = "zgraphy.m3.origin-sweep-repair-no-findings", .label = "origin sweep and automatic repair validation has no causal findings" });
+    try assertions.noPendingFibers(.{ .id = "zgraphy.m3.origin-sweep-repair-no-pending", .label = "origin sweep and automatic repair leaves no pending fibers" });
+    try evidence.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+}
+
+test "zgraphy M3 watch coordinator coalesces and drains one freshness engine" {
+    const scenario = zstd.Testing.Scenario{
+        .id = "m3-watch-coordinator",
+        .label = "Native watch coalesces and drains local update requests through the one immutable freshness engine",
+        .requirement = "req-m3-watch-coordinator",
+        .acceptance_check = "check-m3-watch-coordinator",
+        .component = "zgraphy",
+        .command = "test",
+        .default_seed = 2007,
+        .source_roots = &.{ "src/watch_coordinator.zig", "src/operations.zig", "src/discovery.zig", "src/project.zig", "src/freshness.zig", "src/main.zig", "src/application.zig", "src/root.zig", "benchmarks/fixtures/fullstack-orders", "docs/superpowers/specs/2026-07-17-zgraphy-m3-watch-coordinator.md", "test/all_test.zig" },
+        .tags = &.{ "acceptance", "m3", "watch", "statechart", "debounce", "coalesce", "lease", "queue", "drain", "cancellation", "freshness", "graphify", "equivalence", "redaction", "deterministic" },
+    };
+    var evidence = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{
+        .project = "zgraphy",
+        .suite = "zgraphy-tests",
+        .scenario = scenario,
+        .seed = 2007,
+    });
+    defer evidence.deinit();
+    const assertions = zstd.Testing.AssertionRecorder.init(&evidence);
+
+    const definition_report = zgraphy.Watch.definition.validate();
+    try std.testing.expect(definition_report.isValid());
+    var coordinator = try zgraphy.Watch.Coordinator.init(std.testing.allocator, .{
+        .debounce_ms = 50,
+        .retry_ms = 25,
+        .max_pending_hints = 8,
+        .max_drain_passes = 1,
+    });
+    defer coordinator.deinit();
+    try coordinator.observe("frontend/src/ordersClient.ts", 0);
+    try coordinator.observe("backend/src/orders_service.zig", 10);
+    try coordinator.observe("frontend/src/ordersClient.ts", 20);
+    const early = try coordinator.advance(69);
+    try std.testing.expectEqual(zgraphy.Watch.Action.none, early.action);
+    const due = try coordinator.advance(70);
+    try std.testing.expectEqual(zgraphy.Watch.Action.attempt_refresh, due.action);
+    _ = try coordinator.leaseAcquired();
+    try coordinator.observe("proto/orders.proto", 71);
+    const completed = try coordinator.refreshSucceeded();
+    try std.testing.expectEqual(zgraphy.Watch.Action.drain_pending, completed.action);
+    const drained = try coordinator.drainComplete(false);
+    try std.testing.expectEqual(zgraphy.Watch.State.idle, drained.state);
+    try std.testing.expectEqual(@as(usize, 3), coordinator.summary().unique_hints);
+    try std.testing.expectEqual(@as(usize, 1), coordinator.summary().coalesced_observations);
+    try coordinator.observe("README.md", 100);
+    const second_due = try coordinator.advance(150);
+    try std.testing.expectEqual(zgraphy.Watch.Action.attempt_refresh, second_due.action);
+    _ = try coordinator.leaseAcquired();
+    try coordinator.observe("build.zig", 151);
+    const second_completed = try coordinator.refreshSucceeded();
+    try std.testing.expectEqual(zgraphy.Watch.Action.drain_pending, second_completed.action);
+    const second_drained = try coordinator.drainComplete(false);
+    try std.testing.expectEqual(zgraphy.Watch.State.idle, second_drained.state);
+
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try copyFullstackOrdersFixture(std.testing.allocator, std.testing.io, tmp.dir);
+    try std.testing.expectEqual(zgraphy.Project.InitStatus.initialized, try zgraphy.Project.init(std.testing.allocator, std.testing.io, tmp.dir));
+    var config = try zgraphy.Project.loadConfig(std.testing.allocator, std.testing.io, tmp.dir);
+    defer config.deinit();
+    var cold = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer cold.deinit();
+    const cold_generation = try zgraphy.Memory.copy(u8, std.testing.allocator, cold.publication.generation);
+    defer std.testing.allocator.free(cold_generation);
+
+    const initial_observation = try zgraphy.Watch.observeRepository(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    try tmp.dir.createDirPath(std.testing.io, ".zgraphy/runtime/watch");
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = ".zgraphy/runtime/watch/observer-noise",
+        .data = "watch output must never observe itself\n",
+    });
+    const output_observation = try zgraphy.Watch.observeRepository(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    try std.testing.expectEqualSlices(u8, &initial_observation.fingerprint, &output_observation.fingerprint);
+    try tmp.dir.createDirPath(std.testing.io, "node_modules/ignored-package");
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "node_modules/ignored-package/noise.ts",
+        .data = "export const ignored = true;\n",
+    });
+    const ignored_observation = try zgraphy.Watch.observeRepository(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    try std.testing.expectEqualSlices(u8, &initial_observation.fingerprint, &ignored_observation.fingerprint);
+
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "frontend/src/ordersClient.ts",
+        .data = "import { createClient } from \"@connectrpc/connect\";\nexport const watchedClient = createClient;\n",
+    });
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "backend/src/watched_service.zig",
+        .data = "pub fn watchedHandler() void {}\n",
+    });
+    try tmp.dir.deleteFile(std.testing.io, "frontend/src/deceptiveClient.ts");
+    try tmp.dir.rename("backend/src/unregistered_service.zig", tmp.dir, "backend/src/moved_unregistered_service.zig", std.testing.io);
+    const changed_observation = try zgraphy.Watch.observeRepository(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    try std.testing.expect(!std.mem.eql(u8, &initial_observation.fingerprint, &changed_observation.fingerprint));
+    const changed_paths = [_][]const u8{
+        "frontend/src/ordersClient.ts",
+        "backend/src/watched_service.zig",
+        "frontend/src/deceptiveClient.ts",
+        "backend/src/moved_unregistered_service.zig",
+    };
+    try zgraphy.Watch.requestRefresh(std.testing.allocator, std.testing.io, tmp.dir, .{
+        .repository_id = config.value.repository_id,
+        .request_id = "watch-test-request",
+        .paths = &changed_paths,
+    });
+    var queued = try zgraphy.Watch.readPending(std.testing.allocator, std.testing.io, tmp.dir, config.value.repository_id);
+    defer queued.deinit();
+    try std.testing.expectEqual(@as(usize, 1), queued.value.summary.pending_requests);
+    try std.testing.expectEqual(@as(usize, 4), queued.value.summary.pending_hints);
+    const pending_bytes = try tmp.dir.readFileAlloc(std.testing.io, zgraphy.Watch.pending_path, std.testing.allocator, .limited(zgraphy.Watch.max_pending_bytes));
+    defer std.testing.allocator.free(pending_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, pending_bytes, "frontend/src/ordersClient.ts") == null);
+    try std.testing.expect(std.mem.indexOf(u8, pending_bytes, "backend/src/watched_service.zig") == null);
+    try std.testing.expect(std.mem.indexOf(u8, pending_bytes, "frontend/src/deceptiveClient.ts") == null);
+    try std.testing.expect(std.mem.indexOf(u8, pending_bytes, "backend/src/moved_unregistered_service.zig") == null);
+
+    var held_lock = try tmp.dir.createFile(std.testing.io, zgraphy.Operations.update_lock_path, .{
+        .read = true,
+        .truncate = false,
+        .lock = .exclusive,
+        .lock_nonblocking = true,
+    });
+    var lock_open = true;
+    defer if (lock_open) {
+        held_lock.unlock(std.testing.io);
+        held_lock.close(std.testing.io);
+    };
+    const contended = try zgraphy.Watch.refreshPending(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    try std.testing.expectEqual(zgraphy.Watch.RefreshStatus.contended, contended.status);
+    var retained = try zgraphy.Watch.readPending(std.testing.allocator, std.testing.io, tmp.dir, config.value.repository_id);
+    defer retained.deinit();
+    try std.testing.expectEqual(@as(usize, 1), retained.value.summary.pending_requests);
+    held_lock.unlock(std.testing.io);
+    held_lock.close(std.testing.io);
+    lock_open = false;
+
+    const refreshed = try zgraphy.Watch.refreshPending(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    try std.testing.expectEqual(zgraphy.Watch.RefreshStatus.refreshed, refreshed.status);
+    try std.testing.expect(refreshed.drained_requests > 0);
+    try std.testing.expect(!std.mem.eql(u8, cold_generation, &refreshed.generation));
+    try std.testing.expectError(error.FileNotFound, zgraphy.Watch.readPending(std.testing.allocator, std.testing.io, tmp.dir, config.value.repository_id));
+
+    var watched = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer watched.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.RefreshStatus.current, watched.refresh.status);
+    var stale_watch_path = false;
+    for (watched.graph.nodes.items) |node| {
+        if (std.mem.eql(u8, node.path, "frontend/src/deceptiveClient.ts") or
+            std.mem.eql(u8, node.path, "backend/src/unregistered_service.zig"))
+        {
+            stale_watch_path = true;
+            break;
+        }
+    }
+    try std.testing.expect(!stale_watch_path);
+    var watched_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer watched_active.deinit();
+    try std.testing.expectEqual(@as(usize, 1), watched_active.value.change_lineage_summary.renamed);
+    var clean = try zgraphy.Indexer.buildRepository(std.testing.allocator, std.testing.io, tmp.dir, zgraphy.Operations.buildOptions(config.value));
+    defer clean.deinit();
+    const watched_graph = try zgraphy.Freshness.fingerprint(std.testing.allocator, &watched.graph);
+    const clean_graph = try zgraphy.Freshness.fingerprint(std.testing.allocator, &clean.graph);
+    const watched_index = try watched.graph.secondaryIndexFingerprint(std.testing.allocator);
+    const clean_index = try clean.graph.secondaryIndexFingerprint(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &clean_graph, &watched_graph);
+    try std.testing.expectEqualSlices(u8, &clean_index, &watched_index);
+
+    const empty_pending = zgraphy.Watch.inspectPending(std.testing.allocator, std.testing.io, tmp.dir, config.value.repository_id);
+    try std.testing.expectEqual(zgraphy.Watch.PendingHealthStatus.empty, empty_pending.status);
+    const foreground = try zgraphy.Watch.runForeground(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{
+        .poll_ms = 1,
+        .debounce_ms = 1,
+        .retry_ms = 1,
+        .max_cycles = 1,
+        .max_drain_passes = 3,
+    });
+    try std.testing.expectEqual(zgraphy.Watch.State.stopped, foreground.state);
+    try std.testing.expectEqual(@as(usize, 1), foreground.cycles);
+    try std.testing.expectEqual(@as(usize, 0), foreground.failures);
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.supported, foreground.capabilities.watch_mode);
+    var stopping_coordinator = try zgraphy.Watch.Coordinator.init(std.testing.allocator, .{
+        .debounce_ms = 1,
+        .retry_ms = 1,
+        .max_pending_hints = 2,
+        .max_drain_passes = 2,
+    });
+    defer stopping_coordinator.deinit();
+    try stopping_coordinator.observe("frontend/src/ordersClient.ts", 0);
+    const persist_stop = try stopping_coordinator.stop();
+    try std.testing.expectEqual(zgraphy.Watch.Action.persist_and_stop, persist_stop.action);
+    const stopped = try stopping_coordinator.stop();
+    try std.testing.expectEqual(zgraphy.Watch.State.stopped, stopped.state);
+    const application_args = [_][]const u8{ "zgraphy", "watch" };
+    const application_layer = zgraphy.Application.rootLayer(.{
+        .io = std.testing.io,
+        .root = tmp.dir,
+        .args = &application_args,
+    });
+    var application_runtime = try zstd.ManagedRuntime(@TypeOf(application_layer)).make(
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        application_layer,
+        .{ .graph = .{ .path = zgraphy.Application.causal_graph_path } },
+    );
+    defer application_runtime.deinit();
+    try application_runtime.run(zstd.Application.Lifecycle.start());
+    try application_runtime.run(zstd.Application.Lifecycle.ready());
+    try std.testing.expect((try application_runtime.run(zstd.Application.Lifecycle.currentState())).readiness);
+    try std.testing.expectEqual(zstd.Application.Lifecycle.ProcessSignal.none, try application_runtime.run(zstd.Application.Lifecycle.requestedSignalEffect()));
+    try application_runtime.run(zstd.Application.Lifecycle.drain());
+    try application_runtime.run(zstd.Application.Lifecycle.stop());
+
+    try tmp.dir.createDirPath(std.testing.io, ".zgraphy/runtime/watch");
+    const invalid_paths = [_][]const u8{"../outside.zig"};
+    try std.testing.expectError(error.InvalidWatchPath, zgraphy.Watch.requestRefresh(std.testing.allocator, std.testing.io, tmp.dir, .{
+        .repository_id = config.value.repository_id,
+        .request_id = "path-traversal",
+        .paths = &invalid_paths,
+    }));
+    const repository_paths = [_][]const u8{"repository-state"};
+    try zgraphy.Watch.requestRefresh(std.testing.allocator, std.testing.io, tmp.dir, .{
+        .repository_id = config.value.repository_id,
+        .request_id = "repository-mismatch",
+        .paths = &repository_paths,
+    });
+    try std.testing.expectError(error.CorruptWatchPending, zgraphy.Watch.readPending(
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        "repo-11111111111111111111111111111111",
+    ));
+    const mismatch_drained = try zgraphy.Watch.refreshPending(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    try std.testing.expectEqual(zgraphy.Watch.RefreshStatus.current, mismatch_drained.status);
+    const oversized_pending = try zgraphy.Memory.slice(u8, std.testing.allocator, zgraphy.Watch.max_pending_bytes + 1);
+    defer std.testing.allocator.free(oversized_pending);
+    @memset(oversized_pending, 'x');
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = zgraphy.Watch.pending_path, .data = oversized_pending });
+    try std.testing.expectError(error.CorruptWatchPending, zgraphy.Watch.readPending(std.testing.allocator, std.testing.io, tmp.dir, config.value.repository_id));
+    const oversized_health = zgraphy.Watch.inspectPending(std.testing.allocator, std.testing.io, tmp.dir, config.value.repository_id);
+    try std.testing.expectEqual(zgraphy.Watch.PendingHealthStatus.corrupt, oversized_health.status);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = zgraphy.Watch.pending_path, .data = "{\"complete\":true}" });
+    try std.testing.expectError(error.CorruptWatchPending, zgraphy.Watch.readPending(std.testing.allocator, std.testing.io, tmp.dir, config.value.repository_id));
+    const corrupt_pending = zgraphy.Watch.inspectPending(std.testing.allocator, std.testing.io, tmp.dir, config.value.repository_id);
+    try std.testing.expectEqual(zgraphy.Watch.PendingHealthStatus.corrupt, corrupt_pending.status);
+    const watch_doctor = zgraphy.Operations.DoctorReport{
+        .status = .healthy,
+        .ready = true,
+        .repository_id = config.value.repository_id,
+    };
+    const watch_doctor_bytes = try zgraphy.Operations.encodeDoctorWithWatchAlloc(std.testing.allocator, config.value, &watch_doctor, .{
+        .status = .corrupt,
+        .repair_hint = corrupt_pending.repair_hint,
+    });
+    defer std.testing.allocator.free(watch_doctor_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, watch_doctor_bytes, "\"status\": \"corrupt\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, watch_doctor_bytes, "\"watch\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, watch_doctor_bytes, "remove the corrupt zgraphy-owned watch request artifact") != null);
+
+    const capabilities = zgraphy.Freshness.Capabilities.currentM3_7();
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.supported, capabilities.watch_mode);
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.watch-coalescing",
+        .label = "logical debounce coalesces duplicate observations and drains changes that arrive during refresh",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 4535, .column = 1 },
+        .repair_hint = "drive every watch transition through the typed coordinator and preserve late observations until a subsequent drain succeeds",
+    }, due.action == .attempt_refresh and completed.action == .drain_pending and second_completed.action == .drain_pending and second_drained.state == .idle and coordinator.summary().coalesced_observations == 1 and std.mem.eql(u8, &initial_observation.fingerprint, &output_observation.fingerprint) and std.mem.eql(u8, &initial_observation.fingerprint, &ignored_observation.fingerprint) and !std.mem.eql(u8, &initial_observation.fingerprint, &changed_observation.fingerprint));
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.watch-contention",
+        .label = "lease contention retains a redacted durable request and the eventual holder refreshes through ensureFresh",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 4535, .column = 1 },
+        .repair_hint = "persist bounded request digests before nonblocking lease acquisition and acknowledge only after a complete refresh",
+    }, contended.status == .contended and refreshed.status == .refreshed and watched.refresh.status == .current and mismatch_drained.status == .current);
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.watch-equivalence",
+        .label = "watch-triggered output equals clean graph and native index truth without exposing source paths in its queue",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 4535, .column = 1 },
+        .repair_hint = "keep watch as an accelerator over the canonical freshness barrier rather than a separate merge path",
+    }, std.mem.eql(u8, &clean_graph, &watched_graph) and std.mem.eql(u8, &clean_index, &watched_index) and !stale_watch_path and watched_active.value.change_lineage_summary.renamed == 1 and std.mem.indexOf(u8, pending_bytes, "ordersClient.ts") == null and foreground.state == .stopped and persist_stop.action == .persist_and_stop and stopped.state == .stopped and oversized_health.status == .corrupt and corrupt_pending.status == .corrupt);
+    try assertions.noFindings(.{ .id = "zgraphy.m3.watch-no-findings", .label = "watch coordination validation has no causal findings" });
+    try assertions.noPendingFibers(.{ .id = "zgraphy.m3.watch-no-pending", .label = "watch coordination leaves no pending fibers" });
+    try evidence.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+}
+
+test "zgraphy M3 retention compaction and garbage collection is reader safe" {
+    const scenario = zstd.Testing.Scenario{
+        .id = "m3-retention-gc",
+        .label = "Reader-safe retention bounds immutable generations journals tombstones and structural caches without weakening current graph truth",
+        .requirement = "req-m3-retention-gc",
+        .acceptance_check = "check-m3-retention-gc",
+        .component = "zgraphy",
+        .command = "test",
+        .default_seed = 2008,
+        .source_roots = &.{ "src/retention.zig", "src/operations.zig", "src/extraction_cache.zig", "src/project.zig", "src/freshness.zig", "src/main.zig", "src/root.zig", "benchmarks/fixtures/fullstack-orders", "docs/superpowers/specs/2026-07-17-zgraphy-m3-retention-gc.md", "test/all_test.zig" },
+        .tags = &.{ "acceptance", "m3", "retention", "gc", "compaction", "generation", "cache", "pin", "reader", "lock", "graphify", "recovery", "equivalence", "redaction", "deterministic" },
+    };
+    var evidence = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{
+        .project = "zgraphy",
+        .suite = "zgraphy-tests",
+        .scenario = scenario,
+        .seed = 2008,
+    });
+    defer evidence.deinit();
+    const assertions = zstd.Testing.AssertionRecorder.init(&evidence);
+
+    try std.testing.expectError(error.InvalidConfig, zgraphy.Project.validateConfig(.{ .retention_generations = 1 }));
+    var defaults_tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer defaults_tmp.cleanup();
+    try defaults_tmp.dir.createDirPath(std.testing.io, ".zgraphy");
+    try defaults_tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = zgraphy.Project.config_path,
+        .data = "{\"schema\":\"zgraphy.config.v2\",\"schema_version\":2,\"repository_id\":\"repo-0123456789abcdef0123456789abcdef\"}",
+    });
+    var defaulted_config = try zgraphy.Project.loadConfig(std.testing.allocator, std.testing.io, defaults_tmp.dir);
+    defer defaulted_config.deinit();
+    try std.testing.expect(defaulted_config.value.automatic_gc);
+    try std.testing.expectEqual(@as(usize, 8), defaulted_config.value.retention_generations);
+    try std.testing.expectEqual(@as(u64, 300_000), defaulted_config.value.retention_grace_ms);
+
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(std.testing.io, "src");
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "src/main.zig",
+        .data = "pub fn revision0() usize { return 0; }\n",
+    });
+    try std.testing.expectEqual(zgraphy.Project.InitStatus.initialized, try zgraphy.Project.init(std.testing.allocator, std.testing.io, tmp.dir));
+    var config = try zgraphy.Project.loadConfig(std.testing.allocator, std.testing.io, tmp.dir);
+    defer config.deinit();
+    try std.testing.expect(config.value.automatic_gc);
+    try std.testing.expectEqual(@as(usize, 8), config.value.retention_generations);
+    config.value.automatic_gc = false;
+    config.value.retention_generations = 2;
+    config.value.retention_grace_ms = 0;
+
+    var cold = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer cold.deinit();
+    const pinned_generation = try zgraphy.Memory.copy(u8, std.testing.allocator, cold.publication.generation);
+    defer std.testing.allocator.free(pinned_generation);
+    try zgraphy.Operations.pinGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value, pinned_generation);
+
+    var revision: usize = 1;
+    while (revision <= 4) : (revision += 1) {
+        const source = try std.fmt.allocPrint(std.testing.allocator, "pub fn revision{d}() usize {{ return {d}; }}\n", .{ revision, revision });
+        defer std.testing.allocator.free(source);
+        try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "src/main.zig", .data = source });
+        var refreshed = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+        refreshed.deinit();
+    }
+    var active_before = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer active_before.deinit();
+    const active_generation = try zgraphy.Memory.copy(u8, std.testing.allocator, active_before.value.generation);
+    defer std.testing.allocator.free(active_generation);
+    const fallback_generation = try zgraphy.Memory.copy(u8, std.testing.allocator, active_before.value.parent_generation);
+    defer std.testing.allocator.free(fallback_generation);
+    var active_manifest = try zgraphy.ExtractionCache.readManifest(std.testing.allocator, std.testing.io, tmp.dir, active_before.value.extraction_manifest);
+    defer active_manifest.deinit();
+    const active_unit = active_manifest.find("src/main.zig") orelse return error.MissingExtractionUnit;
+    const live_cache_path = try zgraphy.ExtractionCache.entryPathAlloc(std.testing.allocator, active_unit.cache_key);
+    defer std.testing.allocator.free(live_cache_path);
+
+    const orphan_key = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const orphan_path = try zgraphy.ExtractionCache.entryPathAlloc(std.testing.allocator, orphan_key);
+    defer std.testing.allocator.free(orphan_path);
+    if (std.fs.path.dirname(orphan_path)) |parent| try tmp.dir.createDirPath(std.testing.io, parent);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = orphan_path, .data = "{\"orphan\":true}" });
+    const arbitrary_temporary = ".zgraphy/cache/extraction/structural-facts-v2/aa/unrelated.tmp";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = arbitrary_temporary, .data = "preserve" });
+    const obsolete_namespace = ".zgraphy/cache/extraction/structural-facts-v0/aa";
+    try tmp.dir.createDirPath(std.testing.io, obsolete_namespace);
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = ".zgraphy/cache/extraction/structural-facts-v0/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json",
+        .data = "{\"obsolete\":true}",
+    });
+
+    var dry_run = try zgraphy.Operations.collectGarbage(std.testing.allocator, std.testing.io, tmp.dir, config.value, .dry_run);
+    defer dry_run.deinit();
+    try std.testing.expectEqual(zgraphy.Retention.Status.planned, dry_run.summary.status);
+    try std.testing.expect(dry_run.summary.generation_candidates >= 2);
+    try std.testing.expect(dry_run.summary.cache_candidates >= 1);
+    try std.testing.expectEqual(@as(usize, 1), dry_run.summary.obsolete_namespaces);
+    try std.testing.expect(dry_run.summary.pinned_generations == 1);
+    try tmp.dir.access(std.testing.io, orphan_path, .{});
+
+    var held_reader = try zgraphy.Operations.GenerationReadLease.acquireShared(std.testing.io, tmp.dir);
+    var held_reader_open = true;
+    defer if (held_reader_open) held_reader.deinit();
+    var deferred = try zgraphy.Operations.collectGarbage(std.testing.allocator, std.testing.io, tmp.dir, config.value, .apply);
+    defer deferred.deinit();
+    try std.testing.expectEqual(zgraphy.Retention.Status.deferred_readers, deferred.summary.status);
+    try std.testing.expectEqualSlices(u8, &dry_run.plan_fingerprint, &deferred.plan_fingerprint);
+    try tmp.dir.access(std.testing.io, orphan_path, .{});
+    held_reader.deinit();
+    held_reader_open = false;
+
+    var applied = try zgraphy.Operations.collectGarbage(std.testing.allocator, std.testing.io, tmp.dir, config.value, .apply);
+    defer applied.deinit();
+    try std.testing.expectEqual(zgraphy.Retention.Status.applied, applied.summary.status);
+    try std.testing.expectEqualSlices(u8, &dry_run.plan_fingerprint, &applied.plan_fingerprint);
+    try std.testing.expect(applied.summary.generations_deleted >= 2);
+    try std.testing.expect(applied.summary.cache_entries_deleted >= 1);
+    try std.testing.expectEqual(@as(usize, 1), applied.summary.namespaces_deleted);
+    try std.testing.expectError(error.FileNotFound, tmp.dir.access(std.testing.io, orphan_path, .{}));
+    try tmp.dir.access(std.testing.io, arbitrary_temporary, .{});
+    try tmp.dir.access(std.testing.io, live_cache_path, .{});
+    try std.testing.expectError(error.FileNotFound, tmp.dir.access(std.testing.io, ".zgraphy/cache/extraction/structural-facts-v0", .{}));
+    const active_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ zgraphy.Operations.generation_root, active_generation });
+    defer std.testing.allocator.free(active_path);
+    const fallback_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ zgraphy.Operations.generation_root, fallback_generation });
+    defer std.testing.allocator.free(fallback_path);
+    const pinned_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ zgraphy.Operations.generation_root, pinned_generation });
+    defer std.testing.allocator.free(pinned_path);
+    try tmp.dir.access(std.testing.io, active_path, .{});
+    try tmp.dir.access(std.testing.io, fallback_path, .{});
+    try tmp.dir.access(std.testing.io, pinned_path, .{});
+
+    const pins_bytes = try tmp.dir.readFileAlloc(std.testing.io, zgraphy.Retention.pins_path, std.testing.allocator, .limited(zgraphy.Retention.max_pins_bytes));
+    defer std.testing.allocator.free(pins_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, pins_bytes, pinned_generation) != null);
+    try std.testing.expect(std.mem.indexOf(u8, pins_bytes, "src/main.zig") == null);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = zgraphy.Retention.pins_path, .data = "{\"complete\":true}" });
+    try std.testing.expectError(error.CorruptRetentionPins, zgraphy.Operations.collectGarbage(std.testing.allocator, std.testing.io, tmp.dir, config.value, .apply));
+    try tmp.dir.access(std.testing.io, active_before.value.database, .{});
+
+    try tmp.dir.deleteFile(std.testing.io, zgraphy.Retention.pins_path);
+    config.value.automatic_gc = true;
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "src/main.zig",
+        .data = "pub fn revision5() usize { return 5; }\n",
+    });
+    var automatic = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer automatic.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.RefreshStatus.refreshed, automatic.refresh.status);
+    try std.testing.expectEqual(zgraphy.Retention.Status.applied, automatic.refresh.retention.status);
+    try std.testing.expect(automatic.refresh.retention.generations_deleted >= 1);
+    var current = try zgraphy.Operations.loadManagedGraph(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer current.deinit();
+    var clean = try zgraphy.Indexer.buildRepository(std.testing.allocator, std.testing.io, tmp.dir, zgraphy.Operations.buildOptions(config.value));
+    defer clean.deinit();
+    const current_graph = try zgraphy.Freshness.fingerprint(std.testing.allocator, &current.graph);
+    const clean_graph = try zgraphy.Freshness.fingerprint(std.testing.allocator, &clean.graph);
+    const current_index = try current.graph.secondaryIndexFingerprint(std.testing.allocator);
+    const clean_index = try clean.graph.secondaryIndexFingerprint(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &clean_graph, &current_graph);
+    try std.testing.expectEqualSlices(u8, &clean_index, &current_index);
+    try std.testing.expectEqual(zgraphy.Operations.RefreshStatus.current, current.refresh.status);
+
+    var doctor = try zgraphy.Operations.doctor(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    const doctor_bytes = try zgraphy.Operations.encodeDoctorAlloc(std.testing.allocator, config.value, &doctor);
+    defer std.testing.allocator.free(doctor_bytes);
+    var root_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const root_length = try tmp.dir.realPath(std.testing.io, &root_buffer);
+    try std.testing.expect(std.mem.indexOf(u8, doctor_bytes, root_buffer[0..root_length]) == null);
+    const capabilities = zgraphy.Freshness.Capabilities.currentM3_8();
+    try std.testing.expectEqual(zgraphy.Freshness.CapabilityStatus.supported, capabilities.garbage_collection);
+    var hostile_lock = std.testing.tmpDir(.{ .iterate = true });
+    defer hostile_lock.cleanup();
+    try hostile_lock.dir.createDirPath(std.testing.io, ".zgraphy/runtime");
+    try hostile_lock.dir.writeFile(std.testing.io, .{ .sub_path = "outside.lock", .data = "do not follow" });
+    try hostile_lock.dir.symLink(std.testing.io, "../../outside.lock", zgraphy.Operations.generation_reader_lock_path, .{});
+    try std.testing.expectError(error.InvalidGenerationReaderLockArtifact, zgraphy.Operations.GenerationReadLease.acquireShared(std.testing.io, hostile_lock.dir));
+
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.retention-mark-sweep",
+        .label = "validated retention keeps active fallback and pinned history while deleting only eligible owned generations and cache entries",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 4810, .column = 1 },
+        .repair_hint = "derive the complete mark set from active metadata pins and every retained extraction manifest before producing any deletion action",
+    }, applied.summary.generations_deleted >= 2 and applied.summary.cache_entries_deleted >= 1 and automatic.refresh.retention.generations_deleted >= 1 and current.refresh.status == .current);
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.retention-reader-safety",
+        .label = "an active shared generation reader defers the exact applied plan without deleting work",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 4810, .column = 1 },
+        .repair_hint = "hold shared leases through complete generation loading and require a nonblocking exclusive lease for sweep",
+    }, deferred.summary.status == .deferred_readers and std.mem.eql(u8, &dry_run.plan_fingerprint, &deferred.plan_fingerprint));
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.retention-equivalence",
+        .label = "post-GC default query and native indexes equal a clean repository build without path leakage",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 4810, .column = 1 },
+        .repair_hint = "keep collection outside active graph construction and validate the immutable active pointer after every sweep",
+    }, std.mem.eql(u8, &clean_graph, &current_graph) and std.mem.eql(u8, &clean_index, &current_index) and std.mem.indexOf(u8, doctor_bytes, root_buffer[0..root_length]) == null);
+    try assertions.noFindings(.{ .id = "zgraphy.m3.retention-no-findings", .label = "retention and garbage collection validation has no causal findings" });
+    try assertions.noPendingFibers(.{ .id = "zgraphy.m3.retention-no-pending", .label = "retention and garbage collection leaves no pending fibers" });
+    try evidence.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+}
+
+test "zgraphy M3 semantic no-op source generation reuses validated semantic artifacts" {
+    const scenario = zstd.Testing.Scenario{
+        .id = "m3-semantic-noop-publication",
+        .label = "Meaning-preserving Zig edits publish current source generations by reusing validated semantic artifacts",
+        .requirement = "req-m3-exit-qualification",
+        .acceptance_check = "check-m3-exit-qualification",
+        .component = "zgraphy",
+        .command = "test",
+        .default_seed = 2009,
+        .source_roots = &.{ "src/operations.zig", "src/extraction_cache.zig", "src/delta_journal.zig", "src/retention.zig", "src/repository_context.zig", "src/change_lineage.zig", "src/origin_ledger.zig", "src/repair.zig", "src/store.zig", "src/indexer.zig", "src/main.zig", "docs/superpowers/specs/2026-07-17-zgraphy-m3-performance-repair.md", "test/all_test.zig" },
+        .tags = &.{ "acceptance", "m3", "incremental", "semantic-no-op", "generation", "identity-delta", "retention", "fallback", "equivalence", "deterministic" },
+    };
+    var evidence = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{
+        .project = "zgraphy",
+        .suite = "zgraphy-tests",
+        .scenario = scenario,
+        .seed = 2009,
+    });
+    defer evidence.deinit();
+    const assertions = zstd.Testing.AssertionRecorder.init(&evidence);
+
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try copyFullstackOrdersFixture(std.testing.allocator, std.testing.io, tmp.dir);
+    try std.testing.expectEqual(zgraphy.Project.InitStatus.initialized, try zgraphy.Project.init(std.testing.allocator, std.testing.io, tmp.dir));
+    var config = try zgraphy.Project.loadConfig(std.testing.allocator, std.testing.io, tmp.dir);
+    defer config.deinit();
+    config.value.retention_generations = 2;
+    config.value.retention_grace_ms = 0;
+
+    var cold = try zgraphy.Operations.rebuildManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    const cold_nodes = cold.built.summary.nodes;
+    const cold_edges = cold.built.summary.edges;
+    const cold_generation = try zgraphy.Memory.copy(u8, std.testing.allocator, cold.publication.generation);
+    defer std.testing.allocator.free(cold_generation);
+    cold.deinit();
+    var cold_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer cold_active.deinit();
+    const cold_database = try zgraphy.Memory.copy(u8, std.testing.allocator, cold_active.value.database);
+    defer std.testing.allocator.free(cold_database);
+    const cold_origin = try zgraphy.Memory.copy(u8, std.testing.allocator, cold_active.value.origin_ledger);
+    defer std.testing.allocator.free(cold_origin);
+    const cold_graph_fingerprint = try zgraphy.Memory.copy(u8, std.testing.allocator, cold_active.value.graph_fingerprint);
+    defer std.testing.allocator.free(cold_graph_fingerprint);
+    const cold_index_fingerprint = try zgraphy.Memory.copy(u8, std.testing.allocator, cold_active.value.secondary_index_fingerprint);
+    defer std.testing.allocator.free(cold_index_fingerprint);
+    const cold_discovery_fingerprint = try zgraphy.Memory.copy(u8, std.testing.allocator, cold_active.value.discovery_manifest_digest);
+    defer std.testing.allocator.free(cold_discovery_fingerprint);
+
+    const source_path = "backend/src/orders_service.zig";
+    const original = try tmp.dir.readFileAlloc(std.testing.io, source_path, std.testing.allocator, .limited(1024 * 1024));
+    defer std.testing.allocator.free(original);
+    const comment_only = try std.fmt.allocPrint(std.testing.allocator, "{s}\n// semantic-no-op qualification marker\n", .{original});
+    defer std.testing.allocator.free(comment_only);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = source_path, .data = comment_only });
+
+    var semantic = try zgraphy.Operations.updateManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer semantic.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.UpdateKind.semantic_noop, semantic.kind);
+    try std.testing.expectEqual(@as(usize, 1), semantic.publication.reparsed_files);
+    try std.testing.expectEqual(cold_nodes, semantic.summary.nodes);
+    try std.testing.expectEqual(cold_edges, semantic.summary.edges);
+    try std.testing.expect(!std.mem.eql(u8, semantic.publication.generation, cold_generation));
+
+    var semantic_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer semantic_active.deinit();
+    try std.testing.expectEqualStrings(cold_generation, semantic_active.value.semantic_generation);
+    try std.testing.expectEqualStrings(cold_database, semantic_active.value.database);
+    try std.testing.expectEqualStrings(cold_origin, semantic_active.value.origin_ledger);
+    try std.testing.expectEqualStrings(cold_graph_fingerprint, semantic_active.value.graph_fingerprint);
+    try std.testing.expectEqualStrings(cold_index_fingerprint, semantic_active.value.secondary_index_fingerprint);
+    try std.testing.expect(!std.mem.eql(u8, cold_discovery_fingerprint, semantic_active.value.discovery_manifest_digest));
+    var identity_delta = try zgraphy.DeltaJournal.inspect(std.testing.allocator, std.testing.io, tmp.dir, semantic_active.value.delta_journal);
+    defer identity_delta.deinit();
+    try std.testing.expectEqual(zgraphy.DeltaJournal.Mode.delta, identity_delta.mode);
+    try std.testing.expectEqual(@as(usize, 0), identity_delta.summary.operations);
+    try std.testing.expectEqualStrings(identity_delta.parent_graph_fingerprint, identity_delta.target_graph_fingerprint);
+    try std.testing.expectEqualStrings(identity_delta.parent_index_fingerprint, identity_delta.target_index_fingerprint);
+
+    const first_source_generation = try zgraphy.Memory.copy(u8, std.testing.allocator, semantic_active.value.generation);
+    defer std.testing.allocator.free(first_source_generation);
+    const twice_commented = try std.fmt.allocPrint(std.testing.allocator, "{s}// second semantic-no-op qualification marker\n", .{comment_only});
+    defer std.testing.allocator.free(twice_commented);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = source_path, .data = twice_commented });
+    var semantic_retained = try zgraphy.Operations.updateManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer semantic_retained.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.UpdateKind.semantic_noop, semantic_retained.kind);
+    try std.testing.expectEqual(zgraphy.Retention.Status.applied, semantic_retained.publication.retention.status);
+    var retained_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer retained_active.deinit();
+    try std.testing.expectEqual(@as(usize, 2), retained_active.value.semantic_noop_depth);
+    try std.testing.expectEqualStrings(cold_generation, retained_active.value.semantic_generation);
+    const semantic_base_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ zgraphy.Operations.generation_root, cold_generation });
+    defer std.testing.allocator.free(semantic_base_path);
+    try tmp.dir.access(std.testing.io, semantic_base_path, .{});
+    const source_parent_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ zgraphy.Operations.generation_root, first_source_generation });
+    defer std.testing.allocator.free(source_parent_path);
+    try tmp.dir.access(std.testing.io, source_parent_path, .{});
+
+    var reused_graph = try zgraphy.Store.load(std.testing.allocator, std.testing.io, tmp.dir, retained_active.value.database, .{});
+    defer reused_graph.deinit();
+    var clean = try zgraphy.Indexer.buildRepository(std.testing.allocator, std.testing.io, tmp.dir, zgraphy.Operations.buildOptions(config.value));
+    defer clean.deinit();
+    const reused_graph_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &reused_graph);
+    const clean_graph_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &clean.graph);
+    const reused_index_fingerprint = try reused_graph.secondaryIndexFingerprint(std.testing.allocator);
+    const clean_index_fingerprint = try clean.graph.secondaryIndexFingerprint(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &clean_graph_fingerprint, &reused_graph_fingerprint);
+    try std.testing.expectEqualSlices(u8, &clean_index_fingerprint, &reused_index_fingerprint);
+
+    const snapshot = try tmp.dir.readFileAlloc(std.testing.io, retained_active.value.database, std.testing.allocator, .limited(zgraphy.Store.max_snapshot_bytes));
+    defer std.testing.allocator.free(snapshot);
+    const damaged_snapshot = try zgraphy.Memory.copy(u8, std.testing.allocator, snapshot);
+    defer std.testing.allocator.free(damaged_snapshot);
+    damaged_snapshot[0] = if (damaged_snapshot[0] == '{') '!' else '{';
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = retained_active.value.database, .data = damaged_snapshot });
+    const corruption_probe = try std.fmt.allocPrint(std.testing.allocator, "{s}// corruption fallback qualification marker\n", .{twice_commented});
+    defer std.testing.allocator.free(corruption_probe);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = source_path, .data = corruption_probe });
+    var recovered = try zgraphy.Operations.updateManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer recovered.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.UpdateKind.full_rebuild, recovered.kind);
+    var recovered_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer recovered_active.deinit();
+    try std.testing.expectEqualStrings(recovered_active.value.generation, recovered_active.value.semantic_generation);
+    try std.testing.expectEqualStrings(cold_graph_fingerprint, recovered_active.value.graph_fingerprint);
+
+    const needle = "\"ready\"";
+    const replacement = "\"changed\"";
+    const offset = std.mem.indexOf(u8, corruption_probe, needle) orelse return error.MissingSemanticChangeNeedle;
+    const changed = try zgraphy.Memory.slice(u8, std.testing.allocator, corruption_probe.len + replacement.len - needle.len);
+    defer std.testing.allocator.free(changed);
+    @memcpy(changed[0..offset], corruption_probe[0..offset]);
+    @memcpy(changed[offset..][0..replacement.len], replacement);
+    @memcpy(changed[offset + replacement.len ..], corruption_probe[offset + needle.len ..]);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = source_path, .data = changed });
+    var rebuilt = try zgraphy.Operations.updateManaged(std.testing.allocator, std.testing.io, tmp.dir, config.value, .{});
+    defer rebuilt.deinit();
+    try std.testing.expectEqual(zgraphy.Operations.UpdateKind.full_rebuild, rebuilt.kind);
+    var rebuilt_active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, std.testing.io, tmp.dir, config.value);
+    defer rebuilt_active.deinit();
+    try std.testing.expectEqualStrings(rebuilt_active.value.generation, rebuilt_active.value.semantic_generation);
+    try std.testing.expect(!std.mem.eql(u8, cold_graph_fingerprint, rebuilt_active.value.graph_fingerprint));
+
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.semantic-noop-generation",
+        .label = "a meaning-preserving Zig edit advances current source identity while reusing exact validated graph and origin artifacts",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 5216, .column = 1 },
+        .repair_hint = "prove exact parser projection equivalence before publishing an immutable source generation bound to its retained semantic generation",
+    }, semantic.kind == .semantic_noop and identity_delta.summary.operations == 0 and std.mem.eql(u8, cold_database, semantic_active.value.database) and std.mem.eql(u8, cold_origin, semantic_active.value.origin_ledger));
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.semantic-noop-fallback",
+        .label = "artifact corruption and a graph-bearing source change each fail closed to complete builds that own new semantic generations",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 5216, .column = 1 },
+        .repair_hint = "route every unsupported or mismatched parser projection through the existing complete build publication transaction",
+    }, semantic_retained.kind == .semantic_noop and semantic_retained.publication.retention.status == .applied and recovered.kind == .full_rebuild and std.mem.eql(u8, recovered_active.value.generation, recovered_active.value.semantic_generation) and rebuilt.kind == .full_rebuild and std.mem.eql(u8, rebuilt_active.value.generation, rebuilt_active.value.semantic_generation) and !std.mem.eql(u8, cold_graph_fingerprint, rebuilt_active.value.graph_fingerprint));
+    try assertions.noFindings(.{ .id = "zgraphy.m3.semantic-noop-no-findings", .label = "semantic no-op publication has no causal findings" });
+    try assertions.noPendingFibers(.{ .id = "zgraphy.m3.semantic-noop-no-pending", .label = "semantic no-op publication leaves no pending fibers" });
+    try evidence.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+}
+
+test "zgraphy M3 exit qualification and Graphify performance gate are correctness bound" {
+    const scenario = zstd.Testing.Scenario{
+        .id = "m3-exit-qualification",
+        .label = "Long churn stays exact and bounded while correctness-bound paired evidence gates scoped Graphify update performance",
+        .requirement = "req-m3-exit-qualification",
+        .acceptance_check = "check-m3-exit-qualification",
+        .component = "zgraphy",
+        .command = "test",
+        .default_seed = 2009,
+        .source_roots = &.{ "src/m3_qualification.zig", "src/operations.zig", "src/retention.zig", "src/extraction_cache.zig", "src/freshness.zig", "src/main.zig", "src/root.zig", "benchmarks/run_m3_qualification.py", "benchmarks/fixtures/fullstack-orders", "docs/superpowers/specs/2026-07-17-zgraphy-m3-exit-qualification.md", "test/all_test.zig" },
+        .tags = &.{ "acceptance", "m3", "exit", "churn", "growth", "incremental", "performance", "latency", "rss", "retention", "gc", "repair", "branch", "exclude", "graphify", "equivalence", "redaction", "deterministic" },
+    };
+    var evidence = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{
+        .project = "zgraphy",
+        .suite = "zgraphy-tests",
+        .scenario = scenario,
+        .seed = 2009,
+    });
+    defer evidence.deinit();
+    const assertions = zstd.Testing.AssertionRecorder.init(&evidence);
+
+    const digest_a = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const digest_b = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const digest_c = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+    const digest_d = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+    const performance_identity = zgraphy.M3Qualification.PerformanceIdentity{
+        .workload_id = "m3-selfhost-one-file-managed-update",
+        .corpus_digest = digest_a,
+        .source_revision = digest_b,
+        .machine_digest = digest_c,
+        .operating_system = "macos",
+        .target = "aarch64-macos",
+        .toolchain = "zig-0.16.0_python-3.11",
+        .graphify_python = "3.11.9",
+        .optimize = "ReleaseSafe",
+        .adapter_version = zgraphy.M3Qualification.supervisor_version,
+        .provider_version = "Graphify-0.9.17-cb96bdaa",
+        .configuration_digest = digest_d,
+        .correctness_digest = digest_a,
+        .quality_matrix_digest = digest_b,
+        .resource_matrix_digest = digest_c,
+        .graphify_environment_digest = digest_d,
+    };
+    const sampling = zgraphy.M3Qualification.Sampling{ .warmups = 2, .repetitions = 7 };
+    const targets = zgraphy.M3Qualification.Targets{};
+    var performance_samples = std.mem.zeroes([14]zgraphy.M3Qualification.PerformanceSample);
+    for (0..7) |index| {
+        const repetition: u16 = @intCast(index + 1);
+        performance_samples[index] = .{
+            .engine = .graphify,
+            .repetition = repetition,
+            .elapsed_ns = 1_000_000_000 + index * 10_000_000,
+            .user_cpu_ns = 800_000_000,
+            .system_cpu_ns = 100_000_000,
+            .peak_rss_bytes = 100 * 1024 * 1024,
+            .persisted_bytes = 8 * 1024 * 1024,
+            .nodes = 1_000,
+            .relations = 1_400,
+            .correctness_digest = digest_a,
+        };
+        performance_samples[7 + index] = .{
+            .engine = .zgraphy,
+            .repetition = repetition,
+            .elapsed_ns = 100_000_000 + index * 1_000_000,
+            .user_cpu_ns = 70_000_000,
+            .system_cpu_ns = 10_000_000,
+            .peak_rss_bytes = 40 * 1024 * 1024,
+            .persisted_bytes = 12 * 1024 * 1024,
+            .nodes = 1_200,
+            .relations = 1_800,
+            .correctness_digest = digest_a,
+            .reparsed_files = 1,
+            .cache_hits = 63,
+            .incremental_clean_equivalent = true,
+        };
+    }
+    var performance = try zgraphy.M3Qualification.buildPerformance(
+        std.testing.allocator,
+        performance_identity,
+        sampling,
+        targets,
+        &performance_samples,
+    );
+    defer performance.deinit(std.testing.allocator);
+    try zgraphy.M3Qualification.validatePerformance(&performance);
+    try std.testing.expect(performance.comparison_eligible);
+    try std.testing.expect(performance.performance_gate_passed);
+    try std.testing.expectEqual(@as(usize, 1), performance.claims.len);
+    try std.testing.expect(performance.comparison.speedup_basis_points >= targets.minimum_speedup_basis_points);
+    try std.testing.expect(performance.comparison.rss_ratio_basis_points <= targets.maximum_rss_ratio_basis_points);
+
+    performance_samples[7].correctness_passed = false;
+    try std.testing.expectError(error.IncorrectPerformanceSample, zgraphy.M3Qualification.buildPerformance(
+        std.testing.allocator,
+        performance_identity,
+        sampling,
+        targets,
+        &performance_samples,
+    ));
+    performance_samples[7].correctness_passed = true;
+    for (performance_samples[7..]) |*sample| {
+        sample.elapsed_ns = 400_000_000;
+        sample.peak_rss_bytes = 60 * 1024 * 1024;
+    }
+    var measured_miss = try zgraphy.M3Qualification.buildPerformance(
+        std.testing.allocator,
+        performance_identity,
+        sampling,
+        targets,
+        &performance_samples,
+    );
+    defer measured_miss.deinit(std.testing.allocator);
+    try std.testing.expect(measured_miss.comparison_eligible);
+    try std.testing.expect(!measured_miss.performance_gate_passed);
+    try std.testing.expectEqual(@as(usize, 0), measured_miss.claims.len);
+    performance_samples[7] = performance_samples[8];
+    try std.testing.expectError(error.DuplicatePerformanceSample, zgraphy.M3Qualification.buildPerformance(
+        std.testing.allocator,
+        performance_identity,
+        sampling,
+        targets,
+        &performance_samples,
+    ));
+
+    const operation_cycle = [_]zgraphy.M3Qualification.ChurnOperation{
+        .modify,
+        .create,
+        .rename,
+        .move,
+        .delete,
+        .exclude,
+        .include,
+        .branch,
+        .detach,
+        .unchanged,
+        .reader_defer,
+        .repair,
+    };
+    var churn_transitions = std.mem.zeroes([36]zgraphy.M3Qualification.ChurnTransition);
+    for (&churn_transitions, 0..) |*transition, index| {
+        transition.* = .{
+            .ordinal = @intCast(index + 1),
+            .operation = operation_cycle[index % operation_cycle.len],
+            .generation = "g-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            .parent_generation = "g-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            .graph_fingerprint = digest_a,
+            .clean_graph_fingerprint = digest_a,
+            .index_fingerprint = digest_b,
+            .clean_index_fingerprint = digest_b,
+            .checked_files = 8,
+            .reparsed_files = if (operation_cycle[index % operation_cycle.len] == .branch or
+                operation_cycle[index % operation_cycle.len] == .detach or
+                operation_cycle[index % operation_cycle.len] == .unchanged or
+                operation_cycle[index % operation_cycle.len] == .reader_defer) 0 else 1,
+            .cache_hits = 7,
+            .direct_invalidations = 1,
+            .invalidation_closure = 1,
+            .generation_count = 5,
+            .generation_bytes = 4 * 1024 * 1024,
+            .cache_entries = 24,
+            .cache_bytes = 2 * 1024 * 1024,
+            .extraction_manifest_bytes = 64 * 1024,
+            .delta_journal_bytes = 128 * 1024,
+            .retention_status = if (operation_cycle[index % operation_cycle.len] == .reader_defer) .deferred_readers else .applied,
+            .generations_deleted = if (index == 15) 1 else 0,
+            .reader_deferred = operation_cycle[index % operation_cycle.len] == .reader_defer,
+            .repair_published = operation_cycle[index % operation_cycle.len] == .repair,
+        };
+    }
+    var churn = try zgraphy.M3Qualification.buildChurn(
+        std.testing.allocator,
+        .{
+            .corpus_digest = digest_a,
+            .source_revision = digest_b,
+            .configuration_digest = digest_c,
+            .schedule_digest = digest_d,
+        },
+        .{},
+        &churn_transitions,
+    );
+    defer churn.deinit(std.testing.allocator);
+    try zgraphy.M3Qualification.validateChurn(&churn);
+    try std.testing.expect(churn.churn_gate_passed);
+    try std.testing.expectEqual(@as(usize, churn_transitions.len), churn.summary.transitions);
+    try std.testing.expect(churn.summary.gc_generations_deleted > 0);
+    try std.testing.expect(churn.summary.reader_deferrals > 0);
+    try std.testing.expect(churn.summary.repairs > 0);
+
+    var actual_tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer actual_tmp.cleanup();
+    var churn_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer churn_arena.deinit();
+    var actual_churn = try runActualM3Churn(churn_arena.allocator(), actual_tmp.dir);
+    defer actual_churn.deinit(std.testing.allocator);
+    try zgraphy.M3Qualification.validateChurn(&actual_churn);
+    const actual_bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, actual_churn, .{});
+    defer std.testing.allocator.free(actual_bytes);
+    var actual_root_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const actual_root_length = try actual_tmp.dir.realPath(std.testing.io, &actual_root_buffer);
+    try std.testing.expect(std.mem.indexOf(u8, actual_bytes, actual_root_buffer[0..actual_root_length]) == null);
+    try std.testing.expect(std.mem.indexOf(u8, actual_bytes, "churn-source-body-marker") == null);
+
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.performance-claim-gate",
+        .label = "paired process evidence emits the scoped Graphify target claim only when correctness latency and peak RSS all pass",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 5030, .column = 1 },
+        .repair_hint = "recompute every retained sample aggregate and ratio natively and keep target misses claim-free",
+    }, performance.performance_gate_passed and performance.claims.len == 1 and !measured_miss.performance_gate_passed and measured_miss.claims.len == 0);
+    try assertions.boolean(.{
+        .id = "zgraphy.m3.churn-contract",
+        .label = "the long-churn contract requires every mutation family clean equivalence bounded storage GC reader convergence and repair",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 5030, .column = 1 },
+        .repair_hint = "retain per-transition graph index health and storage evidence rather than reducing qualification to a final-state count",
+    }, actual_churn.churn_gate_passed and actual_churn.summary.transitions == 36 and actual_churn.summary.operation_kinds == operation_cycle.len and actual_churn.summary.gc_generations_deleted > 0 and actual_churn.summary.reader_deferrals > 0 and actual_churn.summary.repairs > 0 and std.mem.indexOf(u8, actual_bytes, actual_root_buffer[0..actual_root_length]) == null);
+    try assertions.noFindings(.{ .id = "zgraphy.m3.exit-qualification-no-findings", .label = "M3 exit qualification has no causal findings" });
+    try assertions.noPendingFibers(.{ .id = "zgraphy.m3.exit-qualification-no-pending", .label = "M3 exit qualification leaves no pending fibers" });
+    try evidence.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+}
+
+const ManagedStorageStats = struct {
+    generation_count: usize = 0,
+    generation_bytes: u64 = 0,
+    cache_entries: usize = 0,
+    cache_bytes: u64 = 0,
+    extraction_manifest_bytes: u64 = 0,
+    delta_journal_bytes: u64 = 0,
+};
+
+fn runActualM3Churn(arena: std.mem.Allocator, root: std.Io.Dir) !zgraphy.M3Qualification.ChurnReceipt {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    const base_ignore = ".git/\n.zgraphy/\n.zigeffect/\n.zig-cache/\nzig-out/\nnode_modules/\n";
+    try copyFullstackOrdersFixture(allocator, io, root);
+    try root.createDirPath(io, ".git/refs/heads");
+    try root.writeFile(io, .{ .sub_path = ".git/HEAD", .data = "ref: refs/heads/main\n" });
+    try root.writeFile(io, .{ .sub_path = ".git/refs/heads/main", .data = "1111111111111111111111111111111111111111\n" });
+    try root.createDirPath(io, "toggle");
+    try root.writeFile(io, .{ .sub_path = "toggle/visible.zig", .data = "pub fn churnSourceBodyMarker() void {} // churn-source-body-marker\n" });
+    try std.testing.expectEqual(zgraphy.Project.InitStatus.initialized, try zgraphy.Project.init(allocator, io, root));
+    var config = try zgraphy.Project.loadConfig(allocator, io, root);
+    defer config.deinit();
+    config.value.automatic_gc = true;
+    config.value.retention_generations = 4;
+    config.value.retention_grace_ms = 0;
+    var cold = try zgraphy.Operations.rebuildManaged(allocator, io, root, config.value, .{});
+    cold.deinit();
+    const orders_source = try root.readFileAlloc(io, "frontend/src/ordersClient.ts", allocator, .limited(1024 * 1024));
+    defer allocator.free(orders_source);
+
+    const operation_cycle = [_]zgraphy.M3Qualification.ChurnOperation{
+        .modify,
+        .create,
+        .rename,
+        .move,
+        .delete,
+        .exclude,
+        .include,
+        .branch,
+        .detach,
+        .unchanged,
+        .reader_defer,
+        .repair,
+    };
+    var transitions: std.ArrayList(zgraphy.M3Qualification.ChurnTransition) = .empty;
+    defer transitions.deinit(allocator);
+    try transitions.ensureTotalCapacity(allocator, 36);
+
+    for (0..36) |index| {
+        const operation = operation_cycle[index % operation_cycle.len];
+        const cycle = index / operation_cycle.len;
+        var retention_override: ?zgraphy.Retention.Summary = null;
+        var managed: ?zgraphy.Operations.ManagedGraph = null;
+        switch (operation) {
+            .modify => {
+                const changed = try std.fmt.allocPrint(allocator, "{s}\n// deterministic-m3-churn-{d}\n", .{ orders_source, cycle });
+                defer allocator.free(changed);
+                try root.writeFile(io, .{ .sub_path = "frontend/src/ordersClient.ts", .data = changed });
+                managed = try zgraphy.Operations.loadManagedGraph(allocator, io, root, config.value);
+            },
+            .create => {
+                try root.createDirPath(io, "scratch");
+                const path = try std.fmt.allocPrint(allocator, "scratch/cycle-{d}.zig", .{cycle});
+                defer allocator.free(path);
+                const source = try std.fmt.allocPrint(allocator, "pub fn cycle{d}() usize {{ return {d}; }}\n", .{ cycle, cycle });
+                defer allocator.free(source);
+                try root.writeFile(io, .{ .sub_path = path, .data = source });
+                managed = try zgraphy.Operations.loadManagedGraph(allocator, io, root, config.value);
+            },
+            .rename => {
+                const before = try std.fmt.allocPrint(allocator, "scratch/cycle-{d}.zig", .{cycle});
+                defer allocator.free(before);
+                const after = try std.fmt.allocPrint(allocator, "scratch/renamed-{d}.zig", .{cycle});
+                defer allocator.free(after);
+                try root.rename(before, root, after, io);
+                managed = try zgraphy.Operations.loadManagedGraph(allocator, io, root, config.value);
+            },
+            .move => {
+                try root.createDirPath(io, "archive");
+                const before = try std.fmt.allocPrint(allocator, "scratch/renamed-{d}.zig", .{cycle});
+                defer allocator.free(before);
+                const after = try std.fmt.allocPrint(allocator, "archive/renamed-{d}.zig", .{cycle});
+                defer allocator.free(after);
+                try root.rename(before, root, after, io);
+                managed = try zgraphy.Operations.loadManagedGraph(allocator, io, root, config.value);
+            },
+            .delete => {
+                const path = try std.fmt.allocPrint(allocator, "archive/renamed-{d}.zig", .{cycle});
+                defer allocator.free(path);
+                try root.deleteFile(io, path);
+                managed = try zgraphy.Operations.loadManagedGraph(allocator, io, root, config.value);
+            },
+            .exclude => {
+                const ignored = base_ignore ++ "toggle/\n";
+                try root.writeFile(io, .{ .sub_path = zgraphy.Project.ignore_path, .data = ignored });
+                managed = try zgraphy.Operations.loadManagedGraph(allocator, io, root, config.value);
+            },
+            .include => {
+                try root.writeFile(io, .{ .sub_path = zgraphy.Project.ignore_path, .data = base_ignore });
+                managed = try zgraphy.Operations.loadManagedGraph(allocator, io, root, config.value);
+            },
+            .branch => {
+                const ref_path = try std.fmt.allocPrint(allocator, ".git/refs/heads/feature-{d}", .{cycle});
+                defer allocator.free(ref_path);
+                const head = try std.fmt.allocPrint(allocator, "ref: refs/heads/feature-{d}\n", .{cycle});
+                defer allocator.free(head);
+                const oid = switch (cycle) {
+                    0 => "2222222222222222222222222222222222222222\n",
+                    1 => "3333333333333333333333333333333333333333\n",
+                    else => "4444444444444444444444444444444444444444\n",
+                };
+                try root.writeFile(io, .{ .sub_path = ref_path, .data = oid });
+                try root.writeFile(io, .{ .sub_path = ".git/HEAD", .data = head });
+                managed = try zgraphy.Operations.loadManagedGraph(allocator, io, root, config.value);
+            },
+            .detach => {
+                const oid = switch (cycle) {
+                    0 => "5555555555555555555555555555555555555555\n",
+                    1 => "6666666666666666666666666666666666666666\n",
+                    else => "7777777777777777777777777777777777777777\n",
+                };
+                try root.writeFile(io, .{ .sub_path = ".git/HEAD", .data = oid });
+                managed = try zgraphy.Operations.loadManagedGraph(allocator, io, root, config.value);
+            },
+            .unchanged => managed = try zgraphy.Operations.loadManagedGraph(allocator, io, root, config.value),
+            .reader_defer => {
+                managed = try zgraphy.Operations.loadManagedGraph(allocator, io, root, config.value);
+                var reader = try zgraphy.Operations.GenerationReadLease.acquireShared(io, root);
+                var report = try zgraphy.Operations.collectGarbage(allocator, io, root, config.value, .apply);
+                reader.deinit();
+                defer report.deinit();
+                try std.testing.expectEqual(zgraphy.Retention.Status.deferred_readers, report.summary.status);
+                retention_override = report.summary;
+            },
+            .repair => {
+                var active = try zgraphy.Operations.readActiveGeneration(allocator, io, root, config.value);
+                defer active.deinit();
+                const snapshot = try root.readFileAlloc(io, active.value.database, allocator, .limited(zgraphy.Store.max_snapshot_bytes));
+                defer allocator.free(snapshot);
+                const damaged = try zgraphy.Memory.copy(u8, allocator, snapshot);
+                defer allocator.free(damaged);
+                const marker = "\"secondary_index_fingerprint\":\"";
+                const marker_offset = std.mem.indexOf(u8, damaged, marker) orelse return error.MissingSecondaryIndexFingerprint;
+                const digest_offset = marker_offset + marker.len;
+                damaged[digest_offset] = if (damaged[digest_offset] == '0') '1' else '0';
+                try root.writeFile(io, .{ .sub_path = active.value.database, .data = damaged });
+                const repair_result = try zgraphy.Operations.loadManagedGraph(allocator, io, root, config.value);
+                try std.testing.expect(repair_result.refresh.repair.action != .none);
+                managed = repair_result;
+            },
+        }
+        var managed_value = managed orelse return error.MissingManagedChurnResult;
+        defer managed_value.deinit();
+        const transition = try observeActualChurnTransition(
+            arena,
+            io,
+            root,
+            config.value,
+            &managed_value,
+            @intCast(index + 1),
+            operation,
+            retention_override,
+        );
+        transitions.appendAssumeCapacity(transition);
+    }
+
+    return zgraphy.M3Qualification.buildChurn(allocator, .{
+        .corpus_digest = "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        .source_revision = "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        .configuration_digest = "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        .schedule_digest = "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    }, .{
+        .max_generations = 8,
+        .max_generation_bytes = 128 * 1024 * 1024,
+        .max_cache_entries = 512,
+        .max_cache_bytes = 64 * 1024 * 1024,
+        .max_extraction_manifest_bytes = 16 * 1024 * 1024,
+        .max_delta_journal_bytes = 64 * 1024 * 1024,
+        .max_reparsed_one_file = 1,
+    }, transitions.items);
+}
+
+fn observeActualChurnTransition(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    root: std.Io.Dir,
+    config: zgraphy.Project.Config,
+    managed: *const zgraphy.Operations.ManagedGraph,
+    ordinal: u16,
+    operation: zgraphy.M3Qualification.ChurnOperation,
+    retention_override: ?zgraphy.Retention.Summary,
+) !zgraphy.M3Qualification.ChurnTransition {
+    try managed.graph.validateSecondaryIndexes();
+    const health = zgraphy.Freshness.inspect(&managed.graph);
+    var clean = try zgraphy.Indexer.buildRepository(std.testing.allocator, io, root, zgraphy.Operations.buildOptions(config));
+    defer clean.deinit();
+    const graph_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &managed.graph);
+    const clean_graph_fingerprint = try zgraphy.Freshness.fingerprint(std.testing.allocator, &clean.graph);
+    const index_fingerprint = try managed.graph.secondaryIndexFingerprint(std.testing.allocator);
+    const clean_index_fingerprint = try clean.graph.secondaryIndexFingerprint(std.testing.allocator);
+    var active = try zgraphy.Operations.readActiveGeneration(std.testing.allocator, io, root, config);
+    defer active.deinit();
+    var origin = try zgraphy.OriginLedger.read(std.testing.allocator, io, root, active.value.origin_ledger);
+    defer origin.deinit();
+    try zgraphy.OriginLedger.validate(&managed.graph, origin.value);
+    const storage = try measureManagedStorage(std.testing.allocator, io, root);
+    const generation_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ zgraphy.Operations.generation_root, active.value.generation });
+    defer std.testing.allocator.free(generation_path);
+    try root.access(io, generation_path, .{});
+    const parent_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ zgraphy.Operations.generation_root, active.value.parent_generation });
+    defer std.testing.allocator.free(parent_path);
+    try root.access(io, parent_path, .{});
+    const retention_summary = retention_override orelse managed.refresh.retention;
+    return .{
+        .ordinal = ordinal,
+        .operation = operation,
+        .generation = try arena.dupe(u8, active.value.generation),
+        .parent_generation = try arena.dupe(u8, active.value.parent_generation),
+        .graph_fingerprint = try digestIdentityAlloc(arena, graph_fingerprint),
+        .clean_graph_fingerprint = try digestIdentityAlloc(arena, clean_graph_fingerprint),
+        .index_fingerprint = try digestIdentityAlloc(arena, index_fingerprint),
+        .clean_index_fingerprint = try digestIdentityAlloc(arena, clean_index_fingerprint),
+        .checked_files = managed.refresh.checked_files,
+        .reparsed_files = managed.refresh.reparsed_files,
+        .cache_hits = managed.refresh.cache_hits,
+        .cache_misses = managed.refresh.cache_misses,
+        .direct_invalidations = managed.refresh.direct_invalidations,
+        .invalidation_closure = managed.refresh.invalidation_closure,
+        .pruned_records = managed.refresh.pruned.nodes + managed.refresh.pruned.edges + managed.refresh.pruned.vectors + managed.refresh.pruned.hyperedges + managed.refresh.pruned.supernodes,
+        .health = .{
+            .dangling_edges = health.dangling_edges,
+            .dangling_hyperedge_participants = health.dangling_hyperedge_participants,
+            .dangling_supernode_members = health.dangling_supernode_members,
+            .missing_input_hyperedges = health.missing_input_hyperedges,
+            .invalid_supernode_proofs = health.invalid_supernode_proofs,
+            .unowned_vectors = health.unowned_vectors,
+            .true_orphans = health.true_orphans,
+        },
+        .generation_count = storage.generation_count,
+        .generation_bytes = storage.generation_bytes,
+        .cache_entries = storage.cache_entries,
+        .cache_bytes = storage.cache_bytes,
+        .extraction_manifest_bytes = storage.extraction_manifest_bytes,
+        .delta_journal_bytes = storage.delta_journal_bytes,
+        .retention_status = qualificationRetentionStatus(retention_summary.status),
+        .generations_deleted = retention_summary.generations_deleted,
+        .cache_entries_deleted = retention_summary.cache_entries_deleted,
+        .reader_deferred = operation == .reader_defer,
+        .repair_published = operation == .repair and managed.refresh.repair.action != .none,
+    };
+}
+
+fn measureManagedStorage(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir) !ManagedStorageStats {
+    var stats = ManagedStorageStats{};
+    var walker = try root.walk(allocator);
+    defer walker.deinit();
+    const generation_prefix = zgraphy.Operations.generation_root ++ "/";
+    const cache_prefix = zgraphy.ExtractionCache.cache_root ++ "/" ++ zgraphy.ExtractionCache.recipe ++ "/";
+    while (try walker.next(io)) |entry| {
+        if (entry.kind == .sym_link) {
+            if (entry.kind == .directory) walker.leave(io);
+            continue;
+        }
+        if (entry.kind == .directory and std.mem.startsWith(u8, entry.path, generation_prefix)) {
+            const suffix = entry.path[generation_prefix.len..];
+            if (std.mem.indexOfScalar(u8, suffix, '/') == null and suffix.len == 66 and std.mem.startsWith(u8, suffix, "g-")) {
+                stats.generation_count += 1;
+            }
+            continue;
+        }
+        if (entry.kind != .file) continue;
+        const stat = try root.statFile(io, entry.path, .{ .follow_symlinks = false });
+        const size: u64 = @intCast(stat.size);
+        if (std.mem.startsWith(u8, entry.path, generation_prefix)) {
+            stats.generation_bytes = try std.math.add(u64, stats.generation_bytes, size);
+            if (std.mem.endsWith(u8, entry.path, "/extraction-manifest.json")) {
+                stats.extraction_manifest_bytes = try std.math.add(u64, stats.extraction_manifest_bytes, size);
+            } else if (std.mem.endsWith(u8, entry.path, "/canonical-delta.jsonl")) {
+                stats.delta_journal_bytes = try std.math.add(u64, stats.delta_journal_bytes, size);
+            }
+        } else if (std.mem.startsWith(u8, entry.path, cache_prefix) and std.mem.endsWith(u8, entry.path, ".json")) {
+            stats.cache_entries += 1;
+            stats.cache_bytes = try std.math.add(u64, stats.cache_bytes, size);
+        }
+    }
+    return stats;
+}
+
+fn digestIdentityAlloc(allocator: std.mem.Allocator, digest: [32]u8) ![]const u8 {
+    const hex = std.fmt.bytesToHex(digest, .lower);
+    return std.fmt.allocPrint(allocator, "sha256:{s}", .{&hex});
+}
+
+fn qualificationRetentionStatus(status: zgraphy.Retention.Status) zgraphy.M3Qualification.RetentionStatus {
+    return switch (status) {
+        .never_run => .no_action,
+        .planned => .planned,
+        .applied => .applied,
+        .deferred_readers => .deferred_readers,
+        .disabled => .disabled,
+        .failed => .failed,
+    };
+}
+
+fn copyFullstackOrdersFixture(allocator: std.mem.Allocator, io: std.Io, destination: std.Io.Dir) !void {
+    for (&[_][]const u8{
+        "backend/gen/orders.pb.zig",
+        "backend/src/orders_service.zig",
+        "backend/src/unregistered_service.zig",
+        "frontend/gen/orders_pb.ts",
+        "frontend/src/OrderPage.tsx",
+        "frontend/src/deceptiveClient.ts",
+        "frontend/src/ordersClient.ts",
+        "proto/orders/v1/orders.proto",
+    }) |path| try copyFullstackOrdersFile(allocator, io, destination, path);
+}
+
+fn copyFullstackOrdersFile(allocator: std.mem.Allocator, io: std.Io, destination: std.Io.Dir, path: []const u8) !void {
+    const source_path = try std.fmt.allocPrint(allocator, "benchmarks/fixtures/fullstack-orders/{s}", .{path});
+    defer allocator.free(source_path);
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, source_path, allocator, .limited(4 * 1024 * 1024));
+    defer allocator.free(bytes);
+    if (std.fs.path.dirname(path)) |parent| try destination.createDirPath(io, parent);
+    try destination.writeFile(io, .{ .sub_path = path, .data = bytes });
+}
+
 fn expectProtobufReference(
     result: *const zgraphy.ProtobufResolution.Result,
     kind: zgraphy.ProtobufResolution.ReferenceKind,
@@ -3297,4 +5946,134 @@ fn expectGeneratedBinding(
     const binding = result.findBinding(language, kind, source_path, canonical_name) orelse return error.MissingGeneratedBinding;
     try std.testing.expectEqual(zgraphy.GeneratedLineage.Status.resolved, binding.status);
     try std.testing.expectEqual(@as(usize, 1), binding.candidate_count);
+}
+
+test "zgraphy M4 semantic recipe registry validates and materializes native meaning" {
+    const scenario = zstd.Testing.Scenario{
+        .id = "m4-semantic-recipe-registry",
+        .label = "Typed proof-carrying recipes validate and materialize native request-path and feature meaning",
+        .requirement = "req-m4-semantic-recipe-registry",
+        .acceptance_check = "check-m4-semantic-recipe-registry",
+        .component = "zgraphy",
+        .command = "test",
+        .default_seed = 2101,
+        .source_roots = &.{ "src/semantic_recipes.zig", "src/model.zig", "src/store.zig", "src/indexer.zig", "src/operations.zig", "src/extraction_cache.zig", "src/root.zig", "benchmarks/fixtures/fullstack-orders", "docs/superpowers/specs/2026-07-17-zgraphy-m4-semantic-recipe-registry.md", "test/all_test.zig" },
+        .tags = &.{ "acceptance", "m4", "meaning", "recipe", "registry", "hyperedge", "supernode", "proof", "materialization", "invalidation", "persistence", "deterministic" },
+    };
+    var evidence = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{
+        .project = "zgraphy",
+        .suite = "zgraphy-tests",
+        .scenario = scenario,
+        .seed = 2101,
+    });
+    defer evidence.deinit();
+    const assertions = zstd.Testing.AssertionRecorder.init(&evidence);
+
+    try zgraphy.SemanticRecipes.validateRegistry();
+    try std.testing.expectEqual(@as(usize, 2), zgraphy.SemanticRecipes.definitions.len);
+    const request_definition = zgraphy.SemanticRecipes.findByName("rpc-request-path-v2") orelse return error.MissingRequestPathRecipe;
+    const feature_definition = zgraphy.SemanticRecipes.findById(.end_to_end_feature_v2);
+    try std.testing.expectEqual(zgraphy.SemanticRecipes.RecipeId.rpc_request_path_v2, request_definition.id);
+    try std.testing.expectEqual(zgraphy.SemanticRecipes.OutputClass.hyperedge, request_definition.output_class);
+    try std.testing.expectEqual(zgraphy.SemanticRecipes.OutputClass.supernode, feature_definition.output_class);
+    try std.testing.expectEqual(zgraphy.SemanticRecipes.RecipeId.rpc_request_path_v2, feature_definition.upstream.?);
+    const registry_fingerprint = zgraphy.SemanticRecipes.fingerprint();
+    const repeated_registry_fingerprint = zgraphy.SemanticRecipes.fingerprint();
+    try std.testing.expect(!std.mem.allEqual(u8, &registry_fingerprint, 0));
+    try std.testing.expectEqualSlices(u8, &registry_fingerprint, &repeated_registry_fingerprint);
+
+    var fixture = try std.Io.Dir.cwd().openDir(std.testing.io, "benchmarks/fixtures/fullstack-orders", .{ .iterate = true, .follow_symlinks = false });
+    defer fixture.close(std.testing.io);
+    var built = try zgraphy.Indexer.buildRepository(std.testing.allocator, std.testing.io, fixture, .{
+        .repository_id = "repo-21012101210121012101210121012101",
+        .max_nodes = 4096,
+        .max_edges = 16_384,
+        .max_hyperedges = 64,
+        .max_hyperedge_participants = 640,
+        .max_hyperedge_evidence = 640,
+        .max_supernodes = 64,
+        .max_supernode_members = 640,
+        .max_supernode_evidence = 640,
+        .max_supernode_proof_steps = 640,
+    });
+    defer built.deinit();
+    try zgraphy.SemanticRecipes.validateGraph(&built.graph);
+    const request_path = built.graph.findHyperedgeByCanonicalName(.request_path, "orders.v1.OrdersService/GetOrder") orelse return error.MissingRequestPathHyperedge;
+    const feature = built.graph.findSupernodeByInputHyperedge(request_path.id) orelse return error.MissingRequestPathFeature;
+    try std.testing.expectEqualStrings(request_definition.name, request_path.recipe);
+    try std.testing.expectEqualStrings(feature_definition.name, feature.recipe);
+
+    var wrong_output = try zgraphy.DeltaJournal.canonicalClone(std.testing.allocator, &built.graph, .{});
+    defer wrong_output.deinit();
+    _ = try wrong_output.addHyperedge(.{
+        .kind = request_path.kind,
+        .canonical_name = "wrong/output-class",
+        .recipe = feature_definition.name,
+        .interaction_fingerprint = request_path.interaction_fingerprint,
+        .participants = request_path.participants,
+        .evidence = request_path.evidence,
+    });
+    try std.testing.expectError(error.SemanticRecipeOutputMismatch, zgraphy.SemanticRecipes.validateGraph(&wrong_output));
+
+    var incomplete_evidence = try zgraphy.DeltaJournal.canonicalClone(std.testing.allocator, &built.graph, .{});
+    defer incomplete_evidence.deinit();
+    _ = try incomplete_evidence.addHyperedge(.{
+        .kind = request_path.kind,
+        .canonical_name = "incomplete/evidence",
+        .recipe = request_definition.name,
+        .interaction_fingerprint = request_path.interaction_fingerprint,
+        .participants = request_path.participants,
+        .evidence = request_path.evidence[0..1],
+    });
+    try std.testing.expectError(error.IncompleteSemanticRecipeEvidence, zgraphy.SemanticRecipes.validateGraph(&incomplete_evidence));
+
+    var incomplete_members = try zgraphy.DeltaJournal.canonicalClone(std.testing.allocator, &built.graph, .{});
+    defer incomplete_members.deinit();
+    const contract_members = [_]zgraphy.Model.SupernodeMember{
+        feature.member(.frontend_callsite).?.*,
+        feature.member(.canonical_operation).?.*,
+        feature.member(.backend_handler).?.*,
+    };
+    _ = try incomplete_members.addSupernode(.{
+        .kind = feature.kind,
+        .canonical_name = "incomplete/member-contract",
+        .name = "Incomplete member contract",
+        .recipe = feature_definition.name,
+        .synopsis = "A structurally valid model record that omits registry-required contract members.",
+        .input_hyperedge_id = request_path.id,
+        .completeness = .contract_path,
+        .members = &contract_members,
+        .evidence = feature.evidence,
+        .proof_steps = feature.proof_steps,
+    });
+    try std.testing.expectError(error.IncompleteSemanticRecipeRoles, zgraphy.SemanticRecipes.validateGraph(&incomplete_members));
+
+    _ = try built.graph.addHyperedge(.{
+        .kind = request_path.kind,
+        .canonical_name = "unregistered/native",
+        .recipe = "unregistered-native-v1",
+        .interaction_fingerprint = request_path.interaction_fingerprint,
+        .participants = request_path.participants,
+        .evidence = request_path.evidence,
+    });
+    try std.testing.expectError(error.UnsupportedSemanticRecipe, zgraphy.SemanticRecipes.validateGraph(&built.graph));
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try std.testing.expectError(error.UnsupportedSemanticRecipe, zgraphy.Store.save(std.testing.io, tmp.dir, "invalid-meaning.nendb.jsonl", &built.graph));
+
+    try assertions.boolean(.{
+        .id = "zgraphy.m4.recipe-registry-contract",
+        .label = "native semantic recipes have one unique typed dependency-ordered contract",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 1, .column = 1 },
+        .repair_hint = "register every native recipe exactly once and include its stable name dependency roles evidence completeness and proof policy in the registry fingerprint",
+    }, zgraphy.SemanticRecipes.definitions.len == 2 and feature_definition.upstream == .rpc_request_path_v2);
+    try assertions.boolean(.{
+        .id = "zgraphy.m4.recipe-current-meaning",
+        .label = "current request path and feature output validates through the typed registry",
+        .source = .{ .id = "zgraphy-tests", .path = "test/all_test.zig", .line = 1, .column = 1 },
+        .repair_hint = "assemble source-grounded recipe input in the indexer and publish it only through the deterministic materialization boundary",
+    }, built.summary.request_paths == 1 and built.summary.feature_supernodes == 1 and request_path.id != 0 and feature.id != 0);
+    try assertions.noFindings(.{ .id = "zgraphy.m4.recipe-no-findings", .label = "semantic recipe registry validation has no causal findings" });
+    try assertions.noPendingFibers(.{ .id = "zgraphy.m4.recipe-no-pending", .label = "semantic recipe registry leaves no pending fibers" });
+    try evidence.publish(std.testing.io, std.Io.Dir.cwd(), 1);
 }

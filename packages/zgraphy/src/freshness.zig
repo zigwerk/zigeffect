@@ -20,6 +20,17 @@ pub const Capabilities = struct {
     full_rebuild: CapabilityStatus,
     snapshot_pruning: CapabilityStatus,
     incremental_update: CapabilityStatus,
+    incremental_extraction_cache: CapabilityStatus = .unsupported,
+    dependency_invalidation_closure: CapabilityStatus = .unsupported,
+    selective_derived_record_reuse: CapabilityStatus = .unsupported,
+    transactional_secondary_indexes: CapabilityStatus = .unsupported,
+    digest_verified_index_reconstruction: CapabilityStatus = .unsupported,
+    canonical_delta_journal: CapabilityStatus = .unsupported,
+    tombstone_replay: CapabilityStatus = .unsupported,
+    full_snapshot_recovery: CapabilityStatus = .unsupported,
+    repository_context_reconciliation: CapabilityStatus = .unsupported,
+    exact_change_lineage: CapabilityStatus = .unsupported,
+    origin_owned_sweep: CapabilityStatus = .unsupported,
     pre_query_refresh: CapabilityStatus,
     watch_mode: CapabilityStatus,
     automatic_pruning: CapabilityStatus,
@@ -31,12 +42,86 @@ pub const Capabilities = struct {
             .full_rebuild = .supported,
             .snapshot_pruning = .supported,
             .incremental_update = .unsupported,
+            .incremental_extraction_cache = .unsupported,
+            .dependency_invalidation_closure = .unsupported,
             .pre_query_refresh = .unsupported,
             .watch_mode = .unsupported,
             .automatic_pruning = .unsupported,
             .repair = .unsupported,
             .garbage_collection = .unsupported,
         };
+    }
+
+    pub fn currentM3_1() Capabilities {
+        return .{
+            .full_rebuild = .supported,
+            .snapshot_pruning = .supported,
+            .incremental_update = .unsupported,
+            .incremental_extraction_cache = .unsupported,
+            .dependency_invalidation_closure = .unsupported,
+            .pre_query_refresh = .supported,
+            .watch_mode = .unsupported,
+            .automatic_pruning = .supported,
+            .repair = .unsupported,
+            .garbage_collection = .unsupported,
+        };
+    }
+
+    pub fn currentM3_2() Capabilities {
+        return .{
+            .full_rebuild = .supported,
+            .snapshot_pruning = .supported,
+            .incremental_update = .unsupported,
+            .incremental_extraction_cache = .supported,
+            .dependency_invalidation_closure = .supported,
+            .pre_query_refresh = .supported,
+            .watch_mode = .unsupported,
+            .automatic_pruning = .supported,
+            .repair = .unsupported,
+            .garbage_collection = .unsupported,
+        };
+    }
+
+    pub fn currentM3_3() Capabilities {
+        var capabilities = currentM3_2();
+        capabilities.selective_derived_record_reuse = .supported;
+        capabilities.transactional_secondary_indexes = .supported;
+        capabilities.digest_verified_index_reconstruction = .supported;
+        return capabilities;
+    }
+
+    pub fn currentM3_4() Capabilities {
+        var capabilities = currentM3_3();
+        capabilities.canonical_delta_journal = .supported;
+        capabilities.tombstone_replay = .supported;
+        capabilities.full_snapshot_recovery = .supported;
+        return capabilities;
+    }
+
+    pub fn currentM3_5() Capabilities {
+        var capabilities = currentM3_4();
+        capabilities.repository_context_reconciliation = .supported;
+        capabilities.exact_change_lineage = .supported;
+        return capabilities;
+    }
+
+    pub fn currentM3_6() Capabilities {
+        var capabilities = currentM3_5();
+        capabilities.origin_owned_sweep = .supported;
+        capabilities.repair = .supported;
+        return capabilities;
+    }
+
+    pub fn currentM3_7() Capabilities {
+        var capabilities = currentM3_6();
+        capabilities.watch_mode = .supported;
+        return capabilities;
+    }
+
+    pub fn currentM3_8() Capabilities {
+        var capabilities = currentM3_7();
+        capabilities.garbage_collection = .supported;
+        return capabilities;
     }
 };
 
@@ -342,6 +427,11 @@ pub fn validate(receipt: *const Receipt) !void {
     const capabilities = receipt.capabilities;
     if (capabilities.full_rebuild != .supported or capabilities.snapshot_pruning != .supported or
         capabilities.incremental_update != .unsupported or capabilities.pre_query_refresh != .unsupported or
+        capabilities.selective_derived_record_reuse != .unsupported or capabilities.transactional_secondary_indexes != .unsupported or
+        capabilities.digest_verified_index_reconstruction != .unsupported or
+        capabilities.canonical_delta_journal != .unsupported or capabilities.tombstone_replay != .unsupported or
+        capabilities.full_snapshot_recovery != .unsupported or capabilities.repository_context_reconciliation != .unsupported or
+        capabilities.exact_change_lineage != .unsupported or
         capabilities.watch_mode != .unsupported or capabilities.automatic_pruning != .unsupported or
         capabilities.repair != .unsupported or capabilities.garbage_collection != .unsupported)
     {

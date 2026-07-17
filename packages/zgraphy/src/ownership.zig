@@ -30,6 +30,7 @@ pub const UnitKind = enum(u8) {
 pub const Options = struct {
     max_units: usize = 4096,
     max_manifest_bytes: usize = 1024 * 1024,
+    discovery_validated: bool = false,
 };
 
 pub const Unit = struct {
@@ -106,7 +107,7 @@ pub fn analyze(
     discovered: *const discovery.Result,
     options: Options,
 ) !Result {
-    try discovery.validate(discovered);
+    if (!options.discovery_validated) try discovery.validate(discovered);
     if (options.max_units == 0 or options.max_manifest_bytes == 0) return error.InvalidOwnershipOptions;
     var units: std.ArrayList(Unit) = .empty;
     errdefer deinitUnits(allocator, &units);

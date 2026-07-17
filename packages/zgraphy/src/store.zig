@@ -1,11 +1,14 @@
 const std = @import("std");
 const model = @import("model.zig");
 const nendb = @import("nendb.zig");
+const semantic_recipes = @import("semantic_recipes.zig");
 
 pub const schema = "zgraphy.nendb.snapshot.v1";
 pub const schema_version: u32 = 1;
-pub const current_schema = "zgraphy.nendb.snapshot.v2";
-pub const current_schema_version: u32 = 2;
+pub const semantic_schema = "zgraphy.nendb.snapshot.v2";
+pub const semantic_schema_version: u32 = 2;
+pub const current_schema = "zgraphy.nendb.snapshot.v3";
+pub const current_schema_version: u32 = 3;
 pub const default_path = ".zgraphy/nendb.jsonl";
 pub const max_snapshot_bytes: usize = 512 * 1024 * 1024;
 
@@ -74,6 +77,13 @@ const Footer = struct {
     vectors: usize,
     hyperedges: usize,
     supernodes: usize,
+    secondary_index_schema: []const u8,
+    secondary_index_fingerprint: []const u8,
+    indexed_documents: usize,
+    adjacency_keys: usize,
+    adjacency_postings: usize,
+    lexical_terms: usize,
+    lexical_postings: usize,
 };
 
 const ParsedLine = struct {
@@ -115,11 +125,23 @@ const ParsedLine = struct {
     vectors: ?usize = null,
     hyperedges: ?usize = null,
     supernodes: ?usize = null,
+    secondary_index_schema: ?[]const u8 = null,
+    secondary_index_fingerprint: ?[]const u8 = null,
+    indexed_documents: ?usize = null,
+    adjacency_keys: ?usize = null,
+    adjacency_postings: ?usize = null,
+    lexical_terms: ?usize = null,
+    lexical_postings: ?usize = null,
 };
 
 pub fn save(io: std.Io, dir: std.Io.Dir, path: []const u8, graph: *const model.RepositoryGraph) !void {
     try validatePath(path);
     try graph.validateSemanticRecords();
+    try semantic_recipes.validateGraph(graph);
+    try graph.validateSecondaryIndexes();
+    const index_fingerprint = try graph.secondaryIndexFingerprintValidated(graph.allocator);
+    const index_fingerprint_hex = std.fmt.bytesToHex(index_fingerprint, .lower);
+    const index_stats = graph.secondaryIndexStats();
     if (std.mem.lastIndexOfScalar(u8, path, '/')) |slash| try dir.createDirPath(io, path[0..slash]);
     var output = std.Io.Writer.Allocating.init(graph.allocator);
     defer output.deinit();
@@ -177,6 +199,13 @@ pub fn save(io: std.Io, dir: std.Io.Dir, path: []const u8, graph: *const model.R
         .vectors = graph.vectorCount(),
         .hyperedges = graph.hyperedgeCount(),
         .supernodes = graph.supernodeCount(),
+        .secondary_index_schema = nendb.secondary_index_schema,
+        .secondary_index_fingerprint = &index_fingerprint_hex,
+        .indexed_documents = index_stats.indexed_documents,
+        .adjacency_keys = index_stats.adjacency_keys,
+        .adjacency_postings = index_stats.adjacency_postings,
+        .lexical_terms = index_stats.lexical_terms,
+        .lexical_postings = index_stats.lexical_postings,
     });
     const bytes = try output.toOwnedSlice();
     defer graph.allocator.free(bytes);
@@ -198,7 +227,8 @@ pub fn load(
     errdefer graph.deinit();
     var saw_header = false;
     var saw_footer = false;
-    var current = false;
+    var semantic_records = false;
+    var indexed_snapshot = false;
     var lines = std.mem.splitScalar(u8, bytes, '\n');
     while (lines.next()) |line| {
         if (line.len == 0) continue;
@@ -211,12 +241,14 @@ pub fn load(
                 return error.IncompleteSnapshot;
             }
             const legacy_header = std.mem.eql(u8, record.schema.?, schema) and record.schema_version == schema_version;
+            const semantic_header = std.mem.eql(u8, record.schema.?, semantic_schema) and record.schema_version == semantic_schema_version;
             const current_header = std.mem.eql(u8, record.schema.?, current_schema) and record.schema_version == current_schema_version;
-            if ((!legacy_header and !current_header) or !std.mem.eql(u8, record.engine.?, "nendb_embedded_soa") or
+            if ((!legacy_header and !semantic_header and !current_header) or !std.mem.eql(u8, record.engine.?, "nendb_embedded_soa") or
                 !std.mem.eql(u8, record.upstream_commit.?, nendb.upstream_commit) or
                 record.dimensions != nendb.embedding_dimensions or
                 !std.mem.eql(u8, record.embedder.?, nendb.embedder)) return error.IncompatibleSnapshot;
-            current = current_header;
+            semantic_records = semantic_header or current_header;
+            indexed_snapshot = current_header;
             saw_header = true;
         } else if (std.mem.eql(u8, record.record, "node")) {
             if (!saw_header or saw_footer) return error.CorruptSnapshot;
@@ -245,7 +277,7 @@ pub fn load(
                 .line = record.line orelse 0,
             });
         } else if (std.mem.eql(u8, record.record, "hyperedge")) {
-            if (!saw_header or saw_footer or !current) return error.CorruptSnapshot;
+            if (!saw_header or saw_footer or !semantic_records) return error.CorruptSnapshot;
             _ = try graph.addHyperedge(.{
                 .id = record.id orelse return error.CorruptSnapshot,
                 .kind = record.hyperedge_kind orelse return error.CorruptSnapshot,
@@ -256,7 +288,7 @@ pub fn load(
                 .evidence = record.evidence orelse return error.CorruptSnapshot,
             });
         } else if (std.mem.eql(u8, record.record, "supernode")) {
-            if (!saw_header or saw_footer or !current) return error.CorruptSnapshot;
+            if (!saw_header or saw_footer or !semantic_records) return error.CorruptSnapshot;
             _ = try graph.addSupernode(.{
                 .id = record.id orelse return error.CorruptSnapshot,
                 .kind = record.supernode_kind orelse return error.CorruptSnapshot,
@@ -273,14 +305,36 @@ pub fn load(
         } else if (std.mem.eql(u8, record.record, "footer")) {
             if (!saw_header or saw_footer or record.complete != true) return error.IncompleteSnapshot;
             if (record.nodes != graph.nodeCount() or record.edges != graph.edgeCount() or record.vectors != graph.vectorCount()) return error.CorruptSnapshot;
-            if (current) {
+            if (semantic_records) {
                 if (record.hyperedges != graph.hyperedgeCount() or record.supernodes != graph.supernodeCount()) return error.CorruptSnapshot;
             } else if (graph.hyperedgeCount() != 0 or graph.supernodeCount() != 0) return error.CorruptSnapshot;
+            if (indexed_snapshot) {
+                if (record.secondary_index_schema == null or record.secondary_index_fingerprint == null or
+                    record.indexed_documents == null or record.adjacency_keys == null or record.adjacency_postings == null or
+                    record.lexical_terms == null or record.lexical_postings == null)
+                {
+                    return error.IncompleteSnapshot;
+                }
+                if (!std.mem.eql(u8, record.secondary_index_schema.?, nendb.secondary_index_schema)) return error.IncompatibleSnapshot;
+                try graph.validateSecondaryIndexes();
+                const stats_value = graph.secondaryIndexStats();
+                if (record.indexed_documents != stats_value.indexed_documents or record.adjacency_keys != stats_value.adjacency_keys or
+                    record.adjacency_postings != stats_value.adjacency_postings or record.lexical_terms != stats_value.lexical_terms or
+                    record.lexical_postings != stats_value.lexical_postings)
+                {
+                    return error.SecondaryIndexMetadataMismatch;
+                }
+                const fingerprint = try graph.secondaryIndexFingerprintValidated(allocator);
+                const fingerprint_hex = std.fmt.bytesToHex(fingerprint, .lower);
+                if (!std.mem.eql(u8, record.secondary_index_fingerprint.?, &fingerprint_hex)) return error.SecondaryIndexFingerprintMismatch;
+            }
             saw_footer = true;
         } else return error.CorruptSnapshot;
     }
     if (!saw_header or !saw_footer) return error.IncompleteSnapshot;
     try graph.validateSemanticRecords();
+    try semantic_recipes.validateGraph(&graph);
+    try graph.validateSecondaryIndexes();
     return graph;
 }
 

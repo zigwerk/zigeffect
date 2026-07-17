@@ -42,7 +42,10 @@ pub fn queryAlloc(
     var query_terms: std.ArrayList(u64) = .empty;
     defer query_terms.deinit(allocator);
     var tokenizer = nendb.Tokenizer.init(query);
-    while (tokenizer.next()) |token| try query_terms.append(allocator, nendb.tokenHash(token));
+    while (tokenizer.next()) |token| {
+        const term = nendb.tokenHash(token);
+        if (std.mem.indexOfScalar(u64, query_terms.items, term) == null) try query_terms.append(allocator, term);
+    }
     if (query_terms.items.len == 0) return error.EmptyQuery;
     const query_vector = nendb.embedText(query);
 
@@ -55,12 +58,26 @@ pub fn queryAlloc(
     defer allocator.free(base);
     const graph_scores = try owned.slice(f32, allocator, count);
     defer allocator.free(graph_scores);
+    const term_scores = try owned.slice(f32, allocator, count);
+    defer allocator.free(term_scores);
+    @memset(keyword, 0);
     @memset(graph_scores, 0);
+    for (query_terms.items) |term| {
+        @memset(term_scores, 0);
+        for (graph.lexicalPostings(term)) |posting| {
+            const field_weight: f32 = switch (posting.field) {
+                .label => 1.0,
+                .path => 0.8,
+                .search_text => 0.65,
+            };
+            const frequency_boost = @min(@as(f32, 1.2), 1.0 + 0.05 * @as(f32, @floatFromInt(posting.frequency - 1)));
+            term_scores[posting.node_index] = @max(term_scores[posting.node_index], field_weight * frequency_boost);
+        }
+        for (0..count) |index| keyword[index] += term_scores[index] / @as(f32, @floatFromInt(query_terms.items.len));
+    }
     var max_keyword: f32 = 0;
     var max_vector: f32 = 0;
     for (0..count) |index| {
-        const node = graph.nodeAt(index);
-        keyword[index] = keywordScore(query_terms.items, node.label, node.search_text);
         vector[index] = @max(@as(f32, 0), nendb.cosine(&query_vector, graph.vectorAt(index)));
         max_keyword = @max(max_keyword, keyword[index]);
         max_vector = @max(max_vector, vector[index]);
@@ -70,11 +87,18 @@ pub fn queryAlloc(
         if (max_vector > 0) vector[index] /= max_vector;
         base[index] = 0.6 * keyword[index] + 0.4 * vector[index];
     }
-    for (graph.edges.items) |edge| {
-        const from_index = graph.topology.findNodeIndex(edge.from) orelse continue;
-        const to_index = graph.topology.findNodeIndex(edge.to) orelse continue;
-        graph_scores[from_index] = @max(graph_scores[from_index], base[to_index] * 0.5);
-        graph_scores[to_index] = @max(graph_scores[to_index], base[from_index] * 0.5);
+    for (0..count) |index| {
+        const node_id = graph.nodeAt(index).id;
+        for (graph.outgoingEdges(node_id)) |edge_index| {
+            const edge = graph.edgeAt(edge_index) orelse continue;
+            const neighbor = graph.topology.findNodeIndex(edge.to) orelse continue;
+            graph_scores[index] = @max(graph_scores[index], base[neighbor] * 0.5);
+        }
+        for (graph.incomingEdges(node_id)) |edge_index| {
+            const edge = graph.edgeAt(edge_index) orelse continue;
+            const neighbor = graph.topology.findNodeIndex(edge.from) orelse continue;
+            graph_scores[index] = @max(graph_scores[index], base[neighbor] * 0.5);
+        }
     }
 
     var ranked: std.ArrayList(Result) = .empty;
@@ -100,18 +124,4 @@ pub fn queryAlloc(
     }.lessThan);
     const result_count = @min(options.limit, ranked.items.len);
     return .{ .allocator = allocator, .items = try owned.copy(Result, allocator, ranked.items[0..result_count]) };
-}
-
-fn keywordScore(query_terms: []const u64, label: []const u8, text: []const u8) f32 {
-    var matched: usize = 0;
-    for (query_terms) |query_term| {
-        if (containsTerm(label, query_term) or containsTerm(text, query_term)) matched += 1;
-    }
-    return @as(f32, @floatFromInt(matched)) / @as(f32, @floatFromInt(query_terms.len));
-}
-
-fn containsTerm(text: []const u8, expected: u64) bool {
-    var tokenizer = nendb.Tokenizer.init(text);
-    while (tokenizer.next()) |token| if (nendb.tokenHash(token) == expected) return true;
-    return false;
 }

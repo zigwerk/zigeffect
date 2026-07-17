@@ -111,11 +111,24 @@ pub const Corpus = struct {
     }
 
     pub fn addSource(self: *Corpus, path: []const u8, source: []const u8) !void {
-        for (self.parsed_files.items) |parsed| if (std.mem.eql(u8, parsed.path, path)) return error.DuplicateZigSourcePath;
-        if (self.parsed_files.items.len >= self.options.max_files) return error.ZigResolutionFileLimitExceeded;
         var parsed = try zig_parser.parse(self.allocator, path, source, self.options.parser);
         errdefer parsed.deinit();
-        try self.parsed_files.append(self.allocator, parsed);
+        try self.addParsedOwned(&parsed);
+    }
+
+    pub fn addParsedOwned(self: *Corpus, parsed: *zig_parser.Result) !void {
+        try zig_parser.validate(parsed);
+        for (self.parsed_files.items) |existing| if (std.mem.eql(u8, existing.path, parsed.path)) return error.DuplicateZigSourcePath;
+        if (self.parsed_files.items.len >= self.options.max_files) return error.ZigResolutionFileLimitExceeded;
+        try self.parsed_files.append(self.allocator, parsed.*);
+        parsed.path = "";
+        parsed.declarations = &.{};
+        parsed.imports = &.{};
+        parsed.calls = &.{};
+        parsed.call_arguments = &.{};
+        parsed.bindings = &.{};
+        parsed.binding_references = &.{};
+        parsed.owns_memory = false;
     }
 
     pub fn parsedForPath(self: *const Corpus, path: []const u8) ?*const zig_parser.Result {
@@ -123,6 +136,10 @@ pub const Corpus = struct {
             if (std.mem.eql(u8, parsed.path, path)) return &self.parsed_files.items[index];
         }
         return null;
+    }
+
+    pub fn parsedResults(self: *const Corpus) []const zig_parser.Result {
+        return self.parsed_files.items;
     }
 
     pub fn resolve(self: *const Corpus) !Result {

@@ -170,14 +170,47 @@ pub const Corpus = struct {
     }
 
     pub fn addSource(self: *Corpus, path: []const u8, source: []const u8) !void {
-        if (!validPath(path)) return error.InvalidProtoResolutionPath;
-        for (self.files.items) |file| if (std.mem.eql(u8, file.path, path)) return error.DuplicateProtoResolutionFile;
-        if (self.files.items.len >= self.options.max_files) return error.ProtoResolutionFileLimitExceeded;
-        const copied_path = try owned.copy(u8, self.allocator, path);
-        errdefer self.allocator.free(copied_path);
         var parsed = try parser.parse(self.allocator, path, source, self.options.parser);
         errdefer parsed.deinit();
-        try self.files.append(self.allocator, .{ .path = copied_path, .parsed = parsed });
+        try self.addParsedOwned(&parsed);
+    }
+
+    pub fn addParsedOwned(self: *Corpus, parsed: *parser.Result) !void {
+        try parsed.validate();
+        if (!validPath(parsed.path)) return error.InvalidProtoResolutionPath;
+        for (self.files.items) |file| if (std.mem.eql(u8, file.path, parsed.path)) return error.DuplicateProtoResolutionFile;
+        if (self.files.items.len >= self.options.max_files) return error.ProtoResolutionFileLimitExceeded;
+        const copied_path = try owned.copy(u8, self.allocator, parsed.path);
+        errdefer self.allocator.free(copied_path);
+        try self.files.append(self.allocator, .{ .path = copied_path, .parsed = parsed.* });
+        parsed.path = "";
+        parsed.declarations = &.{};
+        parsed.imports = &.{};
+        parsed.import_bindings = &.{};
+        parsed.exports = &.{};
+        parsed.type_bindings = &.{};
+        parsed.calls = &.{};
+        parsed.call_arguments = &.{};
+        parsed.call_bindings = &.{};
+        parsed.protocol_packages = &.{};
+        parsed.protocol_fields = &.{};
+        parsed.protocol_enum_values = &.{};
+        parsed.protocol_rpcs = &.{};
+        parsed.owns_memory = false;
+    }
+
+    pub fn parsedCount(self: *const Corpus) usize {
+        return self.files.items.len;
+    }
+
+    pub fn parsedAt(self: *const Corpus, index: usize) ?*const parser.Result {
+        if (index >= self.files.items.len) return null;
+        return &self.files.items[index].parsed;
+    }
+
+    pub fn parsedForPath(self: *const Corpus, path: []const u8) ?*const parser.Result {
+        for (self.files.items) |*file| if (std.mem.eql(u8, file.path, path)) return &file.parsed;
+        return null;
     }
 
     pub fn resolve(self: *const Corpus) !Result {

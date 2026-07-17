@@ -180,6 +180,15 @@ pub const Options = struct {
     max_interactions: usize = 1_000_000,
 };
 
+pub const Prepared = struct {
+    proto: *const protobuf_resolution.Result,
+    protobuf: *const protobuf_resolution.Corpus,
+    lineage: *const generated_lineage.Result,
+    modules: *const typescript_resolution.Result,
+    typescript: []const typescript_parser.Result,
+    zig: []const zig_parser.Result,
+};
+
 const Document = struct {
     path: []const u8,
     source: []const u8,
@@ -287,11 +296,100 @@ pub const Corpus = struct {
             try parsed_zig.append(self.allocator, try zig_parser.parse(self.allocator, document.path, document.source, .{}));
         }
 
-        var engine = Engine.init(self, &proto_result, &lineage_result, &module_result, parsed_typescript.items, parsed_zig.items);
+        return self.resolvePrepared(.{
+            .proto = &proto_result,
+            .protobuf = &proto_corpus,
+            .lineage = &lineage_result,
+            .modules = &module_result,
+            .typescript = parsed_typescript.items,
+            .zig = parsed_zig.items,
+        });
+    }
+
+    pub fn resolvePrepared(self: *const Corpus, prepared: Prepared) !Result {
+        try protobuf_resolution.validate(prepared.proto);
+        try generated_lineage.validate(prepared.lineage, prepared.proto);
+        try typescript_resolution.validate(prepared.modules);
+        try self.validatePreparedDocuments(prepared);
+        var engine = Engine.init(self, prepared.proto, prepared.lineage, prepared.modules, prepared.typescript, prepared.zig);
         defer engine.deinit();
         return engine.run();
     }
+
+    fn validatePreparedDocuments(self: *const Corpus, prepared: Prepared) !void {
+        const prepared_count = std.math.add(usize, prepared.typescript.len, prepared.zig.len) catch return error.PreparedRpcContinuityDocumentMismatch;
+        const complete_count = std.math.add(usize, prepared_count, prepared.protobuf.parsedCount()) catch return error.PreparedRpcContinuityDocumentMismatch;
+        if (complete_count != self.documents.items.len) return error.PreparedRpcContinuityDocumentMismatch;
+
+        for (self.documents.items) |document| switch (document.language) {
+            .protobuf => {
+                const parsed = prepared.protobuf.parsedForPath(document.path) orelse return error.PreparedRpcContinuityDocumentMismatch;
+                try parsed.validate();
+                if (parsed.language != .protobuf or parsed.source_bytes != document.source.len) return error.PreparedRpcContinuityDocumentMismatch;
+            },
+            .zig => {
+                const parsed = uniquePreparedZig(prepared.zig, document.path) orelse return error.PreparedRpcContinuityDocumentMismatch;
+                try zig_parser.validate(parsed);
+                if (parsed.source_bytes != document.source.len) return error.PreparedRpcContinuityDocumentMismatch;
+            },
+            .typescript, .tsx, .javascript, .jsx => {
+                const parsed = uniquePreparedTypeScript(prepared.typescript, document.path) orelse return error.PreparedRpcContinuityDocumentMismatch;
+                try typescript_parser.validate(parsed);
+                const language_matches = switch (document.language) {
+                    .typescript => parsed.language == .typescript,
+                    .tsx => parsed.language == .tsx,
+                    .javascript => parsed.language == .javascript,
+                    .jsx => parsed.language == .jsx,
+                    .zig, .protobuf => return error.PreparedRpcContinuityDocumentMismatch,
+                };
+                if (!language_matches or parsed.source_bytes != document.source.len) return error.PreparedRpcContinuityDocumentMismatch;
+            },
+        };
+        for (prepared.typescript) |*parsed| if (!self.hasPreparedDocument(parsed.path, parsed.source_bytes, .typescript)) {
+            return error.PreparedRpcContinuityDocumentMismatch;
+        };
+        for (prepared.zig) |*parsed| if (!self.hasPreparedDocument(parsed.path, parsed.source_bytes, .zig)) {
+            return error.PreparedRpcContinuityDocumentMismatch;
+        };
+        for (0..prepared.protobuf.parsedCount()) |index| {
+            const parsed = prepared.protobuf.parsedAt(index) orelse return error.PreparedRpcContinuityDocumentMismatch;
+            if (!self.hasPreparedDocument(parsed.path, parsed.source_bytes, .protobuf)) return error.PreparedRpcContinuityDocumentMismatch;
+        }
+    }
+
+    fn hasPreparedDocument(self: *const Corpus, path: []const u8, source_bytes: usize, family: Language) bool {
+        for (self.documents.items) |document| {
+            if (!std.mem.eql(u8, document.path, path) or document.source.len != source_bytes) continue;
+            return switch (family) {
+                .typescript => isTypeScript(document.language),
+                .zig => document.language == .zig,
+                .protobuf => document.language == .protobuf,
+                .tsx, .javascript, .jsx => false,
+            };
+        }
+        return false;
+    }
 };
+
+fn uniquePreparedTypeScript(values: []const typescript_parser.Result, path: []const u8) ?*const typescript_parser.Result {
+    var found: ?*const typescript_parser.Result = null;
+    for (values) |*value| {
+        if (!std.mem.eql(u8, value.path, path)) continue;
+        if (found != null) return null;
+        found = value;
+    }
+    return found;
+}
+
+fn uniquePreparedZig(values: []const zig_parser.Result, path: []const u8) ?*const zig_parser.Result {
+    var found: ?*const zig_parser.Result = null;
+    for (values) |*value| {
+        if (!std.mem.eql(u8, value.path, path)) continue;
+        if (found != null) return null;
+        found = value;
+    }
+    return found;
+}
 
 const TempObservation = struct {
     role: Role,

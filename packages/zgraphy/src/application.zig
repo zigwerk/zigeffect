@@ -5,7 +5,11 @@ const search = @import("search.zig");
 
 const kernel = zstd.fx.kernel;
 
-pub const causal_graph_path = ".zigeffect/graph";
+/// Operational causal evidence for zgraphy's own CLI runtime. This must never
+/// share the target application's `.zigeffect/graph` namespace: the indexer
+/// imports that namespace as repository evidence, so sharing it would make an
+/// unchanged build observe itself and churn the active generation.
+pub const causal_graph_path = ".zgraphy/runtime/causal";
 
 pub const ApplicationInputsApi = struct {
     pub const operations: []const []const u8 = &.{"ZgraphyCommand.dispatch"};
@@ -15,8 +19,16 @@ pub const ApplicationInputsApi = struct {
 };
 pub const ApplicationInputs = kernel.Service("zgraphy/ApplicationInputs", ApplicationInputsApi);
 
-pub fn rootLayer(inputs: ApplicationInputsApi) @TypeOf(kernel.Layer.succeed(ApplicationInputs, inputs)) {
-    return kernel.Layer.succeed(ApplicationInputs, inputs);
+pub fn rootLayer(inputs: ApplicationInputsApi) @TypeOf(kernel.Layer.mergeAll(.{
+    kernel.Layer.succeed(ApplicationInputs, inputs),
+    zstd.Application.Lifecycle.managerLayer(),
+    zstd.Application.Lifecycle.signalLayer(),
+})) {
+    return kernel.Layer.mergeAll(.{
+        kernel.Layer.succeed(ApplicationInputs, inputs),
+        zstd.Application.Lifecycle.managerLayer(),
+        zstd.Application.Lifecycle.signalLayer(),
+    });
 }
 
 pub const RepositoryGraphApi = struct {

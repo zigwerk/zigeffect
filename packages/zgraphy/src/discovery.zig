@@ -163,6 +163,28 @@ pub const Result = struct {
     }
 };
 
+/// A transient, content-free repository observation used by foreground watch.
+/// The digest includes only normalized path identity and no-follow filesystem
+/// metadata. It is a scheduling hint; `Operations.ensureFresh` remains the
+/// authoritative content/freshness check.
+pub const MetadataResult = struct {
+    fingerprint: [32]u8,
+    observed_entries: usize,
+    watched_entries: usize,
+    watched_files: usize,
+    skipped_entries: usize,
+};
+
+const MetadataRecord = struct {
+    path_digest: [32]u8,
+    kind: std.Io.File.Kind,
+    size: u64,
+    inode: u64,
+    mtime_ns: i128,
+    ctime_ns: i128,
+    stat_available: bool,
+};
+
 const IgnoreRule = struct {
     pattern: []const u8,
     base_path: []const u8,
@@ -312,6 +334,100 @@ pub fn scan(
     return result;
 }
 
+pub fn scanMetadata(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    root: std.Io.Dir,
+    options: Options,
+) !MetadataResult {
+    try validateOptions(options);
+    var rules = try loadIgnoreRules(allocator, io, root);
+    defer rules.deinit();
+
+    var records: std.ArrayList(MetadataRecord) = .empty;
+    defer records.deinit(allocator);
+    var observed_entries: usize = 0;
+    var watched_files: usize = 0;
+    var skipped_entries: usize = 0;
+    var walker = try root.walk(allocator);
+    defer walker.deinit();
+    while (try walker.next(io)) |entry| {
+        observed_entries = std.math.add(usize, observed_entries, 1) catch return error.DiscoveryEntryLimitExceeded;
+        if (observed_entries > options.max_entries) return error.DiscoveryEntryLimitExceeded;
+        if (entry.depth() > options.max_depth) return error.DiscoveryDepthLimitExceeded;
+        if (entry.path.len == 0 or entry.path.len > options.max_path_bytes or !validRelativePath(entry.path)) {
+            return error.InvalidDiscoveryPath;
+        }
+
+        if (entry.kind == .directory) {
+            if (mandatoryExcluded(entry.path)) {
+                skipped_entries += 1;
+                walker.leave(io);
+                continue;
+            }
+            if (rules.match(entry.path, true) != null) {
+                skipped_entries += 1;
+                walker.leave(io);
+                continue;
+            }
+            try loadDirectoryIgnoreRules(allocator, io, root, entry.path, &rules);
+        } else {
+            if (mandatoryExcluded(entry.path) or rules.match(entry.path, false) != null) {
+                skipped_entries += 1;
+                continue;
+            }
+            if (entry.kind == .file) {
+                watched_files = std.math.add(usize, watched_files, 1) catch return error.DiscoveryFileLimitExceeded;
+                if (watched_files > options.max_files) return error.DiscoveryFileLimitExceeded;
+            }
+        }
+
+        var path_digest: [32]u8 = @splat(0);
+        std.crypto.hash.sha2.Sha256.hash(entry.path, &path_digest, .{});
+        const stat = root.statFile(io, entry.path, .{ .follow_symlinks = false }) catch null;
+        try records.append(allocator, if (stat) |value| .{
+            .path_digest = path_digest,
+            .kind = value.kind,
+            .size = value.size,
+            .inode = @intCast(value.inode),
+            .mtime_ns = value.mtime.nanoseconds,
+            .ctime_ns = value.ctime.nanoseconds,
+            .stat_available = true,
+        } else .{
+            .path_digest = path_digest,
+            .kind = entry.kind,
+            .size = 0,
+            .inode = 0,
+            .mtime_ns = 0,
+            .ctime_ns = 0,
+            .stat_available = false,
+        });
+    }
+
+    std.mem.sort(MetadataRecord, records.items, {}, metadataRecordLessThan);
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    updateBytes(&hasher, "zgraphy.watch-metadata.v1");
+    updateBytes(&hasher, options.repository_id);
+    for (records.items) |record| {
+        hasher.update(&record.path_digest);
+        updateU64(&hasher, @intCast(@intFromEnum(record.kind)));
+        updateU64(&hasher, record.size);
+        updateU64(&hasher, record.inode);
+        updateI128(&hasher, record.mtime_ns);
+        updateI128(&hasher, record.ctime_ns);
+        updateU64(&hasher, @intFromBool(record.stat_available));
+    }
+    var fingerprint: [32]u8 = @splat(0);
+    hasher.final(&fingerprint);
+    return .{
+        .fingerprint = fingerprint,
+        .observed_entries = observed_entries,
+        .watched_entries = records.items.len,
+        .watched_files = watched_files,
+        .skipped_entries = skipped_entries,
+    };
+}
+
 pub fn validate(result: *const Result) !void {
     if (!isValidRepositoryId(result.repository_id) or result.records.len == 0 or !result.reconciles()) return error.InvalidDiscoveryResult;
     var previous: ?*const Record = null;
@@ -448,6 +564,12 @@ fn lessThanRecord(_: void, left: Record, right: Record) bool {
     return std.mem.lessThan(u8, left.relative_path, right.relative_path);
 }
 
+fn metadataRecordLessThan(_: void, left: MetadataRecord, right: MetadataRecord) bool {
+    const path_order = std.mem.order(u8, &left.path_digest, &right.path_digest);
+    if (path_order != .eq) return path_order == .lt;
+    return @intFromEnum(left.kind) < @intFromEnum(right.kind);
+}
+
 fn summarize(records: []const Record) Summary {
     var summary = Summary{};
     for (records) |record| summary.include(record.disposition);
@@ -488,6 +610,12 @@ fn updateBytes(hasher: *std.crypto.hash.sha2.Sha256, value: []const u8) void {
 fn updateU64(hasher: *std.crypto.hash.sha2.Sha256, value: u64) void {
     var bytes: [8]u8 = @splat(0);
     std.mem.writeInt(u64, &bytes, value, .little);
+    hasher.update(&bytes);
+}
+
+fn updateI128(hasher: *std.crypto.hash.sha2.Sha256, value: i128) void {
+    var bytes: [16]u8 = @splat(0);
+    std.mem.writeInt(u128, &bytes, @bitCast(value), .little);
     hasher.update(&bytes);
 }
 

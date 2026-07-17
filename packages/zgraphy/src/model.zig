@@ -75,6 +75,7 @@ pub const Provenance = enum(u8) {
 pub const Options = struct {
     max_nodes: usize = 100_000,
     max_edges: usize = 500_000,
+    max_lexical_postings: usize = 4_000_000,
     max_hyperedges: usize = 100_000,
     max_hyperedge_participants: usize = 1_000_000,
     max_hyperedge_evidence: usize = 1_000_000,
@@ -288,6 +289,7 @@ pub const RepositoryGraph = struct {
             .topology = try nendb.GraphData.init(allocator, .{
                 .max_nodes = options.max_nodes,
                 .max_edges = options.max_edges,
+                .max_lexical_postings = options.max_lexical_postings,
             }),
         };
     }
@@ -325,7 +327,11 @@ pub const RepositoryGraph = struct {
         errdefer if (search_text.len > 0) self.allocator.free(search_text);
 
         const embedding = nendb.embedPair(input.label, input.search_text);
-        const index = try self.topology.addNode(id, @intFromEnum(input.kind), &embedding);
+        const index = try self.topology.addNode(id, @intFromEnum(input.kind), &embedding, .{
+            .label = input.label,
+            .path = input.path,
+            .search_text = input.search_text,
+        });
         errdefer self.rollbackNode(index);
         try self.nodes.append(self.allocator, .{
             .id = id,
@@ -359,8 +365,8 @@ pub const RepositoryGraph = struct {
         if (self.hasEdge(input.from, input.to, input.relation)) return;
         const source_path = if (input.source_path.len == 0) "" else try owned.copy(u8, self.allocator, input.source_path);
         errdefer if (source_path.len > 0) self.allocator.free(source_path);
-        _ = try self.topology.addEdge(input.from, input.to, @intFromEnum(input.relation));
-        errdefer self.topology.edge_count -= 1;
+        const edge_index = try self.topology.addEdge(input.from, input.to, @intFromEnum(input.relation));
+        errdefer self.topology.removeLastEdge(edge_index);
         try self.edges.append(self.allocator, .{
             .from = input.from,
             .to = input.to,
@@ -410,15 +416,64 @@ pub const RepositoryGraph = struct {
     }
 
     pub fn hasEdge(self: *const RepositoryGraph, from: u64, to: u64, relation: Relation) bool {
-        for (self.edges.items) |edge| {
-            if (edge.from == from and edge.to == to and edge.relation == relation) return true;
+        for (self.outgoingRelationEdges(from, relation)) |edge_index| {
+            const edge = self.edgeAt(edge_index) orelse continue;
+            if (edge.to == to) return true;
         }
         return false;
     }
 
     pub fn hasOutgoingRelation(self: *const RepositoryGraph, from: u64, relation: Relation) bool {
-        for (self.edges.items) |edge| if (edge.from == from and edge.relation == relation) return true;
-        return false;
+        return self.outgoingRelationEdges(from, relation).len > 0;
+    }
+
+    pub fn edgeAt(self: *const RepositoryGraph, index: usize) ?*const Edge {
+        if (index >= self.edges.items.len) return null;
+        return &self.edges.items[index];
+    }
+
+    pub fn outgoingRelationEdges(self: *const RepositoryGraph, node_id: u64, relation: Relation) []const u32 {
+        return self.topology.outgoingRelationEdges(node_id, @intFromEnum(relation));
+    }
+
+    pub fn incomingRelationEdges(self: *const RepositoryGraph, node_id: u64, relation: Relation) []const u32 {
+        return self.topology.incomingRelationEdges(node_id, @intFromEnum(relation));
+    }
+
+    pub fn outgoingEdges(self: *const RepositoryGraph, node_id: u64) []const u32 {
+        return self.topology.outgoingEdges(node_id);
+    }
+
+    pub fn incomingEdges(self: *const RepositoryGraph, node_id: u64) []const u32 {
+        return self.topology.incomingEdges(node_id);
+    }
+
+    pub fn lexicalPostings(self: *const RepositoryGraph, term: u64) []const nendb.LexicalPosting {
+        return self.topology.lexicalPostings(term);
+    }
+
+    pub fn secondaryIndexStats(self: *const RepositoryGraph) nendb.SecondaryIndexStats {
+        return self.topology.secondaryIndexStats();
+    }
+
+    pub fn validateSecondaryIndexes(self: *const RepositoryGraph) !void {
+        try self.topology.validateSecondaryIndexes();
+        var expected_postings: usize = 0;
+        for (self.nodes.items, 0..) |node, index| {
+            try validateLexicalField(self, @intCast(index), .label, node.label, &expected_postings);
+            try validateLexicalField(self, @intCast(index), .path, node.path, &expected_postings);
+            try validateLexicalField(self, @intCast(index), .search_text, node.search_text, &expected_postings);
+        }
+        if (expected_postings != self.secondaryIndexStats().lexical_postings) return error.SecondaryIndexLexicalMismatch;
+    }
+
+    pub fn secondaryIndexFingerprint(self: *const RepositoryGraph, allocator: std.mem.Allocator) ![32]u8 {
+        try self.validateSecondaryIndexes();
+        return self.secondaryIndexFingerprintValidated(allocator);
+    }
+
+    pub fn secondaryIndexFingerprintValidated(self: *const RepositoryGraph, allocator: std.mem.Allocator) ![32]u8 {
+        return self.topology.secondaryIndexFingerprintValidated(allocator);
     }
 
     pub fn addHyperedge(self: *RepositoryGraph, input: HyperedgeInput) !u64 {
@@ -596,8 +651,21 @@ pub const RepositoryGraph = struct {
                 exhausted = true;
                 continue;
             }
-            for (self.edges.items) |edge| {
-                const neighbor = if (edge.from == current) edge.to else if (edge.to == current) edge.from else continue;
+            for (self.outgoingEdges(current)) |edge_index| {
+                const edge = self.edgeAt(edge_index) orelse continue;
+                const neighbor = edge.to;
+                if (parents.contains(neighbor)) continue;
+                try parents.put(neighbor, .{ .parent = current, .depth = depth + 1 });
+                try queue.append(allocator, neighbor);
+                if (neighbor == to) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found) break;
+            for (self.incomingEdges(current)) |edge_index| {
+                const edge = self.edgeAt(edge_index) orelse continue;
+                const neighbor = edge.from;
                 if (parents.contains(neighbor)) continue;
                 try parents.put(neighbor, .{ .parent = current, .depth = depth + 1 });
                 try queue.append(allocator, neighbor);
@@ -626,13 +694,41 @@ pub const RepositoryGraph = struct {
     }
 
     fn rollbackNode(self: *RepositoryGraph, index: u32) void {
-        const id = self.topology.node_ids[index];
-        _ = self.topology.id_index.remove(id);
-        self.topology.node_active[index] = false;
-        self.topology.node_count -= 1;
-        self.topology.vector_count -= 1;
+        self.topology.removeLastNode(index);
     }
 };
+
+fn validateLexicalField(
+    graph: *const RepositoryGraph,
+    node_index: u32,
+    field: nendb.LexicalField,
+    text: []const u8,
+    expected_postings: *usize,
+) !void {
+    var frequencies = std.AutoHashMap(u64, u16).init(graph.allocator);
+    defer frequencies.deinit();
+    var tokenizer = nendb.Tokenizer.init(text);
+    while (tokenizer.next()) |token| {
+        const entry = try frequencies.getOrPut(nendb.tokenHash(token));
+        if (!entry.found_existing) entry.value_ptr.* = 0;
+        if (entry.value_ptr.* < std.math.maxInt(u16)) entry.value_ptr.* += 1;
+    }
+    expected_postings.* = std.math.add(usize, expected_postings.*, frequencies.count()) catch return error.SecondaryIndexLexicalMismatch;
+    const records = graph.topology.nodeLexicalRecords(node_index);
+    var field_records: usize = 0;
+    for (records) |record| {
+        if (record.posting.field == field) field_records += 1;
+    }
+    if (field_records != frequencies.count()) return error.SecondaryIndexLexicalMismatch;
+    var iterator = frequencies.iterator();
+    while (iterator.next()) |entry| {
+        var matches: usize = 0;
+        for (records) |record| {
+            if (record.term == entry.key_ptr.* and record.posting.field == field and record.posting.frequency == entry.value_ptr.*) matches += 1;
+        }
+        if (matches != 1) return error.SecondaryIndexLexicalMismatch;
+    }
+}
 
 fn validateHyperedgeInput(graph: *const RepositoryGraph, input: HyperedgeInput) !void {
     if (input.canonical_name.len == 0 or input.canonical_name.len > 1024 or input.recipe.len == 0 or input.recipe.len > 128 or

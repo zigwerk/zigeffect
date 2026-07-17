@@ -25,7 +25,7 @@
       "disposition": "optional_parity",
       "milestone": "M10",
       "requirement": "ZG-REQ-010",
-      "status": "planned",
+      "status": "mvp_partial",
       "reference_modules": ["graphify/ingest.py", "graphify/transcribe.py", "graphify/google_workspace.py"],
       "reference_tests": ["test_ingest", "test_transcribe", "test_google_workspace", "test_office_incremental"],
       "improvement": "Run rich-corpus work as capability-gated resumable jobs with converter provenance and complete requested-versus-returned coverage."
@@ -58,7 +58,7 @@
       "disposition": "improved_equivalent",
       "milestone": "M5",
       "requirement": "ZG-REQ-009",
-      "status": "planned",
+      "status": "mvp_partial",
       "reference_modules": ["graphify/manifest_ingest.py", "graphify/mcp_ingest.py", "graphify/cargo_introspect.py", "graphify/pg_introspect.py", "graphify/scip_ingest.py"],
       "reference_tests": ["test_manifest_ingest", "test_mcp_ingest", "test_cargo_introspect", "test_pg_introspect", "test_scip_ingest"],
       "improvement": "Wrap source compiler generated database and runtime evidence in typed provider envelopes with authority freshness and explicit contradictions."
@@ -94,7 +94,7 @@
       "status": "planned",
       "reference_modules": ["graphify/cache.py", "graphify/manifest.py", "graphify/watch.py", "graphify/hooks.py"],
       "reference_tests": ["test_cache", "test_incremental", "test_watch", "test_hooks"],
-      "improvement": "Use immutable generations automatic freshness barriers and transactional invalidation mark validation sweep repair and bounded garbage collection."
+      "improvement": "Use immutable generations automatic freshness barriers transactional invalidation mark validation sweep repair a bounded native foreground watch coordinator and reader-safe deterministic generation/cache retention with user pins; Git hooks daemon installation and production long-churn superiority remain planned."
     },
     {
       "id": "analysis-communities-meaning",
