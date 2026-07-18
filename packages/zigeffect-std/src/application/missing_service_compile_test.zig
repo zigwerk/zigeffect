@@ -23,22 +23,15 @@ test "one-shot command cannot compile without its required service" {
         .spec = .{ .name = "test", .subcommands = &commands },
         .handlers = &handlers,
     };
-    var preflight = try zstd.Cli.preflightServiceApplication(
-        MissingServices,
-        error{},
-        std.testing.allocator,
-        application,
-        &.{"status"},
-    );
-    defer preflight.deinit();
     _ = try zstd.Application.runOneShot(
         @TypeOf(layer),
-        @TypeOf(preflight),
+        @TypeOf(application),
         std.testing.allocator,
         std.testing.io,
         tmp.dir,
         layer,
-        &preflight,
+        application,
+        &.{"status"},
         .{ .runtime = .{ .graph = .{ .path = "causal" } } },
     );
 }

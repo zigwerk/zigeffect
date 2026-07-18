@@ -6,19 +6,172 @@ const Lifecycle = @import("lifecycle.zig");
 
 pub fn runOneShot(
     comptime ApplicationLayer: type,
-    comptime Preflight: type,
+    comptime ServiceApp: type,
     allocator: std.mem.Allocator,
     io: std.Io,
     root: std.Io.Dir,
     application_layer: ApplicationLayer,
-    preflight: *const Preflight,
+    application: ServiceApp,
+    argv: []const []const u8,
     options: OneShotOptions,
-) anyerror!OneShotResult(Preflight.CommandEffect.SuccessType) {
-    if (comptime !Cli.isFrameworkServicePreflight(Preflight)) {
-        @compileError("runOneShot requires a framework-produced service CLI preflight artifact");
+) anyerror!OneShotResult(ServiceApp.SuccessType) {
+    validateServiceApplication(ServiceApp);
+    if (comptime ServiceApp.service_application_kind == .parsed) {
+        return runParsedServiceApplication(
+            ApplicationLayer,
+            ServiceApp,
+            allocator,
+            io,
+            root,
+            application_layer,
+            application,
+            argv,
+            options,
+        );
     }
-    const prepared = try preflight.prepare();
-    const CommandEffect = @TypeOf(prepared.effect);
+    return runTypedServiceApplication(
+        ApplicationLayer,
+        ServiceApp,
+        allocator,
+        io,
+        root,
+        application_layer,
+        application,
+        argv,
+        options,
+    );
+}
+
+fn runParsedServiceApplication(
+    comptime ApplicationLayer: type,
+    comptime ServiceApp: type,
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    root: std.Io.Dir,
+    application_layer: ApplicationLayer,
+    application: ServiceApp,
+    argv: []const []const u8,
+    options: OneShotOptions,
+) anyerror!OneShotResult(ServiceApp.SuccessType) {
+    if (try parsedBuiltinShortCircuitAlloc(allocator, application, argv)) |short_circuit| {
+        return emitShortCircuit(ServiceApp.SuccessType, allocator, io, short_circuit, options.testing.write_short_circuit);
+    }
+
+    var parsed = Cli.parse(allocator, application.spec, argv) catch |failure| {
+        const output = try usageOutputAlloc(allocator, application.spec, failure);
+        return emitShortCircuit(ServiceApp.SuccessType, allocator, io, usageShortCircuit(output), options.testing.write_short_circuit);
+    };
+
+    const handler = application.findHandler(parsed) orelse {
+        const output = usageOutputAlloc(allocator, application.spec, Cli.CliError.UnknownSubcommand) catch |failure| {
+            parsed.deinit(allocator);
+            return failure;
+        };
+        parsed.deinit(allocator);
+        return emitShortCircuit(ServiceApp.SuccessType, allocator, io, usageShortCircuit(output), options.testing.write_short_circuit);
+    };
+    const identity = commandIdentityFromMatchedPath(parsed.path[1..]) catch |failure| {
+        parsed.deinit(allocator);
+        return failure;
+    };
+    const effect = parsedCommandEffect(ServiceApp, handler, parsed);
+    const result = runPreparedCommand(
+        ApplicationLayer,
+        @TypeOf(effect),
+        allocator,
+        io,
+        root,
+        application_layer,
+        effect,
+        identity,
+        options,
+    );
+    parsed.deinit(allocator);
+    return result;
+}
+
+fn runTypedServiceApplication(
+    comptime ApplicationLayer: type,
+    comptime ServiceApp: type,
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    root: std.Io.Dir,
+    application_layer: ApplicationLayer,
+    application: ServiceApp,
+    argv: []const []const u8,
+    options: OneShotOptions,
+) anyerror!OneShotResult(ServiceApp.SuccessType) {
+    if (Cli.detectBuiltin(application.command, argv)) |builtin| {
+        const output = switch (builtin) {
+            .help => try Cli.formatTypedHelp(allocator, application.command),
+            .version => try Cli.formatTypedVersion(allocator, application.command),
+            .completions => try Cli.formatTypedCompletions(allocator, application.command),
+        };
+        return emitShortCircuit(ServiceApp.SuccessType, allocator, io, .{
+            .kind = switch (builtin) {
+                .help => .help,
+                .version => .version,
+                .completions => .completions,
+            },
+            .exit_code = .success,
+            .stream = .stdout,
+            .output = output,
+        }, options.testing.write_short_circuit);
+    }
+
+    var parsed = Cli.parse(allocator, application.command.toCommandSpec(), argv) catch |failure| {
+        const output = try typedUsageOutputAlloc(allocator, application.command, failure);
+        return emitShortCircuit(ServiceApp.SuccessType, allocator, io, usageShortCircuit(output), options.testing.write_short_circuit);
+    };
+
+    var decoded = Cli.decodeTypedCommandAlloc(allocator, application.command, parsed, null, null) catch |failure| {
+        parsed.deinit(allocator);
+        return failure;
+    };
+    if (!decoded.ok()) {
+        const output = decoded.issues.jsonAlloc(allocator) catch |failure| {
+            decoded.deinit();
+            parsed.deinit(allocator);
+            return failure;
+        };
+        decoded.deinit();
+        parsed.deinit(allocator);
+        return emitShortCircuit(ServiceApp.SuccessType, allocator, io, usageShortCircuit(output), options.testing.write_short_circuit);
+    }
+
+    const identity = commandIdentityFromMatchedPath(&.{ServiceApp.CommandType.Meta.name}) catch |failure| {
+        decoded.deinit();
+        parsed.deinit(allocator);
+        return failure;
+    };
+    const effect = typedCommandEffect(ServiceApp, application.handler, decoded.value.?);
+    const result = runPreparedCommand(
+        ApplicationLayer,
+        @TypeOf(effect),
+        allocator,
+        io,
+        root,
+        application_layer,
+        effect,
+        identity,
+        options,
+    );
+    decoded.deinit();
+    parsed.deinit(allocator);
+    return result;
+}
+
+fn runPreparedCommand(
+    comptime ApplicationLayer: type,
+    comptime CommandEffect: type,
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    root: std.Io.Dir,
+    application_layer: ApplicationLayer,
+    command_effect: CommandEffect,
+    identity: CommandIdentity,
+    options: OneShotOptions,
+) anyerror!OneShotResult(CommandEffect.SuccessType) {
     const root_layer = fx.kernel.Layer.mergeAll(.{
         application_layer,
         Lifecycle.managerLayer(),
@@ -46,7 +199,7 @@ pub fn runOneShot(
 
     if (infrastructure_failure == null) {
         bump(options.testing.probe, .command);
-        if (runtime.run(prepared.effect.named(prepared.identity.slice()))) |value| {
+        if (runtime.run(command_effect.named(identity.slice()))) |value| {
             command_value = value;
         } else |failure| {
             command_failure = failure;
@@ -90,6 +243,264 @@ pub fn runOneShot(
     return .{ .value = command_value.? };
 }
 
+const command_identity_max_bytes: usize = 128;
+const command_identity_max_segments: usize = 8;
+const command_identity_max_segment_bytes: usize = 48;
+
+const CommandIdentityError = error{
+    EmptyCommandIdentity,
+    EmptyCommandSegment,
+    TooManyCommandSegments,
+    CommandSegmentTooLong,
+    CommandIdentityTooLong,
+};
+
+const CommandIdentity = struct {
+    bytes: [command_identity_max_bytes]u8 = undefined,
+    len: u8 = 0,
+    segment_count: u8 = 0,
+
+    fn slice(self: *const CommandIdentity) []const u8 {
+        return self.bytes[0..self.len];
+    }
+
+    fn segmentCount(self: CommandIdentity) usize {
+        return self.segment_count;
+    }
+};
+
+fn commandIdentityFromMatchedPath(path: []const []const u8) CommandIdentityError!CommandIdentity {
+    if (path.len == 0) return error.EmptyCommandIdentity;
+    if (path.len > command_identity_max_segments) return error.TooManyCommandSegments;
+
+    var identity = CommandIdentity{};
+    for (path, 0..) |segment, segment_index| {
+        if (segment.len == 0) return error.EmptyCommandSegment;
+        if (segment.len > command_identity_max_segment_bytes) return error.CommandSegmentTooLong;
+        const separator_bytes: usize = if (segment_index == 0) 0 else 1;
+        const next_len = @as(usize, identity.len) + separator_bytes + segment.len;
+        if (next_len > command_identity_max_bytes) return error.CommandIdentityTooLong;
+        if (separator_bytes != 0) {
+            identity.bytes[identity.len] = '.';
+            identity.len += 1;
+        }
+        @memcpy(identity.bytes[identity.len..][0..segment.len], segment);
+        identity.len = @intCast(next_len);
+    }
+    identity.segment_count = @intCast(path.len);
+    return identity;
+}
+
+fn validateServiceApplication(comptime ServiceApp: type) void {
+    if (!@hasDecl(ServiceApp, "service_application_kind") or
+        !@hasDecl(ServiceApp, "RequiredServices") or
+        !@hasDecl(ServiceApp, "FailureType") or
+        !@hasDecl(ServiceApp, "SuccessType"))
+    {
+        @compileError("runOneShot requires a declarative service-aware CLI application");
+    }
+    switch (ServiceApp.service_application_kind) {
+        .parsed => if (ServiceApp != Cli.ServiceApplication(ServiceApp.RequiredServices, ServiceApp.FailureType)) {
+            @compileError("runOneShot requires the canonical parsed ServiceApplication type");
+        },
+        .typed => {
+            if (!@hasDecl(ServiceApp, "ArgsType") or !@hasDecl(ServiceApp, "CommandType")) {
+                @compileError("runOneShot typed applications must declare their argument and command types");
+            }
+            if (ServiceApp != Cli.ServiceTypedApplication(
+                ServiceApp.RequiredServices,
+                ServiceApp.ArgsType,
+                ServiceApp.FailureType,
+                ServiceApp.CommandType,
+            )) {
+                @compileError("runOneShot requires the canonical typed ServiceApplication type");
+            }
+        },
+    }
+}
+
+fn ParsedCommandInput(comptime ServiceApp: type) type {
+    return struct {
+        handler: Cli.ServiceHandler(ServiceApp.RequiredServices, ServiceApp.FailureType),
+        parsed: Cli.ParsedCommand,
+    };
+}
+
+fn ParsedCommandEffect(comptime ServiceApp: type) type {
+    const Program = fx.kernel.Effect(void, ServiceApp.FailureType, ServiceApp.RequiredServices);
+    return Program.Stateful(ParsedCommandInput(ServiceApp));
+}
+
+fn parsedCommandEffect(
+    comptime ServiceApp: type,
+    handler: Cli.ServiceHandler(ServiceApp.RequiredServices, ServiceApp.FailureType),
+    parsed: Cli.ParsedCommand,
+) ParsedCommandEffect(ServiceApp) {
+    const Program = fx.kernel.Effect(void, ServiceApp.FailureType, ServiceApp.RequiredServices);
+    const Input = ParsedCommandInput(ServiceApp);
+    return Program.fromState(Input, .{ .handler = handler, .parsed = parsed }, struct {
+        fn execute(input: Input, ctx: *Program.Context) ServiceApp.FailureType!void {
+            return input.handler.run(ctx, input.parsed);
+        }
+    }.execute);
+}
+
+fn TypedCommandInput(comptime ServiceApp: type) type {
+    return struct {
+        handler: Cli.ServiceTypedHandler(ServiceApp.RequiredServices, ServiceApp.ArgsType, ServiceApp.FailureType),
+        args: ServiceApp.ArgsType,
+    };
+}
+
+fn TypedCommandEffect(comptime ServiceApp: type) type {
+    const Program = fx.kernel.Effect(void, ServiceApp.FailureType, ServiceApp.RequiredServices);
+    return Program.Stateful(TypedCommandInput(ServiceApp));
+}
+
+fn typedCommandEffect(
+    comptime ServiceApp: type,
+    handler: Cli.ServiceTypedHandler(ServiceApp.RequiredServices, ServiceApp.ArgsType, ServiceApp.FailureType),
+    args: ServiceApp.ArgsType,
+) TypedCommandEffect(ServiceApp) {
+    const Program = fx.kernel.Effect(void, ServiceApp.FailureType, ServiceApp.RequiredServices);
+    const Input = TypedCommandInput(ServiceApp);
+    return Program.fromState(Input, .{ .handler = handler, .args = args }, struct {
+        fn execute(input: Input, ctx: *Program.Context) ServiceApp.FailureType!void {
+            return input.handler(ctx, input.args);
+        }
+    }.execute);
+}
+
+const ParsedBuiltinMatch = struct {
+    request: Cli.BuiltinRequest,
+    command_path: []const []const u8 = &.{},
+};
+
+fn detectParsedBuiltin(spec: Cli.CommandSpec, argv: []const []const u8) ?ParsedBuiltinMatch {
+    if (argv.len == 0) return .{ .request = .help };
+    if (argv.len == 1 and (std.mem.eql(u8, argv[0], "--help") or std.mem.eql(u8, argv[0], "-h"))) {
+        return .{ .request = .help };
+    }
+    if (argv.len == 1 and std.mem.eql(u8, argv[0], "--version")) return .{ .request = .version };
+    if (argv.len == 1 and std.mem.eql(u8, argv[0], "completions")) return .{ .request = .completions };
+    if (std.mem.eql(u8, argv[0], "help")) {
+        if (argv.len == 1 or (argv.len == 2 and std.mem.eql(u8, argv[1], spec.name))) {
+            return .{ .request = .help };
+        }
+        return .{ .request = .help, .command_path = argv[1..] };
+    }
+    if (std.mem.eql(u8, argv[0], "completions")) {
+        return .{ .request = .completions, .command_path = argv[1..] };
+    }
+    const last = argv[argv.len - 1];
+    if (std.mem.eql(u8, last, "--help") or std.mem.eql(u8, last, "-h")) {
+        return .{ .request = .help, .command_path = argv[0 .. argv.len - 1] };
+    }
+    return null;
+}
+
+fn parsedBuiltinShortCircuitAlloc(
+    allocator: std.mem.Allocator,
+    application: anytype,
+    argv: []const []const u8,
+) !?Cli.ShortCircuit {
+    const builtin = detectParsedBuiltin(application.spec, argv) orelse return null;
+    const output = switch (builtin.request) {
+        .help => help: {
+            const active = activeCommandSpecForArgs(application.spec, builtin.command_path) catch |failure| {
+                return usageShortCircuit(try usageOutputAlloc(allocator, application.spec, failure));
+            };
+            if (application.help) |custom| break :help try allocator.dupe(u8, custom);
+            break :help try Cli.formatHelp(allocator, active);
+        },
+        .version => try std.fmt.allocPrint(allocator, "{s} {s}\n", .{ application.spec.name, application.version }),
+        .completions => Cli.formatCompletions(allocator, application.spec, builtin.command_path) catch |failure| {
+            return usageShortCircuit(try usageOutputAlloc(allocator, application.spec, failure));
+        },
+    };
+    return .{
+        .kind = switch (builtin.request) {
+            .help => .help,
+            .version => .version,
+            .completions => .completions,
+        },
+        .exit_code = .success,
+        .stream = .stdout,
+        .output = output,
+    };
+}
+
+fn activeCommandSpecForArgs(root: Cli.CommandSpec, argv: []const []const u8) Cli.CliError!Cli.CommandSpec {
+    var active = root;
+    for (argv) |arg| {
+        if (arg.len == 0 or arg[0] == '-') break;
+        if (findSubcommand(active, arg)) |subcommand| {
+            active = subcommand;
+        } else if (active.subcommands.len != 0) {
+            return Cli.CliError.UnknownSubcommand;
+        } else {
+            break;
+        }
+    }
+    return active;
+}
+
+fn findSubcommand(spec: Cli.CommandSpec, name: []const u8) ?Cli.CommandSpec {
+    for (spec.subcommands) |subcommand| {
+        if (std.mem.eql(u8, subcommand.name, name)) return subcommand;
+    }
+    return null;
+}
+
+fn usageOutputAlloc(allocator: std.mem.Allocator, spec: Cli.CommandSpec, failure: anyerror) ![]const u8 {
+    const help = try Cli.formatHelp(allocator, spec);
+    const output = std.fmt.allocPrint(allocator, "usage: {s}\n{s}", .{ @errorName(failure), help }) catch |allocation_failure| {
+        allocator.free(help);
+        return allocation_failure;
+    };
+    allocator.free(help);
+    return output;
+}
+
+fn typedUsageOutputAlloc(allocator: std.mem.Allocator, command: anytype, failure: anyerror) ![]const u8 {
+    const help = try Cli.formatTypedHelp(allocator, command);
+    const output = std.fmt.allocPrint(allocator, "usage: {s}\n{s}", .{ @errorName(failure), help }) catch |allocation_failure| {
+        allocator.free(help);
+        return allocation_failure;
+    };
+    allocator.free(help);
+    return output;
+}
+
+fn usageShortCircuit(output: []const u8) Cli.ShortCircuit {
+    return .{
+        .kind = .usage,
+        .exit_code = .usage,
+        .stream = .stderr,
+        .output = output,
+    };
+}
+
+fn emitShortCircuit(
+    comptime Success: type,
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    short_circuit: Cli.ShortCircuit,
+    write_output: bool,
+) !OneShotResult(Success) {
+    var owned = short_circuit;
+    if (write_output) owned.write(io) catch |failure| {
+        owned.deinit(allocator);
+        return failure;
+    };
+    const result: OneShotResult(Success) = .{
+        .exit_code = owned.exit_code,
+        .short_circuit = owned.kind,
+    };
+    owned.deinit(allocator);
+    return result;
+}
+
 pub const OneShotOptions = struct {
     runtime: CausalRuntime.Options = .{},
     inspect: fx.kernel.InspectOptions = .{ .max_recent_events = 128 },
@@ -119,12 +530,15 @@ pub const OneShotOptions = struct {
     pub const Testing = struct {
         faults: TestFaults = .{},
         probe: ?*TestProbe = null,
+        write_short_circuit: bool = true,
     };
 };
 
 pub fn OneShotResult(comptime Success: type) type {
     return struct {
-        value: Success,
+        value: ?Success = null,
+        exit_code: Cli.ExitCode = .success,
+        short_circuit: ?Cli.ShortCircuitKind = null,
     };
 }
 
@@ -173,4 +587,18 @@ const ProbeField = enum {
 
 fn bump(probe: ?*OneShotOptions.TestProbe, comptime field: ProbeField) void {
     if (probe) |value| @field(value, @tagName(field)) += 1;
+}
+
+test "private one-shot command identity enforces matched-path bounds" {
+    const identity = try commandIdentityFromMatchedPath(&.{ "benchmark", "corpus" });
+    try std.testing.expectEqualStrings("benchmark.corpus", identity.slice());
+    try std.testing.expectEqual(@as(usize, 2), identity.segmentCount());
+
+    const too_long_segment = "1234567890123456789012345678901234567890123456789";
+    const full_segment = "123456789012345678901234567890123456789012345678";
+    try std.testing.expectError(error.EmptyCommandIdentity, commandIdentityFromMatchedPath(&.{}));
+    try std.testing.expectError(error.EmptyCommandSegment, commandIdentityFromMatchedPath(&.{""}));
+    try std.testing.expectError(error.CommandSegmentTooLong, commandIdentityFromMatchedPath(&.{too_long_segment}));
+    try std.testing.expectError(error.CommandIdentityTooLong, commandIdentityFromMatchedPath(&.{ full_segment, full_segment, full_segment }));
+    try std.testing.expectError(error.TooManyCommandSegments, commandIdentityFromMatchedPath(&.{ "a", "b", "c", "d", "e", "f", "g", "h", "i" }));
 }
