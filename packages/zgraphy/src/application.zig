@@ -18,17 +18,129 @@ pub const ApplicationInputsApi = struct {
     args: []const []const u8,
 };
 pub const ApplicationInputs = kernel.Service("zgraphy/ApplicationInputs", ApplicationInputsApi);
+pub const ApplicationServices = .{ApplicationInputs};
 
-pub fn rootLayer(inputs: ApplicationInputsApi) @TypeOf(kernel.Layer.mergeAll(.{
-    kernel.Layer.succeed(ApplicationInputs, inputs),
-    zstd.Application.Lifecycle.managerLayer(),
-    zstd.Application.Lifecycle.signalLayer(),
-})) {
-    return kernel.Layer.mergeAll(.{
-        kernel.Layer.succeed(ApplicationInputs, inputs),
-        zstd.Application.Lifecycle.managerLayer(),
-        zstd.Application.Lifecycle.signalLayer(),
-    });
+const common_options = [_]zstd.Cli.OptionSpec{
+    .{ .name = "apply", .kind = .boolean },
+    .{ .name = "configuration" },
+    .{ .name = "correctness" },
+    .{ .name = "debounce-ms", .kind = .integer },
+    .{ .name = "graphify-environment" },
+    .{ .name = "graphify-python" },
+    .{ .name = "json", .kind = .boolean },
+    .{ .name = "limit", .kind = .integer },
+    .{ .name = "machine" },
+    .{ .name = "max-cycles", .kind = .integer },
+    .{ .name = "max-drain-passes", .kind = .integer },
+    .{ .name = "max-hops", .kind = .integer },
+    .{ .name = "poll-ms", .kind = .integer },
+    .{ .name = "quality" },
+    .{ .name = "repetitions", .kind = .integer },
+    .{ .name = "resources" },
+    .{ .name = "retry-ms", .kind = .integer },
+    .{ .name = "root" },
+    .{ .name = "source-revision" },
+    .{ .name = "warmups", .kind = .integer },
+};
+
+const benchmark_commands = [_]zstd.Cli.CommandSpec{
+    .{ .name = "corpus", .options = &common_options },
+    .{ .name = "lexical", .options = &common_options },
+    .{ .name = "zgraphy", .options = &common_options },
+    .{ .name = "graphify", .options = &common_options },
+    .{ .name = "matrix", .options = &common_options },
+    .{ .name = "workload", .options = &common_options },
+    .{ .name = "resources", .options = &common_options },
+    .{ .name = "freshness", .options = &common_options },
+    .{ .name = "churn", .options = &common_options },
+    .{ .name = "performance", .options = &common_options },
+};
+
+const commands = [_]zstd.Cli.CommandSpec{
+    .{ .name = "init", .options = &common_options },
+    .{ .name = "build", .options = &common_options },
+    .{ .name = "ingest", .options = &common_options },
+    .{ .name = "status", .options = &common_options },
+    .{ .name = "doctor", .options = &common_options },
+    .{ .name = "watch", .options = &common_options },
+    .{ .name = "gc", .options = &common_options },
+    .{ .name = "pin", .options = &common_options },
+    .{ .name = "unpin", .options = &common_options },
+    .{ .name = "query", .options = &common_options },
+    .{ .name = "explain", .options = &common_options },
+    .{ .name = "path", .options = &common_options },
+    .{ .name = "parity", .options = &common_options },
+    .{ .name = "schema", .options = &common_options },
+    .{ .name = "contracts", .options = &common_options },
+    .{ .name = "security", .options = &common_options },
+    .{ .name = "evaluation", .options = &common_options },
+    .{ .name = "benchmark", .options = &common_options, .subcommands = &benchmark_commands },
+};
+
+pub const command_spec = zstd.Cli.CommandSpec{
+    .name = "zgraphy",
+    .description = "local Zig repository knowledge graph",
+    .subcommands = &commands,
+};
+
+const command_paths = [_][]const []const u8{
+    &.{ "zgraphy", "init" },
+    &.{ "zgraphy", "build" },
+    &.{ "zgraphy", "ingest" },
+    &.{ "zgraphy", "status" },
+    &.{ "zgraphy", "doctor" },
+    &.{ "zgraphy", "watch" },
+    &.{ "zgraphy", "gc" },
+    &.{ "zgraphy", "pin" },
+    &.{ "zgraphy", "unpin" },
+    &.{ "zgraphy", "query" },
+    &.{ "zgraphy", "explain" },
+    &.{ "zgraphy", "path" },
+    &.{ "zgraphy", "parity" },
+    &.{ "zgraphy", "schema" },
+    &.{ "zgraphy", "contracts" },
+    &.{ "zgraphy", "security" },
+    &.{ "zgraphy", "evaluation" },
+    &.{ "zgraphy", "benchmark" },
+    &.{ "zgraphy", "benchmark", "corpus" },
+    &.{ "zgraphy", "benchmark", "lexical" },
+    &.{ "zgraphy", "benchmark", "zgraphy" },
+    &.{ "zgraphy", "benchmark", "graphify" },
+    &.{ "zgraphy", "benchmark", "matrix" },
+    &.{ "zgraphy", "benchmark", "workload" },
+    &.{ "zgraphy", "benchmark", "resources" },
+    &.{ "zgraphy", "benchmark", "freshness" },
+    &.{ "zgraphy", "benchmark", "churn" },
+    &.{ "zgraphy", "benchmark", "performance" },
+};
+
+pub const CommandHandler = *const fn (*kernel.ContextView(ApplicationServices), zstd.Cli.ParsedCommand) anyerror!void;
+
+pub const CommandApplication = struct {
+    handlers: [command_paths.len]zstd.Cli.ServiceHandler(ApplicationServices, anyerror),
+
+    pub fn init(run: CommandHandler) CommandApplication {
+        var handlers = [_]zstd.Cli.ServiceHandler(ApplicationServices, anyerror){.{
+            .path = command_paths[0],
+            .run = run,
+        }} ** command_paths.len;
+        for (&handlers, command_paths) |*handler, path| {
+            handler.* = .{ .path = path, .run = run };
+        }
+        return .{ .handlers = handlers };
+    }
+
+    pub fn application(self: *const CommandApplication) zstd.Cli.ServiceApplication(ApplicationServices, anyerror) {
+        return .{
+            .spec = command_spec,
+            .version = "0.1.0",
+            .handlers = &self.handlers,
+        };
+    }
+};
+
+pub fn rootLayer(inputs: ApplicationInputsApi) @TypeOf(kernel.Layer.succeed(ApplicationInputs, inputs)) {
+    return kernel.Layer.succeed(ApplicationInputs, inputs);
 }
 
 pub const RepositoryGraphApi = struct {
@@ -58,29 +170,4 @@ pub fn queryEffect(request: QueryRequest) QueryProgram {
             return search.queryAlloc(ctx.allocator(), graph, value.text, value.options);
         }
     }.run).named("zgraphy.query");
-}
-
-/// Completes the process boundary while the managed runtime is still live.
-/// Checked shutdown has precedence because a command result cannot be trusted
-/// when its causal evidence failed to flush durably.
-pub fn checkedCleanup(runtime: anytype, allocator: std.mem.Allocator) ?anyerror {
-    var infrastructure_failure: ?anyerror = null;
-    runtime.run(zstd.Application.Lifecycle.drain()) catch |failure| retainFirstFailure(&infrastructure_failure, failure);
-    runtime.run(zstd.Application.Lifecycle.stop()) catch |failure| retainFirstFailure(&infrastructure_failure, failure);
-
-    if (runtime.inspect(allocator, .{ .max_recent_events = 64 })) |application_value| {
-        var application = application_value;
-        defer application.deinit();
-        if (application.services.len == 0) retainFirstFailure(&infrastructure_failure, error.InvalidApplicationSnapshot);
-    } else |failure| {
-        retainFirstFailure(&infrastructure_failure, failure);
-    }
-    if (runtime.causalHealth().status != .healthy) retainFirstFailure(&infrastructure_failure, error.CausalRuntimeUnhealthy);
-
-    runtime.shutdown() catch |failure| return failure;
-    return infrastructure_failure;
-}
-
-fn retainFirstFailure(current: *?anyerror, failure: anyerror) void {
-    if (current.* == null) current.* = failure;
 }

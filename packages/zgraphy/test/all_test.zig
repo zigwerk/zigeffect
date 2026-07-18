@@ -50,24 +50,6 @@ const cli_causality_scenario = zstd.Testing.Scenario{
     .tags = &.{ "acceptance", "cli", "causal", "lifecycle", "shutdown", "deterministic" },
 };
 
-const CliSuccess = zstd.fx.kernel.Effect(void, error{}, .{});
-
-fn cliSuccess() CliSuccess {
-    return CliSuccess.fromFn(struct {
-        fn run(_: *CliSuccess.Context) error{}!void {}
-    }.run);
-}
-
-const CliFailure = zstd.fx.kernel.Effect(void, error{InjectedCommandFailure}, .{});
-
-fn cliFailure() CliFailure {
-    return CliFailure.fromFn(struct {
-        fn run(_: *CliFailure.Context) error{InjectedCommandFailure}!void {
-            return error.InjectedCommandFailure;
-        }
-    }.run);
-}
-
 fn hasCausalEvent(events: []const zstd.fx.CausalEvent, kind: zstd.fx.CausalEventKind, label: []const u8, status: []const u8) bool {
     for (events) |event| {
         if (event.kind == kind and std.mem.eql(u8, event.label, label) and std.mem.eql(u8, event.status, status)) return true;
@@ -75,27 +57,25 @@ fn hasCausalEvent(events: []const zstd.fx.CausalEvent, kind: zstd.fx.CausalEvent
     return false;
 }
 
-test "zgraphy command application exposes a non-empty canonical root layer" {
+const CliTestHandlers = struct {
+    fn succeed(ctx: *zstd.fx.kernel.ContextView(zgraphy.Application.ApplicationServices), _: zstd.Cli.ParsedCommand) anyerror!void {
+        _ = ctx.service(zgraphy.Application.ApplicationInputs);
+    }
+
+    fn fail(ctx: *zstd.fx.kernel.ContextView(zgraphy.Application.ApplicationServices), _: zstd.Cli.ParsedCommand) anyerror!void {
+        _ = ctx.service(zgraphy.Application.ApplicationInputs);
+        return error.InjectedCommandFailure;
+    }
+};
+
+test "zgraphy command application supplies only application services to the framework supervisor" {
     try std.testing.expectEqualStrings(".zgraphy/runtime/causal", zgraphy.Application.causal_graph_path);
     try std.testing.expectEqualStrings(".zigeffect/graph/causal-graph.jsonl", zgraphy.Indexer.causal_wal_path);
     try std.testing.expect(!std.mem.startsWith(u8, zgraphy.Indexer.causal_wal_path, zgraphy.Application.causal_graph_path));
     const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = std.Io.Dir.cwd(), .args = &.{ "zgraphy", "status" } });
-    var causal = zstd.fx.CausalStore.init(std.testing.allocator);
-    defer causal.deinit();
-    var runtime = try zstd.fx.kernel.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, layer, .{ .causal_store = &causal });
-    defer runtime.deinit();
-    var snapshot = try runtime.inspect(std.testing.allocator, .{});
-    defer snapshot.deinit();
-    try std.testing.expectEqual(@as(usize, 3), snapshot.services.len);
-    var has_inputs = false;
-    var has_lifecycle = false;
-    var has_signals = false;
-    for (snapshot.services) |service| {
-        if (std.mem.eql(u8, service.key, zgraphy.Application.ApplicationInputs.service_key)) has_inputs = true;
-        if (std.mem.eql(u8, service.key, zstd.Application.Lifecycle.Lifecycle.service_key)) has_lifecycle = true;
-        if (std.mem.eql(u8, service.key, zstd.Application.Lifecycle.ProcessSignals.service_key)) has_signals = true;
-    }
-    try std.testing.expect(has_inputs and has_lifecycle and has_signals);
+    try std.testing.expectEqual(@as(usize, 1), @TypeOf(layer).OutputServices.len);
+    try std.testing.expect(@TypeOf(layer).OutputServices[0] == zgraphy.Application.ApplicationInputs);
+    try std.testing.expect(zgraphy.Application.ApplicationServices[0] == zgraphy.Application.ApplicationInputs);
 }
 
 test "zgraphy runtime-owned CLI causality checks every outcome and help preflight" {
@@ -125,24 +105,28 @@ test "zgraphy runtime-owned CLI causality checks every outcome and help prefligh
     try assertions.boolean(.{
         .id = "zgraphy.cli.named-command",
         .label = "the one dispatch effect is named from a bounded parsed command identity",
-        .repair_hint = "interpret commandEffect exactly once with Effect.named using the parsed command identity",
-    }, std.mem.indexOf(u8, main_source, "commandEffect().named(command)") != null);
+        .repair_hint = "preflight the service CLI application and pass its one generated command effect plus bounded identity to runOneShot",
+    }, std.mem.count(u8, main_source, "zstd.Application.runOneShot(") == 1 and
+        std.mem.indexOf(u8, main_source, "preflight.commandEffect()") != null and
+        std.mem.indexOf(u8, main_source, "preflight.identity.?") != null);
     try assertions.boolean(.{
         .id = "zgraphy.cli.checked-cleanup",
-        .label = "command failure cannot bypass checked lifecycle cleanup and shutdown",
-        .repair_hint = "route both command outcomes through drain stop live health inspection and exactly one checked shutdown",
-    }, std.mem.indexOf(u8, main_source, "Lifecycle.drain()) catch {}") == null and
-        std.mem.indexOf(u8, main_source, "Lifecycle.stop()) catch {}") == null and
-        std.mem.count(u8, application_source, "runtime.shutdown()") == 1 and
-        std.mem.indexOf(u8, main_source, ".shutdown()") == null);
+        .label = "zgraphy contains no application-owned lifecycle or shutdown scaffolding",
+        .repair_hint = "leave lifecycle composition drain stop inspection health and checked shutdown exclusively in Application.runOneShot",
+    }, std.mem.indexOf(u8, main_source, "Lifecycle.") == null and
+        std.mem.indexOf(u8, application_source, "Lifecycle.") == null and
+        std.mem.indexOf(u8, main_source, ".shutdown()") == null and
+        std.mem.indexOf(u8, application_source, ".shutdown()") == null and
+        std.mem.indexOf(u8, main_source, "checkedCleanup") == null and
+        std.mem.indexOf(u8, application_source, "checkedCleanup") == null);
 
-    const cleanup_precedence = std.mem.indexOf(u8, main_source, "if (zgraphy.Application.checkedCleanup") orelse return error.MissingCheckedCleanup;
-    const command_precedence = std.mem.indexOf(u8, main_source, "if (command_failure) |failure| return failure") orelse return error.MissingCommandFailureReturn;
     try assertions.boolean(.{
-        .id = "zgraphy.cli.infrastructure-precedence",
-        .label = "checked cleanup and shutdown failure takes precedence over a command failure",
-        .repair_hint = "return checkedCleanup failure before returning the retained named-command failure",
-    }, cleanup_precedence < command_precedence);
+        .id = "zgraphy.cli.framework-identity",
+        .label = "hand-maintained command identity tables are absent",
+        .repair_hint = "derive identity only from the matched ServiceApplication command path",
+    }, std.mem.indexOf(u8, main_source, "command_identities") == null and
+        std.mem.indexOf(u8, main_source, "benchmark_identities") == null and
+        std.mem.indexOf(u8, main_source, "fn commandIdentity") == null);
 
     const top_level_commands = [_][]const u8{
         "init", "build", "ingest", "status", "doctor", "watch", "gc", "pin", "unpin", "query", "explain", "path", "parity", "schema", "contracts", "security", "evaluation", "benchmark",
@@ -151,36 +135,48 @@ test "zgraphy runtime-owned CLI causality checks every outcome and help prefligh
         "corpus", "lexical", "zgraphy", "graphify", "matrix", "workload", "resources", "freshness", "churn", "performance",
     };
     var dispatch_parity = true;
+    var declared_commands = zgraphy.Application.CommandApplication.init(CliTestHandlers.succeed);
+    const command_application = declared_commands.application();
     for (top_level_commands) |name| {
         const dispatch_needle = try std.fmt.allocPrint(std.testing.allocator, "command, \"{s}\"", .{name});
         defer std.testing.allocator.free(dispatch_needle);
         const help_needle = try std.fmt.allocPrint(std.testing.allocator, "zgraphy {s}", .{name});
         defer std.testing.allocator.free(help_needle);
-        const identity_present = if (std.mem.eql(u8, name, "benchmark"))
-            std.mem.indexOf(u8, main_source, "args[1], \"benchmark\"") != null
-        else blk: {
-            const identity_needle = try std.fmt.allocPrint(std.testing.allocator, ".token = \"{s}\", .label = \"{s}\"", .{ name, name });
-            defer std.testing.allocator.free(identity_needle);
-            break :blk std.mem.indexOf(u8, main_source, identity_needle) != null;
-        };
+        var preflight = try zstd.Cli.preflightServiceApplication(
+            zgraphy.Application.ApplicationServices,
+            anyerror,
+            std.testing.allocator,
+            command_application,
+            &.{name},
+        );
+        defer preflight.deinit();
         dispatch_parity = dispatch_parity and std.mem.indexOf(u8, main_source, dispatch_needle) != null and
-            std.mem.indexOf(u8, main_source, help_needle) != null and identity_present;
+            std.mem.indexOf(u8, main_source, help_needle) != null and preflight.shouldRun() and
+            std.mem.eql(u8, preflight.identity.?.slice(), name);
     }
     for (benchmark_commands) |name| {
         const dispatch_needle = try std.fmt.allocPrint(std.testing.allocator, "subcommand, \"{s}\"", .{name});
         defer std.testing.allocator.free(dispatch_needle);
-        const identity_needle = try std.fmt.allocPrint(std.testing.allocator, ".token = \"{s}\", .label = \"benchmark.{s}\"", .{ name, name });
-        defer std.testing.allocator.free(identity_needle);
         const help_needle = try std.fmt.allocPrint(std.testing.allocator, "benchmark {s}", .{name});
         defer std.testing.allocator.free(help_needle);
+        const expected_identity = try std.fmt.allocPrint(std.testing.allocator, "benchmark.{s}", .{name});
+        defer std.testing.allocator.free(expected_identity);
+        var preflight = try zstd.Cli.preflightServiceApplication(
+            zgraphy.Application.ApplicationServices,
+            anyerror,
+            std.testing.allocator,
+            command_application,
+            &.{ "benchmark", name },
+        );
+        defer preflight.deinit();
         dispatch_parity = dispatch_parity and std.mem.indexOf(u8, main_source, dispatch_needle) != null and
-            std.mem.indexOf(u8, main_source, identity_needle) != null and
-            std.mem.indexOf(u8, main_source, help_needle) != null;
+            std.mem.indexOf(u8, main_source, help_needle) != null and preflight.shouldRun() and
+            std.mem.eql(u8, preflight.identity.?.slice(), expected_identity);
     }
     try assertions.boolean(.{
         .id = "zgraphy.cli.dispatch-parity",
-        .label = "every top-level command alias and benchmark subcommand retains dispatch identity and help parity",
-        .repair_hint = "keep the bounded identity table dispatch branches and help contract aligned without changing command output",
+        .label = "every top-level command and benchmark subcommand has dispatch help and derived identity parity",
+        .repair_hint = "keep ServiceApplication declarations dispatch branches and help text aligned without identity tables",
     }, dispatch_parity);
 
     try assertions.boolean(.{
@@ -189,123 +185,116 @@ test "zgraphy runtime-owned CLI causality checks every outcome and help prefligh
         .repair_hint = "leave runQuery on the shipped Search.queryAlloc path in this slice",
     }, std.mem.indexOf(u8, main_source, "zgraphy.Search.queryAlloc(allocator") != null);
 
-    const help_preflight = std.mem.indexOf(u8, main_source, "if (args.len < 2 or isHelp(args[1]))") orelse return error.MissingHelpPreflight;
-    const repository_state = std.mem.indexOf(u8, main_source, "createDirPath(init.io, \".zgraphy\")") orelse return error.MissingRepositoryStateCreation;
+    const help_preflight = std.mem.indexOf(u8, main_source, "preflightServiceApplication(") orelse return error.MissingHelpPreflight;
+    const root_selection = std.mem.indexOf(u8, main_source, "const root_path = selectedRoot(args)") orelse return error.MissingRootSelection;
     try assertions.boolean(.{
         .id = "zgraphy.cli.help-preflight",
-        .label = "help returns before any .zgraphy repository state can be created",
-        .repair_hint = "keep help handling before root opening runtime construction and .zgraphy creation",
-    }, help_preflight < repository_state);
+        .label = "all short circuits return before root opening runtime construction or repository state creation",
+        .repair_hint = "keep service application preflight and short-circuit handling before selectedRoot and openDir",
+    }, help_preflight < root_selection and
+        std.mem.indexOf(u8, main_source, "createDirPath(init.io, \".zgraphy\")") == null);
+
+    var short_tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer short_tmp.cleanup();
+    const ShortCase = struct { args: []const []const u8, kind: zstd.Cli.ShortCircuitKind };
+    const short_cases = [_]ShortCase{
+        .{ .args = &.{"--help"}, .kind = .help },
+        .{ .args = &.{"--version"}, .kind = .version },
+        .{ .args = &.{"completions"}, .kind = .completions },
+        .{ .args = &.{"missing"}, .kind = .usage },
+    };
+    for (short_cases) |case| {
+        var preflight = try zstd.Cli.preflightServiceApplication(
+            zgraphy.Application.ApplicationServices,
+            anyerror,
+            std.testing.allocator,
+            command_application,
+            case.args,
+        );
+        defer preflight.deinit();
+        try std.testing.expect(!preflight.shouldRun());
+        try std.testing.expectEqual(case.kind, preflight.short_circuit.?.kind);
+        try std.testing.expect(preflight.short_circuit.?.output.len != 0);
+    }
+    try std.testing.expectError(error.FileNotFound, short_tmp.dir.access(std.testing.io, ".zgraphy", .{}));
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    const args = [_][]const u8{ "zgraphy", "status" };
+    const args = [_][]const u8{ "zgraphy", "parity" };
     const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir, .args = &args });
-    var runtime = try zstd.ManagedRuntime(@TypeOf(layer)).make(
+    var preflight = try zstd.Cli.preflightServiceApplication(
+        zgraphy.Application.ApplicationServices,
+        anyerror,
+        std.testing.allocator,
+        command_application,
+        args[1..],
+    );
+    defer preflight.deinit();
+    const command_effect = preflight.commandEffect();
+    _ = try zstd.Application.runOneShot(
+        @TypeOf(layer),
+        @TypeOf(command_effect),
         std.testing.allocator,
         std.testing.io,
         tmp.dir,
         layer,
-        .{ .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 256 }, .causal_store = evidence.causalStore() },
+        preflight.identity.?,
+        command_effect,
+        .{ .runtime = .{
+            .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 256 },
+            .causal_store = evidence.causalStore(),
+        } },
     );
-    defer runtime.deinit();
-    try runtime.run(zstd.Application.Lifecycle.start());
-    try runtime.run(zstd.Application.Lifecycle.ready());
-    try runtime.run(cliSuccess().named("status"));
-    try std.testing.expectError(error.InjectedCommandFailure, runtime.run(cliFailure().named("query")));
     _ = try assertions.event(.{
         .id = "zgraphy.cli.named-success",
         .label = "the runtime records successful command identity structurally",
-        .repair_hint = "name the dispatch effect with the bounded parsed command identity",
-    }, .{ .kind = .effect_completed, .label = "status", .status = "success" });
+        .repair_hint = "let runOneShot name the generated service command effect from preflight identity",
+    }, .{ .kind = .effect_completed, .label = "parity", .status = "success" });
     _ = try assertions.event(.{
-        .id = "zgraphy.cli.named-failure",
-        .label = "the runtime records failed command identity structurally",
-        .repair_hint = "retain command failures through the named dispatch effect before checked cleanup",
-    }, .{ .kind = .effect_completed, .label = "query", .status = "failure" });
+        .id = "zgraphy.cli.lifecycle-drained",
+        .label = "the framework drains the command runtime",
+        .repair_hint = "retain Application.runOneShot as the process root",
+    }, .{ .kind = .span_recorded, .label = "Lifecycle.drain", .status = "success" });
     try assertions.noFindings(.{ .id = "zgraphy.cli.no-findings", .label = "runtime-owned CLI causality has no causal findings" });
     try assertions.noPendingFibers(.{ .id = "zgraphy.cli.no-pending", .label = "runtime-owned CLI causality leaves no pending fibers" });
-    try evidence.mapCausalEventIds(&runtime);
-    if (zgraphy.Application.checkedCleanup(&runtime, std.testing.allocator)) |failure| return failure;
     try evidence.publish(std.testing.io, std.Io.Dir.cwd(), 1);
 }
 
-test "zgraphy runtime-owned CLI causality records named success and failure with checked cleanup" {
-    var success_tmp = std.testing.tmpDir(.{});
-    defer success_tmp.cleanup();
-    var success_causal = zstd.fx.CausalStore.init(std.testing.allocator);
-    defer success_causal.deinit();
-    const success_args = [_][]const u8{ "zgraphy", "status" };
-    const success_layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = success_tmp.dir, .args = &success_args });
-    var success_runtime = try zstd.ManagedRuntime(@TypeOf(success_layer)).make(
-        std.testing.allocator,
-        std.testing.io,
-        success_tmp.dir,
-        success_layer,
-        .{ .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 128 }, .causal_store = &success_causal },
-    );
-    defer success_runtime.deinit();
-    try success_runtime.run(zstd.Application.Lifecycle.start());
-    try success_runtime.run(zstd.Application.Lifecycle.ready());
-    try success_runtime.run(cliSuccess().named("status"));
-    if (zgraphy.Application.checkedCleanup(&success_runtime, std.testing.allocator)) |failure| return failure;
-
-    var success_snapshot = try success_causal.snapshot(std.testing.allocator);
-    defer success_snapshot.deinit();
-    try std.testing.expect(hasCausalEvent(success_snapshot.events, .effect_completed, "status", "success"));
-    try std.testing.expect(hasCausalEvent(success_snapshot.events, .span_recorded, "Lifecycle.drain", "success"));
-    try std.testing.expect(hasCausalEvent(success_snapshot.events, .span_recorded, "Lifecycle.stop", "success"));
-
-    var failure_tmp = std.testing.tmpDir(.{});
-    defer failure_tmp.cleanup();
-    var failure_causal = zstd.fx.CausalStore.init(std.testing.allocator);
-    defer failure_causal.deinit();
-    const failure_args = [_][]const u8{ "zgraphy", "query" };
-    const failure_layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = failure_tmp.dir, .args = &failure_args });
-    var failure_runtime = try zstd.ManagedRuntime(@TypeOf(failure_layer)).make(
-        std.testing.allocator,
-        std.testing.io,
-        failure_tmp.dir,
-        failure_layer,
-        .{ .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 128 }, .causal_store = &failure_causal },
-    );
-    defer failure_runtime.deinit();
-    try failure_runtime.run(zstd.Application.Lifecycle.start());
-    try failure_runtime.run(zstd.Application.Lifecycle.ready());
-    try std.testing.expectError(error.InjectedCommandFailure, failure_runtime.run(cliFailure().named("query")));
-    if (zgraphy.Application.checkedCleanup(&failure_runtime, std.testing.allocator)) |failure| return failure;
-
-    var failure_snapshot = try failure_causal.snapshot(std.testing.allocator);
-    defer failure_snapshot.deinit();
-    try std.testing.expect(hasCausalEvent(failure_snapshot.events, .effect_completed, "query", "failure"));
-    try std.testing.expect(hasCausalEvent(failure_snapshot.events, .span_recorded, "Lifecycle.drain", "success"));
-    try std.testing.expect(hasCausalEvent(failure_snapshot.events, .span_recorded, "Lifecycle.stop", "success"));
-}
-
-test "zgraphy runtime-owned CLI causality exposes checked shutdown flush failure after command failure" {
+test "zgraphy runOneShot returns checked shutdown flush failure after a real command failure" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var causal = zstd.fx.CausalStore.init(std.testing.allocator);
     defer causal.deinit();
-    const args = [_][]const u8{ "zgraphy", "query" };
+    const args = [_][]const u8{ "zgraphy", "status" };
     const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir, .args = &args });
-    var runtime = try zstd.ManagedRuntime(@TypeOf(layer)).make(
+    var declared_commands = zgraphy.Application.CommandApplication.init(CliTestHandlers.fail);
+    var preflight = try zstd.Cli.preflightServiceApplication(
+        zgraphy.Application.ApplicationServices,
+        anyerror,
+        std.testing.allocator,
+        declared_commands.application(),
+        args[1..],
+    );
+    defer preflight.deinit();
+    const command_effect = preflight.commandEffect();
+    try std.testing.expectError(error.CausalNendbStorageBackendFull, zstd.Application.runOneShot(
+        @TypeOf(layer),
+        @TypeOf(command_effect),
         std.testing.allocator,
         std.testing.io,
         tmp.dir,
         layer,
-        .{ .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 1 }, .causal_store = &causal },
-    );
-    defer runtime.deinit();
-    try runtime.run(zstd.Application.Lifecycle.start());
-    try runtime.run(zstd.Application.Lifecycle.ready());
-    try std.testing.expectError(error.InjectedCommandFailure, runtime.run(cliFailure().named("query")));
-    const cleanup_failure = zgraphy.Application.checkedCleanup(&runtime, std.testing.allocator) orelse return error.MissingCheckedShutdownFailure;
-    try std.testing.expectEqual(error.CausalNendbStorageBackendFull, cleanup_failure);
+        preflight.identity.?,
+        command_effect,
+        .{ .runtime = .{
+            .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 1 },
+            .causal_store = &causal,
+        } },
+    ));
 
     var snapshot = try causal.snapshot(std.testing.allocator);
     defer snapshot.deinit();
-    try std.testing.expect(hasCausalEvent(snapshot.events, .effect_completed, "query", "failure"));
+    try std.testing.expect(hasCausalEvent(snapshot.events, .effect_completed, "status", "failure"));
     try std.testing.expect(hasCausalEvent(snapshot.events, .span_recorded, "Lifecycle.drain", "success"));
     try std.testing.expect(hasCausalEvent(snapshot.events, .span_recorded, "Lifecycle.stop", "success"));
 }
@@ -5250,20 +5239,27 @@ test "zgraphy M3 watch coordinator coalesces and drains one freshness engine" {
         .root = tmp.dir,
         .args = &application_args,
     });
-    var application_runtime = try zstd.ManagedRuntime(@TypeOf(application_layer)).make(
+    var lifecycle_commands = zgraphy.Application.CommandApplication.init(CliTestHandlers.succeed);
+    var lifecycle_preflight = try zstd.Cli.preflightServiceApplication(
+        zgraphy.Application.ApplicationServices,
+        anyerror,
+        std.testing.allocator,
+        lifecycle_commands.application(),
+        application_args[1..],
+    );
+    defer lifecycle_preflight.deinit();
+    const lifecycle_command = lifecycle_preflight.commandEffect();
+    _ = try zstd.Application.runOneShot(
+        @TypeOf(application_layer),
+        @TypeOf(lifecycle_command),
         std.testing.allocator,
         std.testing.io,
         tmp.dir,
         application_layer,
-        .{ .graph = .{ .path = zgraphy.Application.causal_graph_path } },
+        lifecycle_preflight.identity.?,
+        lifecycle_command,
+        .{ .runtime = .{ .graph = .{ .path = zgraphy.Application.causal_graph_path } } },
     );
-    defer application_runtime.deinit();
-    try application_runtime.run(zstd.Application.Lifecycle.start());
-    try application_runtime.run(zstd.Application.Lifecycle.ready());
-    try std.testing.expect((try application_runtime.run(zstd.Application.Lifecycle.currentState())).readiness);
-    try std.testing.expectEqual(zstd.Application.Lifecycle.ProcessSignal.none, try application_runtime.run(zstd.Application.Lifecycle.requestedSignalEffect()));
-    try application_runtime.run(zstd.Application.Lifecycle.drain());
-    try application_runtime.run(zstd.Application.Lifecycle.stop());
 
     try tmp.dir.createDirPath(std.testing.io, ".zgraphy/runtime/watch");
     const invalid_paths = [_][]const u8{"../outside.zig"};
