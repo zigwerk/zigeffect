@@ -44,6 +44,32 @@ const failure_application = Cli.ServiceApplication(Requirements, anyerror){
     .handlers = failure_handlers[0..],
 };
 
+const GuardIdentityHandoff = struct {
+    bytes: [128]u8,
+    len: u8,
+};
+
+const GuardPayloadWrapper = struct {
+    payload: ?*const union(enum) {
+        none: void,
+        value: GuardIdentityHandoff,
+    },
+};
+
+const GuardNestedFieldWrapper = struct {
+    payload: union(enum) {
+        none: void,
+        value: struct { preflight: usize },
+    },
+};
+
+const GuardSafeWrapper = struct {
+    payload: ?*const union(enum) {
+        none: void,
+        value: usize,
+    },
+};
+
 test "runOneShot executes one framework-named service command and checks every lifecycle stage" {
     try std.testing.expect(!@hasDecl(Cli, "CommandIdentity"));
     try std.testing.expect(!@hasDecl(Cli, "ServicePreflight"));
@@ -98,21 +124,22 @@ test "runOneShot public parameters expose no command identity or preflight forge
     try std.testing.expect(function.params[6].type == null);
     try std.testing.expect(function.params[7].type.? == []const []const u8);
     try std.testing.expect(function.params[8].type.? == Supervisor.OneShotOptions);
-    inline for (function.params) |parameter| {
-        if (parameter.type) |Parameter| {
-            try std.testing.expect(!carriesCommandIdentityState(Parameter));
-        }
+
+    const source = try readSupervisorSource();
+    defer std.testing.allocator.free(source);
+    const declaration = try runOneShotPublicDeclaration(source);
+    try std.testing.expectEqualStrings(expected_run_one_shot_declaration, declaration);
+    inline for (forbidden_run_one_shot_parameter_tokens) |token| {
+        try std.testing.expect(std.mem.indexOf(u8, declaration, token) == null);
     }
-    try std.testing.expect(!carriesCommandIdentityState(@TypeOf(success_application)));
+
+    try std.testing.expect(carriesCommandIdentityState(GuardPayloadWrapper));
+    try std.testing.expect(carriesCommandIdentityState(GuardNestedFieldWrapper));
+    try std.testing.expect(!carriesCommandIdentityState(GuardSafeWrapper));
 }
 
 test "runOneShot supervisor has one checked shutdown and no deferred deinitialization" {
-    const source = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/application/supervisor.zig",
-        std.testing.allocator,
-        .limited(256 * 1024),
-    );
+    const source = try readSupervisorSource();
     defer std.testing.allocator.free(source);
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, source, "runtime.shutdown()"));
 
@@ -315,6 +342,38 @@ test "runOneShot missing required service is a negative compile test" {
     ) != null);
 }
 
+test "runOneShot rejects an application-shaped identity handoff wrapper at compile time" {
+    const result = try std.process.run(std.testing.allocator, std.testing.io, .{
+        .argv = &.{
+            "zig",
+            "test",
+            "-ODebug",
+            "--dep",
+            "zigeffect_std",
+            "-Mroot=src/application/identity_handoff_compile_test.zig",
+            "--dep",
+            "zigeffect",
+            "-Mzigeffect_std=src/root.zig",
+            "-Mzigeffect=../zigeffect/src/zigeffect.zig",
+        },
+        .cwd = .inherit,
+        .stdout_limit = .limited(64 * 1024),
+        .stderr_limit = .limited(64 * 1024),
+    });
+    defer std.testing.allocator.free(result.stdout);
+    defer std.testing.allocator.free(result.stderr);
+
+    switch (result.term) {
+        .exited => |code| try std.testing.expect(code != 0),
+        else => return error.UnexpectedCompilerTermination,
+    }
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        result.stderr,
+        "runOneShot requires the canonical parsed ServiceApplication type",
+    ) != null);
+}
+
 fn runFailureCase(faults: Supervisor.OneShotOptions.TestFaults, expected: anyerror) !void {
     var tmp = std.testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
@@ -348,24 +407,96 @@ fn runFailureCase(faults: Supervisor.OneShotOptions.TestFaults, expected: anyerr
 }
 
 fn carriesCommandIdentityState(comptime Candidate: type) bool {
+    return carriesCommandIdentityStateInner(Candidate, .{});
+}
+
+fn carriesCommandIdentityStateInner(comptime Candidate: type, comptime ancestors: anytype) bool {
+    if (commandIdentityName(@typeName(Candidate))) return true;
+    inline for (ancestors) |Ancestor| {
+        if (Candidate == Ancestor) return false;
+    }
+    const next_ancestors = ancestors ++ .{Candidate};
+
     switch (@typeInfo(Candidate)) {
         .@"struct" => |info| {
             inline for (info.fields) |field| {
-                if (std.mem.eql(u8, field.name, "identity") or
-                    std.mem.eql(u8, field.name, "command_identity") or
-                    std.mem.eql(u8, field.name, "command_path") or
-                    std.mem.eql(u8, field.name, "matched_path") or
-                    std.mem.eql(u8, field.name, "path") or
-                    std.mem.eql(u8, field.name, "segment_count") or
-                    std.mem.eql(u8, field.name, "preflight") or
-                    std.mem.eql(u8, field.name, "sealed_command") or
-                    std.mem.eql(u8, field.name, "parsed") or
-                    std.mem.eql(u8, field.name, "decoded")) return true;
+                if (commandIdentityName(field.name) or
+                    carriesCommandIdentityStateInner(field.type, next_ancestors)) return true;
             }
         },
+        .@"union" => |info| {
+            inline for (info.fields) |field| {
+                if (commandIdentityName(field.name) or
+                    carriesCommandIdentityStateInner(field.type, next_ancestors)) return true;
+            }
+        },
+        .optional => |info| return carriesCommandIdentityStateInner(info.child, next_ancestors),
+        .pointer => |info| return carriesCommandIdentityStateInner(info.child, next_ancestors),
+        .array => |info| return carriesCommandIdentityStateInner(info.child, next_ancestors),
+        .vector => |info| return carriesCommandIdentityStateInner(info.child, next_ancestors),
+        .error_union => |info| return carriesCommandIdentityStateInner(info.payload, next_ancestors),
         else => {},
     }
     return false;
+}
+
+fn commandIdentityName(name: []const u8) bool {
+    inline for (command_identity_name_vocabulary) |token| {
+        if (std.ascii.indexOfIgnoreCase(name, token) != null) return true;
+    }
+    return false;
+}
+
+const command_identity_name_vocabulary = .{
+    "identity",
+    "handoff",
+    "command_identity",
+    "command_path",
+    "matched_path",
+    "path",
+    "segment_count",
+    "preflight",
+    "sealed_command",
+    "parsed",
+    "decoded",
+    "command_effect",
+};
+
+const expected_run_one_shot_declaration =
+    "pub fn runOneShot(\n" ++
+    "    comptime ApplicationLayer: type,\n" ++
+    "    comptime ServiceApp: type,\n" ++
+    "    allocator: std.mem.Allocator,\n" ++
+    "    io: std.Io,\n" ++
+    "    root: std.Io.Dir,\n" ++
+    "    application_layer: ApplicationLayer,\n" ++
+    "    application: ServiceApp,\n" ++
+    "    argv: []const []const u8,\n" ++
+    "    options: OneShotOptions,\n" ++
+    ") anyerror!OneShotResult(ServiceApp.SuccessType) {";
+
+const forbidden_run_one_shot_parameter_tokens = .{
+    "identity:",
+    "handoff:",
+    "preflight:",
+    "command_effect:",
+    "sealed",
+};
+
+fn readSupervisorSource() ![]u8 {
+    return std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/application/supervisor.zig",
+        std.testing.allocator,
+        .limited(256 * 1024),
+    );
+}
+
+fn runOneShotPublicDeclaration(source: []const u8) ![]const u8 {
+    const start = std.mem.indexOf(u8, source, "pub fn runOneShot(") orelse return error.MissingRunOneShotDeclaration;
+    const suffix = ") anyerror!OneShotResult(ServiceApp.SuccessType) {";
+    const relative_end = std.mem.indexOfPos(u8, source, start, suffix) orelse return error.MissingRunOneShotDeclarationEnd;
+    return source[start .. relative_end + suffix.len];
 }
 
 fn expectEmptyProbe(probe: Supervisor.OneShotOptions.TestProbe) !void {
