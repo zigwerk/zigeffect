@@ -2,7 +2,15 @@ const std = @import("std");
 const fx = @import("zigeffect");
 const Secrets = @import("../secrets/root.zig");
 
+const OneShot = @import("supervisor.zig");
+pub const runOneShot = OneShot.runOneShot;
+pub const OneShotOptions = OneShot.OneShotOptions;
+pub const OneShotResult = OneShot.OneShotResult;
 pub const Lifecycle = @import("lifecycle.zig");
+
+test {
+    _ = @import("supervisor_test.zig");
+}
 
 pub const receipt_schema = "zigeffect.application-fact.v1";
 pub const max_fact_string_bytes: usize = 4096;

@@ -137,6 +137,255 @@ pub const RunSummary = struct {
     }
 };
 
+pub const command_identity_max_bytes: usize = 128;
+pub const command_identity_max_segments: usize = 8;
+pub const command_identity_max_segment_bytes: usize = 48;
+
+pub const CommandIdentityError = error{
+    EmptyCommandIdentity,
+    EmptyCommandSegment,
+    TooManyCommandSegments,
+    CommandSegmentTooLong,
+    CommandIdentityTooLong,
+};
+
+/// A bounded command label derived only from names in a successfully matched
+/// command declaration. Option values, positionals, environment variables and
+/// executable names never enter this buffer.
+pub const CommandIdentity = struct {
+    bytes: [command_identity_max_bytes]u8 = undefined,
+    len: u8 = 0,
+    segment_count: u8 = 0,
+
+    pub fn slice(self: *const CommandIdentity) []const u8 {
+        return self.bytes[0..self.len];
+    }
+
+    pub fn segmentCount(self: CommandIdentity) usize {
+        return self.segment_count;
+    }
+};
+
+fn commandIdentityFromMatchedPath(path: []const []const u8) CommandIdentityError!CommandIdentity {
+    if (path.len == 0) return error.EmptyCommandIdentity;
+    if (path.len > command_identity_max_segments) return error.TooManyCommandSegments;
+
+    var identity = CommandIdentity{};
+    for (path, 0..) |segment, segment_index| {
+        if (segment.len == 0) return error.EmptyCommandSegment;
+        if (segment.len > command_identity_max_segment_bytes) return error.CommandSegmentTooLong;
+        const separator_bytes: usize = if (segment_index == 0) 0 else 1;
+        const next_len = @as(usize, identity.len) + separator_bytes + segment.len;
+        if (next_len > command_identity_max_bytes) return error.CommandIdentityTooLong;
+        if (separator_bytes != 0) {
+            identity.bytes[identity.len] = '.';
+            identity.len += 1;
+        }
+        @memcpy(identity.bytes[identity.len..][0..segment.len], segment);
+        identity.len = @intCast(next_len);
+    }
+    identity.segment_count = @intCast(path.len);
+    return identity;
+}
+
+pub const ShortCircuitKind = enum {
+    help,
+    version,
+    completions,
+    usage,
+};
+
+pub const ShortCircuitStream = enum {
+    stdout,
+    stderr,
+};
+
+pub const ShortCircuit = struct {
+    kind: ShortCircuitKind,
+    exit_code: ExitCode,
+    stream: ShortCircuitStream,
+    output: []const u8,
+
+    pub fn deinit(self: *ShortCircuit, allocator: std.mem.Allocator) void {
+        allocator.free(self.output);
+        self.* = undefined;
+    }
+
+    pub fn write(self: ShortCircuit, io: std.Io) !void {
+        switch (self.stream) {
+            .stdout => try std.Io.File.stdout().writeStreamingAll(io, self.output),
+            .stderr => try std.Io.File.stderr().writeStreamingAll(io, self.output),
+        }
+    }
+};
+
+pub fn ServiceHandler(comptime Services: anytype, comptime Failure: type) type {
+    return struct {
+        path: []const []const u8,
+        run: *const fn (*fx.kernel.ContextView(Services), ParsedCommand) Failure!void,
+    };
+}
+
+pub fn ServiceApplication(comptime Services: anytype, comptime Failure: type) type {
+    return struct {
+        const Self = @This();
+
+        spec: CommandSpec,
+        version: []const u8 = "",
+        handlers: []const ServiceHandler(Services, Failure),
+
+        pub fn findHandler(self: Self, parsed: ParsedCommand) ?ServiceHandler(Services, Failure) {
+            for (self.handlers) |handler| {
+                if (commandPathsEqual(handler.path, parsed.path)) return handler;
+            }
+            return null;
+        }
+    };
+}
+
+fn ServiceCommandInput(comptime Services: anytype, comptime Failure: type) type {
+    return struct {
+        handler: ServiceHandler(Services, Failure),
+        parsed: ParsedCommand,
+    };
+}
+
+pub fn ServiceCommandEffect(comptime Services: anytype, comptime Failure: type) type {
+    const Program = fx.kernel.Effect(void, Failure, Services);
+    return Program.Stateful(ServiceCommandInput(Services, Failure));
+}
+
+fn serviceCommandEffect(
+    comptime Services: anytype,
+    comptime Failure: type,
+    handler: ServiceHandler(Services, Failure),
+    parsed: ParsedCommand,
+) ServiceCommandEffect(Services, Failure) {
+    const Program = fx.kernel.Effect(void, Failure, Services);
+    const Input = ServiceCommandInput(Services, Failure);
+    return Program.fromState(Input, .{ .handler = handler, .parsed = parsed }, struct {
+        fn execute(input: Input, ctx: *Program.Context) Failure!void {
+            return input.handler.run(ctx, input.parsed);
+        }
+    }.execute);
+}
+
+pub fn ServicePreflight(comptime Services: anytype, comptime Failure: type) type {
+    return struct {
+        const Self = @This();
+        const App = ServiceApplication(Services, Failure);
+
+        allocator: std.mem.Allocator,
+        application: App,
+        parsed: ?ParsedCommand = null,
+        identity: ?CommandIdentity = null,
+        short_circuit: ?ShortCircuit = null,
+
+        pub fn deinit(self: *Self) void {
+            if (self.parsed) |*parsed| parsed.deinit(self.allocator);
+            if (self.short_circuit) |*short_circuit| short_circuit.deinit(self.allocator);
+            self.* = undefined;
+        }
+
+        pub fn shouldRun(self: *const Self) bool {
+            return self.parsed != null and self.identity != null and self.short_circuit == null;
+        }
+
+        pub fn commandEffect(self: *const Self) ServiceCommandEffect(Services, Failure) {
+            std.debug.assert(self.shouldRun());
+            return serviceCommandEffect(
+                Services,
+                Failure,
+                self.application.findHandler(self.parsed.?).?,
+                self.parsed.?,
+            );
+        }
+    };
+}
+
+pub fn ServiceTypedHandler(comptime Services: anytype, comptime Args: type, comptime Failure: type) type {
+    return *const fn (*fx.kernel.ContextView(Services), Args) Failure!void;
+}
+
+pub fn ServiceTypedApplication(
+    comptime Services: anytype,
+    comptime Args: type,
+    comptime Failure: type,
+    comptime Command: type,
+) type {
+    return struct {
+        command: Command,
+        handler: ServiceTypedHandler(Services, Args, Failure),
+    };
+}
+
+fn ServiceTypedCommandInput(comptime Services: anytype, comptime Args: type, comptime Failure: type) type {
+    return struct {
+        handler: ServiceTypedHandler(Services, Args, Failure),
+        args: Args,
+    };
+}
+
+pub fn ServiceTypedCommandEffect(comptime Services: anytype, comptime Args: type, comptime Failure: type) type {
+    const Program = fx.kernel.Effect(void, Failure, Services);
+    return Program.Stateful(ServiceTypedCommandInput(Services, Args, Failure));
+}
+
+fn serviceTypedCommandEffect(
+    comptime Services: anytype,
+    comptime Args: type,
+    comptime Failure: type,
+    handler: ServiceTypedHandler(Services, Args, Failure),
+    args: Args,
+) ServiceTypedCommandEffect(Services, Args, Failure) {
+    const Program = fx.kernel.Effect(void, Failure, Services);
+    const Input = ServiceTypedCommandInput(Services, Args, Failure);
+    return Program.fromState(Input, .{ .handler = handler, .args = args }, struct {
+        fn execute(input: Input, ctx: *Program.Context) Failure!void {
+            return input.handler(ctx, input.args);
+        }
+    }.execute);
+}
+
+pub fn ServiceTypedPreflight(
+    comptime Services: anytype,
+    comptime Args: type,
+    comptime Failure: type,
+    comptime Command: type,
+) type {
+    return struct {
+        const Self = @This();
+        const App = ServiceTypedApplication(Services, Args, Failure, Command);
+
+        allocator: std.mem.Allocator,
+        application: App,
+        decoded: ?TypedDecodeResult(Args) = null,
+        identity: ?CommandIdentity = null,
+        short_circuit: ?ShortCircuit = null,
+
+        pub fn deinit(self: *Self) void {
+            if (self.decoded) |*decoded| decoded.deinit();
+            if (self.short_circuit) |*short_circuit| short_circuit.deinit(self.allocator);
+            self.* = undefined;
+        }
+
+        pub fn shouldRun(self: *const Self) bool {
+            return self.decoded != null and self.identity != null and self.short_circuit == null;
+        }
+
+        pub fn commandEffect(self: *const Self) ServiceTypedCommandEffect(Services, Args, Failure) {
+            std.debug.assert(self.shouldRun());
+            return serviceTypedCommandEffect(
+                Services,
+                Args,
+                Failure,
+                self.application.handler,
+                self.decoded.?.value.?,
+            );
+        }
+    };
+}
+
 pub const HandlerContext = struct {
     allocator: std.mem.Allocator,
     console: fx.kernel.Console,
@@ -379,6 +628,213 @@ pub fn runApplication(
             });
         }
     }.execute);
+}
+
+const ServiceBuiltinMatch = struct {
+    request: BuiltinRequest,
+    command_path: []const []const u8 = &.{},
+};
+
+fn detectServiceBuiltin(spec: CommandSpec, args: []const []const u8) ?ServiceBuiltinMatch {
+    if (args.len == 0) return .{ .request = .help };
+    if (detectBuiltinNamed(spec.name, args)) |request| {
+        return .{
+            .request = request,
+            .command_path = if (request == .completions and args.len > 1) args[1..] else &.{},
+        };
+    }
+    if (std.mem.eql(u8, args[0], "help")) {
+        return .{ .request = .help, .command_path = args[1..] };
+    }
+    if (std.mem.eql(u8, args[0], "completions")) {
+        return .{ .request = .completions, .command_path = args[1..] };
+    }
+    const last = args[args.len - 1];
+    if (std.mem.eql(u8, last, "--help") or std.mem.eql(u8, last, "-h")) {
+        return .{ .request = .help, .command_path = args[0 .. args.len - 1] };
+    }
+    return null;
+}
+
+fn usageOutputAlloc(
+    allocator: std.mem.Allocator,
+    spec: CommandSpec,
+    failure: anyerror,
+) std.mem.Allocator.Error![]u8 {
+    const help = try formatHelp(allocator, spec);
+    defer allocator.free(help);
+    return std.fmt.allocPrint(allocator, "usage: {s}\n{s}", .{ @errorName(failure), help });
+}
+
+fn typedUsageOutputAlloc(
+    allocator: std.mem.Allocator,
+    command: anytype,
+    failure: anyerror,
+) std.mem.Allocator.Error![]u8 {
+    const help = try formatTypedHelp(allocator, command);
+    defer allocator.free(help);
+    return std.fmt.allocPrint(allocator, "usage: {s}\n{s}", .{ @errorName(failure), help });
+}
+
+fn serviceShortCircuit(
+    comptime Services: anytype,
+    comptime Failure: type,
+    allocator: std.mem.Allocator,
+    application: ServiceApplication(Services, Failure),
+    kind: ShortCircuitKind,
+    exit_code: ExitCode,
+    stream: ShortCircuitStream,
+    output: []const u8,
+) ServicePreflight(Services, Failure) {
+    return .{
+        .allocator = allocator,
+        .application = application,
+        .short_circuit = .{
+            .kind = kind,
+            .exit_code = exit_code,
+            .stream = stream,
+            .output = output,
+        },
+    };
+}
+
+fn serviceTypedShortCircuit(
+    comptime Services: anytype,
+    comptime Args: type,
+    comptime Failure: type,
+    comptime Command: type,
+    allocator: std.mem.Allocator,
+    application: ServiceTypedApplication(Services, Args, Failure, Command),
+    kind: ShortCircuitKind,
+    exit_code: ExitCode,
+    stream: ShortCircuitStream,
+    output: []const u8,
+) ServiceTypedPreflight(Services, Args, Failure, Command) {
+    return .{
+        .allocator = allocator,
+        .application = application,
+        .short_circuit = .{
+            .kind = kind,
+            .exit_code = exit_code,
+            .stream = stream,
+            .output = output,
+        },
+    };
+}
+
+pub fn preflightServiceApplication(
+    comptime Services: anytype,
+    comptime Failure: type,
+    allocator: std.mem.Allocator,
+    application: ServiceApplication(Services, Failure),
+    args: []const []const u8,
+) (std.mem.Allocator.Error || CommandIdentityError)!ServicePreflight(Services, Failure) {
+    if (detectServiceBuiltin(application.spec, args)) |builtin| {
+        const output = switch (builtin.request) {
+            .help => help: {
+                const active = activeCommandSpecForArgs(application.spec, builtin.command_path) catch |failure| {
+                    const usage = try usageOutputAlloc(allocator, application.spec, failure);
+                    return serviceShortCircuit(Services, Failure, allocator, application, .usage, .usage, .stderr, usage);
+                };
+                break :help try formatHelp(allocator, active);
+            },
+            .version => try std.fmt.allocPrint(allocator, "{s} {s}\n", .{ application.spec.name, application.version }),
+            .completions => formatCompletions(allocator, application.spec, builtin.command_path) catch |failure| {
+                const usage = try usageOutputAlloc(allocator, application.spec, failure);
+                return serviceShortCircuit(Services, Failure, allocator, application, .usage, .usage, .stderr, usage);
+            },
+        };
+        return serviceShortCircuit(
+            Services,
+            Failure,
+            allocator,
+            application,
+            switch (builtin.request) {
+                .help => .help,
+                .version => .version,
+                .completions => .completions,
+            },
+            .success,
+            .stdout,
+            output,
+        );
+    }
+
+    var parsed = parse(allocator, application.spec, args) catch |failure| {
+        const usage = try usageOutputAlloc(allocator, application.spec, failure);
+        return serviceShortCircuit(Services, Failure, allocator, application, .usage, .usage, .stderr, usage);
+    };
+    errdefer parsed.deinit(allocator);
+
+    if (application.findHandler(parsed) == null) {
+        const usage = try usageOutputAlloc(allocator, application.spec, CliError.UnknownSubcommand);
+        parsed.deinit(allocator);
+        return serviceShortCircuit(Services, Failure, allocator, application, .usage, .usage, .stderr, usage);
+    }
+
+    const identity = try commandIdentityFromMatchedPath(parsed.path[1..]);
+    return .{
+        .allocator = allocator,
+        .application = application,
+        .parsed = parsed,
+        .identity = identity,
+    };
+}
+
+pub fn preflightServiceTyped(
+    comptime Services: anytype,
+    comptime Args: type,
+    comptime Failure: type,
+    comptime Command: type,
+    allocator: std.mem.Allocator,
+    application: ServiceTypedApplication(Services, Args, Failure, Command),
+    args: []const []const u8,
+) (anyerror || CommandIdentityError)!ServiceTypedPreflight(Services, Args, Failure, Command) {
+    if (detectBuiltin(application.command, args)) |builtin| {
+        const output = switch (builtin) {
+            .help => try formatTypedHelp(allocator, application.command),
+            .version => try formatTypedVersion(allocator, application.command),
+            .completions => try formatTypedCompletions(allocator, application.command),
+        };
+        return serviceTypedShortCircuit(
+            Services,
+            Args,
+            Failure,
+            Command,
+            allocator,
+            application,
+            switch (builtin) {
+                .help => .help,
+                .version => .version,
+                .completions => .completions,
+            },
+            .success,
+            .stdout,
+            output,
+        );
+    }
+
+    var parsed = parse(allocator, application.command.toCommandSpec(), args) catch |failure| {
+        const usage = try typedUsageOutputAlloc(allocator, application.command, failure);
+        return serviceTypedShortCircuit(Services, Args, Failure, Command, allocator, application, .usage, .usage, .stderr, usage);
+    };
+    defer parsed.deinit(allocator);
+
+    var decoded = try decodeTypedCommandAlloc(allocator, application.command, parsed, null, null);
+    errdefer decoded.deinit();
+    if (!decoded.ok()) {
+        const issue_json = try decoded.issues.jsonAlloc(allocator);
+        decoded.deinit();
+        return serviceTypedShortCircuit(Services, Args, Failure, Command, allocator, application, .usage, .usage, .stderr, issue_json);
+    }
+
+    const identity = try commandIdentityFromMatchedPath(&.{Command.Meta.name});
+    return .{
+        .allocator = allocator,
+        .application = application,
+        .decoded = decoded,
+        .identity = identity,
+    };
 }
 
 pub fn parse(
@@ -687,8 +1143,7 @@ pub fn formatTypedHelp(allocator: std.mem.Allocator, command: anytype) std.mem.A
     return output.toOwnedSlice(allocator);
 }
 
-pub fn detectBuiltin(command: anytype, args: []const []const u8) ?BuiltinRequest {
-    const Command = @TypeOf(command);
+fn detectBuiltinNamed(command_name: []const u8, args: []const []const u8) ?BuiltinRequest {
     if (args.len == 0) return null;
     if (args.len == 1 and std.mem.eql(u8, args[0], "--help")) return .help;
     if (args.len == 1 and std.mem.eql(u8, args[0], "-h")) return .help;
@@ -696,9 +1151,14 @@ pub fn detectBuiltin(command: anytype, args: []const []const u8) ?BuiltinRequest
     if (args.len == 1 and std.mem.eql(u8, args[0], "completions")) return .completions;
     if (args.len >= 1 and std.mem.eql(u8, args[0], "help")) {
         if (args.len == 1) return .help;
-        if (std.mem.eql(u8, args[1], Command.Meta.name)) return .help;
+        if (std.mem.eql(u8, args[1], command_name)) return .help;
     }
     return null;
+}
+
+pub fn detectBuiltin(command: anytype, args: []const []const u8) ?BuiltinRequest {
+    const Command = @TypeOf(command);
+    return detectBuiltinNamed(Command.Meta.name, args);
 }
 
 pub fn formatTypedVersion(allocator: std.mem.Allocator, command: anytype) std.mem.Allocator.Error![]const u8 {
@@ -1504,7 +1964,7 @@ test "Cli.run executes handler through the managed runtime and records receipt f
     const HandlerFailure = error{Boom};
     const TestHandlers = struct {
         fn hello(ctx: *HandlerContext, parsed: ParsedCommand) HandlerFailure!void {
-            try std.testing.expectEqualStrings("hello", parsed.command);
+            std.testing.expectEqualStrings("hello", parsed.command) catch return error.Boom;
             ctx.console.writeOut("hello Sean") catch return error.Boom;
         }
     };
@@ -1637,7 +2097,7 @@ test "Cli.run declares its runner dependency at compile time" {
     };
 
     const effect = runApplication(HandlerFailure, app, &.{});
-    try std.testing.expect(effect.RequiredServices[0] == Runner);
+    try std.testing.expect(@TypeOf(effect).RequiredServices[0] == Runner);
 }
 
 test "Cli parse releases staged owned slices on every allocation failure" {
@@ -1653,4 +2113,240 @@ test "Cli parse releases staged owned slices on every allocation failure" {
     };
 
     try std.testing.checkAllAllocationFailures(std.testing.allocator, Probe.run, .{});
+}
+
+const ServiceCliProbeApi = struct {
+    pub const operations: []const []const u8 = &.{"ServiceCliProbe.observe"};
+    observed: *bool,
+    typed_workspace: *?[]const u8,
+};
+
+const ServiceCliProbe = fx.kernel.Service("zigeffect/std/test/ServiceCliProbe", ServiceCliProbeApi);
+const ServiceCliRequirements = .{ServiceCliProbe};
+
+test "Cli service preflight derives a bounded redacted command identity from the matched path" {
+    const Handlers = struct {
+        fn run(_: *fx.kernel.ContextView(ServiceCliRequirements), _: ParsedCommand) error{}!void {}
+    };
+    const corpus_options = [_]OptionSpec{
+        .{ .name = "json", .kind = .boolean },
+        .{ .name = "token", .kind = .string },
+    };
+    const benchmark_commands = [_]CommandSpec{
+        .{ .name = "corpus", .options = corpus_options[0..] },
+    };
+    const commands = [_]CommandSpec{
+        .{ .name = "benchmark", .subcommands = benchmark_commands[0..] },
+    };
+    const spec = CommandSpec{ .name = "zgraphy", .subcommands = commands[0..] };
+    const path = [_][]const u8{ "zgraphy", "benchmark", "corpus" };
+    const handlers = [_]ServiceHandler(ServiceCliRequirements, error{}){
+        .{ .path = path[0..], .run = Handlers.run },
+    };
+    const app = ServiceApplication(ServiceCliRequirements, error{}){
+        .spec = spec,
+        .version = "0.1.0",
+        .handlers = handlers[0..],
+    };
+
+    var preflight = try preflightServiceApplication(
+        ServiceCliRequirements,
+        error{},
+        std.testing.allocator,
+        app,
+        &.{ "benchmark", "corpus", "private-repository", "--token", "token=abc123", "--json" },
+    );
+    defer preflight.deinit();
+
+    try std.testing.expect(preflight.shouldRun());
+    try std.testing.expectEqualStrings("benchmark.corpus", preflight.identity.?.slice());
+    try std.testing.expect(std.mem.indexOf(u8, preflight.identity.?.slice(), "private-repository") == null);
+    try std.testing.expect(std.mem.indexOf(u8, preflight.identity.?.slice(), "abc123") == null);
+    try std.testing.expectEqual(@as(usize, 2), preflight.identity.?.segmentCount());
+
+    const too_long_segment = "1234567890123456789012345678901234567890123456789";
+    const full_segment = "123456789012345678901234567890123456789012345678";
+    try std.testing.expectError(error.EmptyCommandIdentity, commandIdentityFromMatchedPath(&.{}));
+    try std.testing.expectError(error.EmptyCommandSegment, commandIdentityFromMatchedPath(&.{""}));
+    try std.testing.expectError(error.CommandSegmentTooLong, commandIdentityFromMatchedPath(&.{too_long_segment}));
+    try std.testing.expectError(error.CommandIdentityTooLong, commandIdentityFromMatchedPath(&.{ full_segment, full_segment, full_segment }));
+    try std.testing.expectError(error.TooManyCommandSegments, commandIdentityFromMatchedPath(&.{ "a", "b", "c", "d", "e", "f", "g", "h", "i" }));
+}
+
+test "Cli service handlers resolve parsed and typed dependencies through ContextView" {
+    const Handlers = struct {
+        fn parsed(ctx: *fx.kernel.ContextView(ServiceCliRequirements), command: ParsedCommand) error{}!void {
+            const probe = ctx.service(ServiceCliProbe);
+            probe.observed.* = std.mem.eql(u8, command.command, "status");
+        }
+
+        fn typed(ctx: *fx.kernel.ContextView(ServiceCliRequirements), args: TypedServeArgs) error{}!void {
+            const probe = ctx.service(ServiceCliProbe);
+            probe.observed.* = true;
+            probe.typed_workspace.* = args.workspace;
+        }
+    };
+
+    var observed = false;
+    var typed_workspace: ?[]const u8 = null;
+    const layer = fx.kernel.Layer.succeed(ServiceCliProbe, ServiceCliProbeApi{
+        .observed = &observed,
+        .typed_workspace = &typed_workspace,
+    });
+    var runtime = try fx.kernel.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, layer, .{});
+    defer runtime.deinit();
+
+    const commands = [_]CommandSpec{.{ .name = "status" }};
+    const status_path = [_][]const u8{ "zgraphy", "status" };
+    const parsed_handlers = [_]ServiceHandler(ServiceCliRequirements, error{}){
+        .{ .path = status_path[0..], .run = Handlers.parsed },
+    };
+    const parsed_app = ServiceApplication(ServiceCliRequirements, error{}){
+        .spec = .{ .name = "zgraphy", .subcommands = commands[0..] },
+        .handlers = parsed_handlers[0..],
+    };
+    var parsed_preflight = try preflightServiceApplication(
+        ServiceCliRequirements,
+        error{},
+        std.testing.allocator,
+        parsed_app,
+        &.{"status"},
+    );
+    defer parsed_preflight.deinit();
+    const parsed_effect = parsed_preflight.commandEffect();
+    try std.testing.expect(@TypeOf(parsed_effect).RequiredServices[0] == ServiceCliProbe);
+    try runtime.run(parsed_effect);
+    try std.testing.expect(observed);
+
+    observed = false;
+    const command = typedCommand(TypedServeArgs, .{ .name = "serve", .version = "0.1.0" }, .{
+        option("workspace", Schema.string().nonEmpty(), .{ .long = "workspace", .required = true }),
+        option("port", Schema.integer().min(1).max(65535), .{ .long = "port", .default_value = "5178" }),
+        flag("watch", .{ .long = "watch" }),
+        option("mode", Schema.optional(Schema.stringEnum(&.{ "local", "ci" })), .{ .long = "mode" }),
+    });
+    const typed_app = ServiceTypedApplication(ServiceCliRequirements, TypedServeArgs, error{}, @TypeOf(command)){
+        .command = command,
+        .handler = Handlers.typed,
+    };
+    var typed_preflight = try preflightServiceTyped(
+        ServiceCliRequirements,
+        TypedServeArgs,
+        error{},
+        @TypeOf(command),
+        std.testing.allocator,
+        typed_app,
+        &.{ "--workspace", "/repo" },
+    );
+    defer typed_preflight.deinit();
+    const typed_effect = typed_preflight.commandEffect();
+    try std.testing.expect(@TypeOf(typed_effect).RequiredServices[0] == ServiceCliProbe);
+    try runtime.run(typed_effect);
+    try std.testing.expect(observed);
+    try std.testing.expectEqualStrings("/repo", typed_workspace.?);
+}
+
+test "Cli service preflight short circuits builtins and usage without a command effect" {
+    const Handlers = struct {
+        fn run(_: *fx.kernel.ContextView(ServiceCliRequirements), _: ParsedCommand) error{}!void {}
+
+        fn typed(_: *fx.kernel.ContextView(ServiceCliRequirements), _: TypedServeArgs) error{}!void {}
+    };
+    const commands = [_]CommandSpec{.{ .name = "status", .description = "show repository state" }};
+    const status_path = [_][]const u8{ "zgraphy", "status" };
+    const handlers = [_]ServiceHandler(ServiceCliRequirements, error{}){
+        .{ .path = status_path[0..], .run = Handlers.run },
+    };
+    const app = ServiceApplication(ServiceCliRequirements, error{}){
+        .spec = .{ .name = "zgraphy", .description = "local graph", .subcommands = commands[0..] },
+        .version = "0.1.0",
+        .handlers = handlers[0..],
+    };
+
+    const Cases = struct {
+        args: []const []const u8,
+        kind: ShortCircuitKind,
+        exit_code: ExitCode,
+    };
+    const cases = [_]Cases{
+        .{ .args = &.{"--help"}, .kind = .help, .exit_code = .success },
+        .{ .args = &.{"--version"}, .kind = .version, .exit_code = .success },
+        .{ .args = &.{"completions"}, .kind = .completions, .exit_code = .success },
+        .{ .args = &.{"missing"}, .kind = .usage, .exit_code = .usage },
+    };
+    for (cases) |case| {
+        var preflight = try preflightServiceApplication(
+            ServiceCliRequirements,
+            error{},
+            std.testing.allocator,
+            app,
+            case.args,
+        );
+        defer preflight.deinit();
+        try std.testing.expect(!preflight.shouldRun());
+        try std.testing.expect(preflight.identity == null);
+        try std.testing.expectEqual(case.kind, preflight.short_circuit.?.kind);
+        try std.testing.expectEqual(case.exit_code, preflight.short_circuit.?.exit_code);
+        try std.testing.expect(preflight.short_circuit.?.output.len != 0);
+    }
+
+    const command = typedCommand(TypedServeArgs, .{ .name = "serve", .version = "0.1.0" }, .{
+        option("workspace", Schema.string().nonEmpty(), .{ .long = "workspace", .required = true }),
+        option("port", Schema.integer().min(1).max(65535), .{ .long = "port", .default_value = "5178" }),
+        flag("watch", .{ .long = "watch" }),
+        option("mode", Schema.optional(Schema.stringEnum(&.{ "local", "ci" })), .{ .long = "mode" }),
+    });
+    const typed_app = ServiceTypedApplication(ServiceCliRequirements, TypedServeArgs, error{}, @TypeOf(command)){
+        .command = command,
+        .handler = Handlers.typed,
+    };
+    const typed_cases = [_]Cases{
+        .{ .args = &.{"--help"}, .kind = .help, .exit_code = .success },
+        .{ .args = &.{"--version"}, .kind = .version, .exit_code = .success },
+        .{ .args = &.{"completions"}, .kind = .completions, .exit_code = .success },
+        .{ .args = &.{}, .kind = .usage, .exit_code = .usage },
+    };
+    for (typed_cases) |case| {
+        var preflight = try preflightServiceTyped(
+            ServiceCliRequirements,
+            TypedServeArgs,
+            error{},
+            @TypeOf(command),
+            std.testing.allocator,
+            typed_app,
+            case.args,
+        );
+        defer preflight.deinit();
+        try std.testing.expect(!preflight.shouldRun());
+        try std.testing.expect(preflight.identity == null);
+        try std.testing.expectEqual(case.kind, preflight.short_circuit.?.kind);
+        try std.testing.expectEqual(case.exit_code, preflight.short_circuit.?.exit_code);
+        try std.testing.expect(preflight.short_circuit.?.output.len != 0);
+    }
+}
+
+test "Cli service command effect exposes a statically missing dependency" {
+    const Handlers = struct {
+        fn run(_: *fx.kernel.ContextView(ServiceCliRequirements), _: ParsedCommand) error{}!void {}
+    };
+    const commands = [_]CommandSpec{.{ .name = "status" }};
+    const path = [_][]const u8{ "zgraphy", "status" };
+    const handlers = [_]ServiceHandler(ServiceCliRequirements, error{}){
+        .{ .path = path[0..], .run = Handlers.run },
+    };
+    const app = ServiceApplication(ServiceCliRequirements, error{}){
+        .spec = .{ .name = "zgraphy", .subcommands = commands[0..] },
+        .handlers = handlers[0..],
+    };
+    var preflight = try preflightServiceApplication(
+        ServiceCliRequirements,
+        error{},
+        std.testing.allocator,
+        app,
+        &.{"status"},
+    );
+    defer preflight.deinit();
+    const effect = preflight.commandEffect();
+    const missing_layer = fx.kernel.Layer.empty();
+    try std.testing.expect(!fx.kernel.subset(@TypeOf(effect).RequiredServices, @TypeOf(missing_layer).OutputServices));
 }
