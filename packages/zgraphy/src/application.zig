@@ -83,6 +83,41 @@ pub const command_spec = zstd.Cli.CommandSpec{
     .subcommands = &commands,
 };
 
+pub const command_help =
+    \\zgraphy - local Zig repository knowledge graph
+    \\
+    \\Usage:
+    \\  zgraphy init [root] [--json]
+    \\  zgraphy build [root] [--json]
+    \\  zgraphy ingest [root] [--json]
+    \\  zgraphy watch [root] [--poll-ms N] [--debounce-ms N] [--retry-ms N] [--max-cycles N] [--max-drain-passes N] [--json]
+    \\  zgraphy gc [root] [--apply] [--json]  # dry-run unless --apply
+    \\  zgraphy pin <generation> [--root repository] [--json]
+    \\  zgraphy unpin <generation> [--root repository] [--json]
+    \\  zgraphy query <text> [--limit N] [--json]
+    \\  zgraphy explain <node-id-or-label> [--json]
+    \\  zgraphy path <from> <to> [--max-hops N] [--json]
+    \\  zgraphy status [--json]
+    \\  zgraphy doctor [root] [--json]
+    \\  zgraphy parity [--json]
+    \\  zgraphy schema [relation] [--json]
+    \\  zgraphy contracts [provider|conformance|config|health|diagnostic|migration] [--json]
+    \\  zgraphy security [ZG-THR-NNN] [--json]
+    \\  zgraphy evaluation [extraction|retrieval|agent_task|performance|resource] [--json]
+    \\  zgraphy benchmark corpus [--json]
+    \\  zgraphy benchmark lexical <fixture-id> [fixture-root] [--json]
+    \\  zgraphy benchmark zgraphy <fixture-id> [fixture-root] [--json]
+    \\  zgraphy benchmark graphify <fixture-id> <graph.json> [--json]
+    \\  zgraphy benchmark matrix [graphify-run-root] --source-revision <sha256> --graphify-python <version> --graphify-environment <sha256> [--json]
+    \\  zgraphy benchmark workload <fixture-id> <cold-build|warm-unchanged-build|one-file-modify|rename|delete> [fixture-root] [--json]
+    \\  zgraphy benchmark resources <samples.json> --source-revision <sha256> --graphify-python <version> --graphify-environment <sha256> --machine <sha256> --configuration <sha256> [--warmups N] [--repetitions N] [--json]
+    \\  zgraphy benchmark freshness <transitions.json> [--json]
+    \\  zgraphy benchmark churn <observations.json> [--json]
+    \\  zgraphy benchmark performance <samples.json> --source-revision <sha256> --machine <sha256> --configuration <sha256> --correctness <sha256> --quality <sha256> --resources <sha256> --graphify-python <version> --graphify-environment <sha256> [--warmups N] [--repetitions N] [--json]
+    \\  Add --root <repository-path> to any repository command.
+    \\
+;
+
 const command_paths = [_][]const []const u8{
     &.{ "zgraphy", "init" },
     &.{ "zgraphy", "build" },
@@ -133,6 +168,7 @@ pub const CommandApplication = struct {
         return .{
             .spec = command_spec,
             .version = "0.1.0",
+            .help = command_help,
             .handlers = &self.handlers,
         };
     }

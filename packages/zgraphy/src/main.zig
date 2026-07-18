@@ -6,38 +6,23 @@ const owned = zgraphy.Memory;
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     var declared_commands = zgraphy.Application.CommandApplication.init(runCommand);
-    var preflight = try zstd.Cli.preflightServiceApplication(
-        zgraphy.Application.ApplicationServices,
-        anyerror,
-        init.gpa,
-        declared_commands.application(),
-        args[1..],
-    );
-    defer preflight.deinit();
-    if (preflight.short_circuit) |short_circuit| {
-        if (short_circuit.kind == .help) {
-            try printHelp(init.io);
-        } else {
-            try short_circuit.write(init.io);
-        }
-        if (short_circuit.exit_code != .success) std.process.exit(@intCast(@intFromEnum(short_circuit.exit_code)));
-        return;
-    }
-
+    const application = declared_commands.application();
     const root_path = selectedRoot(args);
     var root = try std.Io.Dir.cwd().openDir(init.io, root_path, .{ .iterate = true, .follow_symlinks = false });
     defer root.close(init.io);
     const main_layer = zgraphy.Application.rootLayer(.{ .io = init.io, .root = root, .args = args });
-    _ = try zstd.Application.runOneShot(
+    const result = try zstd.Application.runOneShot(
         @TypeOf(main_layer),
-        @TypeOf(preflight),
+        @TypeOf(application),
         init.gpa,
         init.io,
         root,
         main_layer,
-        &preflight,
+        application,
+        args[1..],
         .{ .runtime = .{ .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 4096, .max_wal_bytes = 16 * 1024 * 1024 } } },
     );
+    if (result.exit_code != .success) std.process.exit(@intCast(@intFromEnum(result.exit_code)));
 }
 
 fn runCommand(ctx: *zstd.fx.kernel.ContextView(zgraphy.Application.ApplicationServices), _: zstd.Cli.ParsedCommand) anyerror!void {
@@ -1376,41 +1361,4 @@ fn writeText(io: std.Io, allocator: std.mem.Allocator, comptime format: []const 
     const text = try std.fmt.allocPrint(allocator, format, args);
     defer allocator.free(text);
     try std.Io.File.stdout().writeStreamingAll(io, text);
-}
-
-fn printHelp(io: std.Io) !void {
-    try std.Io.File.stdout().writeStreamingAll(io,
-        \\zgraphy - local Zig repository knowledge graph
-        \\
-        \\Usage:
-        \\  zgraphy init [root] [--json]
-        \\  zgraphy build [root] [--json]
-        \\  zgraphy ingest [root] [--json]
-        \\  zgraphy watch [root] [--poll-ms N] [--debounce-ms N] [--retry-ms N] [--max-cycles N] [--max-drain-passes N] [--json]
-        \\  zgraphy gc [root] [--apply] [--json]  # dry-run unless --apply
-        \\  zgraphy pin <generation> [--root repository] [--json]
-        \\  zgraphy unpin <generation> [--root repository] [--json]
-        \\  zgraphy query <text> [--limit N] [--json]
-        \\  zgraphy explain <node-id-or-label> [--json]
-        \\  zgraphy path <from> <to> [--max-hops N] [--json]
-        \\  zgraphy status [--json]
-        \\  zgraphy doctor [root] [--json]
-        \\  zgraphy parity [--json]
-        \\  zgraphy schema [relation] [--json]
-        \\  zgraphy contracts [provider|conformance|config|health|diagnostic|migration] [--json]
-        \\  zgraphy security [ZG-THR-NNN] [--json]
-        \\  zgraphy evaluation [extraction|retrieval|agent_task|performance|resource] [--json]
-        \\  zgraphy benchmark corpus [--json]
-        \\  zgraphy benchmark lexical <fixture-id> [fixture-root] [--json]
-        \\  zgraphy benchmark zgraphy <fixture-id> [fixture-root] [--json]
-        \\  zgraphy benchmark graphify <fixture-id> <graph.json> [--json]
-        \\  zgraphy benchmark matrix [graphify-run-root] --source-revision <sha256> --graphify-python <version> --graphify-environment <sha256> [--json]
-        \\  zgraphy benchmark workload <fixture-id> <cold-build|warm-unchanged-build|one-file-modify|rename|delete> [fixture-root] [--json]
-        \\  zgraphy benchmark resources <samples.json> --source-revision <sha256> --graphify-python <version> --graphify-environment <sha256> --machine <sha256> --configuration <sha256> [--warmups N] [--repetitions N] [--json]
-        \\  zgraphy benchmark freshness <transitions.json> [--json]
-        \\  zgraphy benchmark churn <observations.json> [--json]
-        \\  zgraphy benchmark performance <samples.json> --source-revision <sha256> --machine <sha256> --configuration <sha256> --correctness <sha256> --quality <sha256> --resources <sha256> --graphify-python <version> --graphify-environment <sha256> [--warmups N] [--repetitions N] [--json]
-        \\  Add --root <repository-path> to any repository command.
-        \\
-    );
 }
