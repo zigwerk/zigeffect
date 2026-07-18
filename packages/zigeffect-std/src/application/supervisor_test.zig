@@ -127,15 +127,25 @@ test "runOneShot public parameters expose no command identity or preflight forge
 
     const source = try readSupervisorSource();
     defer std.testing.allocator.free(source);
-    const declaration = try runOneShotPublicDeclaration(source);
-    try std.testing.expectEqualStrings(expected_run_one_shot_declaration, declaration);
-    inline for (forbidden_run_one_shot_parameter_tokens) |token| {
-        try std.testing.expect(std.mem.indexOf(u8, declaration, token) == null);
-    }
+    try validateRunOneShotRootDeclaration(std.testing.allocator, source);
 
     try std.testing.expect(carriesCommandIdentityState(GuardPayloadWrapper));
     try std.testing.expect(carriesCommandIdentityState(GuardNestedFieldWrapper));
     try std.testing.expect(!carriesCommandIdentityState(GuardSafeWrapper));
+}
+
+test "runOneShot source guard rejects a nested decoy before a forbidden root declaration" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/application/run_one_shot_declaration_guard_fixture_test.zig",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+    try std.testing.expectError(
+        error.UnexpectedRunOneShotSignature,
+        validateRunOneShotRootDeclaration(std.testing.allocator, source),
+    );
 }
 
 test "runOneShot supervisor has one checked shutdown and no deferred deinitialization" {
@@ -462,25 +472,41 @@ const command_identity_name_vocabulary = .{
     "command_effect",
 };
 
-const expected_run_one_shot_declaration =
-    "pub fn runOneShot(\n" ++
-    "    comptime ApplicationLayer: type,\n" ++
-    "    comptime ServiceApp: type,\n" ++
-    "    allocator: std.mem.Allocator,\n" ++
-    "    io: std.Io,\n" ++
-    "    root: std.Io.Dir,\n" ++
-    "    application_layer: ApplicationLayer,\n" ++
-    "    application: ServiceApp,\n" ++
-    "    argv: []const []const u8,\n" ++
-    "    options: OneShotOptions,\n" ++
-    ") anyerror!OneShotResult(ServiceApp.SuccessType) {";
-
-const forbidden_run_one_shot_parameter_tokens = .{
-    "identity:",
-    "handoff:",
-    "preflight:",
-    "command_effect:",
+const forbidden_run_one_shot_parameter_names = .{
+    "identity",
+    "handoff",
+    "preflight",
+    "command_effect",
     "sealed",
+};
+
+const RunOneShotParameter = struct {
+    name: []const u8,
+    comptime_parameter: bool = false,
+    type_tokens: []const []const u8,
+};
+
+const expected_run_one_shot_parameters = [_]RunOneShotParameter{
+    .{ .name = "ApplicationLayer", .comptime_parameter = true, .type_tokens = &.{"type"} },
+    .{ .name = "ServiceApp", .comptime_parameter = true, .type_tokens = &.{"type"} },
+    .{ .name = "allocator", .type_tokens = &.{ "std", ".", "mem", ".", "Allocator" } },
+    .{ .name = "io", .type_tokens = &.{ "std", ".", "Io" } },
+    .{ .name = "root", .type_tokens = &.{ "std", ".", "Io", ".", "Dir" } },
+    .{ .name = "application_layer", .type_tokens = &.{"ApplicationLayer"} },
+    .{ .name = "application", .type_tokens = &.{"ServiceApp"} },
+    .{ .name = "argv", .type_tokens = &.{ "[", "]", "const", "[", "]", "const", "u8" } },
+    .{ .name = "options", .type_tokens = &.{"OneShotOptions"} },
+};
+
+const expected_run_one_shot_return_tokens = &.{
+    "anyerror",
+    "!",
+    "OneShotResult",
+    "(",
+    "ServiceApp",
+    ".",
+    "SuccessType",
+    ")",
 };
 
 fn readSupervisorSource() ![]u8 {
@@ -492,11 +518,75 @@ fn readSupervisorSource() ![]u8 {
     );
 }
 
-fn runOneShotPublicDeclaration(source: []const u8) ![]const u8 {
-    const start = std.mem.indexOf(u8, source, "pub fn runOneShot(") orelse return error.MissingRunOneShotDeclaration;
-    const suffix = ") anyerror!OneShotResult(ServiceApp.SuccessType) {";
-    const relative_end = std.mem.indexOfPos(u8, source, start, suffix) orelse return error.MissingRunOneShotDeclarationEnd;
-    return source[start .. relative_end + suffix.len];
+fn validateRunOneShotRootDeclaration(allocator: std.mem.Allocator, source: []const u8) !void {
+    const sentinel_source = try allocator.dupeZ(u8, source);
+    defer allocator.free(sentinel_source);
+    var tree = try std.zig.Ast.parse(allocator, sentinel_source, .zig);
+    defer tree.deinit(allocator);
+    if (tree.errors.len != 0) return error.InvalidSupervisorSource;
+
+    var root_run_one_shot: ?std.zig.Ast.Node.Index = null;
+    for (tree.rootDecls()) |node| {
+        var buffer = [1]std.zig.Ast.Node.Index{.root};
+        const proto = tree.fullFnProto(&buffer, node) orelse continue;
+        const name_token = proto.name_token orelse continue;
+        if (!std.mem.eql(u8, tree.tokenSlice(name_token), "runOneShot")) continue;
+        if (root_run_one_shot != null) return error.DuplicateRootRunOneShotDeclaration;
+        root_run_one_shot = node;
+    }
+
+    const root_node = root_run_one_shot orelse return error.MissingRootRunOneShotDeclaration;
+    if (tree.nodeTag(root_node) != .fn_decl) return error.UnexpectedRunOneShotSignature;
+    var buffer = [1]std.zig.Ast.Node.Index{.root};
+    const proto = tree.fullFnProto(&buffer, root_node) orelse return error.UnexpectedRunOneShotSignature;
+    const visibility = proto.visib_token orelse return error.UnexpectedRunOneShotSignature;
+    if (tree.tokenTag(visibility) != .keyword_pub) return error.UnexpectedRunOneShotSignature;
+
+    var parameter_iterator = proto.iterate(&tree);
+    var parameter_index: usize = 0;
+    while (parameter_iterator.next()) |parameter| : (parameter_index += 1) {
+        if (parameter_index >= expected_run_one_shot_parameters.len) return error.UnexpectedRunOneShotSignature;
+        const expected = expected_run_one_shot_parameters[parameter_index];
+        const name_token = parameter.name_token orelse return error.UnexpectedRunOneShotSignature;
+        const name = tree.tokenSlice(name_token);
+        if (!std.mem.eql(u8, name, expected.name)) return error.UnexpectedRunOneShotSignature;
+        inline for (forbidden_run_one_shot_parameter_names) |forbidden| {
+            if (std.ascii.indexOfIgnoreCase(name, forbidden) != null) return error.UnexpectedRunOneShotSignature;
+        }
+        if (expected.comptime_parameter) {
+            const marker = parameter.comptime_noalias orelse return error.UnexpectedRunOneShotSignature;
+            if (tree.tokenTag(marker) != .keyword_comptime) return error.UnexpectedRunOneShotSignature;
+        } else if (parameter.comptime_noalias != null) {
+            return error.UnexpectedRunOneShotSignature;
+        }
+        if (parameter.anytype_ellipsis3 != null) return error.UnexpectedRunOneShotSignature;
+        const type_expr = parameter.type_expr orelse return error.UnexpectedRunOneShotSignature;
+        if (!nodeTokensEqual(&tree, type_expr, expected.type_tokens)) return error.UnexpectedRunOneShotSignature;
+    }
+    if (parameter_index != expected_run_one_shot_parameters.len) return error.UnexpectedRunOneShotSignature;
+
+    const return_type = proto.ast.return_type.unwrap() orelse return error.UnexpectedRunOneShotSignature;
+    if (!nodeTokensEqual(&tree, return_type, expected_run_one_shot_return_tokens)) {
+        return error.UnexpectedRunOneShotSignature;
+    }
+}
+
+fn nodeTokensEqual(tree: *const std.zig.Ast, node: std.zig.Ast.Node.Index, expected: []const []const u8) bool {
+    const last_token = tree.lastToken(node);
+    var token = tree.firstToken(node);
+    var expected_index: usize = 0;
+    while (true) : (token += 1) {
+        switch (tree.tokenTag(token)) {
+            .doc_comment, .container_doc_comment => {},
+            else => {
+                if (expected_index >= expected.len or
+                    !std.mem.eql(u8, tree.tokenSlice(token), expected[expected_index])) return false;
+                expected_index += 1;
+            },
+        }
+        if (token == last_token) break;
+    }
+    return expected_index == expected.len;
 }
 
 fn expectEmptyProbe(probe: Supervisor.OneShotOptions.TestProbe) !void {
