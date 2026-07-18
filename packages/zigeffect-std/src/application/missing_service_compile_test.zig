@@ -31,16 +31,14 @@ test "one-shot command cannot compile without its required service" {
         &.{"status"},
     );
     defer preflight.deinit();
-    const command = preflight.commandEffect();
     _ = try zstd.Application.runOneShot(
         @TypeOf(layer),
-        @TypeOf(command),
+        @TypeOf(preflight),
         std.testing.allocator,
         std.testing.io,
         tmp.dir,
         layer,
-        preflight.identity.?,
-        command,
+        &preflight,
         .{ .runtime = .{ .graph = .{ .path = "causal" } } },
     );
 }

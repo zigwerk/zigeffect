@@ -40,6 +40,7 @@ pub const CommandSpec = struct {
     description: []const u8 = "",
     options: []const OptionSpec = &.{},
     subcommands: []const CommandSpec = &.{},
+    default_subcommand: ?[]const u8 = null,
 };
 
 pub const TypedCommandMeta = struct {
@@ -152,17 +153,17 @@ pub const CommandIdentityError = error{
 /// A bounded command label derived only from names in a successfully matched
 /// command declaration. Option values, positionals, environment variables and
 /// executable names never enter this buffer.
-pub const CommandIdentity = struct {
+const CommandIdentity = struct {
     bytes: [command_identity_max_bytes]u8 = undefined,
     len: u8 = 0,
     segment_count: u8 = 0,
 
     pub fn slice(self: *const CommandIdentity) []const u8 {
-        return self.bytes[0..self.len];
+        return self.bytes[0..@min(@as(usize, self.len), self.bytes.len)];
     }
 
     pub fn segmentCount(self: CommandIdentity) usize {
-        return self.segment_count;
+        return @min(@as(usize, self.segment_count), command_identity_max_segments);
     }
 };
 
@@ -186,6 +187,27 @@ fn commandIdentityFromMatchedPath(path: []const []const u8) CommandIdentityError
     }
     identity.segment_count = @intCast(path.len);
     return identity;
+}
+
+const FrameworkPreflightTag = enum { parsed, typed };
+
+pub fn isFrameworkServicePreflight(comptime Candidate: type) bool {
+    if (!@hasDecl(Candidate, "FrameworkPreflightKind") or
+        !@hasDecl(Candidate, "RequiredServices") or
+        !@hasDecl(Candidate, "FailureType")) return false;
+    if (@TypeOf(Candidate.FrameworkPreflightKind) != FrameworkPreflightTag) return false;
+    return switch (Candidate.FrameworkPreflightKind) {
+        .parsed => Candidate == ServicePreflight(Candidate.RequiredServices, Candidate.FailureType),
+        .typed => blk: {
+            if (!@hasDecl(Candidate, "ArgsType") or !@hasDecl(Candidate, "CommandType")) break :blk false;
+            break :blk Candidate == ServiceTypedPreflight(
+                Candidate.RequiredServices,
+                Candidate.ArgsType,
+                Candidate.FailureType,
+                Candidate.CommandType,
+            );
+        },
+    };
 }
 
 pub const ShortCircuitKind = enum {
@@ -274,31 +296,44 @@ pub fn ServicePreflight(comptime Services: anytype, comptime Failure: type) type
     return struct {
         const Self = @This();
         const App = ServiceApplication(Services, Failure);
+        pub const FrameworkPreflightKind = FrameworkPreflightTag.parsed;
+        pub const RequiredServices = Services;
+        pub const FailureType = Failure;
+        pub const CommandEffect = ServiceCommandEffect(Services, Failure);
+        const SealedCommand = struct {
+            identity: CommandIdentity,
+            effect: CommandEffect,
+        };
+        const Seal = opaque {};
 
         allocator: std.mem.Allocator,
         application: App,
         parsed: ?ParsedCommand = null,
-        identity: ?CommandIdentity = null,
         short_circuit: ?ShortCircuit = null,
+        sealed_command: ?*const Seal = null,
 
         pub fn deinit(self: *Self) void {
+            if (self.sealed_command) |sealed| {
+                const command: *SealedCommand = @ptrCast(@alignCast(@constCast(sealed)));
+                self.allocator.destroy(command);
+            }
             if (self.parsed) |*parsed| parsed.deinit(self.allocator);
             if (self.short_circuit) |*short_circuit| short_circuit.deinit(self.allocator);
             self.* = undefined;
         }
 
         pub fn shouldRun(self: *const Self) bool {
-            return self.parsed != null and self.identity != null and self.short_circuit == null;
+            return self.sealed_command != null and self.short_circuit == null;
         }
 
-        pub fn commandEffect(self: *const Self) ServiceCommandEffect(Services, Failure) {
-            std.debug.assert(self.shouldRun());
-            return serviceCommandEffect(
-                Services,
-                Failure,
-                self.application.findHandler(self.parsed.?).?,
-                self.parsed.?,
-            );
+        pub fn prepare(self: *const Self) error{InvalidCommandPreflight}!SealedCommand {
+            if (!self.shouldRun()) return error.InvalidCommandPreflight;
+            const command: *const SealedCommand = @ptrCast(@alignCast(self.sealed_command.?));
+            return command.*;
+        }
+
+        pub fn commandEffect(self: *const Self) CommandEffect {
+            return (self.prepare() catch unreachable).effect;
         }
     };
 }
@@ -356,32 +391,46 @@ pub fn ServiceTypedPreflight(
     return struct {
         const Self = @This();
         const App = ServiceTypedApplication(Services, Args, Failure, Command);
+        pub const FrameworkPreflightKind = FrameworkPreflightTag.typed;
+        pub const RequiredServices = Services;
+        pub const ArgsType = Args;
+        pub const FailureType = Failure;
+        pub const CommandType = Command;
+        pub const CommandEffect = ServiceTypedCommandEffect(Services, Args, Failure);
+        const SealedCommand = struct {
+            identity: CommandIdentity,
+            effect: CommandEffect,
+        };
+        const Seal = opaque {};
 
         allocator: std.mem.Allocator,
         application: App,
         decoded: ?TypedDecodeResult(Args) = null,
-        identity: ?CommandIdentity = null,
         short_circuit: ?ShortCircuit = null,
+        sealed_command: ?*const Seal = null,
 
         pub fn deinit(self: *Self) void {
+            if (self.sealed_command) |sealed| {
+                const command: *SealedCommand = @ptrCast(@alignCast(@constCast(sealed)));
+                self.allocator.destroy(command);
+            }
             if (self.decoded) |*decoded| decoded.deinit();
             if (self.short_circuit) |*short_circuit| short_circuit.deinit(self.allocator);
             self.* = undefined;
         }
 
         pub fn shouldRun(self: *const Self) bool {
-            return self.decoded != null and self.identity != null and self.short_circuit == null;
+            return self.sealed_command != null and self.short_circuit == null;
         }
 
-        pub fn commandEffect(self: *const Self) ServiceTypedCommandEffect(Services, Args, Failure) {
-            std.debug.assert(self.shouldRun());
-            return serviceTypedCommandEffect(
-                Services,
-                Args,
-                Failure,
-                self.application.handler,
-                self.decoded.?.value.?,
-            );
+        pub fn prepare(self: *const Self) error{InvalidCommandPreflight}!SealedCommand {
+            if (!self.shouldRun()) return error.InvalidCommandPreflight;
+            const command: *const SealedCommand = @ptrCast(@alignCast(self.sealed_command.?));
+            return command.*;
+        }
+
+        pub fn commandEffect(self: *const Self) CommandEffect {
+            return (self.prepare() catch unreachable).effect;
         }
     };
 }
@@ -772,12 +821,18 @@ pub fn preflightServiceApplication(
         return serviceShortCircuit(Services, Failure, allocator, application, .usage, .usage, .stderr, usage);
     }
 
+    const handler = application.findHandler(parsed).?;
     const identity = try commandIdentityFromMatchedPath(parsed.path[1..]);
+    const sealed_command = try allocator.create(ServicePreflight(Services, Failure).SealedCommand);
+    sealed_command.* = .{
+        .identity = identity,
+        .effect = serviceCommandEffect(Services, Failure, handler, parsed),
+    };
     return .{
         .allocator = allocator,
         .application = application,
         .parsed = parsed,
-        .identity = identity,
+        .sealed_command = @ptrCast(sealed_command),
     };
 }
 
@@ -829,11 +884,22 @@ pub fn preflightServiceTyped(
     }
 
     const identity = try commandIdentityFromMatchedPath(&.{Command.Meta.name});
+    const sealed_command = try allocator.create(ServiceTypedPreflight(Services, Args, Failure, Command).SealedCommand);
+    sealed_command.* = .{
+        .identity = identity,
+        .effect = serviceTypedCommandEffect(
+            Services,
+            Args,
+            Failure,
+            application.handler,
+            decoded.value.?,
+        ),
+    };
     return .{
         .allocator = allocator,
         .application = application,
         .decoded = decoded,
-        .identity = identity,
+        .sealed_command = @ptrCast(sealed_command),
     };
 }
 
@@ -857,6 +923,14 @@ pub fn parse(
             return CliError.UnknownSubcommand;
         } else {
             break;
+        }
+    }
+
+    if (active.default_subcommand) |default_name| {
+        if (consumed == args.len or (args[consumed].len > 0 and args[consumed][0] == '-')) {
+            const subcommand = findSubcommand(active, default_name) orelse return CliError.UnknownSubcommand;
+            active = subcommand;
+            try path.append(allocator, subcommand.name);
         }
     }
 
@@ -2136,7 +2210,7 @@ test "Cli service preflight derives a bounded redacted command identity from the
         .{ .name = "corpus", .options = corpus_options[0..] },
     };
     const commands = [_]CommandSpec{
-        .{ .name = "benchmark", .subcommands = benchmark_commands[0..] },
+        .{ .name = "benchmark", .subcommands = benchmark_commands[0..], .default_subcommand = "corpus" },
     };
     const spec = CommandSpec{ .name = "zgraphy", .subcommands = commands[0..] };
     const path = [_][]const u8{ "zgraphy", "benchmark", "corpus" };
@@ -2159,10 +2233,22 @@ test "Cli service preflight derives a bounded redacted command identity from the
     defer preflight.deinit();
 
     try std.testing.expect(preflight.shouldRun());
-    try std.testing.expectEqualStrings("benchmark.corpus", preflight.identity.?.slice());
-    try std.testing.expect(std.mem.indexOf(u8, preflight.identity.?.slice(), "private-repository") == null);
-    try std.testing.expect(std.mem.indexOf(u8, preflight.identity.?.slice(), "abc123") == null);
-    try std.testing.expectEqual(@as(usize, 2), preflight.identity.?.segmentCount());
+    const prepared = try preflight.prepare();
+    try std.testing.expectEqualStrings("benchmark.corpus", prepared.identity.slice());
+    try std.testing.expect(std.mem.indexOf(u8, prepared.identity.slice(), "private-repository") == null);
+    try std.testing.expect(std.mem.indexOf(u8, prepared.identity.slice(), "abc123") == null);
+    try std.testing.expectEqual(@as(usize, 2), prepared.identity.segmentCount());
+
+    var default_preflight = try preflightServiceApplication(
+        ServiceCliRequirements,
+        error{},
+        std.testing.allocator,
+        app,
+        &.{"benchmark"},
+    );
+    defer default_preflight.deinit();
+    const default_prepared = try default_preflight.prepare();
+    try std.testing.expectEqualStrings("benchmark.corpus", default_prepared.identity.slice());
 
     const too_long_segment = "1234567890123456789012345678901234567890123456789";
     const full_segment = "123456789012345678901234567890123456789012345678";
@@ -2171,6 +2257,29 @@ test "Cli service preflight derives a bounded redacted command identity from the
     try std.testing.expectError(error.CommandSegmentTooLong, commandIdentityFromMatchedPath(&.{too_long_segment}));
     try std.testing.expectError(error.CommandIdentityTooLong, commandIdentityFromMatchedPath(&.{ full_segment, full_segment, full_segment }));
     try std.testing.expectError(error.TooManyCommandSegments, commandIdentityFromMatchedPath(&.{ "a", "b", "c", "d", "e", "f", "g", "h", "i" }));
+
+    var corrupted_identity = CommandIdentity{};
+    corrupted_identity.len = std.math.maxInt(u8);
+    corrupted_identity.segment_count = std.math.maxInt(u8);
+    try std.testing.expectEqual(command_identity_max_bytes, corrupted_identity.slice().len);
+    try std.testing.expectEqual(command_identity_max_segments, corrupted_identity.segmentCount());
+
+    const long_commands = [_]CommandSpec{.{ .name = too_long_segment }};
+    const long_path = [_][]const u8{ "zgraphy", too_long_segment };
+    const long_handlers = [_]ServiceHandler(ServiceCliRequirements, error{}){
+        .{ .path = &long_path, .run = Handlers.run },
+    };
+    const long_app = ServiceApplication(ServiceCliRequirements, error{}){
+        .spec = .{ .name = "zgraphy", .subcommands = &long_commands },
+        .handlers = &long_handlers,
+    };
+    try std.testing.expectError(error.CommandSegmentTooLong, preflightServiceApplication(
+        ServiceCliRequirements,
+        error{},
+        std.testing.allocator,
+        long_app,
+        &.{too_long_segment},
+    ));
 }
 
 test "Cli service handlers resolve parsed and typed dependencies through ContextView" {
@@ -2284,7 +2393,6 @@ test "Cli service preflight short circuits builtins and usage without a command 
         );
         defer preflight.deinit();
         try std.testing.expect(!preflight.shouldRun());
-        try std.testing.expect(preflight.identity == null);
         try std.testing.expectEqual(case.kind, preflight.short_circuit.?.kind);
         try std.testing.expectEqual(case.exit_code, preflight.short_circuit.?.exit_code);
         try std.testing.expect(preflight.short_circuit.?.output.len != 0);
@@ -2318,7 +2426,6 @@ test "Cli service preflight short circuits builtins and usage without a command 
         );
         defer preflight.deinit();
         try std.testing.expect(!preflight.shouldRun());
-        try std.testing.expect(preflight.identity == null);
         try std.testing.expectEqual(case.kind, preflight.short_circuit.?.kind);
         try std.testing.expectEqual(case.exit_code, preflight.short_circuit.?.exit_code);
         try std.testing.expect(preflight.short_circuit.?.output.len != 0);

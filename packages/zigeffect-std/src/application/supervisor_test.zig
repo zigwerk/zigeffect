@@ -22,7 +22,10 @@ const Handlers = struct {
     }
 };
 
-const commands = [_]Cli.CommandSpec{.{ .name = "status" }};
+const commands = [_]Cli.CommandSpec{.{
+    .name = "status",
+    .options = &.{.{ .name = "token", .kind = .string, .env = "COMMAND_TOKEN" }},
+}};
 const status_path = [_][]const u8{ "zgraphy", "status" };
 const success_handlers = [_]Cli.ServiceHandler(Requirements, anyerror){
     .{ .path = status_path[0..], .run = Handlers.succeed },
@@ -40,6 +43,7 @@ const failure_application = Cli.ServiceApplication(Requirements, anyerror){
 };
 
 test "runOneShot executes one framework-named service command and checks every lifecycle stage" {
+    try std.testing.expect(!@hasDecl(Cli, "CommandIdentity"));
     var tmp = std.testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     var causal = fx.CausalStore.init(std.testing.allocator);
@@ -52,20 +56,24 @@ test "runOneShot executes one framework-named service command and checks every l
         anyerror,
         std.testing.allocator,
         success_application,
-        &.{"status"},
+        &.{ "status", "--token", "raw-secret-command-name" },
     );
     defer preflight.deinit();
-    const command_effect = preflight.commandEffect();
+    try std.testing.expect(Cli.isFrameworkServicePreflight(@TypeOf(preflight)));
+    try std.testing.expect(!Cli.isFrameworkServicePreflight(struct {
+        pub const FrameworkPreflightKind = @TypeOf(preflight).FrameworkPreflightKind;
+        pub const RequiredServices = Requirements;
+        pub const FailureType = anyerror;
+    }));
 
     const result = try Supervisor.runOneShot(
         @TypeOf(layer),
-        @TypeOf(command_effect),
+        @TypeOf(preflight),
         std.testing.allocator,
         std.testing.io,
         tmp.dir,
         layer,
-        preflight.identity.?,
-        command_effect,
+        &preflight,
         .{
             .runtime = .{
                 .graph = .{ .path = "causal", .max_records = 256 },
@@ -83,6 +91,7 @@ test "runOneShot executes one framework-named service command and checks every l
     try std.testing.expectEqual(@as(usize, 1), countEvent(snapshot.events, .effect_started, "status", "running"));
     try std.testing.expectEqual(@as(usize, 1), countEvent(snapshot.events, .effect_completed, "status", "success"));
     try std.testing.expectEqual(@as(usize, 0), countLabelContaining(snapshot.events, "zgraphy status"));
+    try std.testing.expectEqual(@as(usize, 0), countLabelContaining(snapshot.events, "raw-secret-command-name"));
 }
 
 test "runOneShot fault injection preserves shutdown then first-infrastructure then command precedence" {
@@ -151,17 +160,15 @@ test "runOneShot returns a real shutdown flush failure instead of swallowing it"
         &.{"status"},
     );
     defer preflight.deinit();
-    const command_effect = preflight.commandEffect();
 
     try std.testing.expectError(error.CausalNendbStorageBackendFull, Supervisor.runOneShot(
         @TypeOf(layer),
-        @TypeOf(command_effect),
+        @TypeOf(preflight),
         std.testing.allocator,
         std.testing.io,
         tmp.dir,
         layer,
-        preflight.identity.?,
-        command_effect,
+        &preflight,
         .{
             .runtime = .{
                 .graph = .{ .path = "causal", .max_records = 1 },
@@ -205,6 +212,46 @@ test "runOneShot missing required service is a negative compile test" {
     ) != null);
 }
 
+test "runOneShot exact preflight type cannot forge sealed runnable state" {
+    const result = try std.process.run(std.testing.allocator, std.testing.io, .{
+        .argv = &.{
+            "zig",
+            "test",
+            "-ODebug",
+            "--dep",
+            "zigeffect_std",
+            "-Mroot=src/application/forged_preflight_compile_test.zig",
+            "--dep",
+            "zigeffect",
+            "-Mzigeffect_std=src/root.zig",
+            "-Mzigeffect=../zigeffect/src/zigeffect.zig",
+        },
+        .cwd = .inherit,
+        .stdout_limit = .limited(64 * 1024),
+        .stderr_limit = .limited(64 * 1024),
+    });
+    defer std.testing.allocator.free(result.stdout);
+    defer std.testing.allocator.free(result.stderr);
+
+    switch (result.term) {
+        .exited => |code| try std.testing.expect(code != 0),
+        else => return error.UnexpectedCompilerTermination,
+    }
+    try std.testing.expect(std.mem.indexOf(u8, result.stderr, "does not support array initialization syntax") != null);
+}
+
+test "an exact hand-constructed preflight without the opaque seal is not runnable" {
+    const Preflight = Cli.ServicePreflight(Requirements, anyerror);
+    var forged = Preflight{
+        .allocator = std.testing.allocator,
+        .application = success_application,
+    };
+    defer forged.deinit();
+
+    try std.testing.expect(!forged.shouldRun());
+    try std.testing.expectError(error.InvalidCommandPreflight, forged.prepare());
+}
+
 fn runFailureCase(faults: Supervisor.OneShotOptions.TestFaults, expected: anyerror) !void {
     var tmp = std.testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
@@ -221,17 +268,15 @@ fn runFailureCase(faults: Supervisor.OneShotOptions.TestFaults, expected: anyerr
         &.{"status"},
     );
     defer preflight.deinit();
-    const command_effect = preflight.commandEffect();
 
     if (Supervisor.runOneShot(
         @TypeOf(layer),
-        @TypeOf(command_effect),
+        @TypeOf(preflight),
         std.testing.allocator,
         std.testing.io,
         tmp.dir,
         layer,
-        preflight.identity.?,
-        command_effect,
+        &preflight,
         .{
             .runtime = .{
                 .graph = .{ .path = "causal", .max_records = 256 },

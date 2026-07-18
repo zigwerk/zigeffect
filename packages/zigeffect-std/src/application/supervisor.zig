@@ -6,15 +6,19 @@ const Lifecycle = @import("lifecycle.zig");
 
 pub fn runOneShot(
     comptime ApplicationLayer: type,
-    comptime CommandEffect: type,
+    comptime Preflight: type,
     allocator: std.mem.Allocator,
     io: std.Io,
     root: std.Io.Dir,
     application_layer: ApplicationLayer,
-    identity: Cli.CommandIdentity,
-    command_effect: CommandEffect,
+    preflight: *const Preflight,
     options: OneShotOptions,
-) anyerror!OneShotResult(CommandEffect.SuccessType) {
+) anyerror!OneShotResult(Preflight.CommandEffect.SuccessType) {
+    if (comptime !Cli.isFrameworkServicePreflight(Preflight)) {
+        @compileError("runOneShot requires a framework-produced service CLI preflight artifact");
+    }
+    const prepared = try preflight.prepare();
+    const CommandEffect = @TypeOf(prepared.effect);
     const root_layer = fx.kernel.Layer.mergeAll(.{
         application_layer,
         Lifecycle.managerLayer(),
@@ -42,7 +46,7 @@ pub fn runOneShot(
 
     if (infrastructure_failure == null) {
         bump(options.testing.probe, .command);
-        if (runtime.run(command_effect.named(identity.slice()))) |value| {
+        if (runtime.run(prepared.effect.named(prepared.identity.slice()))) |value| {
             command_value = value;
         } else |failure| {
             command_failure = failure;
