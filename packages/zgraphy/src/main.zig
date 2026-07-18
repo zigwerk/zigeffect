@@ -28,16 +28,14 @@ pub fn main(init: std.process.Init) !void {
     var root = try std.Io.Dir.cwd().openDir(init.io, root_path, .{ .iterate = true, .follow_symlinks = false });
     defer root.close(init.io);
     const main_layer = zgraphy.Application.rootLayer(.{ .io = init.io, .root = root, .args = args });
-    const command_effect = preflight.commandEffect();
     _ = try zstd.Application.runOneShot(
         @TypeOf(main_layer),
-        @TypeOf(command_effect),
+        @TypeOf(preflight),
         init.gpa,
         init.io,
         root,
         main_layer,
-        preflight.identity.?,
-        command_effect,
+        &preflight,
         .{ .runtime = .{ .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 4096, .max_wal_bytes = 16 * 1024 * 1024 } } },
     );
 }

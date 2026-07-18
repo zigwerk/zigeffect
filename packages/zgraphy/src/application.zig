@@ -74,7 +74,7 @@ const commands = [_]zstd.Cli.CommandSpec{
     .{ .name = "contracts", .options = &common_options },
     .{ .name = "security", .options = &common_options },
     .{ .name = "evaluation", .options = &common_options },
-    .{ .name = "benchmark", .options = &common_options, .subcommands = &benchmark_commands },
+    .{ .name = "benchmark", .options = &common_options, .subcommands = &benchmark_commands, .default_subcommand = "corpus" },
 };
 
 pub const command_spec = zstd.Cli.CommandSpec{
@@ -101,7 +101,6 @@ const command_paths = [_][]const []const u8{
     &.{ "zgraphy", "contracts" },
     &.{ "zgraphy", "security" },
     &.{ "zgraphy", "evaluation" },
-    &.{ "zgraphy", "benchmark" },
     &.{ "zgraphy", "benchmark", "corpus" },
     &.{ "zgraphy", "benchmark", "lexical" },
     &.{ "zgraphy", "benchmark", "zgraphy" },

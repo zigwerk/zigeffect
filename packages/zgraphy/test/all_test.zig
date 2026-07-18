@@ -105,10 +105,11 @@ test "zgraphy runtime-owned CLI causality checks every outcome and help prefligh
     try assertions.boolean(.{
         .id = "zgraphy.cli.named-command",
         .label = "the one dispatch effect is named from a bounded parsed command identity",
-        .repair_hint = "preflight the service CLI application and pass its one generated command effect plus bounded identity to runOneShot",
+        .repair_hint = "pass the successful service CLI preflight artifact to runOneShot so the framework derives the effect and bounded identity together",
     }, std.mem.count(u8, main_source, "zstd.Application.runOneShot(") == 1 and
-        std.mem.indexOf(u8, main_source, "preflight.commandEffect()") != null and
-        std.mem.indexOf(u8, main_source, "preflight.identity.?") != null);
+        std.mem.indexOf(u8, main_source, "@TypeOf(preflight)") != null and
+        std.mem.indexOf(u8, main_source, "&preflight") != null and
+        std.mem.indexOf(u8, main_source, "preflight.identity") == null);
     try assertions.boolean(.{
         .id = "zgraphy.cli.checked-cleanup",
         .label = "zgraphy contains no application-owned lifecycle or shutdown scaffolding",
@@ -150,9 +151,11 @@ test "zgraphy runtime-owned CLI causality checks every outcome and help prefligh
             &.{name},
         );
         defer preflight.deinit();
+        const prepared = try preflight.prepare();
+        const expected_identity = if (std.mem.eql(u8, name, "benchmark")) "benchmark.corpus" else name;
         dispatch_parity = dispatch_parity and std.mem.indexOf(u8, main_source, dispatch_needle) != null and
             std.mem.indexOf(u8, main_source, help_needle) != null and preflight.shouldRun() and
-            std.mem.eql(u8, preflight.identity.?.slice(), name);
+            std.mem.eql(u8, prepared.identity.slice(), expected_identity);
     }
     for (benchmark_commands) |name| {
         const dispatch_needle = try std.fmt.allocPrint(std.testing.allocator, "subcommand, \"{s}\"", .{name});
@@ -169,9 +172,10 @@ test "zgraphy runtime-owned CLI causality checks every outcome and help prefligh
             &.{ "benchmark", name },
         );
         defer preflight.deinit();
+        const prepared = try preflight.prepare();
         dispatch_parity = dispatch_parity and std.mem.indexOf(u8, main_source, dispatch_needle) != null and
             std.mem.indexOf(u8, main_source, help_needle) != null and preflight.shouldRun() and
-            std.mem.eql(u8, preflight.identity.?.slice(), expected_identity);
+            std.mem.eql(u8, prepared.identity.slice(), expected_identity);
     }
     try assertions.boolean(.{
         .id = "zgraphy.cli.dispatch-parity",
@@ -220,7 +224,7 @@ test "zgraphy runtime-owned CLI causality checks every outcome and help prefligh
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    const args = [_][]const u8{ "zgraphy", "parity" };
+    const args = [_][]const u8{ "zgraphy", "benchmark" };
     const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir, .args = &args });
     var preflight = try zstd.Cli.preflightServiceApplication(
         zgraphy.Application.ApplicationServices,
@@ -230,16 +234,14 @@ test "zgraphy runtime-owned CLI causality checks every outcome and help prefligh
         args[1..],
     );
     defer preflight.deinit();
-    const command_effect = preflight.commandEffect();
     _ = try zstd.Application.runOneShot(
         @TypeOf(layer),
-        @TypeOf(command_effect),
+        @TypeOf(preflight),
         std.testing.allocator,
         std.testing.io,
         tmp.dir,
         layer,
-        preflight.identity.?,
-        command_effect,
+        &preflight,
         .{ .runtime = .{
             .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 256 },
             .causal_store = evidence.causalStore(),
@@ -249,7 +251,7 @@ test "zgraphy runtime-owned CLI causality checks every outcome and help prefligh
         .id = "zgraphy.cli.named-success",
         .label = "the runtime records successful command identity structurally",
         .repair_hint = "let runOneShot name the generated service command effect from preflight identity",
-    }, .{ .kind = .effect_completed, .label = "parity", .status = "success" });
+    }, .{ .kind = .effect_completed, .label = "benchmark.corpus", .status = "success" });
     _ = try assertions.event(.{
         .id = "zgraphy.cli.lifecycle-drained",
         .label = "the framework drains the command runtime",
@@ -276,16 +278,14 @@ test "zgraphy runOneShot returns checked shutdown flush failure after a real com
         args[1..],
     );
     defer preflight.deinit();
-    const command_effect = preflight.commandEffect();
     try std.testing.expectError(error.CausalNendbStorageBackendFull, zstd.Application.runOneShot(
         @TypeOf(layer),
-        @TypeOf(command_effect),
+        @TypeOf(preflight),
         std.testing.allocator,
         std.testing.io,
         tmp.dir,
         layer,
-        preflight.identity.?,
-        command_effect,
+        &preflight,
         .{ .runtime = .{
             .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 1 },
             .causal_store = &causal,
@@ -5248,16 +5248,14 @@ test "zgraphy M3 watch coordinator coalesces and drains one freshness engine" {
         application_args[1..],
     );
     defer lifecycle_preflight.deinit();
-    const lifecycle_command = lifecycle_preflight.commandEffect();
     _ = try zstd.Application.runOneShot(
         @TypeOf(application_layer),
-        @TypeOf(lifecycle_command),
+        @TypeOf(lifecycle_preflight),
         std.testing.allocator,
         std.testing.io,
         tmp.dir,
         application_layer,
-        lifecycle_preflight.identity.?,
-        lifecycle_command,
+        &lifecycle_preflight,
         .{ .runtime = .{ .graph = .{ .path = zgraphy.Application.causal_graph_path } } },
     );
 
