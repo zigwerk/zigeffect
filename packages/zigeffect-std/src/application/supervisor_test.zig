@@ -70,6 +70,55 @@ const GuardSafeWrapper = struct {
     },
 };
 
+// The probe layer type is fixed by the Probe service and its API, so it can be
+// named at container scope and reused by owned-resource factories.
+const ProbeLayer = @TypeOf(fx.kernel.Layer.succeed(Probe, ProbeApi{ .invocations = undefined }));
+
+/// An owned-directory factory whose acquired handle the test can observe. It
+/// opens a real directory, records the handle for after-return inspection, and
+/// asks the framework to close it (`close_directory`).
+const ObservableOwnedFactory = struct {
+    const Self = @This();
+    pub const LayerType = ProbeLayer;
+
+    parent: std.Io.Dir,
+    subdir: []const u8,
+    layer: ProbeLayer,
+    acquired: *?std.Io.Dir,
+
+    pub fn acquire(
+        self: Self,
+        allocator: std.mem.Allocator,
+        io: std.Io,
+        parsed: Cli.ParsedCommand,
+    ) anyerror!Supervisor.CommandResources(ProbeLayer) {
+        _ = allocator;
+        _ = parsed;
+        const owned = try self.parent.openDir(io, self.subdir, .{ .iterate = true, .follow_symlinks = false });
+        self.acquired.* = owned;
+        return .{ .root = owned, .layer = self.layer, .ownership = .close_directory };
+    }
+};
+
+// A spec that exercises zero-acquire arity and missing-handler paths: `pin`
+// requires a positional, `status` declares zero positionals, and `ghost` parses
+// but has no handler.
+const arity_commands = [_]Cli.CommandSpec{
+    .{ .name = "status" },
+    .{ .name = "pin", .positionals = &.{.{ .name = "generation", .kind = .required }} },
+    .{ .name = "ghost" },
+};
+const arity_status_path = [_][]const u8{ "zgraphy", "status" };
+const arity_pin_path = [_][]const u8{ "zgraphy", "pin" };
+const arity_handlers = [_]Cli.ServiceHandler(Requirements, anyerror){
+    .{ .path = arity_status_path[0..], .run = Handlers.succeed },
+    .{ .path = arity_pin_path[0..], .run = Handlers.succeed },
+};
+const arity_application = Cli.ServiceApplication(Requirements, anyerror){
+    .spec = .{ .name = "zgraphy", .subcommands = arity_commands[0..] },
+    .handlers = arity_handlers[0..],
+};
+
 test "runOneShot executes one framework-named service command and checks every lifecycle stage" {
     try std.testing.expect(!@hasDecl(Cli, "CommandIdentity"));
     try std.testing.expect(!@hasDecl(Cli, "ServicePreflight"));
@@ -415,7 +464,7 @@ test "runOneShot lets a factory self-clean a partial acquisition without a frame
     try std.testing.expectEqual(@as(usize, 0), invocations);
 }
 
-test "runOneShot closes an owned directory only after checked shutdown returns" {
+test "runOneShot with owned resources succeeds, persists the graph, and closes the handle after shutdown" {
     var tmp = std.testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     try tmp.dir.createDirPath(std.testing.io, "owned-root");
@@ -424,29 +473,8 @@ test "runOneShot closes an owned directory only after checked shutdown returns" 
     var invocations: usize = 0;
     var probe = Supervisor.OneShotOptions.TestProbe{};
     const layer = fx.kernel.Layer.succeed(Probe, ProbeApi{ .invocations = &invocations });
-
-    // A factory that owns the selected directory and asks the framework to close
-    // it. The framework must close it only after checked shutdown flushes the
-    // runtime graph into that same directory.
-    const OwnedFactory = struct {
-        const Self = @This();
-        pub const LayerType = @TypeOf(layer);
-        parent: std.Io.Dir,
-        layer: @TypeOf(layer),
-
-        pub fn acquire(
-            self: Self,
-            allocator: std.mem.Allocator,
-            io: std.Io,
-            parsed: Cli.ParsedCommand,
-        ) anyerror!Supervisor.CommandResources(@TypeOf(layer)) {
-            _ = allocator;
-            _ = parsed;
-            const owned = try self.parent.openDir(io, "owned-root", .{ .iterate = true, .follow_symlinks = false });
-            return .{ .root = owned, .layer = self.layer, .ownership = .close_directory };
-        }
-    };
-    const factory = OwnedFactory{ .parent = tmp.dir, .layer = layer };
+    var acquired: ?std.Io.Dir = null;
+    const factory = ObservableOwnedFactory{ .parent = tmp.dir, .subdir = "owned-root", .layer = layer, .acquired = &acquired };
 
     const result = try Supervisor.runOneShot(
         @TypeOf(factory),
@@ -468,9 +496,129 @@ test "runOneShot closes an owned directory only after checked shutdown returns" 
     try std.testing.expectEqual(@as(usize, 1), invocations);
     try expectCompleteProbe(probe, 1);
     // The runtime flushed its graph into the owned directory before it closed:
-    // the directory still exists and holds the graph the runtime persisted.
-    try tmp.dir.access(std.testing.io, "owned-root", .{});
+    // the persisted graph exists on disk (reached through the still-open parent).
     try tmp.dir.access(std.testing.io, "owned-root/graph", .{});
+    // The acquired handle was closed exactly once by the framework release and is
+    // no longer usable after runOneShot returns.
+    try std.testing.expect(acquired != null);
+    try expectDescriptorReleased(tmp.dir, std.testing.io, acquired.?.handle);
+}
+
+test "runOneShot releases an owned directory after a real runtime-make failure" {
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(std.testing.io, "owned-root");
+    var invocations: usize = 0;
+    var probe = Supervisor.OneShotOptions.TestProbe{};
+    const layer = fx.kernel.Layer.succeed(Probe, ProbeApi{ .invocations = &invocations });
+    var acquired: ?std.Io.Dir = null;
+    const factory = ObservableOwnedFactory{ .parent = tmp.dir, .subdir = "owned-root", .layer = layer, .acquired = &acquired };
+
+    // Invalid real graph options (`max_record_bytes > max_wal_bytes`) make the
+    // real `ManagedRuntime.make` fail after a successful acquire. This is the
+    // production make-error catch, not the injected pre-make fault.
+    try std.testing.expectError(error.InvalidGraphOptions, Supervisor.runOneShot(
+        @TypeOf(factory),
+        @TypeOf(success_application),
+        std.testing.allocator,
+        std.testing.io,
+        factory,
+        success_application,
+        &.{"status"},
+        .{
+            .runtime = .{ .graph = .{
+                .path = "graph/causal",
+                .max_wal_bytes = 1,
+                .max_record_bytes = 512 * 1024,
+            } },
+            .testing = .{ .probe = &probe },
+        },
+    ));
+    // Acquired once and released once; the make failure outranks command work
+    // that never ran, so no lifecycle stage executed.
+    try std.testing.expectEqual(@as(usize, 1), probe.acquire);
+    try std.testing.expectEqual(@as(usize, 1), probe.release);
+    try std.testing.expectEqual(@as(usize, 0), probe.start);
+    try std.testing.expectEqual(@as(usize, 0), probe.command);
+    try std.testing.expectEqual(@as(usize, 0), probe.shutdown);
+    try std.testing.expectEqual(@as(usize, 0), invocations);
+    try std.testing.expect(acquired != null);
+    try expectDescriptorReleased(tmp.dir, std.testing.io, acquired.?.handle);
+}
+
+test "runOneShot releases an owned directory after a real shutdown-flush failure" {
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(std.testing.io, "owned-root");
+    var causal = fx.CausalStore.init(std.testing.allocator);
+    defer causal.deinit();
+    var invocations: usize = 0;
+    var probe = Supervisor.OneShotOptions.TestProbe{};
+    const layer = fx.kernel.Layer.succeed(Probe, ProbeApi{ .invocations = &invocations });
+    var acquired: ?std.Io.Dir = null;
+    const factory = ObservableOwnedFactory{ .parent = tmp.dir, .subdir = "owned-root", .layer = layer, .acquired = &acquired };
+
+    // A bounded graph forces a real shutdown-flush failure while the resources
+    // are owned. Release still happens exactly once, after checked shutdown.
+    try std.testing.expectError(error.CausalNendbStorageBackendFull, Supervisor.runOneShot(
+        @TypeOf(factory),
+        @TypeOf(failure_application),
+        std.testing.allocator,
+        std.testing.io,
+        factory,
+        failure_application,
+        &.{"status"},
+        .{
+            .runtime = .{
+                .graph = .{ .path = "graph/causal", .max_records = 1 },
+                .causal_store = &causal,
+            },
+            .testing = .{ .probe = &probe },
+        },
+    ));
+    try std.testing.expectEqual(@as(usize, 1), probe.acquire);
+    try std.testing.expectEqual(@as(usize, 1), probe.shutdown);
+    try std.testing.expectEqual(@as(usize, 1), probe.release);
+    // The owned handle is closed after checked shutdown and released on return.
+    try std.testing.expect(acquired != null);
+    try expectDescriptorReleased(tmp.dir, std.testing.io, acquired.?.handle);
+}
+
+test "runOneShot never acquires on arity or missing-handler short circuits" {
+    const Case = struct { argv: []const []const u8 };
+    const cases = [_]Case{
+        .{ .argv = &.{ "status", "extra" } }, // unexpected positional
+        .{ .argv = &.{"pin"} }, // missing required positional
+        .{ .argv = &.{"ghost"} }, // parses to a leaf with no handler
+    };
+    for (cases) |case| {
+        var tmp = std.testing.tmpDir(.{ .iterate = true });
+        defer tmp.cleanup();
+        var invocations: usize = 0;
+        var probe = Supervisor.OneShotOptions.TestProbe{};
+        const layer = fx.kernel.Layer.succeed(Probe, ProbeApi{ .invocations = &invocations });
+        const factory = Supervisor.fixedResources(tmp.dir, layer);
+        const result = try Supervisor.runOneShot(
+            @TypeOf(factory),
+            @TypeOf(arity_application),
+            std.testing.allocator,
+            std.testing.io,
+            factory,
+            arity_application,
+            case.argv,
+            .{
+                .runtime = .{ .graph = .{ .path = ".zgraphy/runtime/causal" } },
+                .testing = .{ .probe = &probe, .write_short_circuit = false },
+            },
+        );
+        try std.testing.expectEqual(Cli.ShortCircuitKind.usage, result.short_circuit.?);
+        try std.testing.expectEqual(Cli.ExitCode.usage, result.exit_code);
+        try std.testing.expect(result.value == null);
+        try std.testing.expectEqual(@as(usize, 0), invocations);
+        // Every probe field — including acquire and release — stays zero.
+        try expectEmptyProbe(probe);
+        try std.testing.expectError(error.FileNotFound, tmp.dir.access(std.testing.io, ".zgraphy", .{}));
+    }
 }
 
 test "runOneShot missing required service is a negative compile test" {
@@ -537,36 +685,52 @@ test "runOneShot rejects an application-shaped identity handoff wrapper at compi
     ) != null);
 }
 
-test "runOneShot rejects a forged resource result that injects command identity at compile time" {
-    const result = try std.process.run(std.testing.allocator, std.testing.io, .{
-        .argv = &.{
-            "zig",
-            "test",
-            "-ODebug",
-            "--dep",
-            "zigeffect_std",
-            "-Mroot=src/application/resource_factory_authority_compile_test.zig",
-            "--dep",
-            "zigeffect",
-            "-Mzigeffect_std=src/root.zig",
-            "-Mzigeffect=../zigeffect/src/zigeffect.zig",
-        },
-        .cwd = .inherit,
-        .stdout_limit = .limited(64 * 1024),
-        .stderr_limit = .limited(64 * 1024),
-    });
-    defer std.testing.allocator.free(result.stdout);
-    defer std.testing.allocator.free(result.stderr);
+test "runOneShot rejects every forbidden resource-factory result shape at compile time" {
+    // Authority mutation matrix: identity/effect/handler/outcome/runtime field
+    // injections plus generic look-alike and pointer/cast-shaped results. Each is
+    // compiled in isolation and must fail closed with the same stable diagnostic.
+    const variants = [_][]const u8{
+        "src/application/authority_fixtures/identity.zig",
+        "src/application/authority_fixtures/effect.zig",
+        "src/application/authority_fixtures/handler.zig",
+        "src/application/authority_fixtures/outcome.zig",
+        "src/application/authority_fixtures/runtime.zig",
+        "src/application/authority_fixtures/generic.zig",
+        "src/application/authority_fixtures/cast.zig",
+    };
+    for (variants) |variant| {
+        const root_arg = try std.fmt.allocPrint(std.testing.allocator, "-Mroot={s}", .{variant});
+        defer std.testing.allocator.free(root_arg);
+        const result = try std.process.run(std.testing.allocator, std.testing.io, .{
+            .argv = &.{
+                "zig",
+                "test",
+                "-ODebug",
+                "--dep",
+                "zigeffect_std",
+                root_arg,
+                "--dep",
+                "zigeffect",
+                "-Mzigeffect_std=src/root.zig",
+                "-Mzigeffect=../zigeffect/src/zigeffect.zig",
+            },
+            .cwd = .inherit,
+            .stdout_limit = .limited(64 * 1024),
+            .stderr_limit = .limited(64 * 1024),
+        });
+        defer std.testing.allocator.free(result.stdout);
+        defer std.testing.allocator.free(result.stderr);
 
-    switch (result.term) {
-        .exited => |code| try std.testing.expect(code != 0),
-        else => return error.UnexpectedCompilerTermination,
+        switch (result.term) {
+            .exited => |code| try std.testing.expect(code != 0),
+            else => return error.UnexpectedCompilerTermination,
+        }
+        try std.testing.expect(std.mem.indexOf(
+            u8,
+            result.stderr,
+            "resource factory acquire must return CommandResources(LayerType)",
+        ) != null);
     }
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        result.stderr,
-        "resource factory acquire must return CommandResources(LayerType)",
-    ) != null);
 }
 
 fn runFailureCase(faults: Supervisor.OneShotOptions.TestFaults, expected: anyerror) !void {
@@ -656,6 +820,19 @@ const command_identity_name_vocabulary = .{
     "decoded",
     "command_effect",
 };
+
+/// Prove the framework released (closed) the acquired directory descriptor
+/// without touching the stale handle directly (operating on a closed fd raises
+/// an uncatchable EBADF trace). The acquired descriptor was the lowest free fd
+/// when it was opened and every descriptor opened after it is closed during
+/// shutdown, so once release closes it, it is again the lowest free fd. Opening
+/// a fresh handle therefore reclaims that exact descriptor number — which only
+/// holds if the framework closed it and did not leak it.
+fn expectDescriptorReleased(parent: std.Io.Dir, io: std.Io, released_fd: std.posix.fd_t) !void {
+    var probe = try parent.openDir(io, ".", .{ .iterate = true, .follow_symlinks = false });
+    defer probe.close(io);
+    try std.testing.expectEqual(released_fd, probe.handle);
+}
 
 fn readSupervisorSource() ![]u8 {
     return std.Io.Dir.cwd().readFileAlloc(
