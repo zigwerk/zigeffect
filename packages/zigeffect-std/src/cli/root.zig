@@ -35,10 +35,19 @@ pub const OptionMeta = struct {
     secret: bool = false,
 };
 
+pub const PositionalKind = enum { required, optional, repeated };
+
+pub const PositionalSpec = struct {
+    name: []const u8,
+    kind: PositionalKind,
+    help: []const u8 = "",
+};
+
 pub const CommandSpec = struct {
     name: []const u8,
     description: []const u8 = "",
     options: []const OptionSpec = &.{},
+    positionals: []const PositionalSpec = &.{},
     subcommands: []const CommandSpec = &.{},
     default_subcommand: ?[]const u8 = null,
 };
@@ -68,7 +77,29 @@ pub const CliError = error{
     MissingOptionValue,
     MissingRequiredOption,
     UnknownSubcommand,
+    MissingSubcommand,
+    MissingPositional,
+    UnexpectedPositional,
     InvalidInteger,
+    // Fail-closed specification errors. A malformed CommandSpec tree is a
+    // programming error and is rejected before any user token is consumed.
+    InvalidPositionalOrder,
+    RepeatedPositionalNotLast,
+    DuplicatePositionalName,
+    EmptyPositionalName,
+    PositionalsWithSubcommands,
+    UnknownDefaultSubcommand,
+};
+
+/// The subset of `CliError` produced by validating a `CommandSpec` tree before
+/// parsing user input. These signal a malformed declaration, not bad input.
+pub const SpecError = error{
+    InvalidPositionalOrder,
+    RepeatedPositionalNotLast,
+    DuplicatePositionalName,
+    EmptyPositionalName,
+    PositionalsWithSubcommands,
+    UnknownDefaultSubcommand,
 };
 
 pub const ExitCode = enum(i32) {
@@ -109,6 +140,27 @@ pub const ParsedCommand = struct {
     pub fn optionValue(self: ParsedCommand, name: []const u8) ?[]const u8 {
         for (self.options) |parsed_option| {
             if (std.mem.eql(u8, parsed_option.name, name)) return parsed_option.value;
+        }
+        return null;
+    }
+
+    /// Indexed positional accessor. Returns null past the parsed positional
+    /// count so callers can express optional arity without bounds checks.
+    pub fn positional(self: ParsedCommand, index: usize) ?[]const u8 {
+        if (index >= self.positionals.len) return null;
+        return self.positionals[index];
+    }
+
+    pub fn positionalCount(self: ParsedCommand) usize {
+        return self.positionals.len;
+    }
+
+    /// Named positional accessor resolved against the leaf command's declared
+    /// positional schema. A `repeated` positional returns its first element;
+    /// use `positional`/`positionals` for the remaining values.
+    pub fn positionalNamed(self: ParsedCommand, active: CommandSpec, name: []const u8) ?[]const u8 {
+        for (active.positionals, 0..) |spec, index| {
+            if (std.mem.eql(u8, spec.name, name)) return self.positional(index);
         }
         return null;
     }
@@ -467,82 +519,180 @@ pub fn runApplication(
     }.execute);
 }
 
+const TokenKind = enum { double_dash, long_option, short_option, plain };
+
+fn classifyToken(arg: []const u8) TokenKind {
+    if (std.mem.eql(u8, arg, "--")) return .double_dash;
+    if (std.mem.startsWith(u8, arg, "--")) return .long_option;
+    if (arg.len == 2 and arg[0] == '-') return .short_option;
+    return .plain;
+}
+
+/// Validate an entire reachable `CommandSpec` tree fail-closed. A malformed
+/// specification can never emit help, completions, or a parsed command; it is
+/// rejected before any user token is consumed.
+pub fn validateCommandTree(spec: CommandSpec) SpecError!void {
+    if (spec.subcommands.len != 0 and spec.positionals.len != 0) {
+        return SpecError.PositionalsWithSubcommands;
+    }
+
+    var seen_optional = false;
+    var seen_repeated = false;
+    for (spec.positionals, 0..) |positional_spec, index| {
+        if (positional_spec.name.len == 0) return SpecError.EmptyPositionalName;
+        for (spec.positionals[0..index]) |earlier| {
+            if (std.mem.eql(u8, earlier.name, positional_spec.name)) {
+                return SpecError.DuplicatePositionalName;
+            }
+        }
+        if (seen_repeated) return SpecError.RepeatedPositionalNotLast;
+        switch (positional_spec.kind) {
+            .required => if (seen_optional) return SpecError.InvalidPositionalOrder,
+            .optional => seen_optional = true,
+            .repeated => seen_repeated = true,
+        }
+    }
+
+    if (spec.default_subcommand) |default_name| {
+        if (findSubcommand(spec, default_name) == null) return SpecError.UnknownDefaultSubcommand;
+    }
+
+    for (spec.subcommands) |subcommand| {
+        try validateCommandTree(subcommand);
+    }
+}
+
+fn ancestorOption(ancestors: []const CommandSpec, name: []const u8) ?OptionSpec {
+    // The closest declaration (deepest matched command) wins for kind and help.
+    var index = ancestors.len;
+    while (index > 0) {
+        index -= 1;
+        if (findOption(ancestors[index], name)) |legacy_option| return legacy_option;
+    }
+    return null;
+}
+
+fn ancestorShortOption(ancestors: []const CommandSpec, short: u8) ?OptionSpec {
+    var index = ancestors.len;
+    while (index > 0) {
+        index -= 1;
+        if (findShortOption(ancestors[index], short)) |legacy_option| return legacy_option;
+    }
+    return null;
+}
+
+fn validatePositionalArity(active: CommandSpec, count: usize) CliError!void {
+    var required: usize = 0;
+    var optional: usize = 0;
+    var has_repeated = false;
+    for (active.positionals) |positional_spec| switch (positional_spec.kind) {
+        .required => required += 1,
+        .optional => optional += 1,
+        .repeated => has_repeated = true,
+    };
+    if (count < required) return CliError.MissingPositional;
+    if (!has_repeated and count > required + optional) return CliError.UnexpectedPositional;
+}
+
 pub fn parse(
     allocator: std.mem.Allocator,
     spec: CommandSpec,
     args: []const []const u8,
 ) !ParsedCommand {
+    try validateCommandTree(spec);
+
     var active = spec;
-    var consumed: usize = 0;
     var path = std.ArrayList([]const u8).empty;
     errdefer path.deinit(allocator);
     try path.append(allocator, spec.name);
 
-    while (consumed < args.len and args[consumed].len > 0 and args[consumed][0] != '-') {
-        if (findSubcommand(active, args[consumed])) |subcommand| {
-            active = subcommand;
-            consumed += 1;
-            try path.append(allocator, subcommand.name);
-        } else if (active.subcommands.len > 0) {
-            return CliError.UnknownSubcommand;
-        } else {
-            break;
-        }
-    }
-
-    if (active.default_subcommand) |default_name| {
-        if (consumed == args.len or (args[consumed].len > 0 and args[consumed][0] == '-')) {
-            const subcommand = findSubcommand(active, default_name) orelse return CliError.UnknownSubcommand;
-            active = subcommand;
-            try path.append(allocator, subcommand.name);
-        }
-    }
+    // The chain of matched commands from the root to `active`. Options declared
+    // on the active command or any matched ancestor are legal after descent.
+    var ancestors = std.ArrayList(CommandSpec).empty;
+    defer ancestors.deinit(allocator);
+    try ancestors.append(allocator, spec);
 
     var options = std.ArrayList(ParsedOption).empty;
     errdefer options.deinit(allocator);
     var positionals = std.ArrayList([]const u8).empty;
     errdefer positionals.deinit(allocator);
 
-    var index = consumed;
-    while (index < args.len) : (index += 1) {
+    var index: usize = 0;
+    while (index < args.len) {
         const arg = args[index];
-        if (std.mem.eql(u8, arg, "--")) {
-            index += 1;
-            while (index < args.len) : (index += 1) {
-                try positionals.append(allocator, args[index]);
-            }
-            break;
-        } else if (std.mem.startsWith(u8, arg, "--")) {
-            const raw = arg[2..];
-            const equals = std.mem.indexOfScalar(u8, raw, '=');
-            const name = if (equals) |eq| raw[0..eq] else raw;
-            const legacy_option = findOption(active, name) orelse return CliError.UnknownOption;
-            const value: ?[]const u8 = switch (legacy_option.kind) {
-                .boolean => "true",
-                .string, .integer => blk: {
-                    if (equals) |eq| break :blk raw[eq + 1 ..];
-                    if (index + 1 >= args.len) return CliError.MissingOptionValue;
+        switch (classifyToken(arg)) {
+            .double_dash => {
+                index += 1;
+                // `--` ends option/path recognition. At a group, select the
+                // default child (if any) before the remaining tokens become
+                // leaf positionals; a group without a default fails closed.
+                if (active.subcommands.len != 0) {
+                    const default_name = active.default_subcommand orelse return CliError.MissingSubcommand;
+                    const child = findSubcommand(active, default_name) orelse return CliError.UnknownDefaultSubcommand;
+                    active = child;
+                    try path.append(allocator, child.name);
+                    try ancestors.append(allocator, child);
+                }
+                while (index < args.len) : (index += 1) {
+                    try positionals.append(allocator, args[index]);
+                }
+                break;
+            },
+            .long_option => {
+                const raw = arg[2..];
+                const equals = std.mem.indexOfScalar(u8, raw, '=');
+                const name = if (equals) |eq| raw[0..eq] else raw;
+                const legacy_option = ancestorOption(ancestors.items, name) orelse return CliError.UnknownOption;
+                const value: ?[]const u8 = switch (legacy_option.kind) {
+                    .boolean => "true",
+                    .string, .integer => blk: {
+                        if (equals) |eq| break :blk raw[eq + 1 ..];
+                        if (index + 1 >= args.len) return CliError.MissingOptionValue;
+                        index += 1;
+                        break :blk args[index];
+                    },
+                };
+                try validateOptionValue(legacy_option, value);
+                try options.append(allocator, .{ .name = legacy_option.name, .value = value });
+                index += 1;
+            },
+            .short_option => {
+                const legacy_option = ancestorShortOption(ancestors.items, arg[1]) orelse return CliError.UnknownOption;
+                const value: ?[]const u8 = switch (legacy_option.kind) {
+                    .boolean => "true",
+                    .string, .integer => blk: {
+                        if (index + 1 >= args.len) return CliError.MissingOptionValue;
+                        index += 1;
+                        break :blk args[index];
+                    },
+                };
+                try validateOptionValue(legacy_option, value);
+                try options.append(allocator, .{ .name = legacy_option.name, .value = value });
+                index += 1;
+            },
+            .plain => {
+                if (active.subcommands.len != 0) {
+                    const child = findSubcommand(active, arg) orelse return CliError.UnknownSubcommand;
+                    active = child;
+                    try path.append(allocator, child.name);
+                    try ancestors.append(allocator, child);
                     index += 1;
-                    break :blk args[index];
-                },
-            };
-            try validateOptionValue(legacy_option, value);
-            try options.append(allocator, .{ .name = legacy_option.name, .value = value });
-        } else if (std.mem.startsWith(u8, arg, "-") and arg.len == 2) {
-            const legacy_option = findShortOption(active, arg[1]) orelse return CliError.UnknownOption;
-            const value: ?[]const u8 = switch (legacy_option.kind) {
-                .boolean => "true",
-                .string, .integer => blk: {
-                    if (index + 1 >= args.len) return CliError.MissingOptionValue;
+                } else {
+                    try positionals.append(allocator, arg);
                     index += 1;
-                    break :blk args[index];
-                },
-            };
-            try validateOptionValue(legacy_option, value);
-            try options.append(allocator, .{ .name = legacy_option.name, .value = value });
-        } else {
-            try positionals.append(allocator, arg);
+                }
+            },
         }
+    }
+
+    // Input ended without an explicit leaf. Executable parsing selects the
+    // default child; a group without a default fails closed.
+    if (active.subcommands.len != 0) {
+        const default_name = active.default_subcommand orelse return CliError.MissingSubcommand;
+        const child = findSubcommand(active, default_name) orelse return CliError.UnknownDefaultSubcommand;
+        active = child;
+        try path.append(allocator, child.name);
+        try ancestors.append(allocator, child);
     }
 
     for (active.options) |legacy_option| {
@@ -550,6 +700,8 @@ pub fn parse(
             return CliError.MissingRequiredOption;
         }
     }
+
+    try validatePositionalArity(active, positionals.items.len);
 
     const owned_path = try path.toOwnedSlice(allocator);
     errdefer allocator.free(owned_path);
@@ -696,12 +848,24 @@ pub fn formatHelp(allocator: std.mem.Allocator, spec: CommandSpec) ![]const u8 {
     errdefer output.deinit(allocator);
 
     if (spec.subcommands.len == 0) {
-        try output.print(allocator, "Usage: {s} [options]\n", .{spec.name});
+        try output.print(allocator, "Usage: {s} [options]", .{spec.name});
     } else {
-        try output.print(allocator, "Usage: {s} [command] [options]\n", .{spec.name});
+        try output.print(allocator, "Usage: {s} [command] [options]", .{spec.name});
     }
+    for (spec.positionals) |positional_spec| {
+        try appendPositionalUsage(&output, allocator, positional_spec);
+    }
+    try output.append(allocator, '\n');
     if (spec.description.len != 0) {
         try output.print(allocator, "\n{s}\n", .{spec.description});
+    }
+    if (spec.positionals.len != 0) {
+        try output.appendSlice(allocator, "\nArguments:\n");
+        for (spec.positionals) |positional_spec| {
+            try output.print(allocator, "  {s}", .{positional_spec.name});
+            try appendSpaces(&output, allocator, 2);
+            try output.print(allocator, "{s}\n", .{positional_spec.help});
+        }
     }
     if (spec.subcommands.len != 0) {
         try output.appendSlice(allocator, "\nCommands:\n");
@@ -742,6 +906,14 @@ pub fn formatCompletions(allocator: std.mem.Allocator, spec: CommandSpec, args: 
         try output.print(allocator, "option --{s}", .{legacy_option.name});
         if (legacy_option.help.len != 0) {
             try output.print(allocator, " {s}", .{legacy_option.help});
+        }
+        try output.append(allocator, '\n');
+    }
+
+    for (active.positionals) |positional_spec| {
+        try output.print(allocator, "positional {s} {s}", .{ @tagName(positional_spec.kind), positional_spec.name });
+        if (positional_spec.help.len != 0) {
+            try output.print(allocator, " {s}", .{positional_spec.help});
         }
         try output.append(allocator, '\n');
     }
@@ -799,6 +971,77 @@ pub fn detectBuiltin(command: anytype, args: []const []const u8) ?BuiltinRequest
     return detectBuiltinNamed(Command.Meta.name, args);
 }
 
+pub const BuiltinMatch = struct {
+    request: BuiltinRequest,
+    /// Explicit subcommand names (excluding the root) that establish the help
+    /// or completion context. Empty means the root command.
+    command_path: []const []const u8 = &.{},
+};
+
+/// Detect a builtin request using the same option/value/`--` consumer as
+/// command parsing. `--help`/`-h` consumed as an option value, or appearing
+/// after `--`, is data — not a help request.
+pub fn detectBuiltinRequest(spec: CommandSpec, argv: []const []const u8) ?BuiltinMatch {
+    if (argv.len == 0) return .{ .request = .help };
+
+    if (std.mem.eql(u8, argv[0], "help")) {
+        if (argv.len == 1 or (argv.len == 2 and std.mem.eql(u8, argv[1], spec.name))) {
+            return .{ .request = .help };
+        }
+        return .{ .request = .help, .command_path = argv[1..] };
+    }
+    if (std.mem.eql(u8, argv[0], "completions")) {
+        return .{ .request = .completions, .command_path = argv[1..] };
+    }
+    if (argv.len == 1 and std.mem.eql(u8, argv[0], "--version")) {
+        return .{ .request = .version };
+    }
+
+    // Walk the command line, consuming options atomically and descending
+    // explicit subcommands, so a `--help`/`-h` that is really an option value
+    // or a post-`--` positional is never mistaken for a help request.
+    var active = spec;
+    var explicit_end: usize = 0;
+    var index: usize = 0;
+    while (index < argv.len) {
+        const arg = argv[index];
+        switch (classifyToken(arg)) {
+            .double_dash => return null,
+            .long_option => {
+                if (std.mem.eql(u8, arg, "--help")) {
+                    return .{ .request = .help, .command_path = argv[0..explicit_end] };
+                }
+                const raw = arg[2..];
+                const equals = std.mem.indexOfScalar(u8, raw, '=');
+                const name = if (equals) |eq| raw[0..eq] else raw;
+                const legacy_option = findOption(active, name);
+                index += 1;
+                if (legacy_option) |resolved| {
+                    if (resolved.kind != .boolean and equals == null) index += 1;
+                }
+            },
+            .short_option => {
+                if (arg[1] == 'h') {
+                    return .{ .request = .help, .command_path = argv[0..explicit_end] };
+                }
+                const legacy_option = findShortOption(active, arg[1]);
+                index += 1;
+                if (legacy_option) |resolved| {
+                    if (resolved.kind != .boolean) index += 1;
+                }
+            },
+            .plain => {
+                if (active.subcommands.len == 0) return null;
+                const child = findSubcommand(active, arg) orelse return null;
+                active = child;
+                index += 1;
+                explicit_end = index;
+            },
+        }
+    }
+    return null;
+}
+
 pub fn formatTypedVersion(allocator: std.mem.Allocator, command: anytype) std.mem.Allocator.Error![]const u8 {
     const Command = @TypeOf(command);
     return std.fmt.allocPrint(allocator, "{s} {s}\n", .{ Command.Meta.name, Command.Meta.version });
@@ -825,8 +1068,18 @@ pub fn exitCodeForError(err: anyerror) ExitCode {
         CliError.MissingOptionValue,
         CliError.MissingRequiredOption,
         CliError.UnknownSubcommand,
+        CliError.MissingSubcommand,
+        CliError.MissingPositional,
+        CliError.UnexpectedPositional,
         CliError.InvalidInteger,
         => .usage,
+        CliError.InvalidPositionalOrder,
+        CliError.RepeatedPositionalNotLast,
+        CliError.DuplicatePositionalName,
+        CliError.EmptyPositionalName,
+        CliError.PositionalsWithSubcommands,
+        CliError.UnknownDefaultSubcommand,
+        => .defect,
         error.MissingVariable, error.MissingValue => .config,
         error.FileNotFound, error.AccessDenied, error.PathAlreadyExists => .io,
         error.Interrupted => .interrupted,
@@ -957,6 +1210,18 @@ fn maxCommandNameWidth(commands: []const CommandSpec) usize {
         width = @max(width, command.name.len);
     }
     return width;
+}
+
+fn appendPositionalUsage(
+    output: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    positional_spec: PositionalSpec,
+) std.mem.Allocator.Error!void {
+    switch (positional_spec.kind) {
+        .required => try output.print(allocator, " <{s}>", .{positional_spec.name}),
+        .optional => try output.print(allocator, " [{s}]", .{positional_spec.name}),
+        .repeated => try output.print(allocator, " [{s}...]", .{positional_spec.name}),
+    }
 }
 
 fn appendSpaces(output: *std.ArrayList(u8), allocator: std.mem.Allocator, count: usize) std.mem.Allocator.Error!void {
@@ -1199,6 +1464,9 @@ test "Cli parses long string option and positional args" {
         .options = &.{
             .{ .name = "name", .kind = .string, .required = true },
         },
+        .positionals = &.{
+            .{ .name = "extra", .kind = .optional },
+        },
     };
 
     var parsed = try parse(std.testing.allocator, command, &.{ "--name", "Sean", "extra" });
@@ -1220,7 +1488,7 @@ test "Cli rejects unknown option" {
 
 test "Cli routes one subcommand" {
     const subcommands = [_]CommandSpec{
-        .{ .name = "hello" },
+        .{ .name = "hello", .positionals = &.{.{ .name = "target", .kind = .optional }} },
     };
     const command = CommandSpec{
         .name = "zg",
@@ -1317,6 +1585,7 @@ test "Cli parser releases every partial result on allocation failure" {
     const command = CommandSpec{
         .name = "zg",
         .options = &.{.{ .name = "count", .short = 'c', .kind = .integer, .required = true }},
+        .positionals = &.{.{ .name = "item", .kind = .optional }},
     };
     const Harness = struct {
         fn run(allocator: std.mem.Allocator, spec: CommandSpec) !void {
@@ -1336,7 +1605,7 @@ test "Cli maps errors to deterministic exit codes" {
 
 test "Cli routes nested subcommands" {
     const leaf = [_]CommandSpec{
-        .{ .name = "status" },
+        .{ .name = "status", .positionals = &.{.{ .name = "repo", .kind = .optional }} },
     };
     const middle = [_]CommandSpec{
         .{ .name = "workspace", .subcommands = leaf[0..] },
@@ -1744,6 +2013,7 @@ test "Cli parse releases staged owned slices on every allocation failure" {
             const command = CommandSpec{
                 .name = "serve",
                 .options = &.{.{ .name = "port", .kind = .integer }},
+                .positionals = &.{.{ .name = "workspace", .kind = .optional }},
             };
             var parsed = try parse(allocator, command, &.{ "--port", "5178", "workspace" });
             defer parsed.deinit(allocator);
@@ -1760,4 +2030,285 @@ test "Cli service applications expose declarative requirements without command i
     try std.testing.expect(!@hasField(Parsed, "identity"));
     try std.testing.expect(!@hasField(Parsed, "parsed"));
     try std.testing.expect(!@hasField(Parsed, "sealed_command"));
+}
+
+// ---------------------------------------------------------------------------
+// Declarative positional grammar (Ticket 01)
+// ---------------------------------------------------------------------------
+
+const grammar_leaf_options = [_]OptionSpec{
+    .{ .name = "json", .kind = .boolean },
+    .{ .name = "root", .kind = .string },
+    .{ .name = "count", .kind = .integer },
+    .{ .name = "verbose", .kind = .string },
+};
+
+const grammar_group_options = [_]OptionSpec{
+    .{ .name = "json", .kind = .boolean },
+    .{ .name = "root", .kind = .string },
+    .{ .name = "trace", .kind = .boolean },
+    .{ .name = "verbose", .kind = .boolean },
+};
+
+const grammar_lexical_positionals = [_]PositionalSpec{
+    .{ .name = "fixture-id", .kind = .required },
+    .{ .name = "fixture-root", .kind = .optional },
+};
+
+const grammar_files_positionals = [_]PositionalSpec{
+    .{ .name = "path", .kind = .repeated },
+};
+
+const grammar_benchmark_subcommands = [_]CommandSpec{
+    .{ .name = "corpus", .options = &grammar_leaf_options },
+    .{ .name = "lexical", .options = &grammar_leaf_options, .positionals = &grammar_lexical_positionals },
+    .{ .name = "files", .options = &grammar_leaf_options, .positionals = &grammar_files_positionals },
+};
+
+const grammar_top_subcommands = [_]CommandSpec{
+    .{ .name = "benchmark", .options = &grammar_group_options, .subcommands = &grammar_benchmark_subcommands, .default_subcommand = "corpus" },
+    .{ .name = "status", .options = &grammar_leaf_options },
+    .{ .name = "pin", .options = &grammar_leaf_options, .positionals = &.{.{ .name = "generation", .kind = .required }} },
+};
+
+const grammar_spec = CommandSpec{
+    .name = "zg",
+    .subcommands = &grammar_top_subcommands,
+};
+
+test "Cli validates the command spec tree fail closed before consuming input" {
+    try validateCommandTree(grammar_spec);
+
+    try std.testing.expectError(SpecError.InvalidPositionalOrder, validateCommandTree(.{
+        .name = "c",
+        .positionals = &.{ .{ .name = "a", .kind = .optional }, .{ .name = "b", .kind = .required } },
+    }));
+    try std.testing.expectError(SpecError.RepeatedPositionalNotLast, validateCommandTree(.{
+        .name = "c",
+        .positionals = &.{ .{ .name = "a", .kind = .repeated }, .{ .name = "b", .kind = .repeated } },
+    }));
+    try std.testing.expectError(SpecError.RepeatedPositionalNotLast, validateCommandTree(.{
+        .name = "c",
+        .positionals = &.{ .{ .name = "a", .kind = .repeated }, .{ .name = "b", .kind = .optional } },
+    }));
+    try std.testing.expectError(SpecError.EmptyPositionalName, validateCommandTree(.{
+        .name = "c",
+        .positionals = &.{.{ .name = "", .kind = .required }},
+    }));
+    try std.testing.expectError(SpecError.DuplicatePositionalName, validateCommandTree(.{
+        .name = "c",
+        .positionals = &.{ .{ .name = "a", .kind = .required }, .{ .name = "a", .kind = .optional } },
+    }));
+    try std.testing.expectError(SpecError.PositionalsWithSubcommands, validateCommandTree(.{
+        .name = "c",
+        .positionals = &.{.{ .name = "a", .kind = .optional }},
+        .subcommands = &.{.{ .name = "x" }},
+    }));
+    try std.testing.expectError(SpecError.UnknownDefaultSubcommand, validateCommandTree(.{
+        .name = "c",
+        .subcommands = &.{.{ .name = "x" }},
+        .default_subcommand = "y",
+    }));
+    // A malformed nested command is caught during recursive validation.
+    try std.testing.expectError(SpecError.EmptyPositionalName, validateCommandTree(.{
+        .name = "c",
+        .subcommands = &.{.{ .name = "x", .positionals = &.{.{ .name = "", .kind = .required }} }},
+    }));
+    // parse refuses a malformed spec before touching user input.
+    try std.testing.expectError(SpecError.PositionalsWithSubcommands, parse(std.testing.allocator, .{
+        .name = "c",
+        .positionals = &.{.{ .name = "a", .kind = .optional }},
+        .subcommands = &.{.{ .name = "x" }},
+    }, &.{}));
+}
+
+test "Cli treats an empty positional schema as exactly zero positionals" {
+    try std.testing.expectError(
+        CliError.UnexpectedPositional,
+        parse(std.testing.allocator, .{ .name = "status" }, &.{"extra"}),
+    );
+
+    var parsed = try parse(std.testing.allocator, .{ .name = "status" }, &.{});
+    defer parsed.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 0), parsed.positionalCount());
+}
+
+test "Cli enforces required optional and repeated positional arity" {
+    const lexical = CommandSpec{ .name = "lexical", .positionals = &grammar_lexical_positionals };
+    const files = CommandSpec{ .name = "files", .positionals = &grammar_files_positionals };
+
+    try std.testing.expectError(CliError.MissingPositional, parse(std.testing.allocator, lexical, &.{}));
+
+    {
+        var parsed = try parse(std.testing.allocator, lexical, &.{"fx"});
+        defer parsed.deinit(std.testing.allocator);
+        try std.testing.expectEqualStrings("fx", parsed.positional(0).?);
+        try std.testing.expect(parsed.positional(1) == null);
+        try std.testing.expectEqualStrings("fx", parsed.positionalNamed(lexical, "fixture-id").?);
+    }
+    {
+        var parsed = try parse(std.testing.allocator, lexical, &.{ "fx", "root" });
+        defer parsed.deinit(std.testing.allocator);
+        try std.testing.expectEqualStrings("root", parsed.positionalNamed(lexical, "fixture-root").?);
+    }
+
+    try std.testing.expectError(CliError.UnexpectedPositional, parse(std.testing.allocator, lexical, &.{ "a", "b", "c" }));
+
+    {
+        var parsed = try parse(std.testing.allocator, files, &.{ "a", "b", "c" });
+        defer parsed.deinit(std.testing.allocator);
+        try std.testing.expectEqual(@as(usize, 3), parsed.positionalCount());
+    }
+    {
+        var parsed = try parse(std.testing.allocator, files, &.{});
+        defer parsed.deinit(std.testing.allocator);
+        try std.testing.expectEqual(@as(usize, 0), parsed.positionalCount());
+    }
+}
+
+test "Cli accepts options before between and after explicit subcommands" {
+    const forms = [_][]const []const u8{
+        &.{ "benchmark", "--json", "lexical", "fx" },
+        &.{ "benchmark", "lexical", "--json", "fx" },
+        &.{ "benchmark", "lexical", "fx", "--json" },
+    };
+    for (forms) |form| {
+        var parsed = try parse(std.testing.allocator, grammar_spec, form);
+        defer parsed.deinit(std.testing.allocator);
+        try std.testing.expectEqual(@as(usize, 3), parsed.path.len);
+        try std.testing.expectEqualStrings("zg", parsed.path[0]);
+        try std.testing.expectEqualStrings("benchmark", parsed.path[1]);
+        try std.testing.expectEqualStrings("lexical", parsed.path[2]);
+        try std.testing.expectEqualStrings("fx", parsed.positional(0).?);
+        try std.testing.expectEqualStrings("true", parsed.optionValue("json").?);
+    }
+}
+
+test "Cli consumes an option value equal to a subcommand name atomically" {
+    var parsed = try parse(std.testing.allocator, grammar_spec, &.{ "benchmark", "--root", "lexical" });
+    defer parsed.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("lexical", parsed.optionValue("root").?);
+    try std.testing.expectEqualStrings("corpus", parsed.command);
+    try std.testing.expectEqual(@as(usize, 3), parsed.path.len);
+    try std.testing.expectEqualStrings("corpus", parsed.path[2]);
+}
+
+test "Cli treats tokens after -- as positionals and selects defaults at groups" {
+    {
+        var parsed = try parse(std.testing.allocator, grammar_spec, &.{ "benchmark", "lexical", "--", "--json" });
+        defer parsed.deinit(std.testing.allocator);
+        try std.testing.expectEqualStrings("lexical", parsed.command);
+        try std.testing.expectEqualStrings("--json", parsed.positional(0).?);
+        try std.testing.expect(parsed.optionValue("json") == null);
+    }
+    // A `--` at a group with a default selects it, then slurps positionals.
+    {
+        const group = CommandSpec{
+            .name = "zg2",
+            .subcommands = &.{.{ .name = "files", .positionals = &grammar_files_positionals }},
+            .default_subcommand = "files",
+        };
+        var parsed = try parse(std.testing.allocator, group, &.{ "--", "a", "b" });
+        defer parsed.deinit(std.testing.allocator);
+        try std.testing.expectEqualStrings("files", parsed.command);
+        try std.testing.expectEqual(@as(usize, 2), parsed.positionalCount());
+    }
+    // The default leaf still validates arity on the slurped positionals.
+    try std.testing.expectError(
+        CliError.UnexpectedPositional,
+        parse(std.testing.allocator, grammar_spec, &.{ "benchmark", "--", "x" }),
+    );
+}
+
+test "Cli keeps first occurrence but validates every duplicate option" {
+    var parsed = try parse(std.testing.allocator, grammar_spec, &.{ "status", "--root", "a", "--root", "b" });
+    defer parsed.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("a", parsed.optionValue("root").?);
+
+    try std.testing.expectError(
+        CliError.InvalidInteger,
+        parse(std.testing.allocator, grammar_spec, &.{ "status", "--count", "1", "--count", "nope" }),
+    );
+}
+
+test "Cli selects the default child only without an explicit leaf" {
+    {
+        var parsed = try parse(std.testing.allocator, grammar_spec, &.{"benchmark"});
+        defer parsed.deinit(std.testing.allocator);
+        try std.testing.expectEqualStrings("corpus", parsed.command);
+    }
+    {
+        var parsed = try parse(std.testing.allocator, grammar_spec, &.{ "benchmark", "lexical", "fx" });
+        defer parsed.deinit(std.testing.allocator);
+        try std.testing.expectEqualStrings("lexical", parsed.command);
+    }
+}
+
+test "Cli fails closed at a group without an explicit or default child" {
+    const group = CommandSpec{ .name = "zg3", .subcommands = &.{.{ .name = "x" }} };
+    try std.testing.expectError(CliError.MissingSubcommand, parse(std.testing.allocator, group, &.{}));
+    try std.testing.expectError(CliError.MissingSubcommand, parse(std.testing.allocator, group, &.{"--"}));
+    try std.testing.expectError(CliError.UnknownSubcommand, parse(std.testing.allocator, group, &.{"nope"}));
+}
+
+test "Cli resolves ancestor options after descent with the closest declaration winning" {
+    {
+        var parsed = try parse(std.testing.allocator, grammar_spec, &.{ "benchmark", "lexical", "fx", "--trace" });
+        defer parsed.deinit(std.testing.allocator);
+        try std.testing.expectEqualStrings("true", parsed.optionValue("trace").?);
+    }
+    {
+        // `verbose` is boolean on the group but string on the leaf; the leaf wins.
+        var parsed = try parse(std.testing.allocator, grammar_spec, &.{ "benchmark", "lexical", "fx", "--verbose", "loud" });
+        defer parsed.deinit(std.testing.allocator);
+        try std.testing.expectEqualStrings("loud", parsed.optionValue("verbose").?);
+    }
+    // An option not declared on the current (root) command is illegal before a child.
+    try std.testing.expectError(
+        CliError.UnknownOption,
+        parse(std.testing.allocator, grammar_spec, &.{ "--json", "status" }),
+    );
+}
+
+test "Cli builtin detection shares the option value and delimiter consumer" {
+    try std.testing.expectEqual(BuiltinRequest.help, detectBuiltinRequest(grammar_spec, &.{}).?.request);
+    try std.testing.expectEqual(BuiltinRequest.help, detectBuiltinRequest(grammar_spec, &.{"--help"}).?.request);
+    try std.testing.expectEqual(BuiltinRequest.version, detectBuiltinRequest(grammar_spec, &.{"--version"}).?.request);
+    try std.testing.expectEqual(BuiltinRequest.completions, detectBuiltinRequest(grammar_spec, &.{"completions"}).?.request);
+
+    {
+        const match = detectBuiltinRequest(grammar_spec, &.{ "benchmark", "--help" }).?;
+        try std.testing.expectEqual(BuiltinRequest.help, match.request);
+        try std.testing.expectEqual(@as(usize, 1), match.command_path.len);
+        try std.testing.expectEqualStrings("benchmark", match.command_path[0]);
+    }
+    {
+        const match = detectBuiltinRequest(grammar_spec, &.{ "help", "benchmark" }).?;
+        try std.testing.expectEqualStrings("benchmark", match.command_path[0]);
+    }
+
+    // `--help` consumed as an option value or after `--` is data, not a request.
+    try std.testing.expect(detectBuiltinRequest(grammar_spec, &.{ "benchmark", "--root", "--help" }) == null);
+    try std.testing.expect(detectBuiltinRequest(grammar_spec, &.{ "benchmark", "--", "--help" }) == null);
+    try std.testing.expectEqual(BuiltinRequest.help, detectBuiltinRequest(grammar_spec, &.{ "benchmark", "-h" }).?.request);
+}
+
+test "Cli help and completions render declared positionals" {
+    const lexical = CommandSpec{
+        .name = "lexical",
+        .description = "run a lexical benchmark",
+        .options = &.{.{ .name = "json", .kind = .boolean, .help = "json output" }},
+        .positionals = &grammar_lexical_positionals,
+    };
+
+    const help = try formatHelp(std.testing.allocator, lexical);
+    defer std.testing.allocator.free(help);
+    try std.testing.expect(std.mem.indexOf(u8, help, "Usage: lexical [options] <fixture-id> [fixture-root]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, help, "Arguments:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, help, "fixture-id") != null);
+
+    const completions = try formatCompletions(std.testing.allocator, lexical, &.{});
+    defer std.testing.allocator.free(completions);
+    try std.testing.expect(std.mem.indexOf(u8, completions, "positional required fixture-id") != null);
+    try std.testing.expect(std.mem.indexOf(u8, completions, "positional optional fixture-root") != null);
 }

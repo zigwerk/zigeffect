@@ -53,6 +53,13 @@ fn runParsedServiceApplication(
     argv: []const []const u8,
     options: OneShotOptions,
 ) anyerror!OneShotResult(ServiceApp.SuccessType) {
+    // Fail closed on a malformed specification before detecting builtins or
+    // consuming any user token: a bad spec must never emit help or completions.
+    Cli.validateCommandTree(application.spec) catch |failure| {
+        const output = try usageOutputAlloc(allocator, application.spec, failure);
+        return emitShortCircuit(ServiceApp.SuccessType, allocator, io, usageShortCircuit(output), options.testing.write_short_circuit);
+    };
+
     if (try parsedBuiltinShortCircuitAlloc(allocator, application, argv)) |short_circuit| {
         return emitShortCircuit(ServiceApp.SuccessType, allocator, io, short_circuit, options.testing.write_short_circuit);
     }
@@ -371,40 +378,12 @@ fn typedCommandEffect(
     }.execute);
 }
 
-const ParsedBuiltinMatch = struct {
-    request: Cli.BuiltinRequest,
-    command_path: []const []const u8 = &.{},
-};
-
-fn detectParsedBuiltin(spec: Cli.CommandSpec, argv: []const []const u8) ?ParsedBuiltinMatch {
-    if (argv.len == 0) return .{ .request = .help };
-    if (argv.len == 1 and (std.mem.eql(u8, argv[0], "--help") or std.mem.eql(u8, argv[0], "-h"))) {
-        return .{ .request = .help };
-    }
-    if (argv.len == 1 and std.mem.eql(u8, argv[0], "--version")) return .{ .request = .version };
-    if (argv.len == 1 and std.mem.eql(u8, argv[0], "completions")) return .{ .request = .completions };
-    if (std.mem.eql(u8, argv[0], "help")) {
-        if (argv.len == 1 or (argv.len == 2 and std.mem.eql(u8, argv[1], spec.name))) {
-            return .{ .request = .help };
-        }
-        return .{ .request = .help, .command_path = argv[1..] };
-    }
-    if (std.mem.eql(u8, argv[0], "completions")) {
-        return .{ .request = .completions, .command_path = argv[1..] };
-    }
-    const last = argv[argv.len - 1];
-    if (std.mem.eql(u8, last, "--help") or std.mem.eql(u8, last, "-h")) {
-        return .{ .request = .help, .command_path = argv[0 .. argv.len - 1] };
-    }
-    return null;
-}
-
 fn parsedBuiltinShortCircuitAlloc(
     allocator: std.mem.Allocator,
     application: anytype,
     argv: []const []const u8,
 ) !?Cli.ShortCircuit {
-    const builtin = detectParsedBuiltin(application.spec, argv) orelse return null;
+    const builtin = Cli.detectBuiltinRequest(application.spec, argv) orelse return null;
     const output = switch (builtin.request) {
         .help => help: {
             const active = activeCommandSpecForArgs(application.spec, builtin.command_path) catch |failure| {
