@@ -625,19 +625,6 @@ fn validatePositionalArity(active: CommandSpec, count: usize) CliError!void {
     if (!has_repeated and count > required + optional) return CliError.UnexpectedPositional;
 }
 
-/// Whether `count` positionals exceed the command's declared upper bound. Used
-/// to validate explicit `help`/`completions` operands: a help or completion
-/// request never *requires* positionals (you may ask for help on a leaf without
-/// supplying its arguments), but a trailing operand past the leaf's maximum
-/// arity is an invalid command-path token, not a silent positional.
-fn exceedsPositionalArity(active: CommandSpec, count: usize) bool {
-    var upper: usize = 0;
-    for (active.positionals) |positional_spec| switch (positional_spec.kind) {
-        .required, .optional => upper += 1,
-        .repeated => return false,
-    };
-    return count > upper;
-}
 
 /// The single shared token resolver used by both command parsing and builtin
 /// detection. It walks argv exactly once: descending explicit subcommands,
@@ -903,7 +890,7 @@ pub fn resolve(
             return rootRequest(allocator, spec, .help);
         }
         var resolution = try resolveCommandLine(allocator, spec, argv[1..], false);
-        captureBuiltinOverArity(&resolution);
+        captureBuiltinLeafOperand(&resolution);
         return .{
             .allocator = allocator,
             .kind = .help,
@@ -913,7 +900,7 @@ pub fn resolve(
     }
     if (std.mem.eql(u8, argv[0], "completions")) {
         var resolution = try resolveCommandLine(allocator, spec, argv[1..], false);
-        captureBuiltinOverArity(&resolution);
+        captureBuiltinLeafOperand(&resolution);
         return .{ .allocator = allocator, .kind = .completions, .root_context = false, .resolution = resolution };
     }
     if (argv.len == 1 and std.mem.eql(u8, argv[0], "--version")) {
@@ -932,14 +919,16 @@ fn rootRequest(allocator: std.mem.Allocator, spec: CommandSpec, kind: RequestKin
     return .{ .allocator = allocator, .kind = kind, .root_context = true, .resolution = resolution };
 }
 
-/// Explicit `help`/`completions` operands are command-path tokens only. Once a
-/// leaf is resolved, a trailing plain operand past its declared arity is an
-/// invalid suffix — captured as a contextual `UnexpectedPositional` at the leaf
-/// so the supervisor renders usage/64 instead of a success short circuit. This
-/// does not run for the inline `command ... --help` token consumer.
-fn captureBuiltinOverArity(resolution: *Resolution) void {
+/// Explicit `help`/`completions` operands are command-path/options only. Once a
+/// leaf is resolved, the first subsequent plain operand — any collected
+/// positional — is an invalid suffix, captured as a contextual
+/// `UnexpectedPositional` at the leaf so the supervisor renders usage/64 instead
+/// of a success short circuit, regardless of the leaf's executable positional
+/// schema (required/optional/repeated). This does not run for the inline
+/// `command ... --help` token consumer or for ordinary execution parsing.
+fn captureBuiltinLeafOperand(resolution: *Resolution) void {
     if (resolution.failure != null) return;
-    if (exceedsPositionalArity(resolution.active, resolution.positionals.items.len)) {
+    if (resolution.positionals.items.len != 0) {
         resolution.fail(CliError.UnexpectedPositional);
     }
 }
@@ -2632,9 +2621,10 @@ test "Cli resolve converges builtins help completions and usage on one validated
         try std.testing.expectEqualStrings("benchmark", r.commandPath()[1]);
     }
 
-    // Explicit builtin operands are command-path tokens only: a trailing plain
-    // operand past a leaf's declared arity is an invalid suffix, captured as a
-    // contextual UnexpectedPositional at the leaf (usage/64 in the supervisor).
+    // Explicit builtin operands are command-path/options only. Once a leaf is
+    // selected, the FIRST subsequent plain operand is an invalid suffix,
+    // captured as a contextual UnexpectedPositional at the leaf (usage/64 in the
+    // supervisor) — regardless of the leaf's executable positional schema.
     {
         // corpus declares an exact-zero positional schema.
         var r = try resolve(alloc, grammar_spec, &.{ "help", "benchmark", "corpus", "extra" });
@@ -2652,22 +2642,29 @@ test "Cli resolve converges builtins help completions and usage on one validated
         try std.testing.expectEqualStrings("corpus", r.active().name);
     }
     {
-        // lexical accepts at most two positionals; three is over arity.
-        var r = try resolve(alloc, grammar_spec, &.{ "help", "benchmark", "lexical", "fixture-a", "fixture-b", "fixture-c" });
+        // lexical declares a required + optional positional, but explicit help
+        // still rejects the FIRST operand after the leaf.
+        var r = try resolve(alloc, grammar_spec, &.{ "help", "benchmark", "lexical", "fixture-a" });
         defer r.deinit();
         try std.testing.expectEqual(RequestKind.help, r.kind);
         try std.testing.expectEqual(CliError.UnexpectedPositional, r.failure().?);
         try std.testing.expectEqualStrings("lexical", r.active().name);
     }
     {
-        // Within declared arity, help on a leaf still succeeds and never
-        // requires the leaf's positionals.
-        var r = try resolve(alloc, grammar_spec, &.{ "help", "benchmark", "lexical", "fixture-a" });
+        var r = try resolve(alloc, grammar_spec, &.{ "help", "benchmark", "lexical", "fixture-a", "fixture-b" });
         defer r.deinit();
         try std.testing.expectEqual(RequestKind.help, r.kind);
-        try std.testing.expect(r.failure() == null);
+        try std.testing.expectEqual(CliError.UnexpectedPositional, r.failure().?);
+        try std.testing.expectEqualStrings("lexical", r.active().name);
     }
     {
+        var r = try resolve(alloc, grammar_spec, &.{ "completions", "benchmark", "lexical", "fixture-a" });
+        defer r.deinit();
+        try std.testing.expectEqual(RequestKind.completions, r.kind);
+        try std.testing.expectEqual(CliError.UnexpectedPositional, r.failure().?);
+    }
+    {
+        // Asking for help on a leaf without any operand still succeeds.
         var r = try resolve(alloc, grammar_spec, &.{ "help", "benchmark", "lexical" });
         defer r.deinit();
         try std.testing.expectEqual(RequestKind.help, r.kind);
@@ -2675,11 +2672,21 @@ test "Cli resolve converges builtins help completions and usage on one validated
     }
     {
         // Inline `command ... --help` keeps its own token-consumer semantics:
-        // a positional before the flag is data, not a builtin over-arity error.
+        // a positional before the flag is command data, not a builtin operand.
         var r = try resolve(alloc, grammar_spec, &.{ "benchmark", "lexical", "fx", "--help" });
         defer r.deinit();
         try std.testing.expectEqual(RequestKind.help, r.kind);
         try std.testing.expect(r.failure() == null);
+    }
+    {
+        // Ordinary execution arity is unchanged: lexical requires one positional.
+        var r = try resolve(alloc, grammar_spec, &.{ "benchmark", "lexical", "fx" });
+        defer r.deinit();
+        try std.testing.expectEqual(RequestKind.execute, r.kind);
+        try std.testing.expect(r.failure() == null);
+        var parsed = try r.finalizeExecute();
+        defer parsed.deinit(alloc);
+        try std.testing.expectEqualStrings("fx", parsed.positional(0).?);
     }
 }
 
