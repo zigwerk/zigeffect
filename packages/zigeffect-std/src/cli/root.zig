@@ -642,9 +642,9 @@ const Resolution = struct {
     options: std.ArrayList(ParsedOption),
     positionals: std.ArrayList([]const u8),
     ancestors: std.ArrayList(CommandSpec),
-    /// Set only when `detect_builtin` is true and a standalone `--help`/`-h`
-    /// token is reached as a fresh token (never as an option value or after
-    /// `--`). `builtin_path_len` is the explicit child count at that point.
+    /// Set only in `.execute` mode when a standalone `--help`/`-h` token is
+    /// reached as a fresh token (never as an option value or after `--`).
+    /// `builtin_path_len` is the explicit child count at that point.
     builtin: ?BuiltinRequest = null,
     builtin_path_len: usize = 0,
     /// The first token-consumption failure, captured rather than thrown so a
@@ -671,11 +671,21 @@ const Resolution = struct {
     }
 };
 
+/// How `resolveCommandLine` treats tokens once a leaf is reached.
+///   - `.execute`: promote a fresh inline `--help`/`-h` to a builtin request;
+///     collect positionals for later arity validation.
+///   - `.path`: no inline builtin detection; collect positionals (for `parse`).
+///   - `.builtin_operand`: explicit `help`/`completions` — operands are
+///     command-path/options only, so the first plain operand after a leaf is
+///     captured as `UnexpectedPositional` immediately and suffix consumption
+///     stops, so a later option/value error can never overwrite it.
+const ResolveMode = enum { execute, path, builtin_operand };
+
 fn resolveCommandLine(
     allocator: std.mem.Allocator,
     spec: CommandSpec,
     args: []const []const u8,
-    detect_builtin: bool,
+    mode: ResolveMode,
 ) !Resolution {
     var resolution = Resolution{
         .active = spec,
@@ -696,7 +706,7 @@ fn resolveCommandLine(
         // not following `--` — is a builtin request. Because option values are
         // consumed atomically inside the option branch, a value equal to
         // `--help` is never reached here.
-        if (detect_builtin and (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h"))) {
+        if (mode == .execute and (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h"))) {
             resolution.builtin = .help;
             resolution.builtin_path_len = resolution.path.items.len - 1;
             return resolution;
@@ -705,6 +715,12 @@ fn resolveCommandLine(
         switch (classifyToken(arg)) {
             .double_dash => {
                 index += 1;
+                // In explicit-builtin mode any post-`--` operand is an invalid
+                // suffix; capture it at the current context and stop.
+                if (mode == .builtin_operand and index < args.len) {
+                    resolution.fail(CliError.UnexpectedPositional);
+                    return resolution;
+                }
                 while (index < args.len) : (index += 1) {
                     try resolution.positionals.append(allocator, args[index]);
                 }
@@ -770,6 +786,12 @@ fn resolveCommandLine(
                     try resolution.path.append(allocator, child.name);
                     try resolution.ancestors.append(allocator, child);
                     index += 1;
+                } else if (mode == .builtin_operand) {
+                    // The leaf is selected; the first plain operand is an invalid
+                    // builtin suffix. Capture it and stop before consuming any
+                    // later option/value token, so it cannot be overwritten.
+                    resolution.fail(CliError.UnexpectedPositional);
+                    return resolution;
                 } else {
                     try resolution.positionals.append(allocator, arg);
                     index += 1;
@@ -825,7 +847,7 @@ pub fn parse(
     args: []const []const u8,
 ) !ParsedCommand {
     try validateCommandTree(spec);
-    var resolution = try resolveCommandLine(allocator, spec, args, false);
+    var resolution = try resolveCommandLine(allocator, spec, args, .path);
     defer resolution.deinit(allocator);
     return finalizeResolution(allocator, &resolution);
 }
@@ -889,8 +911,7 @@ pub fn resolve(
         if (argv.len == 1 or (argv.len == 2 and std.mem.eql(u8, argv[1], spec.name))) {
             return rootRequest(allocator, spec, .help);
         }
-        var resolution = try resolveCommandLine(allocator, spec, argv[1..], false);
-        captureBuiltinLeafOperand(&resolution);
+        const resolution = try resolveCommandLine(allocator, spec, argv[1..], .builtin_operand);
         return .{
             .allocator = allocator,
             .kind = .help,
@@ -899,8 +920,7 @@ pub fn resolve(
         };
     }
     if (std.mem.eql(u8, argv[0], "completions")) {
-        var resolution = try resolveCommandLine(allocator, spec, argv[1..], false);
-        captureBuiltinLeafOperand(&resolution);
+        const resolution = try resolveCommandLine(allocator, spec, argv[1..], .builtin_operand);
         return .{ .allocator = allocator, .kind = .completions, .root_context = false, .resolution = resolution };
     }
     if (argv.len == 1 and std.mem.eql(u8, argv[0], "--version")) {
@@ -908,29 +928,15 @@ pub fn resolve(
     }
 
     // Execution, with inline `--help`/`-h` promoted to a help request.
-    const resolution = try resolveCommandLine(allocator, spec, argv, true);
+    const resolution = try resolveCommandLine(allocator, spec, argv, .execute);
     const kind: RequestKind = if (resolution.builtin == .help) .help else .execute;
     const root_context = kind == .help and resolution.builtin_path_len == 0;
     return .{ .allocator = allocator, .kind = kind, .root_context = root_context, .resolution = resolution };
 }
 
 fn rootRequest(allocator: std.mem.Allocator, spec: CommandSpec, kind: RequestKind) !ResolvedRequest {
-    const resolution = try resolveCommandLine(allocator, spec, &.{}, false);
+    const resolution = try resolveCommandLine(allocator, spec, &.{}, .path);
     return .{ .allocator = allocator, .kind = kind, .root_context = true, .resolution = resolution };
-}
-
-/// Explicit `help`/`completions` operands are command-path/options only. Once a
-/// leaf is resolved, the first subsequent plain operand — any collected
-/// positional — is an invalid suffix, captured as a contextual
-/// `UnexpectedPositional` at the leaf so the supervisor renders usage/64 instead
-/// of a success short circuit, regardless of the leaf's executable positional
-/// schema (required/optional/repeated). This does not run for the inline
-/// `command ... --help` token consumer or for ordinary execution parsing.
-fn captureBuiltinLeafOperand(resolution: *Resolution) void {
-    if (resolution.failure != null) return;
-    if (resolution.positionals.items.len != 0) {
-        resolution.fail(CliError.UnexpectedPositional);
-    }
 }
 
 pub fn activeCommandSpec(root: CommandSpec, parsed: ParsedCommand) CliError!CommandSpec {
@@ -2687,6 +2693,41 @@ test "Cli resolve converges builtins help completions and usage on one validated
         var parsed = try r.finalizeExecute();
         defer parsed.deinit(alloc);
         try std.testing.expectEqualStrings("fx", parsed.positional(0).?);
+    }
+
+    // First-error-wins: the leaf operand is captured immediately, so a later
+    // unknown option or invalid value in the suffix never overwrites it.
+    {
+        var r = try resolve(alloc, grammar_spec, &.{ "help", "benchmark", "lexical", "fixture-a", "--bad" });
+        defer r.deinit();
+        try std.testing.expectEqual(RequestKind.help, r.kind);
+        try std.testing.expectEqual(CliError.UnexpectedPositional, r.failure().?);
+        try std.testing.expectEqualStrings("lexical", r.active().name);
+    }
+    {
+        // `--count` is an integer leaf option; the invalid value is never
+        // reached because the leaf operand fails first.
+        var r = try resolve(alloc, grammar_spec, &.{ "help", "benchmark", "lexical", "fixture-a", "--count", "nope" });
+        defer r.deinit();
+        try std.testing.expectEqual(RequestKind.help, r.kind);
+        try std.testing.expectEqual(CliError.UnexpectedPositional, r.failure().?);
+        try std.testing.expectEqualStrings("lexical", r.active().name);
+    }
+    {
+        var r = try resolve(alloc, grammar_spec, &.{ "completions", "benchmark", "lexical", "fixture-a", "--bad" });
+        defer r.deinit();
+        try std.testing.expectEqual(RequestKind.completions, r.kind);
+        try std.testing.expectEqual(CliError.UnexpectedPositional, r.failure().?);
+        try std.testing.expectEqualStrings("lexical", r.active().name);
+    }
+    {
+        // Preserved precedence: an option error before any plain operand is
+        // still the first error (the plain operand is not the first suffix
+        // token here).
+        var r = try resolve(alloc, grammar_spec, &.{ "help", "benchmark", "lexical", "--bad", "fixture-a" });
+        defer r.deinit();
+        try std.testing.expectEqual(RequestKind.help, r.kind);
+        try std.testing.expectEqual(CliError.UnknownOption, r.failure().?);
     }
 }
 
