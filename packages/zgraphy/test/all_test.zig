@@ -98,6 +98,136 @@ const CliTestHandlers = struct {
     }
 };
 
+// State captured by the identity-split regression: what a ParsedCommand-driven
+// handler observes for the exact review probe.
+var probe_command_is_corpus = false;
+var probe_positional_count: usize = 999;
+var probe_correctness_value_is_lexical = false;
+var probe_quality_value_is_fixture = false;
+
+const IdentityProbeHandlers = struct {
+    fn record(ctx: *zstd.fx.kernel.ContextView(zgraphy.Application.ApplicationServices), command_line: zstd.Cli.ParsedCommand) anyerror!void {
+        _ = ctx.service(zgraphy.Application.ApplicationInputs);
+        probe_command_is_corpus = std.mem.eql(u8, command_line.command, "corpus");
+        probe_positional_count = command_line.positionalCount();
+        probe_correctness_value_is_lexical = if (command_line.optionValue("correctness")) |value|
+            std.mem.eql(u8, value, "lexical")
+        else
+            false;
+        probe_quality_value_is_fixture = if (command_line.optionValue("quality")) |value|
+            std.mem.eql(u8, value, "zig-ambiguity")
+        else
+            false;
+    }
+};
+
+test "zgraphy parsed authority eliminates the benchmark identity split" {
+    // Structural: dispatch and handlers take command/subcommand/positional and
+    // option authority from ParsedCommand; the raw argv scanners that made the
+    // recorded identity and executed command diverge no longer exist.
+    const main_source = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/main.zig", std.testing.allocator, .limited(2 * 1024 * 1024));
+    defer std.testing.allocator.free(main_source);
+    try std.testing.expect(std.mem.indexOf(u8, main_source, "command_line: zstd.Cli.ParsedCommand") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_source, "command_line.path[1]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_source, "const subcommand = command_line.command;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_source, "command_line.positional(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_source, "command_line.optionValue(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_source, "fn positional(args") == null);
+    try std.testing.expect(std.mem.indexOf(u8, main_source, "fn hasFlag(") == null);
+    try std.testing.expect(std.mem.indexOf(u8, main_source, "fn optionTakesValue(") == null);
+
+    // Behavioral: run the exact reviewer probe through the same supervisor the
+    // installed binary uses. The framework consumes `lexical` and
+    // `zig-ambiguity` atomically as option values, selects the default corpus
+    // leaf, records `benchmark.corpus`, and never surfaces the lexical leaf.
+    probe_command_is_corpus = false;
+    probe_positional_count = 999;
+    probe_correctness_value_is_lexical = false;
+    probe_quality_value_is_fixture = false;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const probe_args = [_][]const u8{ "benchmark", "--correctness", "lexical", "--quality", "zig-ambiguity", "--json" };
+    var declared = zgraphy.Application.CommandApplication.init(IdentityProbeHandlers.record);
+    const app = declared.application();
+    const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir, .args = &probe_args });
+    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+    const result = try zstd.Application.runOneShot(
+        @TypeOf(layer),
+        @TypeOf(app),
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        layer,
+        app,
+        &probe_args,
+        .{ .runtime = .{
+            .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 256 },
+            .causal_store = &store,
+        } },
+    );
+    try std.testing.expect(result.value != null);
+    try std.testing.expect(result.short_circuit == null);
+    try std.testing.expect(probe_command_is_corpus);
+    try std.testing.expectEqual(@as(usize, 0), probe_positional_count);
+    try std.testing.expect(probe_correctness_value_is_lexical);
+    try std.testing.expect(probe_quality_value_is_fixture);
+
+    var snapshot = try store.snapshot(std.testing.allocator);
+    defer snapshot.deinit();
+    try std.testing.expect(hasCausalEvent(snapshot.events, .effect_completed, "benchmark.corpus", "success"));
+    try std.testing.expect(!hasCausalEvent(snapshot.events, .effect_completed, "benchmark.lexical", "success"));
+}
+
+test "zgraphy nested builtins and failures short circuit with correct stream and exit" {
+    var declared = zgraphy.Application.CommandApplication.init(CliTestHandlers.succeed);
+    const command_application = declared.application();
+
+    const Case = struct {
+        args: []const []const u8,
+        kind: zstd.Cli.ShortCircuitKind,
+        exit_code: zstd.Cli.ExitCode,
+    };
+    const cases = [_]Case{
+        // Nested generated help (full path), stdout / 0.
+        .{ .args = &.{ "benchmark", "--help" }, .kind = .help, .exit_code = .success },
+        // Interspersed options before nested help still resolve the leaf.
+        .{ .args = &.{ "benchmark", "--json", "lexical", "--help" }, .kind = .help, .exit_code = .success },
+        // Contextual leaf arity usage, stderr / 64.
+        .{ .args = &.{ "benchmark", "corpus", "extra" }, .kind = .usage, .exit_code = .usage },
+        // Invalid completion path, contextual usage at the deepest valid prefix.
+        .{ .args = &.{ "completions", "benchmark", "bogus" }, .kind = .usage, .exit_code = .usage },
+        // An invalid option before a help-looking token is usage, never help.
+        .{ .args = &.{ "benchmark", "--bad", "--help" }, .kind = .usage, .exit_code = .usage },
+    };
+
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    for (cases) |case| {
+        const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir, .args = case.args });
+        const result = try zstd.Application.runOneShot(
+            @TypeOf(layer),
+            @TypeOf(command_application),
+            std.testing.allocator,
+            std.testing.io,
+            tmp.dir,
+            layer,
+            command_application,
+            case.args,
+            .{
+                .runtime = .{ .graph = .{ .path = zgraphy.Application.causal_graph_path } },
+                .testing = .{ .write_short_circuit = false },
+            },
+        );
+        try std.testing.expectEqual(case.kind, result.short_circuit.?);
+        try std.testing.expectEqual(case.exit_code, result.exit_code);
+        try std.testing.expect(result.value == null);
+    }
+    // None of the short circuits create repository state.
+    try std.testing.expectError(error.FileNotFound, tmp.dir.access(std.testing.io, ".zgraphy", .{}));
+}
+
 test "zgraphy command application supplies only application services to the framework supervisor" {
     try std.testing.expectEqualStrings(".zgraphy/runtime/causal", zgraphy.Application.causal_graph_path);
     try std.testing.expectEqualStrings(".zigeffect/graph/causal-graph.jsonl", zgraphy.Indexer.causal_wal_path);

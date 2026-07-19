@@ -25,30 +25,35 @@ pub fn main(init: std.process.Init) !void {
     if (result.exit_code != .success) std.process.exit(@intCast(@intFromEnum(result.exit_code)));
 }
 
-fn runCommand(ctx: *zstd.fx.kernel.ContextView(zgraphy.Application.ApplicationServices), _: zstd.Cli.ParsedCommand) anyerror!void {
+fn runCommand(ctx: *zstd.fx.kernel.ContextView(zgraphy.Application.ApplicationServices), command_line: zstd.Cli.ParsedCommand) anyerror!void {
     const inputs = ctx.service(zgraphy.Application.ApplicationInputs);
-    try dispatch(ctx.allocator(), inputs.io, inputs.root, inputs.args);
+    try dispatch(ctx.allocator(), inputs.io, inputs.root, command_line);
 }
 
-fn dispatch(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8) !void {
-    const command = args[1];
-    if (std.mem.eql(u8, command, "init")) return runInit(allocator, io, root, hasFlag(args, "--json"));
-    if (std.mem.eql(u8, command, "build") or std.mem.eql(u8, command, "ingest")) return runBuild(allocator, io, root, hasFlag(args, "--json"));
-    if (std.mem.eql(u8, command, "status")) return runStatus(allocator, io, root, hasFlag(args, "--json"));
-    if (std.mem.eql(u8, command, "doctor")) return runDoctor(allocator, io, root, hasFlag(args, "--json"));
-    if (std.mem.eql(u8, command, "watch")) return runWatch(allocator, io, root, args);
-    if (std.mem.eql(u8, command, "gc")) return runGc(allocator, io, root, args);
-    if (std.mem.eql(u8, command, "pin")) return runGenerationPin(allocator, io, root, args, true);
-    if (std.mem.eql(u8, command, "unpin")) return runGenerationPin(allocator, io, root, args, false);
-    if (std.mem.eql(u8, command, "query")) return runQuery(allocator, io, root, args);
-    if (std.mem.eql(u8, command, "explain")) return runExplain(allocator, io, root, args);
-    if (std.mem.eql(u8, command, "path")) return runPath(allocator, io, root, args);
-    if (std.mem.eql(u8, command, "parity")) return runParity(allocator, io, hasFlag(args, "--json"));
-    if (std.mem.eql(u8, command, "schema")) return runSemanticSchema(allocator, io, args);
-    if (std.mem.eql(u8, command, "contracts")) return runOperationalContracts(allocator, io, args);
-    if (std.mem.eql(u8, command, "security")) return runSecurityBaseline(allocator, io, args);
-    if (std.mem.eql(u8, command, "evaluation")) return runEvaluationContracts(allocator, io, args);
-    if (std.mem.eql(u8, command, "benchmark")) return runBenchmark(allocator, io, root, args);
+/// Command, subcommand, positional, and option authority is the resolved
+/// `ParsedCommand`. Raw argv is never re-scanned here to select or feed a
+/// command, so the executed handler cannot diverge from the parsed identity the
+/// framework records. The eager selected-root boundary in `main` still reads
+/// raw argv; that cutover belongs to a later ticket.
+fn dispatch(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_line: zstd.Cli.ParsedCommand) !void {
+    const command = command_line.path[1];
+    if (std.mem.eql(u8, command, "init")) return runInit(allocator, io, root, jsonRequested(command_line));
+    if (std.mem.eql(u8, command, "build") or std.mem.eql(u8, command, "ingest")) return runBuild(allocator, io, root, jsonRequested(command_line));
+    if (std.mem.eql(u8, command, "status")) return runStatus(allocator, io, root, jsonRequested(command_line));
+    if (std.mem.eql(u8, command, "doctor")) return runDoctor(allocator, io, root, jsonRequested(command_line));
+    if (std.mem.eql(u8, command, "watch")) return runWatch(allocator, io, root, command_line);
+    if (std.mem.eql(u8, command, "gc")) return runGc(allocator, io, root, command_line);
+    if (std.mem.eql(u8, command, "pin")) return runGenerationPin(allocator, io, root, command_line, true);
+    if (std.mem.eql(u8, command, "unpin")) return runGenerationPin(allocator, io, root, command_line, false);
+    if (std.mem.eql(u8, command, "query")) return runQuery(allocator, io, root, command_line);
+    if (std.mem.eql(u8, command, "explain")) return runExplain(allocator, io, root, command_line);
+    if (std.mem.eql(u8, command, "path")) return runPath(allocator, io, root, command_line);
+    if (std.mem.eql(u8, command, "parity")) return runParity(allocator, io, jsonRequested(command_line));
+    if (std.mem.eql(u8, command, "schema")) return runSemanticSchema(allocator, io, command_line);
+    if (std.mem.eql(u8, command, "contracts")) return runOperationalContracts(allocator, io, command_line);
+    if (std.mem.eql(u8, command, "security")) return runSecurityBaseline(allocator, io, command_line);
+    if (std.mem.eql(u8, command, "evaluation")) return runEvaluationContracts(allocator, io, command_line);
+    if (std.mem.eql(u8, command, "benchmark")) return runBenchmark(allocator, io, root, command_line);
     return error.InvalidCommand;
 }
 
@@ -137,7 +142,7 @@ fn runBuild(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, json: bo
     });
 }
 
-fn runGc(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8) !void {
+fn runGc(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_line: zstd.Cli.ParsedCommand) !void {
     var config = try zgraphy.Project.loadConfig(allocator, io, root);
     defer config.deinit();
     var report = try zgraphy.Operations.collectGarbage(
@@ -145,10 +150,10 @@ fn runGc(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []con
         io,
         root,
         config.value,
-        if (hasFlag(args, "--apply")) .apply else .dry_run,
+        if (command_line.optionValue("apply") != null) .apply else .dry_run,
     );
     defer report.deinit();
-    if (hasFlag(args, "--json")) {
+    if (jsonRequested(command_line)) {
         const fingerprint = std.fmt.bytesToHex(report.plan_fingerprint, .lower);
         return writeJson(io, allocator, .{
             .schema = zgraphy.Retention.schema,
@@ -171,8 +176,8 @@ fn runGc(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []con
     });
 }
 
-fn runGenerationPin(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8, present: bool) !void {
-    const generation = positional(args, 0) orelse return error.MissingGeneration;
+fn runGenerationPin(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_line: zstd.Cli.ParsedCommand, present: bool) !void {
+    const generation = command_line.positional(0) orelse return error.MissingGeneration;
     var config = try zgraphy.Project.loadConfig(allocator, io, root);
     defer config.deinit();
     if (present) {
@@ -180,7 +185,7 @@ fn runGenerationPin(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, 
     } else {
         try zgraphy.Operations.unpinGeneration(allocator, io, root, config.value, generation);
     }
-    if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
+    if (jsonRequested(command_line)) return writeJson(io, allocator, .{
         .schema = zgraphy.Retention.pins_schema,
         .schema_version = zgraphy.Retention.schema_version,
         .status = if (present) "pinned" else "unpinned",
@@ -189,18 +194,18 @@ fn runGenerationPin(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, 
     return writeText(io, allocator, "{s} {s}\n", .{ if (present) "pinned" else "unpinned", generation });
 }
 
-fn runWatch(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8) !void {
+fn runWatch(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_line: zstd.Cli.ParsedCommand) !void {
     var config = try zgraphy.Project.loadConfig(allocator, io, root);
     defer config.deinit();
-    const max_cycles = try optionalNumericOption(args, "--max-cycles", 1, 1_000_000_000);
+    const max_cycles = try optionalNumericOptionOf(command_line, "max-cycles", 1, 1_000_000_000);
     const summary = try zgraphy.Watch.runForeground(allocator, io, root, config.value, .{
-        .poll_ms = try numericOption(args, "--poll-ms", 250, 1, 60_000),
-        .debounce_ms = try numericOption(args, "--debounce-ms", 250, 1, 60_000),
-        .retry_ms = try numericOption(args, "--retry-ms", 100, 1, 60_000),
+        .poll_ms = try numericOptionOf(command_line, "poll-ms", 250, 1, 60_000),
+        .debounce_ms = try numericOptionOf(command_line, "debounce-ms", 250, 1, 60_000),
+        .retry_ms = try numericOptionOf(command_line, "retry-ms", 100, 1, 60_000),
         .max_cycles = max_cycles,
-        .max_drain_passes = try numericOption(args, "--max-drain-passes", 20, 1, 256),
+        .max_drain_passes = try numericOptionOf(command_line, "max-drain-passes", 20, 1, 256),
     });
-    if (hasFlag(args, "--json")) return writeJson(io, allocator, summary);
+    if (jsonRequested(command_line)) return writeJson(io, allocator, summary);
     return writeText(io, allocator, "watch {s}: {d} cycles, {d} changes, {d} refreshed, {d} current, {d} contentions, {d} pending requests\n", .{
         @tagName(summary.state),
         summary.cycles,
@@ -366,16 +371,16 @@ fn runParity(allocator: std.mem.Allocator, io: std.Io, json: bool) !void {
     });
 }
 
-fn runSemanticSchema(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
+fn runSemanticSchema(allocator: std.mem.Allocator, io: std.Io, command_line: zstd.Cli.ParsedCommand) !void {
     var parsed = try zgraphy.SemanticSchema.parseEmbedded(allocator);
     defer parsed.deinit();
     try zgraphy.SemanticSchema.validate(&parsed.value);
     const digest = zgraphy.SemanticSchema.contractDigest();
     const digest_hex = std.fmt.bytesToHex(digest, .lower);
 
-    if (positional(args, 0)) |relation_name| {
+    if (command_line.positional(0)) |relation_name| {
         const relation = try zgraphy.SemanticSchema.resolveRelation(&parsed.value, relation_name);
-        if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
+        if (jsonRequested(command_line)) return writeJson(io, allocator, .{
             .schema = "zgraphy.semantic-relation.v2",
             .schema_version = zgraphy.SemanticSchema.schema_version,
             .contract_digest = digest_hex,
@@ -392,7 +397,7 @@ fn runSemanticSchema(allocator: std.mem.Allocator, io: std.Io, args: []const []c
         });
     }
 
-    if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
+    if (jsonRequested(command_line)) return writeJson(io, allocator, .{
         .schema = parsed.value.schema,
         .schema_version = parsed.value.schema_version,
         .contract_digest = digest_hex,
@@ -425,14 +430,14 @@ fn runSemanticSchema(allocator: std.mem.Allocator, io: std.Io, args: []const []c
     });
 }
 
-fn runOperationalContracts(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
+fn runOperationalContracts(allocator: std.mem.Allocator, io: std.Io, command_line: zstd.Cli.ParsedCommand) !void {
     var parsed = try zgraphy.OperationalContracts.parseEmbedded(allocator);
     defer parsed.deinit();
     try zgraphy.OperationalContracts.validate(&parsed.value);
     const digest = zgraphy.OperationalContracts.contractDigest();
     const digest_hex = std.fmt.bytesToHex(digest, .lower);
 
-    if (positional(args, 0)) |section| {
+    if (command_line.positional(0)) |section| {
         if (std.mem.eql(u8, section, "provider")) return writeJson(io, allocator, .{ .contract_digest = digest_hex, .provider = parsed.value.provider });
         if (std.mem.eql(u8, section, "conformance")) return writeJson(io, allocator, .{ .contract_digest = digest_hex, .conformance = parsed.value.conformance });
         if (std.mem.eql(u8, section, "config")) return writeJson(io, allocator, .{ .contract_digest = digest_hex, .config = parsed.value.config });
@@ -442,7 +447,7 @@ fn runOperationalContracts(allocator: std.mem.Allocator, io: std.Io, args: []con
         return error.UnknownOperationalContract;
     }
 
-    if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
+    if (jsonRequested(command_line)) return writeJson(io, allocator, .{
         .schema = parsed.value.schema,
         .schema_version = parsed.value.schema_version,
         .contract_digest = digest_hex,
@@ -468,14 +473,14 @@ fn runOperationalContracts(allocator: std.mem.Allocator, io: std.Io, args: []con
     });
 }
 
-fn runSecurityBaseline(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
+fn runSecurityBaseline(allocator: std.mem.Allocator, io: std.Io, command_line: zstd.Cli.ParsedCommand) !void {
     var parsed = try zgraphy.SecurityBaseline.parseEmbedded(allocator);
     defer parsed.deinit();
     try zgraphy.SecurityBaseline.validate(&parsed.value);
     const digest = zgraphy.SecurityBaseline.catalogDigest();
     const digest_hex = std.fmt.bytesToHex(digest, .lower);
 
-    if (positional(args, 0)) |threat_id| {
+    if (command_line.positional(0)) |threat_id| {
         const threat = zgraphy.SecurityBaseline.findThreat(&parsed.value, threat_id) orelse return error.UnknownSecurityThreat;
         return writeJson(io, allocator, .{
             .schema = "zgraphy.security-threat.v1",
@@ -485,7 +490,7 @@ fn runSecurityBaseline(allocator: std.mem.Allocator, io: std.Io, args: []const [
     }
 
     const summary = zgraphy.SecurityBaseline.summarize(&parsed.value);
-    if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
+    if (jsonRequested(command_line)) return writeJson(io, allocator, .{
         .schema = parsed.value.schema,
         .schema_version = parsed.value.schema_version,
         .catalog_digest = digest_hex,
@@ -507,14 +512,14 @@ fn runSecurityBaseline(allocator: std.mem.Allocator, io: std.Io, args: []const [
     });
 }
 
-fn runEvaluationContracts(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
+fn runEvaluationContracts(allocator: std.mem.Allocator, io: std.Io, command_line: zstd.Cli.ParsedCommand) !void {
     var parsed = try zgraphy.EvaluationContracts.parseEmbedded(allocator);
     defer parsed.deinit();
     try zgraphy.EvaluationContracts.validate(&parsed.value);
     const digest = zgraphy.EvaluationContracts.contractDigest();
     const digest_hex = std.fmt.bytesToHex(digest, .lower);
 
-    if (positional(args, 0)) |kind_name| {
+    if (command_line.positional(0)) |kind_name| {
         const kind = std.meta.stringToEnum(zgraphy.EvaluationContracts.EvaluationKind, kind_name) orelse return error.UnknownEvaluationKind;
         const definition = zgraphy.EvaluationContracts.findDefinition(&parsed.value, kind) orelse return error.UnknownEvaluationKind;
         return writeJson(io, allocator, .{
@@ -531,7 +536,7 @@ fn runEvaluationContracts(allocator: std.mem.Allocator, io: std.Io, args: []cons
         .active_baseline => active_baselines += 1,
         .schema_only => schema_only += 1,
     };
-    if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
+    if (jsonRequested(command_line)) return writeJson(io, allocator, .{
         .schema = parsed.value.schema,
         .schema_version = parsed.value.schema_version,
         .contract_digest = digest_hex,
@@ -548,33 +553,35 @@ fn runEvaluationContracts(allocator: std.mem.Allocator, io: std.Io, args: []cons
     });
 }
 
-fn runBenchmark(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8) !void {
-    const subcommand = positional(args, 0) orelse "corpus";
+fn runBenchmark(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_line: zstd.Cli.ParsedCommand) !void {
+    // The benchmark leaf and its arguments come from the resolved command; the
+    // framework already selected the default `corpus` leaf when none was given.
+    const subcommand = command_line.command;
     var corpus = try zgraphy.Benchmark.parseEmbeddedCorpus(allocator);
     defer corpus.deinit();
     try zgraphy.Benchmark.validateCorpus(&corpus.value);
     if (std.mem.eql(u8, subcommand, "workload")) {
-        return runBenchmarkWorkload(allocator, io, root, args, &corpus.value);
+        return runBenchmarkWorkload(allocator, io, root, command_line, &corpus.value);
     }
     if (std.mem.eql(u8, subcommand, "resources")) {
-        return runResourceMatrix(allocator, io, root, args);
+        return runResourceMatrix(allocator, io, root, command_line);
     }
     if (std.mem.eql(u8, subcommand, "freshness")) {
-        return runFreshnessReceipt(allocator, io, root, args);
+        return runFreshnessReceipt(allocator, io, root, command_line);
     }
     if (std.mem.eql(u8, subcommand, "churn")) {
-        return runM3ChurnReceipt(allocator, io, root, args);
+        return runM3ChurnReceipt(allocator, io, root, command_line);
     }
     if (std.mem.eql(u8, subcommand, "performance")) {
-        return runM3PerformanceReceipt(allocator, io, root, args);
+        return runM3PerformanceReceipt(allocator, io, root, command_line);
     }
     if (std.mem.eql(u8, subcommand, "matrix")) {
-        return runQualityMatrix(allocator, io, root, args, &corpus.value);
+        return runQualityMatrix(allocator, io, root, command_line, &corpus.value);
     }
     if (std.mem.eql(u8, subcommand, "lexical")) {
-        const fixture_id = positional(args, 1) orelse return error.MissingBenchmarkFixture;
+        const fixture_id = command_line.positional(0) orelse return error.MissingBenchmarkFixture;
         const fixture = zgraphy.Benchmark.findFixture(&corpus.value, fixture_id) orelse return error.UnknownBenchmarkFixture;
-        const fixture_root = positional(args, 2) orelse fixture.scan_root;
+        const fixture_root = command_line.positional(1) orelse fixture.scan_root;
         var fixture_dir = try root.openDir(io, fixture_root, .{ .iterate = true, .follow_symlinks = false });
         defer fixture_dir.close(io);
         var graph = try zgraphy.Lexical.build(allocator, io, fixture_dir, .{});
@@ -584,7 +591,7 @@ fn runBenchmark(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args
         var receipt = try zgraphy.Differential.projectLexical(allocator, &graph, &gold.value);
         defer receipt.deinit(allocator);
         try zgraphy.Differential.validateReceipt(&receipt);
-        if (hasFlag(args, "--json")) return writeJson(io, allocator, receipt);
+        if (jsonRequested(command_line)) return writeJson(io, allocator, receipt);
         return writeText(io, allocator, "lexical {s}: entities {d}/{d}, relations {d}/{d}, unmatched tokens {d}\n", .{
             fixture.id,
             receipt.entities.matched,
@@ -595,9 +602,9 @@ fn runBenchmark(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args
         });
     }
     if (std.mem.eql(u8, subcommand, "zgraphy")) {
-        const fixture_id = positional(args, 1) orelse return error.MissingBenchmarkFixture;
+        const fixture_id = command_line.positional(0) orelse return error.MissingBenchmarkFixture;
         const fixture = zgraphy.Benchmark.findFixture(&corpus.value, fixture_id) orelse return error.UnknownBenchmarkFixture;
-        const fixture_root = positional(args, 2) orelse fixture.scan_root;
+        const fixture_root = command_line.positional(1) orelse fixture.scan_root;
         var fixture_dir = try root.openDir(io, fixture_root, .{ .iterate = true, .follow_symlinks = false });
         defer fixture_dir.close(io);
         var built = try zgraphy.Indexer.buildRepository(allocator, io, fixture_dir, .{});
@@ -608,7 +615,7 @@ fn runBenchmark(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args
         var receipt = try zgraphy.Differential.projectZgraphy(allocator, &built.graph, &gold.value);
         defer receipt.deinit(allocator);
         try zgraphy.Differential.validateReceipt(&receipt);
-        if (hasFlag(args, "--json")) return writeJson(io, allocator, receipt);
+        if (jsonRequested(command_line)) return writeJson(io, allocator, receipt);
         return writeText(io, allocator, "zgraphy {s}: entities {d}/{d}, relations {d}/{d}, unmappable nodes {d}, unmappable relations {d}\n", .{
             fixture.id,
             receipt.entities.matched,
@@ -620,8 +627,8 @@ fn runBenchmark(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args
         });
     }
     if (std.mem.eql(u8, subcommand, "graphify")) {
-        const fixture_id = positional(args, 1) orelse return error.MissingBenchmarkFixture;
-        const graph_path = positional(args, 2) orelse return error.MissingBenchmarkGraph;
+        const fixture_id = command_line.positional(0) orelse return error.MissingBenchmarkFixture;
+        const graph_path = command_line.positional(1) orelse return error.MissingBenchmarkGraph;
         const fixture = zgraphy.Benchmark.findFixture(&corpus.value, fixture_id) orelse return error.UnknownBenchmarkFixture;
         var gold = try zgraphy.Benchmark.parseEmbeddedGold(allocator, fixture.gold);
         defer gold.deinit();
@@ -633,7 +640,7 @@ fn runBenchmark(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args
         var receipt = try zgraphy.Differential.projectGraphify(allocator, &graph.value, &gold.value);
         defer receipt.deinit(allocator);
         try zgraphy.Differential.validateReceipt(&receipt);
-        if (hasFlag(args, "--json")) return writeJson(io, allocator, receipt);
+        if (jsonRequested(command_line)) return writeJson(io, allocator, receipt);
         return writeText(io, allocator, "Graphify {s}: entities {d}/{d}, relations {d}/{d}, unmappable nodes {d}, unmappable relations {d}\n", .{
             fixture.id,
             receipt.entities.matched,
@@ -652,7 +659,7 @@ fn runBenchmark(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args
         try zgraphy.Benchmark.validateGold(&gold.value, fixture.id);
         summary.include(&fixture, &gold.value);
     }
-    if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
+    if (jsonRequested(command_line)) return writeJson(io, allocator, .{
         .schema = zgraphy.Benchmark.corpus_schema,
         .schema_version = zgraphy.Benchmark.schema_version,
         .canonical_ir_schema = zgraphy.Benchmark.canonical_ir_schema,
@@ -670,8 +677,8 @@ fn runBenchmark(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args
     });
 }
 
-fn runM3ChurnReceipt(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8) !void {
-    const observation_path = positional(args, 1) orelse return error.MissingChurnObservations;
+fn runM3ChurnReceipt(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_line: zstd.Cli.ParsedCommand) !void {
+    const observation_path = command_line.positional(0) orelse return error.MissingChurnObservations;
     const bytes = try root.readFileAlloc(io, observation_path, allocator, .limited(zgraphy.M3Qualification.max_churn_observation_bytes));
     defer allocator.free(bytes);
     var parsed = try zgraphy.M3Qualification.parseChurnObservationFile(allocator, bytes);
@@ -684,7 +691,7 @@ fn runM3ChurnReceipt(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir,
     );
     defer receipt.deinit(allocator);
     try zgraphy.M3Qualification.validateChurn(&receipt);
-    if (hasFlag(args, "--json")) return writeJson(io, allocator, receipt);
+    if (jsonRequested(command_line)) return writeJson(io, allocator, receipt);
     return writeText(io, allocator, "M3 churn: {d} transitions, {d} operation kinds, peak {d} generations/{d} cache entries, deleted {d} generations, reader deferrals {d}, repairs {d}, gate {s}\n", .{
         receipt.summary.transitions,
         receipt.summary.operation_kinds,
@@ -697,18 +704,18 @@ fn runM3ChurnReceipt(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir,
     });
 }
 
-fn runM3PerformanceReceipt(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8) !void {
-    const sample_path = positional(args, 1) orelse return error.MissingPerformanceSamples;
-    const source_revision = try requiredStringOption(args, "--source-revision");
-    const machine_digest = try requiredStringOption(args, "--machine");
-    const configuration_digest = try requiredStringOption(args, "--configuration");
-    const correctness_digest = try requiredStringOption(args, "--correctness");
-    const quality_digest = try requiredStringOption(args, "--quality");
-    const resource_digest = try requiredStringOption(args, "--resources");
-    const graphify_python = try requiredStringOption(args, "--graphify-python");
-    const graphify_environment = try requiredStringOption(args, "--graphify-environment");
-    const warmups: u16 = @intCast(try numericOption(args, "--warmups", 2, 1, zgraphy.M3Qualification.max_repetitions));
-    const repetitions: u16 = @intCast(try numericOption(args, "--repetitions", 7, zgraphy.M3Qualification.min_repetitions, zgraphy.M3Qualification.max_repetitions));
+fn runM3PerformanceReceipt(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_line: zstd.Cli.ParsedCommand) !void {
+    const sample_path = command_line.positional(0) orelse return error.MissingPerformanceSamples;
+    const source_revision = try requiredStringOptionOf(command_line, "source-revision");
+    const machine_digest = try requiredStringOptionOf(command_line, "machine");
+    const configuration_digest = try requiredStringOptionOf(command_line, "configuration");
+    const correctness_digest = try requiredStringOptionOf(command_line, "correctness");
+    const quality_digest = try requiredStringOptionOf(command_line, "quality");
+    const resource_digest = try requiredStringOptionOf(command_line, "resources");
+    const graphify_python = try requiredStringOptionOf(command_line, "graphify-python");
+    const graphify_environment = try requiredStringOptionOf(command_line, "graphify-environment");
+    const warmups: u16 = @intCast(try numericOptionOf(command_line, "warmups", 2, 1, zgraphy.M3Qualification.max_repetitions));
+    const repetitions: u16 = @intCast(try numericOptionOf(command_line, "repetitions", 7, zgraphy.M3Qualification.min_repetitions, zgraphy.M3Qualification.max_repetitions));
     const bytes = try root.readFileAlloc(io, sample_path, allocator, .limited(zgraphy.M3Qualification.max_performance_sample_bytes));
     defer allocator.free(bytes);
     var parsed = try zgraphy.M3Qualification.parsePerformanceSampleFile(allocator, bytes);
@@ -735,7 +742,7 @@ fn runM3PerformanceReceipt(allocator: std.mem.Allocator, io: std.Io, root: std.I
     );
     defer receipt.deinit(allocator);
     try zgraphy.M3Qualification.validatePerformance(&receipt);
-    if (hasFlag(args, "--json")) return writeJson(io, allocator, receipt);
+    if (jsonRequested(command_line)) return writeJson(io, allocator, receipt);
     return writeText(io, allocator, "M3 one-file comparison: speedup {d} bp (target {d}), RSS ratio {d} bp (max {d}), persisted ratio {d} bp, claim {s}\n", .{
         receipt.comparison.speedup_basis_points,
         receipt.targets.minimum_speedup_basis_points,
@@ -746,8 +753,8 @@ fn runM3PerformanceReceipt(allocator: std.mem.Allocator, io: std.Io, root: std.I
     });
 }
 
-fn runFreshnessReceipt(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8) !void {
-    const transition_path = positional(args, 1) orelse return error.MissingFreshnessTransitions;
+fn runFreshnessReceipt(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_line: zstd.Cli.ParsedCommand) !void {
+    const transition_path = command_line.positional(0) orelse return error.MissingFreshnessTransitions;
     const bytes = try root.readFileAlloc(io, transition_path, allocator, .limited(zgraphy.Freshness.max_transition_file_bytes));
     defer allocator.free(bytes);
     var parsed = try zgraphy.Freshness.parseTransitionFile(allocator, bytes);
@@ -759,7 +766,7 @@ fn runFreshnessReceipt(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Di
     var receipt = try zgraphy.Freshness.build(allocator, corpus_identity, parsed.value.transitions, zgraphy.Freshness.Capabilities.currentM0());
     defer receipt.deinit(allocator);
     try zgraphy.Freshness.validate(&receipt);
-    if (hasFlag(args, "--json")) return writeJson(io, allocator, receipt);
+    if (jsonRequested(command_line)) return writeJson(io, allocator, receipt);
     return writeText(io, allocator, "freshness baseline: {d} full rebuild transitions, gate {s}, incremental {s}, pre-query refresh {s}\n", .{
         receipt.transitions.len,
         if (receipt.freshness_gate_passed) "passed" else "failed",
@@ -768,15 +775,15 @@ fn runFreshnessReceipt(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Di
     });
 }
 
-fn runResourceMatrix(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8) !void {
-    const sample_path = positional(args, 1) orelse return error.MissingResourceSamples;
-    const source_revision = try requiredStringOption(args, "--source-revision");
-    const graphify_python = try requiredStringOption(args, "--graphify-python");
-    const graphify_environment = try requiredStringOption(args, "--graphify-environment");
-    const machine_digest = try requiredStringOption(args, "--machine");
-    const configuration_digest = try requiredStringOption(args, "--configuration");
-    const warmups: u16 = @intCast(try numericOption(args, "--warmups", 2, 1, zgraphy.ResourceMatrix.max_repetitions));
-    const repetitions: u16 = @intCast(try numericOption(args, "--repetitions", 7, 7, zgraphy.ResourceMatrix.max_repetitions));
+fn runResourceMatrix(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_line: zstd.Cli.ParsedCommand) !void {
+    const sample_path = command_line.positional(0) orelse return error.MissingResourceSamples;
+    const source_revision = try requiredStringOptionOf(command_line, "source-revision");
+    const graphify_python = try requiredStringOptionOf(command_line, "graphify-python");
+    const graphify_environment = try requiredStringOptionOf(command_line, "graphify-environment");
+    const machine_digest = try requiredStringOptionOf(command_line, "machine");
+    const configuration_digest = try requiredStringOptionOf(command_line, "configuration");
+    const warmups: u16 = @intCast(try numericOptionOf(command_line, "warmups", 2, 1, zgraphy.ResourceMatrix.max_repetitions));
+    const repetitions: u16 = @intCast(try numericOptionOf(command_line, "repetitions", 7, 7, zgraphy.ResourceMatrix.max_repetitions));
     const bytes = try root.readFileAlloc(io, sample_path, allocator, .limited(zgraphy.ResourceMatrix.max_sample_file_bytes));
     defer allocator.free(bytes);
     var parsed = try zgraphy.ResourceMatrix.parseSampleFile(allocator, bytes);
@@ -796,7 +803,7 @@ fn runResourceMatrix(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir,
     }, .{ .warmups = warmups, .repetitions = repetitions }, parsed.value.samples);
     defer receipt.deinit(allocator);
     try zgraphy.ResourceMatrix.validate(&receipt);
-    if (hasFlag(args, "--json")) return writeJson(io, allocator, receipt);
+    if (jsonRequested(command_line)) return writeJson(io, allocator, receipt);
     for (receipt.aggregates) |aggregate| {
         try writeText(io, allocator, "{s} {s} {s}: p50 {d} ns, p95 {d} ns, peak RSS p50 {d} bytes, persisted p50 {d} bytes\n", .{
             @tagName(aggregate.engine),
@@ -814,15 +821,15 @@ fn runBenchmarkWorkload(
     allocator: std.mem.Allocator,
     io: std.Io,
     root: std.Io.Dir,
-    args: []const []const u8,
+    command_line: zstd.Cli.ParsedCommand,
     corpus: *const zgraphy.Benchmark.Corpus,
 ) !void {
-    const fixture_id = positional(args, 1) orelse return error.MissingBenchmarkFixture;
-    const workload_name = positional(args, 2) orelse return error.MissingBenchmarkWorkload;
+    const fixture_id = command_line.positional(0) orelse return error.MissingBenchmarkFixture;
+    const workload_name = command_line.positional(1) orelse return error.MissingBenchmarkWorkload;
     const workload = parseWorkload(workload_name) orelse return error.InvalidBenchmarkWorkload;
     if (workload == .bounded_query) return error.UnsupportedBenchmarkWorkload;
     const fixture = zgraphy.Benchmark.findFixture(corpus, fixture_id) orelse return error.UnknownBenchmarkFixture;
-    const fixture_root = positional(args, 3) orelse fixture.scan_root;
+    const fixture_root = command_line.positional(2) orelse fixture.scan_root;
 
     if (workload == .warm_unchanged_build) {
         var warm_dir = try root.openDir(io, fixture_root, .{ .iterate = true, .follow_symlinks = false });
@@ -888,7 +895,7 @@ fn runBenchmarkWorkload(
         .snapshot_complete = true,
     };
     try zgraphy.ResourceMatrix.validateObservation(&observation);
-    if (hasFlag(args, "--json")) return writeJson(io, allocator, observation);
+    if (jsonRequested(command_line)) return writeJson(io, allocator, observation);
     return writeText(io, allocator, "zgraphy {s} {s}: {d} ns, {d} persisted bytes, {d} nodes, {d} relations\n", .{
         fixture.id,
         @tagName(workload),
@@ -913,13 +920,13 @@ fn runQualityMatrix(
     allocator: std.mem.Allocator,
     io: std.Io,
     root: std.Io.Dir,
-    args: []const []const u8,
+    command_line: zstd.Cli.ParsedCommand,
     corpus: *const zgraphy.Benchmark.Corpus,
 ) !void {
-    const graphify_root = positional(args, 1) orelse ".zgraphy/benchmarks/runs/graphify";
-    const source_revision = try requiredStringOption(args, "--source-revision");
-    const graphify_python = try requiredStringOption(args, "--graphify-python");
-    const graphify_environment = try requiredStringOption(args, "--graphify-environment");
+    const graphify_root = command_line.positional(0) orelse ".zgraphy/benchmarks/runs/graphify";
+    const source_revision = try requiredStringOptionOf(command_line, "source-revision");
+    const graphify_python = try requiredStringOptionOf(command_line, "graphify-python");
+    const graphify_environment = try requiredStringOptionOf(command_line, "graphify-environment");
     if (corpus.fixtures.len != 3) return error.UnsupportedQualityCorpus;
 
     var runs: std.ArrayList(zgraphy.QualityMatrix.Run) = .empty;
@@ -979,7 +986,7 @@ fn runQualityMatrix(
     }, runs.items);
     defer matrix.deinit(allocator);
     try zgraphy.QualityMatrix.validate(&matrix);
-    if (hasFlag(args, "--json")) return writeJson(io, allocator, matrix);
+    if (jsonRequested(command_line)) return writeJson(io, allocator, matrix);
 
     const graphify = zgraphy.QualityMatrix.findAggregate(&matrix, .graphify) orelse return error.MissingGraphifyAggregate;
     const native = zgraphy.QualityMatrix.findAggregate(&matrix, .zgraphy) orelse return error.MissingZgraphyAggregate;
@@ -1001,14 +1008,14 @@ fn runQualityMatrix(
     });
 }
 
-fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8) !void {
-    const query = positional(args, 0) orelse return error.MissingQuery;
-    const limit = try numericOption(args, "--limit", 10, 1, 1024);
+fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_line: zstd.Cli.ParsedCommand) !void {
+    const query = command_line.positional(0) orelse return error.MissingQuery;
+    const limit = try numericOptionOf(command_line, "limit", 10, 1, 1024);
     var loaded = try loadGraph(allocator, io, root);
     defer loaded.deinit();
     var results = try zgraphy.Search.queryAlloc(allocator, &loaded.graph, query, .{ .limit = limit });
     defer results.deinit();
-    if (hasFlag(args, "--json")) {
+    if (jsonRequested(command_line)) {
         const views = try owned.slice(ResultView, allocator, results.items.len);
         defer allocator.free(views);
         for (results.items, 0..) |result, index| views[index] = resultView(&loaded.graph, result);
@@ -1036,8 +1043,8 @@ fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []
     }
 }
 
-fn runExplain(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8) !void {
-    const selector = positional(args, 0) orelse return error.MissingNode;
+fn runExplain(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_line: zstd.Cli.ParsedCommand) !void {
+    const selector = command_line.positional(0) orelse return error.MissingNode;
     var loaded = try loadGraph(allocator, io, root);
     defer loaded.deinit();
     const node = findNode(&loaded.graph, selector) orelse return error.NodeNotFound;
@@ -1056,7 +1063,7 @@ fn runExplain(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: 
     defer allocator.free(features);
     copyMatchingHyperedges(&loaded.graph, node.id, request_paths);
     copyMatchingSupernodes(&loaded.graph, node.id, features);
-    if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
+    if (jsonRequested(command_line)) return writeJson(io, allocator, .{
         .schema = "zgraphy.explain.v4",
         .node = node.*,
         .generation = loaded.refresh.generation,
@@ -1130,17 +1137,17 @@ fn copyMatchingSupernodes(graph: *const zgraphy.RepositoryGraph, node_id: u64, o
     }
 }
 
-fn runPath(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, args: []const []const u8) !void {
-    const from_selector = positional(args, 0) orelse return error.MissingFromNode;
-    const to_selector = positional(args, 1) orelse return error.MissingToNode;
-    const max_hops = try numericOption(args, "--max-hops", 8, 1, 128);
+fn runPath(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_line: zstd.Cli.ParsedCommand) !void {
+    const from_selector = command_line.positional(0) orelse return error.MissingFromNode;
+    const to_selector = command_line.positional(1) orelse return error.MissingToNode;
+    const max_hops = try numericOptionOf(command_line, "max-hops", 8, 1, 128);
     var loaded = try loadGraph(allocator, io, root);
     defer loaded.deinit();
     const from = findNode(&loaded.graph, from_selector) orelse return error.NodeNotFound;
     const to = findNode(&loaded.graph, to_selector) orelse return error.NodeNotFound;
     var path = try loaded.graph.shortestPathAlloc(allocator, from.id, to.id, max_hops);
     defer path.deinit();
-    if (hasFlag(args, "--json")) return writeJson(io, allocator, .{
+    if (jsonRequested(command_line)) return writeJson(io, allocator, .{
         .schema = "zgraphy.path.v3",
         .generation = loaded.refresh.generation,
         .refresh = refreshView(&loaded.refresh),
@@ -1259,70 +1266,38 @@ fn findNode(graph: *const zgraphy.RepositoryGraph, selector: []const u8) ?*const
     return graph.findNode(id);
 }
 
-fn positional(args: []const []const u8, wanted: usize) ?[]const u8 {
-    var found: usize = 0;
-    var index: usize = 2;
-    while (index < args.len) : (index += 1) {
-        if (std.mem.startsWith(u8, args[index], "--")) {
-            if (optionTakesValue(args[index]) and index + 1 < args.len) index += 1;
-            continue;
-        }
-        if (isRootPosition(args, index)) continue;
-        if (found == wanted) return args[index];
-        found += 1;
-    }
-    return null;
+/// Whether `--json` output was requested on the resolved command.
+fn jsonRequested(command_line: zstd.Cli.ParsedCommand) bool {
+    return command_line.optionValue("json") != null;
 }
 
-fn requiredStringOption(args: []const []const u8, name: []const u8) ![]const u8 {
-    for (args, 0..) |arg, index| {
-        if (!std.mem.eql(u8, arg, name)) continue;
-        if (index + 1 >= args.len or std.mem.startsWith(u8, args[index + 1], "--")) return error.MissingOptionValue;
-        return args[index + 1];
-    }
-    return error.MissingOption;
+/// A command-owned required string option, read from the resolved command. The
+/// framework parser already consumed the value atomically, so a present option
+/// always carries one.
+fn requiredStringOptionOf(command_line: zstd.Cli.ParsedCommand, name: []const u8) ![]const u8 {
+    return command_line.optionValue(name) orelse error.MissingOption;
 }
 
-fn optionTakesValue(option: []const u8) bool {
-    return std.mem.eql(u8, option, "--root") or
-        std.mem.eql(u8, option, "--limit") or
-        std.mem.eql(u8, option, "--max-hops") or
-        std.mem.eql(u8, option, "--source-revision") or
-        std.mem.eql(u8, option, "--graphify-python") or
-        std.mem.eql(u8, option, "--graphify-environment") or
-        std.mem.eql(u8, option, "--machine") or
-        std.mem.eql(u8, option, "--configuration") or
-        std.mem.eql(u8, option, "--warmups") or
-        std.mem.eql(u8, option, "--repetitions") or
-        std.mem.eql(u8, option, "--poll-ms") or
-        std.mem.eql(u8, option, "--debounce-ms") or
-        std.mem.eql(u8, option, "--retry-ms") or
-        std.mem.eql(u8, option, "--max-cycles") or
-        std.mem.eql(u8, option, "--max-drain-passes");
+/// A command-owned numeric option with domain bounds, read from the resolved
+/// command. Syntactic parsing already validated integer options; this applies
+/// the command's own range policy.
+fn numericOptionOf(command_line: zstd.Cli.ParsedCommand, name: []const u8, default: usize, minimum: usize, maximum: usize) !usize {
+    const text = command_line.optionValue(name) orelse return default;
+    const value = try std.fmt.parseInt(usize, text, 10);
+    if (value < minimum or value > maximum) return error.InvalidOptionValue;
+    return value;
 }
 
-fn numericOption(args: []const []const u8, name: []const u8, default: usize, minimum: usize, maximum: usize) !usize {
-    for (args, 0..) |arg, index| {
-        if (!std.mem.eql(u8, arg, name)) continue;
-        if (index + 1 >= args.len) return error.MissingOptionValue;
-        const value = try std.fmt.parseInt(usize, args[index + 1], 10);
-        if (value < minimum or value > maximum) return error.InvalidOptionValue;
-        return value;
-    }
-    return default;
+fn optionalNumericOptionOf(command_line: zstd.Cli.ParsedCommand, name: []const u8, minimum: usize, maximum: usize) !?usize {
+    const text = command_line.optionValue(name) orelse return null;
+    const value = try std.fmt.parseInt(usize, text, 10);
+    if (value < minimum or value > maximum) return error.InvalidOptionValue;
+    return value;
 }
 
-fn optionalNumericOption(args: []const []const u8, name: []const u8, minimum: usize, maximum: usize) !?usize {
-    for (args, 0..) |arg, index| {
-        if (!std.mem.eql(u8, arg, name)) continue;
-        if (index + 1 >= args.len) return error.MissingOptionValue;
-        const value = try std.fmt.parseInt(usize, args[index + 1], 10);
-        if (value < minimum or value > maximum) return error.InvalidOptionValue;
-        return value;
-    }
-    return null;
-}
-
+/// Root selection remains an eager raw-argv boundary owned by `main`; the
+/// resolved `--root` option still wins over the optional positional root. The
+/// post-parse selected-root cutover belongs to a later ticket.
 fn selectedRoot(args: []const []const u8) []const u8 {
     for (args, 0..) |arg, index| {
         if (!std.mem.eql(u8, arg, "--root") or index + 1 >= args.len or std.mem.startsWith(u8, args[index + 1], "--")) continue;
@@ -1334,21 +1309,6 @@ fn selectedRoot(args: []const []const u8) []const u8 {
     return ".";
 }
 
-fn isRootPosition(args: []const []const u8, index: usize) bool {
-    return index == 2 and args.len >= 3 and
-        (std.mem.eql(u8, args[1], "init") or std.mem.eql(u8, args[1], "build") or
-            std.mem.eql(u8, args[1], "ingest") or std.mem.eql(u8, args[1], "doctor") or std.mem.eql(u8, args[1], "watch") or std.mem.eql(u8, args[1], "gc")) and
-        !std.mem.startsWith(u8, args[2], "--");
-}
-
-fn hasFlag(args: []const []const u8, flag: []const u8) bool {
-    for (args) |arg| if (std.mem.eql(u8, arg, flag)) return true;
-    return false;
-}
-
-fn isHelp(value: []const u8) bool {
-    return std.mem.eql(u8, value, "--help") or std.mem.eql(u8, value, "-h") or std.mem.eql(u8, value, "help");
-}
 
 fn writeJson(io: std.Io, allocator: std.mem.Allocator, value: anytype) !void {
     const encoded = try std.json.Stringify.valueAlloc(allocator, value, .{});
