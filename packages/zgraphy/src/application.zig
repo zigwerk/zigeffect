@@ -43,37 +43,84 @@ const common_options = [_]zstd.Cli.OptionSpec{
     .{ .name = "warmups", .kind = .integer },
 };
 
+/// Optional repository-root positional shared by the location-taking commands.
+/// The resolved `--root` option still wins when both forms are supplied.
+const root_positional = [_]zstd.Cli.PositionalSpec{
+    .{ .name = "root", .kind = .optional },
+};
+
+const fixture_positionals = [_]zstd.Cli.PositionalSpec{
+    .{ .name = "fixture-id", .kind = .required },
+    .{ .name = "fixture-root", .kind = .optional },
+};
+
 const benchmark_commands = [_]zstd.Cli.CommandSpec{
     .{ .name = "corpus", .options = &common_options },
-    .{ .name = "lexical", .options = &common_options },
-    .{ .name = "zgraphy", .options = &common_options },
-    .{ .name = "graphify", .options = &common_options },
-    .{ .name = "matrix", .options = &common_options },
-    .{ .name = "workload", .options = &common_options },
-    .{ .name = "resources", .options = &common_options },
-    .{ .name = "freshness", .options = &common_options },
-    .{ .name = "churn", .options = &common_options },
-    .{ .name = "performance", .options = &common_options },
+    .{ .name = "lexical", .options = &common_options, .positionals = &fixture_positionals },
+    .{ .name = "zgraphy", .options = &common_options, .positionals = &fixture_positionals },
+    .{ .name = "graphify", .options = &common_options, .positionals = &.{
+        .{ .name = "fixture-id", .kind = .required },
+        .{ .name = "graph.json", .kind = .required },
+    } },
+    .{ .name = "matrix", .options = &common_options, .positionals = &.{
+        .{ .name = "graphify-run-root", .kind = .optional },
+    } },
+    .{ .name = "workload", .options = &common_options, .positionals = &.{
+        .{ .name = "fixture-id", .kind = .required },
+        .{ .name = "workload", .kind = .required },
+        .{ .name = "fixture-root", .kind = .optional },
+    } },
+    .{ .name = "resources", .options = &common_options, .positionals = &.{
+        .{ .name = "samples.json", .kind = .required },
+    } },
+    .{ .name = "freshness", .options = &common_options, .positionals = &.{
+        .{ .name = "transitions.json", .kind = .required },
+    } },
+    .{ .name = "churn", .options = &common_options, .positionals = &.{
+        .{ .name = "observations.json", .kind = .required },
+    } },
+    .{ .name = "performance", .options = &common_options, .positionals = &.{
+        .{ .name = "samples.json", .kind = .required },
+    } },
 };
 
 const commands = [_]zstd.Cli.CommandSpec{
-    .{ .name = "init", .options = &common_options },
-    .{ .name = "build", .options = &common_options },
-    .{ .name = "ingest", .options = &common_options },
+    .{ .name = "init", .options = &common_options, .positionals = &root_positional },
+    .{ .name = "build", .options = &common_options, .positionals = &root_positional },
+    .{ .name = "ingest", .options = &common_options, .positionals = &root_positional },
     .{ .name = "status", .options = &common_options },
-    .{ .name = "doctor", .options = &common_options },
-    .{ .name = "watch", .options = &common_options },
-    .{ .name = "gc", .options = &common_options },
-    .{ .name = "pin", .options = &common_options },
-    .{ .name = "unpin", .options = &common_options },
-    .{ .name = "query", .options = &common_options },
-    .{ .name = "explain", .options = &common_options },
-    .{ .name = "path", .options = &common_options },
+    .{ .name = "doctor", .options = &common_options, .positionals = &root_positional },
+    .{ .name = "watch", .options = &common_options, .positionals = &root_positional },
+    .{ .name = "gc", .options = &common_options, .positionals = &root_positional },
+    .{ .name = "pin", .options = &common_options, .positionals = &.{
+        .{ .name = "generation", .kind = .required },
+    } },
+    .{ .name = "unpin", .options = &common_options, .positionals = &.{
+        .{ .name = "generation", .kind = .required },
+    } },
+    .{ .name = "query", .options = &common_options, .positionals = &.{
+        .{ .name = "text", .kind = .required },
+    } },
+    .{ .name = "explain", .options = &common_options, .positionals = &.{
+        .{ .name = "node-id-or-label", .kind = .required },
+    } },
+    .{ .name = "path", .options = &common_options, .positionals = &.{
+        .{ .name = "from", .kind = .required },
+        .{ .name = "to", .kind = .required },
+    } },
     .{ .name = "parity", .options = &common_options },
-    .{ .name = "schema", .options = &common_options },
-    .{ .name = "contracts", .options = &common_options },
-    .{ .name = "security", .options = &common_options },
-    .{ .name = "evaluation", .options = &common_options },
+    .{ .name = "schema", .options = &common_options, .positionals = &.{
+        .{ .name = "relation", .kind = .optional },
+    } },
+    .{ .name = "contracts", .options = &common_options, .positionals = &.{
+        .{ .name = "section", .kind = .optional },
+    } },
+    .{ .name = "security", .options = &common_options, .positionals = &.{
+        .{ .name = "threat-id", .kind = .optional },
+    } },
+    .{ .name = "evaluation", .options = &common_options, .positionals = &.{
+        .{ .name = "kind", .kind = .optional },
+    } },
     .{ .name = "benchmark", .options = &common_options, .subcommands = &benchmark_commands, .default_subcommand = "corpus" },
 };
 

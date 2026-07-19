@@ -70,6 +70,23 @@ fn matchedPathHasIdentity(parsed: zstd.Cli.ParsedCommand, expected: []const u8) 
     return offset == expected.len;
 }
 
+/// Placeholder tokens that satisfy each command's required positional arity so
+/// the declarative dispatch-parity walk can resolve a handler and identity for
+/// every registered path. Optional positionals are intentionally omitted.
+fn requiredPositionals(name: []const u8) []const []const u8 {
+    if (std.mem.eql(u8, name, "pin") or std.mem.eql(u8, name, "unpin")) return &.{"1"};
+    if (std.mem.eql(u8, name, "query")) return &.{"text"};
+    if (std.mem.eql(u8, name, "explain")) return &.{"node"};
+    if (std.mem.eql(u8, name, "path")) return &.{ "from", "to" };
+    if (std.mem.eql(u8, name, "lexical") or std.mem.eql(u8, name, "zgraphy")) return &.{"fixture-id"};
+    if (std.mem.eql(u8, name, "graphify")) return &.{ "fixture-id", "graph.json" };
+    if (std.mem.eql(u8, name, "workload")) return &.{ "fixture-id", "cold-build" };
+    if (std.mem.eql(u8, name, "resources") or std.mem.eql(u8, name, "performance")) return &.{"samples.json"};
+    if (std.mem.eql(u8, name, "freshness")) return &.{"transitions.json"};
+    if (std.mem.eql(u8, name, "churn")) return &.{"observations.json"};
+    return &.{};
+}
+
 const CliTestHandlers = struct {
     fn succeed(ctx: *zstd.fx.kernel.ContextView(zgraphy.Application.ApplicationServices), _: zstd.Cli.ParsedCommand) anyerror!void {
         _ = ctx.service(zgraphy.Application.ApplicationInputs);
@@ -156,7 +173,11 @@ test "zgraphy runtime-owned CLI causality checks every outcome and help prefligh
         defer std.testing.allocator.free(dispatch_needle);
         const help_needle = try std.fmt.allocPrint(std.testing.allocator, "zgraphy {s}", .{name});
         defer std.testing.allocator.free(help_needle);
-        var parsed = try zstd.Cli.parse(std.testing.allocator, command_application.spec, &.{name});
+        var top_args = std.ArrayList([]const u8).empty;
+        defer top_args.deinit(std.testing.allocator);
+        try top_args.append(std.testing.allocator, name);
+        try top_args.appendSlice(std.testing.allocator, requiredPositionals(name));
+        var parsed = try zstd.Cli.parse(std.testing.allocator, command_application.spec, top_args.items);
         defer parsed.deinit(std.testing.allocator);
         const expected_identity = if (std.mem.eql(u8, name, "benchmark")) "benchmark.corpus" else name;
         dispatch_parity = dispatch_parity and std.mem.indexOf(u8, main_source, dispatch_needle) != null and
@@ -170,7 +191,12 @@ test "zgraphy runtime-owned CLI causality checks every outcome and help prefligh
         defer std.testing.allocator.free(help_needle);
         const expected_identity = try std.fmt.allocPrint(std.testing.allocator, "benchmark.{s}", .{name});
         defer std.testing.allocator.free(expected_identity);
-        var parsed = try zstd.Cli.parse(std.testing.allocator, command_application.spec, &.{ "benchmark", name });
+        var bench_args = std.ArrayList([]const u8).empty;
+        defer bench_args.deinit(std.testing.allocator);
+        try bench_args.append(std.testing.allocator, "benchmark");
+        try bench_args.append(std.testing.allocator, name);
+        try bench_args.appendSlice(std.testing.allocator, requiredPositionals(name));
+        var parsed = try zstd.Cli.parse(std.testing.allocator, command_application.spec, bench_args.items);
         defer parsed.deinit(std.testing.allocator);
         dispatch_parity = dispatch_parity and std.mem.indexOf(u8, main_source, dispatch_needle) != null and
             std.mem.indexOf(u8, zgraphy.Application.command_help, help_needle) != null and command_application.findHandler(parsed) != null and
