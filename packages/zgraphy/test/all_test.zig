@@ -200,6 +200,16 @@ test "zgraphy nested builtins and failures short circuit with correct stream and
         .{ .args = &.{ "completions", "benchmark", "bogus" }, .kind = .usage, .exit_code = .usage },
         // An invalid option before a help-looking token is usage, never help.
         .{ .args = &.{ "benchmark", "--bad", "--help" }, .kind = .usage, .exit_code = .usage },
+        // Re-review regressions: an invalid `help` suffix is contextual usage,
+        // not exit-0 group help.
+        .{ .args = &.{ "help", "benchmark", "missing" }, .kind = .usage, .exit_code = .usage },
+        // Interspersed-option completions resolve the leaf (success completions,
+        // not a usage failure).
+        .{ .args = &.{ "completions", "benchmark", "--json", "lexical" }, .kind = .completions, .exit_code = .success },
+        // An invalid completion suffix after an option is contextual usage/64.
+        .{ .args = &.{ "completions", "benchmark", "--json", "bogus" }, .kind = .usage, .exit_code = .usage },
+        // A group-level invalid integer before a later leaf fails at the group.
+        .{ .args = &.{ "benchmark", "--debounce-ms", "nope", "lexical", "fx" }, .kind = .usage, .exit_code = .usage },
     };
 
     var tmp = std.testing.tmpDir(.{ .iterate = true });
