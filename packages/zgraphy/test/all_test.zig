@@ -153,13 +153,13 @@ test "zgraphy parsed authority eliminates the benchmark identity split" {
     const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir, .args = &probe_args });
     var store = zstd.fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
+    const factory = zstd.Application.fixedResources(tmp.dir, layer);
     const result = try zstd.Application.runOneShot(
-        @TypeOf(layer),
+        @TypeOf(factory),
         @TypeOf(app),
         std.testing.allocator,
         std.testing.io,
-        tmp.dir,
-        layer,
+        factory,
         app,
         &probe_args,
         .{ .runtime = .{
@@ -234,13 +234,13 @@ test "zgraphy nested builtins and failures short circuit with correct stream and
     defer tmp.cleanup();
     for (cases) |case| {
         const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir, .args = case.args });
+        const factory = zstd.Application.fixedResources(tmp.dir, layer);
         const result = try zstd.Application.runOneShot(
-            @TypeOf(layer),
+            @TypeOf(factory),
             @TypeOf(command_application),
             std.testing.allocator,
             std.testing.io,
-            tmp.dir,
-            layer,
+            factory,
             command_application,
             case.args,
             .{
@@ -390,13 +390,13 @@ test "zgraphy runtime-owned CLI causality checks every outcome and help prefligh
     };
     for (short_cases) |case| {
         const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = short_tmp.dir, .args = case.args });
+        const factory = zstd.Application.fixedResources(short_tmp.dir, layer);
         const result = try zstd.Application.runOneShot(
-            @TypeOf(layer),
+            @TypeOf(factory),
             @TypeOf(command_application),
             std.testing.allocator,
             std.testing.io,
-            short_tmp.dir,
-            layer,
+            factory,
             command_application,
             case.args,
             .{
@@ -413,13 +413,13 @@ test "zgraphy runtime-owned CLI causality checks every outcome and help prefligh
     defer tmp.cleanup();
     const args = [_][]const u8{ "zgraphy", "benchmark" };
     const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir, .args = &args });
+    const factory = zstd.Application.fixedResources(tmp.dir, layer);
     _ = try zstd.Application.runOneShot(
-        @TypeOf(layer),
+        @TypeOf(factory),
         @TypeOf(command_application),
         std.testing.allocator,
         std.testing.io,
-        tmp.dir,
-        layer,
+        factory,
         command_application,
         args[1..],
         .{ .runtime = .{
@@ -451,13 +451,13 @@ test "zgraphy runOneShot returns checked shutdown flush failure after a real com
     const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir, .args = &args });
     var declared_commands = zgraphy.Application.CommandApplication.init(CliTestHandlers.fail);
     const command_application = declared_commands.application();
+    const factory = zstd.Application.fixedResources(tmp.dir, layer);
     try std.testing.expectError(error.CausalNendbStorageBackendFull, zstd.Application.runOneShot(
-        @TypeOf(layer),
+        @TypeOf(factory),
         @TypeOf(command_application),
         std.testing.allocator,
         std.testing.io,
-        tmp.dir,
-        layer,
+        factory,
         command_application,
         args[1..],
         .{ .runtime = .{
@@ -5415,13 +5415,13 @@ test "zgraphy M3 watch coordinator coalesces and drains one freshness engine" {
     });
     var lifecycle_commands = zgraphy.Application.CommandApplication.init(CliTestHandlers.succeed);
     const lifecycle_application = lifecycle_commands.application();
+    const lifecycle_factory = zstd.Application.fixedResources(tmp.dir, application_layer);
     _ = try zstd.Application.runOneShot(
-        @TypeOf(application_layer),
+        @TypeOf(lifecycle_factory),
         @TypeOf(lifecycle_application),
         std.testing.allocator,
         std.testing.io,
-        tmp.dir,
-        application_layer,
+        lifecycle_factory,
         lifecycle_application,
         application_args[1..],
         .{ .runtime = .{ .graph = .{ .path = zgraphy.Application.causal_graph_path } } },

@@ -11,13 +11,16 @@ pub fn main(init: std.process.Init) !void {
     var root = try std.Io.Dir.cwd().openDir(init.io, root_path, .{ .iterate = true, .follow_symlinks = false });
     defer root.close(init.io);
     const main_layer = zgraphy.Application.rootLayer(.{ .io = init.io, .root = root, .args = args });
+    // Ticket 03 owns the selected-root resource factory. Until then zgraphy
+    // borrows its still-eager root and layer through the fixed-resource adapter,
+    // so the framework acquires and releases (no-op) around the same directory.
+    const resource_factory = zstd.Application.fixedResources(root, main_layer);
     const result = try zstd.Application.runOneShot(
-        @TypeOf(main_layer),
+        @TypeOf(resource_factory),
         @TypeOf(application),
         init.gpa,
         init.io,
-        root,
-        main_layer,
+        resource_factory,
         application,
         args[1..],
         .{ .runtime = .{ .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 4096, .max_wal_bytes = 16 * 1024 * 1024 } } },
