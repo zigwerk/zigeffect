@@ -3,6 +3,7 @@ const fx = @import("zigeffect");
 const Cli = @import("../cli/root.zig");
 const Schema = @import("../schema/root.zig");
 const Supervisor = @import("supervisor.zig");
+const CausalGraph = @import("../causal_graph/root.zig");
 
 const ProbeApi = struct {
     pub const operations: []const []const u8 = &.{"OneShotProbe.invoke"};
@@ -495,13 +496,35 @@ test "runOneShot with owned resources succeeds, persists the graph, and closes t
     _ = result.value.?;
     try std.testing.expectEqual(@as(usize, 1), invocations);
     try expectCompleteProbe(probe, 1);
-    // The runtime flushed its graph into the owned directory before it closed:
-    // the persisted graph exists on disk (reached through the still-open parent).
-    try tmp.dir.access(std.testing.io, "owned-root/graph", .{});
+
     // The acquired handle was closed exactly once by the framework release and is
     // no longer usable after runOneShot returns.
     try std.testing.expect(acquired != null);
     try expectDescriptorReleased(tmp.dir, std.testing.io, acquired.?.handle);
+
+    // Durable persistence proof: checked shutdown flushed the causal graph into
+    // the owned directory before it was released. Reopen the durable store with
+    // the production `LocalDatabase` API (through the still-open parent) and
+    // assert it holds the known successful command and lifecycle records — this
+    // is stronger than directory existence, which `LocalDatabase.init` creates
+    // before any record is written.
+    var durable = try CausalGraph.LocalDatabase.init(
+        std.testing.allocator,
+        std.testing.io,
+        tmp.dir,
+        .{ .path = "owned-root/graph/causal" },
+    );
+    defer durable.deinit();
+    try std.testing.expect(durable.recordCount() > 0);
+    const records_json = try durable.recordsAfterJsonAlloc(std.testing.allocator, 0, 4096);
+    defer std.testing.allocator.free(records_json);
+    // Node properties are a JSON-string-encoded event blob, so the inner keys are
+    // escaped (\"label\":\"...\"). Assert the durable store holds the known
+    // successful command effect record and a completed lifecycle-stage record —
+    // proof the graph was durably written, not merely that its directory exists.
+    try std.testing.expect(std.mem.indexOf(u8, records_json, "\\\"label\\\":\\\"status\\\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, records_json, "\\\"label\\\":\\\"Lifecycle.drain\\\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, records_json, "\\\"status\\\":\\\"success\\\"") != null);
 }
 
 test "runOneShot releases an owned directory after a real runtime-make failure" {
@@ -535,11 +558,16 @@ test "runOneShot releases an owned directory after a real runtime-make failure" 
         },
     ));
     // Acquired once and released once; the make failure outranks command work
-    // that never ran, so no lifecycle stage executed.
+    // that never ran, so NO lifecycle stage executed and the handler never ran.
     try std.testing.expectEqual(@as(usize, 1), probe.acquire);
     try std.testing.expectEqual(@as(usize, 1), probe.release);
     try std.testing.expectEqual(@as(usize, 0), probe.start);
+    try std.testing.expectEqual(@as(usize, 0), probe.ready);
     try std.testing.expectEqual(@as(usize, 0), probe.command);
+    try std.testing.expectEqual(@as(usize, 0), probe.drain);
+    try std.testing.expectEqual(@as(usize, 0), probe.stop);
+    try std.testing.expectEqual(@as(usize, 0), probe.inspect);
+    try std.testing.expectEqual(@as(usize, 0), probe.health);
     try std.testing.expectEqual(@as(usize, 0), probe.shutdown);
     try std.testing.expectEqual(@as(usize, 0), invocations);
     try std.testing.expect(acquired != null);
@@ -576,9 +604,11 @@ test "runOneShot releases an owned directory after a real shutdown-flush failure
             .testing = .{ .probe = &probe },
         },
     ));
-    try std.testing.expectEqual(@as(usize, 1), probe.acquire);
-    try std.testing.expectEqual(@as(usize, 1), probe.shutdown);
-    try std.testing.expectEqual(@as(usize, 1), probe.release);
+    // The real command actually ran and failed (handler invoked once), every
+    // lifecycle stage ran exactly once, and only then did the real shutdown-flush
+    // failure win over the command failure. Release still happened exactly once.
+    try std.testing.expectEqual(@as(usize, 1), invocations);
+    try expectCompleteProbe(probe, 1);
     // The owned handle is closed after checked shutdown and released on return.
     try std.testing.expect(acquired != null);
     try expectDescriptorReleased(tmp.dir, std.testing.io, acquired.?.handle);
