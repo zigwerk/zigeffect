@@ -53,24 +53,42 @@ fn runParsedServiceApplication(
     argv: []const []const u8,
     options: OneShotOptions,
 ) anyerror!OneShotResult(ServiceApp.SuccessType) {
-    // Fail closed on a malformed specification before detecting builtins or
-    // consuming any user token: a bad spec must never emit help or completions.
+    // Fail closed on a malformed specification before resolving any user token:
+    // a bad spec must never emit help, completions, or a parsed command.
     Cli.validateCommandTree(application.spec) catch |failure| {
-        const output = try usageOutputForArgv(allocator, application.spec, argv, failure);
+        const output = try usageOutputForActive(allocator, &.{application.spec.name}, application.spec, failure);
         return emitShortCircuit(ServiceApp.SuccessType, allocator, io, usageShortCircuit(output), options.testing.write_short_circuit);
     };
 
-    if (try parsedBuiltinShortCircuitAlloc(allocator, application, argv)) |short_circuit| {
+    // One owned, validated resolver result serves help, completions, usage, and
+    // execution. Help/completion operands and option values are validated here.
+    // Ownership is released explicitly (no deferred deinitialization).
+    var request = try Cli.resolve(allocator, application.spec, argv);
+
+    if (request.kind != .execute) {
+        const short_circuit = buildRequestShortCircuit(allocator, application, &request) catch |failure| {
+            request.deinit();
+            return failure;
+        };
+        request.deinit();
         return emitShortCircuit(ServiceApp.SuccessType, allocator, io, short_circuit, options.testing.write_short_circuit);
     }
 
-    var parsed = Cli.parse(allocator, application.spec, argv) catch |failure| {
-        const output = try usageOutputForArgv(allocator, application.spec, argv, failure);
+    var parsed = request.finalizeExecute() catch |failure| {
+        const output = usageOutputForActive(allocator, request.commandPath(), request.active(), failure) catch |render_failure| {
+            request.deinit();
+            return render_failure;
+        };
+        request.deinit();
         return emitShortCircuit(ServiceApp.SuccessType, allocator, io, usageShortCircuit(output), options.testing.write_short_circuit);
     };
+    // The resolved slices are now owned by `parsed`; release the resolver's
+    // remaining containers, retaining the leaf spec value for usage context.
+    const leaf_active = request.active();
+    request.deinit();
 
     const handler = application.findHandler(parsed) orelse {
-        const output = usageOutputForPath(allocator, application.spec, parsed.path[1..], Cli.CliError.UnknownSubcommand) catch |failure| {
+        const output = usageOutputForActive(allocator, parsed.path, leaf_active, Cli.CliError.UnknownSubcommand) catch |failure| {
             parsed.deinit(allocator);
             return failure;
         };
@@ -95,6 +113,40 @@ fn runParsedServiceApplication(
     );
     parsed.deinit(allocator);
     return result;
+}
+
+/// Build the short circuit for a resolved help, version, or completions
+/// request. A captured operand failure renders contextual usage at the deepest
+/// valid prefix; otherwise help/completions render from the resolved spec.
+fn buildRequestShortCircuit(
+    allocator: std.mem.Allocator,
+    application: anytype,
+    request: *Cli.ResolvedRequest,
+) !Cli.ShortCircuit {
+    switch (request.kind) {
+        .help => {
+            if (request.failure()) |failure| {
+                return usageShortCircuit(try usageOutputForActive(allocator, request.commandPath(), request.active(), failure));
+            }
+            const output = if (request.root_context) root_help: {
+                if (application.help) |custom| break :root_help try allocator.dupe(u8, custom);
+                break :root_help try Cli.formatHelp(allocator, application.spec);
+            } else try Cli.formatHelpForPath(allocator, request.commandPath(), request.active());
+            return .{ .kind = .help, .exit_code = .success, .stream = .stdout, .output = output };
+        },
+        .version => {
+            const output = try std.fmt.allocPrint(allocator, "{s} {s}\n", .{ application.spec.name, application.version });
+            return .{ .kind = .version, .exit_code = .success, .stream = .stdout, .output = output };
+        },
+        .completions => {
+            if (request.failure()) |failure| {
+                return usageShortCircuit(try usageOutputForActive(allocator, request.commandPath(), request.active(), failure));
+            }
+            const output = try Cli.formatCompletions(allocator, request.active());
+            return .{ .kind = .completions, .exit_code = .success, .stream = .stdout, .output = output };
+        },
+        .execute => unreachable,
+    }
 }
 
 fn runTypedServiceApplication(
@@ -251,7 +303,10 @@ fn runPreparedCommand(
 }
 
 const command_identity_max_bytes: usize = 128;
-const command_identity_max_segments: usize = 8;
+// The executable identity depth bound is the same documented limit the CLI
+// resolver validates against, so declaration, builtin, and executable paths
+// share one maximum depth.
+const command_identity_max_segments: usize = Cli.max_command_depth;
 const command_identity_max_segment_bytes: usize = 48;
 
 const CommandIdentityError = error{
@@ -378,60 +433,15 @@ fn typedCommandEffect(
     }.execute);
 }
 
-fn parsedBuiltinShortCircuitAlloc(
+/// Render contextual usage from a resolved active spec and its full path — the
+/// deepest valid prefix at the point a failure occurred.
+fn usageOutputForActive(
     allocator: std.mem.Allocator,
-    application: anytype,
-    argv: []const []const u8,
-) !?Cli.ShortCircuit {
-    const match = (try Cli.detectBuiltinRequest(allocator, application.spec, argv)) orelse return null;
-    const command_path = match.commandPath();
-    const output = switch (match.request) {
-        .help => help: {
-            // Custom help is reserved for the root context; nested contexts
-            // render generated full-path help.
-            if (command_path.len == 0) {
-                if (application.help) |custom| break :help try allocator.dupe(u8, custom);
-                break :help try Cli.formatHelp(allocator, application.spec);
-            }
-            break :help try Cli.formatHelpForPath(allocator, application.spec, command_path);
-        },
-        .version => try std.fmt.allocPrint(allocator, "{s} {s}\n", .{ application.spec.name, application.version }),
-        .completions => Cli.formatCompletions(allocator, application.spec, argv[1..]) catch |failure| {
-            // An invalid completion path short-circuits with contextual usage
-            // at the deepest valid explicit prefix.
-            return usageShortCircuit(try usageOutputForPath(allocator, application.spec, command_path, failure));
-        },
-    };
-    return .{
-        .kind = switch (match.request) {
-            .help => .help,
-            .version => .version,
-            .completions => .completions,
-        },
-        .exit_code = .success,
-        .stream = .stdout,
-        .output = output,
-    };
-}
-
-fn usageOutputForArgv(
-    allocator: std.mem.Allocator,
-    spec: Cli.CommandSpec,
-    argv: []const []const u8,
+    full_path: []const []const u8,
+    active: Cli.CommandSpec,
     failure: anyerror,
 ) ![]const u8 {
-    var buffer: [Cli.max_command_path][]const u8 = undefined;
-    const count = Cli.explicitCommandPath(spec, argv, &buffer);
-    return usageOutputForPath(allocator, spec, buffer[0..count], failure);
-}
-
-fn usageOutputForPath(
-    allocator: std.mem.Allocator,
-    spec: Cli.CommandSpec,
-    command_path: []const []const u8,
-    failure: anyerror,
-) ![]const u8 {
-    const help = try Cli.formatHelpForPath(allocator, spec, command_path);
+    const help = try Cli.formatHelpForPath(allocator, full_path, active);
     const output = std.fmt.allocPrint(allocator, "usage: {s}\n{s}", .{ @errorName(failure), help }) catch |allocation_failure| {
         allocator.free(help);
         return allocation_failure;
