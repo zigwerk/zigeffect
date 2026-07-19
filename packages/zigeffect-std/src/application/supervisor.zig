@@ -4,38 +4,80 @@ const Cli = @import("../cli/root.zig");
 const CausalRuntime = @import("../runtime/root.zig");
 const Lifecycle = @import("lifecycle.zig");
 
+/// The framework-owned successful acquisition result. It carries only a root
+/// directory, an application layer, and how the framework must release the
+/// directory. There is no callback, identity, handler, effect, label, outcome,
+/// or runtime field: handler resolution, private identity derivation, and effect
+/// construction stay framework-owned and cannot be supplied by a caller.
+pub fn CommandResources(comptime Layer: type) type {
+    return struct {
+        root: std.Io.Dir,
+        layer: Layer,
+        ownership: enum { borrowed, close_directory },
+    };
+}
+
+/// Fixed-resource adapter: borrows an already-open root and an already-built
+/// application layer. Acquisition is infallible and release is a no-op. This is
+/// the temporary adapter used while selected-root ownership has not yet moved
+/// into a factory (that cutover is a later ticket).
+pub fn FixedResources(comptime Layer: type) type {
+    return struct {
+        const Self = @This();
+        pub const LayerType = Layer;
+
+        root: std.Io.Dir,
+        layer: Layer,
+
+        pub fn acquire(
+            self: Self,
+            allocator: std.mem.Allocator,
+            io: std.Io,
+            parsed: Cli.ParsedCommand,
+        ) anyerror!CommandResources(Layer) {
+            _ = allocator;
+            _ = io;
+            _ = parsed;
+            return .{ .root = self.root, .layer = self.layer, .ownership = .borrowed };
+        }
+    };
+}
+
+/// Construct a fixed-resource factory that borrows `root` and `layer`.
+pub fn fixedResources(root: std.Io.Dir, layer: anytype) FixedResources(@TypeOf(layer)) {
+    return .{ .root = root, .layer = layer };
+}
+
 pub fn runOneShot(
-    comptime ApplicationLayer: type,
+    comptime ResourceFactory: type,
     comptime ServiceApp: type,
     allocator: std.mem.Allocator,
     io: std.Io,
-    root: std.Io.Dir,
-    application_layer: ApplicationLayer,
+    resource_factory: ResourceFactory,
     application: ServiceApp,
     argv: []const []const u8,
     options: OneShotOptions,
 ) anyerror!OneShotResult(ServiceApp.SuccessType) {
     validateServiceApplication(ServiceApp);
+    validateResourceFactory(ResourceFactory);
     if (comptime ServiceApp.service_application_kind == .parsed) {
         return runParsedServiceApplication(
-            ApplicationLayer,
+            ResourceFactory,
             ServiceApp,
             allocator,
             io,
-            root,
-            application_layer,
+            resource_factory,
             application,
             argv,
             options,
         );
     }
     return runTypedServiceApplication(
-        ApplicationLayer,
+        ResourceFactory,
         ServiceApp,
         allocator,
         io,
-        root,
-        application_layer,
+        resource_factory,
         application,
         argv,
         options,
@@ -43,12 +85,11 @@ pub fn runOneShot(
 }
 
 fn runParsedServiceApplication(
-    comptime ApplicationLayer: type,
+    comptime ResourceFactory: type,
     comptime ServiceApp: type,
     allocator: std.mem.Allocator,
     io: std.Io,
-    root: std.Io.Dir,
-    application_layer: ApplicationLayer,
+    resource_factory: ResourceFactory,
     application: ServiceApp,
     argv: []const []const u8,
     options: OneShotOptions,
@@ -100,13 +141,15 @@ fn runParsedServiceApplication(
         return failure;
     };
     const effect = parsedCommandEffect(ServiceApp, handler, parsed);
-    const result = runPreparedCommand(
-        ApplicationLayer,
+    // The resolved, immutable parsed command is the only input handed to the
+    // resource factory; identity and effect are already framework-owned above.
+    const result = runResolvedCommand(
+        ResourceFactory,
         @TypeOf(effect),
         allocator,
         io,
-        root,
-        application_layer,
+        resource_factory,
+        parsed,
         effect,
         identity,
         options,
@@ -150,12 +193,11 @@ fn buildRequestShortCircuit(
 }
 
 fn runTypedServiceApplication(
-    comptime ApplicationLayer: type,
+    comptime ResourceFactory: type,
     comptime ServiceApp: type,
     allocator: std.mem.Allocator,
     io: std.Io,
-    root: std.Io.Dir,
-    application_layer: ApplicationLayer,
+    resource_factory: ResourceFactory,
     application: ServiceApp,
     argv: []const []const u8,
     options: OneShotOptions,
@@ -204,13 +246,15 @@ fn runTypedServiceApplication(
         return failure;
     };
     const effect = typedCommandEffect(ServiceApp, application.handler, decoded.value.?);
-    const result = runPreparedCommand(
-        ApplicationLayer,
+    // The parsed command (pre-decode) is the immutable data handed to the
+    // factory; the decoded typed args feed only the framework-owned effect.
+    const result = runResolvedCommand(
+        ResourceFactory,
         @TypeOf(effect),
         allocator,
         io,
-        root,
-        application_layer,
+        resource_factory,
+        parsed,
         effect,
         identity,
         options,
@@ -220,29 +264,49 @@ fn runTypedServiceApplication(
     return result;
 }
 
-fn runPreparedCommand(
-    comptime ApplicationLayer: type,
+fn runResolvedCommand(
+    comptime ResourceFactory: type,
     comptime CommandEffect: type,
     allocator: std.mem.Allocator,
     io: std.Io,
-    root: std.Io.Dir,
-    application_layer: ApplicationLayer,
+    resource_factory: ResourceFactory,
+    parsed: Cli.ParsedCommand,
     command_effect: CommandEffect,
     identity: CommandIdentity,
     options: OneShotOptions,
 ) anyerror!OneShotResult(CommandEffect.SuccessType) {
+    // Acquire exactly once, only after parse, arity, and handler resolution have
+    // committed to executing a command. The factory owns partial-failure
+    // cleanup: an acquisition error returns here without a framework release.
+    bump(options.testing.probe, .acquire);
+    const resources: CommandResources(ResourceFactory.LayerType) =
+        try resource_factory.acquire(allocator, io, parsed);
+
+    // Injected runtime-construction failure: the acquired resources are released
+    // before the failure is surfaced, ahead of any lifecycle work.
+    if (options.testing.faults.make) |failure| {
+        releaseResources(io, resources, options.testing.probe);
+        return failure;
+    }
+
     const root_layer = fx.kernel.Layer.mergeAll(.{
-        application_layer,
+        resources.layer,
         Lifecycle.managerLayer(),
         Lifecycle.signalLayer(),
     });
     var runtime = CausalRuntime.ManagedRuntime(@TypeOf(root_layer)).make(
         allocator,
         io,
-        root,
+        resources.root,
         root_layer,
         options.runtime,
-    ) catch |failure| return failure;
+    ) catch |failure| {
+        // Runtime construction failed before any command ran; release the
+        // acquired resources and surface the failure. Release cannot fail, so it
+        // never alters `shutdown > first infrastructure > command` precedence.
+        releaseResources(io, resources, options.testing.probe);
+        return failure;
+    };
 
     var command_value: ?CommandEffect.SuccessType = null;
     var command_failure: ?anyerror = null;
@@ -296,10 +360,52 @@ fn runPreparedCommand(
         if (options.testing.faults.shutdown) |failure| shutdown_failure = failure;
     }
 
+    // Release exactly once, after checked shutdown returns. An owned directory is
+    // closed only here; a borrowed directory is a no-op. Release is infallible.
+    releaseResources(io, resources, options.testing.probe);
+
     if (shutdown_failure) |failure| return failure;
     if (infrastructure_failure) |failure| return failure;
     if (command_failure) |failure| return failure;
     return .{ .value = command_value.? };
+}
+
+/// Release framework-owned command resources. This is infallible: a borrowed
+/// directory is a no-op and an owned directory is closed. It never returns an
+/// error, so it cannot alter failure precedence.
+fn releaseResources(io: std.Io, resources: anytype, probe: ?*OneShotOptions.TestProbe) void {
+    bump(probe, .release);
+    switch (resources.ownership) {
+        .borrowed => {},
+        .close_directory => resources.root.close(io),
+    }
+}
+
+/// A resource factory declares `LayerType` and an `acquire` method returning
+/// exactly `CommandResources(LayerType)`. Any result shape that adds identity,
+/// effect, handler, outcome, or runtime authority is a different type and fails
+/// closed here at compile time.
+fn validateResourceFactory(comptime ResourceFactory: type) void {
+    if (!@hasDecl(ResourceFactory, "LayerType")) {
+        @compileError("runOneShot requires a resource factory that declares LayerType");
+    }
+    if (!@hasDecl(ResourceFactory, "acquire")) {
+        @compileError("runOneShot requires a resource factory with an acquire method");
+    }
+    const acquire_info = @typeInfo(@TypeOf(ResourceFactory.acquire));
+    if (acquire_info != .@"fn") {
+        @compileError("runOneShot resource factory acquire must be a function");
+    }
+    const return_type = acquire_info.@"fn".return_type orelse {
+        @compileError("runOneShot resource factory acquire must return CommandResources(LayerType)");
+    };
+    const payload = switch (@typeInfo(return_type)) {
+        .error_union => |error_union| error_union.payload,
+        else => return_type,
+    };
+    if (payload != CommandResources(ResourceFactory.LayerType)) {
+        @compileError("runOneShot resource factory acquire must return CommandResources(LayerType)");
+    }
 }
 
 const command_identity_max_bytes: usize = 128;
@@ -495,6 +601,7 @@ pub const OneShotOptions = struct {
     testing: Testing = .{},
 
     pub const TestFaults = struct {
+        make: ?anyerror = null,
         start: ?anyerror = null,
         ready: ?anyerror = null,
         drain: ?anyerror = null,
@@ -505,6 +612,7 @@ pub const OneShotOptions = struct {
     };
 
     pub const TestProbe = struct {
+        acquire: usize = 0,
         start: usize = 0,
         ready: usize = 0,
         command: usize = 0,
@@ -513,6 +621,7 @@ pub const OneShotOptions = struct {
         inspect: usize = 0,
         health: usize = 0,
         shutdown: usize = 0,
+        release: usize = 0,
     };
 
     pub const Testing = struct {
@@ -563,6 +672,7 @@ fn retainFirst(current: *?anyerror, failure: anyerror) void {
 }
 
 const ProbeField = enum {
+    acquire,
     start,
     ready,
     command,
@@ -571,6 +681,7 @@ const ProbeField = enum {
     inspect,
     health,
     shutdown,
+    release,
 };
 
 fn bump(probe: ?*OneShotOptions.TestProbe, comptime field: ProbeField) void {

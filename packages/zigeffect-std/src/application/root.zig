@@ -6,6 +6,9 @@ const OneShot = @import("supervisor.zig");
 pub const runOneShot = OneShot.runOneShot;
 pub const OneShotOptions = OneShot.OneShotOptions;
 pub const OneShotResult = OneShot.OneShotResult;
+pub const CommandResources = OneShot.CommandResources;
+pub const FixedResources = OneShot.FixedResources;
+pub const fixedResources = OneShot.fixedResources;
 pub const Lifecycle = @import("lifecycle.zig");
 
 test {

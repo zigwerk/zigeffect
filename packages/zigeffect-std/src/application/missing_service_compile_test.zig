@@ -9,6 +9,7 @@ test "one-shot command cannot compile without its required service" {
     var tmp = std.testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     const layer = zstd.fx.kernel.Layer.empty();
+    const factory = zstd.Application.fixedResources(tmp.dir, layer);
     const Handler = struct {
         fn run(ctx: *zstd.fx.kernel.ContextView(MissingServices), _: zstd.Cli.ParsedCommand) error{}!void {
             _ = ctx.service(Missing);
@@ -24,12 +25,11 @@ test "one-shot command cannot compile without its required service" {
         .handlers = &handlers,
     };
     _ = try zstd.Application.runOneShot(
-        @TypeOf(layer),
+        @TypeOf(factory),
         @TypeOf(application),
         std.testing.allocator,
         std.testing.io,
-        tmp.dir,
-        layer,
+        factory,
         application,
         &.{"status"},
         .{ .runtime = .{ .graph = .{ .path = "causal" } } },

@@ -31,17 +31,17 @@ test "one-shot rejects an application-shaped identity handoff wrapper" {
     var tmp = std.testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     const layer = zstd.fx.kernel.Layer.empty();
+    const factory = zstd.Application.fixedResources(tmp.dir, layer);
     const application = WrappedApplication{
         .spec = .{ .name = "test" },
         .handlers = &.{},
     };
     _ = try zstd.Application.runOneShot(
-        @TypeOf(layer),
+        @TypeOf(factory),
         WrappedApplication,
         std.testing.allocator,
         std.testing.io,
-        tmp.dir,
-        layer,
+        factory,
         application,
         &.{"status"},
         .{ .runtime = .{ .graph = .{ .path = "causal" } } },

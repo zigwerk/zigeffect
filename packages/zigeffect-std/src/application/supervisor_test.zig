@@ -83,13 +83,13 @@ test "runOneShot executes one framework-named service command and checks every l
     var invocations: usize = 0;
     var probe = Supervisor.OneShotOptions.TestProbe{};
     const layer = fx.kernel.Layer.succeed(Probe, ProbeApi{ .invocations = &invocations });
+    const factory = Supervisor.fixedResources(tmp.dir, layer);
     const result = try Supervisor.runOneShot(
-        @TypeOf(layer),
+        @TypeOf(factory),
         @TypeOf(success_application),
         std.testing.allocator,
         std.testing.io,
-        tmp.dir,
-        layer,
+        factory,
         success_application,
         &.{ "status", "--token", "raw-secret-command-name" },
         .{
@@ -112,40 +112,44 @@ test "runOneShot executes one framework-named service command and checks every l
     try std.testing.expectEqual(@as(usize, 0), countLabelContaining(snapshot.events, "raw-secret-command-name"));
 }
 
-test "runOneShot public parameters expose no command identity or preflight forgery surface" {
+test "runOneShot public parameters expose no command identity, root, or preflight forgery surface" {
     const function = @typeInfo(@TypeOf(Supervisor.runOneShot)).@"fn";
-    try std.testing.expectEqual(@as(usize, 9), function.params.len);
-    try std.testing.expect(function.params[0].type.? == type);
-    try std.testing.expect(function.params[1].type.? == type);
+    try std.testing.expectEqual(@as(usize, 8), function.params.len);
+    try std.testing.expect(function.params[0].type.? == type); // comptime ResourceFactory
+    try std.testing.expect(function.params[1].type.? == type); // comptime ServiceApp
     try std.testing.expect(function.params[2].type.? == std.mem.Allocator);
     try std.testing.expect(function.params[3].type.? == std.Io);
-    try std.testing.expect(function.params[4].type.? == std.Io.Dir);
-    try std.testing.expect(function.params[5].type == null);
-    try std.testing.expect(function.params[6].type == null);
-    try std.testing.expect(function.params[7].type.? == []const []const u8);
-    try std.testing.expect(function.params[8].type.? == Supervisor.OneShotOptions);
+    try std.testing.expect(function.params[4].type == null); // resource_factory: ResourceFactory
+    try std.testing.expect(function.params[5].type == null); // application: ServiceApp
+    try std.testing.expect(function.params[6].type.? == []const []const u8);
+    try std.testing.expect(function.params[7].type.? == Supervisor.OneShotOptions);
 
-    const source = try readSupervisorSource();
-    defer std.testing.allocator.free(source);
-    try validateRunOneShotRootDeclaration(std.testing.allocator, source);
+    // No parameter is a raw root directory or eager application layer any more.
+    // Root and layer authority is derived solely from the factory result.
+    inline for (function.params) |param| {
+        if (param.type) |ParamType| try std.testing.expect(ParamType != std.Io.Dir);
+    }
 
+    // The only accepted acquisition result carries exactly root, layer, and
+    // ownership — no identity, handler, effect, outcome, or runtime authority.
+    const Resources = Supervisor.CommandResources(@TypeOf(fx.kernel.Layer.empty()));
+    const resources_info = @typeInfo(Resources).@"struct";
+    try std.testing.expectEqual(@as(usize, 3), resources_info.fields.len);
+    try std.testing.expectEqualStrings("root", resources_info.fields[0].name);
+    try std.testing.expectEqualStrings("layer", resources_info.fields[1].name);
+    try std.testing.expectEqualStrings("ownership", resources_info.fields[2].name);
+    try std.testing.expect(resources_info.fields[0].type == std.Io.Dir);
+    const ownership_info = @typeInfo(resources_info.fields[2].type).@"enum";
+    try std.testing.expectEqual(@as(usize, 2), ownership_info.fields.len);
+    try std.testing.expectEqualStrings("borrowed", ownership_info.fields[0].name);
+    try std.testing.expectEqualStrings("close_directory", ownership_info.fields[1].name);
+
+    // Mutation matrix: identity/handoff/preflight shaped payloads are detected,
+    // ordinary payloads are not. A forged resource result that injects command
+    // identity is rejected at compile time by the negative compile test below.
     try std.testing.expect(carriesCommandIdentityState(GuardPayloadWrapper));
     try std.testing.expect(carriesCommandIdentityState(GuardNestedFieldWrapper));
     try std.testing.expect(!carriesCommandIdentityState(GuardSafeWrapper));
-}
-
-test "runOneShot source guard rejects a nested decoy before a forbidden root declaration" {
-    const source = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/application/run_one_shot_declaration_guard_fixture_test.zig",
-        std.testing.allocator,
-        .limited(64 * 1024),
-    );
-    defer std.testing.allocator.free(source);
-    try std.testing.expectError(
-        error.UnexpectedRunOneShotSignature,
-        validateRunOneShotRootDeclaration(std.testing.allocator, source),
-    );
 }
 
 test "runOneShot supervisor has one checked shutdown and no deferred deinitialization" {
@@ -178,13 +182,13 @@ test "runOneShot short circuits before runtime construction and repository state
         var invocations: usize = 0;
         var probe = Supervisor.OneShotOptions.TestProbe{};
         const layer = fx.kernel.Layer.succeed(Probe, ProbeApi{ .invocations = &invocations });
+        const factory = Supervisor.fixedResources(tmp.dir, layer);
         const result = try Supervisor.runOneShot(
-            @TypeOf(layer),
+            @TypeOf(factory),
             @TypeOf(success_application),
             std.testing.allocator,
             std.testing.io,
-            tmp.dir,
-            layer,
+            factory,
             success_application,
             case.argv,
             .{
@@ -223,13 +227,13 @@ test "runOneShot typed service handler resolves dependencies through ContextView
     var invocations: usize = 0;
     var probe = Supervisor.OneShotOptions.TestProbe{};
     const layer = fx.kernel.Layer.succeed(Probe, ProbeApi{ .invocations = &invocations });
+    const factory = Supervisor.fixedResources(tmp.dir, layer);
     const result = try Supervisor.runOneShot(
-        @TypeOf(layer),
+        @TypeOf(factory),
         @TypeOf(application),
         std.testing.allocator,
         std.testing.io,
-        tmp.dir,
-        layer,
+        factory,
         application,
         &.{ "--workspace", "/repo" },
         .{
@@ -300,13 +304,13 @@ test "runOneShot returns a real shutdown flush failure instead of swallowing it"
     var invocations: usize = 0;
     var probe = Supervisor.OneShotOptions.TestProbe{};
     const layer = fx.kernel.Layer.succeed(Probe, ProbeApi{ .invocations = &invocations });
+    const factory = Supervisor.fixedResources(tmp.dir, layer);
     try std.testing.expectError(error.CausalNendbStorageBackendFull, Supervisor.runOneShot(
-        @TypeOf(layer),
+        @TypeOf(factory),
         @TypeOf(failure_application),
         std.testing.allocator,
         std.testing.io,
-        tmp.dir,
-        layer,
+        factory,
         failure_application,
         &.{"status"},
         .{
@@ -318,6 +322,155 @@ test "runOneShot returns a real shutdown flush failure instead of swallowing it"
         },
     ));
     try std.testing.expectEqual(@as(usize, 1), probe.shutdown);
+    // Even on the shutdown-flush failure path the resources are released once.
+    try std.testing.expectEqual(@as(usize, 1), probe.acquire);
+    try std.testing.expectEqual(@as(usize, 1), probe.release);
+}
+
+test "runOneShot acquires once and releases once after a runtime construction failure" {
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    var invocations: usize = 0;
+    var probe = Supervisor.OneShotOptions.TestProbe{};
+    const layer = fx.kernel.Layer.succeed(Probe, ProbeApi{ .invocations = &invocations });
+    const factory = Supervisor.fixedResources(tmp.dir, layer);
+    try std.testing.expectError(error.InjectedRuntimeMakeFailure, Supervisor.runOneShot(
+        @TypeOf(factory),
+        @TypeOf(success_application),
+        std.testing.allocator,
+        std.testing.io,
+        factory,
+        success_application,
+        &.{"status"},
+        .{
+            .runtime = .{ .graph = .{ .path = "causal", .max_records = 256 } },
+            .testing = .{
+                .probe = &probe,
+                .faults = .{ .make = error.InjectedRuntimeMakeFailure },
+            },
+        },
+    ));
+    // Acquired once, released once, and no runtime lifecycle work ran: the
+    // runtime-construction failure outranks command work that never started.
+    try std.testing.expectEqual(@as(usize, 1), probe.acquire);
+    try std.testing.expectEqual(@as(usize, 1), probe.release);
+    try std.testing.expectEqual(@as(usize, 0), probe.start);
+    try std.testing.expectEqual(@as(usize, 0), probe.command);
+    try std.testing.expectEqual(@as(usize, 0), probe.shutdown);
+    try std.testing.expectEqual(@as(usize, 0), invocations);
+}
+
+test "runOneShot lets a factory self-clean a partial acquisition without a framework release" {
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    var invocations: usize = 0;
+    var probe = Supervisor.OneShotOptions.TestProbe{};
+    const layer = fx.kernel.Layer.succeed(Probe, ProbeApi{ .invocations = &invocations });
+
+    var cleaned = false;
+    // A factory that opens a real directory, then fails acquisition. It must
+    // close its own partial resource before returning the error.
+    const PartialFactory = struct {
+        const Self = @This();
+        pub const LayerType = @TypeOf(layer);
+        root: std.Io.Dir,
+        layer: @TypeOf(layer),
+        cleaned: *bool,
+
+        pub fn acquire(
+            self: Self,
+            allocator: std.mem.Allocator,
+            io: std.Io,
+            parsed: Cli.ParsedCommand,
+        ) anyerror!Supervisor.CommandResources(@TypeOf(layer)) {
+            _ = allocator;
+            _ = parsed;
+            var partial = try self.root.openDir(io, ".", .{ .iterate = true, .follow_symlinks = false });
+            partial.close(io);
+            self.cleaned.* = true;
+            return error.InjectedAcquireFailure;
+        }
+    };
+    const factory = PartialFactory{ .root = tmp.dir, .layer = layer, .cleaned = &cleaned };
+
+    try std.testing.expectError(error.InjectedAcquireFailure, Supervisor.runOneShot(
+        @TypeOf(factory),
+        @TypeOf(success_application),
+        std.testing.allocator,
+        std.testing.io,
+        factory,
+        success_application,
+        &.{"status"},
+        .{
+            .runtime = .{ .graph = .{ .path = "causal", .max_records = 256 } },
+            .testing = .{ .probe = &probe },
+        },
+    ));
+    try std.testing.expect(cleaned);
+    // The framework counted the acquire attempt but performed no release: the
+    // factory owns partial-failure cleanup.
+    try std.testing.expectEqual(@as(usize, 1), probe.acquire);
+    try std.testing.expectEqual(@as(usize, 0), probe.release);
+    try std.testing.expectEqual(@as(usize, 0), probe.start);
+    try std.testing.expectEqual(@as(usize, 0), invocations);
+}
+
+test "runOneShot closes an owned directory only after checked shutdown returns" {
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(std.testing.io, "owned-root");
+    var causal = fx.CausalStore.init(std.testing.allocator);
+    defer causal.deinit();
+    var invocations: usize = 0;
+    var probe = Supervisor.OneShotOptions.TestProbe{};
+    const layer = fx.kernel.Layer.succeed(Probe, ProbeApi{ .invocations = &invocations });
+
+    // A factory that owns the selected directory and asks the framework to close
+    // it. The framework must close it only after checked shutdown flushes the
+    // runtime graph into that same directory.
+    const OwnedFactory = struct {
+        const Self = @This();
+        pub const LayerType = @TypeOf(layer);
+        parent: std.Io.Dir,
+        layer: @TypeOf(layer),
+
+        pub fn acquire(
+            self: Self,
+            allocator: std.mem.Allocator,
+            io: std.Io,
+            parsed: Cli.ParsedCommand,
+        ) anyerror!Supervisor.CommandResources(@TypeOf(layer)) {
+            _ = allocator;
+            _ = parsed;
+            const owned = try self.parent.openDir(io, "owned-root", .{ .iterate = true, .follow_symlinks = false });
+            return .{ .root = owned, .layer = self.layer, .ownership = .close_directory };
+        }
+    };
+    const factory = OwnedFactory{ .parent = tmp.dir, .layer = layer };
+
+    const result = try Supervisor.runOneShot(
+        @TypeOf(factory),
+        @TypeOf(success_application),
+        std.testing.allocator,
+        std.testing.io,
+        factory,
+        success_application,
+        &.{"status"},
+        .{
+            .runtime = .{
+                .graph = .{ .path = "graph/causal", .max_records = 256 },
+                .causal_store = &causal,
+            },
+            .testing = .{ .probe = &probe },
+        },
+    );
+    _ = result.value.?;
+    try std.testing.expectEqual(@as(usize, 1), invocations);
+    try expectCompleteProbe(probe, 1);
+    // The runtime flushed its graph into the owned directory before it closed:
+    // the directory still exists and holds the graph the runtime persisted.
+    try tmp.dir.access(std.testing.io, "owned-root", .{});
+    try tmp.dir.access(std.testing.io, "owned-root/graph", .{});
 }
 
 test "runOneShot missing required service is a negative compile test" {
@@ -384,6 +537,38 @@ test "runOneShot rejects an application-shaped identity handoff wrapper at compi
     ) != null);
 }
 
+test "runOneShot rejects a forged resource result that injects command identity at compile time" {
+    const result = try std.process.run(std.testing.allocator, std.testing.io, .{
+        .argv = &.{
+            "zig",
+            "test",
+            "-ODebug",
+            "--dep",
+            "zigeffect_std",
+            "-Mroot=src/application/resource_factory_authority_compile_test.zig",
+            "--dep",
+            "zigeffect",
+            "-Mzigeffect_std=src/root.zig",
+            "-Mzigeffect=../zigeffect/src/zigeffect.zig",
+        },
+        .cwd = .inherit,
+        .stdout_limit = .limited(64 * 1024),
+        .stderr_limit = .limited(64 * 1024),
+    });
+    defer std.testing.allocator.free(result.stdout);
+    defer std.testing.allocator.free(result.stderr);
+
+    switch (result.term) {
+        .exited => |code| try std.testing.expect(code != 0),
+        else => return error.UnexpectedCompilerTermination,
+    }
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        result.stderr,
+        "resource factory acquire must return CommandResources(LayerType)",
+    ) != null);
+}
+
 fn runFailureCase(faults: Supervisor.OneShotOptions.TestFaults, expected: anyerror) !void {
     var tmp = std.testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
@@ -392,13 +577,13 @@ fn runFailureCase(faults: Supervisor.OneShotOptions.TestFaults, expected: anyerr
     var invocations: usize = 0;
     var probe = Supervisor.OneShotOptions.TestProbe{};
     const layer = fx.kernel.Layer.succeed(Probe, ProbeApi{ .invocations = &invocations });
+    const factory = Supervisor.fixedResources(tmp.dir, layer);
     if (Supervisor.runOneShot(
-        @TypeOf(layer),
+        @TypeOf(factory),
         @TypeOf(failure_application),
         std.testing.allocator,
         std.testing.io,
-        tmp.dir,
-        layer,
+        factory,
         failure_application,
         &.{"status"},
         .{
@@ -472,43 +657,6 @@ const command_identity_name_vocabulary = .{
     "command_effect",
 };
 
-const forbidden_run_one_shot_parameter_names = .{
-    "identity",
-    "handoff",
-    "preflight",
-    "command_effect",
-    "sealed",
-};
-
-const RunOneShotParameter = struct {
-    name: []const u8,
-    comptime_parameter: bool = false,
-    type_tokens: []const []const u8,
-};
-
-const expected_run_one_shot_parameters = [_]RunOneShotParameter{
-    .{ .name = "ApplicationLayer", .comptime_parameter = true, .type_tokens = &.{"type"} },
-    .{ .name = "ServiceApp", .comptime_parameter = true, .type_tokens = &.{"type"} },
-    .{ .name = "allocator", .type_tokens = &.{ "std", ".", "mem", ".", "Allocator" } },
-    .{ .name = "io", .type_tokens = &.{ "std", ".", "Io" } },
-    .{ .name = "root", .type_tokens = &.{ "std", ".", "Io", ".", "Dir" } },
-    .{ .name = "application_layer", .type_tokens = &.{"ApplicationLayer"} },
-    .{ .name = "application", .type_tokens = &.{"ServiceApp"} },
-    .{ .name = "argv", .type_tokens = &.{ "[", "]", "const", "[", "]", "const", "u8" } },
-    .{ .name = "options", .type_tokens = &.{"OneShotOptions"} },
-};
-
-const expected_run_one_shot_return_tokens = &.{
-    "anyerror",
-    "!",
-    "OneShotResult",
-    "(",
-    "ServiceApp",
-    ".",
-    "SuccessType",
-    ")",
-};
-
 fn readSupervisorSource() ![]u8 {
     return std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
@@ -518,78 +666,8 @@ fn readSupervisorSource() ![]u8 {
     );
 }
 
-fn validateRunOneShotRootDeclaration(allocator: std.mem.Allocator, source: []const u8) !void {
-    const sentinel_source = try allocator.dupeZ(u8, source);
-    defer allocator.free(sentinel_source);
-    var tree = try std.zig.Ast.parse(allocator, sentinel_source, .zig);
-    defer tree.deinit(allocator);
-    if (tree.errors.len != 0) return error.InvalidSupervisorSource;
-
-    var root_run_one_shot: ?std.zig.Ast.Node.Index = null;
-    for (tree.rootDecls()) |node| {
-        var buffer = [1]std.zig.Ast.Node.Index{.root};
-        const proto = tree.fullFnProto(&buffer, node) orelse continue;
-        const name_token = proto.name_token orelse continue;
-        if (!std.mem.eql(u8, tree.tokenSlice(name_token), "runOneShot")) continue;
-        if (root_run_one_shot != null) return error.DuplicateRootRunOneShotDeclaration;
-        root_run_one_shot = node;
-    }
-
-    const root_node = root_run_one_shot orelse return error.MissingRootRunOneShotDeclaration;
-    if (tree.nodeTag(root_node) != .fn_decl) return error.UnexpectedRunOneShotSignature;
-    var buffer = [1]std.zig.Ast.Node.Index{.root};
-    const proto = tree.fullFnProto(&buffer, root_node) orelse return error.UnexpectedRunOneShotSignature;
-    const visibility = proto.visib_token orelse return error.UnexpectedRunOneShotSignature;
-    if (tree.tokenTag(visibility) != .keyword_pub) return error.UnexpectedRunOneShotSignature;
-
-    var parameter_iterator = proto.iterate(&tree);
-    var parameter_index: usize = 0;
-    while (parameter_iterator.next()) |parameter| : (parameter_index += 1) {
-        if (parameter_index >= expected_run_one_shot_parameters.len) return error.UnexpectedRunOneShotSignature;
-        const expected = expected_run_one_shot_parameters[parameter_index];
-        const name_token = parameter.name_token orelse return error.UnexpectedRunOneShotSignature;
-        const name = tree.tokenSlice(name_token);
-        if (!std.mem.eql(u8, name, expected.name)) return error.UnexpectedRunOneShotSignature;
-        inline for (forbidden_run_one_shot_parameter_names) |forbidden| {
-            if (std.ascii.indexOfIgnoreCase(name, forbidden) != null) return error.UnexpectedRunOneShotSignature;
-        }
-        if (expected.comptime_parameter) {
-            const marker = parameter.comptime_noalias orelse return error.UnexpectedRunOneShotSignature;
-            if (tree.tokenTag(marker) != .keyword_comptime) return error.UnexpectedRunOneShotSignature;
-        } else if (parameter.comptime_noalias != null) {
-            return error.UnexpectedRunOneShotSignature;
-        }
-        if (parameter.anytype_ellipsis3 != null) return error.UnexpectedRunOneShotSignature;
-        const type_expr = parameter.type_expr orelse return error.UnexpectedRunOneShotSignature;
-        if (!nodeTokensEqual(&tree, type_expr, expected.type_tokens)) return error.UnexpectedRunOneShotSignature;
-    }
-    if (parameter_index != expected_run_one_shot_parameters.len) return error.UnexpectedRunOneShotSignature;
-
-    const return_type = proto.ast.return_type.unwrap() orelse return error.UnexpectedRunOneShotSignature;
-    if (!nodeTokensEqual(&tree, return_type, expected_run_one_shot_return_tokens)) {
-        return error.UnexpectedRunOneShotSignature;
-    }
-}
-
-fn nodeTokensEqual(tree: *const std.zig.Ast, node: std.zig.Ast.Node.Index, expected: []const []const u8) bool {
-    const last_token = tree.lastToken(node);
-    var token = tree.firstToken(node);
-    var expected_index: usize = 0;
-    while (true) : (token += 1) {
-        switch (tree.tokenTag(token)) {
-            .doc_comment, .container_doc_comment => {},
-            else => {
-                if (expected_index >= expected.len or
-                    !std.mem.eql(u8, tree.tokenSlice(token), expected[expected_index])) return false;
-                expected_index += 1;
-            },
-        }
-        if (token == last_token) break;
-    }
-    return expected_index == expected.len;
-}
-
 fn expectEmptyProbe(probe: Supervisor.OneShotOptions.TestProbe) !void {
+    try std.testing.expectEqual(@as(usize, 0), probe.acquire);
     try std.testing.expectEqual(@as(usize, 0), probe.start);
     try std.testing.expectEqual(@as(usize, 0), probe.ready);
     try std.testing.expectEqual(@as(usize, 0), probe.command);
@@ -598,9 +676,11 @@ fn expectEmptyProbe(probe: Supervisor.OneShotOptions.TestProbe) !void {
     try std.testing.expectEqual(@as(usize, 0), probe.inspect);
     try std.testing.expectEqual(@as(usize, 0), probe.health);
     try std.testing.expectEqual(@as(usize, 0), probe.shutdown);
+    try std.testing.expectEqual(@as(usize, 0), probe.release);
 }
 
 fn expectCompleteProbe(probe: Supervisor.OneShotOptions.TestProbe, expected_commands: usize) !void {
+    try std.testing.expectEqual(@as(usize, 1), probe.acquire);
     try std.testing.expectEqual(@as(usize, 1), probe.start);
     try std.testing.expectEqual(@as(usize, 1), probe.ready);
     try std.testing.expectEqual(expected_commands, probe.command);
@@ -609,6 +689,7 @@ fn expectCompleteProbe(probe: Supervisor.OneShotOptions.TestProbe, expected_comm
     try std.testing.expectEqual(@as(usize, 1), probe.inspect);
     try std.testing.expectEqual(@as(usize, 1), probe.health);
     try std.testing.expectEqual(@as(usize, 1), probe.shutdown);
+    try std.testing.expectEqual(@as(usize, 1), probe.release);
 }
 
 fn countEvent(
