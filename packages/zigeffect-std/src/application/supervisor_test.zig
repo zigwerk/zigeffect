@@ -518,13 +518,81 @@ test "runOneShot with owned resources succeeds, persists the graph, and closes t
     try std.testing.expect(durable.recordCount() > 0);
     const records_json = try durable.recordsAfterJsonAlloc(std.testing.allocator, 0, 4096);
     defer std.testing.allocator.free(records_json);
-    // Node properties are a JSON-string-encoded event blob, so the inner keys are
-    // escaped (\"label\":\"...\"). Assert the durable store holds the known
-    // successful command effect record and a completed lifecycle-stage record —
-    // proof the graph was durably written, not merely that its directory exists.
-    try std.testing.expect(std.mem.indexOf(u8, records_json, "\\\"label\\\":\\\"status\\\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, records_json, "\\\"label\\\":\\\"Lifecycle.drain\\\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, records_json, "\\\"status\\\":\\\"success\\\"") != null);
+
+    // Parse each durable record and its encoded event-properties object, then
+    // require the (kind, label, status) triple to be correlated WITHIN a single
+    // event. Page-wide substring matching is rejected: a started record plus an
+    // unrelated success record must not satisfy this.
+    //
+    // Observed production schema (verified from the reopened WAL):
+    //   - the command terminal success is an `effect_completed` event with
+    //     label "status" and status "success";
+    //   - `Lifecycle.drain` is recorded as a `span_recorded` terminal event with
+    //     status "success" (not `effect_completed`), so we require that exact
+    //     terminal successful lifecycle record.
+    try std.testing.expect(try durableHasCorrelatedRecord(
+        std.testing.allocator,
+        records_json,
+        "effect_completed",
+        "status",
+        "success",
+    ));
+    try std.testing.expect(try durableHasCorrelatedRecord(
+        std.testing.allocator,
+        records_json,
+        "span_recorded",
+        "Lifecycle.drain",
+        "success",
+    ));
+
+    // Negative controls: the same labels at their started/non-terminal stage and
+    // a success carried by an unrelated event must NOT satisfy the matcher.
+    try std.testing.expect(!try durableHasCorrelatedRecord(
+        std.testing.allocator,
+        records_json,
+        "effect_started",
+        "status",
+        "success",
+    ));
+    try std.testing.expect(!try durableHasCorrelatedRecord(
+        std.testing.allocator,
+        records_json,
+        "effect_completed",
+        "Lifecycle.drain",
+        "success",
+    ));
+}
+
+/// Return true only when a single durable record's encoded event properties
+/// carry all three of `kind`, `label`, and `status` together. This proves a
+/// specific correlated event was durably persisted, not that the three values
+/// appear anywhere on the page.
+fn durableHasCorrelatedRecord(
+    allocator: std.mem.Allocator,
+    records_json: []const u8,
+    kind: []const u8,
+    label: []const u8,
+    status: []const u8,
+) !bool {
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, records_json, .{});
+    defer parsed.deinit();
+    const records = (parsed.value.object.get("records") orelse return false).array;
+    for (records.items) |record| {
+        const node = record.object.get("node") orelse continue;
+        const properties = node.object.get("properties") orelse continue;
+        if (properties != .string) continue;
+        var event = std.json.parseFromSlice(std.json.Value, allocator, properties.string, .{}) catch continue;
+        defer event.deinit();
+        if (event.value != .object) continue;
+        const record_kind = event.value.object.get("kind") orelse continue;
+        const record_label = event.value.object.get("label") orelse continue;
+        const record_status = event.value.object.get("status") orelse continue;
+        if (record_kind != .string or record_label != .string or record_status != .string) continue;
+        if (std.mem.eql(u8, record_kind.string, kind) and
+            std.mem.eql(u8, record_label.string, label) and
+            std.mem.eql(u8, record_status.string, status)) return true;
+    }
+    return false;
 }
 
 test "runOneShot releases an owned directory after a real runtime-make failure" {
