@@ -210,13 +210,19 @@ test "zgraphy nested builtins and failures short circuit with correct stream and
         .{ .args = &.{ "completions", "benchmark", "--json", "bogus" }, .kind = .usage, .exit_code = .usage },
         // A group-level invalid integer before a later leaf fails at the group.
         .{ .args = &.{ "benchmark", "--debounce-ms", "nope", "lexical", "fx" }, .kind = .usage, .exit_code = .usage },
-        // Fixup 03: explicit builtin operands past a leaf's declared arity are
-        // rejected contextually rather than rendering a success short circuit.
+        // Fixup 03 (strict leaf boundary): explicit builtin operands are
+        // command-path/options only; the FIRST plain operand after a leaf is
+        // contextual usage/64, regardless of the leaf's declared arity.
         .{ .args = &.{ "help", "benchmark", "corpus", "extra" }, .kind = .usage, .exit_code = .usage },
         .{ .args = &.{ "completions", "benchmark", "corpus", "extra" }, .kind = .usage, .exit_code = .usage },
+        // lexical declares a required + optional positional, yet even one
+        // explicit help operand is rejected.
+        .{ .args = &.{ "help", "benchmark", "lexical", "fixture-a" }, .kind = .usage, .exit_code = .usage },
+        .{ .args = &.{ "help", "benchmark", "lexical", "fixture-a", "fixture-b" }, .kind = .usage, .exit_code = .usage },
         .{ .args = &.{ "help", "benchmark", "lexical", "fixture-a", "fixture-b", "fixture-c" }, .kind = .usage, .exit_code = .usage },
-        // Preserved: help on a leaf within its arity still succeeds.
+        // Preserved: asking for help on a leaf without operands still succeeds.
         .{ .args = &.{ "help", "benchmark", "corpus" }, .kind = .help, .exit_code = .success },
+        .{ .args = &.{ "help", "benchmark", "lexical" }, .kind = .help, .exit_code = .success },
     };
 
     var tmp = std.testing.tmpDir(.{ .iterate = true });
