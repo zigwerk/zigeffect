@@ -594,55 +594,80 @@ fn validatePositionalArity(active: CommandSpec, count: usize) CliError!void {
     if (!has_repeated and count > required + optional) return CliError.UnexpectedPositional;
 }
 
-pub fn parse(
+/// The single shared token resolver used by both command parsing and builtin
+/// detection. It walks argv exactly once: descending explicit subcommands,
+/// resolving options against the matched-ancestor chain, consuming option
+/// values atomically, and treating everything after `--` as positional data.
+/// It performs no default-subcommand selection and no arity validation — those
+/// are execution-only steps applied by `parse`.
+const Resolution = struct {
+    active: CommandSpec,
+    /// Full command path, root first, including each descended explicit child.
+    /// This is the clean explicit command path — it never contains an option
+    /// token — until `parse` appends a default leaf.
+    path: std.ArrayList([]const u8),
+    options: std.ArrayList(ParsedOption),
+    positionals: std.ArrayList([]const u8),
+    ancestors: std.ArrayList(CommandSpec),
+    /// Set only when `detect_builtin` is true and a standalone `--help`/`-h`
+    /// token is reached as a fresh token (never as an option value or after
+    /// `--`). `builtin_path_len` is the explicit child count at that point.
+    builtin: ?BuiltinRequest = null,
+    builtin_path_len: usize = 0,
+
+    fn deinit(self: *Resolution, allocator: std.mem.Allocator) void {
+        self.path.deinit(allocator);
+        self.options.deinit(allocator);
+        self.positionals.deinit(allocator);
+        self.ancestors.deinit(allocator);
+    }
+};
+
+fn resolveCommandLine(
     allocator: std.mem.Allocator,
     spec: CommandSpec,
     args: []const []const u8,
-) !ParsedCommand {
-    try validateCommandTree(spec);
-
-    var active = spec;
-    var path = std.ArrayList([]const u8).empty;
-    errdefer path.deinit(allocator);
-    try path.append(allocator, spec.name);
-
-    // The chain of matched commands from the root to `active`. Options declared
-    // on the active command or any matched ancestor are legal after descent.
-    var ancestors = std.ArrayList(CommandSpec).empty;
-    defer ancestors.deinit(allocator);
-    try ancestors.append(allocator, spec);
-
-    var options = std.ArrayList(ParsedOption).empty;
-    errdefer options.deinit(allocator);
-    var positionals = std.ArrayList([]const u8).empty;
-    errdefer positionals.deinit(allocator);
+    detect_builtin: bool,
+) !Resolution {
+    var resolution = Resolution{
+        .active = spec,
+        .path = .empty,
+        .options = .empty,
+        .positionals = .empty,
+        .ancestors = .empty,
+    };
+    errdefer resolution.deinit(allocator);
+    try resolution.path.append(allocator, spec.name);
+    try resolution.ancestors.append(allocator, spec);
 
     var index: usize = 0;
     while (index < args.len) {
         const arg = args[index];
+
+        // A fresh `--help`/`-h` token — one not consumed as an option value and
+        // not following `--` — is a builtin request. Because option values are
+        // consumed atomically inside the option branch, a value equal to
+        // `--help` is never reached here.
+        if (detect_builtin and (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h"))) {
+            resolution.builtin = .help;
+            resolution.builtin_path_len = resolution.path.items.len - 1;
+            return resolution;
+        }
+
         switch (classifyToken(arg)) {
             .double_dash => {
                 index += 1;
-                // `--` ends option/path recognition. At a group, select the
-                // default child (if any) before the remaining tokens become
-                // leaf positionals; a group without a default fails closed.
-                if (active.subcommands.len != 0) {
-                    const default_name = active.default_subcommand orelse return CliError.MissingSubcommand;
-                    const child = findSubcommand(active, default_name) orelse return CliError.UnknownDefaultSubcommand;
-                    active = child;
-                    try path.append(allocator, child.name);
-                    try ancestors.append(allocator, child);
-                }
                 while (index < args.len) : (index += 1) {
-                    try positionals.append(allocator, args[index]);
+                    try resolution.positionals.append(allocator, args[index]);
                 }
-                break;
+                resolution.active = resolution.ancestors.items[resolution.ancestors.items.len - 1];
+                return resolution;
             },
             .long_option => {
                 const raw = arg[2..];
                 const equals = std.mem.indexOfScalar(u8, raw, '=');
                 const name = if (equals) |eq| raw[0..eq] else raw;
-                const legacy_option = ancestorOption(ancestors.items, name) orelse return CliError.UnknownOption;
+                const legacy_option = ancestorOption(resolution.ancestors.items, name) orelse return CliError.UnknownOption;
                 const value: ?[]const u8 = switch (legacy_option.kind) {
                     .boolean => "true",
                     .string, .integer => blk: {
@@ -653,11 +678,11 @@ pub fn parse(
                     },
                 };
                 try validateOptionValue(legacy_option, value);
-                try options.append(allocator, .{ .name = legacy_option.name, .value = value });
+                try resolution.options.append(allocator, .{ .name = legacy_option.name, .value = value });
                 index += 1;
             },
             .short_option => {
-                const legacy_option = ancestorShortOption(ancestors.items, arg[1]) orelse return CliError.UnknownOption;
+                const legacy_option = ancestorShortOption(resolution.ancestors.items, arg[1]) orelse return CliError.UnknownOption;
                 const value: ?[]const u8 = switch (legacy_option.kind) {
                     .boolean => "true",
                     .string, .integer => blk: {
@@ -667,50 +692,62 @@ pub fn parse(
                     },
                 };
                 try validateOptionValue(legacy_option, value);
-                try options.append(allocator, .{ .name = legacy_option.name, .value = value });
+                try resolution.options.append(allocator, .{ .name = legacy_option.name, .value = value });
                 index += 1;
             },
             .plain => {
-                if (active.subcommands.len != 0) {
-                    const child = findSubcommand(active, arg) orelse return CliError.UnknownSubcommand;
-                    active = child;
-                    try path.append(allocator, child.name);
-                    try ancestors.append(allocator, child);
+                if (resolution.active.subcommands.len != 0) {
+                    const child = findSubcommand(resolution.active, arg) orelse return CliError.UnknownSubcommand;
+                    resolution.active = child;
+                    try resolution.path.append(allocator, child.name);
+                    try resolution.ancestors.append(allocator, child);
                     index += 1;
                 } else {
-                    try positionals.append(allocator, arg);
+                    try resolution.positionals.append(allocator, arg);
                     index += 1;
                 }
             },
         }
     }
 
-    // Input ended without an explicit leaf. Executable parsing selects the
-    // default child; a group without a default fails closed.
-    if (active.subcommands.len != 0) {
-        const default_name = active.default_subcommand orelse return CliError.MissingSubcommand;
-        const child = findSubcommand(active, default_name) orelse return CliError.UnknownDefaultSubcommand;
-        active = child;
-        try path.append(allocator, child.name);
-        try ancestors.append(allocator, child);
+    return resolution;
+}
+
+pub fn parse(
+    allocator: std.mem.Allocator,
+    spec: CommandSpec,
+    args: []const []const u8,
+) !ParsedCommand {
+    try validateCommandTree(spec);
+
+    var resolution = try resolveCommandLine(allocator, spec, args, false);
+    defer resolution.deinit(allocator);
+
+    // Executable parsing selects the default child when no explicit leaf was
+    // reached; a group without a default fails closed.
+    if (resolution.active.subcommands.len != 0) {
+        const default_name = resolution.active.default_subcommand orelse return CliError.MissingSubcommand;
+        const child = findSubcommand(resolution.active, default_name) orelse return CliError.UnknownDefaultSubcommand;
+        resolution.active = child;
+        try resolution.path.append(allocator, child.name);
     }
 
-    for (active.options) |legacy_option| {
-        if (legacy_option.required and !hasParsedOption(options.items, legacy_option.name) and !optionHasDefaultSource(legacy_option)) {
+    for (resolution.active.options) |legacy_option| {
+        if (legacy_option.required and !hasParsedOption(resolution.options.items, legacy_option.name) and !optionHasDefaultSource(legacy_option)) {
             return CliError.MissingRequiredOption;
         }
     }
 
-    try validatePositionalArity(active, positionals.items.len);
+    try validatePositionalArity(resolution.active, resolution.positionals.items.len);
 
-    const owned_path = try path.toOwnedSlice(allocator);
+    const owned_path = try resolution.path.toOwnedSlice(allocator);
     errdefer allocator.free(owned_path);
-    const owned_options = try options.toOwnedSlice(allocator);
+    const owned_options = try resolution.options.toOwnedSlice(allocator);
     errdefer allocator.free(owned_options);
-    const owned_positionals = try positionals.toOwnedSlice(allocator);
+    const owned_positionals = try resolution.positionals.toOwnedSlice(allocator);
     errdefer allocator.free(owned_positionals);
     return .{
-        .command = active.name,
+        .command = resolution.active.name,
         .path = owned_path,
         .options = owned_options,
         .positionals = owned_positionals,
@@ -843,19 +880,28 @@ pub fn decodeTypedCommandAlloc(
     };
 }
 
-pub fn formatHelp(allocator: std.mem.Allocator, spec: CommandSpec) ![]const u8 {
-    var output = std.ArrayList(u8).empty;
-    errdefer output.deinit(allocator);
-
+fn appendHelpUsageLine(
+    output: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    usage_name: []const u8,
+    spec: CommandSpec,
+) std.mem.Allocator.Error!void {
     if (spec.subcommands.len == 0) {
-        try output.print(allocator, "Usage: {s} [options]", .{spec.name});
+        try output.print(allocator, "Usage: {s} [options]", .{usage_name});
     } else {
-        try output.print(allocator, "Usage: {s} [command] [options]", .{spec.name});
+        try output.print(allocator, "Usage: {s} [command] [options]", .{usage_name});
     }
     for (spec.positionals) |positional_spec| {
-        try appendPositionalUsage(&output, allocator, positional_spec);
+        try appendPositionalUsage(output, allocator, positional_spec);
     }
     try output.append(allocator, '\n');
+}
+
+fn appendHelpSections(
+    output: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    spec: CommandSpec,
+) std.mem.Allocator.Error!void {
     if (spec.description.len != 0) {
         try output.print(allocator, "\n{s}\n", .{spec.description});
     }
@@ -863,7 +909,7 @@ pub fn formatHelp(allocator: std.mem.Allocator, spec: CommandSpec) ![]const u8 {
         try output.appendSlice(allocator, "\nArguments:\n");
         for (spec.positionals) |positional_spec| {
             try output.print(allocator, "  {s}", .{positional_spec.name});
-            try appendSpaces(&output, allocator, 2);
+            try appendSpaces(output, allocator, 2);
             try output.print(allocator, "{s}\n", .{positional_spec.help});
         }
     }
@@ -872,7 +918,7 @@ pub fn formatHelp(allocator: std.mem.Allocator, spec: CommandSpec) ![]const u8 {
         const width = maxCommandNameWidth(spec.subcommands);
         for (spec.subcommands) |subcommand| {
             try output.print(allocator, "  {s}", .{subcommand.name});
-            try appendSpaces(&output, allocator, width - subcommand.name.len + 2);
+            try appendSpaces(output, allocator, width - subcommand.name.len + 2);
             try output.print(allocator, "{s}\n", .{subcommand.description});
         }
     }
@@ -886,6 +932,40 @@ pub fn formatHelp(allocator: std.mem.Allocator, spec: CommandSpec) ![]const u8 {
             }
         }
     }
+}
+
+pub fn formatHelp(allocator: std.mem.Allocator, spec: CommandSpec) ![]const u8 {
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+    try appendHelpUsageLine(&output, allocator, spec.name, spec);
+    try appendHelpSections(&output, allocator, spec);
+    return output.toOwnedSlice(allocator);
+}
+
+/// Render generated help for a nested context, naming the full command path in
+/// the usage line (for example `zgraphy benchmark lexical`). `command_path`
+/// holds the explicit child names below the root; each is resolved against the
+/// spec tree, stopping at the deepest valid prefix.
+pub fn formatHelpForPath(
+    allocator: std.mem.Allocator,
+    root: CommandSpec,
+    command_path: []const []const u8,
+) ![]const u8 {
+    var active = root;
+    var usage_name = std.ArrayList(u8).empty;
+    defer usage_name.deinit(allocator);
+    try usage_name.appendSlice(allocator, root.name);
+    for (command_path) |name| {
+        const child = findSubcommand(active, name) orelse break;
+        active = child;
+        try usage_name.append(allocator, ' ');
+        try usage_name.appendSlice(allocator, child.name);
+    }
+
+    var output = std.ArrayList(u8).empty;
+    errdefer output.deinit(allocator);
+    try appendHelpUsageLine(&output, allocator, usage_name.items, active);
+    try appendHelpSections(&output, allocator, active);
     return output.toOwnedSlice(allocator);
 }
 
@@ -971,73 +1051,111 @@ pub fn detectBuiltin(command: anytype, args: []const []const u8) ?BuiltinRequest
     return detectBuiltinNamed(Command.Meta.name, args);
 }
 
+pub const max_command_path = 16;
+
 pub const BuiltinMatch = struct {
     request: BuiltinRequest,
     /// Explicit subcommand names (excluding the root) that establish the help
-    /// or completion context. Empty means the root command.
-    command_path: []const []const u8 = &.{},
+    /// or completion context, free of any option tokens. Empty means the root.
+    path_storage: [max_command_path][]const u8 = undefined,
+    path_len: usize = 0,
+
+    pub fn commandPath(self: *const BuiltinMatch) []const []const u8 {
+        return self.path_storage[0..self.path_len];
+    }
 };
 
-/// Detect a builtin request using the same option/value/`--` consumer as
-/// command parsing. `--help`/`-h` consumed as an option value, or appearing
-/// after `--`, is data — not a help request.
-pub fn detectBuiltinRequest(spec: CommandSpec, argv: []const []const u8) ?BuiltinMatch {
-    if (argv.len == 0) return .{ .request = .help };
-
-    if (std.mem.eql(u8, argv[0], "help")) {
-        if (argv.len == 1 or (argv.len == 2 and std.mem.eql(u8, argv[1], spec.name))) {
-            return .{ .request = .help };
-        }
-        return .{ .request = .help, .command_path = argv[1..] };
-    }
-    if (std.mem.eql(u8, argv[0], "completions")) {
-        return .{ .request = .completions, .command_path = argv[1..] };
-    }
-    if (argv.len == 1 and std.mem.eql(u8, argv[0], "--version")) {
-        return .{ .request = .version };
-    }
-
-    // Walk the command line, consuming options atomically and descending
-    // explicit subcommands, so a `--help`/`-h` that is really an option value
-    // or a post-`--` positional is never mistaken for a help request.
-    var active = spec;
-    var explicit_end: usize = 0;
+fn builtinWithPath(request: BuiltinRequest, path: []const []const u8) BuiltinMatch {
+    var match = BuiltinMatch{ .request = request };
+    const count = @min(path.len, max_command_path);
     var index: usize = 0;
-    while (index < argv.len) {
+    while (index < count) : (index += 1) match.path_storage[index] = path[index];
+    match.path_len = count;
+    return match;
+}
+
+/// Walk explicit subcommand tokens only, returning the deepest valid explicit
+/// command path (child names, no option tokens). Option tokens and their
+/// values are skipped using the matched-ancestor chain; `--`, an unknown
+/// option, or the first non-child token stops the walk. This is the shared
+/// context resolver for help/usage/completions and their failure prefixes.
+pub fn explicitCommandPath(spec: CommandSpec, argv: []const []const u8, out: *[max_command_path][]const u8) usize {
+    var chain: [max_command_path]CommandSpec = undefined;
+    var depth: usize = 0;
+    chain[depth] = spec;
+    depth += 1;
+    var written: usize = 0;
+
+    var index: usize = 0;
+    while (index < argv.len and written < max_command_path) {
         const arg = argv[index];
         switch (classifyToken(arg)) {
-            .double_dash => return null,
+            .double_dash => break,
             .long_option => {
-                if (std.mem.eql(u8, arg, "--help")) {
-                    return .{ .request = .help, .command_path = argv[0..explicit_end] };
-                }
                 const raw = arg[2..];
                 const equals = std.mem.indexOfScalar(u8, raw, '=');
                 const name = if (equals) |eq| raw[0..eq] else raw;
-                const legacy_option = findOption(active, name);
+                const legacy_option = ancestorOption(chain[0..depth], name) orelse break;
                 index += 1;
-                if (legacy_option) |resolved| {
-                    if (resolved.kind != .boolean and equals == null) index += 1;
-                }
+                if (legacy_option.kind != .boolean and equals == null) index += 1;
             },
             .short_option => {
-                if (arg[1] == 'h') {
-                    return .{ .request = .help, .command_path = argv[0..explicit_end] };
-                }
-                const legacy_option = findShortOption(active, arg[1]);
+                const legacy_option = ancestorShortOption(chain[0..depth], arg[1]) orelse break;
                 index += 1;
-                if (legacy_option) |resolved| {
-                    if (resolved.kind != .boolean) index += 1;
-                }
+                if (legacy_option.kind != .boolean) index += 1;
             },
             .plain => {
-                if (active.subcommands.len == 0) return null;
-                const child = findSubcommand(active, arg) orelse return null;
-                active = child;
+                const active = chain[depth - 1];
+                if (active.subcommands.len == 0) break;
+                const child = findSubcommand(active, arg) orelse break;
+                out[written] = child.name;
+                written += 1;
+                if (depth < max_command_path) {
+                    chain[depth] = child;
+                    depth += 1;
+                }
                 index += 1;
-                explicit_end = index;
             },
         }
+    }
+    return written;
+}
+
+/// Detect a builtin request using the exact same resolver state as parsing.
+/// `--help`/`-h` consumed as an option value (including an ancestor-only
+/// option) or appearing after `--` is data, not a help request. The returned
+/// command path is the clean explicit subcommand path, free of option tokens.
+pub fn detectBuiltinRequest(allocator: std.mem.Allocator, spec: CommandSpec, argv: []const []const u8) std.mem.Allocator.Error!?BuiltinMatch {
+    if (argv.len == 0) return BuiltinMatch{ .request = .help };
+
+    var path_buffer: [max_command_path][]const u8 = undefined;
+
+    if (std.mem.eql(u8, argv[0], "help")) {
+        if (argv.len == 1 or (argv.len == 2 and std.mem.eql(u8, argv[1], spec.name))) {
+            return BuiltinMatch{ .request = .help };
+        }
+        const count = explicitCommandPath(spec, argv[1..], &path_buffer);
+        return builtinWithPath(.help, path_buffer[0..count]);
+    }
+    if (std.mem.eql(u8, argv[0], "completions")) {
+        const count = explicitCommandPath(spec, argv[1..], &path_buffer);
+        return builtinWithPath(.completions, path_buffer[0..count]);
+    }
+    if (argv.len == 1 and std.mem.eql(u8, argv[0], "--version")) {
+        return BuiltinMatch{ .request = .version };
+    }
+
+    // Share the parser's resolver: a bad option before a help-looking token
+    // produces the same usage failure parsing would, not a help request.
+    var resolution = resolveCommandLine(allocator, spec, argv, true) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return null,
+    };
+    defer resolution.deinit(allocator);
+
+    if (resolution.builtin) |request| {
+        const explicit = resolution.path.items[1 .. 1 + resolution.builtin_path_len];
+        return builtinWithPath(request, explicit);
     }
     return null;
 }
@@ -2048,6 +2166,9 @@ const grammar_group_options = [_]OptionSpec{
     .{ .name = "root", .kind = .string },
     .{ .name = "trace", .kind = .boolean },
     .{ .name = "verbose", .kind = .boolean },
+    // Declared only on the group, never on a leaf: exercises ancestor-only
+    // string option value consumption during builtin detection.
+    .{ .name = "label", .kind = .string },
 };
 
 const grammar_lexical_positionals = [_]PositionalSpec{
@@ -2271,26 +2392,40 @@ test "Cli resolves ancestor options after descent with the closest declaration w
 }
 
 test "Cli builtin detection shares the option value and delimiter consumer" {
-    try std.testing.expectEqual(BuiltinRequest.help, detectBuiltinRequest(grammar_spec, &.{}).?.request);
-    try std.testing.expectEqual(BuiltinRequest.help, detectBuiltinRequest(grammar_spec, &.{"--help"}).?.request);
-    try std.testing.expectEqual(BuiltinRequest.version, detectBuiltinRequest(grammar_spec, &.{"--version"}).?.request);
-    try std.testing.expectEqual(BuiltinRequest.completions, detectBuiltinRequest(grammar_spec, &.{"completions"}).?.request);
+    const alloc = std.testing.allocator;
+    try std.testing.expectEqual(BuiltinRequest.help, (try detectBuiltinRequest(alloc, grammar_spec, &.{})).?.request);
+    try std.testing.expectEqual(BuiltinRequest.help, (try detectBuiltinRequest(alloc, grammar_spec, &.{"--help"})).?.request);
+    try std.testing.expectEqual(BuiltinRequest.version, (try detectBuiltinRequest(alloc, grammar_spec, &.{"--version"})).?.request);
+    try std.testing.expectEqual(BuiltinRequest.completions, (try detectBuiltinRequest(alloc, grammar_spec, &.{"completions"})).?.request);
 
     {
-        const match = detectBuiltinRequest(grammar_spec, &.{ "benchmark", "--help" }).?;
+        const match = (try detectBuiltinRequest(alloc, grammar_spec, &.{ "benchmark", "--help" })).?;
         try std.testing.expectEqual(BuiltinRequest.help, match.request);
-        try std.testing.expectEqual(@as(usize, 1), match.command_path.len);
-        try std.testing.expectEqualStrings("benchmark", match.command_path[0]);
+        try std.testing.expectEqual(@as(usize, 1), match.commandPath().len);
+        try std.testing.expectEqualStrings("benchmark", match.commandPath()[0]);
     }
     {
-        const match = detectBuiltinRequest(grammar_spec, &.{ "help", "benchmark" }).?;
-        try std.testing.expectEqualStrings("benchmark", match.command_path[0]);
+        // Interspersed options before nested help must not pollute the path.
+        const match = (try detectBuiltinRequest(alloc, grammar_spec, &.{ "benchmark", "--json", "lexical", "--help" })).?;
+        try std.testing.expectEqual(@as(usize, 2), match.commandPath().len);
+        try std.testing.expectEqualStrings("benchmark", match.commandPath()[0]);
+        try std.testing.expectEqualStrings("lexical", match.commandPath()[1]);
+    }
+    {
+        const match = (try detectBuiltinRequest(alloc, grammar_spec, &.{ "help", "benchmark" })).?;
+        try std.testing.expectEqualStrings("benchmark", match.commandPath()[0]);
     }
 
     // `--help` consumed as an option value or after `--` is data, not a request.
-    try std.testing.expect(detectBuiltinRequest(grammar_spec, &.{ "benchmark", "--root", "--help" }) == null);
-    try std.testing.expect(detectBuiltinRequest(grammar_spec, &.{ "benchmark", "--", "--help" }) == null);
-    try std.testing.expectEqual(BuiltinRequest.help, detectBuiltinRequest(grammar_spec, &.{ "benchmark", "-h" }).?.request);
+    try std.testing.expect((try detectBuiltinRequest(alloc, grammar_spec, &.{ "benchmark", "--root", "--help" })) == null);
+    try std.testing.expect((try detectBuiltinRequest(alloc, grammar_spec, &.{ "benchmark", "--", "--help" })) == null);
+    // An ancestor-only string option consumes `--help` as its value exactly
+    // like parsing does, so this is not a help request.
+    try std.testing.expect((try detectBuiltinRequest(alloc, grammar_spec, &.{ "benchmark", "lexical", "fx", "--label", "--help" })) == null);
+    // An invalid option before a help-looking token yields the parser's usage
+    // failure, not help.
+    try std.testing.expect((try detectBuiltinRequest(alloc, grammar_spec, &.{ "benchmark", "--bad", "--help" })) == null);
+    try std.testing.expectEqual(BuiltinRequest.help, (try detectBuiltinRequest(alloc, grammar_spec, &.{ "benchmark", "-h" })).?.request);
 }
 
 test "Cli help and completions render declared positionals" {
@@ -2311,4 +2446,27 @@ test "Cli help and completions render declared positionals" {
     defer std.testing.allocator.free(completions);
     try std.testing.expect(std.mem.indexOf(u8, completions, "positional required fixture-id") != null);
     try std.testing.expect(std.mem.indexOf(u8, completions, "positional optional fixture-root") != null);
+}
+
+test "Cli renders full command path help for nested contexts" {
+    const alloc = std.testing.allocator;
+
+    const leaf_help = try formatHelpForPath(alloc, grammar_spec, &.{ "benchmark", "lexical" });
+    defer alloc.free(leaf_help);
+    try std.testing.expect(std.mem.indexOf(u8, leaf_help, "Usage: zg benchmark lexical [options] <fixture-id> [fixture-root]") != null);
+
+    const group_help = try formatHelpForPath(alloc, grammar_spec, &.{"benchmark"});
+    defer alloc.free(group_help);
+    try std.testing.expect(std.mem.indexOf(u8, group_help, "Usage: zg benchmark [command] [options]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, group_help, "corpus") != null);
+
+    // The root context still renders the root usage line.
+    const root_help = try formatHelpForPath(alloc, grammar_spec, &.{});
+    defer alloc.free(root_help);
+    try std.testing.expect(std.mem.indexOf(u8, root_help, "Usage: zg [command] [options]") != null);
+
+    // The deepest valid prefix is used when the path runs past a leaf.
+    const prefix_help = try formatHelpForPath(alloc, grammar_spec, &.{ "benchmark", "corpus", "bogus" });
+    defer alloc.free(prefix_help);
+    try std.testing.expect(std.mem.indexOf(u8, prefix_help, "Usage: zg benchmark corpus [options]") != null);
 }

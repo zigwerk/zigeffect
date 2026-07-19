@@ -56,7 +56,7 @@ fn runParsedServiceApplication(
     // Fail closed on a malformed specification before detecting builtins or
     // consuming any user token: a bad spec must never emit help or completions.
     Cli.validateCommandTree(application.spec) catch |failure| {
-        const output = try usageOutputAlloc(allocator, application.spec, failure);
+        const output = try usageOutputForArgv(allocator, application.spec, argv, failure);
         return emitShortCircuit(ServiceApp.SuccessType, allocator, io, usageShortCircuit(output), options.testing.write_short_circuit);
     };
 
@@ -65,12 +65,12 @@ fn runParsedServiceApplication(
     }
 
     var parsed = Cli.parse(allocator, application.spec, argv) catch |failure| {
-        const output = try usageOutputAlloc(allocator, application.spec, failure);
+        const output = try usageOutputForArgv(allocator, application.spec, argv, failure);
         return emitShortCircuit(ServiceApp.SuccessType, allocator, io, usageShortCircuit(output), options.testing.write_short_circuit);
     };
 
     const handler = application.findHandler(parsed) orelse {
-        const output = usageOutputAlloc(allocator, application.spec, Cli.CliError.UnknownSubcommand) catch |failure| {
+        const output = usageOutputForPath(allocator, application.spec, parsed.path[1..], Cli.CliError.UnknownSubcommand) catch |failure| {
             parsed.deinit(allocator);
             return failure;
         };
@@ -383,22 +383,27 @@ fn parsedBuiltinShortCircuitAlloc(
     application: anytype,
     argv: []const []const u8,
 ) !?Cli.ShortCircuit {
-    const builtin = Cli.detectBuiltinRequest(application.spec, argv) orelse return null;
-    const output = switch (builtin.request) {
+    const match = (try Cli.detectBuiltinRequest(allocator, application.spec, argv)) orelse return null;
+    const command_path = match.commandPath();
+    const output = switch (match.request) {
         .help => help: {
-            const active = activeCommandSpecForArgs(application.spec, builtin.command_path) catch |failure| {
-                return usageShortCircuit(try usageOutputAlloc(allocator, application.spec, failure));
-            };
-            if (application.help) |custom| break :help try allocator.dupe(u8, custom);
-            break :help try Cli.formatHelp(allocator, active);
+            // Custom help is reserved for the root context; nested contexts
+            // render generated full-path help.
+            if (command_path.len == 0) {
+                if (application.help) |custom| break :help try allocator.dupe(u8, custom);
+                break :help try Cli.formatHelp(allocator, application.spec);
+            }
+            break :help try Cli.formatHelpForPath(allocator, application.spec, command_path);
         },
         .version => try std.fmt.allocPrint(allocator, "{s} {s}\n", .{ application.spec.name, application.version }),
-        .completions => Cli.formatCompletions(allocator, application.spec, builtin.command_path) catch |failure| {
-            return usageShortCircuit(try usageOutputAlloc(allocator, application.spec, failure));
+        .completions => Cli.formatCompletions(allocator, application.spec, argv[1..]) catch |failure| {
+            // An invalid completion path short-circuits with contextual usage
+            // at the deepest valid explicit prefix.
+            return usageShortCircuit(try usageOutputForPath(allocator, application.spec, command_path, failure));
         },
     };
     return .{
-        .kind = switch (builtin.request) {
+        .kind = switch (match.request) {
             .help => .help,
             .version => .version,
             .completions => .completions,
@@ -409,30 +414,24 @@ fn parsedBuiltinShortCircuitAlloc(
     };
 }
 
-fn activeCommandSpecForArgs(root: Cli.CommandSpec, argv: []const []const u8) Cli.CliError!Cli.CommandSpec {
-    var active = root;
-    for (argv) |arg| {
-        if (arg.len == 0 or arg[0] == '-') break;
-        if (findSubcommand(active, arg)) |subcommand| {
-            active = subcommand;
-        } else if (active.subcommands.len != 0) {
-            return Cli.CliError.UnknownSubcommand;
-        } else {
-            break;
-        }
-    }
-    return active;
+fn usageOutputForArgv(
+    allocator: std.mem.Allocator,
+    spec: Cli.CommandSpec,
+    argv: []const []const u8,
+    failure: anyerror,
+) ![]const u8 {
+    var buffer: [Cli.max_command_path][]const u8 = undefined;
+    const count = Cli.explicitCommandPath(spec, argv, &buffer);
+    return usageOutputForPath(allocator, spec, buffer[0..count], failure);
 }
 
-fn findSubcommand(spec: Cli.CommandSpec, name: []const u8) ?Cli.CommandSpec {
-    for (spec.subcommands) |subcommand| {
-        if (std.mem.eql(u8, subcommand.name, name)) return subcommand;
-    }
-    return null;
-}
-
-fn usageOutputAlloc(allocator: std.mem.Allocator, spec: Cli.CommandSpec, failure: anyerror) ![]const u8 {
-    const help = try Cli.formatHelp(allocator, spec);
+fn usageOutputForPath(
+    allocator: std.mem.Allocator,
+    spec: Cli.CommandSpec,
+    command_path: []const []const u8,
+    failure: anyerror,
+) ![]const u8 {
+    const help = try Cli.formatHelpForPath(allocator, spec, command_path);
     const output = std.fmt.allocPrint(allocator, "usage: {s}\n{s}", .{ @errorName(failure), help }) catch |allocation_failure| {
         allocator.free(help);
         return allocation_failure;
