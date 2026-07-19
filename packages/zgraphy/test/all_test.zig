@@ -223,6 +223,11 @@ test "zgraphy nested builtins and failures short circuit with correct stream and
         // Preserved: asking for help on a leaf without operands still succeeds.
         .{ .args = &.{ "help", "benchmark", "corpus" }, .kind = .help, .exit_code = .success },
         .{ .args = &.{ "help", "benchmark", "lexical" }, .kind = .help, .exit_code = .success },
+        // Amend 02 (first-error-wins): the leaf operand is captured immediately,
+        // so a later unknown option or invalid value never overwrites it.
+        .{ .args = &.{ "help", "benchmark", "lexical", "fixture-a", "--bad" }, .kind = .usage, .exit_code = .usage },
+        .{ .args = &.{ "help", "benchmark", "lexical", "fixture-a", "--debounce-ms", "nope" }, .kind = .usage, .exit_code = .usage },
+        .{ .args = &.{ "completions", "benchmark", "lexical", "fixture-a", "--bad" }, .kind = .usage, .exit_code = .usage },
     };
 
     var tmp = std.testing.tmpDir(.{ .iterate = true });
