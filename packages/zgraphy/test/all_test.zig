@@ -1,6 +1,9 @@
 const std = @import("std");
 const zgraphy = @import("zgraphy");
 const zstd = @import("zigeffect_std");
+// Path to the installed zgraphy executable, injected by build.zig so the
+// installed-process boundary test spawns the real binary rather than runOneShot.
+const build_options = @import("build_options");
 
 const repository_scenario = zstd.Testing.Scenario{
     .id = "repository-graph-roundtrip",
@@ -679,6 +682,215 @@ test "zgraphy resource factory selects the positional root for a location comman
     try tmp.dir.access(std.testing.io, ".zgraphy", .{});
     // The positional root, not cwd, received the handler marker.
     try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().access(std.testing.io, "handler-marker.txt", .{}));
+}
+
+const installed_process_scenario = zstd.Testing.Scenario{
+    .id = "installed-process-parsed-root",
+    .label = "Installed zgraphy process enforces parsed root selection and short circuits",
+    .requirement = "req-runtime-owned-cli-causality",
+    .acceptance_check = "check-runtime-owned-cli-causality",
+    .component = "zgraphy",
+    .command = "test",
+    .default_seed = 1605,
+    .source_roots = &.{ "build.zig", "src/main.zig", "src/application.zig", "test/all_test.zig" },
+    .tags = &.{ "acceptance", "cli", "process", "root", "causal", "deterministic" },
+};
+
+const InstalledOutcome = struct { exit: ?u8, stdout_len: usize, stderr_len: usize };
+
+/// Spawn the actually installed zgraphy executable with `tail` argv in `dir` as
+/// its working directory, collecting exit classification and stream sizes.
+fn runInstalled(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    exe: []const u8,
+    dir: std.Io.Dir,
+    tail: []const []const u8,
+) !InstalledOutcome {
+    const argv = try gpa.alloc([]const u8, tail.len + 1);
+    defer gpa.free(argv);
+    argv[0] = exe;
+    for (tail, 0..) |token, index| argv[index + 1] = token;
+    const result = try std.process.run(gpa, io, .{ .argv = argv, .cwd = .{ .dir = dir } });
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+    return .{
+        .exit = switch (result.term) {
+            .exited => |code| code,
+            else => null,
+        },
+        .stdout_len = result.stdout.len,
+        .stderr_len = result.stderr.len,
+    };
+}
+
+fn pathExists(io: std.Io, dir: std.Io.Dir, sub_path: []const u8) bool {
+    dir.access(io, sub_path, .{}) catch return false;
+    return true;
+}
+
+fn durableString(value: std.json.Value, key: []const u8) ?[]const u8 {
+    const found = value.object.get(key) orelse return null;
+    return switch (found) {
+        .string => |text| text,
+        else => null,
+    };
+}
+
+/// Whether the reopened durable graph page contains a record whose embedded
+/// causal event has the exact kind, label, and status — correlated per record,
+/// not merely present somewhere in the page.
+fn durableHasRecord(
+    gpa: std.mem.Allocator,
+    records_json: []const u8,
+    kind: []const u8,
+    label: []const u8,
+    status: []const u8,
+) !bool {
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, records_json, .{});
+    defer parsed.deinit();
+    const records = parsed.value.object.get("records") orelse return false;
+    for (records.array.items) |record| {
+        const node = record.object.get("node") orelse continue;
+        const properties = node.object.get("properties") orelse continue;
+        const properties_json = switch (properties) {
+            .string => |text| text,
+            else => continue,
+        };
+        var event = std.json.parseFromSlice(std.json.Value, gpa, properties_json, .{}) catch continue;
+        defer event.deinit();
+        const record_kind = durableString(event.value, "kind") orelse continue;
+        const record_label = durableString(event.value, "label") orelse continue;
+        const record_status = durableString(event.value, "status") orelse continue;
+        if (std.mem.eql(u8, record_kind, kind) and
+            std.mem.eql(u8, record_label, label) and
+            std.mem.eql(u8, record_status, status)) return true;
+    }
+    return false;
+}
+
+test "zgraphy installed process boundary enforces parsed root and short circuits" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const missing_root = "installed-missing-root-xyz";
+
+    // The build-injected executable path is relative to the build root; resolve it
+    // to an absolute path so spawns with a changed child working directory still
+    // locate the real installed binary.
+    const exe = try std.Io.Dir.cwd().realPathFileAlloc(io, build_options.zgraphy_exe, gpa);
+    defer gpa.free(exe);
+
+    var evidence = try zstd.Testing.TestContext.initFromProject(gpa, io, std.Io.Dir.cwd(), .{
+        .project = "zgraphy",
+        .suite = "zgraphy-tests",
+        .scenario = installed_process_scenario,
+        .seed = 1605,
+    });
+    defer evidence.deinit();
+    const assertions = zstd.Testing.AssertionRecorder.init(&evidence);
+
+    // 1) Representative short-circuit / usage / infrastructure matrix, each spawned
+    //    in an isolated working directory with a nonexistent selected root.
+    const Class = enum { help_stdout, usage_stderr, infrastructure };
+    const Case = struct { tail: []const []const u8, class: Class, id: []const u8 };
+    const cases = [_]Case{
+        .{ .tail = &.{"--help"}, .class = .help_stdout, .id = "root-help" },
+        .{ .tail = &.{"--version"}, .class = .help_stdout, .id = "version" },
+        .{ .tail = &.{ "completions", "benchmark" }, .class = .help_stdout, .id = "contextual-completions" },
+        .{ .tail = &.{ "build", "--root", missing_root, "--help" }, .class = .help_stdout, .id = "nested-help-missing-root" },
+        .{ .tail = &.{ "benchmark", "corpus", "--root", missing_root, "extra" }, .class = .usage_stderr, .id = "unexpected-positional-missing-root" },
+        .{ .tail = &.{ "pin", "--root", missing_root }, .class = .usage_stderr, .id = "missing-positional-missing-root" },
+        .{ .tail = &.{ "status", "--root", missing_root }, .class = .infrastructure, .id = "valid-inaccessible-root" },
+    };
+    inline for (cases) |case| {
+        var tmp = std.testing.tmpDir(.{ .iterate = true });
+        defer tmp.cleanup();
+        const outcome = try runInstalled(gpa, io, exe, tmp.dir, case.tail);
+        const classified = switch (case.class) {
+            .help_stdout => outcome.exit != null and outcome.exit.? == 0 and outcome.stdout_len > 0 and outcome.stderr_len == 0,
+            .usage_stderr => outcome.exit != null and outcome.exit.? == 64 and outcome.stderr_len > 0 and outcome.stdout_len == 0,
+            .infrastructure => outcome.exit != null and outcome.exit.? == 1,
+        };
+        const no_state = !pathExists(io, tmp.dir, ".zgraphy") and !pathExists(io, tmp.dir, missing_root);
+        try assertions.boolean(.{
+            .id = "zgraphy.installed." ++ case.id,
+            .label = "installed process exits with the classified stream and code and creates no state",
+            .repair_hint = "keep parsed short circuits, usage, and arity before acquisition; open selected roots only for executable commands",
+        }, classified and no_state);
+    }
+
+    // 2) Option-before-leaf runs the real benchmark.corpus handler against the
+    //    selected root; the durable graph lands under that root and nowhere else.
+    {
+        var tmp = std.testing.tmpDir(.{ .iterate = true });
+        defer tmp.cleanup();
+        try tmp.dir.createDirPath(io, "selected");
+        try tmp.dir.createDirPath(io, "other");
+        const outcome = try runInstalled(gpa, io, exe, tmp.dir, &.{ "benchmark", "--root", "selected", "--json" });
+        try assertions.boolean(.{
+            .id = "zgraphy.installed.benchmark-selected-root-exit",
+            .label = "option-before-leaf benchmark corpus succeeds with stdout output",
+            .repair_hint = "resolve the default corpus leaf and open the selected root before running the command",
+        }, outcome.exit != null and outcome.exit.? == 0 and outcome.stdout_len > 0);
+
+        // Reopen the exact selected durable causal store through the production
+        // graph API and require correlated terminal records after process exit.
+        var selected_dir = try tmp.dir.openDir(io, "selected", .{});
+        defer selected_dir.close(io);
+        var snapshot = try zstd.CausalGraph.Snapshot.open(gpa, io, selected_dir, .{ .path = zgraphy.Application.causal_graph_path });
+        defer snapshot.deinit();
+        const records_json = try snapshot.recordsAfterJsonAlloc(gpa, 0, 4096);
+        defer gpa.free(records_json);
+        const has_command = try durableHasRecord(gpa, records_json, "effect_completed", "benchmark.corpus", "success");
+        const has_drain = try durableHasRecord(gpa, records_json, "span_recorded", "Lifecycle.drain", "success");
+        const has_stop = try durableHasRecord(gpa, records_json, "span_recorded", "Lifecycle.stop", "success");
+        try assertions.boolean(.{
+            .id = "zgraphy.installed.durable-terminal-records",
+            .label = "the reopened selected graph is nonempty with correlated command-success and lifecycle drain/stop records",
+            .repair_hint = "share the selected directory with the managed runtime and flush the graph before owned release",
+        }, snapshot.summary().records > 0 and has_command and has_drain and has_stop);
+
+        try assertions.boolean(.{
+            .id = "zgraphy.installed.no-nonselected-state",
+            .label = "no repository state exists in nonselected locations",
+            .repair_hint = "durable graph output must land relative to the selected root only",
+        }, !pathExists(io, tmp.dir, ".zgraphy") and !pathExists(io, tmp.dir, "other/.zgraphy"));
+    }
+
+    // 3) First explicit --root wins over a later duplicate and the positional root.
+    {
+        var tmp = std.testing.tmpDir(.{ .iterate = true });
+        defer tmp.cleanup();
+        try tmp.dir.createDirPath(io, "win");
+        try tmp.dir.createDirPath(io, "dup");
+        try tmp.dir.createDirPath(io, "loser");
+        const outcome = try runInstalled(gpa, io, exe, tmp.dir, &.{ "init", "--root", "win", "--root", "dup", "loser" });
+        try assertions.boolean(.{
+            .id = "zgraphy.installed.first-explicit-root-wins",
+            .label = "the first explicit --root wins over a later duplicate and the positional root",
+            .repair_hint = "select the first parsed --root occurrence before any positional root",
+        }, outcome.exit != null and outcome.exit.? == 0 and
+            pathExists(io, tmp.dir, "win/.zgraphy") and
+            !pathExists(io, tmp.dir, "dup/.zgraphy") and
+            !pathExists(io, tmp.dir, "loser/.zgraphy") and
+            !pathExists(io, tmp.dir, ".zgraphy"));
+    }
+
+    // 4) With neither --root nor a positional, init falls back to the process cwd.
+    {
+        var tmp = std.testing.tmpDir(.{ .iterate = true });
+        defer tmp.cleanup();
+        const outcome = try runInstalled(gpa, io, exe, tmp.dir, &.{"init"});
+        try assertions.boolean(.{
+            .id = "zgraphy.installed.cwd-fallback",
+            .label = "init with no root selects the process working directory",
+            .repair_hint = "default the selected root to \".\" when no --root or positional root is present",
+        }, outcome.exit != null and outcome.exit.? == 0 and pathExists(io, tmp.dir, ".zgraphy"));
+    }
+
+    try assertions.noFindings(.{ .id = "zgraphy.installed.no-findings", .label = "installed process boundary evidence has no causal findings" });
+    try assertions.noPendingFibers(.{ .id = "zgraphy.installed.no-pending", .label = "installed process boundary evidence leaves no pending fibers" });
+    try evidence.publish(io, std.Io.Dir.cwd(), 1);
 }
 
 const parity_scenario = zstd.Testing.Scenario{

@@ -42,6 +42,13 @@ pub fn build(b: *std.Build) void {
     tests_module.addImport("zgraphy", zgraphy);
     tests_module.addImport("zigeffect_std", zstd);
 
+    // Hand the installed-process test the compiled executable path. Wiring it as
+    // a build option makes the test depend on the executable, so `zig build test`
+    // builds the real binary before the process-boundary test spawns it.
+    const build_options = b.addOptions();
+    build_options.addOptionPath("zgraphy_exe", executable.getEmittedBin());
+    tests_module.addOptions("build_options", build_options);
+
     var test_options = std.Build.TestOptions{
         .name = "zgraphy-tests",
         .root_module = tests_module,
