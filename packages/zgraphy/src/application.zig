@@ -15,7 +15,6 @@ pub const ApplicationInputsApi = struct {
     pub const operations: []const []const u8 = &.{"ZgraphyCommand.dispatch"};
     io: std.Io,
     root: std.Io.Dir,
-    args: []const []const u8,
 };
 pub const ApplicationInputs = kernel.Service("zgraphy/ApplicationInputs", ApplicationInputsApi);
 pub const ApplicationServices = .{ApplicationInputs};
@@ -223,6 +222,81 @@ pub const CommandApplication = struct {
 
 pub fn rootLayer(inputs: ApplicationInputsApi) @TypeOf(kernel.Layer.succeed(ApplicationInputs, inputs)) {
     return kernel.Layer.succeed(ApplicationInputs, inputs);
+}
+
+/// The concrete application-input layer type the resource factory returns. The
+/// layer type depends only on the service/api, not the runtime inputs, so it is
+/// stable to name from a comptime placeholder value.
+pub const InputsLayer = @TypeOf(kernel.Layer.succeed(ApplicationInputs, ApplicationInputsApi{ .io = undefined, .root = undefined }));
+
+/// Select the repository root for an executable command from immutable parsed
+/// authority alone (see the technical plan's "Root selection"):
+///
+/// 1. the first parsed `--root` occurrence, if present;
+/// 2. otherwise the optional positional root for exactly `init`, `build`,
+///    `ingest`, `doctor`, `watch`, or `gc`;
+/// 3. otherwise `.`.
+///
+/// Explicit `--root` always wins over a positional repository-root argument,
+/// regardless of the option placement the grammar allows, because it is checked
+/// first. Raw `argv` is never consulted; the parser already resolved the leaf
+/// path, first-occurrence option values, and positionals.
+pub fn selectRoot(parsed: zstd.Cli.ParsedCommand) []const u8 {
+    if (parsed.optionValue("root")) |explicit_root| return explicit_root;
+    if (parsed.path.len >= 2 and commandTakesPositionalRoot(parsed.path[1])) {
+        if (parsed.positional(0)) |positional_root| return positional_root;
+    }
+    return ".";
+}
+
+/// The six location commands whose optional first positional is a repository
+/// root. Every other command's positionals carry different meaning (generation,
+/// query text, fixture ids, ...) and must never be treated as a root.
+fn commandTakesPositionalRoot(command: []const u8) bool {
+    return std.mem.eql(u8, command, "init") or
+        std.mem.eql(u8, command, "build") or
+        std.mem.eql(u8, command, "ingest") or
+        std.mem.eql(u8, command, "doctor") or
+        std.mem.eql(u8, command, "watch") or
+        std.mem.eql(u8, command, "gc");
+}
+
+/// The zgraphy post-parse resource factory. `acquire` receives only the
+/// immutable resolved `ParsedCommand`; it derives the selected root, opens it as
+/// an owned directory, and builds the application-input layer over that same
+/// handle. The framework closes the directory exactly once after checked
+/// shutdown. It is never invoked for built-ins, parse/arity failures, missing
+/// handlers, or completion failures.
+pub const CommandResourceFactory = struct {
+    const Self = @This();
+    pub const LayerType = InputsLayer;
+
+    pub fn acquire(
+        self: Self,
+        allocator: std.mem.Allocator,
+        io: std.Io,
+        parsed: zstd.Cli.ParsedCommand,
+    ) anyerror!zstd.Application.CommandResources(LayerType) {
+        _ = self;
+        _ = allocator;
+        // The only fallible step is opening the selected root. A failure here
+        // acquires nothing, so there is no partial state to clean up; the
+        // missing/inaccessible root surfaces as an infrastructure failure. The
+        // opened handle is supplied to both the managed runtime root and the
+        // application layer, so durable graph output lands relative to it.
+        const root_path = selectRoot(parsed);
+        const root = try std.Io.Dir.cwd().openDir(io, root_path, .{ .iterate = true, .follow_symlinks = false });
+        return .{
+            .root = root,
+            .layer = rootLayer(.{ .io = io, .root = root }),
+            .ownership = .close_directory,
+        };
+    }
+};
+
+/// Construct the zgraphy selected-root resource factory.
+pub fn commandResources() CommandResourceFactory {
+    return .{};
 }
 
 pub const RepositoryGraphApi = struct {

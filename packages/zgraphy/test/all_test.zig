@@ -150,7 +150,7 @@ test "zgraphy parsed authority eliminates the benchmark identity split" {
     const probe_args = [_][]const u8{ "benchmark", "--correctness", "lexical", "--quality", "zig-ambiguity", "--json" };
     var declared = zgraphy.Application.CommandApplication.init(IdentityProbeHandlers.record);
     const app = declared.application();
-    const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir, .args = &probe_args });
+    const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir });
     var store = zstd.fx.CausalStore.init(std.testing.allocator);
     defer store.deinit();
     const factory = zstd.Application.fixedResources(tmp.dir, layer);
@@ -233,7 +233,7 @@ test "zgraphy nested builtins and failures short circuit with correct stream and
     var tmp = std.testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     for (cases) |case| {
-        const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir, .args = case.args });
+        const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir });
         const factory = zstd.Application.fixedResources(tmp.dir, layer);
         const result = try zstd.Application.runOneShot(
             @TypeOf(factory),
@@ -260,7 +260,7 @@ test "zgraphy command application supplies only application services to the fram
     try std.testing.expectEqualStrings(".zgraphy/runtime/causal", zgraphy.Application.causal_graph_path);
     try std.testing.expectEqualStrings(".zigeffect/graph/causal-graph.jsonl", zgraphy.Indexer.causal_wal_path);
     try std.testing.expect(!std.mem.startsWith(u8, zgraphy.Indexer.causal_wal_path, zgraphy.Application.causal_graph_path));
-    const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = std.Io.Dir.cwd(), .args = &.{ "zgraphy", "status" } });
+    const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = std.Io.Dir.cwd() });
     try std.testing.expectEqual(@as(usize, 1), @TypeOf(layer).OutputServices.len);
     try std.testing.expect(@TypeOf(layer).OutputServices[0] == zgraphy.Application.ApplicationInputs);
     try std.testing.expect(zgraphy.Application.ApplicationServices[0] == zgraphy.Application.ApplicationInputs);
@@ -389,7 +389,7 @@ test "zgraphy runtime-owned CLI causality checks every outcome and help prefligh
         .{ .args = &.{"missing"}, .kind = .usage },
     };
     for (short_cases) |case| {
-        const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = short_tmp.dir, .args = case.args });
+        const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = short_tmp.dir });
         const factory = zstd.Application.fixedResources(short_tmp.dir, layer);
         const result = try zstd.Application.runOneShot(
             @TypeOf(factory),
@@ -412,7 +412,7 @@ test "zgraphy runtime-owned CLI causality checks every outcome and help prefligh
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const args = [_][]const u8{ "zgraphy", "benchmark" };
-    const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir, .args = &args });
+    const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir });
     const factory = zstd.Application.fixedResources(tmp.dir, layer);
     _ = try zstd.Application.runOneShot(
         @TypeOf(factory),
@@ -448,7 +448,7 @@ test "zgraphy runOneShot returns checked shutdown flush failure after a real com
     var causal = zstd.fx.CausalStore.init(std.testing.allocator);
     defer causal.deinit();
     const args = [_][]const u8{ "zgraphy", "status" };
-    const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir, .args = &args });
+    const layer = zgraphy.Application.rootLayer(.{ .io = std.testing.io, .root = tmp.dir });
     var declared_commands = zgraphy.Application.CommandApplication.init(CliTestHandlers.fail);
     const command_application = declared_commands.application();
     const factory = zstd.Application.fixedResources(tmp.dir, layer);
@@ -471,6 +471,214 @@ test "zgraphy runOneShot returns checked shutdown flush failure after a real com
     try std.testing.expect(hasCausalEvent(snapshot.events, .effect_completed, "status", "failure"));
     try std.testing.expect(hasCausalEvent(snapshot.events, .span_recorded, "Lifecycle.drain", "success"));
     try std.testing.expect(hasCausalEvent(snapshot.events, .span_recorded, "Lifecycle.stop", "success"));
+}
+
+// A handler that writes a marker through the application layer's shared root, so
+// a test can prove the acquired directory reaches the application layer.
+const SharedRootHandler = struct {
+    fn run(ctx: *zstd.fx.kernel.ContextView(zgraphy.Application.ApplicationServices), _: zstd.Cli.ParsedCommand) anyerror!void {
+        const inputs = ctx.service(zgraphy.Application.ApplicationInputs);
+        try inputs.root.writeFile(inputs.io, .{ .sub_path = "handler-marker.txt", .data = "seen" });
+    }
+};
+
+test "zgraphy selected root derives only from immutable parsed authority" {
+    // Explicit --root wins over a positional repository-root argument.
+    try std.testing.expectEqualStrings("explicit-root", zgraphy.Application.selectRoot(.{
+        .command = "build",
+        .path = &.{ "zgraphy", "build" },
+        .options = &.{.{ .name = "root", .value = "explicit-root" }},
+        .positionals = &.{"positional-root"},
+    }));
+    // The first parsed --root occurrence wins.
+    try std.testing.expectEqualStrings("first", zgraphy.Application.selectRoot(.{
+        .command = "gc",
+        .path = &.{ "zgraphy", "gc" },
+        .options = &.{ .{ .name = "root", .value = "first" }, .{ .name = "root", .value = "second" } },
+        .positionals = &.{},
+    }));
+    // The optional positional root is honored for exactly the six location commands.
+    inline for (.{ "init", "build", "ingest", "doctor", "watch", "gc" }) |name| {
+        try std.testing.expectEqualStrings("pos-root", zgraphy.Application.selectRoot(.{
+            .command = name,
+            .path = &.{ "zgraphy", name },
+            .options = &.{},
+            .positionals = &.{"pos-root"},
+        }));
+        // ... and those six fall back to "." with neither form present.
+        try std.testing.expectEqualStrings(".", zgraphy.Application.selectRoot(.{
+            .command = name,
+            .path = &.{ "zgraphy", name },
+            .options = &.{},
+            .positionals = &.{},
+        }));
+    }
+    // A non-location command's first positional is never treated as a root.
+    try std.testing.expectEqualStrings(".", zgraphy.Application.selectRoot(.{
+        .command = "query",
+        .path = &.{ "zgraphy", "query" },
+        .options = &.{},
+        .positionals = &.{"needle"},
+    }));
+    // Nor is a benchmark leaf positional.
+    try std.testing.expectEqualStrings(".", zgraphy.Application.selectRoot(.{
+        .command = "lexical",
+        .path = &.{ "zgraphy", "benchmark", "lexical" },
+        .options = &.{},
+        .positionals = &.{"fixture-a"},
+    }));
+    // A command with no root positional or option defaults to ".".
+    try std.testing.expectEqualStrings(".", zgraphy.Application.selectRoot(.{
+        .command = "status",
+        .path = &.{ "zgraphy", "status" },
+        .options = &.{},
+        .positionals = &.{},
+    }));
+}
+
+test "zgraphy resource factory acquires nothing on short circuits with a missing root" {
+    const missing = "zgraphy-missing-selected-root-abc";
+    var declared = zgraphy.Application.CommandApplication.init(CliTestHandlers.succeed);
+    const app = declared.application();
+    const factory = zgraphy.Application.commandResources();
+
+    const Case = struct { args: []const []const u8, kind: zstd.Cli.ShortCircuitKind, exit_code: zstd.Cli.ExitCode };
+    const cases = [_]Case{
+        // Root short circuits (no root option is grammatically possible here).
+        .{ .args = &.{"--help"}, .kind = .help, .exit_code = .success },
+        .{ .args = &.{"--version"}, .kind = .version, .exit_code = .success },
+        .{ .args = &.{"completions"}, .kind = .completions, .exit_code = .success },
+        // Nested help/completions with a nonexistent --root before them.
+        .{ .args = &.{ "build", "--root", missing, "--help" }, .kind = .help, .exit_code = .success },
+        .{ .args = &.{ "benchmark", "--root", missing, "--help" }, .kind = .help, .exit_code = .success },
+        // Unknown option after a nonexistent --root.
+        .{ .args = &.{ "benchmark", "--root", missing, "--bad" }, .kind = .usage, .exit_code = .usage },
+        // Unknown subcommand after a nonexistent --root.
+        .{ .args = &.{ "benchmark", "--root", missing, "bogus" }, .kind = .usage, .exit_code = .usage },
+        // Unexpected positional (arity) after a nonexistent --root.
+        .{ .args = &.{ "benchmark", "corpus", "--root", missing, "extra" }, .kind = .usage, .exit_code = .usage },
+        // Missing required positional after a nonexistent --root.
+        .{ .args = &.{ "pin", "--root", missing }, .kind = .usage, .exit_code = .usage },
+    };
+    for (cases) |case| {
+        var probe = zstd.Application.OneShotOptions.TestProbe{};
+        const result = try zstd.Application.runOneShot(
+            @TypeOf(factory),
+            @TypeOf(app),
+            std.testing.allocator,
+            std.testing.io,
+            factory,
+            app,
+            case.args,
+            .{
+                .runtime = .{ .graph = .{ .path = zgraphy.Application.causal_graph_path } },
+                .testing = .{ .write_short_circuit = false, .probe = &probe },
+            },
+        );
+        try std.testing.expectEqual(case.kind, result.short_circuit.?);
+        try std.testing.expectEqual(case.exit_code, result.exit_code);
+        try std.testing.expect(result.value == null);
+        // Zero acquisition and zero release: the factory never ran.
+        try std.testing.expectEqual(@as(usize, 0), probe.acquire);
+        try std.testing.expectEqual(@as(usize, 0), probe.release);
+    }
+    // The nonexistent root was never created, and no cwd state was produced.
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().access(std.testing.io, missing, .{}));
+}
+
+test "zgraphy resource factory reports a missing selected root as infrastructure failure" {
+    var declared = zgraphy.Application.CommandApplication.init(CliTestHandlers.succeed);
+    const app = declared.application();
+    const factory = zgraphy.Application.commandResources();
+    var probe = zstd.Application.OneShotOptions.TestProbe{};
+    const args = [_][]const u8{ "build", "--root", "zgraphy-missing-selected-root-xyz" };
+    // A valid executable command whose selected root cannot be opened fails as an
+    // infrastructure error (FileNotFound), never a usage short circuit.
+    try std.testing.expectError(error.FileNotFound, zstd.Application.runOneShot(
+        @TypeOf(factory),
+        @TypeOf(app),
+        std.testing.allocator,
+        std.testing.io,
+        factory,
+        app,
+        &args,
+        .{
+            .runtime = .{ .graph = .{ .path = zgraphy.Application.causal_graph_path } },
+            .testing = .{ .write_short_circuit = false, .probe = &probe },
+        },
+    ));
+    // Acquire attempted exactly once; acquisition failed before opening anything,
+    // so the framework performed no release and no lifecycle work.
+    try std.testing.expectEqual(@as(usize, 1), probe.acquire);
+    try std.testing.expectEqual(@as(usize, 0), probe.release);
+    try std.testing.expectEqual(@as(usize, 0), probe.start);
+}
+
+test "zgraphy resource factory shares the selected directory with runtime graph and application layer" {
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    const root_path = try std.fmt.allocPrint(std.testing.allocator, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    defer std.testing.allocator.free(root_path);
+
+    var declared = zgraphy.Application.CommandApplication.init(SharedRootHandler.run);
+    const app = declared.application();
+    const factory = zgraphy.Application.commandResources();
+    var probe = zstd.Application.OneShotOptions.TestProbe{};
+    const args = [_][]const u8{ "build", "--root", root_path };
+    const result = try zstd.Application.runOneShot(
+        @TypeOf(factory),
+        @TypeOf(app),
+        std.testing.allocator,
+        std.testing.io,
+        factory,
+        app,
+        &args,
+        .{
+            .runtime = .{ .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 256 } },
+            .testing = .{ .probe = &probe },
+        },
+    );
+    try std.testing.expect(result.value != null);
+    // The handler wrote through the application layer's selected root ...
+    try tmp.dir.access(std.testing.io, "handler-marker.txt", .{});
+    // ... and the runtime graph landed under the same selected directory.
+    try tmp.dir.access(std.testing.io, ".zgraphy", .{});
+    // The selected directory was the tmp root, not cwd: the handler marker never
+    // leaks into the process working directory (a gitignored .zgraphy may already
+    // exist in cwd from prior runs, so the marker is the reliable not-cwd proof).
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().access(std.testing.io, "handler-marker.txt", .{}));
+    // Acquire once, release once, and only after checked shutdown.
+    try std.testing.expectEqual(@as(usize, 1), probe.acquire);
+    try std.testing.expectEqual(@as(usize, 1), probe.release);
+    try std.testing.expectEqual(@as(usize, 1), probe.shutdown);
+}
+
+test "zgraphy resource factory selects the positional root for a location command" {
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    const root_path = try std.fmt.allocPrint(std.testing.allocator, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    defer std.testing.allocator.free(root_path);
+
+    var declared = zgraphy.Application.CommandApplication.init(SharedRootHandler.run);
+    const app = declared.application();
+    const factory = zgraphy.Application.commandResources();
+    // The positional repository root (no --root) selects the same directory.
+    const args = [_][]const u8{ "build", root_path };
+    const result = try zstd.Application.runOneShot(
+        @TypeOf(factory),
+        @TypeOf(app),
+        std.testing.allocator,
+        std.testing.io,
+        factory,
+        app,
+        &args,
+        .{ .runtime = .{ .graph = .{ .path = zgraphy.Application.causal_graph_path, .max_records = 256 } } },
+    );
+    try std.testing.expect(result.value != null);
+    try tmp.dir.access(std.testing.io, "handler-marker.txt", .{});
+    try tmp.dir.access(std.testing.io, ".zgraphy", .{});
+    // The positional root, not cwd, received the handler marker.
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().access(std.testing.io, "handler-marker.txt", .{}));
 }
 
 const parity_scenario = zstd.Testing.Scenario{
@@ -5411,7 +5619,6 @@ test "zgraphy M3 watch coordinator coalesces and drains one freshness engine" {
     const application_layer = zgraphy.Application.rootLayer(.{
         .io = std.testing.io,
         .root = tmp.dir,
-        .args = &application_args,
     });
     var lifecycle_commands = zgraphy.Application.CommandApplication.init(CliTestHandlers.succeed);
     const lifecycle_application = lifecycle_commands.application();

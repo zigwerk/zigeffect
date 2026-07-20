@@ -7,14 +7,12 @@ pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     var declared_commands = zgraphy.Application.CommandApplication.init(runCommand);
     const application = declared_commands.application();
-    const root_path = selectedRoot(args);
-    var root = try std.Io.Dir.cwd().openDir(init.io, root_path, .{ .iterate = true, .follow_symlinks = false });
-    defer root.close(init.io);
-    const main_layer = zgraphy.Application.rootLayer(.{ .io = init.io, .root = root, .args = args });
-    // Ticket 03 owns the selected-root resource factory. Until then zgraphy
-    // borrows its still-eager root and layer through the fixed-resource adapter,
-    // so the framework acquires and releases (no-op) around the same directory.
-    const resource_factory = zstd.Application.fixedResources(root, main_layer);
+    // The framework selects, opens, and owns the repository root after parse,
+    // arity, and handler resolution, using only immutable parsed authority. No
+    // eager raw-argv root scan or root open remains at this process boundary; the
+    // opened directory is shared with the managed runtime and application layer
+    // and closed exactly once after checked shutdown and graph flush.
+    const resource_factory = zgraphy.Application.commandResources();
     const result = try zstd.Application.runOneShot(
         @TypeOf(resource_factory),
         @TypeOf(application),
@@ -36,8 +34,9 @@ fn runCommand(ctx: *zstd.fx.kernel.ContextView(zgraphy.Application.ApplicationSe
 /// Command, subcommand, positional, and option authority is the resolved
 /// `ParsedCommand`. Raw argv is never re-scanned here to select or feed a
 /// command, so the executed handler cannot diverge from the parsed identity the
-/// framework records. The eager selected-root boundary in `main` still reads
-/// raw argv; that cutover belongs to a later ticket.
+/// framework records. Root selection is likewise parsed-only and owned by the
+/// framework's resource factory (`zgraphy.Application.selectRoot`); no raw-argv
+/// root scan remains in this process.
 fn dispatch(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_line: zstd.Cli.ParsedCommand) !void {
     const command = command_line.path[1];
     if (std.mem.eql(u8, command, "init")) return runInit(allocator, io, root, jsonRequested(command_line));
@@ -1297,21 +1296,6 @@ fn optionalNumericOptionOf(command_line: zstd.Cli.ParsedCommand, name: []const u
     if (value < minimum or value > maximum) return error.InvalidOptionValue;
     return value;
 }
-
-/// Root selection remains an eager raw-argv boundary owned by `main`; the
-/// resolved `--root` option still wins over the optional positional root. The
-/// post-parse selected-root cutover belongs to a later ticket.
-fn selectedRoot(args: []const []const u8) []const u8 {
-    for (args, 0..) |arg, index| {
-        if (!std.mem.eql(u8, arg, "--root") or index + 1 >= args.len or std.mem.startsWith(u8, args[index + 1], "--")) continue;
-        return args[index + 1];
-    }
-    if (args.len >= 3 and
-        (std.mem.eql(u8, args[1], "init") or std.mem.eql(u8, args[1], "build") or std.mem.eql(u8, args[1], "ingest") or std.mem.eql(u8, args[1], "doctor") or std.mem.eql(u8, args[1], "watch") or std.mem.eql(u8, args[1], "gc")) and
-        !std.mem.startsWith(u8, args[2], "--")) return args[2];
-    return ".";
-}
-
 
 fn writeJson(io: std.Io, allocator: std.mem.Allocator, value: anytype) !void {
     const encoded = try std.json.Stringify.valueAlloc(allocator, value, .{});
