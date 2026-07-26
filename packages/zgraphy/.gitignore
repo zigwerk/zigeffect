@@ -1,4 +1,11 @@
 .zig-cache/
 zig-out/
 .zigeffect/
+!.zigeffect/
+.zigeffect/*
 .zgraphy/
+
+# Committable requirement proof. Stable across runs and independent of the local
+# graph, so unlike the rest of .zigeffect/ it is meant to be reviewed and shared.
+!.zigeffect/evidence/
+!.zigeffect/evidence/**

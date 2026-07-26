@@ -88,10 +88,10 @@ fn run(
                 scanned += 1;
                 const node = snapshot.nodeAt(position) orelse return error.ColumnsUnavailable;
                 if (!matchesAll(node, predicates)) continue;
-                if (current.items.len == plan.limit) {
-                    truncated = true;
-                    break;
-                }
+                // The limit bounds the *answer*, not the root set. Capping roots
+                // here would silently drop nodes the traversal would have
+                // reached, so roots are bounded by scan_limit alone and the
+                // limit is applied to the result.
                 try current.append(allocator, node.durable_event_id);
             }
         },
@@ -136,6 +136,12 @@ fn run(
         std.mem.swap(std.ArrayList(u64), &current, &next);
     }
 
+    // A plan with no steps returns its roots, so the limit is applied here
+    // rather than while collecting them.
+    if (current.items.len > plan.limit) {
+        current.shrinkRetainingCapacity(plan.limit);
+        truncated = true;
+    }
     return .{
         .ids = try current.toOwnedSlice(allocator),
         .scanned = scanned,

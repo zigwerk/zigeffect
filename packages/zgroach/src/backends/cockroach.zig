@@ -99,7 +99,11 @@ pub fn compile(
         return compileRecursive(allocator, schema, node_name, node, plan, &sql, &parameters, primary_key);
     }
 
-    try sql.print(allocator, "SELECT n0.\"{s}\" AS \"node_id\"\nFROM \"{s}\" AS n0", .{ primary_key, node.table });
+    // The select list is written after the joins, because which alias holds the
+    // answer depends on how many hops there were: a traversal returns what it
+    // reached, not the root it started from.
+    var joins: std.ArrayList(u8) = .empty;
+    defer joins.deinit(allocator);
 
     var alias: usize = 0;
     for (plan.steps) |step| {
@@ -111,14 +115,25 @@ pub fn compile(
         const to_column = if (step.direction == .children) relation.to_column else relation.from_column;
         const edge_alias = alias + 1;
         const next_alias = alias + 2;
-        try sql.print(allocator, "\nJOIN \"{s}\" AS e{d} ON e{d}.\"{s}\" = n{d}.\"{s}\"", .{
+        try joins.print(allocator, "\nJOIN \"{s}\" AS e{d} ON e{d}.\"{s}\" = n{d}.\"{s}\"", .{
             relation.table, edge_alias, edge_alias, from_column, alias, primary_key,
         });
-        try sql.print(allocator, "\nJOIN \"{s}\" AS n{d} ON n{d}.\"{s}\" = e{d}.\"{s}\"", .{
+        try joins.print(allocator, "\nJOIN \"{s}\" AS n{d} ON n{d}.\"{s}\" = e{d}.\"{s}\"", .{
             node.table, next_alias, next_alias, primary_key, edge_alias, to_column,
         });
         alias = next_alias;
     }
+
+    // DISTINCT because a node reachable by more than one join row is one result,
+    // matching the embedded connector — and without it duplicates would consume
+    // the LIMIT and silently shorten the answer.
+    if (plan.steps.len == 0) {
+        try sql.print(allocator, "SELECT n0.\"{s}\" AS \"node_id\"", .{primary_key});
+    } else {
+        try sql.print(allocator, "SELECT DISTINCT n{d}.\"{s}\" AS \"node_id\"", .{ alias, primary_key });
+    }
+    try sql.print(allocator, "\nFROM \"{s}\" AS n0", .{node.table});
+    try sql.appendSlice(allocator, joins.items);
 
     var wrote_where = false;
     switch (plan.from) {
@@ -146,10 +161,9 @@ pub fn compile(
     try sql.print(allocator, "\nLIMIT ${d};", .{parameters.items.len + 1});
     try parameters.append(allocator, .{ .id = plan.limit });
 
-    return .{
-        .sql = try sql.toOwnedSlice(allocator),
-        .parameters = try parameters.toOwnedSlice(allocator),
-    };
+    const owned_parameters = try parameters.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_parameters);
+    return .{ .sql = try sql.toOwnedSlice(allocator), .parameters = owned_parameters };
 }
 
 /// Emit a depth-bounded transitive walk.
@@ -207,10 +221,12 @@ fn compileRecursive(
     try sql.print(allocator, "\nLIMIT ${d};", .{parameters.items.len + 1});
     try parameters.append(allocator, .{ .id = plan.limit });
 
-    return .{
-        .sql = try sql.toOwnedSlice(allocator),
-        .parameters = try parameters.toOwnedSlice(allocator),
-    };
+    // Taken in two steps: evaluating these inline leaks the SQL buffer when the
+    // second allocation fails, because the first has already been detached from
+    // the errdefer'd list.
+    const owned_parameters = try parameters.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_parameters);
+    return .{ .sql = try sql.toOwnedSlice(allocator), .parameters = owned_parameters };
 }
 
 fn firstRelation(schema: Schema.Schema, node_name: []const u8) !Schema.Relation {
@@ -312,7 +328,7 @@ test "a filtered root becomes a where clause and never inlines a value" {
     try std.testing.expectEqual(@as(u64, 77), compiled.parameters[1].id);
 }
 
-test "a traversal becomes a join, and its filter binds to what the hop reached" {
+test "a traversal returns what it reached, not the root it started from" {
     const plan = try Plan.Builder.matching(&.{.{ .field = "status", .match = .{ .text = "failure" } }})
         .traverse(&.{.{ .direction = .children, .where = &.{.{ .field = "kind", .match = .{ .text = "activity_completed" } }} }})
         .limit(5)
@@ -321,7 +337,7 @@ test "a traversal becomes a join, and its filter binds to what the hop reached" 
     defer compiled.deinit(std.testing.allocator);
 
     try std.testing.expectEqualStrings(
-        \\SELECT n0."id" AS "node_id"
+        \\SELECT DISTINCT n2."id" AS "node_id"
         \\FROM "causal_event" AS n0
         \\JOIN "causal_edge" AS e1 ON e1."parent_id" = n0."id"
         \\JOIN "causal_event" AS n2 ON n2."id" = e1."event_id"
