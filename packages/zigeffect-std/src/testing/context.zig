@@ -429,6 +429,9 @@ pub const TestContext = struct {
     pub fn publish(self: *TestContext, io: std.Io, dir: std.Io.Dir, ended_ms: i64) !void {
         const receipt = try self.finish(ended_ms);
         try Protocol.publishRawReceipt(self.allocator, io, dir, receipt);
+        // The committable half: stable across runs, so it can be reviewed and
+        // shared rather than only produced.
+        try Protocol.publishRequirementEvidence(self.allocator, io, dir, receipt);
         if (self.control) |control| {
             if (control.value.process_receipt_path.len > 0)
                 try Protocol.publishReceiptAt(self.allocator, io, dir, control.value.process_receipt_path, receipt)

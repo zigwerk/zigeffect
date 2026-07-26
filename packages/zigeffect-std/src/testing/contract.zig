@@ -180,6 +180,77 @@ pub const AssertionResult = struct {
 
 /// Identity domain used by assertion `causal_event_ids`. Durable IDs can be
 /// passed directly to `zigeffect graph event`; runtime-local IDs cannot.
+pub const requirement_evidence_schema = "zigeffect.requirement-evidence.v1";
+pub const requirement_evidence_schema_version: u32 = 1;
+
+/// A requirement's proof, in a form that can be committed.
+///
+/// The full receipt cannot be: it carries `started_ms`, `ended_ms`,
+/// `duration_ms` and durable event ids that shift on every run, so tracking it
+/// would diff on every test. This carries only what is stable given the same
+/// code — the claim, its assertions, and what the cited causal events *were*.
+///
+/// Durable ids are deliberately omitted. They are a local join key into a graph
+/// that is machine-specific and prunable; including them would make a committed
+/// artifact churn and would imply a resolvability this file does not need.
+pub fn appendRequirementEvidence(
+    output: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    receipt_value: TestReceipt,
+) !void {
+    try output.print(allocator, "{{\"schema\":\"{s}\",\"schema_version\":{d},\"requirement\":", .{
+        requirement_evidence_schema,
+        requirement_evidence_schema_version,
+    });
+    try appendSafeJsonString(output, allocator, receipt_value.scenario.requirement);
+    try output.appendSlice(allocator, ",\"acceptance_check\":");
+    try appendSafeJsonString(output, allocator, receipt_value.scenario.acceptance_check);
+    try output.appendSlice(allocator, ",\"scenario\":");
+    try appendSafeJsonString(output, allocator, receipt_value.scenario.id);
+    try output.appendSlice(allocator, ",\"component\":");
+    try appendSafeJsonString(output, allocator, receipt_value.scenario.component);
+    try output.appendSlice(allocator, ",\"status\":");
+    try appendSafeJsonString(output, allocator, @tagName(receipt_value.status));
+    try output.appendSlice(allocator, ",\"source_revision\":");
+    try appendSafeJsonString(output, allocator, receipt_value.source_revision);
+    try output.appendSlice(allocator, ",\"assertions\":[");
+    for (receipt_value.assertions, 0..) |assertion, position| {
+        if (position != 0) try output.append(allocator, ',');
+        try output.appendSlice(allocator, "{\"id\":");
+        try appendSafeJsonString(output, allocator, assertion.id);
+        try output.appendSlice(allocator, ",\"label\":");
+        try appendSafeJsonString(output, allocator, assertion.label);
+        try output.appendSlice(allocator, ",\"status\":");
+        try appendSafeJsonString(output, allocator, @tagName(assertion.status));
+        try output.appendSlice(allocator, ",\"expected\":");
+        try appendSafeJsonString(output, allocator, assertion.expected);
+        try output.appendSlice(allocator, ",\"actual\":");
+        try appendSafeJsonString(output, allocator, assertion.actual);
+        try output.appendSlice(allocator, ",\"causal_facts\":[");
+        for (assertion.causal_facts, 0..) |fact, fact_position| {
+            if (fact_position != 0) try output.append(allocator, ',');
+            try output.appendSlice(allocator, "{\"kind\":");
+            try appendSafeJsonString(output, allocator, fact.kind);
+            try output.appendSlice(allocator, ",\"label\":");
+            try appendSafeJsonString(output, allocator, fact.label);
+            try output.appendSlice(allocator, ",\"status\":");
+            try appendSafeJsonString(output, allocator, fact.status);
+            try output.appendSlice(allocator, ",\"service_key\":");
+            try appendSafeJsonString(output, allocator, fact.service_key);
+            try output.append(allocator, '}');
+        }
+        try output.appendSlice(allocator, "]}");
+    }
+    try output.appendSlice(allocator, "]}");
+}
+
+pub fn requirementEvidenceJsonAlloc(allocator: std.mem.Allocator, receipt_value: TestReceipt) ![]u8 {
+    var output: std.ArrayList(u8) = .empty;
+    errdefer output.deinit(allocator);
+    try appendRequirementEvidence(&output, allocator, receipt_value);
+    return output.toOwnedSlice(allocator);
+}
+
 pub const CausalEventIdSpace = enum {
     runtime_local,
     graph_durable,

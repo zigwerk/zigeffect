@@ -141,6 +141,28 @@ pub fn rawReceiptPathAlloc(allocator: std.mem.Allocator, scenario_id: []const u8
     return std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ raw_receipt_root, scenario_id });
 }
 
+pub const evidence_root = ".zigeffect/evidence";
+
+/// Write the committable proof for a requirement.
+///
+/// Keyed by requirement and replaced in place, so the file count is the number
+/// of requirements rather than the number of runs, and a re-run of unchanged
+/// code produces a byte-identical file.
+pub fn publishRequirementEvidence(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
+    receipt_value: Contract.TestReceipt,
+) !void {
+    if (receipt_value.scenario.requirement.len == 0) return;
+    const json = try Contract.requirementEvidenceJsonAlloc(allocator, receipt_value);
+    defer allocator.free(json);
+    if (Secrets.containsSecret(json)) return error.SecretDetected;
+    const path = try std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ evidence_root, receipt_value.scenario.requirement });
+    defer allocator.free(path);
+    try writeAtomicFile(allocator, io, dir, path, json);
+}
+
 pub fn publishReceipt(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, receipt_value: Contract.TestReceipt) !void {
     const json = try receipt_value.jsonAlloc(allocator);
     defer allocator.free(json);

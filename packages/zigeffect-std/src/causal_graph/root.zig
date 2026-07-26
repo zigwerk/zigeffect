@@ -117,15 +117,22 @@ pub const Path = struct {
 
 /// What the graph does when a write would exceed `max_records` or `max_wal_bytes`.
 pub const Retention = enum {
-    /// Refuse the write. Every fact ever recorded stays addressable, so a
-    /// receipt referencing an event id can always be resolved. This is the
-    /// default because the graph is evidence: dropping it silently would let a
-    /// proof-carrying claim outlive the record that justified it.
+    /// Refuse the write. Every fact ever recorded stays addressable.
+    ///
+    /// This was the default while a receipt's only proof was an event id
+    /// pointing into this graph — dropping a record would have let a claim
+    /// outlive its justification. Receipts now carry the facts they cite, so
+    /// that is no longer true and this is the explicit choice for a store that
+    /// must never lose a record, not the safe default.
     fail_closed,
     /// Drop the oldest complete sessions to make room. A long-running service
     /// keeps recording instead of failing, at the cost of losing the oldest
     /// history. Sessions are pruned whole because parent edges never cross a
     /// session boundary, so no retained record is left pointing at a gap.
+    ///
+    /// The default. A durable event id is a local join key into a working set,
+    /// and `graph event <id>` returning not-found for a pruned record is normal
+    /// rather than a broken claim — the claim lives in the committed evidence.
     prune_oldest_sessions,
 };
 
@@ -134,7 +141,7 @@ pub const Options = struct {
     wal_name: []const u8 = default_wal_name,
     /// Derived index sibling of the log. Deleting this file is always safe.
     index_name: []const u8 = Index.default_index_name,
-    retention: Retention = .fail_closed,
+    retention: Retention = .prune_oldest_sessions,
     max_records: usize = default_max_records,
     max_wal_bytes: usize = 64 * 1024 * 1024,
     max_record_bytes: usize = 512 * 1024,
@@ -3071,10 +3078,43 @@ test "causal graph retention drops oldest sessions instead of failing closed" {
     }
 }
 
-test "causal graph fails closed by default rather than discarding evidence" {
+test "the default keeps a long-running store writable" {
+    // A service must not stop recording because its working set filled. This is
+    // only safe because a receipt now carries the facts it cites, so pruning a
+    // record no longer invalidates a claim that referenced it.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{ .max_records = 2 });
+
+    var session: usize = 0;
+    while (session < 4) : (session += 1) {
+        var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{ .max_records = 4 });
+        defer database.deinit();
+        const events = [_]fx.CausalEvent{
+            .{ .id = 1, .kind = .run_started, .label = "start" },
+            .{ .id = 2, .kind = .run_completed, .parent_id = 1, .label = "end" },
+        };
+        for (events) |event| {
+            var write = try fx.mapCausalEventToNendbWrite(std.testing.allocator, event);
+            defer fx.deinitCausalNendbWrite(std.testing.allocator, &write);
+            // No GraphDatabaseFull: the store makes room instead of refusing.
+            try database.appendWrite(write);
+        }
+        try database.flush();
+    }
+
+    var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{ .max_records = 4 });
+    defer database.deinit();
+    try std.testing.expect(database.recordCount() <= 4);
+    try std.testing.expect(database.recordCount() > 0);
+}
+
+test "fail_closed is available for a store that must never lose a record" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{
+        .max_records = 2,
+        .retention = .fail_closed,
+    });
     defer database.deinit();
 
     const events = [_]fx.CausalEvent{
