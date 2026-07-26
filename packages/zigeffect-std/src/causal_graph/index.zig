@@ -104,7 +104,10 @@ comptime {
 /// Interns the text columns so entries carry ids instead of bytes.
 pub const StringTable = struct {
     bytes: std.ArrayList(u8) = .empty,
-    lookup: std.StringHashMapUnmanaged(u32) = .empty,
+    /// Content hash to id, deliberately not the string itself: keying by slice
+    /// would store pointers into `bytes`, which every append can reallocate,
+    /// leaving the map to rehash freed memory.
+    lookup: std.AutoHashMapUnmanaged(u64, u32) = .empty,
 
     pub fn deinit(self: *StringTable, allocator: std.mem.Allocator) void {
         self.lookup.deinit(allocator);
@@ -115,15 +118,20 @@ pub const StringTable = struct {
     /// must not be indistinguishable from one it set to "".
     pub fn intern(self: *StringTable, allocator: std.mem.Allocator, value: ?[]const u8) !u32 {
         const text = value orelse return no_string;
-        if (self.lookup.get(text)) |existing| return existing;
-        const id: u32 = @intCast(self.bytes.items.len);
         if (text.len > std.math.maxInt(u16)) return error.IndexUnusable;
+        const key = std.hash.Wyhash.hash(0x5f1d_2a77, text);
+        if (self.lookup.get(key)) |existing| {
+            // Confirm by content, so a hash collision costs a duplicate entry
+            // rather than silently aliasing two different strings.
+            if (resolve(self.bytes.items, existing)) |stored| {
+                if (std.mem.eql(u8, stored, text)) return existing;
+            }
+        }
+        const id: u32 = @intCast(self.bytes.items.len);
         try self.bytes.ensureUnusedCapacity(allocator, text.len + 2);
         self.bytes.appendSliceAssumeCapacity(&std.mem.toBytes(@as(u16, @intCast(text.len))));
         self.bytes.appendSliceAssumeCapacity(text);
-        // Key into the copy, so the caller's slice need not outlive this call.
-        const stored = self.bytes.items[id + 2 ..][0..text.len];
-        try self.lookup.put(allocator, stored, id);
+        try self.lookup.put(allocator, key, id);
         return id;
     }
 

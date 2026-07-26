@@ -86,6 +86,8 @@ pub const Retention = enum {
 pub const Options = struct {
     path: []const u8 = default_path,
     wal_name: []const u8 = default_wal_name,
+    /// Derived index sibling of the log. Deleting this file is always safe.
+    index_name: []const u8 = Index.default_index_name,
     retention: Retention = .fail_closed,
     max_records: usize = default_max_records,
     max_wal_bytes: usize = 64 * 1024 * 1024,
@@ -96,7 +98,10 @@ pub const Options = struct {
     pub fn validate(self: Options) !void {
         try Project.validateRelativePath(self.path, false);
         try Project.validateRelativePath(self.wal_name, false);
+        try Project.validateRelativePath(self.index_name, false);
         if (std.mem.indexOfScalar(u8, self.wal_name, '/') != null or
+            std.mem.indexOfScalar(u8, self.index_name, '/') != null or
+            std.mem.eql(u8, self.index_name, self.wal_name) or
             self.max_records == 0 or
             self.max_records > max_records or
             self.max_wal_bytes == 0 or
@@ -105,7 +110,7 @@ pub const Options = struct {
         {
             return error.InvalidGraphOptions;
         }
-        if (Secrets.containsSecret(self.path) or Secrets.containsSecret(self.wal_name)) return error.SecretDetected;
+        if (Secrets.containsSecret(self.path) or Secrets.containsSecret(self.wal_name) or Secrets.containsSecret(self.index_name)) return error.SecretDetected;
     }
 };
 
@@ -253,6 +258,15 @@ pub const LocalDatabase = struct {
     session_id: u64,
     node_base: u64,
     recovered_partial_bytes: usize = 0,
+    /// Derived index, maintained alongside the log and persisted at flush.
+    /// Nothing reads it yet; it is produced first so that a defect in it cannot
+    /// affect a query result before it has been proven against a replay.
+    index_builder: Index.Builder = undefined,
+    index_dirty: bool = false,
+    /// Cleared the moment the index cannot be kept faithful to the log. Once
+    /// false it stays false for this process: a partially-maintained index is
+    /// worse than none, because a reader could trust it.
+    index_usable: bool = true,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -294,7 +308,9 @@ pub const LocalDatabase = struct {
         };
         self.options.path = self.owned_path;
         self.options.wal_name = self.owned_wal_name;
+        self.index_builder = Index.Builder.init(allocator);
         self.loadExisting() catch |err| {
+            self.index_builder.deinit();
             self.current_source_index.deinit(allocator);
             self.durable_entry_index.deinit(allocator);
             self.entries.deinit(allocator);
@@ -304,6 +320,7 @@ pub const LocalDatabase = struct {
     }
 
     pub fn deinit(self: *LocalDatabase) void {
+        self.index_builder.deinit();
         self.current_source_index.deinit(self.allocator);
         self.durable_entry_index.deinit(self.allocator);
         self.entries.deinit(self.allocator);
@@ -335,6 +352,9 @@ pub const LocalDatabase = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         try self.wal_file.sync(self.io);
+        // The log is durable before the index is written, so a crash in between
+        // leaves a stale index that the next open detects and rebuilds.
+        if (self.index_dirty) self.writeIndexUnlocked();
     }
 
     pub fn recordCount(self: *LocalDatabase) usize {
@@ -658,7 +678,7 @@ pub const LocalDatabase = struct {
             .limited(self.options.max_wal_bytes),
         );
         defer self.allocator.free(content);
-        var scan = try scanContent(self.allocator, content, self.options);
+        var scan = try scanContent(self.allocator, content, self.options, &self.index_builder);
         defer scan.deinit(self.allocator);
 
         if (scan.last_complete_offset < content.len) {
@@ -721,6 +741,10 @@ pub const LocalDatabase = struct {
         var lengths: std.ArrayList(usize) = .empty;
         defer lengths.deinit(self.allocator);
         try lengths.ensureTotalCapacity(self.allocator, self.entries.items.len - cut);
+        // The index is rebuilt in this same pass, against the offsets of the file
+        // being written rather than the one being replaced.
+        var rebuilt_index = Index.Builder.init(self.allocator);
+        errdefer rebuilt_index.deinit();
         for (self.entries.items[cut..], 0..) |entry, index| {
             if (entry.offset + entry.length > content.len) return error.CorruptGraph;
             const line = content[entry.offset .. entry.offset + entry.length];
@@ -731,9 +755,11 @@ pub const LocalDatabase = struct {
             record.sequence = @as(u64, @intCast(index)) + 1;
             const row = try formatRecordAlloc(self.allocator, record);
             defer self.allocator.free(row);
+            const new_offset = retained.items.len;
             lengths.appendAssumeCapacity(row.len);
             try retained.appendSlice(self.allocator, row);
             try retained.append(self.allocator, '\n');
+            try appendIndexRow(&rebuilt_index, self.allocator, record, entry.durable_parent_id, new_offset, row.len);
         }
 
         const staging_name = try std.fmt.allocPrint(self.allocator, "{s}.compact", .{self.options.wal_name});
@@ -782,6 +808,13 @@ pub const LocalDatabase = struct {
             rebuilt.appendAssumeCapacity(moved);
         }
         self.edge_count = edges;
+
+        // Every offset the previous index recorded points into a file that no
+        // longer exists, so the rebuild above replaces it wholesale.
+        self.index_builder.deinit();
+        self.index_builder = rebuilt_index;
+        self.index_usable = true;
+        self.index_dirty = true;
         self.entries.deinit(self.allocator);
         self.entries = rebuilt;
         try self.durable_entry_index.ensureUnusedCapacity(self.allocator, @intCast(self.entries.items.len));
@@ -915,6 +948,58 @@ pub const LocalDatabase = struct {
             .length = row.len,
         });
         if (persisted_edge != null) self.edge_count += 1;
+
+        // Maintained incrementally so a running process never has to re-read its
+        // own log. A failure here must not fail the write: the record is already
+        // durable, and the index is disposable by construction, so the correct
+        // response is to mark it unusable and let the next open rebuild it.
+        if (self.index_usable) {
+            appendIndexRow(
+                &self.index_builder,
+                self.allocator,
+                record,
+                if (persisted_edge) |edge| edge.from else null,
+                offset,
+                row.len,
+            ) catch {
+                self.index_usable = false;
+            };
+        }
+        self.index_dirty = true;
+    }
+
+    /// Persist the derived index next to the log.
+    ///
+    /// Written to a sibling and renamed, so an interrupted write leaves the
+    /// previous index intact rather than a half-file. A failure is swallowed
+    /// deliberately: losing the index costs a rebuild, and failing a durability
+    /// barrier over a disposable artifact would be strictly worse.
+    fn writeIndexUnlocked(self: *LocalDatabase) void {
+        if (!self.index_usable) return;
+        const content = self.graph_dir.readFileAlloc(
+            self.io,
+            self.options.wal_name,
+            self.allocator,
+            .limited(self.options.max_wal_bytes),
+        ) catch return;
+        defer self.allocator.free(content);
+
+        const bytes = self.index_builder.serializeAlloc(content.len, Index.digest(content)) catch return;
+        defer self.allocator.free(bytes);
+
+        const staging = std.fmt.allocPrint(self.allocator, "{s}.next", .{self.options.index_name}) catch return;
+        defer self.allocator.free(staging);
+        {
+            var file = self.graph_dir.createFile(self.io, staging, .{
+                .truncate = true,
+                .resolve_beneath = true,
+            }) catch return;
+            defer file.close(self.io);
+            file.writePositionalAll(self.io, bytes, 0) catch return;
+            file.sync(self.io) catch return;
+        }
+        self.graph_dir.rename(staging, self.graph_dir, self.options.index_name, self.io) catch return;
+        self.index_dirty = false;
     }
 };
 
@@ -1019,6 +1104,53 @@ fn appendFindRow(
     try appendOptionalId(output, allocator, "acceptance_check_id", projection.context.acceptance_check_id);
     try appendOptionalId(output, allocator, "scenario_id", projection.context.scenario_id);
     try output.append(allocator, '}');
+}
+
+/// Project one durable record into an index row.
+///
+/// The semantic columns live inside the encoded property blob, so producing them
+/// costs one extra decode per record. That cost is paid only while building or
+/// rebuilding the index — never while reading one — which is the whole point of
+/// having it.
+fn appendIndexRow(
+    builder: *Index.Builder,
+    allocator: std.mem.Allocator,
+    record: PersistedRecord,
+    durable_parent: ?u64,
+    offset: usize,
+    length: usize,
+) !void {
+    var properties = std.json.parseFromSlice(
+        FindPropertiesProjection,
+        allocator,
+        record.node.properties,
+        .{ .allocate = .alloc_always, .ignore_unknown_fields = true },
+    ) catch return error.CorruptGraph;
+    defer properties.deinit();
+    const projected = properties.value;
+    // The builder interns (copies) every string, so borrowing from the parse
+    // that is about to be freed is safe. Values are passed through verbatim,
+    // including empty ones, so index-backed selection matches the scan exactly.
+    try builder.append(.{
+        .durable_event_id = record.node.id,
+        .source_event_id = record.node.source_event_id,
+        .sequence = record.sequence,
+        .session_id = record.session_id,
+        .durable_parent_id = durable_parent,
+        .offset = offset,
+        .length = length,
+        .node_kind = record.node.kind,
+        .columns = .{
+            .label = projected.label,
+            .status = projected.status,
+            .service_key = projected.service_key,
+            .type_name = projected.type_name,
+            .kind = projected.kind,
+            .requirement_id = projected.context.requirement_id,
+            .acceptance_check_id = projected.context.acceptance_check_id,
+            .scenario_id = projected.context.scenario_id,
+        },
+    });
 }
 
 fn projectionMatches(projection: FindPropertiesProjection, filter: FindFilter) bool {
@@ -1165,7 +1297,7 @@ pub const Snapshot = struct {
         defer graph_dir.close(io);
         const content = try graph_dir.readFileAlloc(io, options.wal_name, allocator, .limited(options.max_wal_bytes));
         errdefer allocator.free(content);
-        var scan = try scanContent(allocator, content, options);
+        var scan = try scanContent(allocator, content, options, null);
         defer scan.deinit(allocator);
         const path = try allocator.dupe(u8, options.path);
         errdefer allocator.free(path);
@@ -1363,7 +1495,16 @@ fn formatRecordAlloc(allocator: std.mem.Allocator, record: PersistedRecord) ![]u
     return std.json.Stringify.valueAlloc(allocator, record, .{});
 }
 
-fn scanContent(allocator: std.mem.Allocator, content: []const u8, options: Options) !ScanResult {
+/// Validate and index the log.
+///
+/// `index_builder`, when supplied, is populated in this same pass so that
+/// building the derived index costs no additional traversal of the log.
+fn scanContent(
+    allocator: std.mem.Allocator,
+    content: []const u8,
+    options: Options,
+    index_builder: ?*Index.Builder,
+) !ScanResult {
     var result = ScanResult{};
     errdefer result.deinit(allocator);
     var line_start: usize = 0;
@@ -1408,6 +1549,9 @@ fn scanContent(allocator: std.mem.Allocator, content: []const u8, options: Optio
             .offset = line_start,
             .length = line.len,
         });
+        if (index_builder) |builder| {
+            try appendIndexRow(builder, allocator, parsed.value, durable_parent, line_start, line.len);
+        }
         try result.seen_nodes.put(allocator, parsed.value.node.id, .{
             .session_id = parsed.value.session_id,
             .source_event_id = parsed.value.node.source_event_id,
@@ -1772,10 +1916,10 @@ test "causal graph scan rejects duplicate source ids and cross-session parents" 
     defer std.testing.allocator.free(cross_json);
     const duplicate_wal = try std.fmt.allocPrint(std.testing.allocator, "{s}\n{s}\n", .{ first_json, duplicate_json });
     defer std.testing.allocator.free(duplicate_wal);
-    try std.testing.expectError(error.CorruptGraph, scanContent(std.testing.allocator, duplicate_wal, .{}));
+    try std.testing.expectError(error.CorruptGraph, scanContent(std.testing.allocator, duplicate_wal, .{}, null));
     const cross_wal = try std.fmt.allocPrint(std.testing.allocator, "{s}\n{s}\n", .{ first_json, cross_json });
     defer std.testing.allocator.free(cross_wal);
-    try std.testing.expectError(error.CorruptGraph, scanContent(std.testing.allocator, cross_wal, .{}));
+    try std.testing.expectError(error.CorruptGraph, scanContent(std.testing.allocator, cross_wal, .{}, null));
 }
 
 test "causal graph rejects non-monotonic source ids before writing" {
@@ -1882,6 +2026,119 @@ test "durable causal graph returns bounded paginated typed lineage records" {
     defer std.testing.allocator.free(second_page);
     try std.testing.expect(std.mem.indexOf(u8, second_page, "matching-end") != null);
     try std.testing.expect(std.mem.indexOf(u8, second_page, "matching-start") == null);
+}
+
+test "the incrementally maintained index equals a full replay of the same log" {
+    // The index is written by two different paths: appended row-by-row while a
+    // process runs, and rebuilt wholesale when a log is opened. If those two ever
+    // disagree, a reader that trusts the index sees something the log does not
+    // say. This pins them together.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const events = [_]fx.CausalEvent{
+        .{ .id = 1, .kind = .run_started, .label = "run", .status = "running", .service_key = "application/A" },
+        .{ .id = 2, .kind = .effect_completed, .parent_id = 1, .label = "A.create", .status = "success", .service_key = "application/A", .context = .{ .requirement_id = 77, .scenario_id = 88 } },
+        .{ .id = 3, .kind = .effect_completed, .parent_id = 2, .label = "A.create", .status = "failure", .type_name = "Invalid" },
+        .{ .id = 4, .kind = .run_completed, .parent_id = 3, .label = "run", .status = "success" },
+    };
+
+    var incremental_bytes: []u8 = undefined;
+    {
+        var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{});
+        defer database.deinit();
+        for (events) |event| {
+            var write = try fx.mapCausalEventToNendbWrite(std.testing.allocator, event);
+            defer fx.deinitCausalNendbWrite(std.testing.allocator, &write);
+            try database.appendWrite(write);
+        }
+        try database.flush();
+        // Captured from the builder that was maintained append-by-append.
+        const content = try database.graph_dir.readFileAlloc(std.testing.io, default_wal_name, std.testing.allocator, .limited(1 << 20));
+        defer std.testing.allocator.free(content);
+        incremental_bytes = try database.index_builder.serializeAlloc(content.len, Index.digest(content));
+    }
+    defer std.testing.allocator.free(incremental_bytes);
+
+    // Reopening replays the log and rebuilds the index from scratch.
+    var reopened = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{});
+    defer reopened.deinit();
+    const content = try reopened.graph_dir.readFileAlloc(std.testing.io, default_wal_name, std.testing.allocator, .limited(1 << 20));
+    defer std.testing.allocator.free(content);
+    const replayed_bytes = try reopened.index_builder.serializeAlloc(content.len, Index.digest(content));
+    defer std.testing.allocator.free(replayed_bytes);
+
+    try std.testing.expectEqualSlices(u8, incremental_bytes, replayed_bytes);
+
+    // And the index actually describes the log it claims to.
+    const view = try Index.parse(replayed_bytes);
+    try std.testing.expectEqual(@as(u32, 4), view.header.entry_count);
+    try std.testing.expectEqual(@as(u64, 3), view.header.edge_count);
+    try std.testing.expect(Index.coversPrefix(view, content.len, content));
+
+    // Spot-check that semantic columns survived the projection.
+    try std.testing.expectEqualStrings("A.create", view.text(view.entries[1].label_id).?);
+    try std.testing.expectEqualStrings("success", view.text(view.entries[1].status_id).?);
+    try std.testing.expectEqual(@as(u64, 77), view.entries[1].requirement_id);
+    try std.testing.expectEqual(@as(u64, 88), view.entries[1].scenario_id);
+    try std.testing.expectEqualStrings("failure", view.text(view.entries[2].status_id).?);
+    try std.testing.expectEqualStrings("Invalid", view.text(view.entries[2].type_name_id).?);
+
+    // Offsets must locate the real log line, since that is how a reader will
+    // fetch full detail without decoding everything.
+    const entry = view.entries[2];
+    const line = content[entry.offset..][0..entry.length];
+    // The property blob is stored as an escaped JSON string inside the record,
+    // which is exactly why a reader needs the projected columns to filter on.
+    try std.testing.expect(std.mem.indexOf(u8, line, "\\\"status\\\":\\\"failure\\\"") != null);
+
+    // The persisted file must match what the builder produced.
+    var graph_dir = try tmp.dir.openDir(std.testing.io, default_path, .{ .follow_symlinks = false });
+    defer graph_dir.close(std.testing.io);
+    const on_disk = try graph_dir.readFileAlloc(std.testing.io, Index.default_index_name, std.testing.allocator, .limited(1 << 20));
+    defer std.testing.allocator.free(on_disk);
+    try std.testing.expectEqualSlices(u8, incremental_bytes, on_disk);
+}
+
+test "compaction rebuilds the index against the rewritten log" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const options = Options{ .max_records = 4, .retention = .prune_oldest_sessions };
+
+    var session: usize = 0;
+    while (session < 3) : (session += 1) {
+        var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, options);
+        defer database.deinit();
+        const events = [_]fx.CausalEvent{
+            .{ .id = 1, .kind = .run_started, .label = "start" },
+            .{ .id = 2, .kind = .run_completed, .parent_id = 1, .label = "end" },
+        };
+        for (events) |event| {
+            var write = try fx.mapCausalEventToNendbWrite(std.testing.allocator, event);
+            defer fx.deinitCausalNendbWrite(std.testing.allocator, &write);
+            try database.appendWrite(write);
+        }
+        try database.flush();
+    }
+
+    var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, options);
+    defer database.deinit();
+    const content = try database.graph_dir.readFileAlloc(std.testing.io, default_wal_name, std.testing.allocator, .limited(1 << 20));
+    defer std.testing.allocator.free(content);
+    const bytes = try database.index_builder.serializeAlloc(content.len, Index.digest(content));
+    defer std.testing.allocator.free(bytes);
+    const view = try Index.parse(bytes);
+
+    // Compaction rewrites every byte offset, so an index carrying the old ones
+    // would point a reader at the wrong line rather than fail.
+    try std.testing.expectEqual(@as(u32, @intCast(database.recordCount())), view.header.entry_count);
+    try std.testing.expect(Index.coversPrefix(view, content.len, content));
+    for (view.entries) |entry| {
+        try std.testing.expect(entry.offset + entry.length <= content.len);
+        const line = content[entry.offset..][0..entry.length];
+        try std.testing.expect(std.mem.startsWith(u8, line, "{"));
+        try std.testing.expect(std.mem.endsWith(u8, line, "}"));
+    }
 }
 
 test "causal graph readers tolerate records written by a newer writer" {
