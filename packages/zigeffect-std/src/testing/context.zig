@@ -225,6 +225,29 @@ pub const TestContext = struct {
             }
         }
         for (self.assertions.items) |*assertion| {
+            // Capture what each cited event was before rewriting the id, while
+            // the recorder is still live and can answer. Afterwards only the
+            // durable id survives, and a receipt carrying an id into a pruned or
+            // absent graph proves nothing.
+            const facts = try self.allocator.alloc(Contract.CausalFact, assertion.causal_event_ids.len);
+            errdefer self.allocator.free(facts);
+            for (assertion.causal_event_ids, facts) |event_id, *fact| {
+                fact.* = .{ .event_id = managed.durableCausalEventId(event_id).? };
+                for (self.causal_store.events.items) |event| {
+                    if (event.id != event_id) continue;
+                    fact.* = .{
+                        .event_id = fact.event_id,
+                        .kind = try self.allocator.dupe(u8, @tagName(event.kind)),
+                        .label = try self.allocator.dupe(u8, event.label),
+                        .status = try self.allocator.dupe(u8, event.status),
+                        .service_key = try self.allocator.dupe(u8, event.service_key),
+                    };
+                    break;
+                }
+            }
+            self.allocator.free(@constCast(assertion.causal_facts));
+            assertion.causal_facts = facts;
+
             const ids = @constCast(assertion.causal_event_ids);
             for (ids) |*event_id| {
                 event_id.* = managed.durableCausalEventId(event_id.*).?;
@@ -452,6 +475,13 @@ fn deinitAssertion(allocator: std.mem.Allocator, value: Contract.AssertionResult
     allocator.free(value.source.id);
     allocator.free(value.source.path);
     allocator.free(value.causal_event_ids);
+    for (value.causal_facts) |fact| {
+        allocator.free(fact.kind);
+        allocator.free(fact.label);
+        allocator.free(fact.status);
+        allocator.free(fact.service_key);
+    }
+    allocator.free(@constCast(value.causal_facts));
     allocator.free(value.expected);
     allocator.free(value.actual);
     allocator.free(value.detail);

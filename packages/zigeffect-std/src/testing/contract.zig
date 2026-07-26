@@ -136,12 +136,35 @@ pub const SourceReference = struct {
     }
 };
 
+/// A cited causal event, carried in the receipt itself.
+///
+/// A receipt cites durable event ids, but the graph they point into is
+/// machine-local, prunable, and gone when a container recycles. Without the
+/// facts travelling alongside them, a proof-carrying claim is only checkable on
+/// the machine that produced it — not by CI, a reviewer, or the next session.
+/// This is deliberately a bounded projection, never the record: enough to verify
+/// what was asserted, small enough to commit.
+pub const CausalFact = struct {
+    event_id: u64,
+    kind: []const u8 = "",
+    label: []const u8 = "",
+    status: []const u8 = "",
+    service_key: []const u8 = "",
+
+    pub fn validate(self: CausalFact) ContractError!void {
+        if (self.event_id == 0) return error.InvalidIdentifier;
+        try validateFreeLabel(self.label);
+    }
+};
+
 pub const AssertionResult = struct {
     id: []const u8,
     label: []const u8,
     status: AssertionStatus,
     source: SourceReference = .{},
     causal_event_ids: []const u64 = &.{},
+    /// What those ids were, so the claim survives the graph.
+    causal_facts: []const CausalFact = &.{},
     expected: []const u8 = "",
     actual: []const u8 = "",
     detail: []const u8 = "",
@@ -151,6 +174,7 @@ pub const AssertionResult = struct {
         try validateIdentifier(self.id);
         try validateFreeLabel(self.label);
         try self.source.validate();
+        for (self.causal_facts) |fact| try fact.validate();
     }
 };
 
@@ -816,7 +840,22 @@ fn appendAssertion(output: *std.ArrayList(u8), allocator: std.mem.Allocator, ass
     try appendSafeJsonString(output, allocator, assertion.source.path);
     try output.print(allocator, ",\"line\":{d},\"column\":{d}}},\"causal_event_ids\":", .{ assertion.source.line, assertion.source.column });
     try appendU64Array(output, allocator, assertion.causal_event_ids);
-    try output.appendSlice(allocator, ",\"expected\":");
+    // The facts travel with the ids, so a reader without the graph can still
+    // check what was asserted.
+    try output.appendSlice(allocator, ",\"causal_facts\":[");
+    for (assertion.causal_facts, 0..) |fact, position| {
+        if (position != 0) try output.append(allocator, ',');
+        try output.print(allocator, "{{\"event_id\":{d},\"kind\":", .{fact.event_id});
+        try appendSafeJsonString(output, allocator, fact.kind);
+        try output.appendSlice(allocator, ",\"label\":");
+        try appendSafeJsonString(output, allocator, fact.label);
+        try output.appendSlice(allocator, ",\"status\":");
+        try appendSafeJsonString(output, allocator, fact.status);
+        try output.appendSlice(allocator, ",\"service_key\":");
+        try appendSafeJsonString(output, allocator, fact.service_key);
+        try output.append(allocator, '}');
+    }
+    try output.appendSlice(allocator, "],\"expected\":");
     try appendSafeJsonString(output, allocator, assertion.expected);
     try output.appendSlice(allocator, ",\"actual\":");
     try appendSafeJsonString(output, allocator, assertion.actual);
@@ -998,6 +1037,54 @@ test "TestReceipt JSON redacts free text round trips and preserves replay eviden
     try std.testing.expectEqualStrings("create-order", parsed.value.scenario.id);
     try std.testing.expectEqual(@as(u64, 7), parsed.value.assertions[0].causal_event_ids[0]);
     try std.testing.expectEqual(TestStatus.passed, parsed.value.status);
+}
+
+test "a receipt carries what its cited events were, not only their ids" {
+    // A receipt cites durable ids into a graph that is gitignored, prunable and
+    // gone when a container recycles. Without the facts alongside them the claim
+    // is only checkable on the machine that produced it.
+    const assertion = AssertionResult{
+        .id = "todo-causal",
+        .label = "the create effect completed",
+        .status = .passed,
+        .causal_event_ids = &.{1763},
+        .causal_facts = &.{.{
+            .event_id = 1763,
+            .kind = "effect_completed",
+            .label = "TodoService.create",
+            .status = "success",
+            .service_key = "application/TodoService",
+        }},
+    };
+    try assertion.validate();
+
+    var output: std.ArrayList(u8) = .empty;
+    defer output.deinit(std.testing.allocator);
+    try appendAssertion(&output, std.testing.allocator, assertion);
+
+    // Everything a reader needs to check the claim is in the document itself.
+    try std.testing.expect(std.mem.indexOf(u8, output.items, "\"causal_facts\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.items, "\"event_id\":1763") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.items, "TodoService.create") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.items, "effect_completed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.items, "application/TodoService") != null);
+
+    // An assertion citing nothing still serialises, so the field is additive.
+    const bare = AssertionResult{ .id = "bare", .label = "no causal citation", .status = .passed };
+    try bare.validate();
+    var plain: std.ArrayList(u8) = .empty;
+    defer plain.deinit(std.testing.allocator);
+    try appendAssertion(&plain, std.testing.allocator, bare);
+    try std.testing.expect(std.mem.indexOf(u8, plain.items, "\"causal_facts\":[]") != null);
+
+    // A fact must name a real event; a zero id is a malformed citation.
+    const broken = AssertionResult{
+        .id = "broken",
+        .label = "cites nothing real",
+        .status = .passed,
+        .causal_facts = &.{.{ .event_id = 0 }},
+    };
+    try std.testing.expectError(error.InvalidIdentifier, broken.validate());
 }
 
 test "TestReceipt preserves additive execution identity" {
