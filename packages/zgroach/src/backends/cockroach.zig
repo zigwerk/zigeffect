@@ -89,13 +89,22 @@ pub fn compile(
     errdefer parameters.deinit(allocator);
 
     const primary_key = "id";
+
+    // A single bounded step is the shape an agent actually asks for — "what did
+    // this cause, up to N hops" — so it gets a recursive CTE carrying its own
+    // depth bound rather than being refused. The bound is a parameter and is
+    // compared inside the recursive arm, so the walk cannot exceed what the plan
+    // asked for even on a deep graph.
+    if (plan.steps.len == 1 and plan.steps[0].max_depth > 1) {
+        return compileRecursive(allocator, schema, node_name, node, plan, &sql, &parameters, primary_key);
+    }
+
     try sql.print(allocator, "SELECT n0.\"{s}\" AS \"node_id\"\nFROM \"{s}\" AS n0", .{ primary_key, node.table });
 
-    // A traversal step is a join per hop; a bounded one is a recursive CTE. Only
-    // the depth-1 form is emitted here, because a recursive CTE that ignored the
-    // depth bound would return more than the plan asked for.
     var alias: usize = 0;
     for (plan.steps) |step| {
+        // Several chained steps where one is bounded would need a CTE per hop;
+        // refusing is still better than emitting an unbounded walk.
         if (step.max_depth != 1) return error.RecursiveTraversalNotCompiled;
         const relation = try firstRelation(schema, node_name);
         const from_column = if (step.direction == .children) relation.from_column else relation.to_column;
@@ -143,6 +152,67 @@ pub fn compile(
     };
 }
 
+/// Emit a depth-bounded transitive walk.
+///
+/// The anchor selects the roots the plan asked for at depth 0; the recursive arm
+/// joins one hop and increments, guarded by `depth < $bound`. The final select
+/// excludes depth 0 so the result is what was *reached*, matching the embedded
+/// connector, which returns descendants and not the node itself.
+fn compileRecursive(
+    allocator: std.mem.Allocator,
+    schema: Schema.Schema,
+    node_name: []const u8,
+    node: Schema.Node,
+    plan: Plan.Plan,
+    sql: *std.ArrayList(u8),
+    parameters: *std.ArrayList(Parameter),
+    primary_key: []const u8,
+) !Compiled {
+    const step = plan.steps[0];
+    const relation = try firstRelation(schema, node_name);
+    const from_column = if (step.direction == .children) relation.from_column else relation.to_column;
+    const to_column = if (step.direction == .children) relation.to_column else relation.from_column;
+
+    try sql.print(allocator,
+        "WITH RECURSIVE traversal(node_id, depth) AS (\n  SELECT n0.\"{s}\", 0\n  FROM \"{s}\" AS n0",
+        .{ primary_key, node.table },
+    );
+
+    var wrote_where = false;
+    switch (plan.from) {
+        .event => |id| {
+            try sql.print(allocator, "\n  WHERE n0.\"{s}\" = ${d}", .{ primary_key, parameters.items.len + 1 });
+            try parameters.append(allocator, .{ .id = id });
+            wrote_where = true;
+        },
+        .matching => |predicates| for (predicates) |predicate| {
+            try appendPredicateInto(allocator, sql, parameters, schema, node_name, 0, predicate, &wrote_where, "\n  WHERE ", "\n    AND ");
+        },
+    }
+
+    const depth_parameter = parameters.items.len + 1;
+    try sql.print(allocator,
+        "\n  UNION ALL\n  SELECT e.\"{s}\", traversal.depth + 1\n  FROM traversal\n  JOIN \"{s}\" AS e ON e.\"{s}\" = traversal.node_id\n  WHERE traversal.depth < ${d}\n)",
+        .{ to_column, relation.table, from_column, depth_parameter },
+    );
+    try parameters.append(allocator, .{ .id = step.max_depth });
+
+    try sql.print(allocator, "\nSELECT n.\"{s}\" AS \"node_id\"\nFROM traversal\nJOIN \"{s}\" AS n ON n.\"{s}\" = traversal.node_id\nWHERE traversal.depth > 0", .{ primary_key, node.table, primary_key });
+
+    var reached_where = true;
+    for (step.where) |predicate| {
+        try appendPredicateInto(allocator, sql, parameters, schema, node_name, null, predicate, &reached_where, "\nWHERE ", "\n  AND ");
+    }
+
+    try sql.print(allocator, "\nLIMIT ${d};", .{parameters.items.len + 1});
+    try parameters.append(allocator, .{ .id = plan.limit });
+
+    return .{
+        .sql = try sql.toOwnedSlice(allocator),
+        .parameters = try parameters.toOwnedSlice(allocator),
+    };
+}
+
 fn firstRelation(schema: Schema.Schema, node_name: []const u8) !Schema.Relation {
     for (schema.relations) |relation| {
         if (std.mem.eql(u8, relation.from_node, node_name)) return relation;
@@ -160,20 +230,45 @@ fn appendPredicate(
     predicate: Plan.Predicate,
     wrote_where: *bool,
 ) !void {
-    const field = try schema.nodeField(node_name, @tagName(predicate.field));
+    return appendPredicateInto(allocator, sql, parameters, schema, node_name, alias, predicate, wrote_where, "\nWHERE ", "\n  AND ");
+}
+
+/// `alias` of null qualifies the column with the outer `n` alias the recursive
+/// form uses, rather than a numbered join alias.
+fn appendPredicateInto(
+    allocator: std.mem.Allocator,
+    sql: *std.ArrayList(u8),
+    parameters: *std.ArrayList(Parameter),
+    schema: Schema.Schema,
+    node_name: []const u8,
+    alias: ?usize,
+    predicate: Plan.Predicate,
+    wrote_where: *bool,
+    first: []const u8,
+    subsequent: []const u8,
+) !void {
+    const field = try schema.nodeField(node_name, predicate.field);
     // The schema says what a column holds, so a text predicate on an id column
     // is a compile error rather than a query that matches nothing.
     const wants_text = predicate.match == .text;
     if ((field.kind == .id or field.kind == .integer) == wants_text) return error.FieldKindMismatch;
 
-    try sql.appendSlice(allocator, if (wrote_where.*) "\n  AND " else "\nWHERE ");
+    try sql.appendSlice(allocator, if (wrote_where.*) subsequent else first);
     wrote_where.* = true;
-    try sql.print(allocator, "n{d}.\"{s}\" {s} ${d}", .{
-        alias,
-        field.column,
-        if (predicate.negated) "<>" else "=",
-        parameters.items.len + 1,
-    });
+    if (alias) |numbered| {
+        try sql.print(allocator, "n{d}.\"{s}\" {s} ${d}", .{
+            numbered,
+            field.column,
+            if (predicate.negated) "<>" else "=",
+            parameters.items.len + 1,
+        });
+    } else {
+        try sql.print(allocator, "n.\"{s}\" {s} ${d}", .{
+            field.column,
+            if (predicate.negated) "<>" else "=",
+            parameters.items.len + 1,
+        });
+    }
     try parameters.append(allocator, switch (predicate.match) {
         .text => |value| .{ .text = value },
         .id => |value| .{ .id = value },
@@ -198,8 +293,8 @@ test "an anchored plan compiles to a parameterised statement" {
 
 test "a filtered root becomes a where clause and never inlines a value" {
     const plan = try Plan.Builder.matching(&.{
-        .{ .field = .status, .match = .{ .text = "failure" } },
-        .{ .field = .requirement_id, .match = .{ .id = 77 } },
+        .{ .field = "status", .match = .{ .text = "failure" } },
+        .{ .field = "requirement_id", .match = .{ .id = 77 } },
     }).limit(25).build();
     var compiled = try compile(std.testing.allocator, Schema.causal, "Event", plan);
     defer compiled.deinit(std.testing.allocator);
@@ -218,8 +313,8 @@ test "a filtered root becomes a where clause and never inlines a value" {
 }
 
 test "a traversal becomes a join, and its filter binds to what the hop reached" {
-    const plan = try Plan.Builder.matching(&.{.{ .field = .status, .match = .{ .text = "failure" } }})
-        .traverse(&.{.{ .direction = .children, .where = &.{.{ .field = .kind, .match = .{ .text = "activity_completed" } }} }})
+    const plan = try Plan.Builder.matching(&.{.{ .field = "status", .match = .{ .text = "failure" } }})
+        .traverse(&.{.{ .direction = .children, .where = &.{.{ .field = "kind", .match = .{ .text = "activity_completed" } }} }})
         .limit(5)
         .build();
     var compiled = try compile(std.testing.allocator, Schema.causal, "Event", plan);
@@ -247,14 +342,14 @@ test "direction chooses which column joins to which" {
     try std.testing.expect(std.mem.indexOf(u8, compiled.sql, "n2.\"id\" = e1.\"parent_id\"") != null);
 }
 
-test "a field/value mismatch is caught by the plan, and again by the schema" {
-    // First line: the plan knows which of its own fields are text, so this never
-    // reaches a backend.
+test "a field/value mismatch is caught by the schema the plan is compiled against" {
+    // The emitter resolves every name through the schema, so a value the column
+    // cannot hold is refused before a database sees the statement.
     const mismatched = Plan.Plan{
-        .from = .{ .matching = &.{.{ .field = .requirement_id, .match = .{ .text = "77" } }} },
+        .from = .{ .matching = &.{.{ .field = "requirement_id", .match = .{ .text = "77" } }} },
     };
     try std.testing.expectError(
-        error.InvalidPlan,
+        error.FieldKindMismatch,
         compile(std.testing.allocator, Schema.causal, "Event", mismatched),
     );
 
@@ -268,22 +363,75 @@ test "a field/value mismatch is caught by the plan, and again by the schema" {
             .{ .name = "status", .column = "status_id", .kind = .id },
         } }},
     };
-    const plan = try Plan.Builder.matching(&.{.{ .field = .status, .match = .{ .text = "failure" } }}).build();
+    const plan = try Plan.Builder.matching(&.{.{ .field = "status", .match = .{ .text = "failure" } }}).build();
     try std.testing.expectError(
         error.FieldKindMismatch,
         compile(std.testing.allocator, disagreeing, "Event", plan),
     );
 }
 
-test "a bounded traversal is refused rather than silently unbounded" {
-    // A recursive CTE that ignored max_depth would return more than the plan
-    // asked for. Until it is emitted with its depth bound, this must not compile.
+test "a bounded traversal becomes a recursive CTE carrying its own depth bound" {
     const deep = try Plan.Builder.fromEvent(1)
         .traverse(&.{.{ .direction = .children, .max_depth = 8 }})
         .build();
+    var compiled = try compile(std.testing.allocator, Schema.causal, "Event", deep);
+    defer compiled.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings(
+        \\WITH RECURSIVE traversal(node_id, depth) AS (
+        \\  SELECT n0."id", 0
+        \\  FROM "causal_event" AS n0
+        \\  WHERE n0."id" = $1
+        \\  UNION ALL
+        \\  SELECT e."event_id", traversal.depth + 1
+        \\  FROM traversal
+        \\  JOIN "causal_edge" AS e ON e."parent_id" = traversal.node_id
+        \\  WHERE traversal.depth < $2
+        \\)
+        \\SELECT n."id" AS "node_id"
+        \\FROM traversal
+        \\JOIN "causal_event" AS n ON n."id" = traversal.node_id
+        \\WHERE traversal.depth > 0
+        \\LIMIT $3;
+    , compiled.sql);
+
+    // The depth bound is a parameter compared inside the recursive arm, so the
+    // walk cannot exceed what the plan asked for however deep the graph is.
+    try std.testing.expectEqual(@as(u64, 8), compiled.parameters[1].id);
+    // Depth 0 is excluded: the result is what was reached, matching the embedded
+    // connector, which returns descendants and not the node itself.
+    try std.testing.expect(std.mem.indexOf(u8, compiled.sql, "traversal.depth > 0") != null);
+}
+
+test "a bounded traversal upward reverses the join and keeps its bound" {
+    const up = try Plan.Builder
+        .matching(&.{.{ .field = "status", .match = .{ .text = "failure" } }})
+        .traverse(&.{.{ .direction = .parents, .max_depth = 4 }})
+        .build();
+    var compiled = try compile(std.testing.allocator, Schema.causal, "Event", up);
+    defer compiled.deinit(std.testing.allocator);
+
+    try std.testing.expect(std.mem.indexOf(u8, compiled.sql, "WITH RECURSIVE") != null);
+    // Reversed against the forward case.
+    try std.testing.expect(std.mem.indexOf(u8, compiled.sql, "SELECT e.\"parent_id\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, compiled.sql, "e.\"event_id\" = traversal.node_id") != null);
+    // The root filter is parameterised, not inlined.
+    try std.testing.expectEqualStrings("failure", compiled.parameters[0].text);
+    try std.testing.expectEqual(@as(u64, 4), compiled.parameters[1].id);
+}
+
+test "chained steps with a bounded hop are still refused rather than unbounded" {
+    // One CTE per hop is not emitted yet, and an unbounded walk would return
+    // more than the plan asked for.
+    const chained = try Plan.Builder.fromEvent(1)
+        .traverse(&.{
+            .{ .direction = .children, .max_depth = 3 },
+            .{ .direction = .parents },
+        })
+        .build();
     try std.testing.expectError(
         error.RecursiveTraversalNotCompiled,
-        compile(std.testing.allocator, Schema.causal, "Event", deep),
+        compile(std.testing.allocator, Schema.causal, "Event", chained),
     );
 }
 

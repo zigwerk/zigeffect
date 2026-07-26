@@ -184,10 +184,10 @@ test "a fully capable connector reports no gap" {
         .reverse_traversal = true,
     });
 
-    const plan = try Plan.Builder.matching(&.{.{ .field = .status, .match = .{ .text = "failure" } }})
+    const plan = try Plan.Builder.matching(&.{.{ .field = "status", .match = .{ .text = "failure" } }})
         .traverse(&.{
             .{ .direction = .children, .max_depth = 16 },
-            .{ .direction = .parents, .max_depth = 4, .where = &.{.{ .field = .kind, .match = .{ .text = "effect_completed" } }} },
+            .{ .direction = .parents, .max_depth = 4, .where = &.{.{ .field = "kind", .match = .{ .text = "effect_completed" } }} },
         })
         .build();
     try std.testing.expect(backend.gap(plan) == null);
@@ -201,6 +201,6 @@ test "a connector without predicates cannot answer a filtered root" {
     const anchored = try Plan.Builder.fromEvent(9).traverse(&.{.{ .direction = .children, .max_depth = 3 }}).build();
     try backend.check(anchored);
 
-    const filtered = try Plan.Builder.matching(&.{.{ .field = .label, .match = .{ .text = "x" } }}).build();
+    const filtered = try Plan.Builder.matching(&.{.{ .field = "label", .match = .{ .text = "x" } }}).build();
     try std.testing.expectEqualStrings("predicates", backend.gap(filtered).?.feature);
 }

@@ -155,24 +155,37 @@ fn matchesAll(node: zstd.CausalGraph.Snapshot.NodeView, predicates: []const Plan
 
 fn matches(node: zstd.CausalGraph.Snapshot.NodeView, predicate: Plan.Predicate) bool {
     const matched = switch (predicate.match) {
-        .text => |wanted| std.mem.eql(u8, switch (predicate.field) {
-            .label => node.label,
-            .kind => node.kind,
-            .status => node.status,
-            .service_key => node.service_key,
-            .type_name => node.type_name,
-            else => return predicate.negated,
-        }, wanted),
-        .id => |wanted| switch (predicate.field) {
-            .requirement_id => node.requirement_id == wanted,
-            .acceptance_check_id => node.acceptance_check_id == wanted,
-            .scenario_id => node.scenario_id == wanted,
-            .run_id => node.run_id == wanted,
-            .session_id => node.session_id == wanted,
-            else => return predicate.negated,
+        .text => |wanted| blk: {
+            const actual = textColumn(node, predicate.field) orelse break :blk false;
+            break :blk std.mem.eql(u8, actual, wanted);
+        },
+        .id => |wanted| blk: {
+            const actual = idColumn(node, predicate.field) orelse break :blk false;
+            break :blk actual == wanted;
         },
     };
     return matched != predicate.negated;
+}
+
+/// Resolve a schema field name onto this store's materialised columns. A name
+/// the causal schema does not declare simply has no column here, and a plan
+/// naming one is rejected by `validateAgainst` before reaching this point.
+fn textColumn(node: zstd.CausalGraph.Snapshot.NodeView, name: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, name, "label")) return node.label;
+    if (std.mem.eql(u8, name, "kind")) return node.kind;
+    if (std.mem.eql(u8, name, "status")) return node.status;
+    if (std.mem.eql(u8, name, "service_key")) return node.service_key;
+    if (std.mem.eql(u8, name, "type_name")) return node.type_name;
+    return null;
+}
+
+fn idColumn(node: zstd.CausalGraph.Snapshot.NodeView, name: []const u8) ?u64 {
+    if (std.mem.eql(u8, name, "requirement_id")) return node.requirement_id;
+    if (std.mem.eql(u8, name, "acceptance_check_id")) return node.acceptance_check_id;
+    if (std.mem.eql(u8, name, "scenario_id")) return node.scenario_id;
+    if (std.mem.eql(u8, name, "run_id")) return node.run_id;
+    if (std.mem.eql(u8, name, "session_id")) return node.session_id;
+    return null;
 }
 
 test "the embedded connector answers plans over a real graph" {
@@ -222,7 +235,7 @@ test "the embedded connector answers plans over a real graph" {
 
     // A filtered root: every failure, without knowing an id first.
     var failures = try store.execute(std.testing.allocator, try Plan.Builder
-        .matching(&.{.{ .field = .status, .match = .{ .text = "failure" } }})
+        .matching(&.{.{ .field = "status", .match = .{ .text = "failure" } }})
         .build());
     defer failures.deinit(std.testing.allocator);
     try std.testing.expectEqualSlices(u64, &.{failure_id}, failures.ids);
@@ -230,7 +243,7 @@ test "the embedded connector answers plans over a real graph" {
     // The composed question, which neither primitive answers alone: everything
     // caused by any failure.
     var fallout = try store.execute(std.testing.allocator, try Plan.Builder
-        .matching(&.{.{ .field = .status, .match = .{ .text = "failure" } }})
+        .matching(&.{.{ .field = "status", .match = .{ .text = "failure" } }})
         .traverse(&.{.{ .direction = .children, .max_depth = 8 }})
         .build());
     defer fallout.deinit(std.testing.allocator);
@@ -240,7 +253,7 @@ test "the embedded connector answers plans over a real graph" {
 
     // Negation is a predicate, not a second operator set.
     var not_failed = try store.execute(std.testing.allocator, try Plan.Builder
-        .matching(&.{.{ .field = .label, .match = .{ .text = "Todo.create" } }, .{ .field = .status, .match = .{ .text = "failure" }, .negated = true }})
+        .matching(&.{.{ .field = "label", .match = .{ .text = "Todo.create" } }, .{ .field = "status", .match = .{ .text = "failure" }, .negated = true }})
         .build());
     defer not_failed.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 1), not_failed.ids.len);

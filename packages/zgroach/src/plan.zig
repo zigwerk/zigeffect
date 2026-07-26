@@ -19,33 +19,20 @@
 //! manifest, or shipped across a boundary and validated on arrival.
 
 const std = @import("std");
+const Schema = @import("schema.zig");
 
 pub const Error = error{
     InvalidPlan,
 };
 
-/// The columns a graph node exposes to a predicate. Deliberately a closed set:
-/// a backend must be able to answer every one of these from an index, never by
-/// decoding a record.
-pub const Field = enum {
-    label,
-    kind,
-    status,
-    service_key,
-    type_name,
-    requirement_id,
-    acceptance_check_id,
-    scenario_id,
-    run_id,
-    session_id,
-
-    pub fn isText(self: Field) bool {
-        return switch (self) {
-            .label, .kind, .status, .service_key, .type_name => true,
-            .requirement_id, .acceptance_check_id, .scenario_id, .run_id, .session_id => false,
-        };
-    }
-};
+/// The name of a field on the node being filtered.
+///
+/// Deliberately a name and not an enum. An enum could only ever list one
+/// store's columns, which would make a plan untargetable at any other — the
+/// whole point of the plan being backend-neutral. What a name *means* is the
+/// schema's job, and a name that does not exist there is rejected before
+/// execution rather than matching nothing.
+pub const FieldName = []const u8;
 
 pub const Match = union(enum) {
     text: []const u8,
@@ -53,16 +40,17 @@ pub const Match = union(enum) {
 };
 
 pub const Predicate = struct {
-    field: Field,
+    field: FieldName,
     match: Match,
     /// Negation is on the predicate rather than a separate operator set so that
     /// "everything that is not a success" stays a single indexed comparison.
     negated: bool = false,
 
+    /// Structural only. Whether the field exists, and whether its type admits
+    /// this value, needs a schema and is checked by `Plan.validateAgainst`.
     pub fn validate(self: Predicate) Error!void {
-        const text_match = self.match == .text;
-        if (self.field.isText() != text_match) return error.InvalidPlan;
-        if (text_match and self.match.text.len == 0) return error.InvalidPlan;
+        if (self.field.len == 0 or self.field.len > max_field_name_bytes) return error.InvalidPlan;
+        if (self.match == .text and self.match.text.len == 0) return error.InvalidPlan;
     }
 };
 
@@ -89,6 +77,7 @@ pub const Step = struct {
     }
 };
 
+pub const max_field_name_bytes: usize = 128;
 pub const max_predicates: usize = 16;
 pub const max_steps: usize = 8;
 pub const max_traversal_depth: usize = 4096;
@@ -128,7 +117,33 @@ pub const Plan = struct {
         }
         for (self.steps) |step| try step.validate();
     }
+
+    /// Semantic validation: every field named must exist on the node, and its
+    /// declared type must admit the value compared against it.
+    ///
+    /// Separate from `validate` because a plan is meaningful without a schema —
+    /// it can be built, stored and shipped — but cannot be *executed* until one
+    /// says what its names mean. Running this before a connector is reached
+    /// turns "returns nothing" into "that field does not exist".
+    pub fn validateAgainst(self: Plan, schema: Schema.Schema, node_name: []const u8) !void {
+        try self.validate();
+        const node = try schema.node(node_name);
+        switch (self.from) {
+            .event => {},
+            .matching => |predicates| for (predicates) |predicate| try checkField(node, predicate),
+        }
+        for (self.steps) |step| {
+            for (step.where) |predicate| try checkField(node, predicate);
+        }
+    }
 };
+
+fn checkField(node: Schema.Node, predicate: Predicate) !void {
+    const field = try node.field(predicate.field);
+    const wants_text = predicate.match == .text;
+    const holds_number = field.kind == .id or field.kind == .integer;
+    if (holds_number == wants_text) return error.FieldKindMismatch;
+}
 
 /// What a plan produced, and whether any bound cut it short.
 ///
@@ -184,7 +199,7 @@ pub const Builder = struct {
 
 test "a plan is data and validates its own bounds" {
     const plan = try Builder.fromEvent(42)
-        .traverse(&.{.{ .direction = .children, .max_depth = 3, .where = &.{.{ .field = .status, .match = .{ .text = "failure" } }} }})
+        .traverse(&.{.{ .direction = .children, .max_depth = 3, .where = &.{.{ .field = "status", .match = .{ .text = "failure" } }} }})
         .limit(64)
         .build();
 
@@ -195,11 +210,9 @@ test "a plan is data and validates its own bounds" {
 }
 
 test "a plan refuses shapes the executor could not honour" {
-    // A text column compared against an id, or the reverse, is a plan bug rather
-    // than an empty result — catching it here keeps the executor total.
-    try std.testing.expectError(error.InvalidPlan, Builder.matching(&.{.{ .field = .status, .match = .{ .id = 7 } }}).build());
-    try std.testing.expectError(error.InvalidPlan, Builder.matching(&.{.{ .field = .requirement_id, .match = .{ .text = "x" } }}).build());
-    try std.testing.expectError(error.InvalidPlan, Builder.matching(&.{.{ .field = .label, .match = .{ .text = "" } }}).build());
+    // A field name is structural: empty or absurdly long is a plan bug.
+    try std.testing.expectError(error.InvalidPlan, Builder.matching(&.{.{ .field = "", .match = .{ .id = 7 } }}).build());
+    try std.testing.expectError(error.InvalidPlan, Builder.matching(&.{.{ .field = "label", .match = .{ .text = "" } }}).build());
 
     // An unanchored, unfiltered root would be a full scan wearing a query's
     // clothes; `since` already does that far more cheaply.
@@ -214,12 +227,41 @@ test "a plan refuses shapes the executor could not honour" {
     );
 }
 
+test "a plan is only meaningful once a schema says what its names are" {
+    // Structurally fine, and deliberately so: a plan can be built and stored
+    // without a schema. What the names mean is checked when one is supplied.
+    const typed_wrong = try Builder.matching(&.{.{ .field = "status", .match = .{ .id = 7 } }}).build();
+    try typed_wrong.validate();
+    try std.testing.expectError(error.FieldKindMismatch, typed_wrong.validateAgainst(Schema.causal, "Event"));
+
+    const reversed = try Builder.matching(&.{.{ .field = "requirement_id", .match = .{ .text = "x" } }}).build();
+    try std.testing.expectError(error.FieldKindMismatch, reversed.validateAgainst(Schema.causal, "Event"));
+
+    // A name the schema does not declare is named as such, rather than matching
+    // nothing at execution time.
+    const unknown = try Builder.matching(&.{.{ .field = "not_a_column", .match = .{ .text = "x" } }}).build();
+    try std.testing.expectError(error.UnknownField, unknown.validateAgainst(Schema.causal, "Event"));
+
+    // A step's filter is checked too, not only the root's.
+    const bad_step = try Builder.fromEvent(1)
+        .traverse(&.{.{ .direction = .children, .where = &.{.{ .field = "nope", .match = .{ .text = "x" } }} }})
+        .build();
+    try std.testing.expectError(error.UnknownField, bad_step.validateAgainst(Schema.causal, "Event"));
+
+    // And the well-formed case passes both layers.
+    const good = try Builder.matching(&.{
+        .{ .field = "status", .match = .{ .text = "failure" } },
+        .{ .field = "requirement_id", .match = .{ .id = 42 } },
+    }).build();
+    try good.validateAgainst(Schema.causal, "Event");
+}
+
 test "steps compose forward and backward causality" {
     // "What did the failures for this requirement cause?" is a filtered root
     // followed by a recursive forward step — one plan, two primitives.
     const plan = try Builder.matching(&.{
-        .{ .field = .requirement_id, .match = .{ .id = 99 } },
-        .{ .field = .status, .match = .{ .text = "failure" } },
+        .{ .field = "requirement_id", .match = .{ .id = 99 } },
+        .{ .field = "status", .match = .{ .text = "failure" } },
     })
         .traverse(&.{.{ .direction = .children, .max_depth = 16 }})
         .build();
