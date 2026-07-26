@@ -192,6 +192,39 @@ pub const Builder = struct {
         columns: Columns = .{},
     };
 
+    /// Adopt a previously serialised index wholesale.
+    ///
+    /// A process that opened from an index still has to be able to persist a
+    /// complete one later, but re-interning every column to get there costs a
+    /// hashmap operation per field per record — enough to erase the saving that
+    /// made the index worth loading. Because string ids are offsets into the
+    /// table, copying the table and the entries verbatim preserves every id
+    /// exactly, so this is two memcpys plus a walk of the distinct strings to
+    /// restore deduplication for whatever is appended next.
+    pub fn seedFrom(self: *Builder, view: View) !void {
+        std.debug.assert(self.entries.items.len == 0);
+        std.debug.assert(self.strings.bytes.items.len == 0);
+
+        try self.strings.bytes.appendSlice(self.allocator, view.strings);
+        var cursor: usize = 0;
+        while (cursor + 2 <= view.strings.len) {
+            const length = std.mem.bytesToValue(u16, view.strings[cursor..][0..2]);
+            const start = cursor + 2;
+            if (start + length > view.strings.len) return error.IndexUnusable;
+            const key = std.hash.Wyhash.hash(0x5f1d_2a77, view.strings[start..][0..length]);
+            try self.strings.lookup.put(self.allocator, key, @intCast(cursor));
+            cursor = start + length;
+        }
+
+        // The view borrows unaligned bytes straight from the file, so entries
+        // are copied one at a time rather than as an aligned slice.
+        try self.entries.ensureUnusedCapacity(self.allocator, view.entries.len);
+        for (view.entries) |entry| self.entries.appendAssumeCapacity(entry);
+        self.edge_count = view.header.edge_count;
+        self.max_session_id = view.header.max_session_id;
+        self.max_durable_event_id = view.header.max_durable_event_id;
+    }
+
     pub fn append(self: *Builder, row: Row) !void {
         // Entries are binary-searched by durable id, exactly as the in-memory
         // index is today, so the ordering invariant has to hold here too.

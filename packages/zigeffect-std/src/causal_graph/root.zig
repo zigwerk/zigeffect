@@ -670,6 +670,137 @@ pub const LocalDatabase = struct {
         };
     }
 
+    /// Restore all derived state from a verified index, decoding nothing.
+    ///
+    /// Returns false whenever the index cannot carry the whole load, in which
+    /// case the caller replays the log exactly as before. Note the index is only
+    /// accepted when it covers every byte: a log with a trailing partial record
+    /// is longer than any index of it, so truncation recovery is never skipped.
+    fn loadFromIndex(self: *LocalDatabase, content: []const u8) !bool {
+        const raw = self.graph_dir.readFileAlloc(
+            self.io,
+            self.options.index_name,
+            self.allocator,
+            .limited(self.options.max_wal_bytes),
+        ) catch return false;
+        defer self.allocator.free(raw);
+
+        const view = Index.parse(raw) catch return false;
+        const covered: usize = @intCast(view.header.covered_bytes);
+        if (covered > content.len) return false;
+        if (!Index.coversPrefix(view, content.len, content[0..covered])) return false;
+        if (view.entries.len > self.options.max_records) return false;
+
+        const parent_label_id = fx.stableCausalNendbEdgeLabelId("causal_parent");
+        try self.entries.ensureTotalCapacity(self.allocator, view.entries.len);
+        try self.durable_entry_index.ensureUnusedCapacity(self.allocator, @intCast(view.entries.len));
+
+        var edges: usize = 0;
+        for (view.entries, 0..) |entry, position| {
+            if (entry.offset + entry.length > content.len) return error.CorruptGraph;
+            if (position != 0 and entry.durable_event_id <= view.entries[position - 1].durable_event_id) {
+                return error.CorruptGraph;
+            }
+            const parent = if (entry.durable_parent_id == Index.no_parent) null else entry.durable_parent_id;
+            _ = self.nendb.addNode(entry.durable_event_id, entry.node_kind) catch return error.CorruptGraph;
+            if (parent) |from| {
+                _ = self.nendb.addEdge(from, entry.durable_event_id, parent_label_id) catch return error.CorruptGraph;
+                edges += 1;
+            }
+            self.entries.appendAssumeCapacity(.{
+                .sequence = entry.sequence,
+                .session_id = entry.session_id,
+                .durable_event_id = entry.durable_event_id,
+                .source_event_id = entry.source_event_id,
+                .durable_parent_id = parent,
+                .offset = @intCast(entry.offset),
+                .length = @intCast(entry.length),
+            });
+            self.durable_entry_index.putAssumeCapacityNoClobber(entry.durable_event_id, position);
+
+        }
+
+        // The builder is seeded by copy rather than by re-interning every
+        // column, which measurement showed cost more than the load saved.
+        self.index_builder.seedFrom(view) catch return error.CorruptGraph;
+
+        self.edge_count = edges;
+        var max_session_id = view.header.max_session_id;
+        var max_durable_event_id = view.header.max_durable_event_id;
+        var last_complete_offset = covered;
+
+        // A process writes lifecycle records after its final flush, so a log is
+        // routinely longer than the index of it. Validating only those trailing
+        // bytes is what makes the fast path reachable at all for a service:
+        // without it a server always falls back to decoding everything.
+        if (covered < content.len) {
+            var scan = ScanResult{};
+            defer scan.deinit(self.allocator);
+            scan.entries = self.entries;
+            self.entries = .empty;
+            scan.edge_count = self.edge_count;
+            scan.max_session_id = max_session_id;
+            scan.max_durable_event_id = max_durable_event_id;
+            scan.last_complete_offset = covered;
+            // Parent resolution reaches back into the restored prefix, so the
+            // identities the tail may reference have to be present.
+            try scan.seen_nodes.ensureUnusedCapacity(self.allocator, @intCast(view.entries.len));
+            for (view.entries) |entry| {
+                scan.seen_nodes.putAssumeCapacity(entry.durable_event_id, .{
+                    .session_id = entry.session_id,
+                    .source_event_id = entry.source_event_id,
+                });
+            }
+            if (view.entries.len != 0) {
+                const newest = view.entries[view.entries.len - 1];
+                if (newest.session_id == max_session_id) scan.last_source_event_id = newest.source_event_id;
+            }
+
+            const before = scan.entries.items.len;
+            scanContentInto(&scan, self.allocator, content[covered..], self.options, covered, &self.index_builder) catch {
+                // The tail is unreadable from here; hand the whole log back to
+                // the replay path, which owns truncation recovery.
+                self.entries = scan.entries;
+                scan.entries = .empty;
+                return false;
+            };
+
+            const parent_label = fx.stableCausalNendbEdgeLabelId("causal_parent");
+            for (scan.entries.items[before..], before..) |entry, position| {
+                // The scan result carries identity but not the topology kind
+                // byte; the index builder recorded it for these same rows, in
+                // the same order, as it validated them.
+                const node_kind = if (position < self.index_builder.entries.items.len)
+                    self.index_builder.entries.items[position].node_kind
+                else
+                    0;
+                _ = self.nendb.addNode(entry.durable_event_id, node_kind) catch return error.CorruptGraph;
+                if (entry.durable_parent_id) |from| {
+                    _ = self.nendb.addEdge(from, entry.durable_event_id, parent_label) catch return error.CorruptGraph;
+                }
+                try self.durable_entry_index.put(self.allocator, entry.durable_event_id, position);
+            }
+            self.entries = scan.entries;
+            scan.entries = .empty;
+            self.edge_count = scan.edge_count;
+            max_session_id = scan.max_session_id;
+            max_durable_event_id = scan.max_durable_event_id;
+            last_complete_offset = scan.last_complete_offset;
+
+            if (last_complete_offset < content.len) {
+                // A trailing partial record needs truncation, which the replay
+                // path already implements correctly. Defer to it.
+                return false;
+            }
+            self.index_dirty = true;
+        }
+
+        self.node_base = max_durable_event_id;
+        self.session_id = std.math.add(u64, max_session_id, 1) catch return error.SessionIdOverflow;
+        if (self.session_id == 0) return error.SessionIdOverflow;
+        return true;
+    }
+
     fn loadExisting(self: *LocalDatabase) !void {
         const content = try self.graph_dir.readFileAlloc(
             self.io,
@@ -678,6 +809,12 @@ pub const LocalDatabase = struct {
             .limited(self.options.max_wal_bytes),
         );
         defer self.allocator.free(content);
+
+        // The runtime opens the graph on the process critical path — this is the
+        // path that stopped a gRPC server binding on a large log. When a verified
+        // index describes exactly these bytes, none of the log is decoded.
+        if (try self.loadFromIndex(content)) return;
+
         var scan = try scanContent(self.allocator, content, self.options, &self.index_builder);
         defer scan.deinit(self.allocator);
 
@@ -1734,6 +1871,24 @@ fn scanContent(
 ) !ScanResult {
     var result = ScanResult{};
     errdefer result.deinit(allocator);
+    try scanContentInto(&result, allocator, content, options, 0, index_builder);
+    return result;
+}
+
+/// Validate `content` into an existing, possibly pre-seeded, result.
+///
+/// `base_offset` is added to every recorded byte position, which is what lets a
+/// caller that already restored a prefix from the index validate only the bytes
+/// beyond it. All invariant checking lives here so a resumed scan cannot enforce
+/// a weaker contract than a full one.
+fn scanContentInto(
+    result: *ScanResult,
+    allocator: std.mem.Allocator,
+    content: []const u8,
+    options: Options,
+    base_offset: usize,
+    index_builder: ?*Index.Builder,
+) !void {
     var line_start: usize = 0;
     while (std.mem.indexOfScalarPos(u8, content, line_start, '\n')) |newline| {
         const line = content[line_start..newline];
@@ -1773,11 +1928,11 @@ fn scanContent(
             .durable_event_id = parsed.value.node.id,
             .source_event_id = parsed.value.node.source_event_id,
             .durable_parent_id = durable_parent,
-            .offset = line_start,
+            .offset = base_offset + line_start,
             .length = line.len,
         });
         if (index_builder) |builder| {
-            try appendIndexRow(builder, allocator, parsed.value, durable_parent, line_start, line.len);
+            try appendIndexRow(builder, allocator, parsed.value, durable_parent, base_offset + line_start, line.len);
         }
         try result.seen_nodes.put(allocator, parsed.value.node.id, .{
             .session_id = parsed.value.session_id,
@@ -1788,9 +1943,8 @@ fn scanContent(
         result.last_source_event_id = parsed.value.node.source_event_id;
         result.max_durable_event_id = parsed.value.node.id;
         line_start = newline + 1;
-        result.last_complete_offset = line_start;
+        result.last_complete_offset = base_offset + line_start;
     }
-    return result;
 }
 
 fn summaryFromEntries(
@@ -2325,6 +2479,162 @@ test "the incrementally maintained index equals a full replay of the same log" {
     const on_disk = try graph_dir.readFileAlloc(std.testing.io, Index.default_index_name, std.testing.allocator, .limited(1 << 20));
     defer std.testing.allocator.free(on_disk);
     try std.testing.expectEqualSlices(u8, incremental_bytes, on_disk);
+}
+
+test "an index covering only a prefix is completed by validating the tail" {
+    // A process writes lifecycle records after its final flush, so in practice
+    // the log is almost always longer than the index of it. If that case fell
+    // back to a full replay, a service would never take the fast path at all —
+    // which is exactly what measurement showed before this existed.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    {
+        var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{});
+        defer database.deinit();
+        var first = try fx.mapCausalEventToNendbWrite(std.testing.allocator, .{ .id = 1, .kind = .run_started, .label = "covered" });
+        defer fx.deinitCausalNendbWrite(std.testing.allocator, &first);
+        try database.appendWrite(first);
+        // Index is persisted here...
+        try database.flush();
+        // ...and these land after it, exactly like shutdown lifecycle records.
+        var second = try fx.mapCausalEventToNendbWrite(std.testing.allocator, .{ .id = 2, .kind = .activity_completed, .parent_id = 1, .label = "after-flush", .status = "success" });
+        defer fx.deinitCausalNendbWrite(std.testing.allocator, &second);
+        try database.appendWrite(second);
+        var third = try fx.mapCausalEventToNendbWrite(std.testing.allocator, .{ .id = 3, .kind = .run_completed, .parent_id = 2, .label = "after-flush", .status = "success" });
+        defer fx.deinitCausalNendbWrite(std.testing.allocator, &third);
+        try database.appendWrite(third);
+    }
+
+    var graph_dir = try tmp.dir.openDir(std.testing.io, default_path, .{ .follow_symlinks = false });
+    defer graph_dir.close(std.testing.io);
+    const log = try graph_dir.readFileAlloc(std.testing.io, default_wal_name, std.testing.allocator, .limited(1 << 20));
+    defer std.testing.allocator.free(log);
+    const stale = try graph_dir.readFileAlloc(std.testing.io, Index.default_index_name, std.testing.allocator, .limited(1 << 20));
+    defer std.testing.allocator.free(stale);
+    const stale_view = try Index.parse(stale);
+    // Precondition: the index really does cover only part of the log.
+    try std.testing.expectEqual(@as(u32, 1), stale_view.header.entry_count);
+    try std.testing.expect(stale_view.header.covered_bytes < log.len);
+
+    // Scoped: the writer holds the log's exclusive lock, so the replay below
+    // cannot open until this one is closed.
+    var resumed_summary: []u8 = undefined;
+    var resumed_index: []u8 = undefined;
+    var resumed_session: u64 = 0;
+    {
+    var resumed = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{});
+    defer resumed.deinit();
+    try std.testing.expectEqual(@as(usize, 3), resumed.recordCount());
+    try std.testing.expectEqual(@as(usize, 2), resumed.edgeCount());
+    // Records written after the flush must be addressable and selectable.
+    try std.testing.expect(resumed.contains(3));
+    const found = try resumed.findRecordsJsonAlloc(std.testing.allocator, .{ .label = "after-flush" }, 0, 8, 64);
+    defer std.testing.allocator.free(found);
+    try std.testing.expect(std.mem.indexOf(u8, found, "\"matched\":2") != null);
+
+    // Completing from a partial index must land in exactly the state a full
+    // replay would have produced, including the index it will next persist.
+    resumed_summary = try resumed.summaryJsonAlloc(std.testing.allocator);
+    resumed_index = try resumed.index_builder.serializeAlloc(log.len, Index.digest(log));
+    resumed_session = resumed.currentSessionId();
+    }
+    defer std.testing.allocator.free(resumed_summary);
+    defer std.testing.allocator.free(resumed_index);
+
+    try graph_dir.deleteFile(std.testing.io, Index.default_index_name);
+    var replayed = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{});
+    defer replayed.deinit();
+    const replayed_summary = try replayed.summaryJsonAlloc(std.testing.allocator);
+    defer std.testing.allocator.free(replayed_summary);
+    const replayed_index = try replayed.index_builder.serializeAlloc(log.len, Index.digest(log));
+    defer std.testing.allocator.free(replayed_index);
+
+    try std.testing.expectEqualStrings(replayed_summary, resumed_summary);
+    try std.testing.expectEqual(replayed.currentSessionId(), resumed_session);
+    try std.testing.expectEqualSlices(u8, replayed_index, resumed_index);
+}
+
+test "opening the writer from an index restores the same state as replaying" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const events = [_]fx.CausalEvent{
+        .{ .id = 1, .kind = .run_started, .label = "run", .status = "running" },
+        .{ .id = 2, .kind = .effect_completed, .parent_id = 1, .label = "B.do", .status = "success", .service_key = "application/B", .context = .{ .requirement_id = 5 } },
+        .{ .id = 3, .kind = .run_completed, .parent_id = 2, .label = "run", .status = "success" },
+    };
+    {
+        var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{});
+        defer database.deinit();
+        for (events) |event| {
+            var write = try fx.mapCausalEventToNendbWrite(std.testing.allocator, event);
+            defer fx.deinitCausalNendbWrite(std.testing.allocator, &write);
+            try database.appendWrite(write);
+        }
+        try database.flush();
+    }
+
+    var graph_dir = try tmp.dir.openDir(std.testing.io, default_path, .{ .follow_symlinks = false });
+    defer graph_dir.close(std.testing.io);
+
+    const Observed = struct { records: usize, edges: usize, session: u64, engine_nodes: usize, engine_edges: usize, summary: []u8, index_bytes: []u8 };
+    const observe = struct {
+        fn run(root: std.Io.Dir) !Observed {
+            var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, root, .{});
+            defer database.deinit();
+            const stats = database.engineStats();
+            const content = try database.graph_dir.readFileAlloc(std.testing.io, default_wal_name, std.testing.allocator, .limited(1 << 20));
+            defer std.testing.allocator.free(content);
+            return .{
+                .records = database.recordCount(),
+                .edges = database.edgeCount(),
+                .session = database.currentSessionId(),
+                .engine_nodes = stats.nodes,
+                .engine_edges = stats.edges,
+                .summary = try database.summaryJsonAlloc(std.testing.allocator),
+                .index_bytes = try database.index_builder.serializeAlloc(content.len, Index.digest(content)),
+            };
+        }
+    }.run;
+
+    const from_index = try observe(tmp.dir);
+    defer std.testing.allocator.free(from_index.summary);
+    defer std.testing.allocator.free(from_index.index_bytes);
+
+    try graph_dir.deleteFile(std.testing.io, Index.default_index_name);
+    const from_replay = try observe(tmp.dir);
+    defer std.testing.allocator.free(from_replay.summary);
+    defer std.testing.allocator.free(from_replay.index_bytes);
+
+    try std.testing.expectEqual(from_replay.records, from_index.records);
+    try std.testing.expectEqual(from_replay.edges, from_index.edges);
+    // Session assignment drives durable id derivation for everything written
+    // next, so a disagreement here would corrupt the log rather than a query.
+    try std.testing.expectEqual(from_replay.session, from_index.session);
+    try std.testing.expectEqual(from_replay.engine_nodes, from_index.engine_nodes);
+    try std.testing.expectEqual(from_replay.engine_edges, from_index.engine_edges);
+    try std.testing.expectEqualStrings(from_replay.summary, from_index.summary);
+    // The builder must be fully repopulated: otherwise the next flush would
+    // persist an index claiming to cover the log while holding only later rows.
+    try std.testing.expectEqualSlices(u8, from_replay.index_bytes, from_index.index_bytes);
+
+    // And a process that opened from the index must keep appending correctly.
+    {
+        var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{});
+        defer database.deinit();
+        var write = try fx.mapCausalEventToNendbWrite(std.testing.allocator, .{ .id = 1, .kind = .run_started, .label = "second-session" });
+        defer fx.deinitCausalNendbWrite(std.testing.allocator, &write);
+        try database.appendWrite(write);
+        try database.flush();
+        try std.testing.expectEqual(@as(usize, 4), database.recordCount());
+    }
+    var reopened = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{});
+    defer reopened.deinit();
+    try std.testing.expectEqual(@as(usize, 4), reopened.recordCount());
+    const found = try reopened.findRecordsJsonAlloc(std.testing.allocator, .{ .label = "second-session" }, 0, 8, 64);
+    defer std.testing.allocator.free(found);
+    try std.testing.expect(std.mem.indexOf(u8, found, "\"matched\":1") != null);
 }
 
 test "an index-backed snapshot answers identically to a replayed one" {
