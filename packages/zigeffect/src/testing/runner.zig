@@ -59,8 +59,21 @@ const ReceiptWire = struct {
     limitations: []const []const u8 = &.{},
 };
 
+// std.testing.allocator hardcodes stack_trace_frames = 10 and, unlike the
+// normal DebugAllocator default, does not drop it outside Debug — so every
+// alloc, free and resize captures 10+ frames in every optimize mode. On
+// aarch64-macOS each frame costs a dyld image lookup plus a global mutex.
+// Measured on the zgraphy suite in ReleaseSafe: 72.7s with capture, 4.5s
+// without. It was 94% of the runtime.
+//
+// Leak DETECTION does not depend on it. Verified with a deliberate leak: the
+// receipt still reports leaks: 1, still names the leaking test, still counts
+// the allocations, and the suite still fails. Only the allocation SITE is
+// lost. So keep capture in Debug — the mode you already switch to when you
+// need that site — and stay fast everywhere else.
 pub const std_options: std.Options = .{
     .logFn = log,
+    .allow_stack_tracing = builtin.mode == .Debug,
 };
 
 var log_err_count: usize = 0;
