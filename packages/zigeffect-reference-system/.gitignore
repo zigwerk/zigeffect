@@ -12,3 +12,8 @@ zig-out/
 .zigeffect/tests/control.json
 .zigeffect/tests/history.jsonl
 .zigeffect/tests/latest.json
+
+# Committable requirement proof. Stable across runs and independent of the local
+# graph, so unlike the rest of .zigeffect/ it is meant to be reviewed and shared.
+!.zigeffect/evidence/
+!.zigeffect/evidence/**

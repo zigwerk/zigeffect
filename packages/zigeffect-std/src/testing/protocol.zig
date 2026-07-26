@@ -158,7 +158,14 @@ pub fn publishRequirementEvidence(
     const json = try Contract.requirementEvidenceJsonAlloc(allocator, receipt_value);
     defer allocator.free(json);
     if (Secrets.containsSecret(json)) return error.SecretDetected;
-    const path = try std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ evidence_root, receipt_value.scenario.requirement });
+    // Keyed by requirement *and* scenario: several scenarios can prove one
+    // requirement, and keying by requirement alone would let whichever ran last
+    // overwrite the others' evidence.
+    const path = try std.fmt.allocPrint(allocator, "{s}/{s}.{s}.json", .{
+        evidence_root,
+        receipt_value.scenario.requirement,
+        receipt_value.scenario.id,
+    });
     defer allocator.free(path);
     try writeAtomicFile(allocator, io, dir, path, json);
 }

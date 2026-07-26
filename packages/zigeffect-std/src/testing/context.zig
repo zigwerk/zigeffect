@@ -245,7 +245,7 @@ pub const TestContext = struct {
                     break;
                 }
             }
-            self.allocator.free(@constCast(assertion.causal_facts));
+            freeCausalFacts(self.allocator, assertion.causal_facts);
             assertion.causal_facts = facts;
 
             const ids = @constCast(assertion.causal_event_ids);
@@ -450,6 +450,41 @@ fn dupe(allocator: std.mem.Allocator, value: []const u8) ![]const u8 {
     return allocator.dupe(u8, value);
 }
 
+fn cloneCausalFacts(allocator: std.mem.Allocator, facts: []const Contract.CausalFact) ![]Contract.CausalFact {
+    const owned = try allocator.alloc(Contract.CausalFact, facts.len);
+    var cloned: usize = 0;
+    errdefer {
+        for (owned[0..cloned]) |fact| {
+            allocator.free(fact.kind);
+            allocator.free(fact.label);
+            allocator.free(fact.status);
+            allocator.free(fact.service_key);
+        }
+        allocator.free(owned);
+    }
+    for (facts, owned) |source, *target| {
+        target.* = .{
+            .event_id = source.event_id,
+            .kind = try dupe(allocator, source.kind),
+            .label = try dupe(allocator, source.label),
+            .status = try dupe(allocator, source.status),
+            .service_key = try dupe(allocator, source.service_key),
+        };
+        cloned += 1;
+    }
+    return owned;
+}
+
+fn freeCausalFacts(allocator: std.mem.Allocator, facts: []const Contract.CausalFact) void {
+    for (facts) |fact| {
+        allocator.free(fact.kind);
+        allocator.free(fact.label);
+        allocator.free(fact.status);
+        allocator.free(fact.service_key);
+    }
+    allocator.free(@constCast(facts));
+}
+
 fn cloneAssertion(allocator: std.mem.Allocator, value: Contract.AssertionResult) !Contract.AssertionResult {
     var owned = value;
     owned.id = try dupe(allocator, value.id);
@@ -462,6 +497,11 @@ fn cloneAssertion(allocator: std.mem.Allocator, value: Contract.AssertionResult)
     errdefer allocator.free(owned.source.path);
     owned.causal_event_ids = try allocator.dupe(u64, value.causal_event_ids);
     errdefer allocator.free(owned.causal_event_ids);
+    // Deep-copied because deinitAssertion frees these. Copying the struct by
+    // value would alias the caller's slice and then free memory this context
+    // never owned.
+    owned.causal_facts = try cloneCausalFacts(allocator, value.causal_facts);
+    errdefer freeCausalFacts(allocator, owned.causal_facts);
     owned.expected = try dupe(allocator, value.expected);
     errdefer allocator.free(owned.expected);
     owned.actual = try dupe(allocator, value.actual);
@@ -478,13 +518,7 @@ fn deinitAssertion(allocator: std.mem.Allocator, value: Contract.AssertionResult
     allocator.free(value.source.id);
     allocator.free(value.source.path);
     allocator.free(value.causal_event_ids);
-    for (value.causal_facts) |fact| {
-        allocator.free(fact.kind);
-        allocator.free(fact.label);
-        allocator.free(fact.status);
-        allocator.free(fact.service_key);
-    }
-    allocator.free(@constCast(value.causal_facts));
+    freeCausalFacts(allocator, value.causal_facts);
     allocator.free(value.expected);
     allocator.free(value.actual);
     allocator.free(value.detail);

@@ -210,16 +210,20 @@ pub const Topology = struct {
 
         var found: std.ArrayList(u64) = .empty;
         errdefer found.deinit(allocator);
-        var truncated = false;
-        while (found.items.len < options.max_results and found.items.len < options.max_depth) {
+        const bound = @min(options.max_results, options.max_depth);
+        while (found.items.len < bound) {
             const parent = self.entries[index].durable_parent_id orelse break;
             const parent_index = self.indexOf(parent) orelse break;
             if (parent_index >= index) break;
             try found.append(allocator, parent);
             index = parent_index;
-        } else {
-            truncated = self.entries[index].durable_parent_id != null;
         }
+        // Truncated only if the walk stopped at a bound while a further parent
+        // still existed. A chain that simply reached a root is complete, even
+        // when its length happens to equal the bound.
+        const truncated = found.items.len == bound and
+            self.entries[index].durable_parent_id != null and
+            self.indexOf(self.entries[index].durable_parent_id.?) != null;
         return .{ .ids = try found.toOwnedSlice(allocator), .truncated = truncated };
     }
 };

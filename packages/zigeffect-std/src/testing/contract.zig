@@ -153,7 +153,10 @@ pub const CausalFact = struct {
 
     pub fn validate(self: CausalFact) ContractError!void {
         if (self.event_id == 0) return error.InvalidIdentifier;
-        try validateFreeLabel(self.label);
+        // A label is genuinely optional: lifecycle events such as scope and
+        // resource records carry none, so requiring one would reject the facts
+        // an assertion most often cites.
+        if (self.label.len != 0) try validateFreeLabel(self.label);
     }
 };
 

@@ -717,6 +717,31 @@ pub const LocalDatabase = struct {
         };
     }
 
+    /// Discard everything `loadFromIndex` built, so the replay path starts from
+    /// the same blank state a fresh open would.
+    ///
+    /// Every late bail-out has to call this. Returning false with the entry
+    /// table, durable lookup, topology and index builder still populated makes
+    /// the subsequent full replay append onto half-loaded state — which fails on
+    /// the first record, and leaves a crash-truncated log permanently unopenable
+    /// rather than recovered.
+    fn resetDerivedState(self: *LocalDatabase) !void {
+        self.entries.clearRetainingCapacity();
+        self.durable_entry_index.clearRetainingCapacity();
+        self.edge_count = 0;
+        self.recovered_partial_bytes = 0;
+        self.index_builder.deinit();
+        self.index_builder = Index.Builder.init(self.allocator);
+        self.index_usable = true;
+        self.index_dirty = false;
+        self.nendb.deinit();
+        self.nendb.* = try Nendb.GraphData.initCapacity(
+            self.allocator,
+            self.options.max_records,
+            self.options.max_records,
+        );
+    }
+
     /// Restore all derived state from a verified index, decoding nothing.
     ///
     /// Returns false whenever the index cannot carry the whole load, in which
@@ -744,7 +769,10 @@ pub const LocalDatabase = struct {
 
         var edges: usize = 0;
         for (view.entries, 0..) |entry, position| {
-            if (entry.offset + entry.length > content.len) return error.CorruptGraph;
+            // Offsets come from a file that may be corrupt; adding them
+            // unchecked panics in a safe build instead of rejecting the index.
+            const end = std.math.add(u64, entry.offset, entry.length) catch return error.CorruptGraph;
+            if (end > content.len) return error.CorruptGraph;
             if (position != 0 and entry.durable_event_id <= view.entries[position - 1].durable_event_id) {
                 return error.CorruptGraph;
             }
@@ -809,6 +837,7 @@ pub const LocalDatabase = struct {
                 // the replay path, which owns truncation recovery.
                 self.entries = scan.entries;
                 scan.entries = .empty;
+                try self.resetDerivedState();
                 return false;
             };
 
@@ -836,7 +865,10 @@ pub const LocalDatabase = struct {
 
             if (last_complete_offset < content.len) {
                 // A trailing partial record needs truncation, which the replay
-                // path already implements correctly. Defer to it.
+                // path already implements correctly. Defer to it — after undoing
+                // everything built above, or the replay appends onto half-loaded
+                // state and the graph never opens again.
+                try self.resetDerivedState();
                 return false;
             }
             self.index_dirty = true;
@@ -1556,7 +1588,8 @@ fn loadVerifiedIndex(
         // The index is a cache of a validated scan, but it is still a file on
         // disk: anything that would make a reader read outside the log, or
         // binary-search a non-monotonic array, is treated as corruption.
-        if (entry.offset + entry.length > content.len) return null;
+        const end = std.math.add(u64, entry.offset, entry.length) catch return null;
+        if (end > content.len) return null;
         if (position != 0 and entry.durable_event_id <= entries[position - 1].durable_event_id) return null;
         entries[position] = .{
             .sequence = entry.sequence,

@@ -136,11 +136,14 @@ pub const StringTable = struct {
         return id;
     }
 
+    /// `id` is read from an untrusted file, so every offset is range-checked
+    /// with widening arithmetic rather than `u32` addition that could wrap.
     pub fn resolve(bytes: []const u8, id: u32) ?[]const u8 {
         if (id == no_string) return null;
-        if (id + 2 > bytes.len) return null;
-        const length = std.mem.bytesToValue(u16, bytes[id..][0..2]);
-        const start = id + 2;
+        const start_of_length: usize = id;
+        if (start_of_length + 2 > bytes.len) return null;
+        const length: usize = std.mem.bytesToValue(u16, bytes[start_of_length..][0..2]);
+        const start = start_of_length + 2;
         if (start + length > bytes.len) return null;
         return bytes[start..][0..length];
     }
@@ -301,9 +304,18 @@ pub fn parse(bytes: []const u8) Error!View {
     if (header.byte_order != byte_order_probe) return error.IndexUnusable;
     if (header.schema_version != schema_version) return error.IndexUnusable;
 
-    const entries_bytes = @as(usize, header.entry_count) * @sizeOf(Entry);
-    const strings_start = @sizeOf(Header) + entries_bytes;
-    const strings_end = strings_start + header.string_bytes;
+    // Every one of these comes straight off disk and is therefore untrusted.
+    // Unchecked arithmetic here panics in safe builds and wraps in fast ones —
+    // and a wrapped length passed the equality check below, yielding slices
+    // pointing past the buffer. Overflow must be a rejection like any other
+    // corruption, not a crash.
+    const entries_bytes = std.math.mul(usize, @as(usize, header.entry_count), @sizeOf(Entry)) catch
+        return error.IndexUnusable;
+    const strings_start = std.math.add(usize, @sizeOf(Header), entries_bytes) catch
+        return error.IndexUnusable;
+    const string_bytes = std.math.cast(usize, header.string_bytes) orelse return error.IndexUnusable;
+    const strings_end = std.math.add(usize, strings_start, string_bytes) catch
+        return error.IndexUnusable;
     if (strings_end != bytes.len) return error.IndexUnusable;
 
     return .{
