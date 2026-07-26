@@ -71,7 +71,7 @@ pub const UpgradeOptions = struct {
     json: bool = false,
 };
 
-pub const GraphOperation = enum { status, since, event, children, path, find };
+pub const GraphOperation = enum { status, since, event, children, path, find, descendants, ancestors };
 pub const GraphOptions = struct {
     operation: GraphOperation,
     event_id: u64 = 0,
@@ -80,6 +80,9 @@ pub const GraphOptions = struct {
     /// `find` walks the durable log rather than an index, so the number of
     /// records it may decode is bounded separately from the match limit.
     scan_limit: usize = 4096,
+    /// Traversal depth. Bounded so an agent cannot walk a whole graph by
+    /// accident, and the reply says when the bound stopped it.
+    depth: usize = 64,
     filter: zstd.CausalGraph.FindFilter = .{},
     root: []const u8 = ".",
     component: ?[]const u8 = null,
@@ -571,6 +574,22 @@ fn runGraphAlloc(
             try text_output.print(allocator, "event {d} -> {d} path={d}\n", .{ options.event_id, options.to_event_id, graph_path.event_ids.len });
             for (graph_path.event_ids) |id| try text_output.print(allocator, "- {d}\n", .{id});
             break :path try text_output.toOwnedSlice(allocator);
+        },
+        .descendants => descendants: {
+            var walk = try snapshot.descendantsAlloc(allocator, options.event_id, .{
+                .max_depth = options.depth,
+                .max_results = options.limit,
+            });
+            defer walk.deinit(allocator);
+            break :descendants try zstd.CausalGraph.traversalJsonAlloc(allocator, "descendants", options.event_id, walk);
+        },
+        .ancestors => ancestors: {
+            var walk = try snapshot.ancestorsAlloc(allocator, options.event_id, .{
+                .max_depth = options.depth,
+                .max_results = options.limit,
+            });
+            defer walk.deinit(allocator);
+            break :ancestors try zstd.CausalGraph.traversalJsonAlloc(allocator, "ancestors", options.event_id, walk);
         },
         .find => try snapshot.findRecordsJsonAlloc(
             allocator,
@@ -2585,6 +2604,7 @@ pub fn helpText() []const u8 {
     \\  zigeffect graph since <event-id> [--limit <count>] [--root <path>] [--component <id>] [--json]
     \\  zigeffect graph <event|children> <event-id> [--root <path>] [--component <id>] [--json]
     \\  zigeffect graph path <from-event-id> <to-event-id> [--limit <count>] [--root <path>] [--component <id>] [--json]
+    \\  zigeffect graph <descendants|ancestors> <event-id> [--depth <n>] [--limit <count>] [--root <path>] [--component <id>]
     \\  zigeffect graph find [--label <name>] [--kind <kind>] [--status <status>] [--service <key>]
     \\                       [--requirement <id>] [--check <id>] [--scenario <id>]
     \\                       [--after <event-id>] [--limit <count>] [--scan-limit <count>] [--root <path>] [--component <id>]
@@ -3121,9 +3141,12 @@ fn parseGraphArgs(args: []const []const u8) (CliError || zstd.Project.ProjectErr
     var event_id_set = false;
     var limit_set = false;
     var scan_limit_set = false;
+    var depth_set = false;
     var index: usize = 1;
 
-    if (operation == .since or operation == .event or operation == .children or operation == .path) {
+    if (operation == .since or operation == .event or operation == .children or operation == .path or
+        operation == .descendants or operation == .ancestors)
+    {
         if (index >= args.len or std.mem.startsWith(u8, args[index], "--")) return error.InvalidEventId;
         options.event_id = std.fmt.parseInt(u64, args[index], 10) catch return error.InvalidEventId;
         if (options.event_id == 0 and operation != .since) return error.InvalidEventId;
@@ -3149,12 +3172,20 @@ fn parseGraphArgs(args: []const []const u8) (CliError || zstd.Project.ProjectErr
             options.component = component;
             component_set = true;
         } else if (eql(args[index], "--limit")) {
-            if (operation != .since and operation != .path and operation != .find) return error.UnknownOption;
+            if (operation != .since and operation != .path and operation != .find and
+                operation != .descendants and operation != .ancestors) return error.UnknownOption;
             if (limit_set) return error.DuplicateOption;
             const value = try optionValue(args, &index);
             options.limit = std.fmt.parseInt(usize, value, 10) catch return error.InvalidLimit;
             if (options.limit == 0 or options.limit > 4096) return error.InvalidLimit;
             limit_set = true;
+        } else if (eql(args[index], "--depth")) {
+            if (operation != .descendants and operation != .ancestors) return error.UnknownOption;
+            if (depth_set) return error.DuplicateOption;
+            const value = try optionValue(args, &index);
+            options.depth = std.fmt.parseInt(usize, value, 10) catch return error.InvalidLimit;
+            if (options.depth == 0 or options.depth > 4096) return error.InvalidLimit;
+            depth_set = true;
         } else if (eql(args[index], "--after")) {
             if (operation != .find) return error.UnknownOption;
             if (event_id_set) return error.DuplicateOption;
@@ -3208,7 +3239,8 @@ fn parseGraphArgs(args: []const []const u8) (CliError || zstd.Project.ProjectErr
             index += 1;
         } else return error.UnknownOption;
     }
-    if ((operation == .since or operation == .event or operation == .children or operation == .path) and !event_id_set) return error.InvalidEventId;
+    if ((operation == .since or operation == .event or operation == .children or operation == .path or
+        operation == .descendants or operation == .ancestors) and !event_id_set) return error.InvalidEventId;
     // An unfiltered `find` would decode every record only to return them all,
     // which `since` already does far more cheaply.
     if (operation == .find and options.filter.isEmpty()) return error.MissingFilter;

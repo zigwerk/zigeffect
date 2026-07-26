@@ -98,14 +98,26 @@ pub fn ManagedRuntime(comptime RootLayer: type) type {
             const project_manifest_json = loaded_project.json;
             errdefer if (project_manifest_json) |json| allocator.free(json);
 
+            // The CLI opens this same graph using the manifest's safety limits,
+            // so a writer allowed to exceed them produces a file its own tooling
+            // cannot read. Clamping here keeps the two in agreement by
+            // construction; an explicitly tighter caller bound still wins.
+            var graph_options = options.graph;
+            if (loaded_project.max_artifact_bytes) |limit| {
+                graph_options.max_wal_bytes = @min(graph_options.max_wal_bytes, limit);
+            }
+            if (loaded_project.max_runtime_events) |limit| {
+                graph_options.max_records = @min(graph_options.max_records, limit);
+            }
+
             const graph = try allocator.create(CausalGraph.LocalDatabase);
             errdefer allocator.destroy(graph);
-            graph.* = try CausalGraph.LocalDatabase.init(allocator, io, root, options.graph);
+            graph.* = try CausalGraph.LocalDatabase.init(allocator, io, root, graph_options);
             errdefer graph.deinit();
 
             const backend = try allocator.create(fx.CausalNendbStorageBackendState);
             errdefer allocator.destroy(backend);
-            backend.* = graph.storageBackend(allocator, options.graph.max_records);
+            backend.* = graph.storageBackend(allocator, graph_options.max_records);
             errdefer backend.deinit();
 
             const owned_store = if (options.causal_store == null) try allocator.create(fx.CausalStore) else null;
@@ -433,6 +445,8 @@ const LoadedProject = struct {
     json: ?[]u8 = null,
     project_id: ?u64 = null,
     component_id: ?u64 = null,
+    max_artifact_bytes: ?usize = null,
+    max_runtime_events: ?usize = null,
 };
 
 fn loadProjectManifestAlloc(
@@ -451,5 +465,7 @@ fn loadProjectManifestAlloc(
         .json = try manifest.value.jsonAlloc(allocator),
         .project_id = fx.stableCausalContextId(manifest.value.name),
         .component_id = if (manifest.value.components.len == 1) fx.stableCausalContextId(manifest.value.components[0].id) else null,
+        .max_artifact_bytes = manifest.value.safety.limits.max_artifact_bytes,
+        .max_runtime_events = manifest.value.safety.limits.max_runtime_events,
     };
 }

@@ -18,11 +18,56 @@ pub const lineage_schema = "zigeffect.causal.local-graph-lineage.v1";
 pub const lineage_schema_version: u32 = 1;
 pub const find_schema = "zigeffect.causal.local-graph-find.v1";
 pub const find_schema_version: u32 = 1;
+pub const traversal_schema = "zigeffect.causal.local-graph-traversal.v1";
+pub const traversal_schema_version: u32 = 1;
+
+/// Render a bounded traversal.
+///
+/// `truncated` is part of the contract, not a detail: an agent reading a partial
+/// causal chain as a complete one would draw the wrong conclusion, so the reply
+/// always states whether a bound stopped the walk.
+pub fn traversalJsonAlloc(
+    allocator: std.mem.Allocator,
+    direction: []const u8,
+    durable_event_id: u64,
+    traversal: Engine.Traversal,
+) ![]u8 {
+    var output: std.ArrayList(u8) = .empty;
+    errdefer output.deinit(allocator);
+    const header = try std.fmt.allocPrint(
+        allocator,
+        "{{\"schema\":\"{s}\",\"schema_version\":{d},\"direction\":\"{s}\",\"event_id\":{d},\"count\":{d},\"truncated\":{s},\"event_ids\":[",
+        .{
+            traversal_schema,
+            traversal_schema_version,
+            direction,
+            durable_event_id,
+            traversal.ids.len,
+            if (traversal.truncated) "true" else "false",
+        },
+    );
+    defer allocator.free(header);
+    try output.appendSlice(allocator, header);
+    for (traversal.ids, 0..) |id, position| {
+        if (position != 0) try output.append(allocator, ',');
+        const rendered = try std.fmt.allocPrint(allocator, "{d}", .{id});
+        defer allocator.free(rendered);
+        try output.appendSlice(allocator, rendered);
+    }
+    try output.appendSlice(allocator, "]}");
+    return output.toOwnedSlice(allocator);
+}
 
 /// Derived, disposable index over the durable log. Nothing reads it yet; it is
 /// introduced ahead of its readers so the format can be reviewed and tested in
 /// isolation, and so a defect in it cannot affect a query result.
 pub const Index = @import("index.zig");
+
+/// Our own topology engine for the causal forest. Not a general graph database:
+/// it exploits the single-parent, id-ordered shape the durable format
+/// guarantees, so parent walks need no index and child lookups need one small
+/// CSR array instead of a scan.
+pub const Engine = @import("engine.zig");
 pub const default_path = ".zigeffect/graph";
 pub const default_wal_name = "causal-graph.jsonl";
 pub const default_max_records: usize = 65_536;
@@ -185,15 +230,9 @@ const EdgePropertiesHeader = struct {
     to_event_id: u64,
 };
 
-const IndexEntry = struct {
-    sequence: u64,
-    session_id: u64,
-    durable_event_id: u64,
-    source_event_id: u64,
-    durable_parent_id: ?u64,
-    offset: usize,
-    length: usize,
-};
+/// The entry table is the engine's node table; aliasing rather than copying
+/// keeps traversal zero-copy over the rows the graph already holds.
+const IndexEntry = Engine.Entry;
 
 pub const Summary = struct {
     schema: []const u8 = summary_schema,
@@ -1567,6 +1606,10 @@ pub const Snapshot = struct {
     last_complete_offset: usize,
     /// Present only when this snapshot was opened from a verified index.
     index_raw: ?[]u8 = null,
+    /// Child adjacency over `entries`. Built once at open because it is two
+    /// small contiguous arrays — 4 bytes per node and per edge — and every
+    /// traversal afterwards is a slice rather than a pass over every record.
+    topology: Engine.Topology,
 
     /// Construct a read-only zero cursor for a project that has not executed
     /// yet. This deliberately allocates no graph directory or WAL.
@@ -1587,6 +1630,10 @@ pub const Snapshot = struct {
             .entries = entries,
             .edge_count = 0,
             .last_complete_offset = 0,
+            // An empty topology still allocates its terminator, so traversal
+            // over a project that has never executed answers EventNotFound
+            // rather than needing a special case.
+            .topology = try Engine.Topology.build(allocator, entries),
         };
     }
 
@@ -1618,6 +1665,7 @@ pub const Snapshot = struct {
                 .edge_count = loaded.edge_count,
                 .last_complete_offset = loaded.covered_bytes,
                 .index_raw = loaded.raw,
+                .topology = try Engine.Topology.build(allocator, loaded.entries),
             };
         }
 
@@ -1632,10 +1680,12 @@ pub const Snapshot = struct {
             .entries = entries,
             .edge_count = scan.edge_count,
             .last_complete_offset = scan.last_complete_offset,
+            .topology = try Engine.Topology.build(allocator, entries),
         };
     }
 
     pub fn deinit(self: *Snapshot) void {
+        self.topology.deinit(self.allocator);
         if (self.index_raw) |raw| self.allocator.free(raw);
         self.allocator.free(self.entries);
         self.allocator.free(self.content);
@@ -1767,7 +1817,27 @@ pub const Snapshot = struct {
     }
 
     pub fn childrenAlloc(self: *const Snapshot, allocator: std.mem.Allocator, durable_event_id: u64) ![]u64 {
-        return childrenFromEntriesAlloc(allocator, self.entries, durable_event_id);
+        return self.topology.childrenAlloc(allocator, durable_event_id);
+    }
+
+    /// Everything this event caused, directly or transitively.
+    pub fn descendantsAlloc(
+        self: *const Snapshot,
+        allocator: std.mem.Allocator,
+        durable_event_id: u64,
+        options: Engine.TraversalOptions,
+    ) !Engine.Traversal {
+        return self.topology.descendantsAlloc(allocator, durable_event_id, options);
+    }
+
+    /// The chain of causes above this event, nearest parent first.
+    pub fn ancestorsAlloc(
+        self: *const Snapshot,
+        allocator: std.mem.Allocator,
+        durable_event_id: u64,
+        options: Engine.TraversalOptions,
+    ) !Engine.Traversal {
+        return self.topology.ancestorsAlloc(allocator, durable_event_id, options);
     }
 
     pub fn pathAlloc(
