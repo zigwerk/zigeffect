@@ -23,7 +23,7 @@
 const std = @import("std");
 
 pub const schema = "zigeffect.causal.local-graph-index.v1";
-pub const schema_version: u32 = 1;
+pub const schema_version: u32 = 2;
 pub const default_index_name = "causal-graph.index";
 
 pub const magic: [8]u8 = .{ 'Z', 'C', 'G', 'I', 'D', 'X', '0', '1' };
@@ -79,6 +79,7 @@ pub const Entry = extern struct {
     requirement_id: u64 = 0,
     acceptance_check_id: u64 = 0,
     scenario_id: u64 = 0,
+    run_id: u64 = 0,
     label_id: u32 = no_string,
     status_id: u32 = no_string,
     service_key_id: u32 = no_string,
@@ -96,7 +97,7 @@ comptime {
     // that into a compile error instead of corruption.
     std.debug.assert(@sizeOf(Header) == 72);
     std.debug.assert(@alignOf(Header) == 8);
-    std.debug.assert(@sizeOf(Entry) == 104);
+    std.debug.assert(@sizeOf(Entry) == 112);
     std.debug.assert(@alignOf(Entry) == 8);
     std.debug.assert(@offsetOf(Header, "schema_version") == 16);
 }
@@ -176,6 +177,7 @@ pub const Builder = struct {
         requirement_id: ?u64 = null,
         acceptance_check_id: ?u64 = null,
         scenario_id: ?u64 = null,
+        run_id: ?u64 = null,
     };
 
     pub const Row = struct {
@@ -208,6 +210,7 @@ pub const Builder = struct {
             .requirement_id = row.columns.requirement_id orelse 0,
             .acceptance_check_id = row.columns.acceptance_check_id orelse 0,
             .scenario_id = row.columns.scenario_id orelse 0,
+            .run_id = row.columns.run_id orelse 0,
             .label_id = try self.strings.intern(self.allocator, row.columns.label),
             .status_id = try self.strings.intern(self.allocator, row.columns.status),
             .service_key_id = try self.strings.intern(self.allocator, row.columns.service_key),

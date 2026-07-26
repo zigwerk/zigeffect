@@ -1149,6 +1149,7 @@ fn appendIndexRow(
             .requirement_id = projected.context.requirement_id,
             .acceptance_check_id = projected.context.acceptance_check_id,
             .scenario_id = projected.context.scenario_id,
+            .run_id = projected.run_id,
         },
     });
 }
@@ -1228,10 +1229,112 @@ fn findResultJsonAlloc(
     return output.toOwnedSlice(allocator);
 }
 
+/// Resolve a filter's text to its interned id.
+///
+/// A value the log never recorded has no id, which lets a selection that cannot
+/// match anything say so without touching a single entry.
+fn internedId(view: Index.View, text: []const u8) ?u32 {
+    var cursor: usize = 0;
+    while (cursor + 2 <= view.strings.len) {
+        const length = std.mem.bytesToValue(u16, view.strings[cursor..][0..2]);
+        const start = cursor + 2;
+        if (start + length > view.strings.len) return null;
+        if (std.mem.eql(u8, view.strings[start..][0..length], text)) return @intCast(cursor);
+        cursor = start + length;
+    }
+    return null;
+}
+
+/// A filter pre-resolved against one index, so matching is integer comparison.
+const IndexedFilter = struct {
+    label_id: ?u32 = null,
+    kind_id: ?u32 = null,
+    status_id: ?u32 = null,
+    service_key_id: ?u32 = null,
+    requirement_id: ?u64 = null,
+    acceptance_check_id: ?u64 = null,
+    scenario_id: ?u64 = null,
+    /// Set when a requested value is absent from the string table entirely.
+    impossible: bool = false,
+
+    fn resolve(view: Index.View, filter: FindFilter) IndexedFilter {
+        var resolved = IndexedFilter{
+            .requirement_id = filter.requirement_id,
+            .acceptance_check_id = filter.acceptance_check_id,
+            .scenario_id = filter.scenario_id,
+        };
+        inline for (.{
+            .{ "label", "label_id" },
+            .{ "kind", "kind_id" },
+            .{ "status", "status_id" },
+            .{ "service_key", "service_key_id" },
+        }) |pair| {
+            if (@field(filter, pair[0])) |text| {
+                if (internedId(view, text)) |id| {
+                    @field(resolved, pair[1]) = id;
+                } else {
+                    resolved.impossible = true;
+                }
+            }
+        }
+        return resolved;
+    }
+
+    fn matches(self: IndexedFilter, entry: Index.Entry) bool {
+        if (self.label_id) |id| if (entry.label_id != id) return false;
+        if (self.kind_id) |id| if (entry.kind_id != id) return false;
+        if (self.status_id) |id| if (entry.status_id != id) return false;
+        if (self.service_key_id) |id| if (entry.service_key_id != id) return false;
+        if (self.requirement_id) |id| if (entry.requirement_id != id) return false;
+        if (self.acceptance_check_id) |id| if (entry.acceptance_check_id != id) return false;
+        if (self.scenario_id) |id| if (entry.scenario_id != id) return false;
+        return true;
+    }
+};
+
+/// Emit a match straight from index columns. Byte-identical to the decoding
+/// path, which the equivalence test enforces.
+fn appendIndexedFindRow(
+    rows: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    view: Index.View,
+    entry: Index.Entry,
+) !void {
+    const head = try std.fmt.allocPrint(
+        allocator,
+        "{{\"durable_event_id\":{d},\"source_event_id\":{d},\"sequence\":{d},\"session_id\":{d}," ++
+            "\"kind\":\"{s}\",\"label\":\"{s}\",\"status\":\"{s}\",\"service_key\":\"{s}\",\"type_name\":\"{s}\"",
+        .{
+            entry.durable_event_id,
+            entry.source_event_id,
+            entry.sequence,
+            entry.session_id,
+            view.text(entry.kind_id) orelse "",
+            view.text(entry.label_id) orelse "",
+            view.text(entry.status_id) orelse "",
+            view.text(entry.service_key_id) orelse "",
+            view.text(entry.type_name_id) orelse "",
+        },
+    );
+    defer allocator.free(head);
+    try rows.appendSlice(allocator, head);
+    // Zero is the index's encoding of absent for every one of these: durable
+    // ids are never zero, and stableCausalContextId never returns zero.
+    try appendOptionalId(rows, allocator, "run_id", if (entry.run_id == 0) null else entry.run_id);
+    try appendOptionalId(rows, allocator, "durable_parent_id", if (entry.durable_parent_id == Index.no_parent) null else entry.durable_parent_id);
+    try appendOptionalId(rows, allocator, "requirement_id", if (entry.requirement_id == 0) null else entry.requirement_id);
+    try appendOptionalId(rows, allocator, "acceptance_check_id", if (entry.acceptance_check_id == 0) null else entry.acceptance_check_id);
+    try appendOptionalId(rows, allocator, "scenario_id", if (entry.scenario_id == 0) null else entry.scenario_id);
+    try rows.append(allocator, '}');
+}
+
 const LoadedIndex = struct {
     entries: []IndexEntry,
     edge_count: usize,
     covered_bytes: usize,
+    /// Retained so selective queries can read the semantic columns without
+    /// decoding a single record. Owned by the snapshot.
+    raw: []u8,
 };
 
 /// Load the derived index only if it provably describes `content`.
@@ -1251,7 +1354,8 @@ fn loadVerifiedIndex(
 ) !?LoadedIndex {
     const raw = graph_dir.readFileAlloc(io, options.index_name, allocator, .limited(options.max_wal_bytes)) catch
         return null;
-    defer allocator.free(raw);
+    var keep_raw = false;
+    defer if (!keep_raw) allocator.free(raw);
 
     const view = Index.parse(raw) catch return null;
     const covered: usize = @intCast(view.header.covered_bytes);
@@ -1280,10 +1384,12 @@ fn loadVerifiedIndex(
             .length = @intCast(entry.length),
         };
     }
+    keep_raw = true;
     return .{
         .entries = entries,
         .edge_count = @intCast(view.header.edge_count),
         .covered_bytes = covered,
+        .raw = raw,
     };
 }
 
@@ -1322,6 +1428,8 @@ pub const Snapshot = struct {
     entries: []IndexEntry,
     edge_count: usize,
     last_complete_offset: usize,
+    /// Present only when this snapshot was opened from a verified index.
+    index_raw: ?[]u8 = null,
 
     /// Construct a read-only zero cursor for a project that has not executed
     /// yet. This deliberately allocates no graph directory or WAL.
@@ -1372,6 +1480,7 @@ pub const Snapshot = struct {
                 .entries = loaded.entries,
                 .edge_count = loaded.edge_count,
                 .last_complete_offset = loaded.covered_bytes,
+                .index_raw = loaded.raw,
             };
         }
 
@@ -1390,6 +1499,7 @@ pub const Snapshot = struct {
     }
 
     pub fn deinit(self: *Snapshot) void {
+        if (self.index_raw) |raw| self.allocator.free(raw);
         self.allocator.free(self.entries);
         self.allocator.free(self.content);
         self.allocator.free(self.wal_name);
@@ -1447,6 +1557,49 @@ pub const Snapshot = struct {
         const range = try recordsAfterRange(self.entries, after_durable_event_id, scan_limit);
         var rows: std.ArrayList(u8) = .empty;
         defer rows.deinit(allocator);
+
+        // With a verified index the semantic columns are already materialised,
+        // so selection compares integers instead of decoding two JSON documents
+        // for every candidate row.
+        if (self.index_raw) |raw| indexed: {
+            const view = Index.parse(raw) catch break :indexed;
+            if (view.entries.len != self.entries.len) break :indexed;
+            const resolved = IndexedFilter.resolve(view, filter);
+
+            var scanned: usize = 0;
+            var matched: usize = 0;
+            var last_scanned: ?u64 = null;
+            var stopped_early = false;
+            if (!resolved.impossible) {
+                for (view.entries[range.start..range.end], 0..) |entry, relative_index| {
+                    scanned += 1;
+                    last_scanned = entry.durable_event_id;
+                    if (!resolved.matches(entry)) continue;
+                    if (matched != 0) try rows.append(allocator, ',');
+                    try appendIndexedFindRow(&rows, allocator, view, entry);
+                    matched += 1;
+                    if (matched == limit) {
+                        stopped_early = relative_index + 1 < range.end - range.start;
+                        break;
+                    }
+                }
+            } else {
+                // A value the log never recorded cannot match, but pagination
+                // must still advance exactly as a scan would have.
+                scanned = range.end - range.start;
+                if (scanned != 0) last_scanned = view.entries[range.end - 1].durable_event_id;
+            }
+
+            return findResultJsonAlloc(
+                allocator,
+                rows.items,
+                after_durable_event_id,
+                last_scanned,
+                scanned,
+                matched,
+                stopped_early or range.truncated,
+            );
+        }
 
         var scanned: usize = 0;
         var matched: usize = 0;
@@ -2207,6 +2360,11 @@ test "an index-backed snapshot answers identically to a replayed one" {
         record: []u8,
         children: []u8,
         found: []u8,
+        found_failure: []u8,
+        found_requirement: []u8,
+        found_service: []u8,
+        found_absent: []u8,
+        found_paged: []u8,
 
         fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             allocator.free(self.summary);
@@ -2214,6 +2372,11 @@ test "an index-backed snapshot answers identically to a replayed one" {
             allocator.free(self.record);
             allocator.free(self.children);
             allocator.free(self.found);
+            allocator.free(self.found_failure);
+            allocator.free(self.found_requirement);
+            allocator.free(self.found_service);
+            allocator.free(self.found_absent);
+            allocator.free(self.found_paged);
         }
     };
 
@@ -2229,6 +2392,14 @@ test "an index-backed snapshot answers identically to a replayed one" {
                 .record = try snapshot.recordJsonAlloc(std.testing.allocator, 3),
                 .children = try childrenJsonAlloc(std.testing.allocator, 2, children_ids),
                 .found = try snapshot.findRecordsJsonAlloc(std.testing.allocator, .{ .label = "A.create" }, 0, 16, 64),
+                .found_failure = try snapshot.findRecordsJsonAlloc(std.testing.allocator, .{ .label = "A.create", .status = "failure" }, 0, 16, 64),
+                .found_requirement = try snapshot.findRecordsJsonAlloc(std.testing.allocator, .{ .requirement_id = 7 }, 0, 16, 64),
+                .found_service = try snapshot.findRecordsJsonAlloc(std.testing.allocator, .{ .service_key = "application/A" }, 0, 16, 64),
+                // A value that was never recorded: the indexed path short-circuits,
+                // and must still report pagination exactly as the scan does.
+                .found_absent = try snapshot.findRecordsJsonAlloc(std.testing.allocator, .{ .label = "never-happened" }, 0, 16, 64),
+                // Paginated, so truncation and the cursor are compared too.
+                .found_paged = try snapshot.findRecordsJsonAlloc(std.testing.allocator, .{ .label = "A.create" }, 0, 1, 64),
             };
         }
     }.run;
@@ -2251,6 +2422,16 @@ test "an index-backed snapshot answers identically to a replayed one" {
     try std.testing.expectEqualStrings(with_index.record, without_index.record);
     try std.testing.expectEqualStrings(with_index.children, without_index.children);
     try std.testing.expectEqualStrings(with_index.found, without_index.found);
+    try std.testing.expectEqualStrings(with_index.found_failure, without_index.found_failure);
+    try std.testing.expectEqualStrings(with_index.found_requirement, without_index.found_requirement);
+    try std.testing.expectEqualStrings(with_index.found_service, without_index.found_service);
+    try std.testing.expectEqualStrings(with_index.found_absent, without_index.found_absent);
+    try std.testing.expectEqualStrings(with_index.found_paged, without_index.found_paged);
+
+    // Guard against the equivalence passing vacuously.
+    try std.testing.expect(std.mem.indexOf(u8, with_index.found_failure, "\"matched\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, with_index.found_requirement, "\"matched\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, with_index.found_absent, "\"matched\":0") != null);
 }
 
 test "a snapshot ignores an index that cannot be proven to describe the log" {
