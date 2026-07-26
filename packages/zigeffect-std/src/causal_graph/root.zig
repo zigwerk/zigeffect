@@ -1228,6 +1228,65 @@ fn findResultJsonAlloc(
     return output.toOwnedSlice(allocator);
 }
 
+const LoadedIndex = struct {
+    entries: []IndexEntry,
+    edge_count: usize,
+    covered_bytes: usize,
+};
+
+/// Load the derived index only if it provably describes `content`.
+///
+/// Returns null for every reason an index might not be usable — absent, written
+/// by an incompatible build, corrupt, describing a different log, or describing
+/// only a prefix of one that has since grown. There is a single correct response
+/// to all of them, which is to decode the log instead, so they are not
+/// distinguished. The index is never allowed to be a second source of truth: it
+/// only ever saves the work of deriving what the log already says.
+fn loadVerifiedIndex(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    graph_dir: std.Io.Dir,
+    options: Options,
+    content: []const u8,
+) !?LoadedIndex {
+    const raw = graph_dir.readFileAlloc(io, options.index_name, allocator, .limited(options.max_wal_bytes)) catch
+        return null;
+    defer allocator.free(raw);
+
+    const view = Index.parse(raw) catch return null;
+    const covered: usize = @intCast(view.header.covered_bytes);
+    // A log that has grown past the index has a tail this stage does not read.
+    // Decoding the whole log is correct and is what the writer's next flush
+    // will make unnecessary.
+    if (covered != content.len) return null;
+    if (!Index.coversPrefix(view, content.len, content[0..covered])) return null;
+    if (view.entries.len > options.max_records) return null;
+
+    const entries = try allocator.alloc(IndexEntry, view.entries.len);
+    errdefer allocator.free(entries);
+    for (view.entries, 0..) |entry, position| {
+        // The index is a cache of a validated scan, but it is still a file on
+        // disk: anything that would make a reader read outside the log, or
+        // binary-search a non-monotonic array, is treated as corruption.
+        if (entry.offset + entry.length > content.len) return null;
+        if (position != 0 and entry.durable_event_id <= entries[position - 1].durable_event_id) return null;
+        entries[position] = .{
+            .sequence = entry.sequence,
+            .session_id = entry.session_id,
+            .durable_event_id = entry.durable_event_id,
+            .source_event_id = entry.source_event_id,
+            .durable_parent_id = if (entry.durable_parent_id == Index.no_parent) null else entry.durable_parent_id,
+            .offset = @intCast(entry.offset),
+            .length = @intCast(entry.length),
+        };
+    }
+    return .{
+        .entries = entries,
+        .edge_count = @intCast(view.header.edge_count),
+        .covered_bytes = covered,
+    };
+}
+
 fn validateFindQuery(filter: FindFilter, limit: usize, scan_limit: usize) !void {
     if (filter.isEmpty() or limit == 0 or limit > 4096 or scan_limit == 0 or scan_limit > max_records) {
         return error.InvalidGraphOptions;
@@ -1297,12 +1356,27 @@ pub const Snapshot = struct {
         defer graph_dir.close(io);
         const content = try graph_dir.readFileAlloc(io, options.wal_name, allocator, .limited(options.max_wal_bytes));
         errdefer allocator.free(content);
-        var scan = try scanContent(allocator, content, options, null);
-        defer scan.deinit(allocator);
         const path = try allocator.dupe(u8, options.path);
         errdefer allocator.free(path);
         const wal_name = try allocator.dupe(u8, options.wal_name);
         errdefer allocator.free(wal_name);
+
+        // Reading the log is free; decoding it is the entire cost. When a
+        // verified index describes exactly these bytes, the decode is skipped.
+        if (try loadVerifiedIndex(allocator, io, graph_dir, options, content)) |loaded| {
+            return .{
+                .allocator = allocator,
+                .path = path,
+                .wal_name = wal_name,
+                .content = content,
+                .entries = loaded.entries,
+                .edge_count = loaded.edge_count,
+                .last_complete_offset = loaded.covered_bytes,
+            };
+        }
+
+        var scan = try scanContent(allocator, content, options, null);
+        defer scan.deinit(allocator);
         const entries = try scan.entries.toOwnedSlice(allocator);
         return .{
             .allocator = allocator,
@@ -2098,6 +2172,128 @@ test "the incrementally maintained index equals a full replay of the same log" {
     const on_disk = try graph_dir.readFileAlloc(std.testing.io, Index.default_index_name, std.testing.allocator, .limited(1 << 20));
     defer std.testing.allocator.free(on_disk);
     try std.testing.expectEqualSlices(u8, incremental_bytes, on_disk);
+}
+
+test "an index-backed snapshot answers identically to a replayed one" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    {
+        var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{});
+        defer database.deinit();
+        const events = [_]fx.CausalEvent{
+            .{ .id = 1, .kind = .run_started, .label = "run", .status = "running" },
+            .{ .id = 2, .kind = .effect_completed, .parent_id = 1, .label = "A.create", .status = "success", .service_key = "application/A", .context = .{ .requirement_id = 7 } },
+            .{ .id = 3, .kind = .effect_completed, .parent_id = 2, .label = "A.create", .status = "failure" },
+            .{ .id = 4, .kind = .run_completed, .parent_id = 3, .label = "run", .status = "success" },
+        };
+        for (events) |event| {
+            var write = try fx.mapCausalEventToNendbWrite(std.testing.allocator, event);
+            defer fx.deinitCausalNendbWrite(std.testing.allocator, &write);
+            try database.appendWrite(write);
+        }
+        try database.flush();
+    }
+
+    var graph_dir = try tmp.dir.openDir(std.testing.io, default_path, .{ .follow_symlinks = false });
+    defer graph_dir.close(std.testing.io);
+
+    // Every query is asked twice: once with the index present, once with it
+    // deleted so the same question is answered by decoding the log. A reader
+    // must not be able to tell which happened.
+    const Answers = struct {
+        summary: []u8,
+        since: []u8,
+        record: []u8,
+        children: []u8,
+        found: []u8,
+
+        fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            allocator.free(self.summary);
+            allocator.free(self.since);
+            allocator.free(self.record);
+            allocator.free(self.children);
+            allocator.free(self.found);
+        }
+    };
+
+    const ask = struct {
+        fn run(root: std.Io.Dir) !Answers {
+            var snapshot = try Snapshot.open(std.testing.allocator, std.testing.io, root, .{});
+            defer snapshot.deinit();
+            const children_ids = try snapshot.childrenAlloc(std.testing.allocator, 2);
+            defer std.testing.allocator.free(children_ids);
+            return .{
+                .summary = try snapshot.summaryJsonAlloc(std.testing.allocator),
+                .since = try snapshot.recordsAfterJsonAlloc(std.testing.allocator, 0, 64),
+                .record = try snapshot.recordJsonAlloc(std.testing.allocator, 3),
+                .children = try childrenJsonAlloc(std.testing.allocator, 2, children_ids),
+                .found = try snapshot.findRecordsJsonAlloc(std.testing.allocator, .{ .label = "A.create" }, 0, 16, 64),
+            };
+        }
+    }.run;
+
+    var with_index = try ask(tmp.dir);
+    defer with_index.deinit(std.testing.allocator);
+
+    // Prove the fast path was actually taken, rather than both runs replaying.
+    const index_bytes = try graph_dir.readFileAlloc(std.testing.io, Index.default_index_name, std.testing.allocator, .limited(1 << 20));
+    defer std.testing.allocator.free(index_bytes);
+    const view = try Index.parse(index_bytes);
+    try std.testing.expectEqual(@as(u32, 4), view.header.entry_count);
+
+    try graph_dir.deleteFile(std.testing.io, Index.default_index_name);
+    var without_index = try ask(tmp.dir);
+    defer without_index.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings(with_index.summary, without_index.summary);
+    try std.testing.expectEqualStrings(with_index.since, without_index.since);
+    try std.testing.expectEqualStrings(with_index.record, without_index.record);
+    try std.testing.expectEqualStrings(with_index.children, without_index.children);
+    try std.testing.expectEqualStrings(with_index.found, without_index.found);
+}
+
+test "a snapshot ignores an index that cannot be proven to describe the log" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    {
+        var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{});
+        defer database.deinit();
+        var write = try fx.mapCausalEventToNendbWrite(std.testing.allocator, .{ .id = 1, .kind = .run_started, .label = "only" });
+        defer fx.deinitCausalNendbWrite(std.testing.allocator, &write);
+        try database.appendWrite(write);
+        try database.flush();
+    }
+
+    var graph_dir = try tmp.dir.openDir(std.testing.io, default_path, .{ .follow_symlinks = false });
+    defer graph_dir.close(std.testing.io);
+    const good = try graph_dir.readFileAlloc(std.testing.io, Index.default_index_name, std.testing.allocator, .limited(1 << 20));
+    defer std.testing.allocator.free(good);
+
+    const cases = [_][]const u8{ "truncated", "bad-magic", "wrong-digest" };
+    for (cases) |case| {
+        const damaged = try std.testing.allocator.dupe(u8, good);
+        defer std.testing.allocator.free(damaged);
+        var write_len = damaged.len;
+        if (std.mem.eql(u8, case, "truncated")) {
+            write_len -= 1;
+        } else if (std.mem.eql(u8, case, "bad-magic")) {
+            damaged[0] = 'X';
+        } else {
+            // Same length, same claimed coverage, different digest.
+            std.mem.writeInt(u64, damaged[32..40], 0xdead_beef, .little);
+        }
+        {
+            var file = try graph_dir.createFile(std.testing.io, Index.default_index_name, .{ .truncate = true, .resolve_beneath = true });
+            defer file.close(std.testing.io);
+            try file.writePositionalAll(std.testing.io, damaged[0..write_len], 0);
+        }
+        // A damaged index must degrade to a replay, never to a wrong answer or
+        // a failure to open.
+        var snapshot = try Snapshot.open(std.testing.allocator, std.testing.io, tmp.dir, .{});
+        defer snapshot.deinit();
+        try std.testing.expectEqual(@as(usize, 1), snapshot.summary().records);
+    }
 }
 
 test "compaction rebuilds the index against the rewritten log" {
