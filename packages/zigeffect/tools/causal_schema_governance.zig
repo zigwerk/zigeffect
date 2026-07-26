@@ -91,6 +91,53 @@ const schema_entries: []const SchemaEntry = &.{
         .governance_requirements = &.{ "NenDB adapter tests", "durable history report tests", "docs" },
     },
     .{
+        .schema = "zigeffect.causal.local-graph-index.v1",
+        .version = 2,
+        .category = "app-runtime",
+        .status = "current",
+        .emitted_by = &.{"zstd.CausalGraph.LocalDatabase"},
+        .consumed_by = &.{"zstd.CausalGraph.Snapshot"},
+        // Derived and disposable: it never carries a fact the log does not, so
+        // it can be deleted at any time and rebuilt. Version changes need no
+        // migration for the same reason.
+        .compatibility = &.{ "derived-artifact", "rebuildable" },
+        .governance_requirements = &.{ "index/replay equivalence tests", "damaged-index degradation tests", "docs" },
+    },
+    .{
+        .schema = "zigeffect.causal.local-graph-find.v1",
+        .version = 1,
+        .category = "app-runtime",
+        .status = "current",
+        .emitted_by = &.{"zstd.CausalGraph.Snapshot"},
+        .consumed_by = &.{ "zigeffect graph find", "agents" },
+        .compatibility = &.{ "bounded-query-contract", "opaque-reference-only" },
+        .governance_requirements = &.{ "indexed/scan equivalence tests", "pagination tests", "docs" },
+    },
+    .{
+        .schema = "zigeffect.causal.local-graph-traversal.v1",
+        .version = 1,
+        .category = "app-runtime",
+        .status = "current",
+        .emitted_by = &.{"zstd.CausalGraph.Snapshot"},
+        .consumed_by = &.{ "zigeffect graph descendants", "zigeffect graph ancestors", "agents" },
+        // A traversal that hit a bound must say so; a partial causal chain read
+        // as a complete one is a wrong answer, not a short one.
+        .compatibility = &.{ "bounded-query-contract", "truncation-explicit" },
+        .governance_requirements = &.{ "brute-force equivalence tests", "bound-reporting tests", "docs" },
+    },
+    .{
+        .schema = "zigeffect.requirement-evidence.v1",
+        .version = 1,
+        .category = "app-runtime",
+        .status = "current",
+        .emitted_by = &.{"zstd.Testing.TestContext"},
+        .consumed_by = &.{ "reviewers", "CI", "agents" },
+        // The one artifact here that is committed, so it must stay stable across
+        // runs and must not depend on the local graph surviving.
+        .compatibility = &.{ "committed-artifact", "run-stable", "graph-independent" },
+        .governance_requirements = &.{ "byte-stability across runs", "self-contained verification", "docs" },
+    },
+    .{
         .schema = "zigeffect.causal.local-graph-lineage.v1",
         .version = 1,
         .category = "app-runtime",
